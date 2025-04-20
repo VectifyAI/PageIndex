@@ -409,25 +409,30 @@ def add_preface_if_needed(data):
 
 
 def get_page_tokens(pdf_path, model="gpt-4o-2024-11-20", pdf_parser="PyPDF2"):
+    enc = tiktoken.encoding_for_model(model)
     if pdf_parser == "PyPDF2":
         pdf_reader = PyPDF2.PdfReader(pdf_path)
+        page_list = []
+        for page_num in range(len(pdf_reader.pages)):
+            page = pdf_reader.pages[page_num]
+            page_text = page.extract_text()
+            token_length = len(enc.encode(page_text))
+            page_list.append((page_text, token_length))
+        return page_list
     elif pdf_parser == "PyMuPDF":
-        pdf_reader = pymupdf.open(pdf_path)
+        if isinstance(pdf_path, BytesIO):
+            pdf_stream = pdf_path
+            doc = pymupdf.open(stream=pdf_stream, filetype="pdf")
+        elif isinstance(pdf_path, str) and os.path.isfile(pdf_path) and pdf_path.lower().endswith(".pdf"):
+            doc = pymupdf.open(pdf_path)
+        page_list = []
+        for page in doc:
+            page_text = page.get_text()
+            token_length = len(enc.encode(page_text))
+            page_list.append((page_text, token_length))
+        return page_list
     else:
         raise ValueError(f"Unsupported PDF parser: {pdf_parser}")
-
-    enc = tiktoken.encoding_for_model(model)
-    
-    page_list = []
-    for page_num in range(len(pdf_reader.pages)):
-        page = pdf_reader.pages[page_num]
-        page_text = page.extract_text()
-        token_length = len(enc.encode(page_text))
-        page_list.append((page_text, token_length))
-    
-    return page_list
-
-
 
         
 
@@ -435,6 +440,12 @@ def get_text_of_pdf_pages(pdf_pages, start_page, end_page):
     text = ""
     for page_num in range(start_page-1, end_page):
         text += pdf_pages[page_num][0]
+    return text
+
+def get_text_of_pdf_pages_with_labels(pdf_pages, start_page, end_page):
+    text = ""
+    for page_num in range(start_page-1, end_page):
+        text += f"<physical_index_{page_num+1}>\n{pdf_pages[page_num][0]}\n<physical_index_{page_num+1}>\n"
     return text
 
 def get_number_of_pages(pdf_path):
@@ -534,18 +545,6 @@ def convert_page_to_int(data):
                 pass
     return data
 
-def write_node_id(data, node_id=0):
-    if isinstance(data, dict):
-        data['node_id'] = str(node_id).zfill(4)
-        node_id += 1
-        for key in list(data.keys()):
-            if 'nodes' in key:
-                node_id = write_node_id(data[key], node_id)
-    elif isinstance(data, list):
-        for index in range(len(data)):
-            node_id = write_node_id(data[index], node_id)
-    return node_id
-
 
 def add_node_text(node, pdf_pages):
     if isinstance(node, dict):
@@ -558,6 +557,20 @@ def add_node_text(node, pdf_pages):
         for index in range(len(node)):
             add_node_text(node[index], pdf_pages)
     return
+
+
+def add_node_text_with_labels(node, pdf_pages):
+    if isinstance(node, dict):
+        start_page = node.get('start_index')
+        end_page = node.get('end_index')
+        node['text'] = get_text_of_pdf_pages_with_labels(pdf_pages, start_page, end_page)
+        if 'nodes' in node:
+            add_node_text_with_labels(node['nodes'], pdf_pages)
+    elif isinstance(node, list):
+        for index in range(len(node)):
+            add_node_text_with_labels(node[index], pdf_pages)
+    return
+
 
 async def generate_node_summary(node, model=None):
     prompt = f"""You are given a part of a document, your task is to generate a description of the partial document about what are main points covered in the partial document.

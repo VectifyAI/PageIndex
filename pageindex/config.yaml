@@ -5,3 +5,4 @@ max_token_num_each_node: 20000
 if_add_node_id: "yes"
 if_add_node_summary: "no"
 if_add_doc_description: "yes"
+if_add_node_text: "no"
