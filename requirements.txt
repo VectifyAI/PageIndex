@@ -4,3 +4,4 @@ PyPDF2==3.0.1
 python-dotenv==1.1.0
 tiktoken==0.7.0
 pyyaml==6.0.2
+tqdm==4.66.2

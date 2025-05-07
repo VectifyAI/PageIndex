@@ -7,6 +7,10 @@ import re
 from .utils import *
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import argparse
+from pageindex.utils import analyze_pdf_structure
+from collections import Counter
+from tqdm import tqdm
 
 
 ################### check title in page #########################################################
@@ -1024,7 +1028,23 @@ def page_index_main(doc, opt=None):
         write_node_id(structure)    
     if opt.if_add_node_summary == 'yes':
         add_node_text(structure, page_list)
-        asyncio.run(generate_summaries_for_structure(structure, model=opt.model))
+        
+        # Get total number of nodes for progress bar
+        nodes = structure_to_list(structure)
+        with tqdm(total=len(nodes), desc="Generating summaries") as pbar:
+            async def generate_summaries_with_progress():
+                tasks = []
+                for node in nodes:
+                    task = asyncio.create_task(generate_node_summary(node, model=opt.model))
+                    task.add_done_callback(lambda _: pbar.update(1))
+                    tasks.append(task)
+                summaries = await asyncio.gather(*tasks)
+                for node, summary in zip(nodes, summaries):
+                    node['summary'] = summary
+                return structure
+            
+            structure = asyncio.run(generate_summaries_with_progress())
+        
         remove_structure_text(structure)
         if opt.if_add_node_text == 'yes':
             add_node_text_with_labels(structure, page_list)
