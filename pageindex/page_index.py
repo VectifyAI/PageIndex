@@ -8,7 +8,6 @@ from .utils import *
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import argparse
-from pageindex.utils import analyze_pdf_structure
 from collections import Counter
 from tqdm import tqdm
 
