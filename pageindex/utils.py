@@ -16,6 +16,7 @@ import logging
 import yaml
 from pathlib import Path
 from types import SimpleNamespace as config
+from tqdm import tqdm
 
 CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
 
@@ -413,7 +414,7 @@ def get_page_tokens(pdf_path, model="gpt-4o-2024-11-20", pdf_parser="PyPDF2"):
     if pdf_parser == "PyPDF2":
         pdf_reader = PyPDF2.PdfReader(pdf_path)
         page_list = []
-        for page_num in range(len(pdf_reader.pages)):
+        for page_num in tqdm(range(len(pdf_reader.pages)), desc="Parsing PDF pages"):
             page = pdf_reader.pages[page_num]
             page_text = page.extract_text()
             token_length = len(enc.encode(page_text))
@@ -426,7 +427,7 @@ def get_page_tokens(pdf_path, model="gpt-4o-2024-11-20", pdf_parser="PyPDF2"):
         elif isinstance(pdf_path, str) and os.path.isfile(pdf_path) and pdf_path.lower().endswith(".pdf"):
             doc = pymupdf.open(pdf_path)
         page_list = []
-        for page in doc:
+        for page in tqdm(doc, desc="Parsing PDF pages"):
             page_text = page.get_text()
             token_length = len(enc.encode(page_text))
             page_list.append((page_text, token_length))
