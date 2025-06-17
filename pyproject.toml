@@ -1,0 +1,15 @@
+[project]
+name = "pageindex"
+version = "0.1.0"
+description = "pageindex is a cutting-edge tool for indexing and searching PDF files without traditional rag."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "openai==1.70.0",
+    "pymupdf==1.25.5",
+    "pypdf2==3.0.1",
+    "python-dotenv==1.1.0",
+    "pyyaml==6.0.2",
+    "sentencepiece>=0.2.0",
+    "tiktoken>=0.9.0",
+]
