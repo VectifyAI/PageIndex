@@ -16,18 +16,69 @@ import logging
 import yaml
 from pathlib import Path
 from types import SimpleNamespace as config
+from contextlib import asynccontextmanager
 
 CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
+BASE_URL = os.getenv("BASE_URL")
 
+@asynccontextmanager
+async def get_async_openai_client(api_key=CHATGPT_API_KEY):
+    """Asynchronous context manager to manage the lifecycle of the OpenAI client."""
+    client = openai.AsyncOpenAI(api_key=api_key, base_url=BASE_URL)
+    try:
+        yield client
+    finally:
+        try:
+            await client.aclose()
+        except Exception:
+            pass
+
+def get_appropriate_tokenizer(model):
+    """
+    Get the appropriate tokenizer for the model.
+    The logic is to prioritize tiktoken and use sentencepiece_approx as a final fallback.
+    """
+    try:
+        # First, try to get the specific tokenizer for the model using tiktoken.
+        enc = tiktoken.encoding_for_model(model)
+        return {
+            'type': 'tiktoken',
+            'encoder': enc
+        }
+    except KeyError:
+        # If the model is not found, tiktoken raises a KeyError.
+        # print(f"Warning: Model '{model}' not found in tiktoken. Using cl100k_base as fallback.")
+        try:
+            # Fallback to a generic tiktoken encoder.
+            enc = tiktoken.get_encoding("cl100k_base")
+            return {
+                'type': 'tiktoken_fallback',
+                'encoder': enc
+            }
+        except Exception as e:
+            # This is unlikely to happen, but as a last resort.
+            print(f"Warning: tiktoken fallback failed: {e}. Using SentencePiece approximation as final fallback.")
+            return {
+                'type': 'sentencepiece_approx',
+                'encoder': None
+            }
 
 def count_tokens(text, model):
-    enc = tiktoken.encoding_for_model(model)
-    tokens = enc.encode(text)
-    return len(tokens)
+    """Count the number of tokens in the text, using the appropriate tokenizer for the model."""
+    tokenizer_info = get_appropriate_tokenizer(model)
+         
+    if tokenizer_info['type'] in ['tiktoken', 'tiktoken_fallback']:
+        # Use tiktoken encoder to return the token count directly
+        enc = tokenizer_info['encoder']
+        return len(enc.encode(text))
+    
+    else:
+        # Default fallback to character count
+        return max(len(text) // 4, 1)  # Rough estimation: 1 token per 4 characters
 
 def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
+    client = openai.OpenAI(api_key=api_key, base_url=BASE_URL)
     for i in range(max_retries):
         try:
             if chat_history:
@@ -59,7 +110,7 @@ def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_
 
 def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
+    client = openai.OpenAI(api_key=api_key, base_url=BASE_URL)
     for i in range(max_retries):
         try:
             if chat_history:
@@ -87,24 +138,24 @@ def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
 
 async def ChatGPT_API_async(model, prompt, api_key=CHATGPT_API_KEY):
     max_retries = 10
-    client = openai.AsyncOpenAI(api_key=api_key)
-    for i in range(max_retries):
-        try:
-            messages = [{"role": "user", "content": prompt}]
-            response = await client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0,
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            print('************* Retrying *************')
-            logging.error(f"Error: {e}")
-            if i < max_retries - 1:
-                await asyncio.sleep(1)  # Wait for 1秒 before retrying
-            else:
-                logging.error('Max retries reached for prompt: ' + prompt)
-                return "Error"  
+    async with get_async_openai_client(api_key) as client:
+        for i in range(max_retries):
+            try:
+                messages = [{"role": "user", "content": prompt}]
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=0,
+                )
+                return response.choices[0].message.content
+            except Exception as e:
+                print('************* Retrying *************')
+                logging.error(f"Error: {e}")
+                if i < max_retries - 1:
+                    await asyncio.sleep(1)  # Wait for 1秒 before retrying
+                else:
+                    logging.error('Max retries reached for prompt: ' + prompt)
+                    return "Error"
             
 def get_json_content(response):
     start_idx = response.find("```json")
@@ -409,16 +460,17 @@ def add_preface_if_needed(data):
 
 
 def get_page_tokens(pdf_path, model="gpt-4o-2024-11-20", pdf_parser="PyPDF2"):
-    enc = tiktoken.encoding_for_model(model)
+    """Get the text and token count for each page of the PDF."""
     if pdf_parser == "PyPDF2":
         pdf_reader = PyPDF2.PdfReader(pdf_path)
         page_list = []
         for page_num in range(len(pdf_reader.pages)):
             page = pdf_reader.pages[page_num]
             page_text = page.extract_text()
-            token_length = len(enc.encode(page_text))
+            token_length = count_tokens(page_text, model)
             page_list.append((page_text, token_length))
         return page_list
+        
     elif pdf_parser == "PyMuPDF":
         if isinstance(pdf_path, BytesIO):
             pdf_stream = pdf_path
@@ -428,7 +480,7 @@ def get_page_tokens(pdf_path, model="gpt-4o-2024-11-20", pdf_parser="PyPDF2"):
         page_list = []
         for page in doc:
             page_text = page.get_text()
-            token_length = len(enc.encode(page_text))
+            token_length = count_tokens(page_text, model)
             page_list.append((page_text, token_length))
         return page_list
     else:
@@ -456,7 +508,7 @@ def get_number_of_pages(pdf_path):
 
 
 def post_processing(structure, end_physical_index):
-    # First convert page_number to start_index in flat list
+    # First convert physical_index to start_index in flat list
     for i, item in enumerate(structure):
         item['start_index'] = item.get('physical_index')
         if i < len(structure) - 1:
@@ -470,7 +522,7 @@ def post_processing(structure, end_physical_index):
     if len(tree)!=0:
         return tree
     else:
-        ### remove appear_start 
+        # remove appear_start 
         for node in structure:
             node.pop('appear_start', None)
             node.pop('physical_index', None)
