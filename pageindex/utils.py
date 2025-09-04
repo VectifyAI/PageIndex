@@ -1,5 +1,6 @@
 import tiktoken
 import openai
+from openai import AzureOpenAI
 import logging
 import os
 from datetime import datetime
@@ -17,7 +18,132 @@ import yaml
 from pathlib import Path
 from types import SimpleNamespace as config
 
-CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# Load Azure OpenAI-specific configurations
+OPENAI_API_TYPE = os.getenv("OPENAI_API_TYPE", "azure")
+OPENAI_API_BASE = os.getenv("OPENAI_API_BASE")
+OPENAI_API_VERSION = os.getenv("OPENAI_API_VERSION")
+OPENAI_API_ENGINE = os.getenv("OPENAI_API_ENGINE")
+
+# Note: Using modern AzureOpenAI client instead of global configuration
+
+# Global cost tracking
+total_cost = 0.0
+call_count = 0
+global_logger = None  # Add global logger reference
+
+# Azure OpenAI pricing per 1K tokens (update these based on your specific pricing)
+# These are example rates - adjust based on your actual Azure OpenAI pricing
+PRICING = {
+    "gpt-4": {
+        "input": 0.03,   # per 1K input tokens
+        "output": 0.06   # per 1K output tokens
+    },
+    "gpt-4-turbo": {
+        "input": 0.01,
+        "output": 0.03
+    },
+    "gpt-4o": {
+        "input": 0.005,
+        "output": 0.015
+    },
+    "gpt-4.1-nano": {  # Add your specific model
+        "input": 0.005,  # Adjust based on actual pricing
+        "output": 0.015  # Adjust based on actual pricing
+    },
+    "default": {
+        "input": 0.01,
+        "output": 0.03
+    }
+}
+
+def set_global_logger(logger):
+    """Set the global logger for cost tracking"""
+    global global_logger
+    global_logger = logger
+
+def calculate_cost(model_name, input_tokens, output_tokens):
+    """Calculate cost based on token usage and model pricing"""
+    # Get pricing for the model or use default
+    model_pricing = PRICING.get(model_name, PRICING["default"])
+    
+    input_cost = (input_tokens / 1000) * model_pricing["input"]
+    output_cost = (output_tokens / 1000) * model_pricing["output"]
+    total_cost = input_cost + output_cost
+    
+    return total_cost, input_cost, output_cost
+
+def log_cost(model_name, input_tokens, output_tokens, prompt_preview=""):
+    """Log cost information for the API call"""
+    global total_cost, call_count, global_logger
+    
+    call_cost, input_cost, output_cost = calculate_cost(model_name, input_tokens, output_tokens)
+    total_cost += call_cost
+    call_count += 1
+    
+    # Create cost data structure
+    cost_data = {
+        "type": "api_cost",
+        "call_number": call_count,
+        "model": model_name,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "input_cost": round(input_cost, 6),
+        "output_cost": round(output_cost, 6),
+        "call_cost": round(call_cost, 6),
+        "running_total": round(total_cost, 6),
+        "prompt_preview": prompt_preview[:100] + "..." if len(prompt_preview) > 100 else prompt_preview,
+        "timestamp": datetime.now().isoformat()
+    }
+    
+    # Console output
+    print(f"💰 API Call #{call_count} Cost:")
+    print(f"   Model: {model_name}")
+    print(f"   Input tokens: {input_tokens} (${input_cost:.4f})")
+    print(f"   Output tokens: {output_tokens} (${output_cost:.4f})")
+    print(f"   Call cost: ${call_cost:.4f}")
+    print(f"   Running total: ${total_cost:.4f}")
+    if prompt_preview:
+        print(f"   Prompt preview: {prompt_preview[:100]}...")
+    print("-" * 50)
+    
+    # Log to file if logger is available
+    if global_logger:
+        global_logger.log("INFO", cost_data)
+    
+    return call_cost
+
+def log_final_cost_summary():
+    """Log final cost summary to both console and file"""
+    global total_cost, call_count, global_logger
+    
+    summary_data = {
+        "type": "cost_summary",
+        "total_api_calls": call_count,
+        "total_cost": round(total_cost, 6),
+        "average_cost_per_call": round(total_cost/call_count, 6) if call_count > 0 else 0,
+        "timestamp": datetime.now().isoformat()
+    }
+    
+    # Console output
+    print("\n" + "="*60)
+    print("💰 FINAL COST SUMMARY")
+    print("="*60)
+    print(f"Total API calls: {call_count}")
+    print(f"Total cost: ${total_cost:.4f}")
+    print(f"Average cost per call: ${total_cost/call_count:.4f}" if call_count > 0 else "No API calls made")
+    print("="*60)
+    
+    # Log to file if logger is available
+    if global_logger:
+        global_logger.log("INFO", summary_data)
+    
+    return summary_data
+
+def get_total_cost():
+    """Get the total cost accumulated so far"""
+    return total_cost, call_count
 
 def count_tokens(text, model=None):
     if not text:
@@ -26,9 +152,9 @@ def count_tokens(text, model=None):
     tokens = enc.encode(text)
     return len(tokens)
 
-def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+# Update the OpenAI client initialization to use modern Azure OpenAI client
+def ChatGPT_API_with_finish_reason(model, prompt, chat_history=None):
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
     for i in range(max_retries):
         try:
             if chat_history:
@@ -37,15 +163,32 @@ def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_
             else:
                 messages = [{"role": "user", "content": prompt}]
             
+            # Count input tokens
+            input_text = prompt if not chat_history else "\n".join([msg.get("content", "") for msg in messages])
+            input_tokens = count_tokens(input_text, model)
+            
+            client = AzureOpenAI(
+                api_key=OPENAI_API_KEY,
+                api_version=OPENAI_API_VERSION,
+                azure_endpoint=OPENAI_API_BASE
+            )
             response = client.chat.completions.create(
-                model=model,
+                model=OPENAI_API_ENGINE,
                 messages=messages,
                 temperature=0,
             )
+            
+            # Get response content and count output tokens
+            response_content = response.choices[0].message.content
+            output_tokens = count_tokens(response_content, model)
+            
+            # Log cost information
+            log_cost(OPENAI_API_ENGINE, input_tokens, output_tokens, prompt)
+            
             if response.choices[0].finish_reason == "length":
-                return response.choices[0].message.content, "max_output_reached"
+                return response_content, "max_output_reached"
             else:
-                return response.choices[0].message.content, "finished"
+                return response_content, "finished"
 
         except Exception as e:
             print('************* Retrying *************')
@@ -54,13 +197,12 @@ def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_
                 time.sleep(1)  # Wait for 1秒 before retrying
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
-                return "Error"
+                return "Error", "error"
 
 
 
-def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+def ChatGPT_API(model, prompt, chat_history=None):
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
     for i in range(max_retries):
         try:
             if chat_history:
@@ -69,13 +211,29 @@ def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
             else:
                 messages = [{"role": "user", "content": prompt}]
             
+            # Count input tokens
+            input_text = prompt if not chat_history else "\n".join([msg.get("content", "") for msg in messages])
+            input_tokens = count_tokens(input_text, model)
+            
+            client = AzureOpenAI(
+                api_key=OPENAI_API_KEY,
+                api_version=OPENAI_API_VERSION,
+                azure_endpoint=OPENAI_API_BASE
+            )
             response = client.chat.completions.create(
-                model=model,
+                model=OPENAI_API_ENGINE,
                 messages=messages,
                 temperature=0,
             )
+            
+            # Get response content and count output tokens
+            response_content = response.choices[0].message.content
+            output_tokens = count_tokens(response_content, model)
+            
+            # Log cost information
+            log_cost(OPENAI_API_ENGINE, input_tokens, output_tokens, prompt)
    
-            return response.choices[0].message.content
+            return response_content
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
@@ -86,18 +244,34 @@ def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
                 return "Error"
             
 
-async def ChatGPT_API_async(model, prompt, api_key=CHATGPT_API_KEY):
+async def ChatGPT_API_async(model, prompt, api_key=OPENAI_API_KEY):
     max_retries = 10
     messages = [{"role": "user", "content": prompt}]
     for i in range(max_retries):
         try:
-            async with openai.AsyncOpenAI(api_key=api_key) as client:
-                response = await client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    temperature=0,
-                )
-                return response.choices[0].message.content
+            # Count input tokens
+            input_tokens = count_tokens(prompt, model)
+            
+            # For Azure OpenAI with the new client
+            client = AzureOpenAI(
+                api_key=api_key,
+                api_version=OPENAI_API_VERSION,
+                azure_endpoint=OPENAI_API_BASE
+            )
+            response = client.chat.completions.create(
+                model=OPENAI_API_ENGINE,
+                messages=messages,
+                temperature=0,
+            )
+            
+            # Get response content and count output tokens
+            response_content = response.choices[0].message.content
+            output_tokens = count_tokens(response_content, model)
+            
+            # Log cost information
+            log_cost(OPENAI_API_ENGINE, input_tokens, output_tokens, prompt)
+            
+            return response_content
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")

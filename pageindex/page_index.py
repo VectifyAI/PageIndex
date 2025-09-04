@@ -4,6 +4,7 @@ import copy
 import math
 import random
 import re
+import logging
 from .utils import *
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -322,10 +323,70 @@ def toc_transformer(toc_content, model=None):
         if_complete = check_if_toc_transformation_is_complete(toc_content, last_complete, model)
         
 
-    last_complete = json.loads(last_complete)
-
-    cleaned_response=convert_page_to_int(last_complete['table_of_contents'])
-    return cleaned_response
+    # Use extract_json instead of json.loads for better error handling
+    try:
+        # First, try to get the JSON content properly
+        if isinstance(last_complete, str):
+            # Clean the response to extract just the JSON part
+            last_complete = last_complete.strip()
+            
+            # Debug: log what we're trying to parse
+            logging.info(f"Attempting to parse JSON: {last_complete[:500]}...")  # Log first 500 chars
+            
+            # Try using extract_json first
+            last_complete_json = extract_json(last_complete)
+            
+            if isinstance(last_complete_json, dict) and 'table_of_contents' in last_complete_json:
+                cleaned_response = convert_page_to_int(last_complete_json['table_of_contents'])
+                return cleaned_response
+            else:
+                logging.warning(f"extract_json returned unexpected format: {type(last_complete_json)}")
+                logging.warning(f"Keys available: {list(last_complete_json.keys()) if isinstance(last_complete_json, dict) else 'Not a dict'}")
+        
+        # Fallback: try direct JSON parsing
+        last_complete_json = json.loads(last_complete)
+        if 'table_of_contents' in last_complete_json:
+            cleaned_response = convert_page_to_int(last_complete_json['table_of_contents'])
+            return cleaned_response
+        else:
+            logging.error(f"JSON doesn't contain 'table_of_contents' key. Available keys: {list(last_complete_json.keys())}")
+            
+    except json.JSONDecodeError as e:
+        logging.error(f"JSON parsing error in toc_transformer: {e}")
+        logging.error(f"Problematic JSON content (first 1000 chars): {last_complete[:1000]}")
+        
+    except Exception as e:
+        logging.error(f"Unexpected error in toc_transformer: {e}")
+        logging.error(f"Content type: {type(last_complete)}")
+        
+    # Final fallback: try to extract JSON manually
+    try:
+        # Find the start and end of JSON structure
+        start_idx = last_complete.find('{')
+        if start_idx != -1:
+            # Find the matching closing brace
+            brace_count = 0
+            for i, char in enumerate(last_complete[start_idx:], start_idx):
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        clean_json = last_complete[start_idx:i+1]
+                        logging.info(f"Manually extracted JSON: {clean_json}")
+                        last_complete_json = json.loads(clean_json)
+                        if 'table_of_contents' in last_complete_json:
+                            cleaned_response = convert_page_to_int(last_complete_json['table_of_contents'])
+                            return cleaned_response
+                        else:
+                            logging.error(f"Manually extracted JSON doesn't contain 'table_of_contents'. Keys: {list(last_complete_json.keys())}")
+        
+        logging.error("Could not extract valid JSON with table_of_contents")
+        return []
+        
+    except Exception as fallback_error:
+        logging.error(f"Fallback JSON parsing also failed: {fallback_error}")
+        return []
     
 
 
@@ -1058,6 +1119,10 @@ async def tree_parser(page_list, opt, doc=None, logger=None):
 def page_index_main(doc, opt=None):
     logger = JsonLogger(doc)
     
+    # Set up cost tracking with logger
+    from .utils import set_global_logger
+    set_global_logger(logger)
+    
     is_valid_pdf = (
         (isinstance(doc, str) and os.path.isfile(doc) and doc.lower().endswith(".pdf")) or 
         isinstance(doc, BytesIO)
@@ -1097,7 +1162,13 @@ def page_index_main(doc, opt=None):
             'structure': structure,
         }
 
-    return asyncio.run(page_index_builder())
+    result = asyncio.run(page_index_builder())
+    
+    # Log final cost summary to file
+    from .utils import log_final_cost_summary
+    log_final_cost_summary()
+    
+    return result
 
 
 def page_index(doc, model=None, toc_check_page_num=None, max_page_num_each_node=None, max_token_num_each_node=None,

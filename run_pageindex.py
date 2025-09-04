@@ -77,6 +77,13 @@ if __name__ == "__main__":
             json.dump(toc_with_page_number, f, indent=2)
         
         print(f'Tree structure saved to: {output_file}')
+        
+        # Final cost summary is already logged in page_index_main
+        # Display it here for console output
+        from pageindex.utils import get_total_cost
+        total_cost, call_count = get_total_cost()
+        if call_count > 0:
+            print(f"\n💰 Total cost: ${total_cost:.4f} for {call_count} API calls")
             
     elif args.md_path:
         # Validate Markdown file
