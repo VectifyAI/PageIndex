@@ -10,7 +10,8 @@ if __name__ == "__main__":
     parser.add_argument('--pdf_path', type=str, help='Path to the PDF file')
     parser.add_argument('--md_path', type=str, help='Path to the Markdown file')
 
-    parser.add_argument('--model', type=str, default='gpt-4o-2024-11-20', help='Model to use')
+    parser.add_argument('--provider', type=str, default='openai', choices=['openai', 'gemini'], help='LLM provider to use')
+    parser.add_argument('--model', type=str, default=None, help='Model to use (defaults based on provider)')
 
     parser.add_argument('--toc-check-pages', type=int, default=20, 
                       help='Number of pages to check for table of contents (PDF only)')
@@ -51,8 +52,12 @@ if __name__ == "__main__":
             raise ValueError(f"PDF file not found: {args.pdf_path}")
             
         # Process PDF file
+        if args.model is None:
+            args.model = "gpt-4o-2024-11-20" if args.provider == "openai" else "gemini-2.5-flash-lite"
+
         # Configure options
         opt = config(
+            provider=args.provider,
             model=args.model,
             toc_check_page_num=args.toc_check_pages,
             max_page_num_each_node=args.max_pages_per_node,
@@ -95,8 +100,12 @@ if __name__ == "__main__":
         from pageindex.utils import ConfigLoader
         config_loader = ConfigLoader()
         
+        if args.model is None:
+            args.model = "gpt-4o-2024-11-20" if args.provider == "openai" else "gemini-2.5-flash-lite"
+
         # Create options dict with user args
         user_opt = {
+            'provider': args.provider,
             'model': args.model,
             'if_add_node_summary': args.if_add_node_summary,
             'if_add_doc_description': args.if_add_doc_description,
