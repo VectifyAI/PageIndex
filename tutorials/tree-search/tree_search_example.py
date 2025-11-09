@@ -424,6 +424,19 @@ def main() -> None:
     parser.add_argument("--max-turns", type=int, default=6, help="maximum LLM turns")
     parser.add_argument("--offline", action="store_true", help="use keyword heuristic instead of LLM")
     parser.add_argument("--verbose", action="store_true", help="enable debug logging")
+    parser.add_argument(
+        "--trace",
+        dest="show_trace",
+        action="store_true",
+        help="print traversal and decision trace",
+    )
+    parser.add_argument(
+        "--no-trace",
+        dest="show_trace",
+        action="store_false",
+        help="suppress traversal and decision trace output",
+    )
+    parser.set_defaults(show_trace=True)
     args = parser.parse_args()
 
     configure_logging(args.verbose)
@@ -438,7 +451,7 @@ def main() -> None:
             branch_factor=args.branch_factor,
         )
         if not offline_result.matches:
-            print("Keyword heuristic did not find high-scoring nodes. Traversal trace below:\n")
+            print("Keyword heuristic did not find high-scoring nodes.")
         else:
             print("Keyword heuristic results:\n")
             for rank, (node, score, reason) in enumerate(offline_result.matches, start=1):
@@ -447,17 +460,18 @@ def main() -> None:
                 print(f"   score: {score:.3f} ({reason})")
                 print(f"   summary: {node.short_summary(220)}\n")
 
-        print_visit_sequence(offline_result.visit_order, lookup, "Traversal order (keyword heuristic):")
-        if offline_result.expansions:
-            print("\nExpansion decisions:")
-            for parent_id, child_ids in offline_result.expansions:
-                parent = lookup.get(parent_id)
-                parent_label = describe_node(parent) if parent else f"[{parent_id}]"
-                print(f"  {parent_label}")
-                for child_id in child_ids:
-                    child = lookup.get(child_id)
-                    child_label = describe_node(child) if child else f"[{child_id}]"
-                    print(f"     → {child_label}")
+        if args.show_trace:
+            print_visit_sequence(offline_result.visit_order, lookup, "Traversal order (keyword heuristic):")
+            if offline_result.expansions:
+                print("\nExpansion decisions:")
+                for parent_id, child_ids in offline_result.expansions:
+                    parent = lookup.get(parent_id)
+                    parent_label = describe_node(parent) if parent else f"[{parent_id}]"
+                    print(f"  {parent_label}")
+                    for child_id in child_ids:
+                        child = lookup.get(child_id)
+                        child_label = describe_node(child) if child else f"[{child_id}]"
+                        print(f"     → {child_label}")
         return
 
     api_key = args.api_key or os.getenv("OPENAI_API_KEY") or os.getenv("CHATGPT_API_KEY")
@@ -484,10 +498,11 @@ def main() -> None:
         print("LLM search did not return any selections. Try increasing max-turns or enabling --offline.")
         return
 
-    print_visit_sequence(llm_result.visit_order, lookup, "Traversal order (LLM-guided):")
-    print()
-    print_llm_steps(llm_result.steps, lookup)
-    print()
+    if args.show_trace:
+        print_visit_sequence(llm_result.visit_order, lookup, "Traversal order (LLM-guided):")
+        print()
+        print_llm_steps(llm_result.steps, lookup)
+        print()
 
     final_nodes = unique_selections(llm_result.selections)
     if final_nodes:
