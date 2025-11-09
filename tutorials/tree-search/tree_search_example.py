@@ -16,7 +16,7 @@ import textwrap
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Deque, Dict, List, Sequence, Tuple
+from typing import Deque, Dict, Iterable, List, Sequence, Tuple
 
 import openai
 
@@ -49,6 +49,108 @@ class TreeNode:
 
     def pretty_path(self) -> str:
         return " > ".join(self.path_titles)
+
+
+@dataclass
+class LLMStep:
+    step_index: int
+    candidate_ids: List[str]
+    thinking: str
+    relevant: List[Tuple[str, str]]
+    expand: List[str]
+    enqueued: Dict[str, List[str]]
+
+
+@dataclass
+class LLMSearchResult:
+    selections: List[Tuple[TreeNode, str]]
+    visit_order: List[str]
+    steps: List[LLMStep]
+
+
+@dataclass
+class OfflineSearchResult:
+    matches: List[Tuple[TreeNode, float, str]]
+    visit_order: List[str]
+    expansions: List[Tuple[str, List[str]]]
+
+
+def describe_node(node: TreeNode) -> str:
+    pages = (
+        f"{node.start_index}-{node.end_index}"
+        if node.start_index >= 0 and node.end_index >= 0
+        else "unknown"
+    )
+    title = node.title or "<untitled>"
+    return f"[{node.node_id}] {title} (pages {pages}, depth {node.depth})"
+
+
+def print_visit_sequence(node_ids: Sequence[str], lookup: Dict[str, TreeNode], header: str, *, summary_chars: int = 160) -> None:
+    if not node_ids:
+        return
+    print(header)
+    for idx, node_id in enumerate(node_ids, start=1):
+        node = lookup.get(node_id)
+        if not node:
+            print(f"  {idx}. [{node_id}] (node details unavailable)")
+            continue
+        print(f"  {idx}. {describe_node(node)}")
+        print(f"     path: {node.pretty_path()}")
+        summary = node.short_summary(summary_chars)
+        if summary:
+            print(f"     summary: {summary}")
+
+
+def print_llm_steps(steps: Sequence[LLMStep], lookup: Dict[str, TreeNode], *, summary_chars: int = 140) -> None:
+    if not steps:
+        print("LLM decision trace: (no steps recorded)")
+        return
+    print("LLM decision trace:")
+    for step in steps:
+        print(f" Step {step.step_index}:")
+        if step.candidate_ids:
+            print("   candidates:")
+            for cid in step.candidate_ids:
+                node = lookup.get(cid)
+                if not node:
+                    print(f"     - [{cid}] (missing)")
+                    continue
+                print(f"     - {describe_node(node)}")
+                print(f"       summary: {node.short_summary(summary_chars)}")
+        if step.thinking:
+            print(f"   thinking: {step.thinking}")
+        if step.relevant:
+            print("   relevant selections:")
+            for cid, reason in step.relevant:
+                node = lookup.get(cid)
+                label = describe_node(node) if node else f"[{cid}]"
+                print(f"     - {label}")
+                if reason:
+                    print(f"       reason: {reason}")
+        if step.expand:
+            print(f"   expand requests: {', '.join(step.expand)}")
+        if step.enqueued:
+            print("   enqueued children:")
+            for parent_id, child_ids in step.enqueued.items():
+                parent_label = describe_node(lookup.get(parent_id)) if parent_id in lookup else f"[{parent_id}]"
+                print(f"     - from {parent_label}")
+                child_labels = []
+                for child_id in child_ids:
+                    child = lookup.get(child_id)
+                    child_labels.append(describe_node(child) if child else f"[{child_id}]")
+                for child_label in child_labels:
+                    print(f"         - {child_label}")
+
+
+def unique_selections(selections: Iterable[Tuple[TreeNode, str]]) -> List[Tuple[TreeNode, str]]:
+    seen: set[str] = set()
+    ordered: List[Tuple[TreeNode, str]] = []
+    for node, reason in selections:
+        if node.node_id in seen:
+            continue
+        seen.add(node.node_id)
+        ordered.append((node, reason))
+    return ordered
 
 
 def load_structure(path: str) -> Tuple[List[TreeNode], Dict[str, TreeNode]]:
@@ -140,23 +242,41 @@ def lexical_score(query_terms: Sequence[str], node: TreeNode) -> float:
     return hits / max(1, len(query_terms))
 
 
-def offline_tree_search(query: str, roots: Sequence[TreeNode], *, max_depth: int, branch_factor: int) -> List[Tuple[TreeNode, float, str]]:
+def offline_tree_search(
+    query: str,
+    roots: Sequence[TreeNode],
+    *,
+    max_depth: int,
+    branch_factor: int,
+) -> OfflineSearchResult:
     terms = re.findall(r"\w+", query.lower())
     queue: Deque[TreeNode] = deque(roots)
     selected: List[Tuple[TreeNode, float, str]] = []
+    visit_order: List[str] = []
+    expansions: List[Tuple[str, List[str]]] = []
+    seen: set[str] = set()
 
     while queue:
         node = queue.popleft()
+        if node.node_id in seen:
+            continue
+        seen.add(node.node_id)
+        visit_order.append(node.node_id)
         score = lexical_score(terms, node)
         if score > 0:
             selected.append((node, score, "keyword-match"))
         if node.children and node.depth < max_depth:
             ranked_children = sorted(node.children, key=lambda child: lexical_score(terms, child), reverse=True)
+            enqueued_ids: List[str] = []
             for child in ranked_children[:branch_factor]:
-                queue.append(child)
+                if child.node_id not in seen:
+                    queue.append(child)
+                enqueued_ids.append(child.node_id)
+            if enqueued_ids:
+                expansions.append((node.node_id, enqueued_ids))
 
     selected.sort(key=lambda item: item[1], reverse=True)
-    return selected
+    return OfflineSearchResult(matches=selected, visit_order=visit_order, expansions=expansions)
 
 
 def run_llm_tree_search(
@@ -172,10 +292,12 @@ def run_llm_tree_search(
     max_summary_chars: int,
     max_turns: int,
     verbose: bool,
-) -> List[Tuple[TreeNode, str]]:
+) -> LLMSearchResult:
     queue: Deque[TreeNode] = deque(roots)
     seen: set[str] = set()
     collected: List[Tuple[TreeNode, str]] = []
+    visit_order: List[str] = []
+    steps: List[LLMStep] = []
     turns = 0
     query_terms = re.findall(r"\w+", query.lower())
 
@@ -186,6 +308,7 @@ def run_llm_tree_search(
             if node.node_id in seen:
                 continue
             seen.add(node.node_id)
+            visit_order.append(node.node_id)
             batch.append(node)
 
         if not batch:
@@ -213,24 +336,41 @@ def run_llm_tree_search(
         parsed = extract_json(content)
         if not parsed:
             logging.warning("Failed to parse model response: %s", content)
+            steps.append(
+                LLMStep(
+                    step_index=turns,
+                    candidate_ids=[node.node_id for node in candidates],
+                    thinking="",
+                    relevant=[],
+                    expand=[],
+                    enqueued={},
+                )
+            )
             continue
 
         thinking = str(parsed.get("thinking", "")).strip()
         if verbose and thinking:
             logging.info("model thinking: %s", thinking)
 
-        relevant = parsed.get("relevant_nodes", []) or []
-        expand_list = parsed.get("expand", []) or []
+        relevant_entries_raw = parsed.get("relevant_nodes", []) or []
+        expand_entries_raw = parsed.get("expand", []) or []
 
-        for entry in relevant:
+        relevant_pairs: List[Tuple[str, str]] = []
+        for entry in relevant_entries_raw:
             node_id = entry.get("node_id")
             reason = entry.get("reason", "")
             if not node_id or node_id not in lookup:
                 continue
             node = lookup[node_id]
             collected.append((node, reason))
+            relevant_pairs.append((node_id, reason))
 
-        expand_targets = {node_id for node_id in expand_list if node_id in lookup}
+        expand_targets: List[str] = []
+        for entry in expand_entries_raw:
+            if isinstance(entry, str) and entry in lookup and entry not in expand_targets:
+                expand_targets.append(entry)
+
+        enqueued: Dict[str, List[str]] = {}
         for node_id in expand_targets:
             node = lookup[node_id]
             if node.depth >= max_depth:
@@ -240,11 +380,26 @@ def run_llm_tree_search(
                 key=lambda child: lexical_score(query_terms, child),
                 reverse=True,
             )
+            child_ids: List[str] = []
             for child in ranked_children[:branch_factor]:
                 if child.node_id not in seen:
                     queue.append(child)
+                child_ids.append(child.node_id)
+            if child_ids:
+                enqueued[node_id] = child_ids
 
-    return collected
+        steps.append(
+            LLMStep(
+                step_index=turns,
+                candidate_ids=[node.node_id for node in candidates],
+                thinking=thinking,
+                relevant=relevant_pairs,
+                expand=expand_targets,
+                enqueued=enqueued,
+            )
+        )
+
+    return LLMSearchResult(selections=collected, visit_order=visit_order, steps=steps)
 
 
 def configure_logging(verbose: bool) -> None:
@@ -276,21 +431,33 @@ def main() -> None:
     roots, lookup = load_structure(args.structure)
 
     if args.offline:
-        results = offline_tree_search(
+        offline_result = offline_tree_search(
             args.query,
             roots,
             max_depth=args.max_depth,
             branch_factor=args.branch_factor,
         )
-        if not results:
-            print("No matching nodes found with keyword heuristic.")
-            return
-        print("Keyword heuristic results:\n")
-        for rank, (node, score, reason) in enumerate(results, start=1):
-            print(f"{rank}. [{node.node_id}] {node.title} (pages {node.start_index}-{node.end_index})")
-            print(f"   path: {node.pretty_path()}")
-            print(f"   score: {score:.3f} ({reason})")
-            print(f"   summary: {node.short_summary(200)}\n")
+        if not offline_result.matches:
+            print("Keyword heuristic did not find high-scoring nodes. Traversal trace below:\n")
+        else:
+            print("Keyword heuristic results:\n")
+            for rank, (node, score, reason) in enumerate(offline_result.matches, start=1):
+                print(f"{rank}. {describe_node(node)}")
+                print(f"   path: {node.pretty_path()}")
+                print(f"   score: {score:.3f} ({reason})")
+                print(f"   summary: {node.short_summary(220)}\n")
+
+        print_visit_sequence(offline_result.visit_order, lookup, "Traversal order (keyword heuristic):")
+        if offline_result.expansions:
+            print("\nExpansion decisions:")
+            for parent_id, child_ids in offline_result.expansions:
+                parent = lookup.get(parent_id)
+                parent_label = describe_node(parent) if parent else f"[{parent_id}]"
+                print(f"  {parent_label}")
+                for child_id in child_ids:
+                    child = lookup.get(child_id)
+                    child_label = describe_node(child) if child else f"[{child_id}]"
+                    print(f"     → {child_label}")
         return
 
     api_key = args.api_key or os.getenv("OPENAI_API_KEY") or os.getenv("CHATGPT_API_KEY")
@@ -299,7 +466,7 @@ def main() -> None:
 
     client = openai.OpenAI(api_key=api_key)
 
-    results = run_llm_tree_search(
+    llm_result = run_llm_tree_search(
         query=args.query,
         roots=roots,
         lookup=lookup,
@@ -313,21 +480,26 @@ def main() -> None:
         verbose=args.verbose,
     )
 
-    if not results:
-        print("LLM search did not return any nodes. Try increasing max-turns or enabling --offline.")
+    if not llm_result.selections and not llm_result.steps:
+        print("LLM search did not return any selections. Try increasing max-turns or enabling --offline.")
         return
 
-    print("LLM-guided tree search results:\n")
-    seen_ids: set[str] = set()
-    for rank, (node, reason) in enumerate(results, start=1):
-        if node.node_id in seen_ids:
-            continue
-        seen_ids.add(node.node_id)
-        print(f"{rank}. [{node.node_id}] {node.title} (pages {node.start_index}-{node.end_index})")
-        print(f"   path: {node.pretty_path()}")
-        if reason:
-            print(f"   reason: {reason}")
-        print(f"   summary: {node.short_summary(200)}\n")
+    print_visit_sequence(llm_result.visit_order, lookup, "Traversal order (LLM-guided):")
+    print()
+    print_llm_steps(llm_result.steps, lookup)
+    print()
+
+    final_nodes = unique_selections(llm_result.selections)
+    if final_nodes:
+        print("Final selected nodes:\n")
+        for rank, (node, reason) in enumerate(final_nodes, start=1):
+            print(f"{rank}. {describe_node(node)}")
+            print(f"   path: {node.pretty_path()}")
+            if reason:
+                print(f"   reason: {reason}")
+            print(f"   summary: {node.short_summary(220)}\n")
+    else:
+        print("LLM did not mark any nodes as relevant; see decision trace above.")
 
 
 if __name__ == "__main__":
