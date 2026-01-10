@@ -166,7 +166,7 @@ You can customize the processing with additional optional arguments:
 
 ```
 --model                 OpenAI model to use (default: gpt-4o-2024-11-20)
---toc-check-pages       Pages to check for table of contents (default: 20)
+--      Pages to check for table of contents (default: 20)
 --max-pages-per-node    Max pages per node (default: 10)
 --max-tokens-per-node   Max tokens per node (default: 20000)
 --if-add-node-id        Add node ID (yes/no, default: yes)

@@ -1,5 +1,6 @@
 import tiktoken
 import openai
+import anthropic
 import logging
 import os
 from datetime import datetime
@@ -17,92 +18,315 @@ import yaml
 from pathlib import Path
 from types import SimpleNamespace as config
 
-CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
+# 配置所有支持的模型
+MODEL_CONFIG = {
+    # OpenAI 模型
+    "gpt-4o": {
+        "api_key": os.getenv("OPENAI_API_KEY"),
+        "base_url": os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+        "tokenizer": "cl100k_base",
+        "provider": "openai"
+    },
+    "gpt-4o-mini": {
+        "api_key": os.getenv("OPENAI_API_KEY"),
+        "base_url": os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+        "tokenizer": "cl100k_base",
+        "provider": "openai"
+    },
+    "gpt-4-turbo": {
+        "api_key": os.getenv("OPENAI_API_KEY"),
+        "base_url": os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+        "tokenizer": "cl100k_base",
+        "provider": "openai"
+    },
+    "gpt-3.5-turbo": {
+        "api_key": os.getenv("OPENAI_API_KEY"),
+        "base_url": os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+        "tokenizer": "cl100k_base",
+        "provider": "openai"
+    },
+    # DeepSeek 模型
+    "deepseek-chat": {
+        "api_key": os.getenv("DEEPSEEK_API_KEY"),
+        "base_url": os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+        "tokenizer": "cl100k_base",
+        "provider": "openai"
+    },
+    "deepseek-coder": {
+        "api_key": os.getenv("DEEPSEEK_API_KEY"),
+        "base_url": os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+        "tokenizer": "cl100k_base",
+        "provider": "openai"
+    },
+    # Claude 模型
+    "claude-3-5-sonnet-20241022": {
+        "api_key": os.getenv("ANTHROPIC_API_KEY"),
+        "base_url": None,
+        "tokenizer": "claude",
+        "provider": "anthropic"
+    },
+    "claude-3-opus-20240229": {
+        "api_key": os.getenv("ANTHROPIC_API_KEY"),
+        "base_url": None,
+        "tokenizer": "claude",
+        "provider": "anthropic"
+    },
+    "claude-3-haiku-20240307": {
+        "api_key": os.getenv("ANTHROPIC_API_KEY"),
+        "base_url": None,
+        "tokenizer": "claude",
+        "provider": "anthropic"
+    },
+    # Qwen 模型
+    "qwen-turbo": {
+        "api_key": os.getenv("QWEN_API_KEY"),
+        "base_url": os.getenv("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode"),
+        "tokenizer": "cl100k_base",
+        "provider": "openai"
+    },
+    "qwen-plus": {
+        "api_key": os.getenv("QWEN_API_KEY"),
+        "base_url": os.getenv("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode"),
+        "tokenizer": "cl100k_base",
+        "provider": "openai"
+    },
+    "qwen-max": {
+        "api_key": os.getenv("QWEN_API_KEY"),
+        "base_url": os.getenv("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode"),
+        "tokenizer": "cl100k_base",
+        "provider": "openai"
+    },
+    # Moonshot 模型
+    "moonshot-v1-8k": {
+        "api_key": os.getenv("MOONSHOT_API_KEY"),
+        "base_url": os.getenv("MOONSHOT_BASE_URL", "https://api.moonshot.cn/v1"),
+        "tokenizer": "cl100k_base",
+        "provider": "openai"
+    },
+    "moonshot-v1-32k": {
+        "api_key": os.getenv("MOONSHOT_API_KEY"),
+        "base_url": os.getenv("MOONSHOT_BASE_URL", "https://api.moonshot.cn/v1"),
+        "tokenizer": "cl100k_base",
+        "provider": "openai"
+    }
+}
+
+# 获取模型配置的辅助函数
+def get_model_config(model):
+    # 检查模型是否直接在配置中
+    if model in MODEL_CONFIG:
+        return MODEL_CONFIG[model]
+    # 检查模型名称是否包含配置中的关键词（不区分大小写）
+    for config_model, config in MODEL_CONFIG.items():
+        if config_model.lower() in model.lower() or model.lower() in config_model.lower():
+            return config
+    # 默认返回 DeepSeek 配置
+    return MODEL_CONFIG.get("deepseek-chat")
+
 
 def count_tokens(text, model=None):
     if not text:
         return 0
-    enc = tiktoken.encoding_for_model(model)
-    tokens = enc.encode(text)
-    return len(tokens)
+    try:
+        config = get_model_config(model)
+        tokenizer = config.get("tokenizer", "cl100k_base")
+        
+        # 处理 Claude 的 tokenizer
+        if tokenizer == "claude":
+            try:
+                # 使用 anthropic 的 tokenizer（如果可用）
+                return anthropic.Tokenizer.encode(text).token_count
+            except:
+                # 如果 anthropic tokenizer 不可用，fallback 到 cl100k_base
+                enc = tiktoken.get_encoding("cl100k_base")
+                return len(enc.encode(text))
+        
+        # 处理其他模型的 tokenizer
+        if tokenizer == "cl100k_base":
+            enc = tiktoken.get_encoding("cl100k_base")
+        elif tokenizer == "p50k_base":
+            enc = tiktoken.get_encoding("p50k_base")
+        elif tokenizer == "r50k_base":
+            enc = tiktoken.get_encoding("r50k_base")
+        else:
+            # 默认使用 cl100k_base
+            enc = tiktoken.get_encoding("cl100k_base")
+        
+        return len(enc.encode(text))
+    except Exception as e:
+        # fallback to cl100k_base if any error
+        logging.error(f"Token counting error: {e}")
+        enc = tiktoken.get_encoding("cl100k_base")
+        return len(enc.encode(text))
 
-def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+
+def ChatGPT_API_with_finish_reason(model, prompt, chat_history=None):
+    config = get_model_config(model)
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
+    
     for i in range(max_retries):
         try:
-            if chat_history:
-                messages = chat_history
-                messages.append({"role": "user", "content": prompt})
-            else:
-                messages = [{"role": "user", "content": prompt}]
+            if config["provider"] == "anthropic":
+                # 使用 Anthropic Claude API
+                client = anthropic.Anthropic(api_key=config["api_key"])
+                
+                if chat_history:
+                    # 转换 chat history 格式
+                    messages = []
+                    for msg in chat_history:
+                        if msg["role"] == "user":
+                            messages.append({"role": "user", "content": msg["content"]})
+                        else:
+                            messages.append({"role": "assistant", "content": msg["content"]})
+                    messages.append({"role": "user", "content": prompt})
+                else:
+                    messages = [{"role": "user", "content": prompt}]
+                
+                response = client.messages.create(
+                    model=model,
+                    messages=messages,
+                    temperature=0,
+                    max_tokens=4096
+                )
+                
+                return response.content[0].text, "finished"
             
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0,
-            )
-            if response.choices[0].finish_reason == "length":
-                return response.choices[0].message.content, "max_output_reached"
             else:
-                return response.choices[0].message.content, "finished"
-
-        except Exception as e:
-            print('************* Retrying *************')
-            logging.error(f"Error: {e}")
-            if i < max_retries - 1:
-                time.sleep(1)  # Wait for 1秒 before retrying
-            else:
-                logging.error('Max retries reached for prompt: ' + prompt)
-                return "Error"
-
-
-
-def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
-    max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
-    for i in range(max_retries):
-        try:
-            if chat_history:
-                messages = chat_history
-                messages.append({"role": "user", "content": prompt})
-            else:
-                messages = [{"role": "user", "content": prompt}]
-            
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0,
-            )
-   
-            return response.choices[0].message.content
-        except Exception as e:
-            print('************* Retrying *************')
-            logging.error(f"Error: {e}")
-            if i < max_retries - 1:
-                time.sleep(1)  # Wait for 1秒 before retrying
-            else:
-                logging.error('Max retries reached for prompt: ' + prompt)
-                return "Error"
-            
-
-async def ChatGPT_API_async(model, prompt, api_key=CHATGPT_API_KEY):
-    max_retries = 10
-    messages = [{"role": "user", "content": prompt}]
-    for i in range(max_retries):
-        try:
-            async with openai.AsyncOpenAI(api_key=api_key) as client:
-                response = await client.chat.completions.create(
+                # 使用 OpenAI 兼容的 API（OpenAI、DeepSeek、Qwen、Moonshot）
+                client = openai.OpenAI(
+                    api_key=config["api_key"],
+                    base_url=config["base_url"]
+                )
+                
+                if chat_history:
+                    messages = chat_history.copy()
+                    messages.append({"role": "user", "content": prompt})
+                else:
+                    messages = [{"role": "user", "content": prompt}]
+                
+                response = client.chat.completions.create(
                     model=model,
                     messages=messages,
                     temperature=0,
                 )
-                return response.choices[0].message.content
+                
+                if response.choices[0].finish_reason == "length":
+                    return response.choices[0].message.content, "max_output_reached"
+                else:
+                    return response.choices[0].message.content, "finished"
+
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
-                await asyncio.sleep(1)  # Wait for 1s before retrying
+                time.sleep(1)
+            else:
+                logging.error('Max retries reached for prompt: ' + prompt)
+                return "Error"
+
+
+def ChatGPT_API(model, prompt, chat_history=None):
+    config = get_model_config(model)
+    max_retries = 10
+    
+    for i in range(max_retries):
+        try:
+            if config["provider"] == "anthropic":
+                # 使用 Anthropic Claude API
+                client = anthropic.Anthropic(api_key=config["api_key"])
+                
+                if chat_history:
+                    # 转换 chat history 格式
+                    messages = []
+                    for msg in chat_history:
+                        if msg["role"] == "user":
+                            messages.append({"role": "user", "content": msg["content"]})
+                        else:
+                            messages.append({"role": "assistant", "content": msg["content"]})
+                    messages.append({"role": "user", "content": prompt})
+                else:
+                    messages = [{"role": "user", "content": prompt}]
+                
+                response = client.messages.create(
+                    model=model,
+                    messages=messages,
+                    temperature=0,
+                    max_tokens=4096
+                )
+                
+                return response.content[0].text
+            
+            else:
+                # 使用 OpenAI 兼容的 API（OpenAI、DeepSeek、Qwen、Moonshot）
+                client = openai.OpenAI(
+                    api_key=config["api_key"],
+                    base_url=config["base_url"]
+                )
+                
+                if chat_history:
+                    messages = chat_history.copy()
+                    messages.append({"role": "user", "content": prompt})
+                else:
+                    messages = [{"role": "user", "content": prompt}]
+                
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=0,
+                )
+                
+                return response.choices[0].message.content
+
+        except Exception as e:
+            print('************* Retrying *************')
+            logging.error(f"Error: {e}")
+            if i < max_retries - 1:
+                time.sleep(1)
+            else:
+                logging.error('Max retries reached for prompt: ' + prompt)
+                return "Error"
+
+
+async def ChatGPT_API_async(model, prompt):
+    config = get_model_config(model)
+    max_retries = 10
+    
+    for i in range(max_retries):
+        try:
+            if config["provider"] == "anthropic":
+                # 使用 Anthropic Claude API
+                client = anthropic.AsyncAnthropic(api_key=config["api_key"])
+                
+                messages = [{"role": "user", "content": prompt}]
+                
+                response = await client.messages.create(
+                    model=model,
+                    messages=messages,
+                    temperature=0,
+                    max_tokens=4096
+                )
+                
+                return response.content[0].text
+            
+            else:
+                # 使用 OpenAI 兼容的 API（OpenAI、DeepSeek、Qwen、Moonshot）
+                async with openai.AsyncOpenAI(
+                    api_key=config["api_key"],
+                    base_url=config["base_url"]
+                ) as client:
+                    messages = [{"role": "user", "content": prompt}]
+                    response = await client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        temperature=0,
+                    )
+                    return response.choices[0].message.content
+
+        except Exception as e:
+            print('************* Retrying *************')
+            logging.error(f"Error: {e}")
+            if i < max_retries - 1:
+                await asyncio.sleep(1)
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
                 return "Error"  
