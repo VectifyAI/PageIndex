@@ -7,8 +7,11 @@ from pageindex.page_index_md import md_to_tree
 if __name__ == "__main__":
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Process PDF or Markdown document and generate structure')
-    parser.add_argument('--pdf_path', type=str, help='Path to the PDF file')
-    parser.add_argument('--md_path', type=str, help='Path to the Markdown file')
+    
+    # Validate that exactly one file type is specified
+    file_parser = parser.add_mutually_exclusive_group(required=True)
+    file_parser.add_argument('--pdf_path', type=str, help='Path to the PDF file')
+    file_parser.add_argument('--md_path', type=str, help='Path to the Markdown file')
 
     parser.add_argument('--model', type=str, default='gpt-4o-2024-11-20', help='Model to use')
 
@@ -36,12 +39,6 @@ if __name__ == "__main__":
     parser.add_argument('--summary-token-threshold', type=int, default=200,
                       help='Token threshold for generating summaries (markdown only)')
     args = parser.parse_args()
-    
-    # Validate that exactly one file type is specified
-    if not args.pdf_path and not args.md_path:
-        raise ValueError("Either --pdf_path or --md_path must be specified")
-    if args.pdf_path and args.md_path:
-        raise ValueError("Only one of --pdf_path or --md_path can be specified")
     
     if args.pdf_path:
         # Validate PDF file
