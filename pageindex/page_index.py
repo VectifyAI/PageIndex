@@ -750,7 +750,33 @@ def single_toc_item_index_fixer(section_title, content, model="gpt-4o-2024-11-20
 
 
 async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, start_index=1, model=None, logger=None):
+    """
+    Fix incorrect physical_index values in TOC items by searching content ranges.
+
+    Args:
+        toc_with_page_number: List of TOC items with physical_index to validate/fix
+        page_list: List of (text, page_num) tuples aligned to start_index
+        incorrect_results: List of items that failed validation
+        start_index: Physical page number of page_list[0] (must be >= 1)
+        model: OpenAI model name for API calls
+        logger: Optional logger for structured logging
+
+    Returns:
+        Updated toc_with_page_number with corrected physical_index values
+
+    Raises:
+        ValueError: If start_index < 1
+    """
     print(f'start fix_incorrect_toc with {len(incorrect_results)} incorrect results')
+    if start_index < 1:
+        raise ValueError(f"start_index must be >= 1, got {start_index}")
+    if logger:
+        logger.info({
+            'message': 'fix_incorrect_toc assumes page_list aligns to start_index',
+            'start_index': start_index,
+            'page_list_length': len(page_list),
+            'expected_physical_end': start_index + len(page_list) - 1
+        })
     incorrect_indices = {result['list_index'] for result in incorrect_results}
     
     end_index = len(page_list) + start_index - 1
@@ -802,6 +828,7 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
         })
 
         page_contents=[]
+        skipped_pages = 0
         for page_index in range(prev_correct, next_correct+1):
             # Add bounds checking to prevent IndexError
             page_list_idx = page_index - start_index
@@ -809,8 +836,18 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
                 page_text = f"<physical_index_{page_index}>\n{page_list[page_list_idx][0]}\n<physical_index_{page_index}>\n\n"
                 page_contents.append(page_text)
             else:
+                skipped_pages += 1
                 continue
         content_range = ''.join(page_contents)
+        if skipped_pages and logger:
+            logger.warning({
+                'message': 'Skipped pages while building content range; check start_index/page_list alignment',
+                'list_index': list_index,
+                'start_index': start_index,
+                'prev_correct': prev_correct,
+                'next_correct': next_correct,
+                'skipped_pages': skipped_pages
+            })
         
         physical_index_int = single_toc_item_index_fixer(incorrect_item['title'], content_range, model)
         
