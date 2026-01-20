@@ -678,6 +678,138 @@ def format_structure(structure, order=None):
     return structure
 
 
+def extract_pdf_native_toc(pdf_path):
+    """
+    Extract native TOC/bookmarks from PDF if available.
+
+    Args:
+        pdf_path: Path to PDF file (string)
+
+    Returns:
+        List of tuples [(level, title, page), ...] or None if extraction fails
+    """
+    try:
+        if not isinstance(pdf_path, str):
+            return None
+        if not os.path.isfile(pdf_path):
+            return None
+
+        doc = pymupdf.open(pdf_path)
+        toc = doc.get_toc()
+        doc.close()
+
+        if not toc:
+            return None
+
+        return toc
+    except Exception:
+        return None
+
+
+def validate_native_toc_quality(toc, total_pages):
+    """
+    Validate that native TOC is high quality and usable.
+
+    Conservative validation - only returns True if TOC is clearly reliable.
+
+    Args:
+        toc: List of tuples [(level, title, page), ...]
+        total_pages: Total number of pages in the document
+
+    Returns:
+        True if TOC passes all quality checks, False otherwise
+    """
+    if not toc:
+        return False
+
+    # Must have at least 5 items to be considered complete
+    if len(toc) < 5:
+        return False
+
+    # All titles must be non-empty
+    for level, title, page in toc:
+        if not title or not title.strip():
+            return False
+
+    # All pages must be within document range
+    for level, title, page in toc:
+        if page < 1 or page > total_pages:
+            return False
+
+    # Check for too many duplicate titles (suggests auto-generated junk)
+    titles = [title for _, title, _ in toc]
+    unique_titles = set(titles)
+    if len(unique_titles) < len(titles) * 0.8:
+        return False
+
+    return True
+
+
+def convert_toc_levels_to_structure(toc):
+    """
+    Convert pymupdf TOC format to PageIndex structure format.
+
+    Transforms [(level, title, page), ...] into the format expected by
+    post_processing and list_to_tree functions.
+
+    Args:
+        toc: List of tuples [(level, title, page), ...]
+
+    Returns:
+        List of dicts [{"structure": "1.2.3", "title": "...", "physical_index": N}, ...]
+    """
+    result = []
+    counters = {}  # {level: current_count}
+
+    for level, title, page in toc:
+        # Reset counters for deeper levels when we go back up
+        for l in list(counters.keys()):
+            if l > level:
+                del counters[l]
+
+        # Increment counter for this level
+        counters[level] = counters.get(level, 0) + 1
+
+        # Build structure string: "1.2.3"
+        structure_parts = []
+        for l in range(1, level + 1):
+            structure_parts.append(str(counters.get(l, 1)))
+        structure = '.'.join(structure_parts)
+
+        result.append({
+            'structure': structure,
+            'title': title,
+            'physical_index': page
+        })
+
+    return result
+
+
+def try_native_toc(pdf_path, total_pages):
+    """
+    Attempt to extract and validate native TOC from PDF.
+
+    Only returns a result if the native TOC exists AND passes quality validation.
+    This is the main entry point for the native TOC optimization.
+
+    Args:
+        pdf_path: Path to PDF file (string)
+        total_pages: Total number of pages in the document
+
+    Returns:
+        List of dicts in PageIndex format if successful, None otherwise
+    """
+    toc = extract_pdf_native_toc(pdf_path)
+
+    if toc is None:
+        return None
+
+    if not validate_native_toc_quality(toc, total_pages):
+        return None
+
+    return convert_toc_levels_to_structure(toc)
+
+
 class ConfigLoader:
     def __init__(self, default_path: str = None):
         if default_path is None:

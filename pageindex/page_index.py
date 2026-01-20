@@ -1019,39 +1019,61 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None)
     return node
 
 async def tree_parser(page_list, opt, doc=None, logger=None):
+    # === Fast path: try native TOC first ===
+    if isinstance(doc, str):
+        native_toc = try_native_toc(doc, len(page_list))
+        if native_toc:
+            logger.info({'source': 'native_toc', 'items': len(native_toc)})
+            print(f'Using native TOC with {len(native_toc)} items')
+
+            # Add preface if needed and process
+            native_toc = add_preface_if_needed(native_toc)
+            valid_toc_items = [item for item in native_toc if item.get('physical_index') is not None]
+            toc_tree = post_processing(valid_toc_items, len(page_list))
+
+            # Still process large nodes if needed
+            tasks = [
+                process_large_node_recursively(node, page_list, opt, logger=logger)
+                for node in toc_tree
+            ]
+            await asyncio.gather(*tasks)
+
+            return toc_tree
+
+    # === Original flow (fallback) ===
     check_toc_result = check_toc(page_list, opt)
     logger.info(check_toc_result)
 
     if check_toc_result.get("toc_content") and check_toc_result["toc_content"].strip() and check_toc_result["page_index_given_in_toc"] == "yes":
         toc_with_page_number = await meta_processor(
-            page_list, 
-            mode='process_toc_with_page_numbers', 
-            start_index=1, 
-            toc_content=check_toc_result['toc_content'], 
-            toc_page_list=check_toc_result['toc_page_list'], 
+            page_list,
+            mode='process_toc_with_page_numbers',
+            start_index=1,
+            toc_content=check_toc_result['toc_content'],
+            toc_page_list=check_toc_result['toc_page_list'],
             opt=opt,
             logger=logger)
     else:
         toc_with_page_number = await meta_processor(
-            page_list, 
-            mode='process_no_toc', 
-            start_index=1, 
+            page_list,
+            mode='process_no_toc',
+            start_index=1,
             opt=opt,
             logger=logger)
 
     toc_with_page_number = add_preface_if_needed(toc_with_page_number)
     toc_with_page_number = await check_title_appearance_in_start_concurrent(toc_with_page_number, page_list, model=opt.model, logger=logger)
-    
+
     # Filter out items with None physical_index before post_processings
     valid_toc_items = [item for item in toc_with_page_number if item.get('physical_index') is not None]
-    
+
     toc_tree = post_processing(valid_toc_items, len(page_list))
     tasks = [
         process_large_node_recursively(node, page_list, opt, logger=logger)
         for node in toc_tree
     ]
     await asyncio.gather(*tasks)
-    
+
     return toc_tree
 
 
