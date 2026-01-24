@@ -51,9 +51,8 @@ Are you frustrated with vector database retrieval accuracy for long professional
 Inspired by AlphaGo, we propose **[PageIndex](https://vectify.ai/pageindex)** — a **vectorless**, **reasoning-based RAG** system that builds a **hierarchical tree index** from long documents and uses LLMs to **reason** *over that index* for **agentic, context-aware retrieval**.
 It simulates how *human experts* navigate and extract knowledge from complex documents through *tree search*, enabling LLMs to *think* and *reason* their way to the most relevant document sections. PageIndex performs retrieval in two steps:
 
-1. Indexing: LLM generates an outline (tree structure) of the document with a summary for each node
-2. Querying: LLM traverses the tree summaries in the same way agent harnesses unpack skills, by reading summaries descriptions and loading the section
-
+1. Indexing: LLM turns the document into a tree of semantically-delineated sections (e.g. doc -> chapter -> section), with each node having a summary of its subtree
+2. Querying: LLM traverses the tree of summaries in the same way agent harnesses unpack skills&mdash;e.g., by having read the TOC into the context window, and then loading chapters' (and so on) children as necessary
 
 <div align="center">
   <a href="https://pageindex.ai/blog/pageindex-intro" target="_blank" title="The PageIndex Framework">
