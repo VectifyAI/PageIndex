@@ -415,6 +415,29 @@ def add_page_offset_to_toc_json(data, offset):
     return data
 
 
+def sanitize_toc_page_numbers(toc_items):
+    """
+    Best-effort cleanup for parsed TOC page numbers.
+
+    Some PDFs have TOCs with inconsistent numbering (resets/spikes). Since downstream
+    logic assumes page numbers are monotonic, treat non-monotonic integers as invalid
+    so they can be re-inferred later (e.g. via `process_none_page_numbers` / verification).
+    """
+    last_page = None
+    for item in toc_items:
+        page = item.get("page")
+        if not isinstance(page, int):
+            continue
+        if page <= 0:
+            item["page"] = None
+            continue
+        if last_page is not None and page < last_page:
+            item["page"] = None
+            continue
+        last_page = page
+    return toc_items
+
+
 
 def page_list_to_group_text(page_contents, token_lengths, max_tokens=20000, overlap_page=1):    
     num_tokens = sum(token_lengths)
@@ -614,6 +637,7 @@ def process_toc_no_page_numbers(toc_content, toc_page_list, page_list,  start_in
 
 def process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_check_page_num=None, model=None, logger=None):
     toc_with_page_number = toc_transformer(toc_content, model)
+    toc_with_page_number = sanitize_toc_page_numbers(toc_with_page_number)
     logger.info(f'toc_with_page_number: {toc_with_page_number}')
 
     toc_no_page_number = remove_page_number(copy.deepcopy(toc_with_page_number))
