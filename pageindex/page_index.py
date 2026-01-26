@@ -566,14 +566,14 @@ def generate_toc_init(part, model=None):
     else:
         raise Exception(f'finish reason: {finish_reason}')
 
-def process_no_toc(page_list, start_index=1, model=None, logger=None):
+def process_no_toc(page_list, start_index=1, model=None, logger=None, max_tokens=20000):
     page_contents=[]
     token_lengths=[]
     for page_index in range(start_index, start_index+len(page_list)):
         page_text = f"<physical_index_{page_index}>\n{page_list[page_index-start_index][0]}\n<physical_index_{page_index}>\n\n"
         page_contents.append(page_text)
         token_lengths.append(count_tokens(page_text, model))
-    group_texts = page_list_to_group_text(page_contents, token_lengths)
+    group_texts = page_list_to_group_text(page_contents, token_lengths, max_tokens=max_tokens)
     logger.info(f'len(group_texts): {len(group_texts)}')
 
     toc_with_page_number= generate_toc_init(group_texts[0], model)
@@ -587,7 +587,7 @@ def process_no_toc(page_list, start_index=1, model=None, logger=None):
 
     return toc_with_page_number
 
-def process_toc_no_page_numbers(toc_content, toc_page_list, page_list,  start_index=1, model=None, logger=None):
+def process_toc_no_page_numbers(toc_content, toc_page_list, page_list,  start_index=1, model=None, logger=None, max_tokens=20000):
     page_contents=[]
     token_lengths=[]
     toc_content = toc_transformer(toc_content, model)
@@ -597,7 +597,7 @@ def process_toc_no_page_numbers(toc_content, toc_page_list, page_list,  start_in
         page_contents.append(page_text)
         token_lengths.append(count_tokens(page_text, model))
     
-    group_texts = page_list_to_group_text(page_contents, token_lengths)
+    group_texts = page_list_to_group_text(page_contents, token_lengths, max_tokens=max_tokens)
     logger.info(f'len(group_texts): {len(group_texts)}')
 
     toc_with_page_number=copy.deepcopy(toc_content)
@@ -952,13 +952,36 @@ async def verify_toc(page_list, list_result, start_index=1, N=None, model=None):
 async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=None, start_index=1, opt=None, logger=None):
     print(mode)
     print(f'start_index: {start_index}')
-    
-    if mode == 'process_toc_with_page_numbers':
-        toc_with_page_number = process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_check_page_num=opt.toc_check_page_num, model=opt.model, logger=logger)
-    elif mode == 'process_toc_no_page_numbers':
-        toc_with_page_number = process_toc_no_page_numbers(toc_content, toc_page_list, page_list, model=opt.model, logger=logger)
-    else:
-        toc_with_page_number = process_no_toc(page_list, start_index=start_index, model=opt.model, logger=logger)
+    max_tokens = getattr(opt, "max_token_num_each_node", 20000)
+    try:
+        if mode == 'process_toc_with_page_numbers':
+            toc_with_page_number = process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_check_page_num=opt.toc_check_page_num, model=opt.model, logger=logger)
+        elif mode == 'process_toc_no_page_numbers':
+            toc_with_page_number = process_toc_no_page_numbers(
+                toc_content,
+                toc_page_list,
+                page_list,
+                start_index=start_index,
+                model=opt.model,
+                logger=logger,
+                max_tokens=max_tokens,
+            )
+        else:
+            toc_with_page_number = process_no_toc(
+                page_list,
+                start_index=start_index,
+                model=opt.model,
+                logger=logger,
+                max_tokens=max_tokens,
+            )
+    except Exception as e:
+        if logger:
+            logger.error({"mode": mode, "start_index": start_index, "error": str(e)})
+        if mode == 'process_toc_with_page_numbers':
+            return await meta_processor(page_list, mode='process_toc_no_page_numbers', toc_content=toc_content, toc_page_list=toc_page_list, start_index=start_index, opt=opt, logger=logger)
+        if mode == 'process_toc_no_page_numbers':
+            return await meta_processor(page_list, mode='process_no_toc', start_index=start_index, opt=opt, logger=logger)
+        return [{"structure": "1", "title": "Document", "physical_index": start_index}]
             
     toc_with_page_number = [item for item in toc_with_page_number if item.get('physical_index') is not None] 
     
@@ -972,7 +995,7 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
     accuracy, incorrect_results = await verify_toc(page_list, toc_with_page_number, start_index=start_index, model=opt.model)
         
     logger.info({
-        'mode': 'process_toc_with_page_numbers',
+        'mode': mode,
         'accuracy': accuracy,
         'incorrect_results': incorrect_results
     })
@@ -987,7 +1010,9 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
         elif mode == 'process_toc_no_page_numbers':
             return await meta_processor(page_list, mode='process_no_toc', start_index=start_index, opt=opt, logger=logger)
         else:
-            raise Exception('Processing failed')
+            if logger:
+                logger.error({"mode": mode, "start_index": start_index, "accuracy": accuracy, "incorrect_results_count": len(incorrect_results)})
+            return [{"structure": "1", "title": "Document", "physical_index": start_index}]
         
  
 async def process_large_node_recursively(node, page_list, opt=None, logger=None):
