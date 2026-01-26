@@ -5,7 +5,10 @@ import os
 from datetime import datetime
 import time
 import json
-import PyPDF2
+try:
+    import pypdf as PyPDF2
+except ImportError:
+    import PyPDF2
 import copy
 import asyncio
 import pymupdf
@@ -16,24 +19,73 @@ import logging
 import yaml
 from pathlib import Path
 from types import SimpleNamespace as config
+from typing import Optional
 
-CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
+CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY") or os.getenv("OPENAI_API_KEY")
+CHATGPT_BASE_URL = os.getenv("CHATGPT_BASE_URL") or os.getenv("OPENAI_BASE_URL")
+CHATGPT_MODEL = os.getenv("CHATGPT_MODEL") or os.getenv("OPENAI_MODEL")
+
+DEFAULT_MODEL = "gpt-4o-2024-11-20"
+
+
+def _default_model_from_env() -> Optional[str]:
+    return os.getenv("CHATGPT_MODEL") or os.getenv("OPENAI_MODEL")
+
+
+def _resolve_model_name(model: Optional[str]) -> str:
+    if model is None or model == DEFAULT_MODEL:
+        return _default_model_from_env() or DEFAULT_MODEL
+    return model
+
+
+def _tiktoken_encoder(model: Optional[str]):
+    model_name = _resolve_model_name(model)
+    try:
+        return tiktoken.encoding_for_model(model_name)
+    except Exception:
+        return tiktoken.get_encoding("cl100k_base")
+
+
+_SYNC_OPENAI_CLIENTS = {}
+_ASYNC_OPENAI_CLIENTS = {}
+
+
+def _client_cache_key(api_key: Optional[str], base_url: Optional[str]):
+    return (api_key or "", base_url or "")
+
+
+def _openai_client(api_key: Optional[str] = CHATGPT_API_KEY, base_url: Optional[str] = CHATGPT_BASE_URL):
+    key = _client_cache_key(api_key, base_url)
+    client = _SYNC_OPENAI_CLIENTS.get(key)
+    if client is None:
+        client = openai.OpenAI(api_key=api_key, base_url=base_url) if base_url else openai.OpenAI(api_key=api_key)
+        _SYNC_OPENAI_CLIENTS[key] = client
+    return client
+
+
+def _openai_async_client(api_key: Optional[str] = CHATGPT_API_KEY, base_url: Optional[str] = CHATGPT_BASE_URL):
+    key = _client_cache_key(api_key, base_url)
+    client = _ASYNC_OPENAI_CLIENTS.get(key)
+    if client is None:
+        client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url) if base_url else openai.AsyncOpenAI(api_key=api_key)
+        _ASYNC_OPENAI_CLIENTS[key] = client
+    return client
 
 def count_tokens(text, model=None):
     if not text:
         return 0
-    enc = tiktoken.encoding_for_model(model)
+    enc = _tiktoken_encoder(model)
     tokens = enc.encode(text)
     return len(tokens)
 
 def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
+    model = _resolve_model_name(model)
+    client = _openai_client(api_key=api_key)
     for i in range(max_retries):
         try:
             if chat_history:
-                messages = chat_history
-                messages.append({"role": "user", "content": prompt})
+                messages = list(chat_history) + [{"role": "user", "content": prompt}]
             else:
                 messages = [{"role": "user", "content": prompt}]
             
@@ -54,18 +106,18 @@ def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_
                 time.sleep(1)  # Wait for 1秒 before retrying
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
-                return "Error"
+                return "", "error"
 
 
 
 def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
+    model = _resolve_model_name(model)
+    client = _openai_client(api_key=api_key)
     for i in range(max_retries):
         try:
             if chat_history:
-                messages = chat_history
-                messages.append({"role": "user", "content": prompt})
+                messages = list(chat_history) + [{"role": "user", "content": prompt}]
             else:
                 messages = [{"role": "user", "content": prompt}]
             
@@ -88,16 +140,17 @@ def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
 
 async def ChatGPT_API_async(model, prompt, api_key=CHATGPT_API_KEY):
     max_retries = 10
+    model = _resolve_model_name(model)
     messages = [{"role": "user", "content": prompt}]
     for i in range(max_retries):
         try:
-            async with openai.AsyncOpenAI(api_key=api_key) as client:
-                response = await client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    temperature=0,
-                )
-                return response.choices[0].message.content
+            client = _openai_async_client(api_key=api_key)
+            response = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0,
+            )
+            return response.choices[0].message.content
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
@@ -194,6 +247,38 @@ def structure_to_list(structure):
         for item in structure:
             nodes.extend(structure_to_list(item))
         return nodes
+
+
+def create_node_mapping(tree, include_page_ranges: bool = False, max_page: Optional[int] = None):
+    """
+    Create a `node_id -> node` mapping for convenient lookups in retrieval pipelines.
+
+    - `include_page_ranges=False` (default): returns `node_id -> node_dict` and adds `page_index`
+      (alias of `start_index`) for backward compatibility with older notebooks.
+    - `include_page_ranges=True`: returns `node_id -> {"node": node, "start_index": x, "end_index": y}`.
+    """
+    node_map = {}
+    for node in structure_to_list(tree):
+        if not isinstance(node, dict):
+            continue
+        node_id = node.get("node_id")
+        if not node_id:
+            continue
+
+        start_index = node.get("start_index")
+        end_index = node.get("end_index")
+
+        if include_page_ranges:
+            if max_page is not None and isinstance(end_index, int):
+                end_index = min(end_index, max_page)
+            node_map[node_id] = {"node": node, "start_index": start_index, "end_index": end_index}
+        else:
+            node_copy = dict(node)
+            if start_index is not None and "page_index" not in node_copy:
+                node_copy["page_index"] = start_index
+            node_map[node_id] = node_copy
+
+    return node_map
 
     
 def get_leaf_nodes(structure):
@@ -410,8 +495,9 @@ def add_preface_if_needed(data):
 
 
 
-def get_page_tokens(pdf_path, model="gpt-4o-2024-11-20", pdf_parser="PyPDF2"):
-    enc = tiktoken.encoding_for_model(model)
+def get_page_tokens(pdf_path, model=DEFAULT_MODEL, pdf_parser="PyPDF2"):
+    model_name = _resolve_model_name(model)
+    enc = _tiktoken_encoder(model_name)
     if pdf_parser == "PyPDF2":
         pdf_reader = PyPDF2.PdfReader(pdf_path)
         page_list = []
@@ -709,4 +795,7 @@ class ConfigLoader:
 
         self._validate_keys(user_dict)
         merged = {**self._default_dict, **user_dict}
+        env_default_model = _default_model_from_env()
+        if env_default_model and "model" not in user_dict:
+            merged["model"] = env_default_model
         return config(**merged)

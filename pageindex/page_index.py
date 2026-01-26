@@ -166,34 +166,35 @@ def extract_toc_content(content, model=None):
     Directly return the full table of contents content. Do not output anything else."""
 
     response, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt)
-    
+    if finish_reason == "error" and not response:
+        raise Exception("Failed to extract table of contents (API error)")
+
     if_complete = check_if_toc_transformation_is_complete(content, response, model)
     if if_complete == "yes" and finish_reason == "finished":
         return response
-    
-    chat_history = [
-        {"role": "user", "content": prompt}, 
-        {"role": "assistant", "content": response},    
-    ]
-    prompt = f"""please continue the generation of table of contents , directly output the remaining part of the structure"""
-    new_response, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt, chat_history=chat_history)
-    response = response + new_response
-    if_complete = check_if_toc_transformation_is_complete(content, response, model)
-    
+
+    max_attempts = 5
+    attempt = 0
+    continue_prompt = "please continue the generation of table of contents, directly output the remaining part of the structure"
+
     while not (if_complete == "yes" and finish_reason == "finished"):
+        attempt += 1
+        if attempt > max_attempts:
+            raise Exception("Failed to complete table of contents after maximum retries")
+
         chat_history = [
-            {"role": "user", "content": prompt}, 
-            {"role": "assistant", "content": response},    
+            {"role": "user", "content": prompt},
+            {"role": "assistant", "content": response},
         ]
-        prompt = f"""please continue the generation of table of contents , directly output the remaining part of the structure"""
-        new_response, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt, chat_history=chat_history)
+        new_response, finish_reason = ChatGPT_API_with_finish_reason(
+            model=model, prompt=continue_prompt, chat_history=chat_history
+        )
+        if finish_reason == "error" and not new_response:
+            raise Exception("Failed to continue table of contents extraction (API error)")
+
         response = response + new_response
         if_complete = check_if_toc_transformation_is_complete(content, response, model)
-        
-        # Optional: Add a maximum retry limit to prevent infinite loops
-        if len(chat_history) > 5:  # Arbitrary limit of 10 attempts
-            raise Exception('Failed to complete table of contents after maximum retries')
-    
+
     return response
 
 def detect_page_index(toc_content, model=None):
@@ -674,11 +675,11 @@ def process_none_page_numbers(toc_items, page_list, start_index=1, model=None):
                     continue
 
             item_copy = copy.deepcopy(item)
-            del item_copy['page']
+            item_copy.pop('page', None)
             result = add_page_number_to_toc(page_contents, item_copy, model)
             if isinstance(result[0]['physical_index'], str) and result[0]['physical_index'].startswith('<physical_index'):
                 item['physical_index'] = int(result[0]['physical_index'].split('_')[-1].rstrip('>').strip())
-                del item['page']
+                item.pop('page', None)
     
     return toc_items
 
@@ -758,13 +759,13 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
     incorrect_results_and_range_logs = []
     # Helper function to process and check a single incorrect item
     async def process_and_check_item(incorrect_item):
-        list_index = incorrect_item['list_index']
+        toc_list_index = incorrect_item['list_index']
         
         # Check if list_index is valid
-        if list_index < 0 or list_index >= len(toc_with_page_number):
+        if toc_list_index < 0 or toc_list_index >= len(toc_with_page_number):
             # Return an invalid result for out-of-bounds indices
             return {
-                'list_index': list_index,
+                'list_index': toc_list_index,
                 'title': incorrect_item['title'],
                 'physical_index': incorrect_item.get('physical_index'),
                 'is_valid': False
@@ -772,7 +773,7 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
         
         # Find the previous correct item
         prev_correct = None
-        for i in range(list_index-1, -1, -1):
+        for i in range(toc_list_index - 1, -1, -1):
             if i not in incorrect_indices and i >= 0 and i < len(toc_with_page_number):
                 physical_index = toc_with_page_number[i].get('physical_index')
                 if physical_index is not None:
@@ -784,7 +785,7 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
         
         # Find the next correct item
         next_correct = None
-        for i in range(list_index+1, len(toc_with_page_number)):
+        for i in range(toc_list_index + 1, len(toc_with_page_number)):
             if i not in incorrect_indices and i >= 0 and i < len(toc_with_page_number):
                 physical_index = toc_with_page_number[i].get('physical_index')
                 if physical_index is not None:
@@ -795,7 +796,7 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
             next_correct = end_index
         
         incorrect_results_and_range_logs.append({
-            'list_index': list_index,
+            'list_index': toc_list_index,
             'title': incorrect_item['title'],
             'prev_correct': prev_correct,
             'next_correct': next_correct
@@ -804,9 +805,9 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
         page_contents=[]
         for page_index in range(prev_correct, next_correct+1):
             # Add bounds checking to prevent IndexError
-            list_index = page_index - start_index
-            if list_index >= 0 and list_index < len(page_list):
-                page_text = f"<physical_index_{page_index}>\n{page_list[list_index][0]}\n<physical_index_{page_index}>\n\n"
+            page_list_index = page_index - start_index
+            if 0 <= page_list_index < len(page_list):
+                page_text = f"<physical_index_{page_index}>\n{page_list[page_list_index][0]}\n<physical_index_{page_index}>\n\n"
                 page_contents.append(page_text)
             else:
                 continue
@@ -820,7 +821,7 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
         check_result = await check_title_appearance(check_item, page_list, start_index, model)
 
         return {
-            'list_index': list_index,
+            'list_index': toc_list_index,
             'title': incorrect_item['title'],
             'physical_index': physical_index_int,
             'is_valid': check_result['answer'] == 'yes'
@@ -1022,15 +1023,25 @@ async def tree_parser(page_list, opt, doc=None, logger=None):
     check_toc_result = check_toc(page_list, opt)
     logger.info(check_toc_result)
 
-    if check_toc_result.get("toc_content") and check_toc_result["toc_content"].strip() and check_toc_result["page_index_given_in_toc"] == "yes":
-        toc_with_page_number = await meta_processor(
-            page_list, 
-            mode='process_toc_with_page_numbers', 
-            start_index=1, 
-            toc_content=check_toc_result['toc_content'], 
-            toc_page_list=check_toc_result['toc_page_list'], 
-            opt=opt,
-            logger=logger)
+    if check_toc_result.get("toc_content") and check_toc_result["toc_content"].strip():
+        if check_toc_result["page_index_given_in_toc"] == "yes":
+            toc_with_page_number = await meta_processor(
+                page_list,
+                mode='process_toc_with_page_numbers',
+                start_index=1,
+                toc_content=check_toc_result['toc_content'],
+                toc_page_list=check_toc_result['toc_page_list'],
+                opt=opt,
+                logger=logger)
+        else:
+            toc_with_page_number = await meta_processor(
+                page_list,
+                mode='process_toc_no_page_numbers',
+                start_index=1,
+                toc_content=check_toc_result['toc_content'],
+                toc_page_list=check_toc_result['toc_page_list'],
+                opt=opt,
+                logger=logger)
     else:
         toc_with_page_number = await meta_processor(
             page_list, 
@@ -1066,7 +1077,7 @@ def page_index_main(doc, opt=None):
         raise ValueError("Unsupported input type. Expected a PDF file path or BytesIO object.")
 
     print('Parsing PDF...')
-    page_list = get_page_tokens(doc)
+    page_list = get_page_tokens(doc, model=getattr(opt, "model", None))
 
     logger.info({'total_page_number': len(page_list)})
     logger.info({'total_token': sum([page[1] for page in page_list])})
