@@ -161,6 +161,10 @@ CHATGPT_API_KEY=your_openai_key_here
 python3 run_pageindex.py --pdf_path /path/to/your/document.pdf
 ```
 
+### Self Hosting
+
+This repository does not ship a production API server. For a minimal self-hosted HTTP wrapper, see `SELF_HOSTING.md`.
+
 <details>
 <summary><strong>Optional parameters</strong></summary>
 <br>
