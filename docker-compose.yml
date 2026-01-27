@@ -1,0 +1,9 @@
+services:
+  pageindex:
+    build: .
+    image: pageindex:local
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data
+      - ./results:/app/results
