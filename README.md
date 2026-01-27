@@ -173,7 +173,9 @@ You can customize the processing with additional optional arguments:
 --max-tokens-per-node   Max tokens per node (default: 20000)
 --if-add-node-id        Add node ID (yes/no, default: yes)
 --if-add-node-summary   Add node summary (yes/no, default: yes)
---if-add-doc-description Add doc description (yes/no, default: yes)
+--if-add-doc-description Add doc description (yes/no, default: no)
+--if-add-node-text      Add node text (yes/no, default: no)
+--if-report-usage       Report token usage (yes/no, default: no)
 ```
 </details>
 

@@ -8,6 +8,7 @@ import json
 import PyPDF2
 import copy
 import asyncio
+import threading
 import pymupdf
 from io import BytesIO
 from dotenv import load_dotenv
@@ -19,6 +20,81 @@ from types import SimpleNamespace as config
 
 CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
 
+
+class UsageTracker:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.calls = 0
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
+        self.total_tokens = 0
+        self.by_model = {}
+
+    def add(self, usage, model=None):
+        if not usage:
+            return
+
+        if isinstance(usage, dict):
+            prompt_tokens = usage.get("prompt_tokens")
+            completion_tokens = usage.get("completion_tokens")
+            total_tokens = usage.get("total_tokens")
+        else:
+            prompt_tokens = getattr(usage, "prompt_tokens", None)
+            completion_tokens = getattr(usage, "completion_tokens", None)
+            total_tokens = getattr(usage, "total_tokens", None)
+
+        if prompt_tokens is None and completion_tokens is None and total_tokens is None:
+            return
+
+        with self._lock:
+            self.calls += 1
+            if prompt_tokens is not None:
+                self.prompt_tokens += int(prompt_tokens)
+            if completion_tokens is not None:
+                self.completion_tokens += int(completion_tokens)
+            if total_tokens is not None:
+                self.total_tokens += int(total_tokens)
+
+            model_key = model or "unknown"
+            if model_key not in self.by_model:
+                self.by_model[model_key] = {
+                    "calls": 0,
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                }
+            model_row = self.by_model[model_key]
+            model_row["calls"] += 1
+            if prompt_tokens is not None:
+                model_row["prompt_tokens"] += int(prompt_tokens)
+            if completion_tokens is not None:
+                model_row["completion_tokens"] += int(completion_tokens)
+            if total_tokens is not None:
+                model_row["total_tokens"] += int(total_tokens)
+
+    def to_dict(self):
+        with self._lock:
+            return {
+                "calls": self.calls,
+                "prompt_tokens": self.prompt_tokens,
+                "completion_tokens": self.completion_tokens,
+                "total_tokens": self.total_tokens,
+                "by_model": copy.deepcopy(self.by_model),
+            }
+
+
+_USAGE_TRACKER = None
+
+
+def set_usage_tracker(tracker):
+    global _USAGE_TRACKER
+    _USAGE_TRACKER = tracker
+
+
+def get_usage_tracker():
+    return _USAGE_TRACKER
+
+
 def count_tokens(text, model=None):
     if not text:
         return 0
@@ -26,14 +102,14 @@ def count_tokens(text, model=None):
     tokens = enc.encode(text)
     return len(tokens)
 
-def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None, usage_tracker=None):
     max_retries = 10
     client = openai.OpenAI(api_key=api_key)
+    tracker = usage_tracker or get_usage_tracker()
     for i in range(max_retries):
         try:
             if chat_history:
-                messages = chat_history
-                messages.append({"role": "user", "content": prompt})
+                messages = list(chat_history) + [{"role": "user", "content": prompt}]
             else:
                 messages = [{"role": "user", "content": prompt}]
             
@@ -42,6 +118,8 @@ def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_
                 messages=messages,
                 temperature=0,
             )
+            if tracker and getattr(response, "usage", None) is not None:
+                tracker.add(response.usage, model=model)
             if response.choices[0].finish_reason == "length":
                 return response.choices[0].message.content, "max_output_reached"
             else:
@@ -58,14 +136,14 @@ def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_
 
 
 
-def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None, usage_tracker=None):
     max_retries = 10
     client = openai.OpenAI(api_key=api_key)
+    tracker = usage_tracker or get_usage_tracker()
     for i in range(max_retries):
         try:
             if chat_history:
-                messages = chat_history
-                messages.append({"role": "user", "content": prompt})
+                messages = list(chat_history) + [{"role": "user", "content": prompt}]
             else:
                 messages = [{"role": "user", "content": prompt}]
             
@@ -74,7 +152,8 @@ def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
                 messages=messages,
                 temperature=0,
             )
-   
+            if tracker and getattr(response, "usage", None) is not None:
+                tracker.add(response.usage, model=model)
             return response.choices[0].message.content
         except Exception as e:
             print('************* Retrying *************')
@@ -86,9 +165,10 @@ def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
                 return "Error"
             
 
-async def ChatGPT_API_async(model, prompt, api_key=CHATGPT_API_KEY):
+async def ChatGPT_API_async(model, prompt, api_key=CHATGPT_API_KEY, usage_tracker=None):
     max_retries = 10
     messages = [{"role": "user", "content": prompt}]
+    tracker = usage_tracker or get_usage_tracker()
     for i in range(max_retries):
         try:
             async with openai.AsyncOpenAI(api_key=api_key) as client:
@@ -97,6 +177,8 @@ async def ChatGPT_API_async(model, prompt, api_key=CHATGPT_API_KEY):
                     messages=messages,
                     temperature=0,
                 )
+                if tracker and getattr(response, "usage", None) is not None:
+                    tracker.add(response.usage, model=model)
                 return response.choices[0].message.content
         except Exception as e:
             print('************* Retrying *************')

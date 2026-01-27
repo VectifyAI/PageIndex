@@ -27,6 +27,9 @@ if __name__ == "__main__":
                       help='Whether to add doc description to the doc')
     parser.add_argument('--if-add-node-text', type=str, default='no',
                       help='Whether to add text to the node')
+
+    parser.add_argument('--if-report-usage', type=str, default='no',
+                      help='Whether to report token usage for this run (yes/no)')
                       
     # Markdown specific arguments
     parser.add_argument('--if-thinning', type=str, default='no',
@@ -63,6 +66,12 @@ if __name__ == "__main__":
             if_add_node_text=args.if_add_node_text
         )
 
+        usage_tracker = None
+        if args.if_report_usage.lower() == 'yes':
+            from pageindex.utils import UsageTracker, set_usage_tracker
+            usage_tracker = UsageTracker()
+            set_usage_tracker(usage_tracker)
+
         # Process the PDF
         toc_with_page_number = page_index_main(args.pdf_path, opt)
         print('Parsing done, saving to file...')
@@ -77,6 +86,9 @@ if __name__ == "__main__":
             json.dump(toc_with_page_number, f, indent=2)
         
         print(f'Tree structure saved to: {output_file}')
+        if usage_tracker:
+            print("Token usage:")
+            print(json.dumps(usage_tracker.to_dict(), indent=2))
             
     elif args.md_path:
         # Validate Markdown file
