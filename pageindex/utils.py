@@ -1,3 +1,4 @@
+import tiktoken
 import litellm
 import logging
 import os
@@ -16,65 +17,174 @@ import yaml
 from pathlib import Path
 from types import SimpleNamespace as config
 
-# Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
-if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
-    os.environ["OPENAI_API_KEY"] = os.getenv("CHATGPT_API_KEY")
+# Support multiple API key environment variables for different providers
+CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY") or os.getenv("OPENAI_API_KEY")
 
-litellm.drop_params = True
+# Configure LiteLLM to use environment variables for different providers
+# Users can set: OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, etc.
+# See: https://docs.litellm.ai/docs/providers
 
 def count_tokens(text, model=None):
+    """
+    Count tokens in text using the appropriate tokenizer for the model.
+    Uses tiktoken for OpenAI models and LiteLLM's token counter for other providers.
+    """
     if not text:
         return 0
-    return litellm.token_counter(model=model, text=text)
+    
+    # Check if it's an OpenAI model (no prefix or openai/ prefix)
+    model_lower = model.lower() if model else ""
+    is_openai_model = (
+        not "/" in model or 
+        model_lower.startswith("openai/") or
+        model_lower.startswith("gpt-") or
+        model_lower.startswith("o1-") or
+        model_lower.startswith("o3-")
+    )
+    
+    if is_openai_model:
+        # Use tiktoken for OpenAI models
+        try:
+            # Strip openai/ prefix if present
+            clean_model = model.replace("openai/", "") if model else "gpt-4o"
+            enc = tiktoken.encoding_for_model(clean_model)
+            tokens = enc.encode(text)
+            return len(tokens)
+        except KeyError:
+            # Fallback to cl100k_base encoding for unknown OpenAI models
+            enc = tiktoken.get_encoding("cl100k_base")
+            tokens = enc.encode(text)
+            return len(tokens)
+    else:
+        # Use LiteLLM's token counter for other providers
+        try:
+            return litellm.token_counter(model=model, text=text)
+        except Exception:
+            # Fallback to approximate counting (4 chars per token)
+            return len(text) // 4
 
-
-def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
+def ChatGPT_API_with_finish_reason(model, prompt, api_key=None, chat_history=None):
+    """
+    Synchronous chat completion API with finish reason tracking.
+    Uses LiteLLM to support multiple LLM providers.
+    
+    Args:
+        model: Model string (e.g., "gpt-4o", "claude-3-opus-20240229", "gemini/gemini-pro")
+        prompt: User prompt
+        api_key: API key (optional, uses environment variables if not provided)
+        chat_history: Previous conversation history
+    
+    Returns:
+        Tuple of (response_content, finish_reason)
+    """
     max_retries = 10
-    messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
+    
+    # Build messages list
+    if chat_history:
+        messages = chat_history.copy()
+        messages.append({"role": "user", "content": prompt})
+    else:
+        messages = [{"role": "user", "content": prompt}]
+    
     for i in range(max_retries):
         try:
             response = litellm.completion(
                 model=model,
                 messages=messages,
                 temperature=0,
+                api_key=api_key,
             )
-            content = response.choices[0].message.content
-            if return_finish_reason:
-                finish_reason = "max_output_reached" if response.choices[0].finish_reason == "length" else "finished"
-                return content, finish_reason
-            return content
+            if response.choices[0].finish_reason == "length":
+                return response.choices[0].message.content, "max_output_reached"
+            else:
+                return response.choices[0].message.content, "finished"
+
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
-                time.sleep(1)
+                time.sleep(1)  # Wait for 1s before retrying
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
-                if return_finish_reason:
-                    return "", "error"
-                return ""
+                return "Error", "error"
 
 
 
-async def llm_acompletion(model, prompt):
+def ChatGPT_API(model, prompt, api_key=None, chat_history=None):
+    """
+    Synchronous chat completion API.
+    Uses LiteLLM to support multiple LLM providers.
+    
+    Args:
+        model: Model string (e.g., "gpt-4o", "claude-3-opus-20240229", "gemini/gemini-pro")
+        prompt: User prompt
+        api_key: API key (optional, uses environment variables if not provided)
+        chat_history: Previous conversation history
+    
+    Returns:
+        Response content string
+    """
     max_retries = 10
-    messages = [{"role": "user", "content": prompt}]
+    
+    # Build messages list
+    if chat_history:
+        messages = chat_history.copy()
+        messages.append({"role": "user", "content": prompt})
+    else:
+        messages = [{"role": "user", "content": prompt}]
+    
     for i in range(max_retries):
         try:
-            response = await litellm.acompletion(
+            response = litellm.completion(
                 model=model,
                 messages=messages,
                 temperature=0,
+                api_key=api_key,
             )
             return response.choices[0].message.content
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
-                await asyncio.sleep(1)
+                time.sleep(1)  # Wait for 1s before retrying
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
-                return ""
+                return "Error"
+            
+
+async def ChatGPT_API_async(model, prompt, api_key=None):
+    """
+    Asynchronous chat completion API.
+    Uses LiteLLM to support multiple LLM providers.
+    
+    Args:
+        model: Model string (e.g., "gpt-4o", "claude-3-opus-20240229", "gemini/gemini-pro")
+        prompt: User prompt
+        api_key: API key (optional, uses environment variables if not provided)
+    
+    Returns:
+        Response content string
+    """
+    max_retries = 10
+    messages = [{"role": "user", "content": prompt}]
+    
+    for i in range(max_retries):
+        try:
+            response = await litellm.acompletion(
+                model=model,
+                messages=messages,
+                temperature=0,
+                api_key=api_key,
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            print('************* Retrying *************')
+            logging.error(f"Error: {e}")
+            if i < max_retries - 1:
+                await asyncio.sleep(1)  # Wait for 1s before retrying
+            else:
+                logging.error('Max retries reached for prompt: ' + prompt)
+                return "Error"  
             
             
 def get_json_content(response):
@@ -379,14 +489,15 @@ def add_preface_if_needed(data):
 
 
 
-def get_page_tokens(pdf_path, model=None, pdf_parser="PyPDF2"):
+def get_page_tokens(pdf_path, model="gpt-4o-2024-11-20", pdf_parser="PyPDF2"):
+    enc = tiktoken.encoding_for_model(model)
     if pdf_parser == "PyPDF2":
         pdf_reader = PyPDF2.PdfReader(pdf_path)
         page_list = []
         for page_num in range(len(pdf_reader.pages)):
             page = pdf_reader.pages[page_num]
             page_text = page.extract_text()
-            token_length = litellm.token_counter(model=model, text=page_text)
+            token_length = len(enc.encode(page_text))
             page_list.append((page_text, token_length))
         return page_list
     elif pdf_parser == "PyMuPDF":
@@ -398,7 +509,7 @@ def get_page_tokens(pdf_path, model=None, pdf_parser="PyPDF2"):
         page_list = []
         for page in doc:
             page_text = page.get_text()
-            token_length = litellm.token_counter(model=model, text=page_text)
+            token_length = len(enc.encode(page_text))
             page_list.append((page_text, token_length))
         return page_list
     else:
@@ -501,7 +612,7 @@ def remove_structure_text(data):
 def check_token_limit(structure, limit=110000):
     list = structure_to_list(structure)
     for node in list:
-        num_tokens = count_tokens(node['text'], model=None)
+        num_tokens = count_tokens(node['text'], model='gpt-4o')
         if num_tokens > limit:
             print(f"Node ID: {node['node_id']} has {num_tokens} tokens")
             print("Start Index:", node['start_index'])
@@ -577,7 +688,7 @@ async def generate_node_summary(node, model=None):
     
     Directly return the description, do not include any other text.
     """
-    response = await llm_acompletion(model, prompt)
+    response = await ChatGPT_API_async(model, prompt)
     return response
 
 
@@ -622,7 +733,7 @@ def generate_doc_description(structure, model=None):
     
     Directly return the description, do not include any other text.
     """
-    response = llm_completion(model, prompt)
+    response = ChatGPT_API(model, prompt)
     return response
 
 

@@ -147,13 +147,48 @@ You can follow these steps to generate a PageIndex tree from a PDF document.
 pip3 install --upgrade -r requirements.txt
 ```
 
-### 2. Set your OpenAI API key
+### 2. Set your API key
 
-Create a `.env` file in the root directory and add your API key:
+PageIndex now supports multiple LLM providers via [LiteLLM](https://docs.litellm.ai/). Create a `.env` file in the root directory and add your API key:
 
+**OpenAI (default):**
 ```bash
+OPENAI_API_KEY=your_openai_key_here
+# or
 CHATGPT_API_KEY=your_openai_key_here
 ```
+
+**Anthropic Claude:**
+```bash
+ANTHROPIC_API_KEY=your_anthropic_key_here
+```
+
+**Google Gemini:**
+```bash
+GEMINI_API_KEY=your_google_key_here
+```
+
+**Azure OpenAI:**
+```bash
+AZURE_API_KEY=your_azure_key_here
+AZURE_API_BASE=your_azure_endpoint
+AZURE_API_VERSION=2024-02-01
+```
+
+**AWS Bedrock:**
+```bash
+AWS_ACCESS_KEY_ID=your_access_key
+AWS_SECRET_ACCESS_KEY=your_secret_key
+AWS_REGION_NAME=us-east-1
+```
+
+**Groq:**
+```bash
+GROQ_API_KEY=your_groq_key_here
+```
+
+**Ollama (local):**
+No API key needed. Just ensure Ollama is running locally.
 
 ### 3. Run PageIndex on your PDF
 
@@ -167,7 +202,15 @@ python3 run_pageindex.py --pdf_path /path/to/your/document.pdf
 You can customize the processing with additional optional arguments:
 
 ```
---model                 OpenAI model to use (default: gpt-4o-2024-11-20)
+--model                 LLM model to use (default: gpt-4o-2024-11-20)
+                        Examples:
+                          - OpenAI: gpt-4o, gpt-4-turbo
+                          - Claude: claude-3-opus-20240229, claude-3-sonnet-20240229
+                          - Gemini: gemini/gemini-pro, gemini/gemini-1.5-pro
+                          - Azure: azure/your-deployment-name
+                          - Bedrock: bedrock/anthropic.claude-3-opus-20240229-v1:0
+                          - Groq: groq/llama-3.1-70b-versatile
+                          - Ollama: ollama/llama3
 --toc-check-pages       Pages to check for table of contents (default: 20)
 --max-pages-per-node    Max pages per node (default: 10)
 --max-tokens-per-node   Max tokens per node (default: 20000)

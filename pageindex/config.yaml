@@ -1,3 +1,38 @@
+# PageIndex Configuration
+# 
+# Model Configuration:
+# PageIndex now supports multiple LLM providers via LiteLLM.
+# Set the model string according to your preferred provider:
+#
+# OpenAI (default):
+#   model: "gpt-4o-2024-11-20" or "gpt-4o" or "gpt-4-turbo"
+#   Env var: OPENAI_API_KEY or CHATGPT_API_KEY
+#
+# Anthropic Claude:
+#   model: "claude-3-opus-20240229" or "claude-3-sonnet-20240229"
+#   Env var: ANTHROPIC_API_KEY
+#
+# Google Gemini:
+#   model: "gemini/gemini-pro" or "gemini/gemini-1.5-pro"
+#   Env var: GEMINI_API_KEY
+#
+# Azure OpenAI:
+#   model: "azure/your-deployment-name"
+#   Env vars: AZURE_API_KEY, AZURE_API_BASE, AZURE_API_VERSION
+#
+# AWS Bedrock:
+#   model: "bedrock/anthropic.claude-3-opus-20240229-v1:0"
+#   Env vars: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION_NAME
+#
+# Groq:
+#   model: "groq/llama-3.1-70b-versatile"
+#   Env var: GROQ_API_KEY
+#
+# Ollama (local):
+#   model: "ollama/llama3"
+#
+# For more providers, see: https://docs.litellm.ai/docs/providers
+
 model: "gpt-4o-2024-11-20"
 # model: "anthropic/claude-sonnet-4-6"
 toc_check_page_num: 20
