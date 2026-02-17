@@ -116,10 +116,22 @@ def toc_detector_single_page(content, model=None):
     Directly return the final JSON structure. Do not output anything else.
     Please note: abstract,summary, notation list, figure list, table list, etc. are not table of contents."""
 
-    response = ChatGPT_API(model=model, prompt=prompt)
-    # print('response', response)
-    json_content = extract_json(response)    
-    return json_content['toc_detected']
+    try:
+        response = ChatGPT_API(model=model, prompt=prompt)
+        # print('response', response)
+        json_content = extract_json(response)
+        
+        # 检查 JSON 是否有效且包含必要字段
+        if json_content and 'toc_detected' in json_content:
+            return json_content['toc_detected']
+        else:
+            # JSON 解析成功但缺少字段，默认返回 'no'
+            print(f"Warning: JSON response missing 'toc_detected' field: {json_content}")
+            return 'no'
+    except Exception as e:
+        # API 调用失败或 JSON 解析失败，默认返回 'no'
+        print(f"Warning: Failed to detect TOC due to error: {e}")
+        return 'no'
 
 
 def check_if_toc_extraction_is_complete(content, toc, model=None):
@@ -1055,7 +1067,7 @@ async def tree_parser(page_list, opt, doc=None, logger=None):
     return toc_tree
 
 
-def page_index_main(doc, opt=None):
+async def page_index_main(doc, opt=None):
     logger = JsonLogger(doc)
     
     is_valid_pdf = (
@@ -1066,38 +1078,37 @@ def page_index_main(doc, opt=None):
         raise ValueError("Unsupported input type. Expected a PDF file path or BytesIO object.")
 
     print('Parsing PDF...')
+    # get_page_tokens is likely synchronous (based on previous view), so we keep it as is.
+    # If it blocks, it should ideally be run in executor, but for now we follow the existing pattern.
     page_list = get_page_tokens(doc)
 
     logger.info({'total_page_number': len(page_list)})
     logger.info({'total_token': sum([page[1] for page in page_list])})
 
-    async def page_index_builder():
-        structure = await tree_parser(page_list, opt, doc=doc, logger=logger)
-        if opt.if_add_node_id == 'yes':
-            write_node_id(structure)    
-        if opt.if_add_node_text == 'yes':
+    structure = await tree_parser(page_list, opt, doc=doc, logger=logger)
+    if opt.if_add_node_id == 'yes':
+        write_node_id(structure)    
+    if opt.if_add_node_text == 'yes':
+        add_node_text(structure, page_list)
+    if opt.if_add_node_summary == 'yes':
+        if opt.if_add_node_text == 'no':
             add_node_text(structure, page_list)
-        if opt.if_add_node_summary == 'yes':
-            if opt.if_add_node_text == 'no':
-                add_node_text(structure, page_list)
-            await generate_summaries_for_structure(structure, model=opt.model)
-            if opt.if_add_node_text == 'no':
-                remove_structure_text(structure)
-            if opt.if_add_doc_description == 'yes':
-                # Create a clean structure without unnecessary fields for description generation
-                clean_structure = create_clean_structure_for_description(structure)
-                doc_description = generate_doc_description(clean_structure, model=opt.model)
-                return {
-                    'doc_name': get_pdf_name(doc),
-                    'doc_description': doc_description,
-                    'structure': structure,
-                }
-        return {
-            'doc_name': get_pdf_name(doc),
-            'structure': structure,
-        }
-
-    return asyncio.run(page_index_builder())
+        await generate_summaries_for_structure(structure, model=opt.model)
+        if opt.if_add_node_text == 'no':
+            remove_structure_text(structure)
+        if opt.if_add_doc_description == 'yes':
+            # Create a clean structure without unnecessary fields for description generation
+            clean_structure = create_clean_structure_for_description(structure)
+            doc_description = generate_doc_description(clean_structure, model=opt.model)
+            return {
+                'doc_name': get_pdf_name(doc),
+                'doc_description': doc_description,
+                'structure': structure,
+            }
+    return {
+        'doc_name': get_pdf_name(doc),
+        'structure': structure,
+    }
 
 
 def page_index(doc, model=None, toc_check_page_num=None, max_page_num_each_node=None, max_token_num_each_node=None,
@@ -1108,7 +1119,7 @@ def page_index(doc, model=None, toc_check_page_num=None, max_page_num_each_node=
         if arg != "doc" and value is not None
     }
     opt = ConfigLoader().load(user_opt)
-    return page_index_main(doc, opt)
+    return asyncio.run(page_index_main(doc, opt))
 
 
 def validate_and_truncate_physical_indices(toc_with_page_number, page_list_length, start_index=1, logger=None):

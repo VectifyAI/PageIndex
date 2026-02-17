@@ -1,0 +1,100 @@
+{
+  "doc_name": "FAIRFEDMED- ACHIEVING EQUITY IN MEDICAL FEDERATED LEARNING VIA FAIRLORA.pdf",
+  "structure": [
+    {
+      "title": "INTRODUCTION",
+      "start_index": 1,
+      "end_index": 3,
+      "node_id": "0000",
+      "summary": "This partial document introduces a research paper under review that addresses fairness in medical Federated Learning (FL). The main points covered are:\n\n1.  **Problem Statement:** It highlights a critical gap in healthcare AI: ensuring fairness (equitable performance across demographic groups) within privacy-preserving Federated Learning frameworks, which is under-explored for medical data.\n2.  **Proposed Dataset:** The authors introduce **FairFedMed**, presented as the first FL dataset designed for studying group fairness in medicine. It consists of paired 2D and 3D eye images (SLO and OCT) from over 15,000 glaucoma patients, annotated with six demographic attributes (age, gender, race, ethnicity, preferred language, marital status).\n3.  **Proposed Method:** To tackle the dual challenges of medical image analysis and fairness in FL, the authors propose **FairLoRA**, a novel fairness-aware FL framework. It is based on a singular value decomposition (SVD) low-rank approximation technique that customizes singular value matrices per demographic group while sharing singular vector matrices across groups to balance unique characteristics and inter-group relationships.\n4.  **Contributions:** The paper's contributions are summarized as: the creation of the FairFedMed dataset, an experimental FL setup with varied client demographics for benchmarking, and the proposal of the FairLoRA framework.\n5.  **Background and Context:** The document provides background on fairness in medical imaging, Federated Learning techniques, and the distinction between *site fairness* (across institutions) and *group fairness* (across demographic groups), positioning the work to address group fairness in a medical FL context.\n6.  **Initial Results Claim:** The abstract states that experiments on FairFedMed show FairLoRA achieves state-of-the-art classification performance while significantly improving fairness across demographics.\n\nThe document includes the paper's abstract, introduction, a summary of related work, and the beginning of a section detailing the FairFedMed dataset."
+    },
+    {
+      "title": "RELATED WORK",
+      "start_index": 3,
+      "end_index": 3,
+      "node_id": "0001",
+      "summary": "This partial document is the \"Related Work\" section and the beginning of the \"Dataset Analysis\" section from a conference paper under review. The main points covered are:\n\n1.  **Fairness in Medical Imaging:** It reviews existing work on reducing bias in medical imaging AI, noting that current research and public datasets (like CheXpert, MIMIC-CXR) are limited. They primarily focus on single-site classification tasks, lack comprehensive demographic attributes, and do not support federated learning or 3D imaging scenarios.\n\n2.  **Federated Learning (FL):** It provides an overview of FL, categorizing methods into traditional parameter-updating approaches (e.g., FedAvg, FedProx) and newer prompt-learning methods (e.g., PromptFL, FedOTP). The discussion highlights the goal of collaborative training while preserving data privacy and reducing communication costs.\n\n3.  **Fairness in Federated Learning:** It identifies a unique challenge in FL and divides related research into two categories: *Site Fairness* (ensuring equitable influence from clients with varying data) and *Group Fairness* (ensuring equitable performance across demographic groups within the data). The text notes that most fairness research in FL focuses on non-medical applications, leaving a significant gap for healthcare.\n\n4.  **Introduction of a New Dataset:** The document transitions to introducing \"FairFedMed,\" a new dataset designed to address the identified gaps. It is described as containing over 15,000 samples with paired 2D and 3D ophthalmic images (SLO and OCT) and six detailed demographic attributes (age, gender, race, etc.), making it suitable for fairness-aware federated learning research in medical imaging."
+    },
+    {
+      "title": "FAIRFEDMED DATASET ANALYSIS",
+      "start_index": 3,
+      "end_index": 4,
+      "node_id": "0002",
+      "summary": "This partial document is from a research paper under review, covering sections of the Related Work, a new dataset introduction, and the beginning of the Method section.\n\nThe main points covered are:\n\n1.  **Related Work:** It reviews existing literature in three key areas:\n    *   **Fairness in Medical Imaging:** Highlights a focus on classification tasks and a lack of datasets and methods for cross-domain and federated fairness in 3D imaging.\n    *   **Federated Learning (FL):** Categorizes FL into traditional parameter-update methods (e.g., FedAvg, FedProx) and newer prompt-learning methods (e.g., PromptFL, FedOTP).\n    *   **Fairness in Federated Learning:** Distinguishes between *Site Fairness* (equitable treatment of different clients) and *Group Fairness* (equitable performance across demographic groups within data), noting a significant gap in applying these concepts to medical FL.\n\n2.  **FairFedMed Dataset:** Introduces a new dataset to address the identified shortage. It describes the dataset's composition (15,165 subjects, 2D and 3D ophthalmic images), detailed demographic attributes (age, gender, race, etc.), and its partition across three simulated FL sites with significantly different demographic distributions to study fairness disparities.\n\n3.  **Method (Preliminary):** Begins to outline the proposed technical approach by introducing foundational concepts:\n    *   **Singular Value Decomposition (SVD)** and its compact form for dimensionality reduction.\n    *   **SVD-based Adaptation** for model fine-tuning, positioning Low-Rank Adaptation (LoRA) as a simplified form of SVD.\n    *   **Federated Learning using LoRA:** Presents the basic FL setup where clients collaboratively train a global model, with local updates applied to low-rank weight matrices."
+    },
+    {
+      "title": "METHOD",
+      "start_index": 4,
+      "end_index": 4,
+      "nodes": [
+        {
+          "title": "PRELIMINARY",
+          "start_index": 4,
+          "end_index": 4,
+          "node_id": "0004",
+          "summary": "The partial document covers two main sections: a dataset description and the beginning of a methodology section for a federated learning paper.\n\nFirst, it presents a detailed demographic analysis of a multi-site medical dataset, focusing on attributes like race, ethnicity, and language to highlight fairness disparities. It includes specific statistics and a figure (Figure 2) visualizing the distributions across three sites. The dataset is split for federated learning (FL) and contains glaucoma classification labels.\n\nSecond, the document introduces the methodological approach. It begins with a preliminary explanation of Singular Value Decomposition (SVD) and its compact version, then connects it to low-rank adaptation techniques like LoRA for efficient model fine-tuning. It concludes by setting up the federated learning framework, defining the global model and local client updates."
+        },
+        {
+          "title": "FEDERATED LEARNING USING LORA",
+          "start_index": 4,
+          "end_index": 5,
+          "node_id": "0005",
+          "summary": "The partial document covers two main sections of a research paper under review for ICLR 2025. First, it presents a dataset description and analysis, focusing on demographic distributions (race, ethnicity, language) and clinical labels (glaucomatous status) across three federated learning sites, highlighting significant fairness disparities. The dataset is partitioned for federated learning to study cross-site heterogeneity. Second, it details the proposed method, \"FairLoRA.\" This involves a preliminary explanation of Singular Value Decomposition (SVD) and Low-Rank Adaptation (LoRA), followed by their integration into a Federated Learning framework. The core innovation, FairLoRA, is introduced as a fairness-aware model that uses group-customized singular value matrices within the low-rank updates to address demographic disparities while sharing singular vectors to capture inter-group relationships."
+        },
+        {
+          "title": "FEDERATED LEARNING USING FAIRLORA",
+          "start_index": 5,
+          "end_index": 7,
+          "node_id": "0006",
+          "summary": "This partial document covers the methodology and experimental validation of \"FairLoRA,\" a fairness-aware federated learning model. The main points are:\n\n1.  **FairLoRA Proposal:** It introduces a novel federated learning framework that integrates Low-Rank Adaptation (LoRA) with a fairness mechanism. The core innovation is customizing singular value matrices for different demographic groups (e.g., 'Black', 'Asian', 'White') while sharing singular vector matrices across groups. This design aims to balance unique group characteristics with shared global knowledge.\n\n2.  **Technical Formulation:** The document details the mathematical model, showing how local client updates and global aggregation are performed using low-rank decompositions (either standard LoRA or an SVD-based variant). It explains the initialization strategy for the fairness-aware matrices and includes a complete algorithm (Algorithm 1) for the federated training process.\n\n3.  **Experimental Evaluation:** The paper describes an extensive experimental setup on the \"FairFedMed\" benchmark, using 2D fundus and 3D OCT images for glaucoma detection. It compares FairLoRA against traditional federated learning methods (FedAvg, FedHEAL) and prompt-learning models (PromptFL, FedOTP) using backbones like ResNet50 and ViT-B.\n\n4.  **Key Results:** The experiments demonstrate that FairLoRA consistently outperforms baseline methods. It achieves higher overall classification accuracy (AUC) and significantly improves fairness metrics (Equality-Scale AUC or ESAUC) across demographic attributes like race, language, and ethnicity, establishing state-of-the-art performance."
+        }
+      ],
+      "node_id": "0003",
+      "summary": "The partial document covers two main sections: a dataset description and the beginning of a methodological explanation for a federated learning approach.\n\nFirst, it details a multi-site medical imaging dataset, highlighting significant demographic disparities (in race, ethnicity, and language) across three different sites. It provides specific statistics on patient demographics and glaucomatous status, noting the dataset's suitability for studying federated learning with varying site distributions and image modalities.\n\nSecond, it introduces the methodological approach, starting with a preliminary explanation of Singular Value Decomposition (SVD) and its application in low-rank adaptation (LoRA) for efficient model fine-tuning. It then begins to outline a federated learning framework where clients collaboratively train a model using local data and LoRA-based updates."
+    },
+    {
+      "title": "EXPERIMENTS",
+      "start_index": 7,
+      "end_index": 7,
+      "nodes": [
+        {
+          "title": "EXPERIMENTAL SETUP",
+          "start_index": 7,
+          "end_index": 7,
+          "node_id": "0008",
+          "summary": "The partial document covers the experimental section of a research paper titled \"FairLoRA,\" focusing on federated learning for medical image analysis with an emphasis on fairness. The main points are:\n\n1.  **Experimental Setup:** Details the training parameters (50 epochs, SGD optimizer), the FairLoRA method implemented on ResNet50 and ViT-B backbones with specific LoRA parameters, and the comparison methods (FedAvg, FedHEAL, PromptFL, FedOTP). Evaluation metrics include overall AUC and fairness-specific metrics (ESAUC, group-wise AUCs).\n\n2.  **Results on 2D Fundus Images:** Presents findings from the \"FairFedMed\" benchmark for glaucoma detection. It reports that traditional FL methods achieve good overall accuracy but poor fairness, while prompt-based methods have lower performance. In contrast, FairLoRA is shown to consistently outperform all others, achieving higher overall AUC and significantly improved fairness metrics (ESAUC) across attributes like race, language, and ethnicity.\n\n3.  **Results on 3D OCT Images:** Briefly introduces the results on a second benchmark using 3D OCT scans, indicating a similar pattern where traditional methods have a performance-fairness gap. The text cuts off while discussing challenges in ensuring fairness for specific demographic groups."
+        },
+        {
+          "title": "BENCHMARK: FAIRFEDMED ON 2D SLO FUNDUS IMAGES",
+          "start_index": 7,
+          "end_index": 7,
+          "node_id": "0009",
+          "summary": "The partial document covers the experimental section of a research paper. It details the setup, including implementation specifics like training parameters and model backbones (ResNet50 and ViT-B) for a method called FairLoRA, and lists comparison methods and evaluation metrics (AUC, ESAUC). It then presents results on two medical imaging benchmarks: 2D SLO fundus images and 3D OCT B-scan images for glaucoma detection. The results show that FairLoRA consistently outperforms other federated learning methods in both overall performance (AUC) and fairness (ESAUC) across attributes like race, language, and ethnicity."
+        },
+        {
+          "title": "BENCHMARK: FAIRFEDMED ON 3D OCT B-SCAN IMAGES",
+          "start_index": 7,
+          "end_index": 10,
+          "node_id": "0010",
+          "summary": "This partial document covers the experimental section of a research paper titled \"FairLoRA,\" which is under review for ICLR 2025. The main points are:\n\n1.  **Experimental Setup:** Details the implementation of the proposed \"FairLoRA\" framework for federated learning (FL), including training parameters, model backbones (ResNet50 and ViT-B), and comparison methods (FedAvg, FedHEAL, PromptFL, FedOTP). Evaluation focuses on both accuracy (Overall AUC) and fairness (ESAUC, group-wise AUCs) across demographic attributes like race, language, and ethnicity.\n\n2.  **Benchmark Results on 2D Images:** Presents results on the \"FairFedMed\" benchmark using 2D SLO fundus images for glaucoma detection. The paper reports that FairLoRA consistently outperforms baseline methods in both overall accuracy and fairness metrics across all demographic attributes.\n\n3.  **Benchmark Results on 3D Images:** Similarly, presents results on 3D OCT B-Scan images within the same benchmark. FairLoRA is shown to achieve state-of-the-art performance, improving both overall AUC and fairness scores compared to other FL methods.\n\n4.  **Ablation Studies:** Analyzes the impact of federated learning versus single-site learning, showing FL's superiority. It also compares different LoRA variants, demonstrating that the proposed FairLoRA achieves the best balance of high accuracy and fairness across client sites.\n\n5.  **Conclusion:** Summarizes the paper's contributions: introducing the FairFedMed dataset (with 2D/3D images and demographics) and the FairLoRA framework, which is shown to enhance both performance and fairness in federated medical image analysis."
+        },
+        {
+          "title": "ABLATION STUDY",
+          "start_index": 10,
+          "end_index": 10,
+          "node_id": "0011",
+          "summary": "The partial document covers the ablation study and conclusion sections of a conference paper. The main points are:\n\n1.  **Ablation Study Results:** It presents an ablation study comparing model performance on 2D medical images. Key findings include:\n    *   Federated learning with the proposed FairLoRA model outperforms single-site learning, improving both overall accuracy (AUC) and fairness (ESAUC) by 1-3%.\n    *   Among several compared models (a baseline PromptFL, standard LoRA, SVD-based LoRA, and FairLoRA), the proposed FairLoRA achieves the highest overall AUC (79.3%) and the best fairness metrics, demonstrating stability across clients.\n\n2.  **Conclusion:** The conclusion summarizes the paper's contributions:\n    *   Introduction of the **FairFedMed** dataset, the first fairness-aware federated learning dataset with 2D and 3D real-world medical images and demographic attributes.\n    *   Proposal of the **FairLoRA** framework, which uses a novel low-rank approximation method to enhance fairness across demographic groups in federated learning.\n    *   Experimental confirmation that FairLoRA achieves superior classification performance while promoting fairness in healthcare FL."
+        }
+      ],
+      "node_id": "0007",
+      "summary": "The partial document covers the experimental section of a research paper titled \"FairLoRA,\" focusing on federated learning for medical image analysis with an emphasis on fairness. The main points are:\n\n1.  **Experimental Setup:** Details the training parameters (50 epochs, SGD optimizer), the FairLoRA method implemented on ResNet50 and ViT-B backbones with specific hyperparameters, and the use of an Exponential Moving Average (EMA) for stability. It also lists the comparison methods (FedAvg, FedHEAL, PromptFL, FedOTP) and evaluation metrics (overall AUC, fairness-specific ESAUC, and group-wise AUCs).\n\n2.  **Results on 2D Fundus Images:** Presents findings from the \"FairFedMed\" benchmark for glaucoma detection. It reports that traditional FL methods achieve good overall accuracy but poor fairness, while prompt-based methods have lower overall performance. In contrast, FairLoRA is shown to consistently outperform all others, achieving higher overall AUC and significantly better fairness (ESAUC) across race, language, and ethnicity attributes.\n\n3.  **Initial Results on 3D OCT Images:** Begins to discuss results on a 3D imaging benchmark, indicating that traditional FL methods again show a gap between high overall AUC and lower fairness scores (ESAUC), particularly for the Asian demographic group. The results for FairLoRA on this benchmark are not included in this excerpt."
+    },
+    {
+      "title": "CONCLUSION",
+      "start_index": 10,
+      "end_index": 13,
+      "node_id": "0012",
+      "summary": "This partial document contains the final sections of a research paper under review for ICLR 2025. The main points covered are:\n\n1.  **Ablation Study Results:** It presents an ablation study on 2D SLO Fundus images, comparing:\n    *   **Single Site vs. Federated Learning:** Federated learning with the proposed FairLoRA model outperforms single-client learning, improving overall accuracy (AUC) and fairness (ESAUC) by 1-3%.\n    *   **Model Variants:** It compares a baseline (PromptFL) against three LoRA-based fine-tuning methods (standard LoRA, SVD-based LoRA, and FairLoRA). The proposed FairLoRA achieves the highest overall AUC (79.3%) and the best fairness metrics, demonstrating its effectiveness in handling client data distribution differences.\n\n2.  **Conclusion:** The paper concludes by summarizing its contributions:\n    *   Introducing the **FairFedMed** dataset, the first federated learning medical dataset with 2D/3D images and demographic attributes.\n    *   Proposing the **FairLoRA** framework, which uses a group-tailored low-rank approximation to enhance fairness in federated learning by preserving intra-/inter-group characteristics and sharing global knowledge.\n    *   Asserting that FairLoRA achieves superior classification performance and promotes fairness across demographic groups in healthcare FL.\n\n3.  **References:** The document includes the beginning of the reference section, listing related work in fair federated learning, foundational models (e.g., ViT, LoRA), and medical imaging datasets."
+    }
+  ]
+}

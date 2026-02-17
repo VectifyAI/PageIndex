@@ -1,0 +1,324 @@
+{
+  "doc_name": "q1-fy25-earnings.pdf",
+  "structure": [
+    {
+      "title": "THE WALT DISNEY COMPANY REPORTS FIRST QUARTER EARNINGS FOR FISCAL 2025",
+      "start_index": 1,
+      "end_index": 1,
+      "nodes": [
+        {
+          "title": "Guidance and Outlook",
+          "start_index": 2,
+          "end_index": 2,
+          "node_id": "0001",
+          "summary": "This partial document is a financial and strategic outlook from The Walt Disney Company, focusing on guidance for Q2 and the full fiscal year 2025, along with a CEO message. The main points covered are:\n\n1.  **Impact of Star India Deconsolidation:** It details the financial effects of transitioning the India business to a joint venture, showing a significant expected drop in Entertainment segment income but a major improvement in Sports segment income (from a large loss to a small profit). It notes an expected equity loss for the year due to purchase accounting.\n\n2.  **Q2 Fiscal 2025 Outlook:** Provides specific guidance for the upcoming quarter, including a modest decline in Disney+ subscribers, a $150 million adverse impact on Sports operating income (from college sports, an extra NFL game, and exiting the Venu Sports JV), and pre-opening expenses for Disney Cruise Line.\n\n3.  **Full Fiscal Year 2025 Outlook:** Presents high-level financial targets for the year, including high-single-digit adjusted EPS growth, ~$15 billion in operating cash flow, and segment operating income growth projections for Entertainment (double-digit), Sports (13%), and Experiences (6-8%). It also notes a full-year expense for Disney Cruise Line pre-opening costs.\n\n4.  **CEO Commentary:** CEO Robert Iger's message highlights strong Q1 performance in box office, streaming profitability, and Experiences. It emphasizes strategic progress, specifically citing the addition of an ESPN tile on Disney+ and expresses confidence in the company's growth strategy."
+        },
+        {
+          "title": "Message From Our CEO",
+          "start_index": 2,
+          "end_index": 2,
+          "node_id": "0002",
+          "summary": "This partial document is a financial and strategic outlook from The Walt Disney Company, focusing on fiscal year 2025. It covers three main areas:\n\n1.  **Impact of Star India Deconsolidation:** It details the financial effects of transitioning Star India to a joint venture, showing significantly reduced contributions to Entertainment and Sports segment incomes, and forecasting a large equity loss for the year due to purchase accounting.\n\n2.  **Quarterly and Annual Financial Guidance:** It provides specific forecasts for Q2 and the full fiscal year 2025 across key segments. Highlights include a modest Disney+ subscriber decline, various one-time expenses impacting Sports and Experiences, and overall targets for high-single-digit adjusted EPS growth, strong cash flow, and double-digit operating income growth in Entertainment.\n\n3.  **CEO's Strategic Commentary:** A message from CEO Robert Iger frames the quarter as a strong start, citing box office success, improved streaming profitability, the integration of ESPN into Disney+, and the enduring strength of the Experiences segment, expressing confidence in the company's growth strategy."
+        }
+      ],
+      "node_id": "0000",
+      "summary": "The partial document is the beginning of The Walt Disney Company's earnings press release for the first fiscal quarter of 2025 (ended December 28, 2024). It announces strong overall financial results, including revenue growth and significant increases in profitability metrics like EPS. The main points covered are the key financial highlights for the quarter and a breakdown of performance by its three business segments: Entertainment (noting growth in operating income, Direct-to-Consumer improvements, and the impact of *Moana 2*), Sports (highlighting increased operating income and domestic ESPN advertising growth), and Experiences (where operating income was flat due to hurricane impacts and pre-opening expenses for the Disney Treasure cruise ship, despite strong international park performance)."
+    },
+    {
+      "title": "SUMMARIZED FINANCIAL RESULTS",
+      "start_index": 3,
+      "end_index": 3,
+      "nodes": [
+        {
+          "title": "SUMMARIZED SEGMENT FINANCIAL RESULTS",
+          "start_index": 3,
+          "end_index": 3,
+          "node_id": "0004",
+          "summary": "This partial document presents summarized financial results for the first quarter of fiscal years 2025 and 2024 (comparing periods ending December 2024 and December 2023). It highlights key performance metrics, showing year-over-year growth in overall revenues, income, and earnings per share. It also provides a segment-level breakdown, detailing revenue and operating income performance for the Entertainment, Sports, and Experiences business segments. The document notes the use of non-GAAP financial measures and directs the reader to a later section for definitions and reconciliations."
+        }
+      ],
+      "node_id": "0003",
+      "summary": "This partial document presents summarized financial results for the first quarter of fiscal years 2025 and 2024 (comparing periods ending December 2024 and December 2023). It highlights key performance metrics, showing year-over-year growth in revenues, income, and earnings per share (EPS). It also provides a segment-level breakdown of revenues and operating income for the Entertainment, Sports, and Experiences business segments, noting significant profit growth in Entertainment and Sports. The document defines and references several non-GAAP financial measures used in the analysis."
+    },
+    {
+      "title": "DISCUSSION OF FIRST QUARTER SEGMENT RESULTS",
+      "start_index": 4,
+      "end_index": 4,
+      "nodes": [
+        {
+          "title": "Star India",
+          "start_index": 4,
+          "end_index": 4,
+          "node_id": "0006",
+          "summary": "This partial document covers two main points: the formation and financial impact of a joint venture in India, and the financial performance of the Entertainment segment for the quarter.\n\nFirst, it details the completion of the \"Star India Transaction,\" a joint venture between the Company and Reliance Industries Limited (RIL) that combined their Indian media and entertainment businesses. It specifies the ownership structure (RIL 56%, the Company 37%, a third party 7%) and explains that the Company now reports its share of the joint venture's results using the equity method.\n\nSecond, it presents a financial table and analysis for the Entertainment segment, comparing the current quarter to the prior year. It shows a 9% increase in total revenue, driven by growth in Direct-to-Consumer and Content Sales/Licensing, despite a decline in Linear Networks revenue. Operating income increased significantly by 95%, primarily due to improved results in Direct-to-Consumer and Content Sales/Licensing, which offset a decrease from Linear Networks."
+        },
+        {
+          "title": "Entertainment",
+          "start_index": 4,
+          "end_index": 4,
+          "nodes": [
+            {
+              "title": "Linear Networks",
+              "start_index": 5,
+              "end_index": 5,
+              "nodes": [
+                {
+                  "title": "Domestic",
+                  "start_index": 5,
+                  "end_index": 5,
+                  "node_id": "0009",
+                  "summary": "This partial document covers the financial performance of a company's Linear Networks and Direct-to-Consumer segments for a quarter ended December 28, 2024, compared to the prior year.\n\nFor **Linear Networks**, it details a decline in total revenue and operating income. The domestic business saw flat operating income, with factors like higher programming costs (due to guild strikes), lower affiliate revenue from fewer subscribers, lower technology costs, and higher advertising rates (driven by political ads) offsetting each other. International operating income fell significantly, primarily due to the Star India Transaction. Income from equity investees also decreased.\n\nFor the **Direct-to-Consumer** segment, it reports strong revenue growth and a significant improvement to an operating profit from a prior-year loss. This is attributed primarily to subscription revenue growth from higher pricing and more subscribers."
+                },
+                {
+                  "title": "International",
+                  "start_index": 5,
+                  "end_index": 5,
+                  "node_id": "0010",
+                  "summary": "This partial document covers the financial performance of a company's Linear Networks and Direct-to-Consumer segments for a quarter ended in December 2024 compared to the prior year.\n\nFor **Linear Networks**, it details a decline in total revenue and operating income. The domestic business saw flat operating income, with factors like higher programming costs (due to guild strikes), lower affiliate revenue from fewer subscribers (offset by higher rates), lower technology costs, and higher advertising revenue (from political ads, offset by lower viewership). International operating income fell significantly, primarily due to the Star India Transaction. Income from equity investees also decreased.\n\nFor the **Direct-to-Consumer** segment, it reports strong revenue growth and a significant improvement to an operating profit from a prior-year loss. This is attributed primarily to subscription revenue growth from higher pricing and more subscribers."
+                },
+                {
+                  "title": "Equity in the Income of Investees",
+                  "start_index": 5,
+                  "end_index": 5,
+                  "node_id": "0011",
+                  "summary": "This partial document covers the financial performance of a company's Linear Networks and Direct-to-Consumer segments for a quarter ended in December 2024 compared to the prior year.\n\nFor **Linear Networks**, it details a decline in total revenue and operating income. The domestic business saw flat operating income, with factors like higher programming costs (due to guild strikes), lower affiliate revenue from fewer subscribers (offset by higher rates), lower technology costs, and higher advertising revenue (from political ads, offset by lower viewership). International operating income fell significantly, primarily due to the Star India Transaction. Income from equity investees also decreased.\n\nFor the **Direct-to-Consumer** segment, it reports strong growth, with revenue increasing and the segment turning an operating profit compared to a loss in the prior year. This improvement is attributed to subscription revenue growth from higher pricing and more subscribers."
+                }
+              ],
+              "node_id": "0008",
+              "summary": "This partial document covers the financial performance of a company's Linear Networks and Direct-to-Consumer segments for a quarter ended in December 2024 compared to the prior year.\n\nFor **Linear Networks**, it details a decline in overall revenue and operating income. The domestic business saw flat operating income, with contributing factors including higher programming costs, lower affiliate revenue from fewer subscribers (offset by higher rates), lower technology costs, and higher advertising revenue from political ads (offset by lower viewership). International operating income fell significantly, primarily due to a transaction (Star India Transaction). Income from equity investments also decreased.\n\nFor the **Direct-to-Consumer** segment, it reports strong revenue growth and a significant improvement to an operating profit from a prior-year loss. This improvement is attributed to subscription revenue growth from higher pricing and more subscribers, partially offset by foreign exchange impacts."
+            },
+            {
+              "title": "Direct-to-Consumer",
+              "start_index": 5,
+              "end_index": 6,
+              "node_id": "0012",
+              "summary": "This partial document covers the financial and operational performance of a company's Linear Networks and Direct-to-Consumer (DTC) segments for a quarter ended December 28, 2024, compared to the prior year.\n\nFor **Linear Networks**, it details a decline in total revenue and operating income. Domestic results were flat, with factors like higher programming costs and lower affiliate revenue offset by lower technology costs and higher advertising revenue. International operating income fell significantly, primarily due to the Star India Transaction. Income from equity investees also decreased.\n\nFor the **Direct-to-Consumer** segment (e.g., Disney+, Hulu), it reports substantial revenue growth and a shift from an operating loss to a profit. Key drivers included subscription revenue growth from higher rates and more subscribers, though this was partially offset by higher costs and lower advertising revenue from the absence of a major cricket event.\n\nFinally, the document presents **key sequential metrics** for Disney+ and Hulu, showing subscriber counts and changes in Average Monthly Revenue Per Paid Subscriber (ARPU) from the previous quarter. It notes adjustments due to the Star India Transaction."
+            },
+            {
+              "title": "Key Metrics - First Quarter of Fiscal 2025 Comparison to Fourth Quarter of Fiscal 2024",
+              "start_index": 6,
+              "end_index": 7,
+              "node_id": "0013",
+              "summary": "This partial document covers a financial and operational performance report for The Walt Disney Company, focusing on the first quarter of fiscal 2025 compared to prior periods. The main points are:\n\n1.  **Cost and Revenue Drivers:** It explains factors affecting costs and advertising revenue, including higher technology and programming costs for Hulu Live TV, lower sports programming costs on Disney+ due to the absence of a major cricket event, and mixed advertising revenue trends.\n\n2.  **Key Direct-to-Consumer (DTC) Metrics:** The core of the document presents key performance indicators for Disney+ and Hulu, comparing subscriber counts and average monthly revenue per paid subscriber (ARPU) from the fourth quarter to the first quarter of fiscal 2025. It shows subscriber growth for Hulu and domestic Disney+, but a slight decline in total Disney+ subscribers. ARPU increased for most services, primarily due to price hikes.\n\n3.  **Segment Performance:**\n    *   **Content Sales/Licensing and Other:** Reports a significant increase in revenue and a swing to operating income, driven by the strong theatrical performance of *Moana 2*.\n    *   **Sports:** Details revenue and operating income for ESPN and Star India. ESPN's revenue grew, but domestic operating income declined. Star India's revenue dropped significantly (90%) due to its divestiture (the Star India Transaction), though it moved from a large loss to a small profit. Overall Sports segment operating income improved substantially."
+            },
+            {
+              "title": "Content Sales/Licensing and Other",
+              "start_index": 7,
+              "end_index": 7,
+              "node_id": "0014",
+              "summary": "The partial document covers two main areas: streaming service revenue per subscriber and the financial performance of the Content Sales/Licensing and Sports segments.\n\nFor streaming, it details increases in average monthly revenue per paid subscriber for Domestic and International Disney+ (due to price hikes) and Hulu Live TV + SVOD. Hulu SVOD Only revenue remained stable as lower ad revenue was offset by price increases.\n\nFor Content Sales/Licensing, it reports a significant increase in revenue and a swing to operating income, primarily attributed to the strong theatrical performance of *Moana 2*.\n\nFor the Sports segment, it provides a breakdown of revenue and operating income for ESPN (Domestic and International) and Star India. Overall Sports revenue was flat, but operating income improved significantly due to better international ESPN results and a substantial loss at Star India in the prior year."
+            }
+          ],
+          "node_id": "0007",
+          "summary": "This partial document covers two main points: the formation and financial impact of a joint venture in India, and the financial performance of the Entertainment segment for the quarter.\n\nFirst, it details the completion of the \"Star India Transaction,\" a joint venture between the Company and Reliance Industries Limited (RIL) that combined their media and entertainment businesses in India. It specifies the ownership stakes (RIL 56%, the Company 37%, a third party 7%) and explains that the Company now recognizes its share of the joint venture's results as equity income.\n\nSecond, it presents a financial table and analysis for the Entertainment segment, comparing the current quarter to the prior year. It shows a 9% increase in total revenue, driven by growth in Direct-to-Consumer and Content Sales/Licensing, despite a decline in Linear Networks revenue. Operating income increased significantly by 95%, primarily due to improved results in Direct-to-Consumer and Content Sales/Licensing, which offset a decrease from Linear Networks."
+        },
+        {
+          "title": "Sports",
+          "start_index": 7,
+          "end_index": 7,
+          "nodes": [
+            {
+              "title": "Domestic ESPN",
+              "start_index": 8,
+              "end_index": 8,
+              "node_id": "0016",
+              "summary": "The partial document covers the financial performance of ESPN's domestic and international operations, as well as Star India, for a specified quarter compared to the prior year. It details factors affecting domestic ESPN results, including higher programming costs from expanded college football rights and changes to the College Football Playoff format, increased advertising revenue, and stable affiliate revenue. For international ESPN, it notes a reduced operating loss driven by higher content fees from Disney+ and lower affiliate revenue. Star India's improvement is attributed to the absence of a major prior-year cricket event. The document also presents key sequential quarterly metrics for ESPN+, showing a decrease in paid subscribers but an increase in average monthly revenue per subscriber due to pricing and advertising."
+            },
+            {
+              "title": "International ESPN",
+              "start_index": 8,
+              "end_index": 8,
+              "node_id": "0017",
+              "summary": "The partial document covers the financial performance of ESPN's domestic and international operations, as well as Star India, for a specified quarter compared to the prior year. It details factors affecting domestic ESPN results, including higher programming costs from expanded college football rights and changes to the College Football Playoff format, increased advertising revenue, and stable affiliate revenue. For international ESPN, it notes a reduced operating loss driven by higher content fees from Disney+ and increased soccer rights costs. The improvement at Star India is attributed to the absence of a major cricket event from the prior year. Finally, it presents key sequential quarterly metrics for ESPN+, showing a decline in subscribers but an increase in average monthly revenue per subscriber due to pricing and advertising."
+            },
+            {
+              "title": "Star India",
+              "start_index": 8,
+              "end_index": 8,
+              "node_id": "0018",
+              "summary": "The partial document covers the financial performance of ESPN's domestic and international operations, as well as Star India, for a specified quarter compared to the prior year. It details factors affecting operating results, including higher programming costs for college football (specifically the revised College Football Playoff format), changes in advertising and affiliate revenue, and the impact of major sporting events. It also presents key sequential-quarter metrics for ESPN+, showing a decrease in paid subscribers but an increase in average monthly revenue per subscriber due to pricing and advertising."
+            },
+            {
+              "title": "Key Metrics - First Quarter of Fiscal 2025 Comparison to Fourth Quarter of Fiscal 2024",
+              "start_index": 8,
+              "end_index": 8,
+              "node_id": "0019",
+              "summary": "The partial document covers the financial performance of ESPN's domestic and international operations, as well as Star India, for a specified quarter compared to the prior year. It details factors affecting operating results, including higher programming costs for college football (specifically the revised College Football Playoff format), changes in advertising and affiliate revenue, and the impact of major sporting events. It also presents key sequential-quarter metrics for ESPN+, showing a decrease in paid subscribers but an increase in average monthly revenue per subscriber due to pricing and advertising."
+            }
+          ],
+          "node_id": "0015",
+          "summary": "The partial document covers two main areas: streaming service revenue per subscriber and the financial performance of the Content Sales/Licensing and Sports segments.\n\nFor streaming, it details increases in average monthly revenue per paid subscriber for Domestic and International Disney+ (due to price increases) and Hulu Live TV + SVOD. Hulu SVOD Only revenue was flat as lower ad revenue was offset by other factors.\n\nFor Content Sales/Licensing, it reports a significant year-over-year increase in revenue and a shift to operating income, attributed primarily to the strong theatrical performance of *Moana 2*.\n\nFor the Sports segment, it provides a breakdown of revenue and operating income for ESPN (Domestic and International) and Star India, showing overall revenue stability but a substantial improvement in operating income, notably due to reduced losses at Star India."
+        },
+        {
+          "title": "Experiences",
+          "start_index": 9,
+          "end_index": 9,
+          "nodes": [
+            {
+              "title": "Domestic Parks and Experiences",
+              "start_index": 9,
+              "end_index": 9,
+              "node_id": "0021",
+              "summary": "This partial document presents a financial performance summary for the \"Experiences\" segment (which includes Parks and Consumer Products) for a quarter, comparing results from December 2024 to December 2023. The main points covered are:\n\n1.  **Financial Results:** It provides a table showing revenue and operating income for Domestic Parks, International Parks, and Consumer Products, along with percentage changes.\n2.  **Domestic Performance Analysis:** Explains that domestic operating income decreased due to higher costs (cruise line expansion, inflation), lower attendance from hurricanes, and increased guest spending. It specifically notes the negative impact of Hurricane Milton and Hurricane Helene.\n3.  **International Performance Analysis:** Explains that international operating income increased due to growth in guest spending, higher attendance, and increased costs from new guest offerings.\n4.  **Other Financial Information:** Notes an increase in corporate expenses primarily due to a legal settlement and records a loss related to the Star India Transaction."
+            },
+            {
+              "title": "International Parks and Experiences",
+              "start_index": 9,
+              "end_index": 9,
+              "node_id": "0022",
+              "summary": "This partial document presents a financial performance summary for the \"Experiences\" segment (which includes Parks and Consumer Products) for a quarter, comparing results from December 2024 to December 2023.\n\nThe main points covered are:\n\n1.  **Financial Results:** It provides a table showing revenue and operating income for Domestic Parks, International Parks, and Consumer Products, along with percentage changes.\n2.  **Domestic Performance Analysis:** Explains that domestic operating income decreased due to higher costs (fleet expansion, inflation), lower attendance from hurricanes, and increased guest spending. It specifically notes the negative impact of Hurricane Milton and Hurricane Helene.\n3.  **International Performance Analysis:** Explains that international operating income increased due to growth in guest spending, higher attendance, and increased costs from new guest offerings.\n4.  **Other Financial Information:** Notes an increase in corporate expenses primarily due to a legal settlement and records a loss related to the Star India Transaction."
+            }
+          ],
+          "node_id": "0020",
+          "summary": "This partial document presents a financial performance summary for the \"Experiences\" segment (which includes Parks and Consumer Products) for a quarter comparing fiscal years 2024 and 2023. The main points covered are:\n\n1.  **Financial Results:** It provides a table showing revenue and operating income for Domestic Parks, International Parks, and Consumer Products, highlighting year-over-year percentage changes.\n2.  **Domestic Performance Analysis:** It explains that domestic operating income decreased due to higher costs (fleet expansion, inflation), lower attendance from hurricane impacts (Milton and Helene), and increased guest spending.\n3.  **International Performance Analysis:** It states that international operating income increased primarily due to growth in guest spending, higher attendance, and costs associated with new guest offerings.\n4.  **Other Financial Information:** It notes increases in corporate expenses due to a legal settlement and records a significant loss related to the Star India Transaction."
+        }
+      ],
+      "node_id": "0005",
+      "summary": "This partial document covers two main points: the formation and financial impact of a joint venture in India, and the financial performance of the Entertainment segment for the quarter.\n\nFirst, it details the completion of the \"Star India Transaction,\" a joint venture between the Company and Reliance Industries Limited (RIL). It specifies the ownership structure (RIL 56%, the Company 37%, a third party 7%) and explains that the Company now records its 37% share of the venture's results using the equity method.\n\nSecond, it presents a financial table and analysis for the Entertainment segment, comparing the current quarter to the prior year. It shows a 9% increase in total revenue, driven by growth in Direct-to-Consumer and Content Sales/Licensing, despite a decline in Linear Networks. Operating income increased significantly by 95%, primarily due to improved results in Direct-to-Consumer and Content Sales/Licensing, which offset a decrease from Linear Networks."
+    },
+    {
+      "title": "OTHER FINANCIAL INFORMATION",
+      "start_index": 9,
+      "end_index": 9,
+      "nodes": [
+        {
+          "title": "Corporate and Unallocated Shared Expenses",
+          "start_index": 9,
+          "end_index": 9,
+          "node_id": "0024",
+          "summary": "This partial document presents a financial performance summary for the \"Experiences\" segment (which includes Parks and Consumer Products) for a quarter, comparing results from December 2024 to December 2023.\n\nThe main points covered are:\n\n1.  **Financial Results:** It provides a table showing revenue and operating income for Domestic Parks, International Parks, and Consumer Products, along with percentage changes.\n2.  **Domestic Parks Performance:** Operating income decreased due to higher costs (fleet expansion, inflation), lower attendance from hurricane impacts (Milton and Helene), and increased guest spending.\n3.  **International Parks Performance:** Operating income increased, driven by growth in guest spending, higher attendance, and costs associated with new guest offerings.\n4.  **Other Financial Information:** It notes increased corporate expenses due to a legal settlement and a significant loss ($143 million) recorded for the \"Star India Transaction.\""
+        },
+        {
+          "title": "Restructuring and Impairment Charges",
+          "start_index": 9,
+          "end_index": 9,
+          "node_id": "0025",
+          "summary": "This partial document presents a financial performance summary for the \"Experiences\" segment (which includes Parks and Consumer Products) for a quarter, comparing results from December 2024 to December 2023.\n\nThe main points covered are:\n\n1.  **Financial Results:** It provides a table showing revenue and operating income for Domestic Parks, International Parks, and Consumer Products, along with percentage changes.\n2.  **Domestic Parks Performance Analysis:** Explains that operating income decreased due to higher costs (cruise line expansion, inflation), lower attendance from hurricane impacts (Milton and Helene), and increased guest spending.\n3.  **International Parks Performance Analysis:** Explains that operating income increased due to growth in guest spending, higher attendance, and costs associated with new guest offerings.\n4.  **Other Financial Information:** Notes an increase in corporate expenses primarily due to a legal settlement and records a loss related to the Star India Transaction."
+        },
+        {
+          "title": "Interest Expense, net",
+          "start_index": 10,
+          "end_index": 10,
+          "node_id": "0026",
+          "summary": "The partial document covers three main financial items from a quarterly report: 1) **Net Interest Expense**, detailing a decrease due to lower debt and rates, offset by lower interest income from reduced cash balances and investment losses. 2) **Equity in the Income of Investees**, showing a significant decrease primarily from lower income from A+E and new losses from an India joint venture. 3) **Income Taxes**, explaining an increase in the effective tax rate due to a non-cash charge related to the Star India Transaction, partially offset by prior-year adjustments and other factors."
+        },
+        {
+          "title": "Equity in the Income of Investees",
+          "start_index": 10,
+          "end_index": 10,
+          "node_id": "0027",
+          "summary": "The partial document covers three main financial items from a quarterly report: 1) **Net Interest Expense**, detailing a decrease due to lower debt and rates, offset by lower interest income from reduced cash balances and investment losses. 2) **Equity in the Income of Investees**, showing a significant decrease primarily from lower income from A+E and new losses from an India joint venture. 3) **Income Taxes**, explaining an increase in the effective tax rate mainly due to a non-cash charge related to the Star India Transaction, partially offset by other favorable adjustments."
+        },
+        {
+          "title": "Income Taxes",
+          "start_index": 10,
+          "end_index": 10,
+          "node_id": "0028",
+          "summary": "The partial document covers three main financial items from a quarterly report: 1) **Net Interest Expense**, detailing a decrease due to lower debt and rates, offset by lower interest income from reduced cash balances and investment losses. 2) **Equity in the Income of Investees**, showing a significant decrease primarily from lower income from A+E and new losses from an India joint venture. 3) **Income Taxes**, explaining an increase in the effective tax rate mainly due to a non-cash charge related to the Star India Transaction, partially offset by other favorable adjustments."
+        },
+        {
+          "title": "Noncontrolling Interests",
+          "start_index": 11,
+          "end_index": 11,
+          "node_id": "0029",
+          "summary": "The partial document covers two main financial topics: Net Income Attributable to Noncontrolling Interests and Cash from Operations. It presents quarterly comparative data (2024 vs. 2023) for these items. For noncontrolling interests, it shows a decrease in net income attributed to them and explains the primary reason (comparison to prior-year accretion of an interest in Hulu). For cash flow, it details the increase in cash provided by operations, lists the components of free cash flow, and provides several specific drivers for the operational cash increase, including lower tax payments and higher operating income in the Entertainment segment."
+        },
+        {
+          "title": "Cash from Operations",
+          "start_index": 11,
+          "end_index": 11,
+          "node_id": "0030",
+          "summary": "The partial document covers two main financial topics: 1) Net income attributable to noncontrolling interests, showing a decrease for the quarter, primarily due to a prior-year accretion related to NBC Universal's interest in Hulu. 2) Cash from operations and free cash flow, detailing a significant increase in cash provided by operations driven by lower tax payments, higher operating income in Entertainment, and timing differences in production and rights payments, alongside a presentation of free cash flow."
+        },
+        {
+          "title": "Capital Expenditures",
+          "start_index": 12,
+          "end_index": 12,
+          "node_id": "0031",
+          "summary": "The partial document covers capital expenditures and depreciation expense for a company, comparing the quarters ended December 2024 and December 2023. The main points are:\n\n1.  **Capital Expenditures:** Total investments in parks, resorts, and other property increased significantly to $2.466 billion in Q4 2024 from $1.299 billion in Q4 2023. This increase is attributed primarily to higher spending on cruise ship fleet expansion within the Experiences segment, with detailed breakdowns provided for Entertainment, Sports, Experiences (Domestic and International), and Corporate.\n\n2.  **Depreciation Expense:** Total depreciation expense also increased, rising to $909 million in Q4 2024 from $823 million in Q4 2023. A detailed segment breakdown (Entertainment, Sports, Experiences, and Corporate) shows the contribution from each area to the overall increase."
+        },
+        {
+          "title": "Depreciation Expense",
+          "start_index": 12,
+          "end_index": 12,
+          "node_id": "0032",
+          "summary": "The partial document covers capital expenditures and depreciation expense for a company, comparing the quarters ended December 2024 and December 2023. The main points are:\n\n1.  **Capital Expenditures:** Total investments in parks, resorts, and other property increased significantly to $2.466 billion in 2024 from $1.299 billion in 2023. This increase is primarily attributed to higher spending on cruise ship fleet expansion within the Experiences segment. The data is broken down by segment (Entertainment, Sports, Experiences, and Corporate).\n\n2.  **Depreciation Expense:** Total depreciation expense also increased, rising to $909 million in 2024 from $823 million in 2023. The expense figures are provided with the same segment breakdown as the capital expenditures."
+        }
+      ],
+      "node_id": "0023",
+      "summary": "This partial document presents a financial performance summary for the \"Experiences\" segment (which includes Parks and Consumer Products) for a quarter, comparing results from December 2024 to December 2023.\n\nThe main points covered are:\n\n1.  **Financial Results:** It provides a table showing revenue and operating income for Domestic Parks, International Parks, and Consumer Products, along with percentage changes.\n2.  **Domestic Parks Performance Analysis:** Explains that operating income decreased due to higher costs (fleet expansion, inflation), lower attendance from hurricane impacts (Milton and Helene), and increased guest spending.\n3.  **International Parks Performance Analysis:** Explains that operating income increased due to growth in guest spending, higher attendance, and costs associated with new guest offerings.\n4.  **Other Financial Information:** Notes increases in corporate expenses due to a legal settlement and records a loss related to the Star India Transaction."
+    },
+    {
+      "title": "THE WALT DISNEY COMPANY CONDENSED CONSOLIDATED STATEMENTS OF INCOME",
+      "start_index": 13,
+      "end_index": 13,
+      "node_id": "0033",
+      "summary": "The partial document is a condensed consolidated income statement for The Walt Disney Company, comparing the quarters ended December 28, 2024, and December 30, 2023. It shows that revenues increased year-over-year. It details the calculation of net income, listing major line items such as costs and expenses, restructuring charges, interest expense, and income taxes. The statement concludes with the net income attributable to Disney and presents earnings per share (both diluted and basic) along with the weighted average number of shares outstanding."
+    },
+    {
+      "title": "THE WALT DISNEY COMPANY CONDENSED CONSOLIDATED BALANCE SHEETS",
+      "start_index": 14,
+      "end_index": 14,
+      "node_id": "0034",
+      "summary": "This partial document is a condensed consolidated balance sheet for The Walt Disney Company, presenting the company's financial position as of two dates: December 28, 2024, and September 28, 2024. The main points covered are:\n\n1.  **Asset Composition:** It details the company's total assets, broken down into current assets (like cash, receivables, inventories) and long-term assets (including content costs, parks/resorts property net of depreciation, intangible assets, and goodwill).\n2.  **Liability and Equity Structure:** It outlines the company's obligations, including current liabilities (payables, current debt) and long-term liabilities (borrowings, deferred taxes). It also details the equity section, showing common stock, retained earnings, and treasury stock.\n3.  **Period-over-Period Comparison:** The two-column format allows for a direct quarter-to-quarter comparison of all balance sheet line items, showing changes in the company's financial position from the end of the previous fiscal quarter (September) to the end of the current quarter (December).\n4.  **Accounting Basis:** It notes the data is unaudited and presented in millions of U.S. dollars, except per share data."
+    },
+    {
+      "title": "THE WALT DISNEY COMPANY CONDENSED CONSOLIDATED STATEMENTS OF CASH FLOWS",
+      "start_index": 15,
+      "end_index": 15,
+      "node_id": "0035",
+      "summary": "This partial document is a condensed consolidated statement of cash flows for The Walt Disney Company for the quarters ended December 28, 2024, and December 30, 2023. It details the company's cash movements categorized into three main activities:\n\n1.  **Operating Activities:** Shows cash generated from core business operations, starting with net income and adjusting for non-cash items (like depreciation and amortization) and changes in working capital (like receivables and payables). Cash provided by operations was $3,205 million in 2024, up from $2,185 million in 2023.\n\n2.  **Investing Activities:** Reports cash used for capital expenditures, primarily investments in parks, resorts, and other property, and other investments. Cash used in investing activities was $2,575 million in 2024, compared to $1,246 million in 2023.\n\n3.  **Financing Activities:** Covers cash flows from borrowing, repaying debt, repurchasing stock, and other transactions with shareholders and creditors. There was a cash use of $997 million in 2024, significantly lower than the $8,006 million used in 2023, which was heavily impacted by an $8.61 billion acquisition of noncontrolling interests.\n\nThe statement concludes by reconciling the net change in cash, cash equivalents, and restricted cash for the period, showing a decrease of $520 million in 2024 and a $6,988 million decrease in 2023, and reporting the ending balances."
+    },
+    {
+      "title": "DTC PRODUCT DESCRIPTIONS AND KEY DEFINITIONS",
+      "start_index": 16,
+      "end_index": 16,
+      "node_id": "0036",
+      "summary": "This partial document outlines key definitions and methodologies for Disney's Direct-to-Consumer (DTC) streaming services. It covers three main areas: 1) **Product Offerings**, describing the standalone and bundled availability of Disney+, ESPN+, and Hulu in the U.S. and internationally. 2) **Paid Subscribers**, defining who qualifies as a paid subscriber, how subscribers in bundles are counted, and the distinction between subscribers and total \"paid subscriptions.\" 3) **Average Monthly Revenue Per Paid Subscriber**, detailing the specific calculation methods for each service, what revenue is included, and how revenue is allocated across bundled services and wholesale arrangements."
+    },
+    {
+      "title": "NON-GAAP FINANCIAL MEASURES",
+      "start_index": 17,
+      "end_index": 17,
+      "nodes": [
+        {
+          "title": "Diluted EPS excluding certain items",
+          "start_index": 17,
+          "end_index": 18,
+          "node_id": "0038",
+          "summary": "This partial document explains the company's use of non-GAAP financial measures, specifically Diluted EPS Excluding Certain Items, Total Segment Operating Income, and Free Cash Flow. It defines these measures, states they are not GAAP-compliant, and emphasizes they should be reviewed alongside GAAP results. The document provides a detailed rationale for using adjusted EPS, excluding items like restructuring charges and amortization from major acquisitions (TFCF and Hulu) to facilitate period-to-period comparability and management's evaluation of operations. It includes a quantitative reconciliation table comparing reported and adjusted diluted EPS for two quarters, with explanatory footnotes. The document also notes that forward-looking non-GAAP measures are not reconciled to GAAP due to the unpredictability of certain future items."
+        },
+        {
+          "title": "Total segment operating income",
+          "start_index": 19,
+          "end_index": 19,
+          "node_id": "0039",
+          "summary": "The partial document explains two key non-GAAP financial metrics used by the Company to evaluate performance: **Total Segment Operating Income** and **Free Cash Flow**.\n\n1.  **Total Segment Operating Income:** This metric is used to assess the operating performance of the business segments separately from non-operating factors like corporate expenses, interest, and restructuring charges. The document provides a reconciliation table showing how income before taxes is adjusted to arrive at this figure for two quarterly periods, highlighting a 31% year-over-year increase.\n\n2.  **Free Cash Flow:** This metric is defined as cash from operations less investments in property. It is used to evaluate the cash generated by operations that is available for debt service, acquisitions, dividends, and share repurchases. A summary consolidated cash flow table is presented, showing the components leading to the change in cash for the same two quarterly periods."
+        },
+        {
+          "title": "Free cash flow",
+          "start_index": 19,
+          "end_index": 20,
+          "node_id": "0040",
+          "summary": "This partial document covers two key financial performance metrics used by the Company: **Total Segment Operating Income** and **Free Cash Flow**.\n\n1.  **Total Segment Operating Income:** The document explains that this metric is used to evaluate the performance of operating segments, separating operational business results from non-operating factors like corporate expenses, restructuring charges, and interest. A reconciliation table shows how income before taxes is adjusted to arrive at this figure for two quarterly periods, highlighting a 31% year-over-year increase.\n\n2.  **Free Cash Flow:** The document defines free cash flow as cash from operations minus investments in property. It states that this metric is used to assess the cash available for debt service, acquisitions, dividends, and share repurchases. A summary of consolidated cash flows and a specific reconciliation table are provided, showing the calculation of free cash flow for two quarterly periods, noting a year-over-year decrease."
+        }
+      ],
+      "node_id": "0037",
+      "summary": "This partial document explains the company's use and rationale for three non-GAAP financial measures: Diluted EPS excluding certain items, total segment operating income, and free cash flow. It clarifies that these are not substitutes for GAAP measures but are provided for additional insight. The text details why Diluted EPS excluding certain items is used\u2014to remove the effects of non-comparable items and large acquisition-related amortization\u2014and states that forward-looking reconciliations for this measure are not provided due to the unpredictability of certain future items. It also notes that definitions and quantitative reconciliations to GAAP measures are provided elsewhere in the document."
+    },
+    {
+      "title": "FORWARD-LOOKING STATEMENTS",
+      "start_index": 21,
+      "end_index": 21,
+      "node_id": "0041",
+      "summary": "This partial document is a \"Forward-Looking Statements\" disclaimer from a company's earnings release. Its main points are:\n\n1.  It defines forward-looking statements as non-historical information regarding expectations, plans, financial guidance, and strategic initiatives.\n2.  It explicitly warns that these statements are based on management's current views and assumptions, are subject to change, and that actual results may differ materially.\n3.  It provides a non-exhaustive list of internal and external risk factors that could cause actual results to differ, including economic conditions, competition, consumer preferences, regulatory changes, and labor markets.\n4.  It directs readers to more detailed risk factors in the company's official SEC filings (Annual Report on Form 10-K, Quarterly Reports on Form 10-Q).\n5.  It clarifies that the company does not undertake any obligation to update these forward-looking statements."
+    },
+    {
+      "title": "PREPARED EARNINGS REMARKS AND CONFERENCE CALL INFORMATION",
+      "start_index": 22,
+      "end_index": 22,
+      "node_id": "0042",
+      "summary": "This partial document provides logistical details for The Walt Disney Company's earnings release. It announces that prepared management remarks (Executive Commentary) are available on the company's investor website and specifies the date and time for an upcoming conference call, which will be accessible via a live webcast on the same site. It also lists contact information for Corporate Communications and Investor Relations."
+    }
+  ]
+}

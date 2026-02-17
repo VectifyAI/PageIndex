@@ -1,4 +1,4 @@
-model: "gpt-4o-2024-11-20"
+model: "deepseek-chat"
 toc_check_page_num: 20
 max_page_num_each_node: 10
 max_token_num_each_node: 20000

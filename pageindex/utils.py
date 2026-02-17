@@ -18,17 +18,30 @@ from pathlib import Path
 from types import SimpleNamespace as config
 
 CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
+OPENAI_API_BASE = os.getenv("OPENAI_API_BASE")  # 支持通义千问等兼容 API
 
 def count_tokens(text, model=None):
     if not text:
         return 0
-    enc = tiktoken.encoding_for_model(model)
+    
+    # 尝试获取模型特定的编码器，如果失败则使用默认编码器
+    try:
+        enc = tiktoken.encoding_for_model(model)
+    except KeyError:
+        # 对于非 OpenAI 模型（如 qwen-max, deepseek-chat 等），使用 cl100k_base 编码器
+        # cl100k_base 是 GPT-4 和 GPT-3.5-turbo 使用的编码器，适用于大多数现代模型
+        enc = tiktoken.get_encoding("cl100k_base")
+    
     tokens = enc.encode(text)
     return len(tokens)
 
 def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
+    # 支持自定义 API 基础 URL
+    if OPENAI_API_BASE:
+        client = openai.OpenAI(api_key=api_key, base_url=OPENAI_API_BASE)
+    else:
+        client = openai.OpenAI(api_key=api_key)
     for i in range(max_retries):
         try:
             if chat_history:
@@ -60,7 +73,11 @@ def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_
 
 def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
+    # 支持自定义 API 基础 URL
+    if OPENAI_API_BASE:
+        client = openai.OpenAI(api_key=api_key, base_url=OPENAI_API_BASE)
+    else:
+        client = openai.OpenAI(api_key=api_key)
     for i in range(max_retries):
         try:
             if chat_history:
@@ -91,13 +108,23 @@ async def ChatGPT_API_async(model, prompt, api_key=CHATGPT_API_KEY):
     messages = [{"role": "user", "content": prompt}]
     for i in range(max_retries):
         try:
-            async with openai.AsyncOpenAI(api_key=api_key) as client:
-                response = await client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    temperature=0,
-                )
-                return response.choices[0].message.content
+            # 支持自定义 API 基础 URL
+            if OPENAI_API_BASE:
+                async with openai.AsyncOpenAI(api_key=api_key, base_url=OPENAI_API_BASE) as client:
+                    response = await client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        temperature=0,
+                    )
+                    return response.choices[0].message.content
+            else:
+                async with openai.AsyncOpenAI(api_key=api_key) as client:
+                    response = await client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        temperature=0,
+                    )
+                    return response.choices[0].message.content
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")

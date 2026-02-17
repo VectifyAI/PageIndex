@@ -1,0 +1,49 @@
+[project]
+name = "pageindex"
+version = "0.1.0"
+description = "Vectorless, Reasoning-based RAG - A hierarchical tree index for long documents"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "Vectify AI", email = "contact@vectify.ai" }
+]
+keywords = ["rag", "llm", "document-analysis", "retrieval", "reasoning"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "openai==1.101.0",
+    "pymupdf==1.26.4",
+    "PyPDF2==3.0.1",
+    "python-dotenv==1.1.0",
+    "tiktoken==0.11.0",
+    "pyyaml==6.0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "jupyter>=1.0.0",
+    "notebook>=7.0.0",
+    "ipykernel>=6.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "jupyter>=1.0.0",
+    "notebook>=7.0.0",
+    "ipykernel>=6.0.0",
+]

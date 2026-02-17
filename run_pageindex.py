@@ -1,8 +1,13 @@
 import argparse
 import os
 import json
+import asyncio
+from dotenv import load_dotenv
 from pageindex import *
 from pageindex.page_index_md import md_to_tree
+
+# Load environment variables
+load_dotenv()
 
 if __name__ == "__main__":
     # Set up argument parser
@@ -10,7 +15,9 @@ if __name__ == "__main__":
     parser.add_argument('--pdf_path', type=str, help='Path to the PDF file')
     parser.add_argument('--md_path', type=str, help='Path to the Markdown file')
 
-    parser.add_argument('--model', type=str, default='gpt-4o-2024-11-20', help='Model to use')
+    # Get default model from environment variable or config
+    default_model = os.getenv('OPENAI_MODEL', 'deepseek-chat')
+    parser.add_argument('--model', type=str, default=default_model, help='Model to use')
 
     parser.add_argument('--toc-check-pages', type=int, default=20, 
                       help='Number of pages to check for table of contents (PDF only)')
@@ -64,7 +71,7 @@ if __name__ == "__main__":
         )
 
         # Process the PDF
-        toc_with_page_number = page_index_main(args.pdf_path, opt)
+        toc_with_page_number = asyncio.run(page_index_main(args.pdf_path, opt))
         print('Parsing done, saving to file...')
         
         # Save results
