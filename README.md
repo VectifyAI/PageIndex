@@ -152,7 +152,11 @@ pip3 install --upgrade -r requirements.txt
 Create a `.env` file in the root directory and add your API key:
 
 ```bash
+# Either key name works
 CHATGPT_API_KEY=your_openai_key_here
+OPENAI_API_KEY=your_openai_key_here
+# Optional: custom OpenAI-compatible endpoint
+OPENAI_BASE_URL=https://your-openai-compatible-endpoint/v1
 ```
 
 ### 3. Run PageIndex on your PDF
@@ -188,6 +192,104 @@ python3 run_pageindex.py --md_path /path/to/your/document.md
 
 > Note: in this function, we use "#" to determine node heading and their levels. For example, "##" is level 2, "###" is level 3, etc. Make sure your markdown file is formatted correctly. If your Markdown file was converted from a PDF or HTML, we don't recommend using this function, since most existing conversion tools cannot preserve the original hierarchy. Instead, use our [PageIndex OCR](https://pageindex.ai/blog/ocr), which is designed to preserve the original hierarchy, to convert the PDF to a markdown file and then use this function.
 </details>
+
+### 4. Run as network service with Docker (async task API)
+
+Build image:
+
+```bash
+docker build -t pageindex-api .
+```
+
+Run container:
+
+```bash
+docker run --rm -p 8000:8000 \
+  -e CHATGPT_API_KEY=your_openai_key_here \
+  -e OPENAI_BASE_URL=https://your-openai-compatible-endpoint/v1 \
+  -v $(pwd)/results:/app/results \
+  -v $(pwd)/tasks:/app/tasks \
+  pageindex-api
+```
+
+Submit a long-running generation task (TypeScript, Node.js 18+):
+
+```ts
+import { readFile } from "node:fs/promises";
+
+const API_BASE = "http://localhost:8000";
+
+type CreateTaskResponse = {
+  task_id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  status_url: string;
+  download_url: string;
+  result_url: string;
+};
+
+async function createTask(pdfPath: string): Promise<CreateTaskResponse> {
+  const fileBuffer = await readFile(pdfPath);
+  const form = new FormData();
+  form.append("file", new Blob([fileBuffer], { type: "application/pdf" }), "document.pdf");
+  form.append("if_add_node_summary", "true");
+
+  const res = await fetch(`${API_BASE}/tasks`, { method: "POST", body: form });
+  if (!res.ok) throw new Error(`Create task failed: ${res.status} ${await res.text()}`);
+  return (await res.json()) as CreateTaskResponse;
+}
+```
+
+Response example:
+
+```json
+{
+  "task_id": "3ef4...",
+  "status": "queued",
+  "status_url": "/tasks/3ef4...",
+  "download_url": "/tasks/3ef4.../download",
+  "result_url": "/tasks/3ef4.../result"
+}
+```
+
+Query task status + download completed JSON (TypeScript):
+
+```ts
+import { writeFile } from "node:fs/promises";
+
+const API_BASE = "http://localhost:8000";
+
+type TaskStatusResponse = {
+  task_id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  error: string | null;
+};
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitAndDownload(taskId: string, outputFile = "output.json"): Promise<void> {
+  while (true) {
+    const statusRes = await fetch(`${API_BASE}/tasks/${taskId}`);
+    if (!statusRes.ok) throw new Error(`Get status failed: ${statusRes.status} ${await statusRes.text()}`);
+    const status = (await statusRes.json()) as TaskStatusResponse;
+
+    if (status.status === "completed") {
+      const downloadRes = await fetch(`${API_BASE}/tasks/${taskId}/download`);
+      if (!downloadRes.ok) throw new Error(`Download failed: ${downloadRes.status} ${await downloadRes.text()}`);
+      const bytes = new Uint8Array(await downloadRes.arrayBuffer());
+      await writeFile(outputFile, bytes);
+      return;
+    }
+
+    if (status.status === "failed") {
+      throw new Error(`Task failed: ${status.error ?? "unknown error"}`);
+    }
+
+    await sleep(2000);
+  }
+}
+```
 
 <!-- 
 # ☁️ Improved Tree Generation with PageIndex OCR

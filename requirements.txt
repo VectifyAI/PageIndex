@@ -4,3 +4,6 @@ PyPDF2==3.0.1
 python-dotenv==1.1.0
 tiktoken==0.11.0
 pyyaml==6.0.2
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+python-multipart==0.0.20
