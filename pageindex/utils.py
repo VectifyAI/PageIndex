@@ -1,4 +1,5 @@
 import tiktoken
+import re
 import openai
 import logging
 import os
@@ -16,19 +17,187 @@ import logging
 import yaml
 from pathlib import Path
 from types import SimpleNamespace as config
+from pathlib import Path
+
+from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.pipeline_options import (
+    PdfPipelineOptions,
+    TableStructureOptions,
+)
+from docling.datamodel.settings import settings
+from docling.document_converter import DocumentConverter, PdfFormatOption
+
 
 CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
+BASE_URL =  os.getenv("BASE_URL","https://api.openai.com/v1/chat/completions")
 
-def count_tokens(text, model=None):
+class PDFReader:
+    def __init__(self, pdf_path, parser="docling", use_gpu=False, num_threads=8, do_ocr=True, do_table_structure=True, do_cell_matching=True):
+        self.pdf_path = pdf_path
+        self.parser = parser
+        self.options = {
+            "use_gpu": use_gpu,
+            "num_threads": num_threads,
+            "do_ocr": do_ocr,
+            "do_table_structure": do_table_structure,
+            "do_cell_matching": do_cell_matching
+        }
+        self._doc_content = None # Generic content holder
+        self._pages_list = None
+        self._full_text = None
+
+    def _load_docling(self):
+        try:
+            if self.options["use_gpu"]:
+                print("Using GPU")
+                device = AcceleratorDevice.GPU
+            else:
+                print("Using CPU")
+                device = AcceleratorDevice.CPU            
+            accelerator_options = AcceleratorOptions(
+                num_threads=self.options["num_threads"],
+                device=device
+            )
+
+            pipeline_options = PdfPipelineOptions()
+            pipeline_options.accelerator_options = accelerator_options
+            pipeline_options.do_ocr = self.options["do_ocr"]
+            pipeline_options.do_table_structure = self.options["do_table_structure"]
+            pipeline_options.table_structure_options = TableStructureOptions(
+                do_cell_matching=self.options["do_cell_matching"]
+            )
+
+            converter = DocumentConverter(
+                format_options={
+                    InputFormat.PDF: PdfFormatOption(
+                        pipeline_options=pipeline_options,
+                    )
+                }
+            )
+
+            settings.debug.profile_pipeline_timings = True
+            
+            # Convert the document
+            conversion_result = converter.convert(self.pdf_path)
+            doc = conversion_result.document
+            
+            # Helper to get pages
+            self._full_text = doc.export_to_markdown()
+            self._pages_list = doc.export_to_markdown(page_break_placeholder="<!-- PAGE_BREAK -->").split("<!-- PAGE_BREAK -->")
+            
+            doc_conversion_secs = conversion_result.timings["pipeline_total"].times
+            print(f"Conversion secs: {doc_conversion_secs}")
+
+        except Exception as e:
+            print(f"Error extracting text from PDF with Docling: {e}")
+            raise e
+
+    def _load_pypdf2(self):
+        try:
+            pdf_reader = PyPDF2.PdfReader(self.pdf_path)
+            num_pages = len(pdf_reader.pages)
+            page_texts = []
+            for page_num in range(num_pages):
+                page = pdf_reader.pages[page_num]
+                page_text = page.extract_text()
+                if page_text:
+                    page_texts.append(page_text)
+                else:
+                    page_texts.append("")
+            self._pages_list = page_texts
+            self._full_text = "\n".join(page_texts)
+        except Exception as e:
+            print(f"Error extracting text from PDF with PyPDF2: {e}")
+            raise e
+
+    def _load_pymupdf(self):
+        try:
+            if isinstance(self.pdf_path, BytesIO):
+                doc = pymupdf.open(stream=self.pdf_path, filetype="pdf")
+            else:
+                doc = pymupdf.open(self.pdf_path)
+                
+            num_pages = len(doc)
+            page_texts = []
+            for page_num in range(num_pages):
+                page = doc.load_page(page_num)
+                page_text = page.get_text()
+                if page_text:
+                    page_texts.append(page_text)
+                else:
+                    page_texts.append("")
+            doc.close()
+            self._pages_list = page_texts
+            self._full_text = "\n".join(page_texts)
+        except Exception as e:
+            print(f"Error extracting text from PDF with PyMuPDF: {e}")
+            raise e
+
+    def load(self):
+        if self._full_text is not None and self._pages_list is not None:
+             return self
+             
+        if self.parser == "docling":
+            print("Using Docling")
+            self._load_docling()
+        elif self.parser == "PyMuPDF":
+            print("Using PyMuPDF")
+            self._load_pymupdf()
+        elif self.parser == "PyPDF2":
+            print("Using PyPDF2")
+            self._load_pypdf2()
+        else:
+            raise ValueError(f"Unsupported PDF parser: {self.parser}. Use 'docling', 'PyMuPDF', or 'PyPDF2'")
+        return self
+
+    def export_to_markdown(self):
+        self.load()
+        return self._full_text
+
+    def get_pages(self):
+        self.load()
+        return self._pages_list
+
+
+def extract_text_from_pdf(input_doc_path, pdf_parser="docling", use_gpu=False, num_threads=8, do_ocr=True, do_table_structure=True, do_cell_matching=True):
+    reader = PDFReader(
+        input_doc_path, 
+        parser=pdf_parser, 
+        use_gpu=use_gpu, 
+        num_threads=num_threads, 
+        do_ocr=do_ocr, 
+        do_table_structure=do_table_structure, 
+        do_cell_matching=do_cell_matching
+    )
+    return reader.export_to_markdown()
+
+def read_pdf(input_doc_path, pdf_parser="docling", output_format="full", use_gpu=False, num_threads=8, do_ocr=True, do_table_structure=True, do_cell_matching=True):
+    reader = PDFReader(
+        input_doc_path, 
+        parser=pdf_parser, 
+        use_gpu=use_gpu, 
+        num_threads=num_threads, 
+        do_ocr=do_ocr, 
+        do_table_structure=do_table_structure, 
+        do_cell_matching=do_cell_matching
+    )
+    
+    if output_format == "pages":
+        return reader.get_pages()
+    else:
+        return reader.export_to_markdown()
+
+def count_tokens(text, tokenizer_model="o200k_base"):
     if not text:
         return 0
-    enc = tiktoken.encoding_for_model(model)
+    enc = tiktoken.get_encoding(tokenizer_model)
     tokens = enc.encode(text)
     return len(tokens)
 
-def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+def ChatGPT_API_with_finish_reason(model, prompt, response_format=None, api_key=CHATGPT_API_KEY, base_url=BASE_URL, chat_history=None):
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
+    client = openai.OpenAI(api_key=api_key, base_url=base_url)
     for i in range(max_retries):
         try:
             if chat_history:
@@ -37,15 +206,31 @@ def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_
             else:
                 messages = [{"role": "user", "content": prompt}]
             
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0,
-            )
-            if response.choices[0].finish_reason == "length":
-                return response.choices[0].message.content, "max_output_reached"
+            if response_format:
+                # Use parse() for Pydantic models
+                response = client.beta.chat.completions.parse(
+                    model=model,
+                    messages=messages,
+                    temperature=0,
+                    response_format=response_format,
+                )
+                if response.choices[0].finish_reason == "length":
+                    finish_reason = "max_output_reached"
+                else:
+                    finish_reason = "finished"
+                return response.choices[0].message.parsed, finish_reason
             else:
-                return response.choices[0].message.content, "finished"
+                # Use create() for regular text responses
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=0,
+                )
+                if response.choices[0].finish_reason == "length":
+                    finish_reason = "max_output_reached"
+                else:
+                    finish_reason = "finished"
+                return response.choices[0].message.content, finish_reason
 
         except Exception as e:
             print('************* Retrying *************')
@@ -54,13 +239,13 @@ def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_
                 time.sleep(1)  # Wait for 1秒 before retrying
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
-                return "Error"
+                return "Error", "error"
 
 
 
-def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+def ChatGPT_API(model, prompt, response_format=None, api_key=CHATGPT_API_KEY, base_url=BASE_URL, chat_history=None):
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
+    client = openai.OpenAI(api_key=api_key, base_url=base_url)
     for i in range(max_retries):
         try:
             if chat_history:
@@ -69,35 +254,56 @@ def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
             else:
                 messages = [{"role": "user", "content": prompt}]
             
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0,
-            )
-   
-            return response.choices[0].message.content
-        except Exception as e:
-            print('************* Retrying *************')
-            logging.error(f"Error: {e}")
-            if i < max_retries - 1:
-                time.sleep(1)  # Wait for 1秒 before retrying
+            if response_format:
+                # Use parse() for Pydantic models
+                response = client.beta.chat.completions.parse(
+                    model=model,
+                    messages=messages,
+                    temperature=0,
+                    response_format=response_format,
+                )
+                return response.choices[0].message.parsed
             else:
-                logging.error('Max retries reached for prompt: ' + prompt)
-                return "Error"
-            
-
-async def ChatGPT_API_async(model, prompt, api_key=CHATGPT_API_KEY):
-    max_retries = 10
-    messages = [{"role": "user", "content": prompt}]
-    for i in range(max_retries):
-        try:
-            async with openai.AsyncOpenAI(api_key=api_key) as client:
-                response = await client.chat.completions.create(
+                # Use create() for regular text responses
+                response = client.chat.completions.create(
                     model=model,
                     messages=messages,
                     temperature=0,
                 )
                 return response.choices[0].message.content
+        except Exception as e:
+            print('************* Retrying *************')
+            logging.error(f"Error: {e}")
+            if i < max_retries - 1:
+                time.sleep(1)  # Wait for 1秒 before retrying
+            else:
+                logging.error('Max retries reached for prompt: ' + prompt)
+                return "Error"
+            
+
+async def ChatGPT_API_async(model, prompt, response_format=None, api_key=CHATGPT_API_KEY, base_url=BASE_URL):
+    max_retries = 10
+    messages = [{"role": "user", "content": prompt}]
+    for i in range(max_retries):
+        try:
+            async with openai.AsyncOpenAI(api_key=api_key, base_url=base_url) as client:
+                if response_format:
+                    # Use parse() for Pydantic models
+                    response = await client.beta.chat.completions.parse(
+                        model=model,
+                        messages=messages,
+                        temperature=0,
+                        response_format=response_format,
+                    )
+                    return response.choices[0].message.parsed
+                else:
+                    # Use create() for regular text responses
+                    response = await client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        temperature=0,
+                    )
+                    return response.choices[0].message.content
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
@@ -244,31 +450,39 @@ def get_last_node(structure):
     return structure[-1]
 
 
-def extract_text_from_pdf(pdf_path):
-    pdf_reader = PyPDF2.PdfReader(pdf_path)
-    ###return text not list 
-    text=""
-    for page_num in range(len(pdf_reader.pages)):
-        page = pdf_reader.pages[page_num]
-        text+=page.extract_text()
-    return text
-
 def get_pdf_title(pdf_path):
     pdf_reader = PyPDF2.PdfReader(pdf_path)
     meta = pdf_reader.metadata
     title = meta.title if meta and meta.title else 'Untitled'
     return title
 
-def get_text_of_pages(pdf_path, start_page, end_page, tag=True):
-    pdf_reader = PyPDF2.PdfReader(pdf_path)
+def get_text_of_pages(pdf_path, start_page, end_page, tag=True, pdf_parser="PyPDF2", use_gpu=False, num_threads=8, do_ocr=True, do_table_structure=True):
+    reader = PDFReader(
+        pdf_path, 
+        parser=pdf_parser, 
+        use_gpu=use_gpu, 
+        num_threads=num_threads, 
+        do_ocr=do_ocr, 
+        do_table_structure=do_table_structure
+    )
+    pages = reader.get_pages()
+    
     text = ""
-    for page_num in range(start_page-1, end_page):
-        page = pdf_reader.pages[page_num]
-        page_text = page.extract_text()
+    # Adjust for 0-based indexing and handle page limits
+    num_pages = len(pages)
+    
+    # Ensure start_page is at least 1
+    start_idx = max(0, start_page - 1)
+    # Ensure end_page does not exceed number of pages
+    end_idx = min(num_pages, end_page)
+    
+    for i in range(start_idx, end_idx):
+        page_text = pages[i]
         if tag:
-            text += f"<start_index_{page_num+1}>\n{page_text}\n<end_index_{page_num+1}>\n"
+            text += f"<start_index_{i+1}>\n{page_text}\n<end_index_{i+1}>\n"
         else:
             text += page_text
+            
     return text
 
 def get_first_start_page_from_text(text):
@@ -410,31 +624,24 @@ def add_preface_if_needed(data):
 
 
 
-def get_page_tokens(pdf_path, model="gpt-4o-2024-11-20", pdf_parser="PyPDF2"):
-    enc = tiktoken.encoding_for_model(model)
-    if pdf_parser == "PyPDF2":
-        pdf_reader = PyPDF2.PdfReader(pdf_path)
-        page_list = []
-        for page_num in range(len(pdf_reader.pages)):
-            page = pdf_reader.pages[page_num]
-            page_text = page.extract_text()
-            token_length = len(enc.encode(page_text))
-            page_list.append((page_text, token_length))
-        return page_list
-    elif pdf_parser == "PyMuPDF":
-        if isinstance(pdf_path, BytesIO):
-            pdf_stream = pdf_path
-            doc = pymupdf.open(stream=pdf_stream, filetype="pdf")
-        elif isinstance(pdf_path, str) and os.path.isfile(pdf_path) and pdf_path.lower().endswith(".pdf"):
-            doc = pymupdf.open(pdf_path)
-        page_list = []
-        for page in doc:
-            page_text = page.get_text()
-            token_length = len(enc.encode(page_text))
-            page_list.append((page_text, token_length))
-        return page_list
-    else:
-        raise ValueError(f"Unsupported PDF parser: {pdf_parser}")
+def get_page_tokens(pdf_path, tokenizer_model="o200k_base", pdf_parser="docling", use_gpu=False, do_ocr=True, do_table_structure=True, do_cell_matching=True):
+    enc = tiktoken.get_encoding(tokenizer_model)
+    
+    reader = PDFReader(
+        pdf_path, 
+        parser=pdf_parser, 
+        use_gpu=use_gpu, 
+        do_ocr=do_ocr, 
+        do_table_structure=do_table_structure,
+        do_cell_matching=do_cell_matching
+    )
+    pages = reader.get_pages()
+    
+    page_list = []
+    for page_text in pages:
+        token_length = len(enc.encode(page_text))
+        page_list.append((page_text, token_length))
+    return page_list
 
         
 
@@ -548,15 +755,23 @@ def convert_physical_index_to_int(data):
             # Check if item is a dictionary and has 'physical_index' key
             if isinstance(data[i], dict) and 'physical_index' in data[i]:
                 if isinstance(data[i]['physical_index'], str):
-                    if data[i]['physical_index'].startswith('<physical_index_'):
-                        data[i]['physical_index'] = int(data[i]['physical_index'].split('_')[-1].rstrip('>').strip())
-                    elif data[i]['physical_index'].startswith('physical_index_'):
-                        data[i]['physical_index'] = int(data[i]['physical_index'].split('_')[-1].strip())
+                    try:
+                        if data[i]['physical_index'].startswith('<physical_index_'):
+                            data[i]['physical_index'] = int(data[i]['physical_index'].split('_')[-1].rstrip('>').strip())
+                        elif data[i]['physical_index'].startswith('physical_index_'):
+                            data[i]['physical_index'] = int(data[i]['physical_index'].split('_')[-1].strip())
+                    except ValueError:
+                        # Keep original value if conversion fails (e.g., Roman numerals like 'ii')
+                        pass
     elif isinstance(data, str):
-        if data.startswith('<physical_index_'):
-            data = int(data.split('_')[-1].rstrip('>').strip())
-        elif data.startswith('physical_index_'):
-            data = int(data.split('_')[-1].strip())
+        try:
+            if data.startswith('<physical_index_'):
+                data = int(data.split('_')[-1].rstrip('>').strip())
+            elif data.startswith('physical_index_'):
+                data = int(data.split('_')[-1].strip())
+        except ValueError:
+            # Return None if conversion fails (e.g., Roman numerals like 'ii')
+            return None
         # Check data is int
         if isinstance(data, int):
             return data

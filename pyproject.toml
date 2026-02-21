@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "PageIndex"
+version = "0.1.0"
+description = """
+A vectorless, reasoning-based RAG system that builds a hierarchical tree index from long documents
+and uses LLMs to reason over that index for agentic, context-aware retrieval.
+It simulates how human experts navigate and extract knowledge from complex documents through tree search,
+enabling LLMs to think and reason their way to the most relevant document sections.
+"""
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+
+dependencies = [
+    "openai==1.101.0",
+    "pymupdf==1.26.4",
+    "PyPDF2==3.0.1",
+    "python-dotenv==1.1.0",
+    "tiktoken==0.11.0",
+    "pyyaml==6.0.2",
+    "docling==2.72.0",
+    "pydantic==2.12.5",
+    "ruff==0.15.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/VectifyAI/PageIndex"
+
+# -----------------------------
+# setuptools package discovery
+# -----------------------------
+[tool.setuptools.packages.find]
+where = ["pageindex"]
+include = ["*", "*.*"]
+
+# -----------------------------
+# Ruff configuration
+# -----------------------------
+[tool.ruff]
+line-length = 88
+exclude = ["__pycache__", "build", "dist", ".venv", "venv"]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+[tool.ruff.per-file-ignores]
+"tests/*" = ["D", "S101"]

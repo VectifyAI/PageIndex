@@ -1,4 +1,5 @@
 model: "gpt-4o-2024-11-20"
+base_url: ""
 toc_check_page_num: 20
 max_page_num_each_node: 10
 max_token_num_each_node: 20000
@@ -6,3 +7,10 @@ if_add_node_id: "yes"
 if_add_node_summary: "yes"
 if_add_doc_description: "no"
 if_add_node_text: "no"
+pdf_parser: "docling"  # Options: PyPDF2, PyMuPDF, docling
+use_docling: True
+use_gpu: False
+do_ocr: True
+do_table_structure: True
+do_cell_matching: True
+tokenizer_model: "o200k_base"

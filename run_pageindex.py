@@ -51,17 +51,24 @@ if __name__ == "__main__":
             raise ValueError(f"PDF file not found: {args.pdf_path}")
             
         # Process PDF file
-        # Configure options
-        opt = config(
-            model=args.model,
-            toc_check_page_num=args.toc_check_pages,
-            max_page_num_each_node=args.max_pages_per_node,
-            max_token_num_each_node=args.max_tokens_per_node,
-            if_add_node_id=args.if_add_node_id,
-            if_add_node_summary=args.if_add_node_summary,
-            if_add_doc_description=args.if_add_doc_description,
-            if_add_node_text=args.if_add_node_text
-        )
+        # Use ConfigLoader to get consistent defaults (matching markdown behavior)
+        from pageindex.utils import ConfigLoader
+        config_loader = ConfigLoader()
+        
+        # Create options dict with user args
+        user_opt = {
+            'model': args.model,
+            'toc_check_page_num': args.toc_check_pages,
+            'max_page_num_each_node': args.max_pages_per_node,
+            'max_token_num_each_node': args.max_tokens_per_node,
+            'if_add_node_id': args.if_add_node_id,
+            'if_add_node_summary': args.if_add_node_summary,
+            'if_add_doc_description': args.if_add_doc_description,
+            'if_add_node_text': args.if_add_node_text
+        }
+        
+        # Load config with defaults from config.yaml
+        opt = config_loader.load(user_opt)
 
         # Process the PDF
         toc_with_page_number = page_index_main(args.pdf_path, opt)

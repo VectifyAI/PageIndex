@@ -12,4 +12,5 @@ SDK/*
 log/*
 logs/
 parts/*
+test.ipynb
 json_results/*
