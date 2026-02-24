@@ -8,6 +8,7 @@ import json
 import PyPDF2
 import copy
 import asyncio
+import re
 import pymupdf
 from io import BytesIO
 from dotenv import load_dotenv
