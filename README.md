@@ -232,6 +232,25 @@ Explore the full [benchmark results](https://github.com/VectifyAI/Mafin2.5-Finan
 ---
 
 # ⭐ Support Us
+Please cite this work as:
+```
+Mingtian Zhang, Yu Tang and PageIndex Team,
+"PageIndex: Next-Generation Vectorless, Reasoning-based RAG",
+PageIndex Blog, Sep 2025.
+```
+
+Or use the BibTeX citation:
+
+```
+@article{zhang2025pageindex,
+  author = {Mingtian Zhang and Yu Tang and PageIndex Team},
+  title = {PageIndex: Next-Generation Vectorless, Reasoning-based RAG},
+  journal = {PageIndex Blog},
+  year = {2025},
+  month = {September},
+  note = {https://pageindex.ai/blog/pageindex-intro},
+}
+```
 
 Leave us a star 🌟 if you like our project. Thank you!  
 
