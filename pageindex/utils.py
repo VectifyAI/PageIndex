@@ -1,5 +1,6 @@
 import tiktoken
 import openai
+import anthropic
 import logging
 import os
 from datetime import datetime
@@ -18,81 +19,129 @@ from pathlib import Path
 from types import SimpleNamespace as config
 
 CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+
+# Gemini OpenAI-compatible base URL
+_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+
+def get_provider(model):
+    """Detect LLM provider from model name."""
+    if model and model.startswith("claude"):
+        return "anthropic"
+    elif model and model.startswith("gemini"):
+        return "google"
+    return "openai"
+
+
+def _get_default_api_key(model):
+    provider = get_provider(model)
+    if provider == "anthropic":
+        return ANTHROPIC_API_KEY
+    elif provider == "google":
+        return GOOGLE_API_KEY
+    return CHATGPT_API_KEY
+
+
+def _make_openai_client(model, api_key):
+    """Return a synchronous OpenAI-compatible client for OpenAI or Gemini."""
+    if get_provider(model) == "google":
+        return openai.OpenAI(api_key=api_key, base_url=_GEMINI_BASE_URL)
+    return openai.OpenAI(api_key=api_key)
+
+
+def _make_async_openai_client(model, api_key):
+    """Return an async OpenAI-compatible client for OpenAI or Gemini."""
+    if get_provider(model) == "google":
+        return openai.AsyncOpenAI(api_key=api_key, base_url=_GEMINI_BASE_URL)
+    return openai.AsyncOpenAI(api_key=api_key)
+
 
 def count_tokens(text, model=None):
     if not text:
         return 0
-    enc = tiktoken.encoding_for_model(model)
+    try:
+        enc = tiktoken.encoding_for_model(model)
+    except KeyError:
+        # Fallback for non-OpenAI models (Claude, Gemini, etc.)
+        enc = tiktoken.get_encoding("cl100k_base")
     tokens = enc.encode(text)
     return len(tokens)
 
-def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+def ChatGPT_API_with_finish_reason(model, prompt, api_key=None, chat_history=None):
+    if api_key is None:
+        api_key = _get_default_api_key(model)
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
+    provider = get_provider(model)
+
+    if chat_history:
+        messages = chat_history
+        messages.append({"role": "user", "content": prompt})
+    else:
+        messages = [{"role": "user", "content": prompt}]
+
     for i in range(max_retries):
         try:
-            if chat_history:
-                messages = chat_history
-                messages.append({"role": "user", "content": prompt})
+            if provider == "anthropic":
+                client = anthropic.Anthropic(api_key=api_key)
+                msg = client.messages.create(
+                    model=model,
+                    max_tokens=8096,
+                    messages=messages,
+                    temperature=0,
+                )
+                text = msg.content[0].text
+                finish = "max_output_reached" if msg.stop_reason == "max_tokens" else "finished"
+                return text, finish
             else:
-                messages = [{"role": "user", "content": prompt}]
-            
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0,
-            )
-            if response.choices[0].finish_reason == "length":
-                return response.choices[0].message.content, "max_output_reached"
-            else:
-                return response.choices[0].message.content, "finished"
+                client = _make_openai_client(model, api_key)
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=0,
+                )
+                if response.choices[0].finish_reason == "length":
+                    return response.choices[0].message.content, "max_output_reached"
+                else:
+                    return response.choices[0].message.content, "finished"
 
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
-                time.sleep(1)  # Wait for 1秒 before retrying
+                time.sleep(1)
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
                 return "Error"
 
 
-
-def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+def ChatGPT_API(model, prompt, api_key=None, chat_history=None):
+    if api_key is None:
+        api_key = _get_default_api_key(model)
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
+    provider = get_provider(model)
+
+    if chat_history:
+        messages = chat_history
+        messages.append({"role": "user", "content": prompt})
+    else:
+        messages = [{"role": "user", "content": prompt}]
+
     for i in range(max_retries):
         try:
-            if chat_history:
-                messages = chat_history
-                messages.append({"role": "user", "content": prompt})
+            if provider == "anthropic":
+                client = anthropic.Anthropic(api_key=api_key)
+                msg = client.messages.create(
+                    model=model,
+                    max_tokens=8096,
+                    messages=messages,
+                    temperature=0,
+                )
+                return msg.content[0].text
             else:
-                messages = [{"role": "user", "content": prompt}]
-            
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0,
-            )
-   
-            return response.choices[0].message.content
-        except Exception as e:
-            print('************* Retrying *************')
-            logging.error(f"Error: {e}")
-            if i < max_retries - 1:
-                time.sleep(1)  # Wait for 1秒 before retrying
-            else:
-                logging.error('Max retries reached for prompt: ' + prompt)
-                return "Error"
-            
-
-async def ChatGPT_API_async(model, prompt, api_key=CHATGPT_API_KEY):
-    max_retries = 10
-    messages = [{"role": "user", "content": prompt}]
-    for i in range(max_retries):
-        try:
-            async with openai.AsyncOpenAI(api_key=api_key) as client:
-                response = await client.chat.completions.create(
+                client = _make_openai_client(model, api_key)
+                response = client.chat.completions.create(
                     model=model,
                     messages=messages,
                     temperature=0,
@@ -102,10 +151,46 @@ async def ChatGPT_API_async(model, prompt, api_key=CHATGPT_API_KEY):
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
-                await asyncio.sleep(1)  # Wait for 1s before retrying
+                time.sleep(1)
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
-                return "Error"  
+                return "Error"
+
+
+async def ChatGPT_API_async(model, prompt, api_key=None):
+    if api_key is None:
+        api_key = _get_default_api_key(model)
+    max_retries = 10
+    provider = get_provider(model)
+    messages = [{"role": "user", "content": prompt}]
+
+    for i in range(max_retries):
+        try:
+            if provider == "anthropic":
+                async with anthropic.AsyncAnthropic(api_key=api_key) as client:
+                    msg = await client.messages.create(
+                        model=model,
+                        max_tokens=8096,
+                        messages=messages,
+                        temperature=0,
+                    )
+                    return msg.content[0].text
+            else:
+                async with _make_async_openai_client(model, api_key) as client:
+                    response = await client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        temperature=0,
+                    )
+                    return response.choices[0].message.content
+        except Exception as e:
+            print('************* Retrying *************')
+            logging.error(f"Error: {e}")
+            if i < max_retries - 1:
+                await asyncio.sleep(1)
+            else:
+                logging.error('Max retries reached for prompt: ' + prompt)
+                return "Error"
             
             
 def get_json_content(response):
