@@ -7,6 +7,7 @@ chroma-collections.parquet
 chroma-embeddings.parquet
 .DS_Store
 .env*
+!.env.example
 notebook
 SDK/*
 log/*
