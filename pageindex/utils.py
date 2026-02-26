@@ -18,6 +18,15 @@ from pathlib import Path
 from types import SimpleNamespace as config
 
 CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
+# Novita AI - OpenAI-compatible API support
+NOVITA_API_KEY = os.getenv("NOVITA_API_KEY")
+NOVITA_BASE_URL = "https://api.novita.ai/openai"
+
+def get_openai_client():
+    """Get OpenAI client - supports both OpenAI and Novita AI (OpenAI-compatible)."""
+    if NOVITA_API_KEY:
+        return openai.OpenAI(api_key=NOVITA_API_KEY, base_url=NOVITA_BASE_URL)
+    return openai.OpenAI(api_key=CHATGPT_API_KEY)
 
 def count_tokens(text, model=None):
     if not text:
@@ -28,7 +37,7 @@ def count_tokens(text, model=None):
 
 def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
+    client = get_openai_client()
     for i in range(max_retries):
         try:
             if chat_history:
@@ -60,7 +69,7 @@ def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_
 
 def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
+    client = get_openai_client()
     for i in range(max_retries):
         try:
             if chat_history:
