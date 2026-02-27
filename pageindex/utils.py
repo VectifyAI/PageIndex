@@ -25,7 +25,7 @@ NOVITA_BASE_URL = "https://api.novita.ai/openai"
 def get_openai_client(api_key=CHATGPT_API_KEY, async_client=False):
     """Get OpenAI client - supports both OpenAI and Novita AI (OpenAI-compatible)."""
     client_cls = openai.AsyncOpenAI if async_client else openai.OpenAI
-    if NOVITA_API_KEY and (api_key in [None, CHATGPT_API_KEY]):
+    if NOVITA_API_KEY and api_key == CHATGPT_API_KEY:
         return client_cls(api_key=NOVITA_API_KEY, base_url=NOVITA_BASE_URL)
     return client_cls(api_key=api_key)
 
