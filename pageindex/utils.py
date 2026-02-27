@@ -22,6 +22,7 @@ CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
 NOVITA_API_KEY = os.getenv("NOVITA_API_KEY")
 NOVITA_BASE_URL = "https://api.novita.ai/openai"
 NOVITA_MODEL = os.getenv("NOVITA_MODEL")
+NOVITA_DEFAULT_MODEL = "deepseek/deepseek-r1"
 DEFAULT_OPENAI_MODEL = "gpt-4o-2024-11-20"
 
 def get_openai_client(api_key=CHATGPT_API_KEY, async_client=False):
@@ -34,9 +35,7 @@ def get_openai_client(api_key=CHATGPT_API_KEY, async_client=False):
 def resolve_chat_model(model, api_key=CHATGPT_API_KEY):
     """Resolve model name for OpenAI-compatible providers."""
     if NOVITA_API_KEY and api_key == CHATGPT_API_KEY and model == DEFAULT_OPENAI_MODEL:
-        if NOVITA_MODEL:
-            return NOVITA_MODEL
-        raise ValueError("NOVITA_MODEL is required when using NOVITA_API_KEY with default model gpt-4o-2024-11-20.")
+        return NOVITA_MODEL or NOVITA_DEFAULT_MODEL
     return model
 
 def count_tokens(text, model=None):
