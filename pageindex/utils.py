@@ -22,11 +22,12 @@ CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
 NOVITA_API_KEY = os.getenv("NOVITA_API_KEY")
 NOVITA_BASE_URL = "https://api.novita.ai/openai"
 
-def get_openai_client():
+def get_openai_client(api_key=CHATGPT_API_KEY, async_client=False):
     """Get OpenAI client - supports both OpenAI and Novita AI (OpenAI-compatible)."""
-    if NOVITA_API_KEY:
-        return openai.OpenAI(api_key=NOVITA_API_KEY, base_url=NOVITA_BASE_URL)
-    return openai.OpenAI(api_key=CHATGPT_API_KEY)
+    client_cls = openai.AsyncOpenAI if async_client else openai.OpenAI
+    if NOVITA_API_KEY and (api_key in [None, CHATGPT_API_KEY]):
+        return client_cls(api_key=NOVITA_API_KEY, base_url=NOVITA_BASE_URL)
+    return client_cls(api_key=api_key)
 
 def count_tokens(text, model=None):
     if not text:
@@ -37,7 +38,7 @@ def count_tokens(text, model=None):
 
 def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
     max_retries = 10
-    client = get_openai_client()
+    client = get_openai_client(api_key=api_key)
     for i in range(max_retries):
         try:
             if chat_history:
@@ -69,7 +70,7 @@ def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_
 
 def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
     max_retries = 10
-    client = get_openai_client()
+    client = get_openai_client(api_key=api_key)
     for i in range(max_retries):
         try:
             if chat_history:
@@ -100,7 +101,7 @@ async def ChatGPT_API_async(model, prompt, api_key=CHATGPT_API_KEY):
     messages = [{"role": "user", "content": prompt}]
     for i in range(max_retries):
         try:
-            async with openai.AsyncOpenAI(api_key=api_key) as client:
+            async with get_openai_client(api_key=api_key, async_client=True) as client:
                 response = await client.chat.completions.create(
                     model=model,
                     messages=messages,
