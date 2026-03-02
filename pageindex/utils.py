@@ -5,6 +5,8 @@ import os
 from datetime import datetime
 import time
 import json
+import re
+import random
 import PyPDF2
 import copy
 import asyncio
@@ -12,27 +14,58 @@ import pymupdf
 from io import BytesIO
 from dotenv import load_dotenv
 load_dotenv()
-import logging
 import yaml
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace as config
 
 CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
 
+# Optional in-memory LLM response cache: when set to a dict, API responses are cached by (model, prompt_hash).
+_response_cache = None
+
+
+def set_response_cache(enable):
+    """Enable or disable LLM response caching. Pass True to use a new in-memory cache, False to disable, or a dict to use as cache."""
+    global _response_cache
+    if enable is True:
+        _response_cache = {}
+    elif enable is False or enable is None:
+        _response_cache = None
+    else:
+        _response_cache = enable
+
+
+def _retry_delay(attempt, base=1.0, max_delay=60.0):
+    """Exponential backoff with jitter for API retries."""
+    delay = min(base * (2 ** attempt), max_delay) + random.uniform(0, 1)
+    return delay
+
+
 def count_tokens(text, model=None):
     if not text:
         return 0
+    model = model or "gpt-4o"
     enc = tiktoken.encoding_for_model(model)
     tokens = enc.encode(text)
     return len(tokens)
 
+def _cache_key(model, prompt, chat_history=None):
+    raw = prompt + json.dumps(chat_history or [], sort_keys=True)
+    return (model, hashlib.sha256(raw.encode("utf-8")).hexdigest())
+
+
 def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+    if _response_cache is not None:
+        key = _cache_key(model, prompt, chat_history)
+        if key in _response_cache:
+            return _response_cache[key]
     max_retries = 10
     client = openai.OpenAI(api_key=api_key)
     for i in range(max_retries):
         try:
             if chat_history:
-                messages = chat_history
+                messages = list(chat_history)
                 messages.append({"role": "user", "content": prompt})
             else:
                 messages = [{"role": "user", "content": prompt}]
@@ -43,28 +76,35 @@ def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_
                 temperature=0,
             )
             if response.choices[0].finish_reason == "length":
-                return response.choices[0].message.content, "max_output_reached"
+                result = response.choices[0].message.content, "max_output_reached"
             else:
-                return response.choices[0].message.content, "finished"
+                result = response.choices[0].message.content, "finished"
+            if _response_cache is not None:
+                _response_cache[key] = result
+            return result
 
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
-                time.sleep(1)  # Wait for 1秒 before retrying
+                time.sleep(_retry_delay(i))
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
-                return "Error"
+                return ("Error", "error")
 
 
 
 def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+    if _response_cache is not None:
+        key = _cache_key(model, prompt, chat_history)
+        if key in _response_cache:
+            return _response_cache[key]
     max_retries = 10
     client = openai.OpenAI(api_key=api_key)
     for i in range(max_retries):
         try:
             if chat_history:
-                messages = chat_history
+                messages = list(chat_history)
                 messages.append({"role": "user", "content": prompt})
             else:
                 messages = [{"role": "user", "content": prompt}]
@@ -74,19 +114,25 @@ def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
                 messages=messages,
                 temperature=0,
             )
-   
-            return response.choices[0].message.content
+            result = response.choices[0].message.content
+            if _response_cache is not None:
+                _response_cache[key] = result
+            return result
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
-                time.sleep(1)  # Wait for 1秒 before retrying
+                time.sleep(_retry_delay(i))
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
                 return "Error"
             
 
 async def ChatGPT_API_async(model, prompt, api_key=CHATGPT_API_KEY):
+    if _response_cache is not None:
+        key = _cache_key(model, prompt, None)
+        if key in _response_cache:
+            return _response_cache[key]
     max_retries = 10
     messages = [{"role": "user", "content": prompt}]
     for i in range(max_retries):
@@ -97,12 +143,15 @@ async def ChatGPT_API_async(model, prompt, api_key=CHATGPT_API_KEY):
                     messages=messages,
                     temperature=0,
                 )
-                return response.choices[0].message.content
+                result = response.choices[0].message.content
+                if _response_cache is not None:
+                    _response_cache[key] = result
+                return result
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
-                await asyncio.sleep(1)  # Wait for 1s before retrying
+                await asyncio.sleep(_retry_delay(i))
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
                 return "Error"  
@@ -134,8 +183,10 @@ def extract_json(content):
             # If no delimiters, assume entire content could be JSON
             json_content = content.strip()
 
-        # Clean up common issues that might cause parsing errors
-        json_content = json_content.replace('None', 'null')  # Replace Python None with JSON null
+        # Replace Python None with JSON null only when in a value position (after : [ ,), not inside quoted strings
+        json_content = re.sub(r'(?<=:)\s*None(?=\s*[,\}\]\s])', ' null', json_content)
+        json_content = re.sub(r'(?<=\[)\s*None(?=\s*[,\]\s])', 'null', json_content)
+        json_content = re.sub(r'(?<=,)\s*None(?=\s*[,\}\]\s])', ' null', json_content)
         json_content = json_content.replace('\n', ' ').replace('\r', ' ')  # Remove newlines
         json_content = ' '.join(json_content.split())  # Normalize whitespace
 
@@ -198,7 +249,7 @@ def structure_to_list(structure):
     
 def get_leaf_nodes(structure):
     if isinstance(structure, dict):
-        if not structure['nodes']:
+        if not structure.get('nodes'):
             structure_node = copy.deepcopy(structure)
             structure_node.pop('nodes', None)
             return [structure_node]

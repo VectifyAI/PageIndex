@@ -4,7 +4,7 @@ import re
 import os
 try:
     from .utils import *
-except:
+except ImportError:
     from utils import *
 
 async def get_node_summary(node, summary_token_threshold=200, model=None):

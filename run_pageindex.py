@@ -4,7 +4,8 @@ import json
 from pageindex import *
 from pageindex.page_index_md import md_to_tree
 
-if __name__ == "__main__":
+
+def main():
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Process PDF or Markdown document and generate structure')
     parser.add_argument('--pdf_path', type=str, help='Path to the PDF file')
@@ -131,3 +132,7 @@ if __name__ == "__main__":
             json.dump(toc_with_page_number, f, indent=2, ensure_ascii=False)
         
         print(f'Tree structure saved to: {output_file}')
+
+
+if __name__ == "__main__":
+    main()

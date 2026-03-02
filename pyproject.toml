@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pageindex"
+version = "0.1.0"
+description = "Vectorless, reasoning-based RAG framework. No vector DB, no chunking, human-like retrieval."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.8"
+authors = [
+    { name = "Vectify AI" }
+]
+keywords = ["rag", "llm", "document", "pdf", "markdown", "retrieval", "vectorless"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "openai>=1.101.0",
+    "pymupdf>=1.26.4",
+    "PyPDF2>=3.0.1",
+    "python-dotenv>=1.1.0",
+    "tiktoken>=0.11.0",
+    "pyyaml>=6.0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]
+
+[project.scripts]
+run_pageindex = "run_pageindex:main"
+
+[project.urls]
+Homepage = "https://vectify.ai/pageindex"
+Documentation = "https://docs.pageindex.ai"
+Repository = "https://github.com/VectifyAI/PageIndex"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pageindex*"]
+
+[tool.setuptools]
+py-modules = ["run_pageindex"]

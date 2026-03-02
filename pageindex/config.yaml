@@ -6,3 +6,7 @@ if_add_node_id: "yes"
 if_add_node_summary: "yes"
 if_add_doc_description: "no"
 if_add_node_text: "no"
+# Optional: progress_callback(stage, message, **kwargs) for long-running PDF processing
+progress_callback: null
+# Optional: set to true to cache LLM responses in memory (faster re-runs, lower API cost)
+response_cache: false

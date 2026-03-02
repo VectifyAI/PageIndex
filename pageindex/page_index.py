@@ -5,8 +5,17 @@ import math
 import random
 import re
 from .utils import *
-import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+def _progress_report(opt, stage, message, **kwargs):
+    """Call optional progress_callback(stage, message, **kwargs) if set on opt."""
+    callback = getattr(opt, "progress_callback", None)
+    if callable(callback):
+        try:
+            callback(stage, message, **kwargs)
+        except Exception:
+            pass
 
 
 ################### check title in page #########################################################
@@ -180,20 +189,21 @@ def extract_toc_content(content, model=None):
     response = response + new_response
     if_complete = check_if_toc_transformation_is_complete(content, response, model)
     
+    max_attempts = 10
+    attempt = 0
     while not (if_complete == "yes" and finish_reason == "finished"):
+        attempt += 1
+        if attempt > max_attempts:
+            raise Exception('Failed to complete table of contents after maximum retries')
         chat_history = [
-            {"role": "user", "content": prompt}, 
-            {"role": "assistant", "content": response},    
+            {"role": "user", "content": prompt},
+            {"role": "assistant", "content": response},
         ]
         prompt = f"""please continue the generation of table of contents , directly output the remaining part of the structure"""
         new_response, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt, chat_history=chat_history)
         response = response + new_response
         if_complete = check_if_toc_transformation_is_complete(content, response, model)
-        
-        # Optional: Add a maximum retry limit to prevent infinite loops
-        if len(chat_history) > 5:  # Arbitrary limit of 10 attempts
-            raise Exception('Failed to complete table of contents after maximum retries')
-    
+
     return response
 
 def detect_page_index(toc_content, model=None):
@@ -674,11 +684,11 @@ def process_none_page_numbers(toc_items, page_list, start_index=1, model=None):
                     continue
 
             item_copy = copy.deepcopy(item)
-            del item_copy['page']
-            result = add_page_number_to_toc(page_contents, item_copy, model)
-            if isinstance(result[0]['physical_index'], str) and result[0]['physical_index'].startswith('<physical_index'):
+            item_copy.pop('page', None)
+            result = add_page_number_to_toc(''.join(page_contents), item_copy, model)
+            if result and isinstance(result[0].get('physical_index'), str) and result[0]['physical_index'].startswith('<physical_index'):
                 item['physical_index'] = int(result[0]['physical_index'].split('_')[-1].rstrip('>').strip())
-                del item['page']
+            item.pop('page', None)
     
     return toc_items
 
@@ -804,9 +814,9 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
         page_contents=[]
         for page_index in range(prev_correct, next_correct+1):
             # Add bounds checking to prevent IndexError
-            list_index = page_index - start_index
-            if list_index >= 0 and list_index < len(page_list):
-                page_text = f"<physical_index_{page_index}>\n{page_list[list_index][0]}\n<physical_index_{page_index}>\n\n"
+            page_list_index = page_index - start_index
+            if page_list_index >= 0 and page_list_index < len(page_list):
+                page_text = f"<physical_index_{page_index}>\n{page_list[page_list_index][0]}\n<physical_index_{page_index}>\n\n"
                 page_contents.append(page_text)
             else:
                 continue
@@ -1019,6 +1029,7 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None)
     return node
 
 async def tree_parser(page_list, opt, doc=None, logger=None):
+    _progress_report(opt, "toc_detection", "Detecting table of contents...")
     check_toc_result = check_toc(page_list, opt)
     logger.info(check_toc_result)
 
@@ -1039,12 +1050,14 @@ async def tree_parser(page_list, opt, doc=None, logger=None):
             opt=opt,
             logger=logger)
 
+    _progress_report(opt, "verify_toc", "Verifying section positions...")
     toc_with_page_number = add_preface_if_needed(toc_with_page_number)
     toc_with_page_number = await check_title_appearance_in_start_concurrent(toc_with_page_number, page_list, model=opt.model, logger=logger)
     
     # Filter out items with None physical_index before post_processings
     valid_toc_items = [item for item in toc_with_page_number if item.get('physical_index') is not None]
     
+    _progress_report(opt, "build_tree", "Building document tree...", total_pages=len(page_list))
     toc_tree = post_processing(valid_toc_items, len(page_list))
     tasks = [
         process_large_node_recursively(node, page_list, opt, logger=logger)
@@ -1056,6 +1069,16 @@ async def tree_parser(page_list, opt, doc=None, logger=None):
 
 
 def page_index_main(doc, opt=None):
+    from pageindex.utils import set_response_cache
+    if opt is not None and getattr(opt, "response_cache", False):
+        set_response_cache(True)
+    try:
+        return _page_index_main_impl(doc, opt)
+    finally:
+        set_response_cache(False)
+
+
+def _page_index_main_impl(doc, opt=None):
     logger = JsonLogger(doc)
     
     is_valid_pdf = (
@@ -1066,42 +1089,43 @@ def page_index_main(doc, opt=None):
         raise ValueError("Unsupported input type. Expected a PDF file path or BytesIO object.")
 
     print('Parsing PDF...')
+    _progress_report(opt, "pages_loaded", "Extracting pages...")
     page_list = get_page_tokens(doc)
+    _progress_report(opt, "pages_loaded", f"Extracted {len(page_list)} pages", total_pages=len(page_list))
 
     logger.info({'total_page_number': len(page_list)})
     logger.info({'total_token': sum([page[1] for page in page_list])})
 
     async def page_index_builder():
         structure = await tree_parser(page_list, opt, doc=doc, logger=logger)
+        _progress_report(opt, "node_ids", "Assigning node IDs...")
         if opt.if_add_node_id == 'yes':
             write_node_id(structure)    
         if opt.if_add_node_text == 'yes':
             add_node_text(structure, page_list)
         if opt.if_add_node_summary == 'yes':
+            _progress_report(opt, "summaries", "Generating node summaries...")
             if opt.if_add_node_text == 'no':
                 add_node_text(structure, page_list)
             await generate_summaries_for_structure(structure, model=opt.model)
             if opt.if_add_node_text == 'no':
                 remove_structure_text(structure)
-            if opt.if_add_doc_description == 'yes':
-                # Create a clean structure without unnecessary fields for description generation
-                clean_structure = create_clean_structure_for_description(structure)
-                doc_description = generate_doc_description(clean_structure, model=opt.model)
-                return {
-                    'doc_name': get_pdf_name(doc),
-                    'doc_description': doc_description,
-                    'structure': structure,
-                }
-        return {
+        result = {
             'doc_name': get_pdf_name(doc),
             'structure': structure,
         }
+        if opt.if_add_doc_description == 'yes':
+            _progress_report(opt, "description", "Generating document description...")
+            clean_structure = create_clean_structure_for_description(structure)
+            result['doc_description'] = generate_doc_description(clean_structure, model=opt.model)
+        return result
 
     return asyncio.run(page_index_builder())
 
 
 def page_index(doc, model=None, toc_check_page_num=None, max_page_num_each_node=None, max_token_num_each_node=None,
-               if_add_node_id=None, if_add_node_summary=None, if_add_doc_description=None, if_add_node_text=None):
+               if_add_node_id=None, if_add_node_summary=None, if_add_doc_description=None, if_add_node_text=None,
+               progress_callback=None, response_cache=None):
     
     user_opt = {
         arg: value for arg, value in locals().items()
