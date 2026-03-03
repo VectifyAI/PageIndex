@@ -3,7 +3,7 @@ import os
 import json
 from pageindex import *
 from pageindex.page_index_md import md_to_tree
-
+model = os.getenv("MODEL")
 if __name__ == "__main__":
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Process PDF or Markdown document and generate structure')
@@ -53,7 +53,7 @@ if __name__ == "__main__":
         # Process PDF file
         # Configure options
         opt = config(
-            model=args.model,
+            model=model,
             toc_check_page_num=args.toc_check_pages,
             max_page_num_each_node=args.max_pages_per_node,
             max_token_num_each_node=args.max_tokens_per_node,
@@ -97,7 +97,7 @@ if __name__ == "__main__":
         
         # Create options dict with user args
         user_opt = {
-            'model': args.model,
+            'model': model,
             'if_add_node_summary': args.if_add_node_summary,
             'if_add_doc_description': args.if_add_doc_description,
             'if_add_node_text': args.if_add_node_text,

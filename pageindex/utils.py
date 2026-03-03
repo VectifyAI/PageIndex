@@ -1,5 +1,6 @@
 import tiktoken
 import openai
+import re
 import logging
 import os
 from datetime import datetime
@@ -16,19 +17,24 @@ import logging
 import yaml
 from pathlib import Path
 from types import SimpleNamespace as config
+from pageindex.providers.factory import LLMFactory
+API_KEY = os.getenv("API_KEY")
+PLATFORM = os.getenv("PROVIDER")
+model = os.getenv("MODEL")
+embedding_model = os.getenv("EMBEDDING_MODEL")
 
-CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
-
-def count_tokens(text, model=None):
+def count_tokens(text, model=model):
     if not text:
         return 0
-    enc = tiktoken.encoding_for_model(model)
+    # here we need to do dynamic 
+    
+    enc = tiktoken.get_encoding(embedding_model)
     tokens = enc.encode(text)
     return len(tokens)
 
-def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+def LLM_API_with_finish_reason(prompt,model=model, api_key=API_KEY, chat_history=None):
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
+    llm = LLMFactory.create(PLATFORM, API_KEY)
     for i in range(max_retries):
         try:
             if chat_history:
@@ -37,15 +43,16 @@ def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_
             else:
                 messages = [{"role": "user", "content": prompt}]
             
-            response = client.chat.completions.create(
+            
+            response = llm.generate(
                 model=model,
                 messages=messages,
                 temperature=0,
             )
-            if response.choices[0].finish_reason == "length":
-                return response.choices[0].message.content, "max_output_reached"
+            if response['finish_reason'] == "length":
+                return response['content'], "max_output_reached"
             else:
-                return response.choices[0].message.content, "finished"
+                return response['content'], "finished"
 
         except Exception as e:
             print('************* Retrying *************')
@@ -58,9 +65,9 @@ def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_
 
 
 
-def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+def LLM_API(prompt, model = model,  api_key=API_KEY, chat_history=None):
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
+    llm = LLMFactory.create(PLATFORM, API_KEY)
     for i in range(max_retries):
         try:
             if chat_history:
@@ -69,35 +76,35 @@ def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
             else:
                 messages = [{"role": "user", "content": prompt}]
             
-            response = client.chat.completions.create(
+            response = llm.generate(
                 model=model,
                 messages=messages,
                 temperature=0,
             )
    
-            return response.choices[0].message.content
+            return response['content']
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
-                time.sleep(1)  # Wait for 1秒 before retrying
+                time.sleep(1)  
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
                 return "Error"
             
 
-async def ChatGPT_API_async(model, prompt, api_key=CHATGPT_API_KEY):
+async def LLM_API_async(prompt,model= model,  api_key=API_KEY):
     max_retries = 10
     messages = [{"role": "user", "content": prompt}]
+    llm = LLMFactory.create(PLATFORM, API_KEY)
     for i in range(max_retries):
         try:
-            async with openai.AsyncOpenAI(api_key=api_key) as client:
-                response = await client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    temperature=0,
-                )
-                return response.choices[0].message.content
+            response = await llm.agenerate(
+                model=model,
+                messages=messages,
+                temperature=0,
+            )
+            return response['content']
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
@@ -107,7 +114,7 @@ async def ChatGPT_API_async(model, prompt, api_key=CHATGPT_API_KEY):
                 logging.error('Max retries reached for prompt: ' + prompt)
                 return "Error"  
             
-            
+         
 def get_json_content(response):
     start_idx = response.find("```json")
     if start_idx != -1:
@@ -410,8 +417,10 @@ def add_preface_if_needed(data):
 
 
 
-def get_page_tokens(pdf_path, model="gpt-4o-2024-11-20", pdf_parser="PyPDF2"):
-    enc = tiktoken.encoding_for_model(model)
+def get_page_tokens(pdf_path, model=model, pdf_parser="PyPDF2"):
+    # here we need to dynamic 
+    
+    enc = tiktoken.get_encoding(embedding_model)
     if pdf_parser == "PyPDF2":
         pdf_reader = PyPDF2.PdfReader(pdf_path)
         page_list = []
@@ -609,7 +618,7 @@ async def generate_node_summary(node, model=None):
     
     Directly return the description, do not include any other text.
     """
-    response = await ChatGPT_API_async(model, prompt)
+    response = await LLM_API_async(model, prompt)
     return response
 
 
@@ -654,7 +663,7 @@ def generate_doc_description(structure, model=None):
     
     Directly return the description, do not include any other text.
     """
-    response = ChatGPT_API(model, prompt)
+    response = LLM_API(model, prompt)
     return response
 
 
