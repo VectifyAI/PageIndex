@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pageindex"
+version = "0.1.0b0"
+description = "Transform long documents into hierarchical tree structures for LLM-based retrieval"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.8"
+dependencies = [
+    "openai>=1.0.0",
+    "pymupdf>=1.26.0",
+    "PyPDF2>=3.0.0",
+    "python-dotenv>=1.0.0",
+    "tiktoken>=0.5.0",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+pageindex = "pageindex.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pageindex*"]
+
+[tool.setuptools.package-data]
+pageindex = ["config.yaml"]
