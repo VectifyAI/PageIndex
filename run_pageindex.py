@@ -3,12 +3,15 @@ import os
 import json
 from pageindex import *
 from pageindex.page_index_md import md_to_tree
+from pageindex.batch_processor import process_batch
 
 if __name__ == "__main__":
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Process PDF or Markdown document and generate structure')
     parser.add_argument('--pdf_path', type=str, help='Path to the PDF file')
     parser.add_argument('--md_path', type=str, help='Path to the Markdown file')
+    parser.add_argument('--batch-dir', type=str,
+                        help='Directory of PDF files to process as a batch (creates kb_index.json)')
 
     parser.add_argument('--model', type=str, default='gpt-4o-2024-11-20', help='Model to use')
 
@@ -36,14 +39,47 @@ if __name__ == "__main__":
     parser.add_argument('--summary-token-threshold', type=int, default=200,
                       help='Token threshold for generating summaries (markdown only)')
     args = parser.parse_args()
+
+    # Validate that exactly one mode is specified
+    modes = [bool(args.pdf_path), bool(args.md_path), bool(args.batch_dir)]
+    if sum(modes) == 0:
+        raise ValueError("One of --pdf_path, --md_path, or --batch-dir must be specified.")
+    if sum(modes) > 1:
+        raise ValueError("Only one of --pdf_path, --md_path, or --batch-dir can be specified.")
     
-    # Validate that exactly one file type is specified
-    if not args.pdf_path and not args.md_path:
-        raise ValueError("Either --pdf_path or --md_path must be specified")
-    if args.pdf_path and args.md_path:
-        raise ValueError("Only one of --pdf_path or --md_path can be specified")
-    
-    if args.pdf_path:
+    if args.batch_dir:
+        # Batch mode — process all PDFs in a directory
+        if not os.path.isdir(args.batch_dir):
+            raise ValueError(f"Directory not found: {args.batch_dir}")
+
+        pdf_files = sorted(
+            os.path.join(args.batch_dir, f)
+            for f in os.listdir(args.batch_dir)
+            if f.lower().endswith(".pdf")
+        )
+        if not pdf_files:
+            raise ValueError(f"No PDF files found in: {args.batch_dir}")
+
+        print(f"Found {len(pdf_files)} PDF(s) in '{args.batch_dir}'. Processing...")
+        output_dir = './results'
+        summary = process_batch(
+            doc_paths=pdf_files,
+            output_dir=output_dir,
+            model=args.model,
+            if_add_node_id=args.if_add_node_id,
+            if_add_node_summary=args.if_add_node_summary,
+            if_add_doc_description=args.if_add_doc_description,
+            if_add_node_text=args.if_add_node_text,
+        )
+        print(f"Batch complete.")
+        print(f"  Processed : {len(summary['processed'])} document(s)")
+        print(f"  Failed    : {len(summary['failed'])} document(s)")
+        if summary['failed']:
+            for entry in summary['failed']:
+                print(f"    - {entry['doc']}: {entry['error']}")
+        print(f"  Index     : {summary['kb_index_path']}")
+
+    elif args.pdf_path:
         # Validate PDF file
         if not args.pdf_path.lower().endswith('.pdf'):
             raise ValueError("PDF file must have .pdf extension")
