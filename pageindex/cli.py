@@ -10,6 +10,8 @@ def main():
     parser.add_argument('--md_path', type=str, help='Path to the Markdown file')
 
     parser.add_argument('--model', type=str, default='gpt-4o-2024-11-20', help='Model to use')
+    parser.add_argument('--base-url', type=str, default=None,
+                        help='Custom OpenAI-compatible API base URL (e.g. http://localhost:11434/v1 for Ollama)')
 
     parser.add_argument('--toc-check-pages', type=int, default=20,
                         help='Number of pages to check for table of contents (PDF only)')
@@ -51,6 +53,7 @@ def main():
 
         opt = config(
             model=args.model,
+            base_url=args.base_url,
             toc_check_page_num=args.toc_check_pages,
             max_page_num_each_node=args.max_pages_per_node,
             max_token_num_each_node=args.max_tokens_per_node,
@@ -87,6 +90,7 @@ def main():
         config_loader = ConfigLoader()
         user_opt = {
             'model': args.model,
+            'base_url': args.base_url,
             'if_add_node_summary': args.if_add_node_summary,
             'if_add_doc_description': args.if_add_doc_description,
             'if_add_node_text': args.if_add_node_text,
@@ -101,6 +105,7 @@ def main():
             if_add_node_summary=opt.if_add_node_summary,
             summary_token_threshold=args.summary_token_threshold,
             model=opt.model,
+            base_url=opt.base_url,
             if_add_doc_description=opt.if_add_doc_description,
             if_add_node_text=opt.if_add_node_text,
             if_add_node_id=opt.if_add_node_id

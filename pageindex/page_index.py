@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 ################### check title in page #########################################################
-async def check_title_appearance(item, page_list, start_index=1, model=None):    
+async def check_title_appearance(item, page_list, start_index=1, model=None, base_url=None):    
     title=item['title']
     if 'physical_index' not in item or item['physical_index'] is None:
         return {'list_index': item.get('list_index'), 'answer': 'no', 'title':title, 'page_number': None}
@@ -36,7 +36,7 @@ async def check_title_appearance(item, page_list, start_index=1, model=None):
     }}
     Directly return the final JSON structure. Do not output anything else."""
 
-    response = await ChatGPT_API_async(model=model, prompt=prompt)
+    response = await ChatGPT_API_async(model=model, prompt=prompt, base_url=base_url)
     response = extract_json(response)
     if 'answer' in response:
         answer = response['answer']
@@ -45,7 +45,7 @@ async def check_title_appearance(item, page_list, start_index=1, model=None):
     return {'list_index': item['list_index'], 'answer': answer, 'title': title, 'page_number': page_number}
 
 
-async def check_title_appearance_in_start(title, page_text, model=None, logger=None):    
+async def check_title_appearance_in_start(title, page_text, model=None, base_url=None, logger=None):    
     prompt = f"""
     You will be given the current section title and the current page_text.
     Your job is to check if the current section starts in the beginning of the given page_text.
@@ -64,14 +64,14 @@ async def check_title_appearance_in_start(title, page_text, model=None, logger=N
     }}
     Directly return the final JSON structure. Do not output anything else."""
 
-    response = await ChatGPT_API_async(model=model, prompt=prompt)
+    response = await ChatGPT_API_async(model=model, prompt=prompt, base_url=base_url)
     response = extract_json(response)
     if logger:
         logger.info(f"Response: {response}")
     return response.get("start_begin", "no")
 
 
-async def check_title_appearance_in_start_concurrent(structure, page_list, model=None, logger=None):
+async def check_title_appearance_in_start_concurrent(structure, page_list, model=None, base_url=None, logger=None):
     if logger:
         logger.info("Checking title appearance in start concurrently")
     
@@ -86,7 +86,7 @@ async def check_title_appearance_in_start_concurrent(structure, page_list, model
     for item in structure:
         if item.get('physical_index') is not None:
             page_text = page_list[item['physical_index'] - 1][0]
-            tasks.append(check_title_appearance_in_start(item['title'], page_text, model=model, logger=logger))
+            tasks.append(check_title_appearance_in_start(item['title'], page_text, model=model, base_url=base_url, logger=logger))
             valid_items.append(item)
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -101,7 +101,7 @@ async def check_title_appearance_in_start_concurrent(structure, page_list, model
     return structure
 
 
-def toc_detector_single_page(content, model=None):
+def toc_detector_single_page(content, model=None, base_url=None):
     prompt = f"""
     Your job is to detect if there is a table of content provided in the given text.
 
@@ -116,13 +116,13 @@ def toc_detector_single_page(content, model=None):
     Directly return the final JSON structure. Do not output anything else.
     Please note: abstract,summary, notation list, figure list, table list, etc. are not table of contents."""
 
-    response = ChatGPT_API(model=model, prompt=prompt)
+    response = ChatGPT_API(model=model, prompt=prompt, base_url=base_url)
     # print('response', response)
-    json_content = extract_json(response)    
+    json_content = extract_json(response)
     return json_content['toc_detected']
 
 
-def check_if_toc_extraction_is_complete(content, toc, model=None):
+def check_if_toc_extraction_is_complete(content, toc, model=None, base_url=None):
     prompt = f"""
     You are given a partial document  and a  table of contents.
     Your job is to check if the  table of contents is complete, which it contains all the main sections in the partial document.
@@ -135,12 +135,12 @@ def check_if_toc_extraction_is_complete(content, toc, model=None):
     Directly return the final JSON structure. Do not output anything else."""
 
     prompt = prompt + '\n Document:\n' + content + '\n Table of contents:\n' + toc
-    response = ChatGPT_API(model=model, prompt=prompt)
+    response = ChatGPT_API(model=model, prompt=prompt, base_url=base_url)
     json_content = extract_json(response)
     return json_content['completed']
 
 
-def check_if_toc_transformation_is_complete(content, toc, model=None):
+def check_if_toc_transformation_is_complete(content, toc, model=None, base_url=None):
     prompt = f"""
     You are given a raw table of contents and a  table of contents.
     Your job is to check if the  table of contents is complete.
@@ -153,11 +153,11 @@ def check_if_toc_transformation_is_complete(content, toc, model=None):
     Directly return the final JSON structure. Do not output anything else."""
 
     prompt = prompt + '\n Raw Table of contents:\n' + content + '\n Cleaned Table of contents:\n' + toc
-    response = ChatGPT_API(model=model, prompt=prompt)
+    response = ChatGPT_API(model=model, prompt=prompt, base_url=base_url)
     json_content = extract_json(response)
     return json_content['completed']
 
-def extract_toc_content(content, model=None):
+def extract_toc_content(content, model=None, base_url=None):
     prompt = f"""
     Your job is to extract the full table of contents from the given text, replace ... with :
 
@@ -165,30 +165,30 @@ def extract_toc_content(content, model=None):
 
     Directly return the full table of contents content. Do not output anything else."""
 
-    response, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt)
-    
-    if_complete = check_if_toc_transformation_is_complete(content, response, model)
+    response, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt, base_url=base_url)
+
+    if_complete = check_if_toc_transformation_is_complete(content, response, model, base_url=base_url)
     if if_complete == "yes" and finish_reason == "finished":
         return response
-    
+
     chat_history = [
-        {"role": "user", "content": prompt}, 
-        {"role": "assistant", "content": response},    
+        {"role": "user", "content": prompt},
+        {"role": "assistant", "content": response},
     ]
     prompt = f"""please continue the generation of table of contents , directly output the remaining part of the structure"""
-    new_response, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt, chat_history=chat_history)
+    new_response, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt, chat_history=chat_history, base_url=base_url)
     response = response + new_response
-    if_complete = check_if_toc_transformation_is_complete(content, response, model)
-    
+    if_complete = check_if_toc_transformation_is_complete(content, response, model, base_url=base_url)
+
     while not (if_complete == "yes" and finish_reason == "finished"):
         chat_history = [
-            {"role": "user", "content": prompt}, 
-            {"role": "assistant", "content": response},    
+            {"role": "user", "content": prompt},
+            {"role": "assistant", "content": response},
         ]
         prompt = f"""please continue the generation of table of contents , directly output the remaining part of the structure"""
-        new_response, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt, chat_history=chat_history)
+        new_response, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt, chat_history=chat_history, base_url=base_url)
         response = response + new_response
-        if_complete = check_if_toc_transformation_is_complete(content, response, model)
+        if_complete = check_if_toc_transformation_is_complete(content, response, model, base_url=base_url)
         
         # Optional: Add a maximum retry limit to prevent infinite loops
         if len(chat_history) > 5:  # Arbitrary limit of 10 attempts
@@ -196,7 +196,7 @@ def extract_toc_content(content, model=None):
     
     return response
 
-def detect_page_index(toc_content, model=None):
+def detect_page_index(toc_content, model=None, base_url=None):
     print('start detect_page_index')
     prompt = f"""
     You will be given a table of contents.
@@ -212,11 +212,11 @@ def detect_page_index(toc_content, model=None):
     }}
     Directly return the final JSON structure. Do not output anything else."""
 
-    response = ChatGPT_API(model=model, prompt=prompt)
+    response = ChatGPT_API(model=model, prompt=prompt, base_url=base_url)
     json_content = extract_json(response)
     return json_content['page_index_given_in_toc']
 
-def toc_extractor(page_list, toc_page_list, model):
+def toc_extractor(page_list, toc_page_list, model, base_url=None):
     def transform_dots_to_colon(text):
         text = re.sub(r'\.{5,}', ': ', text)
         # Handle dots separated by spaces
@@ -227,7 +227,7 @@ def toc_extractor(page_list, toc_page_list, model):
     for page_index in toc_page_list:
         toc_content += page_list[page_index][0]
     toc_content = transform_dots_to_colon(toc_content)
-    has_page_index = detect_page_index(toc_content, model=model)
+    has_page_index = detect_page_index(toc_content, model=model, base_url=base_url)
     
     return {
         "toc_content": toc_content,
@@ -237,7 +237,7 @@ def toc_extractor(page_list, toc_page_list, model):
 
 
 
-def toc_index_extractor(toc, content, model=None):
+def toc_index_extractor(toc, content, model=None, base_url=None):
     print('start toc_index_extractor')
     toc_extractor_prompt = """
     You are given a table of contents in a json format and several pages of a document, your job is to add the physical_index to the table of contents in the json format.
@@ -261,13 +261,13 @@ def toc_index_extractor(toc, content, model=None):
     Directly return the final JSON structure. Do not output anything else."""
 
     prompt = toc_extractor_prompt + '\nTable of contents:\n' + str(toc) + '\nDocument pages:\n' + content
-    response = ChatGPT_API(model=model, prompt=prompt)
-    json_content = extract_json(response)    
+    response = ChatGPT_API(model=model, prompt=prompt, base_url=base_url)
+    json_content = extract_json(response)
     return json_content
 
 
 
-def toc_transformer(toc_content, model=None):
+def toc_transformer(toc_content, model=None, base_url=None):
     print('start toc_transformer')
     init_prompt = """
     You are given a table of contents, You job is to transform the whole table of content into a JSON format included table_of_contents.
@@ -289,8 +289,8 @@ def toc_transformer(toc_content, model=None):
     Directly return the final JSON structure, do not output anything else. """
 
     prompt = init_prompt + '\n Given table of contents\n:' + toc_content
-    last_complete, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt)
-    if_complete = check_if_toc_transformation_is_complete(toc_content, last_complete, model)
+    last_complete, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt, base_url=base_url)
+    if_complete = check_if_toc_transformation_is_complete(toc_content, last_complete, model, base_url=base_url)
     if if_complete == "yes" and finish_reason == "finished":
         last_complete = extract_json(last_complete)
         cleaned_response=convert_page_to_int(last_complete['table_of_contents'])
@@ -313,13 +313,13 @@ def toc_transformer(toc_content, model=None):
 
         Please continue the json structure, directly output the remaining part of the json structure."""
 
-        new_complete, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt)
+        new_complete, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt, base_url=base_url)
 
         if new_complete.startswith('```json'):
-            new_complete =  get_json_content(new_complete)
-            last_complete = last_complete+new_complete
+            new_complete = get_json_content(new_complete)
+            last_complete = last_complete + new_complete
 
-        if_complete = check_if_toc_transformation_is_complete(toc_content, last_complete, model)
+        if_complete = check_if_toc_transformation_is_complete(toc_content, last_complete, model, base_url=base_url)
         
 
     last_complete = json.loads(last_complete)
@@ -340,7 +340,7 @@ def find_toc_pages(start_page_index, page_list, opt, logger=None):
         # Only check beyond max_pages if we're still finding TOC pages
         if i >= opt.toc_check_page_num and not last_page_is_yes:
             break
-        detected_result = toc_detector_single_page(page_list[i][0],model=opt.model)
+        detected_result = toc_detector_single_page(page_list[i][0], model=opt.model, base_url=opt.base_url)
         if detected_result == 'yes':
             if logger:
                 logger.info(f'Page {i} has toc')
@@ -450,7 +450,7 @@ def page_list_to_group_text(page_contents, token_lengths, max_tokens=20000, over
     print('divide page_list to groups', len(subsets))
     return subsets
 
-def add_page_number_to_toc(part, structure, model=None):
+def add_page_number_to_toc(part, structure, model=None, base_url=None):
     fill_prompt_seq = """
     You are given an JSON structure of a document and a partial part of the document. Your task is to check if the title that is described in the structure is started in the partial given document.
 
@@ -474,7 +474,7 @@ def add_page_number_to_toc(part, structure, model=None):
     Directly return the final JSON structure. Do not output anything else."""
 
     prompt = fill_prompt_seq + f"\n\nCurrent Partial Document:\n{part}\n\nGiven Structure\n{json.dumps(structure, indent=2)}\n"
-    current_json_raw = ChatGPT_API(model=model, prompt=prompt)
+    current_json_raw = ChatGPT_API(model=model, prompt=prompt, base_url=base_url)
     json_result = extract_json(current_json_raw)
     
     for item in json_result:
@@ -496,7 +496,7 @@ def remove_first_physical_index_section(text):
     return text
 
 ### add verify completeness
-def generate_toc_continue(toc_content, part, model="gpt-4o-2024-11-20"):
+def generate_toc_continue(toc_content, part, model="gpt-4o-2024-11-20", base_url=None):
     print('start generate_toc_continue')
     prompt = """
     You are an expert in extracting hierarchical tree structure.
@@ -524,14 +524,14 @@ def generate_toc_continue(toc_content, part, model="gpt-4o-2024-11-20"):
     Directly return the additional part of the final JSON structure. Do not output anything else."""
 
     prompt = prompt + '\nGiven text\n:' + part + '\nPrevious tree structure\n:' + json.dumps(toc_content, indent=2)
-    response, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt)
+    response, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt, base_url=base_url)
     if finish_reason == 'finished':
         return extract_json(response)
     else:
         raise Exception(f'finish reason: {finish_reason}')
     
 ### add verify completeness
-def generate_toc_init(part, model=None):
+def generate_toc_init(part, model=None, base_url=None):
     print('start generate_toc_init')
     prompt = """
     You are an expert in extracting hierarchical tree structure, your task is to generate the tree structure of the document.
@@ -558,14 +558,14 @@ def generate_toc_init(part, model=None):
     Directly return the final JSON structure. Do not output anything else."""
 
     prompt = prompt + '\nGiven text\n:' + part
-    response, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt)
+    response, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt, base_url=base_url)
 
     if finish_reason == 'finished':
-         return extract_json(response)
+        return extract_json(response)
     else:
         raise Exception(f'finish reason: {finish_reason}')
 
-def process_no_toc(page_list, start_index=1, model=None, logger=None):
+def process_no_toc(page_list, start_index=1, model=None, base_url=None, logger=None):
     page_contents=[]
     token_lengths=[]
     for page_index in range(start_index, start_index+len(page_list)):
@@ -575,9 +575,9 @@ def process_no_toc(page_list, start_index=1, model=None, logger=None):
     group_texts = page_list_to_group_text(page_contents, token_lengths)
     logger.info(f'len(group_texts): {len(group_texts)}')
 
-    toc_with_page_number= generate_toc_init(group_texts[0], model)
+    toc_with_page_number = generate_toc_init(group_texts[0], model, base_url=base_url)
     for group_text in group_texts[1:]:
-        toc_with_page_number_additional = generate_toc_continue(toc_with_page_number, group_text, model)    
+        toc_with_page_number_additional = generate_toc_continue(toc_with_page_number, group_text, model, base_url=base_url)    
         toc_with_page_number.extend(toc_with_page_number_additional)
     logger.info(f'generate_toc: {toc_with_page_number}')
 
@@ -586,10 +586,10 @@ def process_no_toc(page_list, start_index=1, model=None, logger=None):
 
     return toc_with_page_number
 
-def process_toc_no_page_numbers(toc_content, toc_page_list, page_list,  start_index=1, model=None, logger=None):
+def process_toc_no_page_numbers(toc_content, toc_page_list, page_list, start_index=1, model=None, base_url=None, logger=None):
     page_contents=[]
     token_lengths=[]
-    toc_content = toc_transformer(toc_content, model)
+    toc_content = toc_transformer(toc_content, model, base_url=base_url)
     logger.info(f'toc_transformer: {toc_content}')
     for page_index in range(start_index, start_index+len(page_list)):
         page_text = f"<physical_index_{page_index}>\n{page_list[page_index-start_index][0]}\n<physical_index_{page_index}>\n\n"
@@ -601,7 +601,7 @@ def process_toc_no_page_numbers(toc_content, toc_page_list, page_list,  start_in
 
     toc_with_page_number=copy.deepcopy(toc_content)
     for group_text in group_texts:
-        toc_with_page_number = add_page_number_to_toc(group_text, toc_with_page_number, model)
+        toc_with_page_number = add_page_number_to_toc(group_text, toc_with_page_number, model, base_url=base_url)
     logger.info(f'add_page_number_to_toc: {toc_with_page_number}')
 
     toc_with_page_number = convert_physical_index_to_int(toc_with_page_number)
@@ -611,8 +611,8 @@ def process_toc_no_page_numbers(toc_content, toc_page_list, page_list,  start_in
 
 
 
-def process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_check_page_num=None, model=None, logger=None):
-    toc_with_page_number = toc_transformer(toc_content, model)
+def process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_check_page_num=None, model=None, base_url=None, logger=None):
+    toc_with_page_number = toc_transformer(toc_content, model, base_url=base_url)
     logger.info(f'toc_with_page_number: {toc_with_page_number}')
 
     toc_no_page_number = remove_page_number(copy.deepcopy(toc_with_page_number))
@@ -622,7 +622,7 @@ def process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_che
     for page_index in range(start_page_index, min(start_page_index + toc_check_page_num, len(page_list))):
         main_content += f"<physical_index_{page_index+1}>\n{page_list[page_index][0]}\n<physical_index_{page_index+1}>\n\n"
 
-    toc_with_physical_index = toc_index_extractor(toc_no_page_number, main_content, model)
+    toc_with_physical_index = toc_index_extractor(toc_no_page_number, main_content, model, base_url=base_url)
     logger.info(f'toc_with_physical_index: {toc_with_physical_index}')
 
     toc_with_physical_index = convert_physical_index_to_int(toc_with_physical_index)
@@ -637,7 +637,7 @@ def process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_che
     toc_with_page_number = add_page_offset_to_toc_json(toc_with_page_number, offset)
     logger.info(f'toc_with_page_number: {toc_with_page_number}')
 
-    toc_with_page_number = process_none_page_numbers(toc_with_page_number, page_list, model=model)
+    toc_with_page_number = process_none_page_numbers(toc_with_page_number, page_list, model=model, base_url=base_url)
     logger.info(f'toc_with_page_number: {toc_with_page_number}')
 
     return toc_with_page_number
@@ -645,7 +645,7 @@ def process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_che
 
 
 ##check if needed to process none page numbers
-def process_none_page_numbers(toc_items, page_list, start_index=1, model=None):
+def process_none_page_numbers(toc_items, page_list, start_index=1, model=None, base_url=None):
     for i, item in enumerate(toc_items):
         if "physical_index" not in item:
             # logger.info(f"fix item: {item}")
@@ -675,7 +675,7 @@ def process_none_page_numbers(toc_items, page_list, start_index=1, model=None):
 
             item_copy = copy.deepcopy(item)
             del item_copy['page']
-            result = add_page_number_to_toc(page_contents, item_copy, model)
+            result = add_page_number_to_toc(page_contents, item_copy, model, base_url=base_url)
             if isinstance(result[0]['physical_index'], str) and result[0]['physical_index'].startswith('<physical_index'):
                 item['physical_index'] = int(result[0]['physical_index'].split('_')[-1].rstrip('>').strip())
                 del item['page']
@@ -692,7 +692,7 @@ def check_toc(page_list, opt=None):
         return {'toc_content': None, 'toc_page_list': [], 'page_index_given_in_toc': 'no'}
     else:
         print('toc found')
-        toc_json = toc_extractor(page_list, toc_page_list, opt.model)
+        toc_json = toc_extractor(page_list, toc_page_list, opt.model, base_url=opt.base_url)
 
         if toc_json['page_index_given_in_toc'] == 'yes':
             print('index found')
@@ -713,7 +713,7 @@ def check_toc(page_list, opt=None):
                 if len(additional_toc_pages) == 0:
                     break
 
-                additional_toc_json = toc_extractor(page_list, additional_toc_pages, opt.model)
+                additional_toc_json = toc_extractor(page_list, additional_toc_pages, opt.model, base_url=opt.base_url)
                 if additional_toc_json['page_index_given_in_toc'] == 'yes':
                     print('index found')
                     return {'toc_content': additional_toc_json['toc_content'], 'toc_page_list': additional_toc_pages, 'page_index_given_in_toc': 'yes'}
@@ -729,7 +729,7 @@ def check_toc(page_list, opt=None):
 
 
 ################### fix incorrect toc #########################################################
-def single_toc_item_index_fixer(section_title, content, model="gpt-4o-2024-11-20"):
+def single_toc_item_index_fixer(section_title, content, model="gpt-4o-2024-11-20", base_url=None):
     toc_extractor_prompt = """
     You are given a section title and several pages of a document, your job is to find the physical index of the start page of the section in the partial document.
 
@@ -743,13 +743,13 @@ def single_toc_item_index_fixer(section_title, content, model="gpt-4o-2024-11-20
     Directly return the final JSON structure. Do not output anything else."""
 
     prompt = toc_extractor_prompt + '\nSection Title:\n' + str(section_title) + '\nDocument pages:\n' + content
-    response = ChatGPT_API(model=model, prompt=prompt)
-    json_content = extract_json(response)    
+    response = ChatGPT_API(model=model, prompt=prompt, base_url=base_url)
+    json_content = extract_json(response)
     return convert_physical_index_to_int(json_content['physical_index'])
 
 
 
-async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, start_index=1, model=None, logger=None):
+async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, start_index=1, model=None, base_url=None, logger=None):
     print(f'start fix_incorrect_toc with {len(incorrect_results)} incorrect results')
     incorrect_indices = {result['list_index'] for result in incorrect_results}
     
@@ -812,12 +812,12 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
                 continue
         content_range = ''.join(page_contents)
         
-        physical_index_int = single_toc_item_index_fixer(incorrect_item['title'], content_range, model)
-        
+        physical_index_int = single_toc_item_index_fixer(incorrect_item['title'], content_range, model, base_url=base_url)
+
         # Check if the result is correct
         check_item = incorrect_item.copy()
         check_item['physical_index'] = physical_index_int
-        check_result = await check_title_appearance(check_item, page_list, start_index, model)
+        check_result = await check_title_appearance(check_item, page_list, start_index, model, base_url=base_url)
 
         return {
             'list_index': list_index,
@@ -867,7 +867,7 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
 
 
 
-async def fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorrect_results, start_index=1, max_attempts=3, model=None, logger=None):
+async def fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorrect_results, start_index=1, max_attempts=3, model=None, base_url=None, logger=None):
     print('start fix_incorrect_toc')
     fix_attempt = 0
     current_toc = toc_with_page_number
@@ -876,7 +876,7 @@ async def fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorr
     while current_incorrect:
         print(f"Fixing {len(current_incorrect)} incorrect results")
         
-        current_toc, current_incorrect = await fix_incorrect_toc(current_toc, page_list, current_incorrect, start_index, model, logger)
+        current_toc, current_incorrect = await fix_incorrect_toc(current_toc, page_list, current_incorrect, start_index, model, base_url=base_url, logger=logger)
                 
         fix_attempt += 1
         if fix_attempt >= max_attempts:
@@ -889,7 +889,7 @@ async def fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorr
 
 
 ################### verify toc #########################################################
-async def verify_toc(page_list, list_result, start_index=1, N=None, model=None):
+async def verify_toc(page_list, list_result, start_index=1, N=None, model=None, base_url=None):
     print('start verify_toc')
     # Find the last non-None physical_index
     last_physical_index = None
@@ -923,7 +923,7 @@ async def verify_toc(page_list, list_result, start_index=1, N=None, model=None):
 
     # Run checks concurrently
     tasks = [
-        check_title_appearance(item, page_list, start_index, model)
+        check_title_appearance(item, page_list, start_index, model, base_url=base_url)
         for item in indexed_sample_list
     ]
     results = await asyncio.gather(*tasks)
@@ -953,11 +953,11 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
     print(f'start_index: {start_index}')
     
     if mode == 'process_toc_with_page_numbers':
-        toc_with_page_number = process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_check_page_num=opt.toc_check_page_num, model=opt.model, logger=logger)
+        toc_with_page_number = process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_check_page_num=opt.toc_check_page_num, model=opt.model, base_url=opt.base_url, logger=logger)
     elif mode == 'process_toc_no_page_numbers':
-        toc_with_page_number = process_toc_no_page_numbers(toc_content, toc_page_list, page_list, model=opt.model, logger=logger)
+        toc_with_page_number = process_toc_no_page_numbers(toc_content, toc_page_list, page_list, model=opt.model, base_url=opt.base_url, logger=logger)
     else:
-        toc_with_page_number = process_no_toc(page_list, start_index=start_index, model=opt.model, logger=logger)
+        toc_with_page_number = process_no_toc(page_list, start_index=start_index, model=opt.model, base_url=opt.base_url, logger=logger)
             
     toc_with_page_number = [item for item in toc_with_page_number if item.get('physical_index') is not None] 
     
@@ -968,7 +968,7 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
         logger=logger
     )
     
-    accuracy, incorrect_results = await verify_toc(page_list, toc_with_page_number, start_index=start_index, model=opt.model)
+    accuracy, incorrect_results = await verify_toc(page_list, toc_with_page_number, start_index=start_index, model=opt.model, base_url=opt.base_url)
         
     logger.info({
         'mode': 'process_toc_with_page_numbers',
@@ -978,7 +978,7 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
     if accuracy == 1.0 and len(incorrect_results) == 0:
         return toc_with_page_number
     if accuracy > 0.6 and len(incorrect_results) > 0:
-        toc_with_page_number, incorrect_results = await fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorrect_results,start_index=start_index, max_attempts=3, model=opt.model, logger=logger)
+        toc_with_page_number, incorrect_results = await fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorrect_results, start_index=start_index, max_attempts=3, model=opt.model, base_url=opt.base_url, logger=logger)
         return toc_with_page_number
     else:
         if mode == 'process_toc_with_page_numbers':
@@ -997,7 +997,7 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None)
         print('large node:', node['title'], 'start_index:', node['start_index'], 'end_index:', node['end_index'], 'token_num:', token_num)
 
         node_toc_tree = await meta_processor(node_page_list, mode='process_no_toc', start_index=node['start_index'], opt=opt, logger=logger)
-        node_toc_tree = await check_title_appearance_in_start_concurrent(node_toc_tree, page_list, model=opt.model, logger=logger)
+        node_toc_tree = await check_title_appearance_in_start_concurrent(node_toc_tree, page_list, model=opt.model, base_url=opt.base_url, logger=logger)
         
         # Filter out items with None physical_index before post_processing
         valid_node_toc_items = [item for item in node_toc_tree if item.get('physical_index') is not None]
@@ -1040,7 +1040,7 @@ async def tree_parser(page_list, opt, doc=None, logger=None):
             logger=logger)
 
     toc_with_page_number = add_preface_if_needed(toc_with_page_number)
-    toc_with_page_number = await check_title_appearance_in_start_concurrent(toc_with_page_number, page_list, model=opt.model, logger=logger)
+    toc_with_page_number = await check_title_appearance_in_start_concurrent(toc_with_page_number, page_list, model=opt.model, base_url=opt.base_url, logger=logger)
     
     # Filter out items with None physical_index before post_processings
     valid_toc_items = [item for item in toc_with_page_number if item.get('physical_index') is not None]
@@ -1080,13 +1080,13 @@ def page_index_main(doc, opt=None):
         if opt.if_add_node_summary == 'yes':
             if opt.if_add_node_text == 'no':
                 add_node_text(structure, page_list)
-            await generate_summaries_for_structure(structure, model=opt.model)
+            await generate_summaries_for_structure(structure, model=opt.model, base_url=opt.base_url)
             if opt.if_add_node_text == 'no':
                 remove_structure_text(structure)
             if opt.if_add_doc_description == 'yes':
                 # Create a clean structure without unnecessary fields for description generation
                 clean_structure = create_clean_structure_for_description(structure)
-                doc_description = generate_doc_description(clean_structure, model=opt.model)
+                doc_description = generate_doc_description(clean_structure, model=opt.model, base_url=opt.base_url)
                 return {
                     'doc_name': get_pdf_name(doc),
                     'doc_description': doc_description,
@@ -1100,7 +1100,7 @@ def page_index_main(doc, opt=None):
     return asyncio.run(page_index_builder())
 
 
-def page_index(doc, model=None, toc_check_page_num=None, max_page_num_each_node=None, max_token_num_each_node=None,
+def page_index(doc, model=None, base_url=None, toc_check_page_num=None, max_page_num_each_node=None, max_token_num_each_node=None,
                if_add_node_id=None, if_add_node_summary=None, if_add_doc_description=None, if_add_node_text=None):
     
     user_opt = {
