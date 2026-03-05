@@ -180,11 +180,35 @@ You can customize the processing with additional optional arguments:
 --if-add-node-id        Add node ID (yes/no, default: yes)
 --if-add-node-summary   Add node summary (yes/no, default: yes)
 --if-add-doc-description Add doc description (yes/no, default: yes)
+--enable-profile         Enable runtime CPU/memory profiling
+--profile-output         Output path for profile report JSON (default: ./results/profile_report.json)
 ```
 </details>
 
 <details>
-<summary>Markdown support</summary>
+<summary><strong>CPU and memory profiling under heavy load</strong></summary>
+<br>
+Use profiling mode to measure end-to-end runtime and peak memory when processing larger PDFs or running repeated load tests.
+
+```bash
+python3 run_pageindex.py \
+  --pdf_path /path/to/your/large-document.pdf \
+  --max-pages-per-node 20 \
+  --max-tokens-per-node 30000 \
+  --enable-profile \
+  --profile-output ./results/heavy-load-profile.json
+```
+
+The generated JSON report includes:
+- `elapsed_seconds`: total wall-clock runtime
+- `peak_memory_mb`: Python peak memory during the run (tracemalloc)
+- `rss_mb`: max resident memory of the process (when supported by OS)
+
+Use this output to compare tuning changes (e.g., `--max-pages-per-node`, model choice, or input-size buckets) and identify memory pressure regressions.
+</details>
+
+<details>
+<summary><strong>Markdown support</strong></summary>
 <br>
 We also provide markdown support for PageIndex. You can use the `--md_path` flag to generate a tree structure for a markdown file.
 
