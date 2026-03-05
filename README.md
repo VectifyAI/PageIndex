@@ -147,18 +147,38 @@ You can follow these steps to generate a PageIndex tree from a PDF document.
 pip3 install --upgrade -r requirements.txt
 ```
 
-### 2. Set your OpenAI API key
+### 2. Set your API key
 
-Create a `.env` file in the root directory and add your API key:
+Create a `.env` file in the root directory and add your API key for your chosen provider:
 
 ```bash
+# OpenAI (default)
 CHATGPT_API_KEY=your_openai_key_here
+
+# Anthropic (optional)
+ANTHROPIC_API_KEY=your_anthropic_key_here
+
+# Ollama — no API key needed, just have Ollama running locally
 ```
 
 ### 3. Run PageIndex on your PDF
 
+**OpenAI (default):**
 ```bash
 python3 run_pageindex.py --pdf_path /path/to/your/document.pdf
+```
+
+**Anthropic:**
+```bash
+python3 run_pageindex.py --pdf_path /path/to/your/document.pdf \
+  --provider anthropic --model claude-sonnet-4-20250514
+```
+
+**Ollama (local models):**
+```bash
+# Make sure Ollama is running (ollama serve)
+python3 run_pageindex.py --pdf_path /path/to/your/document.pdf \
+  --provider ollama --model llama3
 ```
 
 <details>
@@ -167,7 +187,9 @@ python3 run_pageindex.py --pdf_path /path/to/your/document.pdf
 You can customize the processing with additional optional arguments:
 
 ```
---model                 OpenAI model to use (default: gpt-4o-2024-11-20)
+--model                 Model to use (default: gpt-4o-2024-11-20)
+--provider              LLM provider: openai, anthropic, or ollama (default: openai)
+--api-base-url          Custom API base URL (e.g. http://localhost:11434/v1 for Ollama)
 --toc-check-pages       Pages to check for table of contents (default: 20)
 --max-pages-per-node    Max pages per node (default: 10)
 --max-tokens-per-node   Max tokens per node (default: 20000)
@@ -175,6 +197,25 @@ You can customize the processing with additional optional arguments:
 --if-add-node-summary   Add node summary (yes/no, default: yes)
 --if-add-doc-description Add doc description (yes/no, default: yes)
 ```
+
+You can also set the provider via environment variables instead of CLI flags:
+```bash
+export LLM_PROVIDER=ollama          # or "anthropic"
+export API_BASE_URL=http://localhost:11434/v1  # optional, for custom endpoints
+```
+</details>
+
+<details>
+<summary><strong>Supported LLM Providers</strong></summary>
+<br>
+
+| Provider | Example Models | API Key Env Var | Notes |
+|----------|---------------|-----------------|-------|
+| **OpenAI** (default) | `gpt-4o-2024-11-20`, `gpt-4o-mini` | `CHATGPT_API_KEY` | Full support, recommended |
+| **Anthropic** | `claude-sonnet-4-20250514`, `claude-haiku-4-5-20251001` | `ANTHROPIC_API_KEY` | Full support |
+| **Ollama** | `llama3`, `mistral`, `qwen2.5` | _(none needed)_ | Requires Ollama running locally. Uses OpenAI-compatible API at `http://localhost:11434/v1` |
+
+**Note:** PageIndex relies on structured JSON output from the LLM. For best results, use capable models (GPT-4o, Claude Sonnet/Opus, or large Ollama models like Llama 3 70B+). Smaller local models may produce lower-quality tree structures.
 </details>
 
 <details>

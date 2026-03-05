@@ -18,17 +18,87 @@ from pathlib import Path
 from types import SimpleNamespace as config
 
 CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai")  # "openai", "anthropic", or "ollama"
+API_BASE_URL = os.getenv("API_BASE_URL")  # e.g. http://localhost:11434/v1 for Ollama
+
+
+def _get_provider_config(provider=None, api_key=None, base_url=None):
+    """Resolve provider, api_key, and base_url from args or environment."""
+    provider = provider or LLM_PROVIDER
+    if provider == "ollama":
+        return {
+            "provider": "ollama",
+            "api_key": api_key or "ollama",
+            "base_url": base_url or API_BASE_URL or "http://localhost:11434/v1",
+        }
+    elif provider == "anthropic":
+        return {
+            "provider": "anthropic",
+            "api_key": api_key or ANTHROPIC_API_KEY,
+        }
+    else:  # openai (default)
+        cfg = {
+            "provider": "openai",
+            "api_key": api_key or CHATGPT_API_KEY,
+        }
+        if base_url or API_BASE_URL:
+            cfg["base_url"] = base_url or API_BASE_URL
+        return cfg
+
+
+def _call_anthropic(model, messages, api_key):
+    """Synchronous Anthropic API call."""
+    import anthropic
+    client = anthropic.Anthropic(api_key=api_key)
+    # Convert openai-style messages: extract system if present
+    system_msg = None
+    user_messages = []
+    for m in messages:
+        if m["role"] == "system":
+            system_msg = m["content"]
+        else:
+            user_messages.append(m)
+    kwargs = {"model": model, "max_tokens": 8192, "temperature": 0, "messages": user_messages}
+    if system_msg:
+        kwargs["system"] = system_msg
+    response = client.messages.create(**kwargs)
+    return response.content[0].text
+
+
+async def _call_anthropic_async(model, messages, api_key):
+    """Asynchronous Anthropic API call."""
+    import anthropic
+    client = anthropic.AsyncAnthropic(api_key=api_key)
+    system_msg = None
+    user_messages = []
+    for m in messages:
+        if m["role"] == "system":
+            system_msg = m["content"]
+        else:
+            user_messages.append(m)
+    kwargs = {"model": model, "max_tokens": 8192, "temperature": 0, "messages": user_messages}
+    if system_msg:
+        kwargs["system"] = system_msg
+    response = await client.messages.create(**kwargs)
+    return response.content[0].text
+
 
 def count_tokens(text, model=None):
     if not text:
         return 0
-    enc = tiktoken.encoding_for_model(model)
+    try:
+        enc = tiktoken.encoding_for_model(model)
+    except KeyError:
+        # Fallback for non-OpenAI models (Anthropic, Ollama, etc.)
+        enc = tiktoken.get_encoding("cl100k_base")
     tokens = enc.encode(text)
     return len(tokens)
 
-def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+def ChatGPT_API_with_finish_reason(model, prompt, api_key=None, chat_history=None, provider=None, base_url=None):
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
+    pcfg = _get_provider_config(provider, api_key, base_url)
+
     for i in range(max_retries):
         try:
             if chat_history:
@@ -36,31 +106,40 @@ def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_
                 messages.append({"role": "user", "content": prompt})
             else:
                 messages = [{"role": "user", "content": prompt}]
-            
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0,
-            )
-            if response.choices[0].finish_reason == "length":
-                return response.choices[0].message.content, "max_output_reached"
+
+            if pcfg["provider"] == "anthropic":
+                content = _call_anthropic(model, messages, pcfg["api_key"])
+                return content, "finished"
             else:
-                return response.choices[0].message.content, "finished"
+                client_kwargs = {"api_key": pcfg["api_key"]}
+                if "base_url" in pcfg:
+                    client_kwargs["base_url"] = pcfg["base_url"]
+                client = openai.OpenAI(**client_kwargs)
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=0,
+                )
+                if response.choices[0].finish_reason == "length":
+                    return response.choices[0].message.content, "max_output_reached"
+                else:
+                    return response.choices[0].message.content, "finished"
 
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
-                time.sleep(1)  # Wait for 1秒 before retrying
+                time.sleep(1)
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
                 return "Error"
 
 
 
-def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+def ChatGPT_API(model, prompt, api_key=None, chat_history=None, provider=None, base_url=None):
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
+    pcfg = _get_provider_config(provider, api_key, base_url)
+
     for i in range(max_retries):
         try:
             if chat_history:
@@ -68,41 +147,56 @@ def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
                 messages.append({"role": "user", "content": prompt})
             else:
                 messages = [{"role": "user", "content": prompt}]
-            
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0,
-            )
-   
-            return response.choices[0].message.content
-        except Exception as e:
-            print('************* Retrying *************')
-            logging.error(f"Error: {e}")
-            if i < max_retries - 1:
-                time.sleep(1)  # Wait for 1秒 before retrying
-            else:
-                logging.error('Max retries reached for prompt: ' + prompt)
-                return "Error"
-            
 
-async def ChatGPT_API_async(model, prompt, api_key=CHATGPT_API_KEY):
-    max_retries = 10
-    messages = [{"role": "user", "content": prompt}]
-    for i in range(max_retries):
-        try:
-            async with openai.AsyncOpenAI(api_key=api_key) as client:
-                response = await client.chat.completions.create(
+            if pcfg["provider"] == "anthropic":
+                return _call_anthropic(model, messages, pcfg["api_key"])
+            else:
+                client_kwargs = {"api_key": pcfg["api_key"]}
+                if "base_url" in pcfg:
+                    client_kwargs["base_url"] = pcfg["base_url"]
+                client = openai.OpenAI(**client_kwargs)
+                response = client.chat.completions.create(
                     model=model,
                     messages=messages,
                     temperature=0,
                 )
                 return response.choices[0].message.content
+
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
-                await asyncio.sleep(1)  # Wait for 1s before retrying
+                time.sleep(1)
+            else:
+                logging.error('Max retries reached for prompt: ' + prompt)
+                return "Error"
+            
+
+async def ChatGPT_API_async(model, prompt, api_key=None, provider=None, base_url=None):
+    max_retries = 10
+    messages = [{"role": "user", "content": prompt}]
+    pcfg = _get_provider_config(provider, api_key, base_url)
+
+    for i in range(max_retries):
+        try:
+            if pcfg["provider"] == "anthropic":
+                return await _call_anthropic_async(model, messages, pcfg["api_key"])
+            else:
+                client_kwargs = {"api_key": pcfg["api_key"]}
+                if "base_url" in pcfg:
+                    client_kwargs["base_url"] = pcfg["base_url"]
+                async with openai.AsyncOpenAI(**client_kwargs) as client:
+                    response = await client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        temperature=0,
+                    )
+                    return response.choices[0].message.content
+        except Exception as e:
+            print('************* Retrying *************')
+            logging.error(f"Error: {e}")
+            if i < max_retries - 1:
+                await asyncio.sleep(1)
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
                 return "Error"  
@@ -411,7 +505,10 @@ def add_preface_if_needed(data):
 
 
 def get_page_tokens(pdf_path, model="gpt-4o-2024-11-20", pdf_parser="PyPDF2"):
-    enc = tiktoken.encoding_for_model(model)
+    try:
+        enc = tiktoken.encoding_for_model(model)
+    except KeyError:
+        enc = tiktoken.get_encoding("cl100k_base")
     if pdf_parser == "PyPDF2":
         pdf_reader = PyPDF2.PdfReader(pdf_path)
         page_list = []
