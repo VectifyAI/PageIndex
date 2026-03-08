@@ -632,6 +632,8 @@ def process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_che
     logger.info(f'matching_pairs: {matching_pairs}')
 
     offset = calculate_page_offset(matching_pairs)
+    if offset is None:
+        offset = 0
     logger.info(f'offset: {offset}')
 
     toc_with_page_number = add_page_offset_to_toc_json(toc_with_page_number, offset)
