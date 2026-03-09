@@ -1,4 +1,6 @@
 model: "gpt-4o-2024-11-20"
+provider: "openai"  # "openai" or "minimax"
+api_base_url: null  # Custom API base URL (e.g. https://api.minimax.io/v1 for MiniMax)
 toc_check_page_num: 20
 max_page_num_each_node: 10
 max_token_num_each_node: 20000

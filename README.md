@@ -149,20 +149,27 @@ pip3 install --upgrade -r requirements.txt
 
 ### 2. Set your API key
 
-Create a `.env` file in the root directory and add your API key:
+Create a `.env` file in the root directory and add your API key for your chosen provider:
 
 ```bash
-# For OpenAI models (default)
+# OpenAI (default)
 CHATGPT_API_KEY=your_openai_key_here
 
-# For MiniMax models
+# MiniMax (optional)
 MINIMAX_API_KEY=your_minimax_key_here
 ```
 
 ### 3. Run PageIndex on your PDF
 
+**OpenAI (default):**
 ```bash
 python3 run_pageindex.py --pdf_path /path/to/your/document.pdf
+```
+
+**MiniMax:**
+```bash
+python3 run_pageindex.py --pdf_path /path/to/your/document.pdf \
+    --provider minimax --model MiniMax-Text-01
 ```
 
 <details>
@@ -171,7 +178,9 @@ python3 run_pageindex.py --pdf_path /path/to/your/document.pdf
 You can customize the processing with additional optional arguments:
 
 ```
---model                 Model to use (default: gpt-4o-2024-11-20, also supports MiniMax-M1, MiniMax-M2.5, etc.)
+--model                 Model to use (default: gpt-4o-2024-11-20)
+--provider              LLM provider: openai or minimax (default: openai)
+--api-base-url          Custom API base URL (e.g. https://api.minimax.io/v1 for MiniMax)
 --toc-check-pages       Pages to check for table of contents (default: 20)
 --max-pages-per-node    Max pages per node (default: 10)
 --max-tokens-per-node   Max tokens per node (default: 20000)
@@ -179,6 +188,24 @@ You can customize the processing with additional optional arguments:
 --if-add-node-summary   Add node summary (yes/no, default: yes)
 --if-add-doc-description Add doc description (yes/no, default: yes)
 ```
+
+You can also set the provider via environment variables instead of CLI flags:
+```bash
+export LLM_PROVIDER=minimax
+export API_BASE_URL=https://api.minimax.io/v1  # optional, for custom endpoints
+```
+</details>
+
+<details>
+<summary><strong>Supported LLM Providers</strong></summary>
+<br>
+
+| Provider | Example Models | API Key Env Var | Notes |
+|----------|---------------|-----------------|-------|
+| **OpenAI** (default) | `gpt-4o-2024-11-20`, `gpt-4o-mini` | `CHATGPT_API_KEY` | Full support, recommended |
+| **MiniMax** | `MiniMax-M2.5 | `MINIMAX_API_KEY` | Full support via OpenAI-compatible API at `https://api.minimax.io/v1` |
+
+**Note:** PageIndex relies on structured JSON output from the LLM. For best results, use capable models (GPT-4o or MiniMax-Text-01). Smaller models may produce lower-quality tree structures.
 </details>
 
 <details>

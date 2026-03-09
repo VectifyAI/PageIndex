@@ -1057,7 +1057,17 @@ async def tree_parser(page_list, opt, doc=None, logger=None):
 
 def page_index_main(doc, opt=None):
     logger = JsonLogger(doc)
-    
+
+    # Set provider config from opt so all downstream API calls pick it up
+    if hasattr(opt, 'provider') and opt.provider:
+        os.environ['LLM_PROVIDER'] = opt.provider
+        from pageindex import utils
+        utils.LLM_PROVIDER = opt.provider
+    if hasattr(opt, 'api_base_url') and opt.api_base_url:
+        os.environ['API_BASE_URL'] = opt.api_base_url
+        from pageindex import utils
+        utils.API_BASE_URL = opt.api_base_url
+
     is_valid_pdf = (
         (isinstance(doc, str) and os.path.isfile(doc) and doc.lower().endswith(".pdf")) or 
         isinstance(doc, BytesIO)
@@ -1066,7 +1076,7 @@ def page_index_main(doc, opt=None):
         raise ValueError("Unsupported input type. Expected a PDF file path or BytesIO object.")
 
     print('Parsing PDF...')
-    page_list = get_page_tokens(doc)
+    page_list = get_page_tokens(doc, model=opt.model)
 
     logger.info({'total_page_number': len(page_list)})
     logger.info({'total_token': sum([page[1] for page in page_list])})
@@ -1100,7 +1110,8 @@ def page_index_main(doc, opt=None):
     return asyncio.run(page_index_builder())
 
 
-def page_index(doc, model=None, toc_check_page_num=None, max_page_num_each_node=None, max_token_num_each_node=None,
+def page_index(doc, model=None, provider=None, api_base_url=None,
+               toc_check_page_num=None, max_page_num_each_node=None, max_token_num_each_node=None,
                if_add_node_id=None, if_add_node_summary=None, if_add_doc_description=None, if_add_node_text=None):
     
     user_opt = {
