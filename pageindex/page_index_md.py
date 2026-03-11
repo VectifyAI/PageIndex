@@ -306,7 +306,7 @@ if __name__ == "__main__":
     MD_PATH = os.path.join(os.path.dirname(__file__), '..', 'tests/markdowns/', f'{MD_NAME}.md')
 
 
-    MODEL="gpt-4.1"
+    MODEL = os.getenv('OPENAI_MODEL', 'deepseek-chat')
     IF_THINNING=False
     THINNING_THRESHOLD=5000
     SUMMARY_TOKEN_THRESHOLD=200

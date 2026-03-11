@@ -2,6 +2,7 @@ import tiktoken
 import openai
 import logging
 import os
+import re
 from datetime import datetime
 import time
 import json
@@ -17,18 +18,18 @@ import yaml
 from pathlib import Path
 from types import SimpleNamespace as config
 
-CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "deepseek-chat")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com")
 
 def count_tokens(text, model=None):
-    if not text:
-        return 0
-    enc = tiktoken.encoding_for_model(model)
-    tokens = enc.encode(text)
-    return len(tokens)
+    # 忽略 model 参数，直接强制使用通用编码
+    enc = tiktoken.get_encoding("cl100k_base")
+    return len(enc.encode(text))
 
-def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+def OpenAI_API_with_finish_reason(model, prompt, api_key=OPENAI_API_KEY, chat_history=None):
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
+    client = openai.OpenAI(api_key=api_key, base_url=OPENAI_BASE_URL)
     for i in range(max_retries):
         try:
             if chat_history:
@@ -58,9 +59,9 @@ def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_
 
 
 
-def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+def OpenAI_API(model, prompt, api_key=OPENAI_API_KEY, chat_history=None):
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
+    client = openai.OpenAI(api_key=api_key, base_url=OPENAI_BASE_URL)
     for i in range(max_retries):
         try:
             if chat_history:
@@ -86,12 +87,12 @@ def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
                 return "Error"
             
 
-async def ChatGPT_API_async(model, prompt, api_key=CHATGPT_API_KEY):
+async def OpenAI_API_async(model, prompt, api_key=OPENAI_API_KEY):
     max_retries = 10
     messages = [{"role": "user", "content": prompt}]
     for i in range(max_retries):
         try:
-            async with openai.AsyncOpenAI(api_key=api_key) as client:
+            async with openai.AsyncOpenAI(api_key=api_key, base_url=OPENAI_BASE_URL) as client:
                 response = await client.chat.completions.create(
                     model=model,
                     messages=messages,
@@ -609,7 +610,7 @@ async def generate_node_summary(node, model=None):
     
     Directly return the description, do not include any other text.
     """
-    response = await ChatGPT_API_async(model, prompt)
+    response = await OpenAI_API_async(model, prompt)
     return response
 
 
@@ -654,7 +655,7 @@ def generate_doc_description(structure, model=None):
     
     Directly return the description, do not include any other text.
     """
-    response = ChatGPT_API(model, prompt)
+    response = OpenAI_API(model, prompt)
     return response
 
 
