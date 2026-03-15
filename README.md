@@ -147,13 +147,15 @@ You can follow these steps to generate a PageIndex tree from a PDF document.
 pip3 install --upgrade -r requirements.txt
 ```
 
-### 2. Set your OpenAI API key
+### 2. Set your API key
 
 Create a `.env` file in the root directory and add your API key:
 
 ```bash
 CHATGPT_API_KEY=your_openai_key_here
 ```
+
+You can also use `OPENAI_API_KEY` as an alternative environment variable name.
 
 ### 3. Run PageIndex on your PDF
 
@@ -167,7 +169,9 @@ python3 run_pageindex.py --pdf_path /path/to/your/document.pdf
 You can customize the processing with additional optional arguments:
 
 ```
---model                 OpenAI model to use (default: gpt-4o-2024-11-20)
+--model                 Model to use (default: gpt-4o-2024-11-20)
+--api-key               API key (overrides env var)
+--base-url              Base URL for OpenAI-compatible API providers
 --toc-check-pages       Pages to check for table of contents (default: 20)
 --max-pages-per-node    Max pages per node (default: 10)
 --max-tokens-per-node   Max tokens per node (default: 20000)
@@ -175,6 +179,39 @@ You can customize the processing with additional optional arguments:
 --if-add-node-summary   Add node summary (yes/no, default: yes)
 --if-add-doc-description Add doc description (yes/no, default: yes)
 ```
+</details>
+
+<details>
+<summary><strong>Using alternative LLM providers</strong></summary>
+<br>
+
+PageIndex supports any OpenAI-compatible API provider via the `--base-url` flag or the `OPENAI_BASE_URL` environment variable.
+
+**MiniMax**
+
+[MiniMax](https://www.minimaxi.com) offers models like `MiniMax-M2.5` with 204K context window through an OpenAI-compatible API:
+
+```bash
+# Via environment variables
+OPENAI_API_KEY=your_minimax_key_here
+OPENAI_BASE_URL=https://api.minimax.io/v1
+
+python3 run_pageindex.py --pdf_path /path/to/your/document.pdf --model MiniMax-M2.5
+```
+
+Or via CLI arguments:
+
+```bash
+python3 run_pageindex.py --pdf_path /path/to/your/document.pdf \
+  --model MiniMax-M2.5 \
+  --api-key your_minimax_key_here \
+  --base-url https://api.minimax.io/v1
+```
+
+**Other compatible providers**
+
+Any provider offering an OpenAI-compatible chat completions API can be used in the same way by setting `--base-url` to their endpoint.
+
 </details>
 
 <details>

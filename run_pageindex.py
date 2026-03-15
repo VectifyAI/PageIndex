@@ -11,6 +11,10 @@ if __name__ == "__main__":
     parser.add_argument('--md_path', type=str, help='Path to the Markdown file')
 
     parser.add_argument('--model', type=str, default='gpt-4o-2024-11-20', help='Model to use')
+    parser.add_argument('--api-key', type=str, default=None,
+                      help='API key (defaults to CHATGPT_API_KEY or OPENAI_API_KEY env var)')
+    parser.add_argument('--base-url', type=str, default=None,
+                      help='Base URL for OpenAI-compatible API (e.g., https://api.minimax.io/v1)')
 
     parser.add_argument('--toc-check-pages', type=int, default=20, 
                       help='Number of pages to check for table of contents (PDF only)')
@@ -36,7 +40,13 @@ if __name__ == "__main__":
     parser.add_argument('--summary-token-threshold', type=int, default=200,
                       help='Token threshold for generating summaries (markdown only)')
     args = parser.parse_args()
-    
+
+    # Override env vars if CLI args are provided
+    if args.api_key:
+        os.environ["CHATGPT_API_KEY"] = args.api_key
+    if args.base_url:
+        os.environ["OPENAI_BASE_URL"] = args.base_url
+
     # Validate that exactly one file type is specified
     if not args.pdf_path and not args.md_path:
         raise ValueError("Either --pdf_path or --md_path must be specified")
