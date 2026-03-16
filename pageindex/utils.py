@@ -17,7 +17,7 @@ import yaml
 from pathlib import Path
 from types import SimpleNamespace as config
 
-CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
+# API keys should be retrieved dynamically, not stored as global variables
 
 def count_tokens(text, model=None):
     if not text:
@@ -26,8 +26,13 @@ def count_tokens(text, model=None):
     tokens = enc.encode(text)
     return len(tokens)
 
-def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+def ChatGPT_API_with_finish_reason(model, prompt, api_key=None, chat_history=None):
     max_retries = 10
+    if api_key is None:
+        # Retrieve API key from environment variable at runtime
+        api_key = os.getenv("OPENAI_API_KEY") or os.getenv("CHATGPT_API_KEY")
+        if not api_key:
+            raise ValueError("API key must be provided or set in environment variables")
     client = openai.OpenAI(api_key=api_key)
     for i in range(max_retries):
         try:
@@ -58,7 +63,12 @@ def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_
 
 
 
-def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+def ChatGPT_API(model, prompt, api_key=None, chat_history=None):
+    if api_key is None:
+        # Retrieve API key from environment variable at runtime
+        api_key = os.getenv("OPENAI_API_KEY") or os.getenv("CHATGPT_API_KEY")
+        if not api_key:
+            raise ValueError("API key must be provided or set in environment variables")
     max_retries = 10
     client = openai.OpenAI(api_key=api_key)
     for i in range(max_retries):
