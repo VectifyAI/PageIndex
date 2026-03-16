@@ -11,6 +11,7 @@ if __name__ == "__main__":
     parser.add_argument('--md_path', type=str, help='Path to the Markdown file')
 
     parser.add_argument('--model', type=str, default='gpt-4o-2024-11-20', help='Model to use')
+    parser.add_argument('--tokenizer', type=str, default='', help='Tiktoken encoding name (e.g. o200k_base). Empty = auto-detect from model.')
 
     parser.add_argument('--toc-check-pages', type=int, default=20, 
                       help='Number of pages to check for table of contents (PDF only)')
@@ -54,6 +55,7 @@ if __name__ == "__main__":
         # Configure options
         opt = config(
             model=args.model,
+            tokenizer=args.tokenizer,
             toc_check_page_num=args.toc_check_pages,
             max_page_num_each_node=args.max_pages_per_node,
             max_token_num_each_node=args.max_tokens_per_node,
@@ -98,6 +100,7 @@ if __name__ == "__main__":
         # Create options dict with user args
         user_opt = {
             'model': args.model,
+            'tokenizer': args.tokenizer,
             'if_add_node_summary': args.if_add_node_summary,
             'if_add_doc_description': args.if_add_doc_description,
             'if_add_node_text': args.if_add_node_text,
@@ -114,6 +117,7 @@ if __name__ == "__main__":
             if_add_node_summary=opt.if_add_node_summary,
             summary_token_threshold=args.summary_token_threshold,
             model=opt.model,
+            tokenizer=opt.tokenizer,
             if_add_doc_description=opt.if_add_doc_description,
             if_add_node_text=opt.if_add_node_text,
             if_add_node_id=opt.if_add_node_id

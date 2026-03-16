@@ -568,13 +568,13 @@ def generate_toc_init(part, model=None):
     else:
         raise Exception(f'finish reason: {finish_reason}')
 
-def process_no_toc(page_list, start_index=1, model=None, logger=None):
+def process_no_toc(page_list, start_index=1, model=None, logger=None, tokenizer=None):
     page_contents=[]
     token_lengths=[]
     for page_index in range(start_index, start_index+len(page_list)):
         page_text = f"<physical_index_{page_index}>\n{page_list[page_index-start_index][0]}\n<physical_index_{page_index}>\n\n"
         page_contents.append(page_text)
-        token_lengths.append(count_tokens(page_text, model))
+        token_lengths.append(count_tokens(page_text, model, tokenizer=tokenizer))
     group_texts = page_list_to_group_text(page_contents, token_lengths)
     logger.info(f'len(group_texts): {len(group_texts)}')
 
@@ -589,7 +589,7 @@ def process_no_toc(page_list, start_index=1, model=None, logger=None):
 
     return toc_with_page_number
 
-def process_toc_no_page_numbers(toc_content, toc_page_list, page_list,  start_index=1, model=None, logger=None):
+def process_toc_no_page_numbers(toc_content, toc_page_list, page_list,  start_index=1, model=None, logger=None, tokenizer=None):
     page_contents=[]
     token_lengths=[]
     toc_content = toc_transformer(toc_content, model)
@@ -597,8 +597,8 @@ def process_toc_no_page_numbers(toc_content, toc_page_list, page_list,  start_in
     for page_index in range(start_index, start_index+len(page_list)):
         page_text = f"<physical_index_{page_index}>\n{page_list[page_index-start_index][0]}\n<physical_index_{page_index}>\n\n"
         page_contents.append(page_text)
-        token_lengths.append(count_tokens(page_text, model))
-    
+        token_lengths.append(count_tokens(page_text, model, tokenizer=tokenizer))
+
     group_texts = page_list_to_group_text(page_contents, token_lengths)
     logger.info(f'len(group_texts): {len(group_texts)}')
 
@@ -635,6 +635,8 @@ def process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_che
     logger.info(f'matching_pairs: {matching_pairs}')
 
     offset = calculate_page_offset(matching_pairs)
+    if offset is None:
+        offset = 0
     logger.info(f'offset: {offset}')
 
     toc_with_page_number = add_page_offset_to_toc_json(toc_with_page_number, offset)
@@ -958,9 +960,9 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
     if mode == 'process_toc_with_page_numbers':
         toc_with_page_number = process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_check_page_num=opt.toc_check_page_num, model=opt.model, logger=logger)
     elif mode == 'process_toc_no_page_numbers':
-        toc_with_page_number = process_toc_no_page_numbers(toc_content, toc_page_list, page_list, model=opt.model, logger=logger)
+        toc_with_page_number = process_toc_no_page_numbers(toc_content, toc_page_list, page_list, model=opt.model, logger=logger, tokenizer=opt.tokenizer)
     else:
-        toc_with_page_number = process_no_toc(page_list, start_index=start_index, model=opt.model, logger=logger)
+        toc_with_page_number = process_no_toc(page_list, start_index=start_index, model=opt.model, logger=logger, tokenizer=opt.tokenizer)
             
     toc_with_page_number = [item for item in toc_with_page_number if item.get('physical_index') is not None] 
     
@@ -1069,7 +1071,7 @@ def page_index_main(doc, opt=None):
         raise ValueError("Unsupported input type. Expected a PDF file path or BytesIO object.")
 
     print('Parsing PDF...')
-    page_list = get_page_tokens(doc)
+    page_list = get_page_tokens(doc, model=opt.model, tokenizer=opt.tokenizer)
 
     logger.info({'total_page_number': len(page_list)})
     logger.info({'total_token': sum([page[1] for page in page_list])})
@@ -1103,7 +1105,7 @@ def page_index_main(doc, opt=None):
     return asyncio.run(page_index_builder())
 
 
-def page_index(doc, model=None, toc_check_page_num=None, max_page_num_each_node=None, max_token_num_each_node=None,
+def page_index(doc, model=None, tokenizer=None, toc_check_page_num=None, max_page_num_each_node=None, max_token_num_each_node=None,
                if_add_node_id=None, if_add_node_summary=None, if_add_doc_description=None, if_add_node_text=None):
     
     user_opt = {

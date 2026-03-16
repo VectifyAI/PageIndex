@@ -7,18 +7,18 @@ try:
 except:
     from utils import *
 
-async def get_node_summary(node, summary_token_threshold=200, model=None):
+async def get_node_summary(node, summary_token_threshold=200, model=None, tokenizer=None):
     node_text = node.get('text')
-    num_tokens = count_tokens(node_text, model=model)
+    num_tokens = count_tokens(node_text, model=model, tokenizer=tokenizer)
     if num_tokens < summary_token_threshold:
         return node_text
     else:
         return await generate_node_summary(node, model=model)
 
 
-async def generate_summaries_for_structure_md(structure, summary_token_threshold, model=None):
+async def generate_summaries_for_structure_md(structure, summary_token_threshold, model=None, tokenizer=None):
     nodes = structure_to_list(structure)
-    tasks = [get_node_summary(node, summary_token_threshold=summary_token_threshold, model=model) for node in nodes]
+    tasks = [get_node_summary(node, summary_token_threshold=summary_token_threshold, model=model, tokenizer=tokenizer) for node in nodes]
     summaries = await asyncio.gather(*tasks)
     
     for node, summary in zip(nodes, summaries):
@@ -86,7 +86,7 @@ def extract_node_text_content(node_list, markdown_lines):
         node['text'] = '\n'.join(markdown_lines[start_line:end_line]).strip()    
     return all_nodes
 
-def update_node_list_with_text_token_count(node_list, model=None):
+def update_node_list_with_text_token_count(node_list, model=None, tokenizer=None):
 
     def find_all_children(parent_index, parent_level, node_list):
         """Find all direct and indirect children of a parent node"""
@@ -127,12 +127,12 @@ def update_node_list_with_text_token_count(node_list, model=None):
                 total_text += '\n' + child_text
         
         # Calculate token count for combined text
-        result_list[i]['text_token_count'] = count_tokens(total_text, model=model)
-    
+        result_list[i]['text_token_count'] = count_tokens(total_text, model=model, tokenizer=tokenizer)
+
     return result_list
 
 
-def tree_thinning_for_index(node_list, min_node_token=None, model=None):
+def tree_thinning_for_index(node_list, min_node_token=None, model=None, tokenizer=None):
     def find_all_children(parent_index, parent_level, node_list):
         children_indices = []
         
@@ -179,7 +179,7 @@ def tree_thinning_for_index(node_list, min_node_token=None, model=None):
                 
                 result_list[i]['text'] = merged_text
                 
-                result_list[i]['text_token_count'] = count_tokens(merged_text, model=model)
+                result_list[i]['text_token_count'] = count_tokens(merged_text, model=model, tokenizer=tokenizer)
     
     for index in sorted(nodes_to_remove, reverse=True):
         result_list.pop(index)
@@ -240,7 +240,7 @@ def clean_tree_for_output(tree_nodes):
     return cleaned_nodes
 
 
-async def md_to_tree(md_path, if_thinning=False, min_token_threshold=None, if_add_node_summary='no', summary_token_threshold=None, model=None, if_add_doc_description='no', if_add_node_text='no', if_add_node_id='yes'):
+async def md_to_tree(md_path, if_thinning=False, min_token_threshold=None, if_add_node_summary='no', summary_token_threshold=None, model=None, tokenizer=None, if_add_doc_description='no', if_add_node_text='no', if_add_node_id='yes'):
     with open(md_path, 'r', encoding='utf-8') as f:
         markdown_content = f.read()
     
@@ -251,9 +251,9 @@ async def md_to_tree(md_path, if_thinning=False, min_token_threshold=None, if_ad
     nodes_with_content = extract_node_text_content(node_list, markdown_lines)
     
     if if_thinning:
-        nodes_with_content = update_node_list_with_text_token_count(nodes_with_content, model=model)
+        nodes_with_content = update_node_list_with_text_token_count(nodes_with_content, model=model, tokenizer=tokenizer)
         print(f"Thinning nodes...")
-        nodes_with_content = tree_thinning_for_index(nodes_with_content, min_token_threshold, model=model)
+        nodes_with_content = tree_thinning_for_index(nodes_with_content, min_token_threshold, model=model, tokenizer=tokenizer)
     
     print(f"Building tree from nodes...")
     tree_structure = build_tree_from_nodes(nodes_with_content)
@@ -268,7 +268,7 @@ async def md_to_tree(md_path, if_thinning=False, min_token_threshold=None, if_ad
         tree_structure = format_structure(tree_structure, order = ['title', 'node_id', 'summary', 'prefix_summary', 'text', 'line_num', 'nodes'])
         
         print(f"Generating summaries for each node...")
-        tree_structure = await generate_summaries_for_structure_md(tree_structure, summary_token_threshold=summary_token_threshold, model=model)
+        tree_structure = await generate_summaries_for_structure_md(tree_structure, summary_token_threshold=summary_token_threshold, model=model, tokenizer=tokenizer)
         
         if if_add_node_text == 'no':
             # Remove text after summary generation if not requested
