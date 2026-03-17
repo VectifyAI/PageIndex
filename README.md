@@ -180,13 +180,31 @@ You can customize the processing with additional optional arguments:
 <details>
 <summary><strong>Markdown support</strong></summary>
 <br>
-We also provide markdown support for PageIndex. You can use the `-md_path` flag to generate a tree structure for a markdown file.
+We also provide markdown support for PageIndex. You can use the `--md_path` flag to generate a tree structure for a markdown file.
 
 ```bash
 python3 run_pageindex.py --md_path /path/to/your/document.md
 ```
 
 > Note: in this function, we use "#" to determine node heading and their levels. For example, "##" is level 2, "###" is level 3, etc. Make sure your markdown file is formatted correctly. If your Markdown file was converted from a PDF or HTML, we don't recommend using this function, since most existing conversion tools cannot preserve the original hierarchy. Instead, use our [PageIndex OCR](https://pageindex.ai/blog/ocr), which is designed to preserve the original hierarchy, to convert the PDF to a markdown file and then use this function.
+</details>
+
+<details>
+<summary><strong>Text file support</strong></summary>
+<br>
+We support processing unstructured text files (.txt) with automatic semantic section detection. The system uses a windowing approach with overlap to handle long documents and employs LLMs to automatically identify headings and subheadings.
+
+```bash
+python3 run_pageindex.py --txt_path /path/to/your/document.txt
+```
+
+Optional parameters for text processing:
+```
+--window-size          Window size in characters for text chunking (default: 5000)
+--overlap              Overlap size in characters between windows (default: 500)
+```
+
+> Note: Unlike markdown files where headings are explicitly marked with "#", text files require automatic semantic section detection. The system analyzes the content to identify natural topic boundaries and creates a hierarchical structure. This works best with well-structured prose that has clear topic transitions.
 </details>
 
 <!-- 

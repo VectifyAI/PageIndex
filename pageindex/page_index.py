@@ -1083,13 +1083,13 @@ def page_index_main(doc, opt=None):
         if opt.if_add_node_summary == 'yes':
             if opt.if_add_node_text == 'no':
                 add_node_text(structure, page_list)
-            await generate_summaries_for_structure(structure, model=opt.model)
+            await generate_summaries_for_structure(structure, model=opt.model, max_input_tokens=opt.max_input_tokens)
             if opt.if_add_node_text == 'no':
                 remove_structure_text(structure)
             if opt.if_add_doc_description == 'yes':
                 # Create a clean structure without unnecessary fields for description generation
                 clean_structure = create_clean_structure_for_description(structure)
-                doc_description = generate_doc_description(clean_structure, model=opt.model)
+                doc_description = generate_doc_description(clean_structure, model=opt.model, max_input_tokens=opt.max_input_tokens)
                 return {
                     'doc_name': get_pdf_name(doc),
                     'doc_description': doc_description,
