@@ -189,21 +189,21 @@ PageIndex supports any OpenAI-compatible API provider via the `--base-url` flag 
 
 **MiniMax**
 
-[MiniMax](https://www.minimaxi.com) offers models like `MiniMax-M2.5` with 204K context window through an OpenAI-compatible API:
+[MiniMax](https://www.minimaxi.com) offers models like `MiniMax-M2.7` with 1M context window through an OpenAI-compatible API:
 
 ```bash
 # Via environment variables
 OPENAI_API_KEY=your_minimax_key_here
 OPENAI_BASE_URL=https://api.minimax.io/v1
 
-python3 run_pageindex.py --pdf_path /path/to/your/document.pdf --model MiniMax-M2.5
+python3 run_pageindex.py --pdf_path /path/to/your/document.pdf --model MiniMax-M2.7
 ```
 
 Or via CLI arguments:
 
 ```bash
 python3 run_pageindex.py --pdf_path /path/to/your/document.pdf \
-  --model MiniMax-M2.5 \
+  --model MiniMax-M2.7 \
   --api-key your_minimax_key_here \
   --base-url https://api.minimax.io/v1
 ```
