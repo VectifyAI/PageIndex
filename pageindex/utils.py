@@ -90,7 +90,7 @@ def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_
                 time.sleep(_retry_delay(i))
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
-                return ("Error", "error")
+                return "", "error"
 
 
 

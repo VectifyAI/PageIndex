@@ -1,0 +1,45 @@
+# Removes the "duplicate" label when a human (non-bot) comments on a
+# duplicate-flagged issue, signaling that the issue needs re-evaluation.
+# The auto-close script also independently checks for human activity,
+# so this provides an additional visible signal.
+name: Remove Duplicate Label on Human Activity
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+
+jobs:
+  remove-label:
+    # Only run for issue comments (not PR comments)
+    if: >
+      github.event.issue.pull_request == null &&
+      !endsWith(github.actor, '[bot]') &&
+      github.actor != 'github-actions'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove duplicate label if human commented
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const labels = (issue.labels || []).map(l => l.name);
+
+            if (!labels.includes('duplicate')) {
+              core.info('Issue does not have "duplicate" label - nothing to do.');
+              return;
+            }
+
+            await github.rest.issues.removeLabel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              name: 'duplicate',
+            });
+
+            core.info(
+              `Removed "duplicate" label from #${issue.number} ` +
+              `after human comment by ${context.actor}`
+            );

@@ -189,12 +189,14 @@ def extract_toc_content(content, model=None):
     response = response + new_response
     if_complete = check_if_toc_transformation_is_complete(content, response, model)
     
-    max_attempts = 10
     attempt = 0
+    max_attempts = 5
+
     while not (if_complete == "yes" and finish_reason == "finished"):
         attempt += 1
         if attempt > max_attempts:
             raise Exception('Failed to complete table of contents after maximum retries')
+
         chat_history = [
             {"role": "user", "content": prompt},
             {"role": "assistant", "content": response},
@@ -203,7 +205,7 @@ def extract_toc_content(content, model=None):
         new_response, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt, chat_history=chat_history)
         response = response + new_response
         if_complete = check_if_toc_transformation_is_complete(content, response, model)
-
+    
     return response
 
 def detect_page_index(toc_content, model=None):
@@ -814,9 +816,9 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
         page_contents=[]
         for page_index in range(prev_correct, next_correct+1):
             # Add bounds checking to prevent IndexError
-            page_list_index = page_index - start_index
-            if page_list_index >= 0 and page_list_index < len(page_list):
-                page_text = f"<physical_index_{page_index}>\n{page_list[page_list_index][0]}\n<physical_index_{page_index}>\n\n"
+            page_list_idx = page_index - start_index
+            if page_list_idx >= 0 and page_list_idx < len(page_list):
+                page_text = f"<physical_index_{page_index}>\n{page_list[page_list_idx][0]}\n<physical_index_{page_index}>\n\n"
                 page_contents.append(page_text)
             else:
                 continue

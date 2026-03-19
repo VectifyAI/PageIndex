@@ -1,0 +1,37 @@
+# Auto-closes duplicate issues after 3 days if no human activity or thumbs-down reaction.
+# Runs daily at 09:00 UTC.
+name: Auto-close Duplicate Issues
+
+on:
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run - report but do not close issues'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  autoclose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Close inactive duplicate issues
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        run: node scripts/autoclose-labeled-issues.js
