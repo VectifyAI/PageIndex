@@ -1,6 +1,5 @@
-openai==1.101.0
+litellm==1.82.0
 pymupdf==1.26.4
 PyPDF2==3.0.1
 python-dotenv==1.1.0
-tiktoken==0.11.0
 pyyaml==6.0.2

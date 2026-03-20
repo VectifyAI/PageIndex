@@ -3,6 +3,7 @@ import os
 import json
 from pageindex import *
 from pageindex.page_index_md import md_to_tree
+from pageindex.utils import ConfigLoader
 
 if __name__ == "__main__":
     # Set up argument parser
@@ -10,22 +11,22 @@ if __name__ == "__main__":
     parser.add_argument('--pdf_path', type=str, help='Path to the PDF file')
     parser.add_argument('--md_path', type=str, help='Path to the Markdown file')
 
-    parser.add_argument('--model', type=str, default='gpt-4o-2024-11-20', help='Model to use')
+    parser.add_argument('--model', type=str, default=None, help='Model to use (overrides config.yaml)')
 
-    parser.add_argument('--toc-check-pages', type=int, default=20, 
+    parser.add_argument('--toc-check-pages', type=int, default=None,
                       help='Number of pages to check for table of contents (PDF only)')
-    parser.add_argument('--max-pages-per-node', type=int, default=10,
+    parser.add_argument('--max-pages-per-node', type=int, default=None,
                       help='Maximum number of pages per node (PDF only)')
-    parser.add_argument('--max-tokens-per-node', type=int, default=20000,
+    parser.add_argument('--max-tokens-per-node', type=int, default=None,
                       help='Maximum number of tokens per node (PDF only)')
 
-    parser.add_argument('--if-add-node-id', type=str, default='yes',
+    parser.add_argument('--if-add-node-id', type=str, default=None,
                       help='Whether to add node id to the node')
-    parser.add_argument('--if-add-node-summary', type=str, default='yes',
+    parser.add_argument('--if-add-node-summary', type=str, default=None,
                       help='Whether to add summary to the node')
-    parser.add_argument('--if-add-doc-description', type=str, default='no',
+    parser.add_argument('--if-add-doc-description', type=str, default=None,
                       help='Whether to add doc description to the doc')
-    parser.add_argument('--if-add-node-text', type=str, default='no',
+    parser.add_argument('--if-add-node-text', type=str, default=None,
                       help='Whether to add text to the node')
                       
     # Markdown specific arguments
@@ -51,17 +52,17 @@ if __name__ == "__main__":
             raise ValueError(f"PDF file not found: {args.pdf_path}")
             
         # Process PDF file
-        # Configure options
-        opt = config(
-            model=args.model,
-            toc_check_page_num=args.toc_check_pages,
-            max_page_num_each_node=args.max_pages_per_node,
-            max_token_num_each_node=args.max_tokens_per_node,
-            if_add_node_id=args.if_add_node_id,
-            if_add_node_summary=args.if_add_node_summary,
-            if_add_doc_description=args.if_add_doc_description,
-            if_add_node_text=args.if_add_node_text
-        )
+        user_opt = {
+            'model': args.model,
+            'toc_check_page_num': args.toc_check_pages,
+            'max_page_num_each_node': args.max_pages_per_node,
+            'max_token_num_each_node': args.max_tokens_per_node,
+            'if_add_node_id': args.if_add_node_id,
+            'if_add_node_summary': args.if_add_node_summary,
+            'if_add_doc_description': args.if_add_doc_description,
+            'if_add_node_text': args.if_add_node_text,
+        }
+        opt = ConfigLoader().load({k: v for k, v in user_opt.items() if v is not None})
 
         # Process the PDF
         toc_with_page_number = page_index_main(args.pdf_path, opt)
