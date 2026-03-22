@@ -1,6 +1,7 @@
 import litellm
 import logging
 import os
+import re
 from datetime import datetime
 import time
 import json
@@ -533,14 +534,43 @@ def convert_physical_index_to_int(data):
     return data
 
 
+def roman_to_int(value: str):
+    if not isinstance(value, str):
+        return None
+    
+    value = value.strip()
+    # Loose normalization for real-world TOCs: allow trailing punctuation like "vii."
+    value = re.sub(r"^[^A-Za-z]+|[^A-Za-z]+$", "", value)
+    value = value.upper()
+    if not value:
+        return None
+
+    roman_values = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
+    if any(char not in roman_values for char in value):
+        return None
+
+    total = 0
+    prev_value = 0
+    for char in reversed(value):
+        curr_value = roman_values[char]
+        if curr_value < prev_value:
+            total -= curr_value
+        else:
+            total += curr_value
+        prev_value = curr_value
+    
+    return total if total > 0 else None
+
 def convert_page_to_int(data):
     for item in data:
         if 'page' in item and isinstance(item['page'], str):
             try:
                 item['page'] = int(item['page'])
             except ValueError:
-                # Keep original value if conversion fails
-                pass
+                # Try roman numeral parsing
+                parsed_roman = roman_to_int(item['page'])
+                if parsed_roman is not None:
+                    item['page'] = parsed_roman
     return data
 
 
