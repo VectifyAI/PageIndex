@@ -36,7 +36,7 @@ async def check_title_appearance(item, page_list, start_index=1, model=None):
     }}
     Directly return the final JSON structure. Do not output anything else."""
 
-    response = await ChatGPT_API_async(model=model, prompt=prompt)
+    response = await llm_acompletion(model=model, prompt=prompt)
     response = extract_json(response)
     if 'answer' in response:
         answer = response['answer']
@@ -64,7 +64,7 @@ async def check_title_appearance_in_start(title, page_text, model=None, logger=N
     }}
     Directly return the final JSON structure. Do not output anything else."""
 
-    response = await ChatGPT_API_async(model=model, prompt=prompt)
+    response = await llm_acompletion(model=model, prompt=prompt)
     response = extract_json(response)
     if logger:
         logger.info(f"Response: {response}")
@@ -116,7 +116,7 @@ def toc_detector_single_page(content, model=None):
     Directly return the final JSON structure. Do not output anything else.
     Please note: abstract,summary, notation list, figure list, table list, etc. are not table of contents."""
 
-    response = ChatGPT_API(model=model, prompt=prompt)
+    response = llm_completion(model=model, prompt=prompt)
     # print('response', response)
     json_content = extract_json(response)    
     return json_content['toc_detected']
@@ -135,7 +135,7 @@ def check_if_toc_extraction_is_complete(content, toc, model=None):
     Directly return the final JSON structure. Do not output anything else."""
 
     prompt = prompt + '\n Document:\n' + content + '\n Table of contents:\n' + toc
-    response = ChatGPT_API(model=model, prompt=prompt)
+    response = llm_completion(model=model, prompt=prompt)
     json_content = extract_json(response)
     return json_content['completed']
 
@@ -153,7 +153,7 @@ def check_if_toc_transformation_is_complete(content, toc, model=None):
     Directly return the final JSON structure. Do not output anything else."""
 
     prompt = prompt + '\n Raw Table of contents:\n' + content + '\n Cleaned Table of contents:\n' + toc
-    response = ChatGPT_API(model=model, prompt=prompt)
+    response = llm_completion(model=model, prompt=prompt)
     json_content = extract_json(response)
     return json_content['completed']
 
@@ -165,7 +165,7 @@ def extract_toc_content(content, model=None):
 
     Directly return the full table of contents content. Do not output anything else."""
 
-    response, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt)
+    response, finish_reason = llm_completion(model=model, prompt=prompt, return_finish_reason=True)
     
     if_complete = check_if_toc_transformation_is_complete(content, response, model)
     if if_complete == "yes" and finish_reason == "finished":
@@ -176,23 +176,26 @@ def extract_toc_content(content, model=None):
         {"role": "assistant", "content": response},    
     ]
     prompt = f"""please continue the generation of table of contents , directly output the remaining part of the structure"""
-    new_response, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt, chat_history=chat_history)
+    new_response, finish_reason = llm_completion(model=model, prompt=prompt, chat_history=chat_history, return_finish_reason=True)
     response = response + new_response
     if_complete = check_if_toc_transformation_is_complete(content, response, model)
     
+    attempt = 0
+    max_attempts = 5
+
     while not (if_complete == "yes" and finish_reason == "finished"):
+        attempt += 1
+        if attempt > max_attempts:
+            raise Exception('Failed to complete table of contents after maximum retries')
+
         chat_history = [
-            {"role": "user", "content": prompt}, 
-            {"role": "assistant", "content": response},    
+            {"role": "user", "content": prompt},
+            {"role": "assistant", "content": response},
         ]
         prompt = f"""please continue the generation of table of contents , directly output the remaining part of the structure"""
-        new_response, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt, chat_history=chat_history)
+        new_response, finish_reason = llm_completion(model=model, prompt=prompt, chat_history=chat_history, return_finish_reason=True)
         response = response + new_response
         if_complete = check_if_toc_transformation_is_complete(content, response, model)
-        
-        # Optional: Add a maximum retry limit to prevent infinite loops
-        if len(chat_history) > 5:  # Arbitrary limit of 10 attempts
-            raise Exception('Failed to complete table of contents after maximum retries')
     
     return response
 
@@ -212,7 +215,7 @@ def detect_page_index(toc_content, model=None):
     }}
     Directly return the final JSON structure. Do not output anything else."""
 
-    response = ChatGPT_API(model=model, prompt=prompt)
+    response = llm_completion(model=model, prompt=prompt)
     json_content = extract_json(response)
     return json_content['page_index_given_in_toc']
 
@@ -239,7 +242,7 @@ def toc_extractor(page_list, toc_page_list, model):
 
 def toc_index_extractor(toc, content, model=None):
     print('start toc_index_extractor')
-    tob_extractor_prompt = """
+    toc_extractor_prompt = """
     You are given a table of contents in a json format and several pages of a document, your job is to add the physical_index to the table of contents in the json format.
 
     The provided pages contains tags like <physical_index_X> and <physical_index_X> to indicate the physical location of the page X.
@@ -260,8 +263,8 @@ def toc_index_extractor(toc, content, model=None):
     If the section is not in the provided pages, do not add the physical_index to it.
     Directly return the final JSON structure. Do not output anything else."""
 
-    prompt = tob_extractor_prompt + '\nTable of contents:\n' + str(toc) + '\nDocument pages:\n' + content
-    response = ChatGPT_API(model=model, prompt=prompt)
+    prompt = toc_extractor_prompt + '\nTable of contents:\n' + str(toc) + '\nDocument pages:\n' + content
+    response = llm_completion(model=model, prompt=prompt)
     json_content = extract_json(response)    
     return json_content
 
@@ -289,7 +292,7 @@ def toc_transformer(toc_content, model=None):
     Directly return the final JSON structure, do not output anything else. """
 
     prompt = init_prompt + '\n Given table of contents\n:' + toc_content
-    last_complete, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt)
+    last_complete, finish_reason = llm_completion(model=model, prompt=prompt, return_finish_reason=True)
     if_complete = check_if_toc_transformation_is_complete(toc_content, last_complete, model)
     if if_complete == "yes" and finish_reason == "finished":
         last_complete = extract_json(last_complete)
@@ -297,7 +300,12 @@ def toc_transformer(toc_content, model=None):
         return cleaned_response
     
     last_complete = get_json_content(last_complete)
+    attempt = 0
+    max_attempts = 5
     while not (if_complete == "yes" and finish_reason == "finished"):
+        attempt += 1
+        if attempt > max_attempts:
+            raise Exception('Failed to complete toc transformation after maximum retries')
         position = last_complete.rfind('}')
         if position != -1:
             last_complete = last_complete[:position+2]
@@ -313,7 +321,7 @@ def toc_transformer(toc_content, model=None):
 
         Please continue the json structure, directly output the remaining part of the json structure."""
 
-        new_complete, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt)
+        new_complete, finish_reason = llm_completion(model=model, prompt=prompt, return_finish_reason=True)
 
         if new_complete.startswith('```json'):
             new_complete =  get_json_content(new_complete)
@@ -474,7 +482,7 @@ def add_page_number_to_toc(part, structure, model=None):
     Directly return the final JSON structure. Do not output anything else."""
 
     prompt = fill_prompt_seq + f"\n\nCurrent Partial Document:\n{part}\n\nGiven Structure\n{json.dumps(structure, indent=2)}\n"
-    current_json_raw = ChatGPT_API(model=model, prompt=prompt)
+    current_json_raw = llm_completion(model=model, prompt=prompt)
     json_result = extract_json(current_json_raw)
     
     for item in json_result:
@@ -524,7 +532,7 @@ def generate_toc_continue(toc_content, part, model=None):
     Directly return the additional part of the final JSON structure. Do not output anything else."""
 
     prompt = prompt + '\nGiven text\n:' + part + '\nPrevious tree structure\n:' + json.dumps(toc_content, indent=2)
-    response, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt)
+    response, finish_reason = llm_completion(model=model, prompt=prompt, return_finish_reason=True)
     if finish_reason == 'finished':
         return extract_json(response)
     else:
@@ -558,7 +566,7 @@ def generate_toc_init(part, model=None):
     Directly return the final JSON structure. Do not output anything else."""
 
     prompt = prompt + '\nGiven text\n:' + part
-    response, finish_reason = ChatGPT_API_with_finish_reason(model=model, prompt=prompt)
+    response, finish_reason = llm_completion(model=model, prompt=prompt, return_finish_reason=True)
 
     if finish_reason == 'finished':
          return extract_json(response)
@@ -729,8 +737,8 @@ def check_toc(page_list, opt=None):
 
 
 ################### fix incorrect toc #########################################################
-def single_toc_item_index_fixer(section_title, content, model=None):
-    tob_extractor_prompt = """
+async def single_toc_item_index_fixer(section_title, content, model=None):
+    toc_extractor_prompt = """
     You are given a section title and several pages of a document, your job is to find the physical index of the start page of the section in the partial document.
 
     The provided pages contains tags like <physical_index_X> and <physical_index_X> to indicate the physical location of the page X.
@@ -742,8 +750,8 @@ def single_toc_item_index_fixer(section_title, content, model=None):
     }
     Directly return the final JSON structure. Do not output anything else."""
 
-    prompt = tob_extractor_prompt + '\nSection Title:\n' + str(section_title) + '\nDocument pages:\n' + content
-    response = ChatGPT_API(model=model, prompt=prompt)
+    prompt = toc_extractor_prompt + '\nSection Title:\n' + str(section_title) + '\nDocument pages:\n' + content
+    response = await llm_acompletion(model=model, prompt=prompt)
     json_content = extract_json(response)    
     return convert_physical_index_to_int(json_content['physical_index'])
 
@@ -804,15 +812,15 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
         page_contents=[]
         for page_index in range(prev_correct, next_correct+1):
             # Add bounds checking to prevent IndexError
-            list_index = page_index - start_index
-            if list_index >= 0 and list_index < len(page_list):
-                page_text = f"<physical_index_{page_index}>\n{page_list[list_index][0]}\n<physical_index_{page_index}>\n\n"
+            page_list_idx = page_index - start_index
+            if page_list_idx >= 0 and page_list_idx < len(page_list):
+                page_text = f"<physical_index_{page_index}>\n{page_list[page_list_idx][0]}\n<physical_index_{page_index}>\n\n"
                 page_contents.append(page_text)
             else:
                 continue
         content_range = ''.join(page_contents)
         
-        physical_index_int = single_toc_item_index_fixer(incorrect_item['title'], content_range, model)
+        physical_index_int = await single_toc_item_index_fixer(incorrect_item['title'], content_range, model)
         
         # Check if the result is correct
         check_item = incorrect_item.copy()
