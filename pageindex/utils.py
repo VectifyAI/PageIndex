@@ -1,4 +1,3 @@
-import tiktoken
 import litellm
 import logging
 import os
@@ -26,42 +25,16 @@ CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY") or os.getenv("OPENAI_API_KEY")
 
 def count_tokens(text, model=None):
     """
-    Count tokens in text using the appropriate tokenizer for the model.
-    Uses tiktoken for OpenAI models and LiteLLM's token counter for other providers.
+    Count tokens in text using LiteLLM's token counter, which automatically
+    selects the appropriate tokenizer for each provider.
     """
     if not text:
         return 0
-    
-    # Check if it's an OpenAI model (no prefix or openai/ prefix)
-    model_lower = model.lower() if model else ""
-    is_openai_model = (
-        not "/" in model or 
-        model_lower.startswith("openai/") or
-        model_lower.startswith("gpt-") or
-        model_lower.startswith("o1-") or
-        model_lower.startswith("o3-")
-    )
-    
-    if is_openai_model:
-        # Use tiktoken for OpenAI models
-        try:
-            # Strip openai/ prefix if present
-            clean_model = model.replace("openai/", "") if model else "gpt-4o"
-            enc = tiktoken.encoding_for_model(clean_model)
-            tokens = enc.encode(text)
-            return len(tokens)
-        except KeyError:
-            # Fallback to cl100k_base encoding for unknown OpenAI models
-            enc = tiktoken.get_encoding("cl100k_base")
-            tokens = enc.encode(text)
-            return len(tokens)
-    else:
-        # Use LiteLLM's token counter for other providers
-        try:
-            return litellm.token_counter(model=model, text=text)
-        except Exception:
-            # Fallback to approximate counting (4 chars per token)
-            return len(text) // 4
+    try:
+        return litellm.token_counter(model=model or "gpt-4o", text=text)
+    except Exception:
+        # Fallback to approximate counting (4 chars per token)
+        return len(text) // 4
 
 def ChatGPT_API_with_finish_reason(model, prompt, api_key=None, chat_history=None):
     """
@@ -490,14 +463,13 @@ def add_preface_if_needed(data):
 
 
 def get_page_tokens(pdf_path, model="gpt-4o-2024-11-20", pdf_parser="PyPDF2"):
-    enc = tiktoken.encoding_for_model(model)
     if pdf_parser == "PyPDF2":
         pdf_reader = PyPDF2.PdfReader(pdf_path)
         page_list = []
         for page_num in range(len(pdf_reader.pages)):
             page = pdf_reader.pages[page_num]
             page_text = page.extract_text()
-            token_length = len(enc.encode(page_text))
+            token_length = count_tokens(page_text, model=model)
             page_list.append((page_text, token_length))
         return page_list
     elif pdf_parser == "PyMuPDF":
@@ -509,7 +481,7 @@ def get_page_tokens(pdf_path, model="gpt-4o-2024-11-20", pdf_parser="PyPDF2"):
         page_list = []
         for page in doc:
             page_text = page.get_text()
-            token_length = len(enc.encode(page_text))
+            token_length = count_tokens(page_text, model=model)
             page_list.append((page_text, token_length))
         return page_list
     else:
@@ -609,10 +581,10 @@ def remove_structure_text(data):
     return data
 
 
-def check_token_limit(structure, limit=110000):
+def check_token_limit(structure, limit=110000, model=None):
     list = structure_to_list(structure)
     for node in list:
-        num_tokens = count_tokens(node['text'], model='gpt-4o')
+        num_tokens = count_tokens(node['text'], model=model)
         if num_tokens > limit:
             print(f"Node ID: {node['node_id']} has {num_tokens} tokens")
             print("Start Index:", node['start_index'])
