@@ -1,4 +1,5 @@
 litellm==1.82.0
+# openai-agents  # optional: required for examples/openai_agents_demo.py
 pymupdf==1.26.4
 PyPDF2==3.0.1
 python-dotenv==1.1.0
