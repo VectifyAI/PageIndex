@@ -62,7 +62,7 @@ It simulates how *human experts* navigate and extract knowledge from complex doc
   </a>
 </div>
 
-### 🎯 Core Features 
+### 🎯 Core Features
 
 Compared to traditional vector-based RAG, **PageIndex** features:
 - **No Vector DB**: Uses document structure and LLM reasoning for retrieval, instead of vector similarity search.
@@ -74,7 +74,7 @@ PageIndex powers a reasoning-based RAG system that achieved **state-of-the-art**
 
 ### 📍 Explore PageIndex
 
-To learn more, please see a detailed introduction of the [PageIndex framework](https://pageindex.ai/blog/pageindex-intro). Check out this GitHub repo for open-source code, and the [cookbooks](https://docs.pageindex.ai/cookbook), [tutorials](https://docs.pageindex.ai/tutorials), and [blog](https://pageindex.ai/blog) for additional usage guides and examples. 
+To learn more, please see a detailed introduction of the [PageIndex framework](https://pageindex.ai/blog/pageindex-intro). Check out this GitHub repo for open-source code, and the [cookbooks](https://docs.pageindex.ai/cookbook), [tutorials](https://docs.pageindex.ai/tutorials), and [blog](https://pageindex.ai/blog) for additional usage guides and examples.
 
 The PageIndex service is available as a ChatGPT-style [chat platform](https://chat.pageindex.ai), or can be integrated via [MCP](https://pageindex.ai/mcp) or [API](https://docs.pageindex.ai/quickstart).
 
@@ -101,6 +101,7 @@ The PageIndex service is available as a ChatGPT-style [chat platform](https://ch
 ---
 
 # 🌲 PageIndex Tree Structure
+
 PageIndex can transform lengthy PDF documents into a semantic **tree structure**, similar to a _"table of contents"_ but optimized for use with Large Language Models (LLMs). It's ideal for: financial reports, regulatory filings, academic textbooks, legal or technical manuals, and any document that exceeds LLM context limits.
 
 Below is an example PageIndex tree structure. Also see more example [documents](https://github.com/VectifyAI/PageIndex/tree/main/tests/pdfs) and generated [tree structures](https://github.com/VectifyAI/PageIndex/tree/main/tests/results).
@@ -133,7 +134,7 @@ Below is an example PageIndex tree structure. Also see more example [documents](
 ...
 ```
 
-You can generate the PageIndex tree structure with this open-source repo, or use our [API](https://docs.pageindex.ai/quickstart) 
+You can generate the PageIndex tree structure with this open-source repo, or use our [API](https://docs.pageindex.ai/quickstart).
 
 ---
 
@@ -149,7 +150,7 @@ pip3 install --upgrade -r requirements.txt
 
 ### 2. Set your LLM API key
 
-Create a `.env` file in the root directory with your LLM API key::
+Create a `.env` file in the root directory with your LLM API key, with multi-LLM support via [LiteLLM](https://docs.litellm.ai/docs/providers):
 
 ```bash
 OPENAI_API_KEY=your_openai_key_here
@@ -169,7 +170,7 @@ python3 run_pageindex.py --pdf_path /path/to/your/document.pdf
 You can customize the processing with additional optional arguments:
 
 ```
---model                 OpenAI model to use (default: gpt-4o-2024-11-20)
+--model                 LLM model to use (default: gpt-4o-2024-11-20)
 --toc-check-pages       Pages to check for table of contents (default: 20)
 --max-pages-per-node    Max pages per node (default: 10)
 --max-tokens-per-node   Max tokens per node (default: 20000)
@@ -182,7 +183,7 @@ You can customize the processing with additional optional arguments:
 <details>
 <summary><strong>Markdown support</strong></summary>
 <br>
-We also provide markdown support for PageIndex. You can use the `-md_path` flag to generate a tree structure for a markdown file.
+We also provide markdown support for PageIndex. You can use the `--md_path` flag to generate a tree structure for a markdown file.
 
 ```bash
 python3 run_pageindex.py --md_path /path/to/your/document.md
@@ -193,7 +194,7 @@ python3 run_pageindex.py --md_path /path/to/your/document.md
 
 ### A Complete Agentic RAG Example
 
-For a complete agent-based QA example using the [OpenAI Agents SDK](https://github.com/openai/openai-agents-python), see [`examples/openai_agents_demo.py`](examples/openai_agents_demo.py).
+For a complete example on **agentic RAG with PageIndex** (using [OpenAI Agents SDK](https://github.com/openai/openai-agents-python)), see [`examples/openai_agents_demo.py`](examples/openai_agents_demo.py).
 
 ```bash
 # Install optional dependency

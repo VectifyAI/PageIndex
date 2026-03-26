@@ -32,8 +32,8 @@ from openai.types.responses import ResponseTextDeltaEvent, ResponseReasoningSumm
 from pageindex import PageIndexClient
 import pageindex.utils as utils
 
-PDF_URL = "https://arxiv.org/pdf/2501.12948.pdf"
-PDF_PATH = "tests/pdfs/deepseek-r1.pdf"
+PDF_URL = "https://arxiv.org/pdf/2603.15031"
+PDF_PATH = "tests/pdfs/attention-residuals.pdf"
 WORKSPACE = "./pageindex_workspace"
 
 AGENT_SYSTEM_PROMPT = """
@@ -168,6 +168,6 @@ print(client.get_document(doc_id))
 print("\n" + "=" * 60)
 print("Step 3: Agent Query (auto tool-use)")
 print("=" * 60)
-question = "What reward design does DeepSeek-R1-Zero use, and why was it chosen over supervised fine-tuning?"
+question = "Explain Attention Residuals in simple language."
 print(f"\nQuestion: '{question}'\n")
 query_agent(client, doc_id, question, verbose=True)
