@@ -30,7 +30,7 @@
 <details open>
 <summary><h2>🔥 Updates</h2></summary>
 
-- [**Agentic Vectorless RAG Example**](https://github.com/VectifyAI/PageIndex/blob/main/examples/openai_agents_demo.py): A complete *agentic, vectorless RAG* [example](https://github.com/VectifyAI/PageIndex/blob/main/examples/openai_agents_demo.py) with self-hosted PageIndex, using OpenAI Agents SDK.
+- [**An Agentic Vectorless RAG Example**](https://github.com/VectifyAI/PageIndex/blob/main/examples/openai_agents_demo.py): A complete *agentic, vectorless RAG* [example](https://github.com/VectifyAI/PageIndex/blob/main/examples/openai_agents_demo.py) with self-hosted PageIndex, using OpenAI Agents SDK.
 - [PageIndex Chat](https://chat.pageindex.ai): Human-like document-analysis agent [platform](https://chat.pageindex.ai) for professional long documents. Also available via [MCP](https://pageindex.ai/mcp) or [API](https://docs.pageindex.ai/quickstart).
 - [PageIndex Framework](https://pageindex.ai/blog/pageindex-intro): The PageIndex framework — an *agentic, in-context tree index* that enables LLMs to perform *reasoning-based, human-like retrieval* over long documents.
 
@@ -155,8 +155,6 @@ Create a `.env` file in the root directory with your LLM API key, with multi-LLM
 
 ```bash
 OPENAI_API_KEY=your_openai_key_here
-# or
-CHATGPT_API_KEY=your_openai_key_here  # legacy, still supported
 ```
 
 ### 3. Generate PageIndex structure for your PDF
@@ -166,7 +164,7 @@ python3 run_pageindex.py --pdf_path /path/to/your/document.pdf
 ```
 
 <details>
-<summary><strong>Optional parameters</strong></summary>
+<summary>Optional parameters</summary>
 <br>
 You can customize the processing with additional optional arguments:
 
@@ -182,7 +180,7 @@ You can customize the processing with additional optional arguments:
 </details>
 
 <details>
-<summary><strong>Markdown support</strong></summary>
+<summary>Markdown support</summary>
 <br>
 We also provide markdown support for PageIndex. You can use the `--md_path` flag to generate a tree structure for a markdown file.
 
@@ -190,12 +188,12 @@ We also provide markdown support for PageIndex. You can use the `--md_path` flag
 python3 run_pageindex.py --md_path /path/to/your/document.md
 ```
 
-> Note: in this function, we use "#" to determine node heading and their levels. For example, "##" is level 2, "###" is level 3, etc. Make sure your markdown file is formatted correctly. If your Markdown file was converted from a PDF or HTML, we don't recommend using this function, since most existing conversion tools cannot preserve the original hierarchy. Instead, use our [PageIndex OCR](https://pageindex.ai/blog/ocr), which is designed to preserve the original hierarchy, to convert the PDF to a markdown file and then use this function.
+> Note: in this mode, we use "#" to determine node headings and their levels. For example, "##" is level 2, "###" is level 3, etc. Make sure your markdown file is formatted correctly. If your Markdown file was converted from a PDF or HTML, we don't recommend using this mode, since most existing conversion tools cannot preserve the original hierarchy. Instead, use our [PageIndex OCR](https://pageindex.ai/blog/ocr), which is designed to preserve the original hierarchy, to convert the PDF to a markdown file and then use this mode.
 </details>
 
-### A Complete Agentic RAG Example
+### Agentic Vectorless RAG Example
 
-For a complete example on building document QA agents via **agentic vectorless RAG** using PageIndex (with [OpenAI Agents SDK](https://github.com/openai/openai-agents-python)), see [`examples/openai_agents_demo.py`](examples/openai_agents_demo.py).
+For a complete **agentic vectorless RAG** example with PageIndex, see [`examples/openai_agents_demo.py`](examples/openai_agents_demo.py) (using [OpenAI Agents SDK](https://github.com/openai/openai-agents-python)).
 
 ```bash
 # Install optional dependency
@@ -255,9 +253,10 @@ Mingtian Zhang, Yu Tang and PageIndex Team,
 PageIndex Blog, Sep 2025.
 ```
 
-Or use the BibTeX citation:
+<details>
+<summary>Or use the BibTeX citation</summary>
 
-```
+```bibtex
 @article{zhang2025pageindex,
   author = {Mingtian Zhang and Yu Tang and PageIndex Team},
   title = {PageIndex: Next-Generation Vectorless, Reasoning-based RAG},
@@ -267,6 +266,7 @@ Or use the BibTeX citation:
   note = {https://pageindex.ai/blog/pageindex-intro},
 }
 ```
+</details>
 
 Leave us a star 🌟 if you like our project. Thank you!  
 
@@ -283,4 +283,4 @@ Leave us a star 🌟 if you like our project. Thank you!
 
 ---
 
-© 2025 [Vectify AI](https://vectify.ai)
+© 2026 [Vectify AI](https://vectify.ai)
