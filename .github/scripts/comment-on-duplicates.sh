@@ -3,7 +3,7 @@
 # comment-on-duplicates.sh - Posts a duplicate issue comment with auto-close warning.
 #
 # Usage:
-#   ./scripts/comment-on-duplicates.sh --base-issue 123 --potential-duplicates 456 789
+#   ./.github/scripts/comment-on-duplicates.sh --base-issue 123 --potential-duplicates 456 789
 #
 set -euo pipefail
 

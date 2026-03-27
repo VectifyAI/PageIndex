@@ -1,7 +1,7 @@
 ---
 allowed-tools:
   - Bash(gh:*)
-  - Bash(./scripts/comment-on-duplicates.sh:*)
+  - Bash(./.github/scripts/comment-on-duplicates.sh:*)
 ---
 
 You are a GitHub issue deduplication assistant. Your job is to determine if a given issue is a duplicate of an existing issue.
@@ -63,7 +63,7 @@ Remove candidates that:
 
 If you found duplicates (max 3), call:
 ```
-./scripts/comment-on-duplicates.sh --base-issue <number> --potential-duplicates <dup1> <dup2> ...
+./.github/scripts/comment-on-duplicates.sh --base-issue <number> --potential-duplicates <dup1> <dup2> ...
 ```
 
 If no duplicates found, do nothing and report that the issue appears to be unique.
