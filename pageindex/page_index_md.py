@@ -243,7 +243,8 @@ def clean_tree_for_output(tree_nodes):
 async def md_to_tree(md_path, if_thinning=False, min_token_threshold=None, if_add_node_summary='no', summary_token_threshold=None, model=None, if_add_doc_description='no', if_add_node_text='no', if_add_node_id='yes'):
     with open(md_path, 'r', encoding='utf-8') as f:
         markdown_content = f.read()
-    
+    line_count = markdown_content.count('\n') + 1
+
     print(f"Extracting nodes from markdown...")
     node_list, markdown_lines = extract_nodes_from_markdown(markdown_content)
 
@@ -265,14 +266,14 @@ async def md_to_tree(md_path, if_thinning=False, min_token_threshold=None, if_ad
     
     if if_add_node_summary == 'yes':
         # Always include text for summary generation
-        tree_structure = format_structure(tree_structure, order = ['title', 'node_id', 'summary', 'prefix_summary', 'text', 'line_num', 'nodes'])
+        tree_structure = format_structure(tree_structure, order = ['title', 'node_id', 'line_num', 'summary', 'prefix_summary', 'text', 'nodes'])
         
         print(f"Generating summaries for each node...")
         tree_structure = await generate_summaries_for_structure_md(tree_structure, summary_token_threshold=summary_token_threshold, model=model)
         
         if if_add_node_text == 'no':
             # Remove text after summary generation if not requested
-            tree_structure = format_structure(tree_structure, order = ['title', 'node_id', 'summary', 'prefix_summary', 'line_num', 'nodes'])
+            tree_structure = format_structure(tree_structure, order = ['title', 'node_id', 'line_num', 'summary', 'prefix_summary', 'nodes'])
         
         if if_add_doc_description == 'yes':
             print(f"Generating document description...")
@@ -282,17 +283,19 @@ async def md_to_tree(md_path, if_thinning=False, min_token_threshold=None, if_ad
             return {
                 'doc_name': os.path.splitext(os.path.basename(md_path))[0],
                 'doc_description': doc_description,
+                'line_count': line_count,
                 'structure': tree_structure,
             }
     else:
         # No summaries needed, format based on text preference
         if if_add_node_text == 'yes':
-            tree_structure = format_structure(tree_structure, order = ['title', 'node_id', 'summary', 'prefix_summary', 'text', 'line_num', 'nodes'])
+            tree_structure = format_structure(tree_structure, order = ['title', 'node_id', 'line_num', 'summary', 'prefix_summary', 'text', 'nodes'])
         else:
-            tree_structure = format_structure(tree_structure, order = ['title', 'node_id', 'summary', 'prefix_summary', 'line_num', 'nodes'])
+            tree_structure = format_structure(tree_structure, order = ['title', 'node_id', 'line_num', 'summary', 'prefix_summary', 'nodes'])
     
     return {
         'doc_name': os.path.splitext(os.path.basename(md_path))[0],
+        'line_count': line_count,
         'structure': tree_structure,
     }
 
@@ -303,7 +306,7 @@ if __name__ == "__main__":
     
     # MD_NAME = 'Detect-Order-Construct'
     MD_NAME = 'cognitive-load'
-    MD_PATH = os.path.join(os.path.dirname(__file__), '..', 'tests/markdowns/', f'{MD_NAME}.md')
+    MD_PATH = os.path.join(os.path.dirname(__file__), '..', 'examples/documents/', f'{MD_NAME}.md')
 
 
     MODEL="gpt-4.1"

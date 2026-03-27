@@ -18,10 +18,10 @@ Steps:
 """
 import os
 import sys
+import json
 import asyncio
 import concurrent.futures
 import requests
-from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -32,9 +32,10 @@ from openai.types.responses import ResponseTextDeltaEvent, ResponseReasoningSumm
 from pageindex import PageIndexClient
 import pageindex.utils as utils
 
+_EXAMPLES_DIR = os.path.dirname(os.path.abspath(__file__))
 PDF_URL = "https://arxiv.org/pdf/2603.15031"
-PDF_PATH = "tests/pdfs/attention-residuals.pdf"
-WORKSPACE = "./pageindex_workspace"
+PDF_PATH = os.path.join(_EXAMPLES_DIR, "documents", "attention-residuals.pdf")
+WORKSPACE = os.path.join(_EXAMPLES_DIR, "workspace")
 
 AGENT_SYSTEM_PROMPT = """
 You are PageIndex, a document QA assistant.
@@ -147,16 +148,16 @@ client = PageIndexClient(workspace=WORKSPACE)
 print("=" * 60)
 print("Step 1: Indexing PDF and inspecting tree structure")
 print("=" * 60)
-_id_cache = Path(WORKSPACE).expanduser() / "demo_doc_id.txt"
-if _id_cache.exists() and (doc_id := _id_cache.read_text().strip()) in client.documents:
+doc_id = next((did for did, doc in client.documents.items()
+                if doc.get('doc_name') == os.path.basename(PDF_PATH)), None)
+if doc_id:
     print(f"\nLoaded cached doc_id: {doc_id}")
 else:
     doc_id = client.index(PDF_PATH)
-    _id_cache.parent.mkdir(parents=True, exist_ok=True)
-    _id_cache.write_text(doc_id)
     print(f"\nIndexed. doc_id: {doc_id}")
 print("\nTree Structure (top-level sections):")
-utils.print_tree(client.documents[doc_id]["structure"])
+structure = json.loads(client.get_document_structure(doc_id))
+utils.print_tree(structure)
 
 # ── Step 2: Document Metadata ──────────────────────────────────────────────────
 print("\n" + "=" * 60)

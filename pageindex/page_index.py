@@ -1095,11 +1095,13 @@ def page_index_main(doc, opt=None):
                 # Create a clean structure without unnecessary fields for description generation
                 clean_structure = create_clean_structure_for_description(structure)
                 doc_description = generate_doc_description(clean_structure, model=opt.model)
+                structure = format_structure(structure, order=['title', 'node_id', 'start_index', 'end_index', 'summary', 'text', 'nodes'])
                 return {
                     'doc_name': get_pdf_name(doc),
                     'doc_description': doc_description,
                     'structure': structure,
                 }
+        structure = format_structure(structure, order=['title', 'node_id', 'start_index', 'end_index', 'summary', 'text', 'nodes'])
         return {
             'doc_name': get_pdf_name(doc),
             'structure': structure,
