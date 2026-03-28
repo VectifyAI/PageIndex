@@ -1,28 +1,31 @@
 """
-PageIndex x OpenAI Agents Demo
+Agentic Vectorless RAG with PageIndex - Demo
 
-Demonstrates how to use PageIndexClient with the OpenAI Agents SDK
-to build a document QA agent with 3 tools:
-  - get_document()
-  - get_document_structure()
-  - get_page_content()
+A simple example of building a document QA agent with self-hosted PageIndex
+and the OpenAI Agents SDK. Instead of vector similarity search and chunking,
+PageIndex builds a hierarchical tree index and uses agentic LLM reasoning for
+human-like, context-aware retrieval.
 
-Requirements:
-    pip install openai-agents
+Agent tools:
+  - get_document()           — document metadata (status, page count, etc.)
+  - get_document_structure() — tree structure index of a document
+  - get_page_content()       — retrieve text content of specific pages
 
 Steps:
-  1 — Index PDF and inspect tree structure
-  2 — Inspect document metadata
-  3 — Ask a question (agent auto-calls tools)
+  1 — Index a PDF and view its tree structure index
+  2 — View document metadata
+  3 — Ask a question (agent reasons over the index and auto-calls tools)
+
+Requirements: pip install openai-agents
 """
-import os
 import sys
 import json
 import asyncio
 import concurrent.futures
+from pathlib import Path
 import requests
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agents import Agent, Runner, function_tool, set_tracing_disabled
 from agents.model_settings import ModelSettings
@@ -34,9 +37,9 @@ import pageindex.utils as utils
 
 PDF_URL = "https://arxiv.org/pdf/2603.15031"
 
-_EXAMPLES_DIR = os.path.dirname(os.path.abspath(__file__))
-PDF_PATH = os.path.join(_EXAMPLES_DIR, "documents", "attention-residuals.pdf")
-WORKSPACE = os.path.join(_EXAMPLES_DIR, "workspace")
+_EXAMPLES_DIR = Path(__file__).parent
+PDF_PATH = _EXAMPLES_DIR / "documents" / "attention-residuals.pdf"
+WORKSPACE = _EXAMPLES_DIR / "workspace"
 
 AGENT_SYSTEM_PROMPT = """
 You are PageIndex, a document QA assistant.
@@ -138,9 +141,9 @@ if __name__ == "__main__":
     set_tracing_disabled(True)
 
     # Download PDF if needed
-    if not os.path.exists(PDF_PATH):
+    if not PDF_PATH.exists():
         print(f"Downloading {PDF_URL} ...")
-        os.makedirs(os.path.dirname(PDF_PATH), exist_ok=True)
+        PDF_PATH.parent.mkdir(parents=True, exist_ok=True)
         with requests.get(PDF_URL, stream=True, timeout=30) as r:
             r.raise_for_status()
             with open(PDF_PATH, "wb") as f:
@@ -152,12 +155,12 @@ if __name__ == "__main__":
     # Setup
     client = PageIndexClient(workspace=WORKSPACE)
 
-    # Step 1: Index + Tree
+    # Step 1: Index PDF and view tree structure
     print("=" * 60)
-    print("Step 1: Indexing PDF and inspecting tree structure")
+    print("Step 1: Index PDF and view tree structure")
     print("=" * 60)
     doc_id = next(
-        (did for did, doc in client.documents.items() if doc.get('doc_name') == os.path.basename(PDF_PATH)),
+        (did for did, doc in client.documents.items() if doc.get('doc_name') == PDF_PATH.name),
         None,
     )
     if doc_id:
@@ -169,9 +172,9 @@ if __name__ == "__main__":
     structure = json.loads(client.get_document_structure(doc_id))
     utils.print_tree(structure)
 
-    # Step 2: Document Metadata
+    # Step 2: View document metadata
     print("\n" + "=" * 60)
-    print("Step 2: Document Metadata (get_document)")
+    print("Step 2: View document metadata")
     print("=" * 60)
     doc_metadata = client.get_document(doc_id)
     print(f"\n{doc_metadata}")
