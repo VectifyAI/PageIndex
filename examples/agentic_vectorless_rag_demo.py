@@ -24,7 +24,7 @@ import requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agents import Agent, Runner, function_tool
+from agents import Agent, Runner, function_tool, set_tracing_disabled
 from agents.model_settings import ModelSettings
 from agents.stream_events import RawResponsesStreamEvent, RunItemStreamEvent
 from openai.types.responses import ResponseTextDeltaEvent, ResponseReasoningSummaryTextDeltaEvent
@@ -134,6 +134,8 @@ def query_agent(client: PageIndexClient, doc_id: str, prompt: str, verbose: bool
 
 
 if __name__ == "__main__":
+
+    set_tracing_disabled(True)
 
     # Download PDF if needed
     if not os.path.exists(PDF_PATH):

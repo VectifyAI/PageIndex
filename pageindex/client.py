@@ -15,6 +15,16 @@ from .utils import ConfigLoader, remove_fields
 META_INDEX = "_meta.json"
 
 
+def _normalize_retrieve_model(model: str) -> str:
+    """Preserve supported Agents SDK prefixes and route other provider paths via LiteLLM."""
+    passthrough_prefixes = ("litellm/", "openai/")
+    if not model or "/" not in model:
+        return model
+    if model.startswith(passthrough_prefixes):
+        return model
+    return f"litellm/{model}"
+
+
 class PageIndexClient:
     """
     A client for indexing and retrieving document content.
@@ -35,7 +45,7 @@ class PageIndexClient:
             overrides["retrieve_model"] = retrieve_model
         opt = ConfigLoader().load(overrides or None)
         self.model = opt.model
-        self.retrieve_model = opt.retrieve_model or self.model
+        self.retrieve_model = _normalize_retrieve_model(opt.retrieve_model or self.model)
         if self.workspace:
             self.workspace.mkdir(parents=True, exist_ok=True)
         self.documents = {}
