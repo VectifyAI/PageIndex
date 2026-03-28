@@ -9,6 +9,9 @@
 
 <p align="center">
   <a href="https://trendshift.io/repositories/14736" target="_blank"><img src="https://trendshift.io/api/badge/repositories/14736" alt="VectifyAI%2FPageIndex | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+  <a href="https://gitcgr.com/VectifyAI/PageIndex" target="_blank" rel="noopener noreferrer">
+    <img src="https://gitcgr.com/badge/VectifyAI/PageIndex.svg" alt="gitcgr" />
+  </a>
 </p>
 
 # PageIndex: Vectorless, Reasoning-based RAG
