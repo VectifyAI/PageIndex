@@ -1,0 +1,44 @@
+{
+  "doc_name": "聊天文件管理",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\SillyTavern 官方文档\\核心概念\\聊天文件管理.md",
+  "structure": [
+    {
+      "title": "独奏",
+      "node_id": "0000",
+      "prefix_summary": "### 独奏",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/chatfilemanagement/#chat-import)聊天导入",
+          "node_id": "0001",
+          "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/chatfilemanagement/#chat-import)聊天导入\n\n**将聊天记录导入 SillyTavern**\n\n要导入 Character.AI 聊天，请使用以下工具：[https://github.com/0x000011b/characterai-dumper](https://github.com/0x000011b/characterai-dumper)。",
+          "line_num": 9
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/chatfilemanagement/#group-chats)群聊",
+      "node_id": "0002",
+      "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/chatfilemanagement/#group-chats)群聊",
+      "line_num": 15
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/chatfilemanagement/#export-as-txt)导出为 .txt",
+      "node_id": "0003",
+      "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/chatfilemanagement/#export-as-txt)导出为 .txt",
+      "line_num": 17
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/chatfilemanagement/#bookmarks)书签",
+      "node_id": "0004",
+      "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/chatfilemanagement/#bookmarks)书签",
+      "line_num": 19
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/chatfilemanagement/#rename-chat)重命名聊天",
+      "node_id": "0005",
+      "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/chatfilemanagement/#rename-chat)重命名聊天\n\n默认情况下，聊天文件的名称为它们启动的日期和时间。\n\n您可以通过单击铅笔图标并键入新名称来更改此设置。\n\n这将断开与该聊天相关的书签之间的链接。",
+      "line_num": 21
+    }
+  ]
+}

@@ -1,0 +1,256 @@
+{
+  "doc_name": "角色创建的指南Ali：Chat Lite",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\角色创建的指南Ali：Chat Lite\\角色创建的指南Ali：Chat Lite.md",
+  "structure": [
+    {
+      "title": "**免責聲明**",
+      "node_id": "0000",
+      "summary": "## **免責聲明**\n\n这些指南很容易过时。随着工作效率的提高，请务必跟进最新的字符格式。LLM 每天都在变化，所以如果我需要经常更新本指南，请不要感到惊讶。",
+      "line_num": 85
+    },
+    {
+      "title": "**资源**",
+      "node_id": "0001",
+      "summary": "## **资源**\n\n- [AliCat 的 Ali：Chat 指南](https://rentry.co/alichat)\n\n- [AVAKSon的PList指南](https://rentry.co/plists_alichat_avakson)\n\n- [AVAKSon 的 zoltanAI 字符编辑器分支](https://avakson.github.io/character-editor) - 这使用 OpenAI 分词器。请务必检查 SillyTavern 上的代币！",
+      "line_num": 89
+    },
+    {
+      "title": "**目标**",
+      "node_id": "0002",
+      "summary": "## **目标**\n\n1. 教您如何将 AVAK 指南中的字符转换为这种新格式。\n\n1. 说明如何针对较低的令牌限制优化字符。\n\n1. 解释作者的注释是什么以及我们为什么要使用它。",
+      "line_num": 97
+    },
+    {
+      "title": "**SillyTavern 设置**",
+      "node_id": "0003",
+      "prefix_summary": "## **SillyTavern 设置**",
+      "line_num": 105,
+      "nodes": [
+        {
+          "title": "**皮格马利翁模型**",
+          "node_id": "0004",
+          "summary": "### **皮格马利翁模型**\n\n\n- 皮格马利翁格式 - 确保这是自动的\n\n- 分词器 - 由于 pygmalion（7 和 13b）基于 LLaMA，因此请使用适当的分词器。6B 使用 GPT-3-classic。",
+          "line_num": 107
+        },
+        {
+          "title": "**非皮格马利翁 LLaMA 模型**",
+          "node_id": "0005",
+          "summary": "### **非皮格马利翁 LLaMA 模型** 文档描述：\n\n1. **取消勾选选项**：用户可以选择取消勾选某些选项，因为它们不执行任何操作，但建议进行检查以确保设置正确。\n2. **基本聊天交互**：为了避免 AI 模仿用户行为，建议保持某些选项启用。如果 AI 在段落中途停止，用户可以禁用相关选项以继续对话。\n3. **角色名称提示**：建议在提示中始终添加角色的名字，以确保对话的连贯性。\n4. **分词器兼容性**：确保分词器适用于 LLaMA 模型。\n5. **聊天分隔符**：保持聊天分隔符为空，避免自动插入 dinkuses。\n6. **Markdown 插入**：用户可以将任何内容插入到 markdown 中，忽略逗号分隔的列表。\n7. **禁用皮格马利翁格式**：确保禁用皮格马利翁格式以避免不必要的行为。\n8. **Exllama 和 oobabooga 的问题**：当前在 SillyTavern 中使用 oobabooga 时，Exllama 会出现问题，建议用户调整设置以避免控制台错误。",
+          "line_num": 114
+        }
+      ]
+    },
+    {
+      "title": "**聊天分隔符 （Dinkuses）**",
+      "node_id": "0006",
+      "prefix_summary": "## **聊天分隔符 （Dinkuses）**\n\n此部分已弃用\n\n丁卡不再适用于角色！如果您发现使用 dinkus 的旧角色，最好将其删除。此处保留此部分仅供参考。\n\n聊天分隔符或“dinkuses”用于拆分角色的各个部分。对于这种方法，您只需要一个 dinkus，但使用正确的 dinkus 非常重要。每个模型都是在特定的 dinkuse 上训练的，因此使用正确的模型会给出更好的结果。这是一个列表（随着我了解更多 dinkuses 及其用途，这将更新）：",
+      "line_num": 135,
+      "nodes": [
+        {
+          "title": "：LLaMA 模型的通用 dinkus",
+          "node_id": "0007",
+          "summary": "### ：LLaMA 模型的通用 dinkus\n\n- `<START>`：仅适用于皮格马利翁型号（6B、7B、13B。不是metharme）",
+          "line_num": 143
+        },
+        {
+          "title": "一般来说，你想使用 ，但如果你正在制作一个皮格马利翁字符，请使用，因为这是数据集使用的。`<START>`",
+          "node_id": "0008",
+          "summary": "### 一般来说，你想使用 ，但如果你正在制作一个皮格马利翁字符，请使用，因为这是数据集使用的。`<START>`",
+          "line_num": 147
+        }
+      ]
+    },
+    {
+      "title": "**每个字符的作者笔记**",
+      "node_id": "0009",
+      "summary": "## **每个字符的作者笔记**\n\n\n本指南起作用的主要原因是因为作者的注释。这是以消息间隔注入聊天的信息，以使 AI 保持在上下文中。我们使用作者注释的主要原因是因为它减小了角色卡标记的大小，同时允许我们保留该角色的小细节。\n\n从最新版本的 SillyTavern 开始，角色作者的笔记现在在聊天之间保留作者的笔记，具体取决于您的角色。下面是有关如何使用信息启用它的图像：",
+      "line_num": 149
+    },
+    {
+      "title": "**示例字符**",
+      "node_id": "0010",
+      "summary": "## **示例字符**\n\n今天，我们将使用我的 OC Manami。主要原因是因为她是我花了很长时间创造的角色，她是本指南的完美例子。\n\n按照本指南，Manami 的角色卡从大约 1300 个代币增加到只有 599 个代币，甚至可以通过一些巧妙的写作来减少。",
+      "line_num": 156
+    },
+    {
+      "title": "**PLists（英语：PLists）**",
+      "node_id": "0011",
+      "prefix_summary": "The partial document provides an overview of PLists, which are used to describe character traits in role-playing (RP) scenarios. It explains that PLists encompass various aspects of a character, including their personality, clothing, physical appearance, and even the environment of the RP. The document suggests using world information for the environment but notes that PLists are also effective. It contrasts with AVAKSon's guide by recommending against splitting PList entries, instead advocating for grouping as much information as possible into a single PList. The reasoning behind this is to minimize the risk of \"bot leaks,\" as more arrays can lead to increased variability in the AI's responses.",
+      "line_num": 162,
+      "nodes": [
+        {
+          "title": "**旧 PList 结构转换**",
+          "node_id": "0012",
+          "summary": "### **旧 PList 结构转换**\n\nThe partial document discusses the transformation of an outdated PList structure for character cards to a more compact and efficient format. It emphasizes the optional nature of many fields following the character traits, highlighting the decision to retain certain features for specific characters like Manami. The document also mentions the interchangeable use of different separators like `:=:` and `/:/:`, noting better support for the former in LLaMA model derivatives. The main goal is to provide AI with sufficient context for generating new scenarios by optimizing the PList structure. It stresses the importance of the order of traits, with those appearing later being more significant.",
+          "line_num": 170
+        },
+        {
+          "title": "**性格特征/角色**",
+          "node_id": "0013",
+          "summary": "### **性格特征/角色**\n\n这些特征描述了你的角色的性格、衣服、身体，以及你想表明的任何其他东西。这还可能涉及与用户的关系。以下是我倾向于格式化 PList 这一部分的方式：\n\n\n使用 just 可能会使某些模型对您尝试指定的内容感到困惑。相反，请尝试使用 、 或 .我倾向于喜欢角色，因为它囊括了一切。`Character:Character's traitsCharacter's personalityCharacter's persona`",
+          "line_num": 186
+        },
+        {
+          "title": "**复杂的性状**",
+          "node_id": "0014",
+          "summary": "### **复杂的性状**\n\n该部分文档讨论了特征可能非常复杂，难以用单一标签解释的情况。以 Manami 的一个复杂特征为例，她的大部分友谊都很肤浅，但她与亲密的朋友进行了深入的交谈。为了充分描述这一特征，使用了多个描述性标签，如 \"makes shallow friendships\" 和 \"respects few friends close friends with {{user}}\" 。文档强调了特征需要多个标签来全面解释，并指出用户是 Manami 的密友，以确保 AI 能够与用户进行深入对话。",
+          "line_num": 193
+        },
+        {
+          "title": "**可选部分**",
+          "node_id": "0015",
+          "summary": "### **可选部分**\n\n该文档讨论了在角色扮演（RP）文档的PList中包含额外部分的建议，以增强角色描述的深度和细节。以下是主要涵盖的可选部分：\n\n1. **服装**：描述角色所穿的衣服，例如颜色、款式和配饰。\n2. **身体**：详细描述角色的外貌特征，包括体型、肤色、发型、眼睛颜色等。\n3. **流派**：定义角色扮演的整体风格或类型，例如生活片段、奇幻、科幻等。\n4. **标签**：添加额外的标签以进一步分类或描述角色，例如地点、主题、兴趣等。\n5. **场景**：用一句话概括角色所处的场景，建议使用模糊的描述而非具体的名字或第二人称。\n\n文档建议保留服装、身体、流派和标签部分，并保持场景描述的简短。此外，还提到可以使用SillyTavern中的世界信息/传说书来包含更多细节或触发特定对话，而不是增加PList的标记数量。最后，文档以一个完整的PList示例作为参考，展示了如何将这些部分结合起来。",
+          "line_num": 201
+        }
+      ]
+    },
+    {
+      "title": "**世界信息/传说书**",
+      "node_id": "0016",
+      "prefix_summary": "### Description of the Partial Document\n\nThe partial document provides an overview of \"World Info\" and \"Lorebooks,\" which are essential tools for creating immersive environments and backstories for characters in a shared world or universe. It emphasizes the distinction between these two concepts: \"World Info\" pertains to global world-building, while \"Lorebooks\" focus on character-specific knowledge.\n\nThe document explains the concept of \"key/value pairs,\" where each key is unique and can be linked to a specific value. When a key is mentioned in a prompt, the corresponding value is injected into the text. It further outlines two primary methods for creating these key/value pairs:\n\n1. **Environment - Simple PList**: This method likely involves a straightforward list format for organizing world-related information.\n2. **Lore - PList + Ali:Chat combination**: This approach combines a list format with additional functionality, possibly enhancing the depth and interactivity of character-specific lore.\n\nThe document also mentions that a section on \"World Info\" is outdated and directs readers to a more updated resource, the \"World Info Encyclopedia.\" Additionally, it includes a reference to a visual guide showing the configuration options for World Info and a link related to Lorebook selection.",
+      "line_num": 226,
+      "nodes": [
+        {
+          "title": "**环境**",
+          "node_id": "0017",
+          "summary": "The partial document focuses on creating a structured and efficient way to describe environments, particularly locations and objects such as places, buildings, landmarks, and houses. It emphasizes using a simple PList format to capture all relevant features of a region. The document provides an example using \"Manami and the user's university BDIT (Bluudale Institute of Technology),\" illustrating how to create a PList entry that includes strong associations and aliases. It suggests including key attributes like \"college of technology,\" \"respected by physicists,\" and \"very competitive\" for BDIT. Additionally, the document advises on organizing keys related to the location, such as using \"BDIT,Bluudale Institute of Technology,college,university,uni,school\" for BDIT, and using single-word descriptors for strong associations when appropriate, like \"Bluudale(metropolis).\" The document also mentions that SillyTavern will handle trimming excess spaces in the comma-separated lists.",
+          "line_num": 250
+        },
+        {
+          "title": "**博学**",
+          "node_id": "0018",
+          "summary": "The partial document explains the structure and components of a document related to character descriptions and their interactions with objects or environments. It introduces two main elements: PList and Ali:Chat. PList is used for general descriptions, while Ali:Chat is for character-specific reactions or opinions about legendary items. An exception is made for global objects, where Ali:Chat is only used if the object is deemed very important. The document also provides an example of how to describe a character's alternate park outfit, including both the clothing items and the character's feelings about them. It emphasizes using a consistent template for any specific knowledge a character might have. Additionally, it discusses the principle of using keys for triggering these pairs, suggesting keywords that someone might use to access the information, such as activities or locations associated with the outfit.",
+          "line_num": 262
+        },
+        {
+          "title": "**放置**",
+          "node_id": "0019",
+          "summary": "The partial document discusses the \"placement\" feature in the World Information Editor, detailing where specific information can be injected within a prompt to optimize its importance and effectiveness. It outlines four primary injection points: \"Before character,\" \"After character,\" \"Author's note top,\" and \"Author's note bottom.\" The document emphasizes the strategic importance of placement, suggesting that less critical information should be placed lower in the prompt to avoid overshadowing more important details. It advises writers to prioritize information based on its relevance to the character's dialogue rather than including everything they deem important. Additionally, it provides an example of placing background information, like a city, before the character description if it is not directly referenced in the conversation but is known to the character.",
+          "line_num": 279
+        },
+        {
+          "title": "**扫描深度**",
+          "node_id": "0020",
+          "summary": "### **扫描深度**\n\n这决定了要扫描世界信息的聊天消息的数量。通常，除非您希望扫描更多邮件进行注入，否则应将其保留为默认值。`2`",
+          "line_num": 299
+        },
+        {
+          "title": "**上下文百分比**",
+          "node_id": "0021",
+          "summary": "### **上下文百分比**\n\n世界信息最多可以占用的上下文百分比。除非您希望为世界信息上下文注入提供更高的最大预算，否则请将其保留为默认值。`25%`",
+          "line_num": 303
+        },
+        {
+          "title": "**高级：特异性**",
+          "node_id": "0022",
+          "summary": "### **高级：特异性**\n\n该部分文档主要讨论了如何在SillyTavern中处理特定角色相关的世界信息条目。它介绍了使用`SelectiveAND`选项来创建一个条件，该条件要求提示中同时包含主列表和辅助列表中的键，才能触发世界信息的注入。具体示例以\"Manami的公寓\"为例，展示了如何设置主键（如\"apartment\"和\"home\"）和辅助键（如\"Manami\"、\"your\"、\"she\"和\"her\"），以确保只有在提示中同时包含这些键时，才会触发与Manami公寓相关的信息注入。这种方法确保了世界信息的准确性和特异性，避免了不相关的场景被错误触发。",
+          "line_num": 307
+        },
+        {
+          "title": "**高级：递归扫描**",
+          "node_id": "0023",
+          "summary": "### **高级：递归扫描**\n\n递归扫描是一种通过重复应用条件来扩展上下文的技术。在 World Info 中，递归以键和子键的形式实现。例如，定义一个父条目和多个子条目后，启用递归扫描后，提及父条目将自动注入所有相关子条目的上下文。文档中以“monsters”和“slimes”为例，说明了如何通过递归扫描将“monsters”扩展为“monstersmonstersslimes”，从而在对话中引入更丰富的上下文信息。\n\n递归扫描允许用户为复杂的知识体系创建详细的键和子键树，从而进一步定义和扩展虚拟世界。此外，用户可以选择在特定情况下排除某些条目进行递归，例如替代服装或特定建筑物，这在 SillyTavern 中可以通过启用“Exclude from recursion”选项来实现。",
+          "line_num": 321
+        },
+        {
+          "title": "**高级：PList 基础世界**",
+          "node_id": "0024",
+          "summary": "### **高级：PList 基础世界**\n\n该文档主要介绍了如何使用 PList 基础世界来管理和优化多个 PL 器导致的支架泄漏问题。以下是主要步骤：\n\n1. **下载与添加**：\n   - 从 GitHub 下载 PList 基础世界文件（`PList-Base.json`）并将其添加到 SillyTavern 中。\n\n2. **配置世界信息**：\n   - 在全球世界信息中选择 PList 基础世界。默认情况下，方括号会被注入到每个世界信息（WI）放置中。\n   - 若需删除某些方括号，可根据具体位置禁用单个条目。\n\n3. **整合 PList 条目**：\n   - 选择 PList 基础世界作为活动世界后，从所有其他世界的 PList 条目中删除，并在每个条目的末尾添加 `[];`。\n\n4. **适用场景**：\n   - 该方法适用于需要处理大量世界信息条目的情况，尽管操作较为复杂，但能有效减少支架泄漏的可能性。\n\n文档还提到，如果用户在使用过程中遇到困惑，可以随时在 Discord 上寻求帮助。",
+          "line_num": 339
+        }
+      ]
+    },
+    {
+      "title": "**阿里：聊天**",
+      "node_id": "0025",
+      "prefix_summary": "The partial document provides guidance on using \"Ali: Chat\" for enhancing character descriptions in a role-playing context. It emphasizes that the primary goal of Ali: Chat is to reinforce key traits in a character's Persona List (PList) through examples, rather than detailing every trait. The document highlights the importance of token usage in these examples, as they constitute the sole content of the character description. It also suggests that Ali: Chat is particularly useful for elaborating on complex traits and resolving detail-related issues. Additionally, the document advises that while legends can enrich a character, they should not be included in the character description itself but rather in the world information or legend book.",
+      "line_num": 350,
+      "nodes": [
+        {
+          "title": "**格式准则**",
+          "node_id": "0026",
+          "summary": "### **Description of the Partial Document**\n\nThe partial document provides guidelines for creating Ali:Chat role-play examples, focusing on formatting, content, and token usage. It emphasizes the importance of adhering to specific line limits for different example types, suggesting either three short examples with 5-6 lines each or two long examples with 7-8 lines each when using the AVAKSon character editor. The document highlights the significance of including prompts related to the character's appearance and personality, as these aspects help in introducing and reinforcing the character's traits. It also advises making prompts as spicy as possible for NSFW content to achieve the best results. The document sets a soft token limit of 300-600 for Ali:Chat examples, recommending that fewer tokens allow for more chat history. It encourages creators to consider the types of interactions they want with their characters and to avoid overly descriptive inputs by placing detailed information in PList or world information, allowing Ali:Chat to focus on interaction. The document concludes with an example of a character named Manami, demonstrating how to create concise and engaging responses to typical user prompts about life story, appearance, and personality.",
+          "line_num": 364
+        }
+      ]
+    },
+    {
+      "title": "**问候语**",
+      "node_id": "0027",
+      "prefix_summary": "## **问候语**\n\n你可能认为给一个角色的问候语是无害的最后一刻添加的，但我向你保证，它们不是。 “第一印象就是最好的印象”在这里适用，因为问候语是你与角色的第一条信息不可或缺的一部分。",
+      "line_num": 397,
+      "nodes": [
+        {
+          "title": "**永久代币与总代币**",
+          "node_id": "0028",
+          "summary": "### **永久代币与总代币**\n\n该部分文档主要讨论了在使用聊天机器人时，永久代币与总代币的区别及其重要性。文档指出，问候消息中的标记是临时的，会随着聊天上下文的更新而被删除，而其他标记则是永久性的。文档建议将总代币数量控制在600个以下，但如果无法做到这一点，至少应确保永久代币数量不超过600个，以避免上下文截断的问题。",
+          "line_num": 401
+        },
+        {
+          "title": "**翻转的场景**",
+          "node_id": "0029",
+          "summary": "### **文档描述**\n\n该文档主要讨论了如何编写和翻转对话场景中的问候语，以确保角色互动自然且避免模仿。以下是主要要点：\n\n1. **避免模仿**：理想情况下，问候语不应包含对用户行为的直接模仿，以保持角色的独立性和对话的自然流畅。\n2. **使用第二人称**：建议使用第二人称编写信息，然后将角色和用户的角色进行翻转，以实现角色互换。\n3. **场景翻转示例**：通过一个具体例子展示了如何从用户的视角编写初始场景，然后将其翻转至角色的视角，并进行语法和情感上的调整。\n4. **情感和细节添加**：在翻转后的场景中，添加情感表达和其他细节，使对话更加生动和真实。\n5. **避免引导性问题**：为防止对话循环，应从问候语中删除引导性问题。\n6. **保持角色独立性**：最重要的是不要在场景中描述另一个角色在做什么，以确保场景顺利翻转并保持问候语的质量。",
+          "line_num": 409
+        }
+      ]
+    },
+    {
+      "title": "**高级：代币微优化**",
+      "node_id": "0030",
+      "prefix_summary": "## **高级：代币微优化**\n\n本节旨在教您如何使您的整体代币计数比以前更低。需要注意的是，这些优化完全是可选的，并且依赖于分词器。但是，在大多数情况下，您的卡将拥有较少的代币。请记住永久令牌和总令牌之间的区别。",
+      "line_num": 438,
+      "nodes": [
+        {
+          "title": "**PLists（英语：PLists）**",
+          "node_id": "0031",
+          "summary": "### Description of the Partial Document\n\nThe document focuses on optimizing PLists, which are used to describe characters in terms of their physical attributes and clothing. The main points covered include:\n\n1. **Micro-Optimization of PLists**: The document suggests ways to streamline the PList entries to make them more efficient and concise. This involves grouping multiple descriptive features under a single category, such as clothing or body parts, to save tokens and create a tighter association between features and the character.\n\n2. **Examples of Optimized PLists**:\n   - **Clothing**: Instead of listing each clothing item separately, they are grouped under a single category. For example, \"mint-green blouse\" and \"denim shorts\" are combined into `/mint-green blouse, denim shorts`.\n   - **Body**: Multiple features of a body part, such as \"light blue hair,\" \"short hair,\" and \"messy hair,\" are grouped under a single category, resulting in `hair(light blue, short, messy)`.\n\n3. **Comprehensive PList for Manami**: The document provides a detailed example of an optimized PList for the character Manami, including her personality traits, clothing, physical attributes, and the context of her interaction with the user. This includes:\n   - **Personality**: Outgoing, tomboyish, athletic, intelligent, caring, kind, sweet, honest, happy, sensitive, selfless, enthusiastic, silly, curious, dreamy, insecure about her intelligence, forming superficial friendships, respecting few friends, enjoying chatting, liking anime and manga, playing video games, swimming, and going to the beach.\n   - **Clothing**: Shirt (mint green), shorts (denim), flat shoes.\n   - **Physical Attributes**: Young woman, fair skin, hair (light blue, short and messy), eyes (blue), nail polish (magenta).\n   - **Context**: The scenario involves Manami needing the user's help to study for a quantum physics exam, followed by them going out together after completing their studies.\n\n4. **Context and Tags**: The PList also includes tags and a scenario that provide additional context for the character's interactions, such as \"city,\" \"park,\" \"quantum physics,\" \"exam,\" \"university,\" and the specific scenario of studying and going out.",
+          "line_num": 442
+        },
+        {
+          "title": "**阿里：聊天**",
+          "node_id": "0032",
+          "summary": "### Description of Partial Document: \"阿里：聊天\"\n\nThe document focuses on micro-optimizations in chat interactions, particularly regarding token count reduction while maintaining the intended meaning. It emphasizes the importance of concise and natural language, suggesting that overly descriptive sentences can be rewritten for brevity without losing their core message. Examples are provided to illustrate how actions and emotions can be expressed more succinctly. The document advises against repetitive descriptions of feelings or actions, recommending the use of synonyms or different grammatical structures to add variety and avoid bias in character interactions. It also discusses the concept of \"name reinforcement,\" suggesting that while modern models may not require explicit name mentions in every sentence, simpler models might still benefit from this practice. The document stresses the importance of varying sentence structures and formats in example dialogues to enhance role-playing interactions. Additionally, it highlights the token-saving benefit of using lowercase letters for non-proper nouns, as capitalization consumes additional tokens.",
+          "line_num": 464
+        }
+      ]
+    },
+    {
+      "title": "**高级：角色思想**",
+      "node_id": "0033",
+      "prefix_summary": "This section, titled \"Advanced: Character Thoughts,\" discusses the implementation of character inner monologues in SillyTavern. It highlights the ability for users to add and inject their own thoughts into dialogues, enhancing interactions depth. The section emphasizes the importance of minimalism to manage token counts, as adding thoughts essentially doubles the context. It also mentions the potential for increased context size when combined with World Info and Lorebooks, and warns that this feature has been tested only on 13B and 33B models, advising caution for users of other models.",
+      "line_num": 501,
+      "nodes": [
+        {
+          "title": "**它是如何工作的？**",
+          "node_id": "0034",
+          "summary": "### **它是如何工作的？**\n\n角色思想背后的主要原则是在对话中引入反模式。通常，建议避免反模式，因为它们会使对话重复且无趣。然而，我们总是希望在信息中提供角色的想法，因此让 AI 建立一种“总是注入内心独白”的模式，将使 AI 总是在对话发生之前说出角色的想法。",
+          "line_num": 511
+        },
+        {
+          "title": "**角色卡**",
+          "node_id": "0035",
+          "summary": "### **角色卡描述**\n\n这份文档主要讨论了在角色卡片中添加角色想法的方法和技巧：\n\n1. **添加想法的方法**：\n   - 在问候信息中插入想法，使用任意两个字符（如反引号或尖括号）括起来。\n   - 建议使用反引号，因为它对Markdown不友好，避免格式问题。\n\n2. **写作角度**：\n   - 推荐以第一人称写作，以增强角色的沉浸感。\n   - 也可以根据需要选择其他视角，如第三人称，适合故事或小说创作。\n\n3. **想法内容**：\n   - 第一个想法应与角色的问候相关，思考“角色在执行问候时在想什么”。\n   - 将想法写成“`<{{char}}'s thoughts: ...>`”的形式，并将其插入到问候信息的开头。\n\n4. **示例**：\n   - 提供了一个名为真奈美的角色的新问候信息示例，展示了如何将想法融入问候中。\n   - 示例中，真奈美的想法是关于喝咖啡、学习和联系用户，展示了角色的日常生活和与用户的互动。\n\n5. **角色互动**：\n   - 文档还展示了角色在特定场景下的对话和动作，进一步丰富了角色的个性和背景。",
+          "line_num": 515
+        },
+        {
+          "title": "**SillyTavern（傻酒馆）**",
+          "node_id": "0036",
+          "summary": "### **SillyTavern（傻酒馆）**\n\n将字符串（冒号后有空格）添加到 SillyTavern 中“高级格式”下的部分。此外，请确保选中该框。`<{{char}}'s thoughts:Start Reply WithShow reply prefix in chat`\n\n该设置将文本附加到 AI 的提示中，因此 AI 将始终在继续其响应之前自动填充该文本。AI 还应该自动关闭尖括号。`<{{char}}'s thoughts:`",
+          "line_num": 529
+        },
+        {
+          "title": "**可选：正则表达式**",
+          "node_id": "0037",
+          "summary": "### **可选：正则表达式**\n\n该部分文档主要讨论了使用正则表达式来管理和格式化聊天内容中的想法，具体涵盖以下要点：\n\n1. **格式控制**：由于仅依赖AI输出格式可能导致问题，正则表达式提供了一种更可靠的格式控制方法。\n   \n2. **格式化快捷方式**：\n   - 使用正则表达式`<([^>]*)>`来查找包含尖括号的内容，并自动添加`{{user}}'s thoughts:`或`{{char}}'s thoughts:`，以确保想法被正确标记和格式化。\n   - 例如，查找正则表达式`/<([^>]*)>/g`可以用于修复字符响应或向斜杠命令添加思维格式。\n\n3. **隐藏想法**：\n   - 通过使用相同的正则表达式`<([^>]*)>`，可以删除用户和角色消息中的所有尖括号实例，从而在Markdown渲染时隐藏想法。\n   - 这种方法确保想法在聊天窗口中不可见，但在编辑消息时仍然可以查看。\n\n这些方法为用户提供了灵活的方式来管理和格式化聊天内容中的想法，确保格式正确并根据需要隐藏或显示内容。",
+          "line_num": 535
+        }
+      ]
+    },
+    {
+      "title": "**最终结果**",
+      "node_id": "0038",
+      "summary": "## **最终结果**\n\n你的整体角色卡应该如下所示：\n\n\n现在导入卡：\n\n1. 像往常一样将PNG导入SillyTavern\n\n1. 剪掉 plists + dinkus`ctrl or cmd + x`\n\n1. 打开面板`Author's note`\n\n1. 粘贴作者注释中的 plists\n\n1. 你的角色卡应该*只有*Ali：Chat的例子\n\n确保使用角色作者的注释，因为它在聊天中持续存在！\n\n为方便起见，我们提供了一张图片：\n\n在此导入过程之后，您的整体角色 + 聊天应该是什么样子：\n\n角色描述：\n\n\n角色作者注：",
+      "line_num": 563
+    }
+  ]
+}

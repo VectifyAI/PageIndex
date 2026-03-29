@@ -1,0 +1,20 @@
+{
+  "doc_name": "记忆系统",
+  "source_path": "E:/knowledge/Knowledge\\02-Infrastructure\\记忆系统.md",
+  "structure": [
+    {
+      "title": "记忆系统",
+      "node_id": "0000",
+      "prefix_summary": "# 记忆系统\n\n> 六套系统，各司其职\n\n| 系统 | 存储 | 用途 |\n|------|------|------|\n| GitNexus | Neo4j | 代码图谱，改代码前查影响 |\n| OpenViking | 向量RAG | \"上次怎么做的\" |\n| MemoV | SQLite | 精确回放某次操作 |\n| auto-memory | Markdown | 每次会话自动加载 |\n| OMC notepad | .omc/ | 当前session进度 |\n| Obsidian | E:/knowledge/ | 全局知识图谱 |",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "路由规则",
+          "node_id": "0001",
+          "summary": "## 路由规则\n- 改代码前 → GitNexus\n- \"之前/上次\" → OpenViking → auto-memory\n- 交互完成 → MemoV snap()\n- Agent踩坑 → agent memory\n- 临时状态 → notepad\n- 长期架构 → **Obsidian**\n\n#infrastructure #memory #knowledge",
+          "line_num": 14
+        }
+      ]
+    }
+  ]
+}

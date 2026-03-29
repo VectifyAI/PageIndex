@@ -1,0 +1,134 @@
+{
+  "doc_name": "Stars-游戏开发",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\GitHub-Stars\\Stars-游戏开发.md",
+  "structure": [
+    {
+      "title": "游戏开发",
+      "node_id": "0000",
+      "prefix_summary": "# 游戏开发",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "AutoIt",
+          "node_id": "0001",
+          "summary": "## AutoIt\n\n- [KovaaK/InterAccel](https://github.com/KovaaK/InterAccel) — QuakeLive style mouse acceleration across your entire OS and any game",
+          "line_num": 4
+        },
+        {
+          "title": "Batchfile",
+          "node_id": "0002",
+          "summary": "## Batchfile\n\n- [MingFT/Motion_Field](https://github.com/MingFT/Motion_Field) — Motion Field是一个帮助设计师管理工程文件的脚本工具集",
+          "line_num": 8
+        },
+        {
+          "title": "C",
+          "node_id": "0003",
+          "summary": "## C\n\n- [teamfinalmouse/xlat](https://github.com/teamfinalmouse/xlat) — XLAT USB-HID Latency Measurement Tool",
+          "line_num": 12
+        },
+        {
+          "title": "C#",
+          "node_id": "0004",
+          "summary": "The partial document provides a list of C#-related projects and tools, primarily focused on game development, asset management, and system utilities. Key points include:\n\n1. **Asset Management and Extraction**: Several tools are listed for working with game assets and engine files, such as AssetRipper, AssetStudio, and UtinyRipper, which allow users to explore, extract, and export assets and asset bundles.\n\n2. **Performance and Graphics Tweaks**: Projects like JTRP (Unity HDRP ToonShading Render Pipeline) and LWGUI (Lightweight Shader GUI System) focus on enhancing graphics and rendering in Unity. Additionally, emoose/DLSSTweaks offers modifications for NVIDIA's DLSS, allowing users to tweak scaling ratios and force DLAA.\n\n3. **System Utilities**: Tools like Codeusa/SteamCleaner help users reclaim disk space from various game clients, while andrewmd5/Borderless-Gaming allows games to be played in a borderless window for a smoother experience.\n\n4. **Audio and Input Tools**: Milkitic/KeyASIO.Net provides low-latency audio support for osu! players, and Jagailo/YetAnotherKeyDisplayer is an app for displaying pressed keyboard keys.\n\n5. **3D Pose Estimation**: digital-standard/ThreeDPoseUnityBarracuda offers a Unity sample for 3D pose estimation using Barracuda.\n\n6. **Texture Management**: fidifis/TextureMerge allows users to pack and merge textures into image channels.\n\n7. **Game Server Management**: nickj609/GameModeManager is a server plugin for Counter-Strike 2, assisting administrators in managing custom game modes, settings, and maps.",
+          "line_num": 16
+        },
+        {
+          "title": "C++",
+          "node_id": "0005",
+          "summary": "The partial document provides an overview of various C++ projects and resources related to graphics, animation, and game development. Key points include:\n\n1. **MaterialX**: An open standard for exchanging rich material and look-development content.\n2. **Cinema 4D Plugins**: A plugin for importing MikuMikuDance data into Cinema 4D.\n3. **Unreal Engine**: Access to the source code of Unreal Engine and a project for building the next Unreal Tournament game.\n4. **NVIDIA PhysX**: The SDK for NVIDIA's physics engine.\n5. **Unity Plugins**: DCC plugins for MeshSync in Unity, supporting tools like Maya, 3ds Max, and others.\n6. **Dynamic Liquid Shader**: A shader for Unreal Engine 5 using the Substrate material.\n7. **Shader Library**: A library for creating Unreal Engine 5 Master Materials.\n8. **Appleseed**: A modern open-source rendering engine for animation and visual effects.\n9. **Blender**: The official mirror of the Blender project.\n10. **Environmental Interaction**: A system for Unreal Engine to make landscapes interact with weather, wind, water, foliage, and players.\n11. **Mapbox Integration**: A plugin for importing heightmaps into Unreal Engine from real-world locations using Mapbox.\n12. **VR Plugin**: A plugin for fishtank-VR using OffAxisProjection in Unreal Engine.\n13. **Shader Guide**: A step-by-step guide for implementing various 3D game shaders for beginners.\n14. **Firmware**: The firmware for a Hall Effect keypad designed for osu! and Rapid Trigger.\n15. **Animation Previewer**: A plugin for previewing animation assets.\n16. **OpenMMD**: An application for converting real-person videos to motion files using OpenPose.\n17. **MMD Import Plugin**: A plugin for importing MMD models and motion files into Unreal Engine 4.\n18. **Oculus Lip Sync**: Oculus Lip Sync compiled for Unreal Engine 5.",
+          "line_num": 33
+        },
+        {
+          "title": "HLSL",
+          "node_id": "0006",
+          "summary": "## HLSL\n\n- [kamone416/MayaToonOutlineShader](https://github.com/kamone416/MayaToonOutlineShader) — Realtime Toon Shader for Maya Hardware 2.0 Renderer",
+          "line_num": 55
+        },
+        {
+          "title": "HTML",
+          "node_id": "0007",
+          "summary": "## HTML\n\n- [ringhyacinth/Star-Office-UI](https://github.com/ringhyacinth/Star-Office-UI) — A pixel office for your OpenClaw: turn invisible work states into a cozy little space with character",
+          "line_num": 59
+        },
+        {
+          "title": "JavaScript",
+          "node_id": "0008",
+          "summary": "## JavaScript\n\n- [autogame-17/green-tea-persona](https://github.com/autogame-17/green-tea-persona) — A persona skill that sends messages in a 'Green Tea' style: broken sentences, no punctuation, and ra\n- [nidorx/matcaps](https://github.com/nidorx/matcaps) — Huge library of matcap PNG textures organized by color\n- [tobspr-games/shapez.io](https://github.com/tobspr-games/shapez.io) — shapez is an open source base building game on Steam inspired by factorio!",
+          "line_num": 63
+        },
+        {
+          "title": "Jupyter Notebook",
+          "node_id": "0009",
+          "summary": "## Jupyter Notebook\n\n- [transpchan/Live3D-v2](https://github.com/transpchan/Live3D-v2) — Neural Rendering with Attention: An Incremental Improvement for Anime Character Animation",
+          "line_num": 69
+        },
+        {
+          "title": "Mathematica",
+          "node_id": "0010",
+          "summary": "## Mathematica\n\n- [EpicGames/MetaHuman-DNA-Calibration](https://github.com/EpicGames/MetaHuman-DNA-Calibration) —",
+          "line_num": 73
+        },
+        {
+          "title": "Max",
+          "node_id": "0011",
+          "summary": "## Max\n\n- [EnvelopSound/EnvelopForLive](https://github.com/EnvelopSound/EnvelopForLive) — Free, open-source tools for Ambisonic 3D panning within Max for Live 10+",
+          "line_num": 77
+        },
+        {
+          "title": "Other",
+          "node_id": "0012",
+          "summary": "The partial document is a compilation of various GitHub repositories related to gaming, 3D modeling, and software optimization. Key points include:\n\n1. **Blender Addons and Plugins**: Repositories like \"BetterMegascan_ASST\" and \"gltf-blender-importer\" offer tools for importing assets and models into Blender, enhancing its functionality for 3D artists.\n\n2. **Gaming PC Optimization**: \"GamingPCSetup\" provides a research-based approach to optimizing gaming PC configurations, while \"csgofpsboost\" and \"fpsbooster\" focus on improving FPS in games like CS:GO and Fortnite.\n\n3. **Game Mods and Patches**: \"t7patch\" offers a community patch for BO3, and \"Counter-Strike-2-Command-List\" provides a comprehensive list of commands for CS2, aiding in game customization and practice.\n\n4. **3D Models and Assets**: \"cherry-mx-keycaps\" offers 3D models of Cherry MX keycaps, and \"AnimeGame-Assets\" provides assets for anime-style games, catering to niche modeling and game development needs.\n\n5. **Software Tools and Utilities**: \"UEditingTools\" automates FBX animation import into Unreal Engine, and \"poseWrangler\" offers a visual interface for Maya UE4 RBF plugin, streamlining animation workflows.\n\n6. **Documentation and Tutorials**: \"docs.cascadeur\" provides Chinese translations of Cascadeur's official documentation, and \"3dsMax-Python-HowTos\" offers Python scripting examples for 3ds Max, supporting learning and development.\n\n7. **Game Configuration and Settings**: \"ApexConfig\" and \"CS2-Game-Configure\" offer configuration files for Apex Legends and CS2, aiming to enhance gameplay experiences.\n\n8. **Graphics and Rendering**: \"FidelityFX-FSR-Unity-URP\" integrates FidelityFX FSR 1.0 into Unity URP, and \"GaussianAvatars\" presents a repository for photorealistic head avatars, highlighting advancements in graphics technology.\n\n9. **Miscellaneous Tools**: \"Steamtools\" aims to enhance the Steam gaming experience, and \"ue5-gitignore\" provides a git setup example for Unreal Engine projects, assisting developers in version control.",
+          "line_num": 81
+        },
+        {
+          "title": "Pascal",
+          "node_id": "0013",
+          "summary": "## Pascal\n\n- [xiao-mantou/GamingTweaks-CHS](https://github.com/xiao-mantou/GamingTweaks-CHS) — Windows 10 and (some) Linux Gaming Tweaks without myths",
+          "line_num": 107
+        },
+        {
+          "title": "PowerShell",
+          "node_id": "0014",
+          "summary": "## PowerShell\n\n- [NigelBurk/FpsNJunkerCleaner](https://github.com/NigelBurk/FpsNJunkerCleaner) — FpsNJunkCleaner is a collection of PowerShell scripts to improve computer performance, increase fram",
+          "line_num": 111
+        },
+        {
+          "title": "Python",
+          "node_id": "0015",
+          "summary": "This partial document provides an overview of various tools and addons related to 3D modeling, animation, and game development, primarily focusing on software like Blender, Maya, Unreal Engine, and others. Key points include:\n\n1. **UV Tools**: Tools for splitting UVs between RizomUV and Maya, and importing/exporting Source Engine textures.\n2. **Auto Rigging**: Addons for automatic rigging in Blender, such as GameRig and MikuMikuRig.\n3. **Asset Import/Export**: Addons for importing/exporting meshes, skeletons, and animations from various file formats, including psk/psa and MMD (MikuMikuDance) files.\n4. **Game Development Workflow**: Tools that improve the workflow between Blender and Unreal Engine, including Blender addons for Epic Games and tools for converting images to Unreal Engine scenes.\n5. **Rendering**: Solutions for cinematic toon rendering in Unreal Engine 5 and tools for integrating Blender with RenderMan.\n6. **3D Asset Integration**: Tools for ingesting Megascan assets into Houdini and importing models from Google Maps into Blender.\n7. **Character Animation**: Modular frameworks for face and avatar animation, and tools for transferring vertex order between meshes.\n8. **AI and Automation**: AI-driven tools for generating game combat motion assets and plugins for bridging Maya and Cascadeur.\n9. **Color Management**: Tools for quickly changing the colorspace of multiple files in Maya and converting texture color spaces in Blender.\n10. **Building and Architecture**: Addons for building generation in Blender and tools for integrating Blender with geographic data.\n11. **Virtual Reality**: VRM importer, exporter, and utilities for Blender, and tools for using VirtuCamera with Blender for realtime camera motion capture.\n12. **Unpacking Game Assets**: Tools for batch unpacking game assets from Arknights.",
+          "line_num": 115
+        },
+        {
+          "title": "Rust",
+          "node_id": "0016",
+          "summary": "## Rust\n\n- [lasa01/Plumber](https://github.com/lasa01/Plumber) — A Blender addon for importing Source 1 engine maps, models, materials and textures.  This addon make",
+          "line_num": 158
+        },
+        {
+          "title": "ShaderLab",
+          "node_id": "0017",
+          "summary": "## ShaderLab\n\n- [ColinLeung-NiloCat/UnityURPToonLitShaderExample](https://github.com/ColinLeung-NiloCat/UnityURPToonLitShaderExample) — A very simple toon lit shader example, for you to learn writing custom lit shader in Unity URP\n- [lilxyzw/lilToon](https://github.com/lilxyzw/lilToon) — Feature-rich shaders for avatars",
+          "line_num": 162
+        },
+        {
+          "title": "Shell",
+          "node_id": "0018",
+          "summary": "## Shell\n\n- [ibbles/LearningUnrealEngine](https://github.com/ibbles/LearningUnrealEngine) — [Deprecated, see LearningUnreal instead.] A bunch of notes and code snippets that I write while figu\n- [shivangi-aneja/FaceTalk](https://github.com/shivangi-aneja/FaceTalk) — [CVPR 2024] FaceTalk: Audio-Driven Motion Diffusion for Neural Parametric Head Models",
+          "line_num": 167
+        },
+        {
+          "title": "TypeScript",
+          "node_id": "0019",
+          "summary": "## TypeScript\n\n- [superpowers/superpowers-game](https://github.com/superpowers/superpowers-game) — :video_game: Make 2D and 3D games in live collaboration with Superpowers",
+          "line_num": 172
+        },
+        {
+          "title": "VBScript",
+          "node_id": "0020",
+          "summary": "## VBScript\n\n- [amymor/AIO-per-game-tweaks](https://github.com/amymor/AIO-per-game-tweaks) — A simple tool to apply generic tweaks to your desired games.",
+          "line_num": 176
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,96 @@
+{
+  "doc_name": "CLAW Agent Lifecycle",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\CLAW Agent Lifecycle.md",
+  "structure": [
+    {
+      "title": "CLAW Agent Lifecycle — 统一Agent生命周期管理",
+      "node_id": "0000",
+      "prefix_summary": "# CLAW Agent Lifecycle — 统一Agent生命周期管理\n\n> ClawTeam设计模式移植 + CLAW生态全工具支持",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "基本信息",
+          "node_id": "0001",
+          "summary": "## 基本信息\n- **代码**: `~/a2a-dev/src/omc_patches/` (8模块, 1355行)\n- **状态**: P0+P1完成，P2待定\n- **依赖**: 零外部依赖(纯stdlib)，可选redis用于远程liveness",
+          "line_num": 5
+        },
+        {
+          "title": "已完成 (2026-03-18)",
+          "node_id": "0002",
+          "prefix_summary": "## 已完成 (2026-03-18)",
+          "line_num": 10,
+          "nodes": [
+            {
+              "title": "模块清单",
+              "node_id": "0003",
+              "summary": "### 模块清单\n| 模块 | 来源 | 用途 |\n|------|------|------|\n| platform.py | 新建 | 6 liveness backend, 10工具32 env vars |\n| tmux_prompt.py | ClawTeam tmux_backend | load-buffer安全prompt注入 |\n| spawn_registry.py | ClawTeam registry | 三级liveness+hostname标签 |\n| env_sanitizer.py | ClawTeam unset_clause | 多工具env var清理 |\n| task_lock.py | ClawTeam tasks | 死agent自动释放锁 |\n| event_log.py | ClawTeam mailbox | JSONL审计日志 |\n| on_exit.py | ClawTeam lifecycle | agent退出清理编排 |\n| waiter.py | ClawTeam waiter | 阻塞等待(信号安全) |",
+              "line_num": 12
+            },
+            {
+              "title": "支持的工具 (TOOL_ENV_VARS)",
+              "node_id": "0004",
+              "summary": "The document lists supported coding tools and their environment variables used to detect nested sessions. It specifies whether each tool blocks or not, notes how detection works, and includes remarks such as unique blocking (Claude Code), sandbox detection (Codex CLI), shell tagging (Gemini CLI), signal routing (OpenClaw), sub-session checks (OpenCode), file sessions (Aider), unreliable flags (Cursor), headless modes (Continue), cleanup steps (ClawTeam), and internal use (OMC).",
+              "line_num": 24
+            },
+            {
+              "title": "Liveness Backends",
+              "node_id": "0005",
+              "summary": "### Liveness Backends\n| Backend | 用途 | 平台 |\n|---------|------|------|\n| tmux | Claude/Codex/Gemini in pane | Mac/Linux/Win(MSYS2) |\n| subprocess | NanoClaw, 本地进程 | 全平台 |\n| systemd | OpenClaw on Linux | Linux |\n| docker | 容器化agent | 全平台 |\n| http | ZeroClaw, API agents | 全平台 |\n| a2a | Redis注册的agent | 需Redis |",
+              "line_num": 38
+            }
+          ]
+        },
+        {
+          "title": "待研究",
+          "node_id": "0006",
+          "prefix_summary": "## 待研究",
+          "line_num": 48,
+          "nodes": [
+            {
+              "title": "R1: OpenClaw systemd + 中央节点env vars",
+              "node_id": "0007",
+              "summary": "### R1: OpenClaw systemd + 中央节点env vars\n- SSH到中央(43.163.225.27)\n- `cat /proc/$(pgrep -f openclaw)/environ | tr '\\0' '\\n'`\n- 检查systemd unit Type=notify/watchdog配置\n- 对比本机Windows版OpenClaw env vars\n- **合并ZeroClaw研究不做**——ZeroClaw留本机(云端OOM)",
+              "line_num": 50
+            },
+            {
+              "title": "R2: OpenClaw agent注入方式",
+              "node_id": "0008",
+              "summary": "### R2: OpenClaw agent注入方式\n- **核心问题**: 怎么让OpenClaw的coding-agent skill spawn的agent注册到我们的spawn_registry?\n- **参考**: ClawTeam怎么实现给OpenClaw注入的(插件模式)\n- 可能方案: OpenClaw skill plugin → 调omc_patches API\n- 需要读ClawTeam的OpenClaw集成代码",
+              "line_num": 57
+            },
+            {
+              "title": "R3: 跨节点liveness (Redis各跑各的)",
+              "node_id": "0009",
+              "summary": "### R3: 跨节点liveness (Redis各跑各的)\n- 中央/硅谷/东京各有独立Redis，不共享\n- 不能靠\"查同一个Redis\"做远程liveness\n- 方案A: HTTP health endpoint互查\n- 方案B: Redis pub/sub桥接(中央master订阅所有节点)\n- 方案C: A2A coordinator轮询各节点agent card",
+              "line_num": 63
+            },
+            {
+              "title": "R4: OMC team接入方式",
+              "node_id": "0010",
+              "summary": "### R4: OMC team接入方式\n- 选项A: PostToolUse hook拦截TeamCreate/SendMessage → 自动调模块\n- 选项B: team skill SKILL.md指令 → Claude主动调\n- 待决策",
+              "line_num": 70
+            },
+            {
+              "title": "R5: A2A heartbeat协议",
+              "node_id": "0011",
+              "summary": "### R5: A2A heartbeat协议\n- 每个agent写 `SET a2a:heartbeat:{name} {ts} EX 30`\n- 需改base_agent.py加心跳循环\n- 但Redis各跑各的——心跳只对本节点有效\n- 跨节点得走HTTP",
+              "line_num": 75
+            }
+          ]
+        },
+        {
+          "title": "架构定位",
+          "node_id": "0012",
+          "summary": "## 架构定位\n```\nCLAW 生态分层\n├─ 跨设备通信: A2A agent_bus (Redis Streams) ← 已有\n├─ 单机增强: omc_patches (本项目) ← 已完成\n├─ 编排层: OMC team skill ← 待接入\n└─ Agent运行时: Claude/Codex/OpenClaw/ZeroClaw ← 各自独立\n```",
+          "line_num": 81
+        },
+        {
+          "title": "经济学 (唯物主义)",
+          "node_id": "0013",
+          "summary": "## 经济学 (唯物主义)\n- Claude: $15/M tokens — 只用于架构决策\n- Codex: $10/M — 实现类任务\n- 国产(Doubao/MiniMax): $0.5/M — 搬砖\n- OpenClaw白嫖: ¥0 — 用免费quota\n- **lifecycle工具必须工具无关**，否则锁定最贵供应商",
+          "line_num": 90
+        }
+      ]
+    }
+  ]
+}

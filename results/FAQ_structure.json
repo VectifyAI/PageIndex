@@ -1,0 +1,144 @@
+{
+  "doc_name": "FAQ",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\SillyTavern 官方文档\\使用方法\\FAQ.md",
+  "structure": [
+    {
+      "title": "常见问题",
+      "node_id": "0000",
+      "prefix_summary": "# 常见问题",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/faq/#explain-what-sillytavern-is-about)解释 SillyTavern 是关于干什么的",
+          "node_id": "0001",
+          "summary": "The partial document explains that SillyTavern is an application designed to facilitate role-playing chats with AI language models like ChatGPT. It serves as a user interface for managing conversations with AI, allowing users to create and switch between different characters, import characters created by others, and maintain chat logs for easy access and continuation of conversations. The application sends system prompts to the AI to guide the role-playing sessions, which can range from casual chats to more mature themes, depending on the user's preferences. The document emphasizes the flexibility and creativity involved in crafting unique and engaging role-playing experiences with the AI.",
+          "line_num": 9
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/faq/#tell-me-more-about-ai-models-and-how-they-might-differ)告诉我更多关于 AI 模型的信息以及它们可能有何不同",
+          "node_id": "0002",
+          "summary": "### Description of the Partial Document\n\nThe document provides an overview of AI models used in conjunction with SillyTavern, a platform that facilitates interactions with fictional characters. It emphasizes that SillyTavern acts as an intermediary and relies on external AI systems to generate responses. The quality of these AI systems can vary significantly.\n\nThe document delves into the concept of AI capability levels, explaining that higher capability levels result in more sophisticated and immersive experiences. It illustrates this by presenting a scenario where different AI models are tasked with playing the role of Eli, a fire and brimstone preacher. Users interact with Eli by confessing their feelings about falling in love with an AI girl and neglecting real-world women.\n\nThe document then showcases the varied responses from different AI models, highlighting the importance of choosing an AI system that aligns with the desired interaction quality. It also mentions that some models are proprietary, while others, like LLlama-13B, are self-hosted.",
+          "line_num": 25
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/faq/#can-this-technology-be-used-for-)这项技术可以用于***吗？",
+          "node_id": "0003",
+          "summary": "## [#](https://docs.sillytavern.app/usage/faq/#can-this-technology-be-used-for-)这项技术可以用于***吗？\n\n  令人惊讶的是，我们的开发团队收到报告称，一些用户确实以这种方式与我们的产品互动。我们和您一样对此感到困惑，并将密切关注情况以获得可操作的见解。",
+          "line_num": 36
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/faq/#give-me-an-overview-of-my-ai-model-options)请简要介绍一下我的 AI 模型选项",
+          "node_id": "0004",
+          "prefix_summary": "## [#](https://docs.sillytavern.app/usage/faq/#give-me-an-overview-of-my-ai-model-options)请简要介绍一下我的 AI 模型选项\n\nSillyTavern 可以与两种类型的 AI 交互：\n\n1. Web 服务（又名云、付费、专有、封闭）\n\n1. 自托管（又名本地、免费、开源）",
+          "line_num": 40,
+          "nodes": [
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/faq/#paid-web-service-ais)付费 Web 服务 AI",
+              "node_id": "0005",
+              "summary": "### 付费 Web 服务 AI\n\n付费网络模型是一种用户通过付费使用第三方公司提供的 AI 服务的模式。用户需要在 SillyTavern 中配置账户信息，AI 服务提供商将通过这些信息代表用户使用 AI。\n\n**优点：**\n- 使用便捷，上手简单。\n- 提供高质量的 AI 写作体验。\n\n**缺点：**\n- 需要支付费用。\n- 隐私问题突出，服务提供商可能会记录用户的所有活动。\n- 服务内容受到审查，某些话题可能因道德规范限制而无法讨论。\n- 对使用 AI 的行为有严格限制，例如尝试执行 NSFW 内容可能导致账户被暂停。\n\n**常用 AI 服务选项：**\n- **OpenAI GPT-4：** 技术最先进，但费用较高，尤其是长时间对话时成本会显著增加。\n- **OpenAI GPT 3.5 Turbo：** 功能不如 GPT-4，但价格低廉。\n- **NovelAI：** 更适合写故事而非聊天，采用固定月费模式，提供无限制的内容生成。\n- **Anthropic 的 Claude：** 被认为是 GPT-4 的有力竞争对手，表现令人印象深刻。",
+              "line_num": 48
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/faq/#self-hosted-ais)自托管 AI",
+              "node_id": "0006",
+              "summary": "### Description of the Partial Document\n\nThe partial document provides an overview of self-hosted AI models, detailing their characteristics, advantages, and disadvantages. \n\n**Main Points Covered:**\n\n1. **Definition and Requirements:**\n   - Self-hosted AI models are free models that can be run on a personal computer.\n   - They require a powerful PC and involve more setup compared to other options.\n\n2. **Advantages:**\n   - **Cost:** Once set up, they operate for free without the need for internet access.\n   - **Privacy:** All content generated remains on the user's PC, ensuring complete privacy.\n   - **Variety:** Due to their community-driven nature, there is a wide range of models available, including those that do not censor NSFW content.\n\n3. **Disadvantages:**\n   - **Performance:** They may not be as capable as the highest-paid options, though recent advancements like Mixtral MoE suggest potential improvements.\n   - **Hardware Requirements:** They necessitate a powerful computer or access to a high-performance cloud service.\n   - **Setup Complexity:** Installation and configuration can be challenging.\n   - **Speed:** AI response times are slower compared to paid services due to local processing.\n\n4. **Resources:**\n   - A link is provided for a dedicated guide on how to use self-hosted models, offering further assistance for those interested in implementing them.",
+              "line_num": 78
+            }
+          ]
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/faq/#im-clueless-just-spoonfeed-me-the-easiest-and-fastest-way-i-can-start-using-sillytavern)我一无所知。只需用勺子喂我最简单、最快的方法，我就可以开始使用 SillyTavern。",
+          "node_id": "0007",
+          "prefix_summary": "## [#](https://docs.sillytavern.app/usage/faq/#im-clueless-just-spoonfeed-me-the-easiest-and-fastest-way-i-can-start-using-sillytavern)我一无所知。只需用勺子喂我最简单、最快的方法，我就可以开始使用 SillyTavern。\n\n这些基本说明仅适用于 OpenAI，这是一项付费服务。如果其他人可以为其他服务添加单独的说明，我将不胜感激。",
+          "line_num": 102,
+          "nodes": [
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/faq/#install-sillytavern)安装 SillyTavern",
+              "node_id": "0008",
+              "summary": "### [#](https://docs.sillytavern.app/usage/faq/#install-sillytavern)安装 SillyTavern\n\n按照[安装说明](https://docs.sillytavern.app/installation/windows/)进行操作。",
+              "line_num": 106
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/faq/#get-access-to-openai)访问 OpenAI",
+              "node_id": "0009",
+              "summary": "### [#](https://docs.sillytavern.app/usage/faq/#get-access-to-openai)访问 OpenAI\n\n1. 注册 OpenAI\n\n1. 转到 [https://platform.openai.com](https://platform.openai.com/)\n\n1. 单击右上角的帐户图标，然后单击查看 API 密钥\n\n1. 单击“创建新的密钥”。立即将其复制到某个地方。不要共享此密钥。任何拥有它的人都可以使用您的帐户使用 GPT，费用由您承担。",
+              "line_num": 110
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/faq/#configure-sillytavern-to-use-your-api)配置 SillyTavern 以使用您的 API",
+              "node_id": "0010",
+              "summary": "### [#](https://docs.sillytavern.app/usage/faq/#configure-sillytavern-to-use-your-api)配置 SillyTavern 以使用您的 API\n\n1. 在 Tavern 的顶部栏中，单击 API 连接\n\n1. 在“API”下，选择“聊天完成 （OpenAI）”\n\n1. 在“聊天完成源”下，选择“OpenAI”\n\n1. 粘贴您在上一步中保存的 API 密钥\n\n1. 单击“连接”按钮。确认它显示有效。\n\n1. 默认情况下，SillyTavern 将使用 GPT 3.5 Turbo。如果您可以访问 GPT-4，您真的希望使用它以获得最高质量，但要了解定价。",
+              "line_num": 120
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/faq/#test-your-setup)测试您的设置",
+              "node_id": "0011",
+              "summary": "### [#](https://docs.sillytavern.app/usage/faq/#test-your-setup)测试您的设置\n\n1. 在 SillyTavern 的顶部栏中，点击最右边的角色管理\n\n1. 选择现有字符，例如 Coding Sensei\n\n1. 在底部的文本框中，向 Coding Sensei 写入内容，然后按 Enter 键或点按“发送”按钮\n\n如果你做对了一切，几秒钟后，编码老师应该会做出回应。",
+              "line_num": 134
+            }
+          ]
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/faq/#can-i-use-sillytavern-on-my-phone-or-tablet)我可以在手机或平板电脑上使用 SillyTavern 吗？",
+          "node_id": "0012",
+          "summary": "The document explains that while the full SillyTavern application cannot run on iPhones and iPads, users can access it via a mobile browser by running it on another computer connected to the same home Wi-Fi network. For Android users, there is an additional option to run SillyTavern directly on their phone using the Termux app, without needing a PC.",
+          "line_num": 144
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/faq/#how-can-i-download-pre-made-characters-to-chat-with)如何下载预制角色进行聊天？",
+          "node_id": "0013",
+          "summary": "## [#](https://docs.sillytavern.app/usage/faq/#how-can-i-download-pre-made-characters-to-chat-with)如何下载预制角色进行聊天？\n\n通过使用各种第三方角色共享网站。",
+          "line_num": 150
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/faq/#i-tried-to-import-a-png-character-card-but-got-an-error-that-its-invalid-why)我尝试导入 PNG 字符卡，但收到错误提示它无效。为什么？",
+          "node_id": "0014",
+          "summary": "The partial document explains why importing a PNG character card might result in an \"invalid\" error. It outlines two main possibilities: 1) The card lacks embedded definitions, making it just a regular image file, possibly due to programs or file managers stripping the embedded definitions during saving. It advises using the original PNG file as shared. 2) The PNG file is actually a WEBP file with a \".png\" extension. The solution suggested is to rename the file or find the correct PNG version before importing.",
+          "line_num": 154
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/faq/#how-can-i-make-my-own-ai-character)如何制作自己的 AI 角色？",
+          "node_id": "0015",
+          "summary": "This partial document provides a step-by-step guide on creating a custom AI character for conversational purposes, primarily focusing on services like GPT, Claude, and LLMs based on Llama or Mistral. It outlines the process starting with accessing the \"Character Management\" section, creating a new character, and entering details such as the character's name, description, and an initial message. The document emphasizes the importance of providing a detailed and relevant description to enhance the AI's understanding and interaction capabilities. It also suggests including contextual information and personalizing the character to create a more engaging and realistic conversation. Additionally, the document notes that while most details can be edited later, the character's name remains fixed after creation.",
+          "line_num": 162
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/faq/#where-can-i-find-the-old-backgrounds)在哪里可以找到旧背景？",
+          "node_id": "0016",
+          "summary": "## [#](https://docs.sillytavern.app/usage/faq/#where-can-i-find-the-old-backgrounds)在哪里可以找到旧背景？\n\n我们正在转向 100% 纯原创内容政策，因此已从此存储库中删除了旧的背景图像。\n\n您可以在此处找到存档的它们：\n\n[https://files.catbox.moe/1xevnc.zip](https://files.catbox.moe/1xevnc.zip)",
+          "line_num": 198
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/faq/#where-are-my-api-keys-stored-why-cant-i-see-them)我的 API 密钥存储在哪里？为什么我看不到它们？",
+          "node_id": "0017",
+          "summary": "## [#](https://docs.sillytavern.app/usage/faq/#where-are-my-api-keys-stored-why-cant-i-see-them)我的 API 密钥存储在哪里？为什么我看不到它们？\n\nSillyTavern 将您的 API 密钥保存到服务器目录中的文件中。`secrets.json`\n\n默认情况下，在您输入它们并重新加载页面后，它们不会暴露在前端。\n\n要通过单击 API 块中的按钮来查看密钥，请执行以下操作：\n\n1. 在文件中设置 to 的值。`allowKeysExposuretrueconfig.yaml`\n\n1. 重新启动 SillyTavern 服务器。",
+          "line_num": 206
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/faq/#why-is-the-ui-so-slowjittery)为什么 UI 如此缓慢/抖动？",
+          "node_id": "0018",
+          "summary": "## [#](https://docs.sillytavern.app/usage/faq/#why-is-the-ui-so-slowjittery)为什么 UI 如此缓慢/抖动？\n\n- 尝试在“用户设置”面板上启用“无模糊效果（快速用户界面）”模式。\n\n- 确保您的浏览器使用的是硬件加速。",
+          "line_num": 218
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/faq/#how-to-make-the-ai-write-more)如何让AI写得更多？",
+          "node_id": "0019",
+          "summary": "The partial document provides strategies to make AI-generated text longer when it responds too briefly. It suggests increasing the `Response Length` slider, designing a verbose character persona, adding descriptive phrases like \"likes to talk a lot\" in the character description, using similar prompts for the author, and as a last resort, enabling the `Multigen` feature, which generates multiple small responses and combines them into a longer one, albeit with potential drawbacks such as slower response times and incompatibility with certain API options.",
+          "line_num": 224
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/faq/#how-to-make-the-ai-write-less)如何让AI写得更少？",
+          "node_id": "0020",
+          "summary": "## [#](https://docs.sillytavern.app/usage/faq/#how-to-make-the-ai-write-less)如何让AI写得更少？\n\n这主要只是 ChatGPT 或 Claude 等模型的问题。可以应用相同的策略，但相反。\n\n- 减小滑块`Response Length`\n\n- 在他们的描述中给角色一个短语，比如“说话简短”或“话不多”。\n\n- 给角色一个简短的第一条消息，为聊天定下基调和期望。\n\n- 确保已关闭。`Multigen`",
+          "line_num": 242
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/faq/#how-to-make-the-ai-stop-writing-the-actions-of-my-character-and-driving-the-plot-all-on-its-own)如何让AI停止写我的角色的动作，并自行推动情节？",
+          "node_id": "0021",
+          "summary": "## [#](https://docs.sillytavern.app/usage/faq/#how-to-make-the-ai-stop-writing-the-actions-of-my-character-and-driving-the-plot-all-on-its-own)如何让AI停止写我的角色的动作，并自行推动情节？\n\n这应该用以下短语的组合来处理：`Author's Note`\n\n- {{char}} 的响应只能是被动的，并且对 {{user}} 的操作是被动的和被动的。\n\n- 您的下一个响应将完全来自 {{char}} 的 POV。\n\n- 您永远不允许为 {{user}} 口述语音操作",
+          "line_num": 254
+        }
+      ]
+    }
+  ]
+}

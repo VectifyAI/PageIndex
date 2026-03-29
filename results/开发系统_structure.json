@@ -1,0 +1,114 @@
+{
+  "doc_name": "开发系统",
+  "source_path": "E:/knowledge/Knowledge\\00-Index\\开发系统.md",
+  "structure": [
+    {
+      "title": "开发系统架构",
+      "node_id": "0000",
+      "prefix_summary": "# 开发系统架构\n\n> 我们怎么开发——工具链、流程、多模型协作、记忆体系的完整方法论",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "系统全景",
+          "node_id": "0001",
+          "summary": "A comprehensive system overview showcasing an AI-driven development and trading infrastructure. Key elements include remote developer interaction, a local “AI brain” coordinating multiple LLM tools (Claude, Codex, Gemini, OpenCode), and an orchestration layer with autopilot, skills, hooks, and command interfaces. Execution relies on Git worktrees, subagents, and containerized engines. Six memory subsystems store code, decisions, interactions, and experience. Situational awareness integrates market data (A-shares, U.S., crypto) through routers, adapters, and unified data storage. A feedback loop generates trading signals, executes across markets, and reinvests profits into compute resources. Underpinning this are distributed infrastructures in multiple regions, knowledge bases in Obsidian, GitHub/Gitea, and MCP servers, all connected via agent workflows and data pipelines.",
+          "line_num": 5
+        },
+        {
+          "title": "开发流程",
+          "node_id": "0002",
+          "summary": "描述该文档: 介绍了一套明确的开发流程：从需求进入开始，先通过自动记忆系统检查历史经验，然后根据任务难度选择不同执行模式（直接实施、OMC执行器、规划+团队并行、或多模型共识）。执行阶段借助 Git worktree 隔离、自动质量钩子、子智能体并行以及超级节点进行重计算。完成后由验证代理、代码审查和测试组成的验证环节确保质量，最终通过 Git 提交、MemoV 快照、Obsidian 记录和自动记忆反馈来归档与沉淀知识。",
+          "line_num": 127
+        },
+        {
+          "title": "六工具CLI矩阵",
+          "node_id": "0003",
+          "summary": "Six-tool CLI matrix explains each tool, model, role, and usage context:\n• Claude Code (Opus/Sonnet) – main coding/orchestration for most tasks.\n• Codex CLI (GPT-5.x) – reasoning, second opinion for architecture decisions/code reviews.\n• Gemini CLI (Gemini 2.5) – third perspective for planning validation/broader scope checks.\n• OpenCode (Doubao/DeepSeek) – fast, low-cost for simple queries/Chinese-heavy tasks.\n• OpenClaw (multi-model) – multi-channel agent for QQ/TG interactions/non-coding tasks.\n• NanoClaw (Claude -p) – lightweight REPL for quick tests/single-use tasks.",
+          "line_num": 158
+        },
+        {
+          "title": "模型路由原则",
+          "node_id": "0004",
+          "summary": "## 模型路由原则\n\n```\n任务复杂度 → 模型选择:\n  探索/简单查询 → haiku (最便宜)\n  标准实现/测试 → sonnet (性价比)\n  架构/深度分析 → opus (最强)\n  中文/低成本 → Doubao/DeepSeek (免费/极廉)\n  需要第二意见 → Codex (推理链)\n  需要第三视角 → Gemini (宽度)\n\n不确定时 → CCG三模型共识\n```",
+          "line_num": 169
+        },
+        {
+          "title": "质量保证体系",
+          "node_id": "0005",
+          "summary": "## 质量保证体系\n\n```\n层级1: Hooks自动触发\n  - PreToolUse: 并行检查/后台建议\n  - PostToolUse: 失败自动修复\n  - SessionStart: 加载上下文\n\n层级2: Agent审查\n  - code-reviewer (opus): 逻辑/API/兼容性\n  - security-reviewer (sonnet): 漏洞/边界\n  - test-engineer (sonnet): 覆盖率/边界\n\n层级3: 多模型交叉\n  - CCG共识: 3模型独立分析→Byzantine验证\n  - claw-mesh Jaccard: 代码级相似度验证\n```",
+          "line_num": 183
+        },
+        {
+          "title": "AI自循环交易系统 — 执行层现状",
+          "node_id": "0006",
+          "prefix_summary": "## AI自循环交易系统 — 执行层现状",
+          "line_num": 201,
+          "nodes": [
+            {
+              "title": "已建成 ✅",
+              "node_id": "0007",
+              "summary": "Document details fully operational system components and their roles: China Gateway 106 adapter for Chinese market macro/policy/sentiment data, quant-terminal handling A-share market data with CUDA factors and DuckDB scanning, Crypto 15 adapter collecting derivatives/blockchain/sentiment data across OKX and Binance, Claw Router managing LLM online search pathways and model routing, Harvest persistent storage combining NAS + PostgreSQL with Metabase and Grafana BI, event-driven scheduler orchestrating pre/post market collection windows, and StockScanner performing HS300 six-factor scans via SUPER execution.",
+              "line_num": 203
+            },
+            {
+              "title": "未建成 ❌ — 需要找论文/轮子",
+              "node_id": "0008",
+              "summary": "The document outlines an “Unbuilt” status table listing key system components that still need research or tooling. It identifies required elements for situation fusion (multi-source data alignment and conflict detection), signal generation (combining LLM and factors into trading signals, leveraging tools like PyTorch TFT, ruptures, stumpy), risk control (position management, stop-loss, correlation via PyOD, Kelly formula, VaR), trade execution channels for A-shares and U.S. stocks, data feeds for U.S. markets, performance evaluation with attribution and strategy iteration (quantstats, pyfolio), and a self-reinforcing loop that reallocates profits to tokens for stronger sensing, requiring a capital allocation strategy. Each row lists missing pieces and candidate libraries or approaches.",
+              "line_num": 214
+            },
+            {
+              "title": "闭环路径（从近到远）",
+              "node_id": "0009",
+              "summary": "### 闭环路径（从近到远）\n```\nPhase 1 (现在): 感知就绪 → 人工看Grafana/Metabase → 人工交易\nPhase 2 (近期): 信号生成 → LLM读snapshot → 输出买卖建议 → 人工确认执行\nPhase 3 (中期): 半自动 → 信号+风控 → 自动下单(A股THS/Crypto OKX) → 人工监控\nPhase 4 (远期): 全自循环 → 感知→决策→执行→评估→优化 → 利润回流买token\n```",
+              "line_num": 226
+            }
+          ]
+        },
+        {
+          "title": "约束驱动设计 (Kantorovich原则)",
+          "node_id": "0010",
+          "prefix_summary": "## 约束驱动设计 (Kantorovich原则)\n\n> 资源有限，最优分配。约束不是敌人，是设计的起点。",
+          "line_num": 234,
+          "nodes": [
+            {
+              "title": "算力约束",
+              "node_id": "0011",
+              "summary": "### 算力约束\n| 约束 | 设计决策 |\n|------|---------|\n| 中央服务器2核2G | 控制面轻量化，只跑路由/cron/监控，重计算下放 |\n| Docker Agent<200MB | 最小化依赖，单一职责，不装全栈 |\n| RTX 5090本地 | CUDA密集计算留本地(因子/模型)，不传到云上 |\n| SUPER 64核128G | 数据采集+全市场扫描+BI，重IO任务集中此节点 |",
+              "line_num": 238
+            },
+            {
+              "title": "成本约束",
+              "node_id": "0012",
+              "summary": "The document outlines cost-saving strategies for AI deployment, including tiered use of AI models, exploiting free quotas from domestic models, using LLMs to replace traditional web crawlers, routing tasks by model strengths, and prohibiting expensive models in certain worker layers.",
+              "line_num": 246
+            },
+            {
+              "title": "网络约束",
+              "node_id": "0013",
+              "summary": "### 网络约束\n| 约束 | 设计决策 |\n|------|---------|\n| 用户在澳洲 | 国内数据走SUPER跳板，不直连；NetBird mesh全节点互通 |\n| 大陆IP限制 | OpenRouter Google系模型不可用，留给澳洲本地；国内走claw-router |\n| NAS在C宅内网 | SUPER经局域网直连NAS PG/Gitea，外部经rathole隧道 |",
+              "line_num": 255
+            },
+            {
+              "title": "注意力约束",
+              "node_id": "0014",
+              "summary": "### 注意力约束\n| 约束 | 设计决策 |\n|------|---------|\n| Context窗口有限 | 最小上下文加载原则：只读当前任务相关文件，不全量灌入 |\n| Lost in the Middle | CLAUDE.md < 80行锚点，详情按需Read |\n| Agent prompt膨胀 | 派agent时指定读哪些文件，不说\"读所有文档\" |\n| 记忆6套各司其职 | 改代码→GitNexus，查历史→OpenViking，临时→notepad，永久→auto-memory |",
+              "line_num": 262
+            },
+            {
+              "title": "数据约束",
+              "node_id": "0015",
+              "summary": "### 数据约束\n| 约束 | 设计决策 |\n|------|---------|\n| DuckDB单进程锁 | quant-terminal独占DuckDB，Gateway用PG持久化 |\n| 数据源反爬 | 难爬的用LLM搜索间接采集，不硬刚反爬机制 |\n| 小红书需扫码 | XHS MCP部署但需物理扫码，暂未突破 |\n| akshare并发限制 | 全局Semaphore(10)控制，所有akshare调用走run_sync |",
+              "line_num": 270
+            }
+          ]
+        },
+        {
+          "title": "可复用清单",
+          "node_id": "0016",
+          "summary": "## 可复用清单\n开始任何新项目时检查：\n\n- [ ] **编排**: 用OMC还是直接干？\n- [ ] **模型**: 哪个模型最合适？参考路由原则\n- [ ] **隔离**: 需要worktree吗？\n- [ ] **记忆**: 之前做过类似的吗？查6套记忆\n- [ ] **质量**: hooks+reviewer配置了吗？\n- [ ] **部署**: 跑在哪？本地/SUPER/中央？\n- [ ] **归档**: 经验写Obsidian了吗？\n\n#index #meta-architecture #development-system #reusable",
+          "line_num": 278
+        }
+      ]
+    }
+  ]
+}

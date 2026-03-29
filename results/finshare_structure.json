@@ -1,0 +1,132 @@
+{
+  "doc_name": "finshare",
+  "source_path": "E:/knowledge/Knowledge\\Projects\\finshare.md",
+  "structure": [
+    {
+      "title": "finshare",
+      "node_id": "0000",
+      "prefix_summary": "The partial document introduces \"finshare,\" a professional toolkit for fetching financial data in Python. It highlights the project's online documentation, official website, GitHub repository, Discord community, and issue tracking for feedback. The document also displays badges indicating the number of GitHub stars, Python version compatibility (3.8 and above), and the MIT license.",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "📖 在线文档",
+          "node_id": "0001",
+          "summary": "## 📖 在线文档\n\n**详细使用文档请访问：** 👉 **[finshare 文档网站](https://finvfamily.github.io/finshare/)**\n\n文档网站包含：\n- 完整的 API 参考\n- 快速开始指南\n- 数据源说明\n- 常见问题解答\n- 更多代码示例\n\n---",
+          "line_num": 24
+        },
+        {
+          "title": "🚀 快速开始",
+          "node_id": "0002",
+          "summary": "## 🚀 快速开始\n\n```python\nimport finshare as fs\n\n# 获取历史K线\ndf = fs.get_historical_data('000001.SZ', start='2024-01-01', end='2024-12-31')\n\n# 获取实时快照\nsnapshot = fs.get_snapshot_data('000001.SZ')\n\n# 批量获取快照\nsnapshots = fs.get_batch_snapshots(['000001.SZ', '600519.SH'])\n\nprint(df.head())\n```",
+          "line_num": 37
+        },
+        {
+          "title": "✨ 核心特性",
+          "node_id": "0003",
+          "summary": "## ✨ 核心特性\n\n- 📊 **多数据源** - 东方财富、Yahoo Finance、腾讯、新浪、通达信、BaoStock\n- 🔄 **自动故障切换** - 数据源失败时自动切换备用源\n- 📈 **统一数据格式** - 所有数据源返回统一格式\n- ⚡ **高性能** - 优化的数据获取性能\n- 🔧 **简单易用** - 简洁的 API 设计，开箱即用\n- 🌍 **多市场支持** - A股、港股、美股、期货、基金",
+          "line_num": 54
+        },
+        {
+          "title": "📦 安装",
+          "node_id": "0004",
+          "summary": "## 📦 安装\n\n```bash\npip install finshare\n```",
+          "line_num": 63
+        },
+        {
+          "title": "📚 支持的数据类型",
+          "node_id": "0005",
+          "summary": "## 📚 支持的数据类型\n\n| 类别 | 功能 |\n|------|------|\n| **股票** | K线、实时快照、资金流向、龙虎榜、融资融券 |\n| **基金** | 净值、信息、列表、ETF、LOF |\n| **期货** | K线、实时快照 |\n| **证券列表** | 股票列表、ETF列表、LOF列表、期货列表 |",
+          "line_num": 69
+        },
+        {
+          "title": "🛠️ 用 finshare 创建工具",
+          "node_id": "0006",
+          "prefix_summary": "## 🛠️ 用 finshare 创建工具\n\nfinshare 不仅是一个数据库，更是一个可以**快速构建金融工具**的基础库。以下是几个示例：",
+          "line_num": 78,
+          "nodes": [
+            {
+              "title": "1. 行情看板 (finboard)",
+              "node_id": "0007",
+              "summary": "The partial document describes a real-time stock market dashboard called \"finboard\" built using Streamlit and finshare. It includes the following main points:\n\n1. **Project Overview**: The finboard is a real-time stock market dashboard that displays stock snapshots and charts.\n2. **Technology Stack**: The dashboard is built using Streamlit for the frontend and finshare for data retrieval, with Plotly for interactive visualizations.\n3. **Stock Selection and Data Retrieval**: The code snippet shows how to select a list of stocks (e.g., '000001.SZ', '600519.SH', '300750.SZ') and retrieve their real-time snapshots using the `fs.get_batch_snapshots` function.\n4. **Displaying Stock Metrics**: The dashboard displays the latest price and the percentage change for each selected stock using Streamlit's `st.metric` function.\n5. **Interactive K-Line Chart**: The document includes a code snippet to generate a candlestick chart for a specific stock ('600519.SH') using historical data retrieved from finshare and visualized with Plotly.\n6. **Visualization**: The document provides a preview image of the dashboard, showcasing the stock metrics and the K-line chart.\n7. **Project Repository**: The document includes a link to the project's GitHub repository for further exploration and contribution.",
+              "line_num": 82
+            },
+            {
+              "title": "2. 选股器",
+              "node_id": "0008",
+              "summary": "### 2. 选股器\n\n```python\n# 条件选股器\nimport finshare as fs\nimport pandas as pd\n\n# 获取全部股票列表\nstocks = fs.get_stock_list()\n\n# 筛选条件\n# 1. 涨幅 > 5%\n# 2. 成交额 > 1亿\n# 3. 换手率 > 10%\n\nfiltered = stocks[\n    (stocks['change_pct'] > 5) &\n    (stocks['amount'] > 1e8) &\n    (stocks.get('turnover_rate', 0) > 10)\n]\n\nprint(f\"符合条件的股票: {len(filtered)} 只\")\nprint(filtered[['code', 'name', 'change_pct']])\n```\n\n---",
+              "line_num": 119
+            },
+            {
+              "title": "3. 价格提醒机器人",
+              "node_id": "0009",
+              "summary": "This partial document describes a price alert robot for stocks, implemented in Python for platforms like WeChat or DingTalk. The script monitors a predefined list of stocks, checks their current prices against set high and low thresholds, and sends alerts via DingTalk when these thresholds are breached. The key components include:\n\n1. **Stock Monitoring**: The script monitors a watch list of stock codes, such as '000001.SZ' and '600519.SH' (which corresponds to Kweichow Moutai).\n2. **Price Alerts Configuration**: It defines a dictionary `PRICE_ALERTS` that sets the high and low price thresholds for specific stocks.\n3. **Alert Mechanism**: The `send_alert` function sends a text message through DingTalk when a stock's price crosses the defined thresholds, indicating whether it has \"突破\" (broken through) the high threshold or \"跌破\" (fallen below) the low threshold.\n4. **Continuous Monitoring**: The script runs an infinite loop that fetches the current snapshots of the watched stocks every minute, checks their prices against the alerts, and triggers the alert function when necessary.\n5. **Dependencies**: It uses the `finshare` library to get stock snapshots and the `requests` library to send HTTP POST requests to the DingTalk webhook.",
+              "line_num": 146
+            },
+            {
+              "title": "4. 数据导出工具",
+              "node_id": "0010",
+              "summary": "### 4. 数据导出工具\n\n```python\n# 导出历史数据到 Excel\nimport finshare as fs\n\ncodes = ['000001.SZ', '600519.SH', '601318.SH']\n\nwith pd.ExcelWriter('stock_data.xlsx') as writer:\n    for code in codes:\n        df = fs.get_historical_data(code, start='2020-01-01')\n        df.to_excel(writer, sheet_name=code, index=False)\n\nprint(\"数据已导出到 stock_data.xlsx\")\n```\n\n---",
+              "line_num": 186
+            },
+            {
+              "title": "5. 实时行情 API",
+              "node_id": "0011",
+              "summary": "### 5. 实时行情 API\n\n```python\n# Flask API 服务\nfrom flask import Flask, jsonify\nimport finshare as fs\n\napp = Flask(__name__)\n\n@app.route('/quote/<code>')\ndef get_quote(code):\n    snapshot = fs.get_snapshot_data(code)\n    return jsonify({\n        'code': snapshot.code,\n        'price': snapshot.last_price,\n        'change_pct': snapshot.change_pct,\n        'volume': snapshot.volume\n    })\n\n@app.route('/kline/<code>')\ndef get_kline(code):\n    df = fs.get_historical_data(code, start='2024-01-01')\n    return jsonify(df.to_dict(orient='records'))\n\nif __name__ == '__main__':\n    app.run(host='0.0.0.0', port=5000)\n```\n\n---",
+              "line_num": 204
+            },
+            {
+              "title": "6. 更多创意",
+              "node_id": "0012",
+              "summary": "### 6. 更多创意\n\n| 工具 | 描述 |\n|------|------|\n| 📊 **量化回测** | 使用历史数据进行策略回测 |\n| 📈 **自动交易** | 条件触发自动买卖 |\n| 🔔 **新闻监控** | 监控个股相关新闻 |\n| 📱 **小程序** | 微信/支付宝小程序展示行情 |\n| 📊 **Excel插件** | Excel 实时看盘 |\n\n---",
+              "line_num": 234
+            }
+          ]
+        },
+        {
+          "title": "📖 更多示例",
+          "node_id": "0013",
+          "summary": "## 📖 更多示例\n\n查看 [examples](https://github.com/finvfamily/finshare/tree/main/examples) 目录获取更多示例代码。",
+          "line_num": 246
+        },
+        {
+          "title": "🌟 相关项目",
+          "node_id": "0014",
+          "summary": "## 🌟 相关项目\n\n| 项目 | 描述 |\n|------|------|\n| [finboard](https://github.com/finvfamily/finboard) | 实时行情看板 |\n| [finscreener](https://github.com/finvfamily/finscreener) | 智能选股器 |\n| [finquant](https://github.com/finvfamily/finquant) | 量化回测框架 |\n| [finshare-skills](https://github.com/finvfamily/finshare-skills) | OpenClaw AI 助手技能 |\n| [meepoquant](https://meepoquant.com) | 免费量化回测平台 |",
+          "line_num": 250
+        },
+        {
+          "title": "🙏 致谢",
+          "node_id": "0015",
+          "prefix_summary": "## 🙏 致谢",
+          "line_num": 260,
+          "nodes": [
+            {
+              "title": "参照的开源项目",
+              "node_id": "0016",
+              "summary": "### 参照的开源项目\n\n本项目在设计思路和 API 风格上参考了以下优秀的开源项目：\n\n| 项目 | 描述 |\n|------|------|\n| [akshare](https://github.com/akfamily/akshare) | 专业的金融数据开源库，为本项目提供了重要参考 |",
+              "line_num": 262
+            },
+            {
+              "title": "数据源网站",
+              "node_id": "0017",
+              "summary": "### 数据源网站\n\n感谢以下数据源网站提供的免费 API 接口：\n\n| 数据源 | 用途 |\n|--------|------|\n| 东方财富 | A股行情、财务数据、龙虎榜、融资融券 |\n| 腾讯财经 | 港股行情、实时报价 |\n| 新浪财经 | 港股行情、实时报价 |\n| 通达信 | 行情数据 |\n| BaoStock | 证券数据 |\n| 天天基金 | 基金净值数据 |\n\n---",
+              "line_num": 270
+            }
+          ]
+        },
+        {
+          "title": "🤝 贡献",
+          "node_id": "0018",
+          "summary": "## 🤝 贡献\n\n欢迎贡献代码！查看 [贡献指南](CONTRIBUTING.md)。",
+          "line_num": 285
+        },
+        {
+          "title": "📄 许可证",
+          "node_id": "0019",
+          "summary": "## 📄 许可证\n\nMIT License - 详见 [LICENSE](LICENSE)\n\n---\n\n<div align=\"center\">\n  <p>⭐ 如果这个项目对你有帮助，请给我们一个 Star！</p>\n  <p>🤖 由 <a href=\"https://meepoquant.com\">米波量化</a> 团队开发</p>\n</div>",
+          "line_num": 289
+        }
+      ]
+    }
+  ]
+}

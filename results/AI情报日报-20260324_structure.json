@@ -1,0 +1,184 @@
+{
+  "doc_name": "AI情报日报-20260324",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\AI情报日报-20260324.md",
+  "structure": [
+    {
+      "title": "AI 情报日报 2026-03-24",
+      "node_id": "0000",
+      "prefix_summary": "# AI 情报日报 2026-03-24\n\n扫描量：23 个项目/工具 + 14 篇论文 + 3 篇深度文章 = 40 个目标",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "底层叙事",
+          "node_id": "0001",
+          "summary": "## 底层叙事\n\n三条主线同时加速：\n1. **Agent 自进化** — 从\"人类设计规则\"走向\"agent 自己学会怎么变好\"\n2. **记忆与上下文工程** — 从 prompt engineering 走向 context engineering\n3. **Agent 获得行动能力** — 从\"会说话\"走向\"会操控电脑、会自己排班\"\n\n---",
+          "line_num": 11
+        },
+        {
+          "title": "Tier 1 — 直接行动",
+          "node_id": "0002",
+          "prefix_summary": "## Tier 1 — 直接行动",
+          "line_num": 20,
+          "nodes": [
+            {
+              "title": "MiniMax M2.7 (P0 升级)",
+              "node_id": "0003",
+              "summary": "### MiniMax M2.7 (P0 升级)\n- SWE-Pro 56.22%，接近 Claude Opus\n- 100+ 轮自进化训练，内部评测提升 30%\n- 价格不变：$0.30/$1.20 per M token\n- **行动**：升级 memU/PageIndex/claw-router 三处",
+              "line_num": 22
+            },
+            {
+              "title": "agent-browser (P1 安装)",
+              "node_id": "0004",
+              "summary": "### agent-browser (P1 安装)\n- GitHub: `vercel-labs/agent-browser` | 24.5k stars | Rust\n- Snapshot+Refs 模式，context 占用减少 93%\n- 抗 DOM 变动，跨命令 session 持久化\n- `npm i -g agent-browser`",
+              "line_num": 28
+            },
+            {
+              "title": "LLMFit (P1 安装)",
+              "node_id": "0005",
+              "summary": "### LLMFit (P1 安装)\n- GitHub: `LLMFit` | 6.6k stars\n- 自动检测硬件，推荐最优模型+量化\n- `brew install llmfit`\n\n---",
+              "line_num": 34
+            }
+          ]
+        },
+        {
+          "title": "Tier 2 — 偷设计/研究",
+          "node_id": "0006",
+          "prefix_summary": "## Tier 2 — 偷设计/研究",
+          "line_num": 41,
+          "nodes": [
+            {
+              "title": "AutoSkill — 技能自进化框架",
+              "node_id": "0007",
+              "summary": "### AutoSkill — 技能自进化框架\n- arXiv: 2603.01145v2 | 华东师范大学 + 上海 AI 实验室\n- GitHub: `ECNU-ICALK/AutoSkill`\n- 核心：add/merge/discard 三决策 + 版本化 SKILL.md\n- 只从 user query 提取（不用 assistant response，避免生成偏差）\n- 混合检索(dense+BM25) + 阈值过滤防 context pollution\n- **偷给**：continuous-learning-v2",
+              "line_num": 43
+            },
+            {
+              "title": "MEMO — 记忆增强多 Agent 上下文优化",
+              "node_id": "0008",
+              "summary": "### MEMO — 记忆增强多 Agent 上下文优化\n- arXiv: 2603.09022v2 | Rice/UT Austin/Princeton\n- GitHub: `openverse-ai/MEMO`\n- 记忆 CRUD（矛盾则双删）+ TrueSkill 不确定性惩罚 + 逆频率优先回放\n- GPT-4o-mini 胜率 25.1%→49.5%，方差 44.9%→6.4%\n- 记忆注入比例 pi=0.75（保留 25% 无记忆 agent 维持探索）\n- **偷给**：memU(CRUD) / claw-router(TrueSkill) / OMC(注入比例) / FSC(逆频率回放)",
+              "line_num": 51
+            },
+            {
+              "title": "SWE-CI — CI 环境 Agent 评估",
+              "node_id": "0009",
+              "summary": "### SWE-CI — CI 环境 Agent 评估\n- arXiv: 2603.03823v3 | 中山大学 + 阿里\n- EvoScore(gamma加权) + Zero-Regression Rate + 非对称归一化\n- 每任务平均跨 233 天、71 个 commit\n- 零回归率：大多数模型 <0.25，只有 Claude Opus 超过 0.5\n- **偷给**：FSC 质量门加 Zero-Regression Rate",
+              "line_num": 59
+            },
+            {
+              "title": "SWE-AF (AgentField)",
+              "node_id": "0010",
+              "summary": "### SWE-AF (AgentField)\n- 95/100 vs Claude Code 73 分，$6 成本 MiniMax\n- 400-500 agent 并发，DAG 依赖图，失败模式实时注入\n- **偷给**：FSC DAG 调度 + 失败模式注入",
+              "line_num": 66
+            },
+            {
+              "title": "claude-subconscious (Letta)",
+              "node_id": "0011",
+              "summary": "### claude-subconscious (Letta)\n- GitHub: `letta-ai/claude-subconscious` | 1.1k stars | MIT\n- Claude Code Plugin，4 hooks 拦截 session 生命周期\n- 8 个结构化 memory blocks，Stop hook async 不阻塞\n- 完全静默观察 + Agent 自主决策记什么 + diff 注入\n- **偷给**：memU（静默拦截 / 自主决策 / diff 注入）",
+              "line_num": 71
+            },
+            {
+              "title": "Understand-Anything",
+              "node_id": "0012",
+              "summary": "### Understand-Anything\n- GitHub: `Lum1104/Understand-Anything` | 5.6k stars (9天)\n- 7 阶段 5 Agent 管道：tree-sitter AST + LLM 语义\n- React Flow 交互图 + 6 个 skill 命令\n- 和 GitNexus 互补（语义层 vs 图查询）",
+              "line_num": 78
+            },
+            {
+              "title": "Page Agent (阿里)",
+              "node_id": "0013",
+              "summary": "### Page Agent (阿里)\n- 纯 JS 嵌入页面，自然语言控 UI，不靠 CSS selector\n- MIT 开源，支持 OpenAI/Anthropic/Qwen\n- **评估接入** APEX-CNAIFREE",
+              "line_num": 84
+            },
+            {
+              "title": "Prompt Caching 布局优化 (Thariq)",
+              "node_id": "0014",
+              "summary": "### Prompt Caching 布局优化 (Thariq)\n- 铁律：静态在前、动态在后\n- cache hit rate 当 SEV 监控\n- compaction 必须 cache-safe forking\n\n---",
+              "line_num": 89
+            }
+          ]
+        },
+        {
+          "title": "Tier 3 — 论文收藏",
+          "node_id": "0015",
+          "prefix_summary": "## Tier 3 — 论文收藏",
+          "line_num": 96,
+          "nodes": [
+            {
+              "title": "Hyperagents (DGM-H)",
+              "node_id": "0016",
+              "summary": "### Hyperagents (DGM-H)\n- arXiv: 2603.19461 | Meta FAIR + Jeff Clune\n- GitHub: `facebookresearch/HyperAgents`\n- task agent + meta agent 合成可编辑程序，meta 层自身也可编辑\n- 4 域实验：编程/论文评审/机器人奖励/数学评分\n- 自发演化出持久记忆 + 性能追踪",
+              "line_num": 98
+            },
+            {
+              "title": "LeWorldModel (JEPA)",
+              "node_id": "0017",
+              "summary": "### LeWorldModel (JEPA)\n- arXiv: 2603.19312v1 | Yann LeCun 团队\n- GitHub: `lucas-maes/le-wm`\n- 两个 loss：next-embedding prediction + 高斯正则化\n- 超参从 6 降到 1，规划速度快 48x\n- 1500 万参数，单 GPU 几小时训完",
+              "line_num": 105
+            },
+            {
+              "title": "IGPO (蚂蚁+人大)",
+              "node_id": "0018",
+              "summary": "### IGPO (蚂蚁+人大)\n- ICLR 2026 Poster\n- 每步搜索后看置信度涨跌做即时反馈\n- 解决：advantage collapse + 信用分配模糊 + 样本效率低",
+              "line_num": 112
+            },
+            {
+              "title": "ACT (马里兰)",
+              "node_id": "0019",
+              "summary": "### ACT (马里兰)\n- 批判训练 vs 模仿学习：92.86% vs 85.71%\n- 教 AI 判断质量而非模仿行为，推理能力自然涌现\n- 零数学训练数据却提升了物理/数学基准",
+              "line_num": 117
+            },
+            {
+              "title": "Code Intelligence Survey",
+              "node_id": "0020",
+              "summary": "### Code Intelligence Survey\n- arXiv: 2511.18538v5 | 71 位作者 | 303 页 | 1344 引用\n- Section 8 Training Recipes 最有实操价值\n- 语言特定 Scaling Law：Python alpha 最高，Rust/Go 最低",
+              "line_num": 122
+            },
+            {
+              "title": "其他",
+              "node_id": "0021",
+              "summary": "### 其他\n- Mamba-3: SSM 第三代，线性复杂度\n- PRISM: Mid-training retention\n- Qianfan-OCR / GLM-OCR: 文档 OCR\n- DeepCrossAttention: Transformer 残差连接增强\n\n---",
+              "line_num": 127
+            }
+          ]
+        },
+        {
+          "title": "深度文章",
+          "node_id": "0022",
+          "prefix_summary": "## 深度文章",
+          "line_num": 135,
+          "nodes": [
+            {
+              "title": "Karpathy Agent 转变",
+              "node_id": "0023",
+              "summary": "### Karpathy Agent 转变\n- 5 个月前：\"they just don't work\"\n- 现在：12h 110 次改动，700 次实验，20 个优化叠加\n- 核心方法：20 分钟宏任务并行外包给 agent，人类退到审核席\n- \"agent 失败更像是 human skill issue\"",
+              "line_num": 137
+            },
+            {
+              "title": "Thariq Harness Engineering",
+              "node_id": "0024",
+              "summary": "### Thariq Harness Engineering\n- Claude Code 核心开发者实践\n- 5 大主题：Skills / Action Space / Prompt Caching / 文件系统+Bash / Playgrounds\n- 核心哲学：Agent 成功靠系统工程，不是单一模型能力",
+              "line_num": 143
+            },
+            {
+              "title": "Anthropic 三连发",
+              "node_id": "0025",
+              "summary": "### Anthropic 三连发\n- Computer Use：Claude 接管 Mac（Windows 即将支持）\n- /schedule：云端定时 Agent\n- Claude Code Desktop：桌面版\n\n---",
+              "line_num": 148
+            }
+          ]
+        },
+        {
+          "title": "项目判定汇总",
+          "node_id": "0026",
+          "summary": "该文档主要汇总了多个项目的判定情况，涵盖以下主要内容：\n\n1. **项目判定分类**：文档将项目分为多个判定类别，包括P0升级、P1安装、P2研究/偷设计、P3参考、已立项、收藏、观望和Skip。\n\n2. **项目数量分布**：\n   - P0升级：1个项目（MiniMax M2.7）\n   - P1安装：2个项目（agent-browser, LLMFit）\n   - P2研究/偷设计：8个项目（AutoSkill, MEMO, SWE-CI, SWE-AF, claude-subconscious, Understand-Anything, Page Agent, Prompt Caching）\n   - P3参考：4个项目（Hyperagents, 逆频率回放, 阈值过滤, memU 静默观察）\n   - 已立项：1个项目（AgentMouth (LuxTTS)）\n   - 收藏：6个项目（LeWorldModel, IGPO, ACT, Code Survey, Unsloth, Anthropic 面试题）\n   - 观望：1个项目（Windows Computer Use）\n   - Skip：10个项目（DeerFlow/N.O.M.A.D/HyperSkill/Hermes/Awesome Skills/Google WS CLI//schedule/Desktop/对话转文档/OpenRoom）\n\n3. **项目名称**：文档列出了每个项目的具体名称，涵盖了不同领域和技术方向的项目。",
+          "line_num": 155
+        },
+        {
+          "title": "GitHub Stars (本次新增)",
+          "node_id": "0027",
+          "summary": "## GitHub Stars (本次新增)\n\n- `vercel-labs/agent-browser`\n- `Lum1104/Understand-Anything`\n- `letta-ai/claude-subconscious`\n- `ECNU-ICALK/AutoSkill`\n- `openverse-ai/MEMO`\n- `facebookresearch/HyperAgents`\n- `lucas-maes/le-wm`\n- `bytedance/deer-flow`",
+          "line_num": 170
+        }
+      ]
+    }
+  ]
+}

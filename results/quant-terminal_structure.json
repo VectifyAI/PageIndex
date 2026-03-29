@@ -1,0 +1,64 @@
+{
+  "doc_name": "quant-terminal",
+  "source_path": "E:/knowledge/Knowledge\\03-Trading\\quant-terminal.md",
+  "structure": [
+    {
+      "title": "quant-terminal — A股量化交易终端",
+      "node_id": "0000",
+      "prefix_summary": "# quant-terminal — A股量化交易终端\n\n> FastAPI + pytdx + DuckDB + PyTorch TFT",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "基本信息",
+          "node_id": "0001",
+          "summary": "## 基本信息\n- **路径**: `D:/projects/quant-terminal/`\n- **栈**: Python 3.11 + Next.js\n- **GitHub**: 2233admin/quant-terminal\n- **状态**: 活跃",
+          "line_num": 5
+        },
+        {
+          "title": "核心模块",
+          "node_id": "0002",
+          "prefix_summary": "## 核心模块",
+          "line_num": 11,
+          "nodes": [
+            {
+              "title": "数据层 (`app/data/`)",
+              "node_id": "0003",
+              "summary": "### 数据层 (`app/data/`)\n- `tdx_realtime.py` — pytdx 8并行连接实时行情\n- `kline_cache.py` — 全市场K线DuckDB缓存\n- `akshare_feed.py` / `adata_source.py` — 备用数据源\n- `okx_client.py` — OKX加密货币API\n- `gpu_factors.py` — RTX 5090 CUDA因子计算",
+              "line_num": 13
+            },
+            {
+              "title": "分析层 (`app/strategy/`)",
+              "node_id": "0004",
+              "summary": "### 分析层 (`app/strategy/`)\n- `stock_scanner.py` — 全市场扫描器 (6维因子+矛盾信号)\n- `materialist_engine.py` — 唯物主义交易引擎 (OKX)\n- `decision_fusion.py` — 多信号融合层\n- `macro_bridge.py` — hist-mat宏观regime接入\n- `sentiment_agent.py` — 舆情分析Agent\n- `ict_analyzer.py` — ICT分析框架\n- `dialectical_filter/` — 辩证法过滤器",
+              "line_num": 20
+            },
+            {
+              "title": "交易模式",
+              "node_id": "0005",
+              "summary": "### 交易模式\npaper / ths / tdx / qmt",
+              "line_num": 29
+            }
+          ]
+        },
+        {
+          "title": "DuckDB存储",
+          "node_id": "0006",
+          "summary": "## DuckDB存储\n- 路径: `C:/Users/Administrator/quant-terminal/data/quant.duckdb`\n- 注意: 单进程锁，扫描器运行时其他进程无法读取",
+          "line_num": 32
+        },
+        {
+          "title": "经验",
+          "node_id": "0007",
+          "summary": "## 经验\n- 扫描器走SUPER节点（澳洲直连pytdx太慢）\n- akshare东财API从澳洲不稳定\n- py -3.11的simplejson覆盖requests.json()，用json.loads绕过",
+          "line_num": 36
+        },
+        {
+          "title": "关联",
+          "node_id": "0008",
+          "summary": "## 关联\n- [[hist-mat]] — macro_bridge接入P_risk/信贷脉冲\n- [[AI自循环系统]] — 下一步进化方向\n\n#project #trading #python #a-share",
+          "line_num": 41
+        }
+      ]
+    }
+  ]
+}

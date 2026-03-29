@@ -1,0 +1,70 @@
+{
+  "doc_name": "高级格式",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\SillyTavern 官方文档\\核心概念\\高级格式.md",
+  "structure": [
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/advancedformatting/#context-template)上下文模板",
+      "node_id": "0000",
+      "prefix_summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/advancedformatting/#context-template)上下文模板\n\n**此处的大多数设置不适用于聊天完成 API，因为它们由提示管理器系统管理。**\n\n通常，AI 模型要求您以某种特定方式向它们提供字符数据。SillyTavern 包含针对不同型号的预制转换规则列表，但您可以根据需要自定义它们。",
+      "line_num": 9,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/advancedformatting/#story-string)故事字符串",
+          "node_id": "0001",
+          "summary": "The partial document describes the \"story string\" field, which is a template for character data used in chat interactions. It explains that this template is the primary method for formatting character cards to provide text and guide the model. The document highlights that the template supports Handlebars syntax and custom text injection or formatting, and it provides a link to the Handlebars language reference. It lists the parameters that can be used within the template, such as `description`, `scenario`, `personality`, `system`, `persona`, `char`, and `user`, each serving a specific purpose in defining the character. Additionally, it mentions the optional `mesExamples` parameter for character dialogue examples and the special `{{trim}}` macro for removing surrounding newline characters. The document also warns that missing parameters in the story string template will result in those parameters not being sent in the prompt.",
+          "line_num": 15
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/advancedformatting/#example-separator)示例分隔符",
+          "node_id": "0002",
+          "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/advancedformatting/#example-separator)示例分隔符\n\n用作块标题和示例对话块之间的分隔符。示例对话框中的任何标签实例都将替换为此字段的内容。`<START>`",
+          "line_num": 47
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/advancedformatting/#chat-start)聊天开始",
+          "node_id": "0003",
+          "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/advancedformatting/#chat-start)聊天开始\n\n作为分隔符插入到呈现的故事字符串之后和示例对话块之后，但在上下文中的第一条消息之前。",
+          "line_num": 51
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/advancedformatting/#use-as-stop-strings)用作停止字符串",
+      "node_id": "0004",
+      "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/advancedformatting/#use-as-stop-strings)用作停止字符串\n\n将“Example Separator”和“Chat Start”添加到停止字符串列表中。\n\n如果模型倾向于产生幻觉或泄漏分隔符前面的整个示例对话块，则很有帮助。",
+      "line_num": 55
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/advancedformatting/#allow-jailbreak)允许越狱",
+      "node_id": "0005",
+      "prefix_summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/advancedformatting/#allow-jailbreak)允许越狱\n\n在提示的末尾包括越狱，格式化为最后一条用户消息。\n\n越狱提示应在角色卡中定义，并应启用“首选字符越狱”设置。\n\n应谨慎使用，因为在上下文中将指令放在较低的位置会导致较小模型的输出质量下降。",
+      "line_num": 61,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/advancedformatting/#always-add-characters-name-to-prompt)始终将角色名称添加到提示符中",
+          "node_id": "0006",
+          "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/advancedformatting/#always-add-characters-name-to-prompt)始终将角色名称添加到提示符中\n\n将角色的名称附加到提示符中，以强制模型以字符身份完成消息：\n\n```python\n** OTHER CONTEXT HERE **\nCharacter:\n```",
+          "line_num": 69
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/advancedformatting/#tokenizer)分词器",
+      "node_id": "0007",
+      "summary": "### 分词器描述\n\n分词器是将文本分解为更小单元（如单词或其部分）的工具，每个单元称为一个标记，通常对应3~4个字符。SillyTavern根据不同的API提供商提供“最佳匹配”分词器选项：\n\n#### 文本完成 API（可覆盖）：\n- **NovelAI Clio**: 使用NerdStash分词器。\n- **NovelAI Kayra**: 使用NerdStash v2分词器。\n- **文本完成**: 使用API分词器（如果支持）或LLaMA分词器。\n- **KoboldAI Classic / AI Horde**: 使用LLaMA分词器。\n- **Koboldcpp**: 使用模型API分词器。\n\n用户可以手动设置覆盖分词器，例如：\n- **无覆盖**: 每个标记估计为~3.3个字符，适用于高上下文长度提示。\n- **LLaMA分词器**: 适用于LLaMA 1/2模型系列。\n- **NerdStash分词器**: 适用于NovelAI的Clio模型。\n- **NerdStash v2分词器**: 适用于NovelAI的Kayra模型。\n- **Mistral分词器**: 适用于Mistral模型系列。\n- **易令牌化**: 适用于Yi模型。\n- **API分词器**: 查询生成API以直接从模型获取令牌计数，支持后端包括文本生成WebUI、koboldcpp等。\n\n#### 聊天完成 API（不可覆盖）：\n- **OpenAI / OpenRouter / Window的GPT**: 使用tiktoken的模型依赖分词器。\n- **Claude**: 使用WebTokenizers的模型依赖分词器。\n- **OpenRouter**: 使用Llama和Mistral分词器。\n- **缩放API**: 使用GPT-4分词器。\n- **AI21 API**: 默认使用GPT-3.5 turbo分词器，或启用API分词器（可能影响速度）。\n- **回退分词器（用于代理）**: 使用GPT-3.5 turbo分词器。",
+      "line_num": 78
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/advancedformatting/#token-padding)令牌填充",
+      "node_id": "0008",
+      "summary": "### 描述\n\n该部分文档主要讨论了SillyTavern中的**令牌填充**功能及其重要性：\n\n1. **适用范围**：令牌填充功能不适用于聊天完成API，因为SillyTavern会为这些模型自动使用匹配的分词器。\n\n2. **分词器问题**：由于SillyTavern无法使用KoboldAI或Oobabooga的TextGen远程实例上运行的模型提供的适当分词器，因此在提示生成过程中，所有标记计数都是基于所选分词器类型估计的。\n\n3. **上下文大小问题**：由于标记化结果在接近模型定义的最大上下文大小时可能不准确，提示的某些部分可能会被修剪或删除，这可能影响角色定义的一致性。\n\n4. **填充机制**：为了防止提示被截断，SillyTavern会分配一部分上下文大小作为填充，以确保不会添加超出模型容纳范围的聊天项。\n\n5. **调整建议**：如果发现提示的某些部分被修剪，即使选择了最匹配的分词器，用户也可以通过调整填充来避免截断说明。\n\n6. **反向填充**：用户可以为反向填充输入负值，这允许分配超过设置的最大令牌数量。",
+      "line_num": 126
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/advancedformatting/#custom-stopping-strings)自定义停止字符串",
+      "node_id": "0009",
+      "summary": "## [#](https://docs.sillytavern.app/usage/core-concepts/advancedformatting/#custom-stopping-strings)自定义停止字符串\n\n接受停止字符串的 JSON 序列化数组。例：。如果不确定格式，请使用[在线 JSON 验证器](https://jsonlint.com/)。`[\"\\n\", \"\\nUser:\", \"\\nChar:\"]`\n\n支持的 API：\n\n1. KoboldAI (versions 1.2.2 and higher) or KoboldCpp\n\n1. AI Horde\n\n1. Text Completion APIs: Text Generation WebUI (ooba), Tabby, Aphrodite, Mancer, TogetherAI, Ollama, etc.\n\n1. NovelAI\n\n1. OpenAI, including via OpenRouter (max 4 strings)\n\n1. Claude",
+      "line_num": 138
+    }
+  ]
+}

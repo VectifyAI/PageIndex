@@ -1,0 +1,60 @@
+{
+  "doc_name": "二次元角色卡通渲染—面部篇（下）",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\二次元角色卡通渲染—面部篇（下）.md",
+  "structure": [
+    {
+      "title": "Ⅰ. 为什么动画风格的脸会不成立?",
+      "node_id": "0000",
+      "summary": "### Description of Partial Document\n\nThe partial document discusses the reasons why anime-style faces are not feasible in a three-dimensional context. It explains that the \"exaggeration\" and \"omission\" in anime character designs enhance their expressiveness and that the unrealistic elements are often part of their charm. The document identifies anime-style faces as extreme and \"surreal\" deformations, making them difficult to fully translate into three-dimensional models. It suggests that accepting the impossibility of perfect translation is necessary and recommends using deformers or bone corrections as more practical solutions. The document also emphasizes the importance of striving for the ideal appearance as much as possible within the limitations of the 3D model.",
+      "line_num": 41
+    },
+    {
+      "title": "Ⅱ. 以斜脸作为制作时的参考视角",
+      "node_id": "0001",
+      "summary": "### Description of Partial Document\n\nThe document discusses the challenges and advantages of using an oblique angle as a reference perspective in 3D modeling. It argues that while creating models from front and side views is feasible, achieving consistency across all angles is difficult and requires significant skill from the modeler. The oblique angle is highlighted as the most frequently viewed perspective, with front and side views being less commonly used. Additionally, the oblique angle can reveal details not visible from the front or side, and if the model looks correct from this angle, it is likely to appear correct from other intermediate angles as well. The key point is that creating a model that looks good from an oblique angle equates to crafting a face with depth and dimensionality, which helps balance the need for animation flexibility and visual consistency, ultimately reducing the likelihood of the model appearing unnatural or inconsistent.",
+      "line_num": 48
+    },
+    {
+      "title": "Ⅲ. 斜脸时制作的注意点",
+      "node_id": "0002",
+      "summary": "### 斜脸时制作的注意点\n\n1. **脸颊的线条（粉紫线）**：\n   - 决定角色的尖锐、柔软或粗略印象，是制作美型角色的关键。\n\n2. **嘴部的收缩（蓝线）**：\n   - 在斜脸时，嘴部应稍微向后收缩，以表现纵深感。可以通过变形或骨骼修正实现，模型阶段也可进行调整。\n\n3. **眉眼的立体感（黄线）**：\n   - 强调眉清目秀，特别是眼睛周围的立体感。眼角到眉间的高度落差（即周边深度）很重要，通常会夸张两眼之间的宽度差距以增强立体感。\n\n4. **下巴的线条（绿线）**：\n   - 与脸颊线条共同构成面部轮廓，影响角色的形象。在斜脸时，应向内收窄下巴轮廓以避免脸部横向拉长，同时保持正面和侧面的外观不变。",
+      "line_num": 54
+    },
+    {
+      "title": "Ⅳ. 总结",
+      "node_id": "0003",
+      "summary": "### Ⅳ. 总结\n\n既然以“超越现实的表现”为目标，一定程度的违和就不可避免。通过变形器或骨骼变形的目前最好的方式。但是通过模型制作时的努力可以在一定程度上缓解。重点在于变形与立体感的兼容性，在不影响变形效果的范围内，在立体感上下功夫。\n\n---\n\n这里简略了很多内容，细节部分建议去看原PPT，链接见文后引用。",
+      "line_num": 89
+    },
+    {
+      "title": "3.3.3 基于视角的面部形态修正",
+      "node_id": "0004",
+      "summary": "### Description of the Partial Document\n\nThe partial document focuses on techniques for improving the appearance of 3D character faces in different camera perspectives. It emphasizes that relying solely on modeling is insufficient and suggests using additional methods to adjust facial morphology based on the camera's viewpoint. This ensures that the face looks appealing in the final render. The document mentions using Blend Shapes (BS) or bones to blend deformations according to the camera position. It also discusses various deformation methods, such as fine-tuning based on perspective and squash deformations to simulate low Field of View (FOV). The document provides examples of these techniques applied to the 3D character designs in \"IDOLY_PRIDE,\" showcasing their effectiveness in creating attractive and efficient 3D idol characters. Additionally, the document briefly mentions other minor features but notes that they are not discussed in detail due to length constraints.",
+      "line_num": 97
+    },
+    {
+      "title": "3.4.1 红晕与点光",
+      "node_id": "0005",
+      "summary": "### 3.4.1 红晕与点光\n\n面部表现的常见效果。\n\n\n红晕与点光",
+      "line_num": 117
+    },
+    {
+      "title": "3.4.2 颈部阴影",
+      "node_id": "0006",
+      "summary": "### 3.4.2 颈部阴影\n\n该部分主要讨论了动画中颈部阴影的处理方式及其变化。颈部阴影通常位于下巴和脖子区域，常被作为恒定的暗区处理，但在不同风格的动画中表现各异。阴影的处理会依据角色的外观特征进行调整，例如硬朗的角色通常使用较深的阴影或双层阴影，而柔软的角色则可能减少阴影和轮廓线的使用。整体上，颈部阴影的处理方式会根据角色的设计风格和表现需求进行灵活调整。",
+      "line_num": 124
+    },
+    {
+      "title": "3.4.3 边缘高光",
+      "node_id": "0007",
+      "summary": "### 3.4.3 边缘高光\n\n面部边缘高光主要有两种，侧视时的边缘以及正视时的左右两侧边缘，可以使用SDF或深度边缘光或边缘检测的方式来制作。\n\n边缘高光",
+      "line_num": 132
+    },
+    {
+      "title": "引用",
+      "node_id": "0008",
+      "summary": "This partial document is a compilation of resources and articles focused on advanced techniques in 3D graphics, particularly in the realm of anime-style rendering and character modeling. It covers topics such as:\n\n1. **Real-time 3D Graphics**: Discusses the secrets behind achieving anime-like real-time 3D graphics in \"GUILTY GEAR Xrd -SIGN-\".\n2. **Lighting Techniques**: Explores the use of Rembrandt lighting and other lighting setups in photography and animation.\n3. **Shadow Rendering**: Includes articles on shadow simplification, facial shadow rendering, and the use of Signed Distance Fields for rendering.\n4. **Character Modeling**: Provides tips and insights into anime-style character modeling from the developers of \"GUILTY GEAR Xrd\" and \"BLUE PROTOCOL\".\n5. **Rendering Techniques**: Covers the implementation of anime-style rendering in games like \"崩壊3rd\" and \"新サクラ大戦\", including the use of Render Features in Unity for cartoon rendering.\n6. **Tools and Algorithms**: Mentions tools like CSP for creating cel-shaded facial shadow maps and algorithms for curve morphing in facial shadows.\n7. **Game Development**: Includes discussions on the development of \"七つの大罪\" and \"IDOLY_PRIDE\", focusing on techniques for creating high-quality graphics and efficient 3D character modeling.\n8. **Case Studies**: Features case studies on the 3DCG character design in \"ウマ娘 プリティーダービー\" and the balance between anime-style deformation and realistic textures in \"新サクラ大戦\".\n9. **Technical Aspects**: Covers technical aspects such as focal length and its effect on viewing angles, and ergonomic issues in VRUI libraries.\n\nThe document serves as a resource for developers and enthusiasts interested in the technical and artistic aspects of anime-style 3D graphics and character modeling.",
+      "line_num": 138
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "doc_name": "Linux_MacOS 安装",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\SillyTavern 官方文档\\安装\\Linux_MacOS 安装.md",
+  "structure": [
+    {
+      "title": "[#](https://docs.sillytavern.app/installation/linuxmacos/#manual-git-install)手动 Git 安装",
+      "node_id": "0000",
+      "summary": "## [#](https://docs.sillytavern.app/installation/linuxmacos/#manual-git-install)手动 Git 安装\n\n对于 MacOS / Linux，所有这些都将在终端中完成。\n\n1. 安装 git 和 nodeJS（执行此操作的方法因操作系统而异）\n\n1. 克隆存储库\n\n- 对于发布分支：`git clone ``https://github.com/SillyTavern/SillyTavern`` -b release`\n\n- 对于暂存分支：`git clone ``https://github.com/SillyTavern/SillyTavern`` -b staging`\n\n1. `cd SillyTavern`导航到安装文件夹。\n\n1. 使用以下命令之一运行脚本：`start.sh`\n\n- `./start.sh`\n\n- `bash start.sh`",
+      "line_num": 7
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/installation/linuxmacos/#sillytavern-launcher)SillyTavern 启动器",
+      "node_id": "0001",
+      "prefix_summary": "## [#](https://docs.sillytavern.app/installation/linuxmacos/#sillytavern-launcher)SillyTavern 启动器",
+      "line_num": 27,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/installation/linuxmacos/#for-linux-users)对于 Linux 用户",
+          "node_id": "0002",
+          "summary": "### [#](https://docs.sillytavern.app/installation/linuxmacos/#for-linux-users)对于 Linux 用户\n\n1. 打开你喜欢的终端并安装 git\n\n1. 下载Sillytavern Launcher：`git clone ``https://github.com/SillyTavern/SillyTavern-Launcher.git`\n\n1. 通过以下方式导航到 SillyTavern-Launcher：`cd SillyTavern-Launcher`\n\n1. 使用以下命令启动安装启动器： 并选择要安装的内容`chmod +x install.sh && ./install.sh`\n\n1. 安装后，通过以下命令启动启动器：`chmod +x launcher.sh && ./launcher.sh`",
+          "line_num": 29
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/installation/linuxmacos/#for-mac-users)对于Mac用户",
+          "node_id": "0003",
+          "summary": "### Description of the Partial Document\n\nThe partial document provides a step-by-step guide for Mac users to install and set up the SillyTavern application. It begins with instructions on installing Homebrew, a package manager for macOS, using a terminal command. Following this, it directs users to install Git via Homebrew. The document then outlines the process of cloning the SillyTavern-Launcher repository from GitHub, navigating to the cloned directory, and running an installation script to set up the launcher. Finally, it provides the command to execute the launcher after the installation is complete.",
+          "line_num": 41
+        }
+      ]
+    }
+  ]
+}

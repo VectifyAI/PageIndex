@@ -1,0 +1,62 @@
+{
+  "doc_name": "Stars-量化交易",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\GitHub-Stars\\Stars-量化交易.md",
+  "structure": [
+    {
+      "title": "量化交易",
+      "node_id": "0000",
+      "prefix_summary": "# 量化交易",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "C",
+          "node_id": "0001",
+          "summary": "## C\n\n- [openctp/openctp](https://github.com/openctp/openctp) — openctp提供CTP股票期权、中泰证券XTP、华鑫证券奇点TORA、东方证券OST、东方财富证券EMT、盈透证券TWS、易盛TAP、量投QDP等各通道的CTPAPI兼容接口，CTP程序可以无缝对接",
+          "line_num": 4
+        },
+        {
+          "title": "C#",
+          "node_id": "0002",
+          "summary": "## C#\n\n- [QuantConnect/Lean](https://github.com/QuantConnect/Lean) — Lean Algorithmic Trading Engine by QuantConnect (Python, C#)",
+          "line_num": 8
+        },
+        {
+          "title": "JavaScript",
+          "node_id": "0003",
+          "summary": "## JavaScript\n\n- [chrisleekr/binance-trading-bot](https://github.com/chrisleekr/binance-trading-bot) — Automated Binance trading bot -  Trade multiple cryptocurrencies. Buy low/sell high with Grid Tradin\n- [markrickert/cryptohopper-dashboard-watchlist](https://github.com/markrickert/cryptohopper-dashboard-watchlist) — A browser userscript that tweaks the Cryptohopper dashboard.",
+          "line_num": 12
+        },
+        {
+          "title": "Jupyter Notebook",
+          "node_id": "0004",
+          "summary": "## Jupyter Notebook\n\n- [AI4Finance-Foundation/FinRL](https://github.com/AI4Finance-Foundation/FinRL) — FinRL®:  Financial Reinforcement Learning. 🔥",
+          "line_num": 17
+        },
+        {
+          "title": "NSIS",
+          "node_id": "0005",
+          "summary": "## NSIS\n\n- [DeadManWalkingTO/NVidiaProfileInspectorDmW](https://github.com/DeadManWalkingTO/NVidiaProfileInspectorDmW) — Nvidia GPU Profile Inspector by DeadManWalking (DeadManWalkingTO-GitHub)",
+          "line_num": 21
+        },
+        {
+          "title": "Other",
+          "node_id": "0006",
+          "summary": "The partial document provides a list of GitHub repositories related to financial data and tools. It includes:\n\n1. **Ashare**: A repository for a stock market data interface focused on Chinese A-share market data. It offers a free, real-time data API for Chinese stock market data, including daily, historical, intraday, and minute-level data. The system collects data from both Sina and Tencent sources with automatic failover.\n\n2. **FinceptTerminal**: A modern finance application that provides advanced market analytics and investment research tools.\n\n3. **awesome-tradingview**: A curated list of resources related to TradingView, including widgets, charting libraries, and other useful tools.",
+          "line_num": 25
+        },
+        {
+          "title": "Python",
+          "node_id": "0007",
+          "summary": "The partial document provides an overview of various open-source Python projects and tools focused on financial markets, trading, and data analysis. Key themes include:\n\n1. **Quantitative Trading and Analysis**: Projects like `1nchaos/adata`, `FinHackCN/finhack`, and `OpenBB-finance/OpenBB` offer platforms and frameworks for quantitative trading, data analysis, and AI-driven strategies in financial markets.\n\n2. **Cryptocurrency Trading Bots**: Tools such as `Drakkar-Software/OctoBot` and `freqtrade/freqtrade` provide automated trading solutions for cryptocurrencies, supporting strategies like AI, Grid, DCA, and TradingView.\n\n3. **Market Data and Analytics**: `Fincept-Corporation/FinceptTerminal` and `mementum/backtrader` offer advanced market analytics and backtesting capabilities for trading strategies, while `mpquant/Ashare` provides a free API for real-time Chinese stock market data.\n\n4. **Financial Data Tools**: `finvfamily/finshare` is a professional toolkit for fetching financial data, highlighting the importance of data acquisition in financial applications.\n\n5. **Innovative Approaches**: Projects like `The-Swarm-Corporation/AutoHedge` leverage swarm intelligence for autonomous hedge fund management, and `2233admin/CryptoMamba` and `MShahabSepehri/CryptoMamba` implement state space models for accurate Bitcoin price prediction, showcasing cutting-edge techniques in financial technology.",
+          "line_num": 31
+        },
+        {
+          "title": "Rust",
+          "node_id": "0008",
+          "summary": "## Rust\n\n- [Julien-R44/cli-candlestick-chart](https://github.com/Julien-R44/cli-candlestick-chart) — 📈 Display candlestick charts right into your terminal.",
+          "line_num": 46
+        }
+      ]
+    }
+  ]
+}

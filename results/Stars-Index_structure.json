@@ -1,0 +1,12 @@
+{
+  "doc_name": "Stars-Index",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\GitHub-Stars\\Stars-Index.md",
+  "structure": [
+    {
+      "title": "GitHub Stars 索引",
+      "node_id": "0000",
+      "summary": "This partial document is a categorized index of GitHub repositories, organized by the number of stars each category has received. The document lists 15 categories, including AI-Agent, AI-ML, CLI tools, DevOps-Infrastructure, Python ecosystem, Rust systems, Windows desktop, frontend web, media creation, security and reverse engineering, data storage, game development, mobile development, and quantitative trading. Each category is accompanied by the number of repositories it contains and the total number of stars it has received. The document provides a snapshot of the popularity and distribution of repositories across different technology domains on GitHub.",
+      "line_num": 1
+    }
+  ]
+}

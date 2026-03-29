@@ -1,0 +1,32 @@
+{
+  "doc_name": "Architecture",
+  "source_path": "E:/knowledge/Knowledge\\00-Index\\Architecture.md",
+  "structure": [
+    {
+      "title": "全局架构图",
+      "node_id": "0000",
+      "prefix_summary": "# 全局架构图\n\n> 一切项目的连接关系。这是你打开Obsidian第一个看的文件。",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "系统全景",
+          "node_id": "0001",
+          "summary": "Partial document illustrates system landscape: coding infrastructure (self-developed FSC engine, claw-mesh cluster, K8s control via claw-grid linking to Agent ecosystem and deployments). API & routing (ClawAPI, Router v3.0, China MCP gateway). Agent ecosystem with orchestrator oh-my-claudecode connecting to OpenClaw (149 skills), ZeroClaw (Rust), OpenCode. Quant trading stack with quant-terminal, hist-mat engine, AI self-loop. Thought research with hist-mat engine and knowledge board. Cluster infrastructure nodes (Central, Silicon Valley, Tokyo, SUPER, NAS, Curry, interconnections). Memory systems (GitNexus, RAG, MemoV, auto-memory, Obsidian, notepad). Deployment links between components.",
+          "line_num": 5
+        },
+        {
+          "title": "项目索引",
+          "node_id": "0002",
+          "summary": "项目索引涵盖多个领域的主要项目状态概览，包括编码（FSC、claw-mesh等）、路由（ClawAPI、Claw Router等）、Agent系统、量化交易、研究项目、优化工具和集群运维，每个项目标注了当前状态和关键指标。",
+          "line_num": 80
+        },
+        {
+          "title": "工具链",
+          "node_id": "0003",
+          "summary": "## 工具链\n\n| 工具                 | 用途       |\n| ------------------ | -------- |\n| Claude Code + OMC  | 主力开发     |\n| Codex CLI v0.114   | 第二意见/推理  |\n| Gemini CLI v0.33.1 | 第三视角     |\n| OpenCode           | 国产模型     |\n| OpenClaw           | 多渠道Agent |\n| Obsidian           | 知识图谱     |\n| Gitea              | 私有Git    |\n| GitHub             | 公开项目     |",
+          "line_num": 98
+        }
+      ]
+    }
+  ]
+}

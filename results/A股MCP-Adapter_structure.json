@@ -1,0 +1,74 @@
+{
+  "doc_name": "A股MCP-Adapter",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\A股MCP-Adapter.md",
+  "structure": [
+    {
+      "title": "A 股 MCP Adapter",
+      "node_id": "0000",
+      "prefix_summary": "# A 股 MCP Adapter\n\n> 把 A 股数据源包成 MCP server，对接 Anthropic financial-services-plugins",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "动机",
+          "node_id": "0001",
+          "summary": "## 动机\n\nfinancial-services-plugins 的 skill/workflow 是通用的（DCF/Comps/三表），但 MCP 数据源全是美股（FactSet/S&P/Morningstar）。A 股需要自己的 MCP adapter。",
+          "line_num": 11
+        },
+        {
+          "title": "数据源映射",
+          "node_id": "0002",
+          "summary": "主要内容概述：\n文档列出多个原始美股数据源，以及在 A 股市场可替代的工具或数据来源，涵盖实时行情、财务信息、新闻、投资者问答、基金评级/持仓、债券数据以及股权融资等不同类型的数据映射。",
+          "line_num": 15
+        },
+        {
+          "title": "架构",
+          "node_id": "0003",
+          "summary": "## 架构\n\n```\nfinancial-services-plugins (skill/workflow 不动)\n         ↓ MCP 协议\nA股 MCP Server (FastAPI + SSE)\n         ↓\n┌────────┬────────┬──────────┬──────────┐\n│ pytdx  │akshare │东财爬虫   │舆情Agent  │\n│ 行情    │财报    │资金流     │新闻情绪   │\n└────────┴────────┴──────────┴──────────┘\n```",
+          "line_num": 28
+        },
+        {
+          "title": "爬虫引擎",
+          "node_id": "0004",
+          "summary": "Doc describes a crawler engine setup: crawlee-python (self-hosted, reliable vs akshare/adata) with features stability, anti-anti-crawler, proxy, headless rendering, Markdown output for LLMs, combined with Crawl4AI for LLM-friendly extraction.",
+          "line_num": 41
+        },
+        {
+          "title": "已有资产",
+          "node_id": "0005",
+          "summary": "## 已有资产\n\n- **China MCP Gateway** — 106 个 adapter，大量数据源已接\n- **quant-terminal** — pytdx/akshare/adata/舆情 Agent 已实现\n- **SUPER 节点** — 大陆网络环境，爬虫跑这里\n- **crawlee-python** — 自托管爬虫引擎（待部署）\n- **Crawl4AI** — LLM 友好内容提取（待部署）",
+          "line_num": 55
+        },
+        {
+          "title": "实现方案",
+          "node_id": "0006",
+          "summary": "## 实现方案\n\n1. 从 China MCP Gateway 的 adapter 中挑 A 股相关的\n2. 包成标准 MCP server（Streamable HTTP）\n3. 改 financial-analysis 插件的 `.mcp.json` 指向自己的 server\n4. skill 里的美股术语改 A 股术语（10-K→年报，10-Q→季报，等）",
+          "line_num": 63
+        },
+        {
+          "title": "需要新写的 Skill",
+          "node_id": "0007",
+          "summary": "## 需要新写的 Skill\n\n- A 股特色分析：涨停板/跌停板/打板策略\n- 北向资金/主力资金流向\n- 龙虎榜分析\n- 板块轮动/概念联动\n- 融资融券分析\n- 限售股解禁日历",
+          "line_num": 70
+        },
+        {
+          "title": "部署",
+          "node_id": "0008",
+          "summary": "## 部署\n\n- MCP Server: SUPER 节点（大陆网络）\n- 通过 claw-router 反代暴露给澳洲本机",
+          "line_num": 79
+        },
+        {
+          "title": "优先级",
+          "node_id": "0009",
+          "summary": "## 优先级\n\n1. pytdx MCP (行情/K线) — 最基础\n2. akshare MCP (财报/指标) — /comps /dcf 必需\n3. 东财舆情 MCP (新闻) — /earnings 用\n4. A 股特色 skill — 涨停/北向/龙虎榜",
+          "line_num": 84
+        },
+        {
+          "title": "关联",
+          "node_id": "0010",
+          "summary": "## 关联\n\n- [[China MCP Gateway]] — 数据源已有\n- [[quant-terminal]] — 数据层代码可复用\n- [[AI自循环系统]] — 感知层的 MCP 化\n\n#project #trading #mcp #a-share",
+          "line_num": 91
+        }
+      ]
+    }
+  ]
+}

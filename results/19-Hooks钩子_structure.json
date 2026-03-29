@@ -1,0 +1,76 @@
+{
+  "doc_name": "19-Hooks钩子",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\ClaudeLog-干货\\19-Hooks钩子.md",
+  "structure": [
+    {
+      "title": "Hooks 钩子",
+      "node_id": "0000",
+      "prefix_summary": "# Hooks 钩子\n\n> 原文：[claudelog.com/mechanics/hooks](https://claudelog.com/mechanics/hooks)",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "概述",
+          "node_id": "0001",
+          "summary": "## 概述\n\nHooks 是 Claude Code 中触发**确定性响应**的机制，由特定事件（工具执行、文件变更、部署活动等）触发。",
+          "line_num": 5
+        },
+        {
+          "title": "可用触发器",
+          "node_id": "0002",
+          "summary": "## 可用触发器\n\n- `PreToolUse` / `PostToolUse` — 工具调用前后\n- `UserPromptSubmit` — 用户提交 prompt 时\n- `PermissionRequest` — 权限请求时\n- `Stop` / `SubagentStop` — 主 agent/子 agent 停止时\n- `SessionEnd` / `Setup` — session 结束/初始化时\n- `Elicitation` / `ElicitationResult` — 用户输入收集前后\n- `PostCompact` — 上下文压缩后",
+          "line_num": 9
+        },
+        {
+          "title": "作用域陷阱",
+          "node_id": "0003",
+          "summary": "## 作用域陷阱\n\n**糟糕的例子：** bash hook 对**任何** bash 命令都触发，连 `ls` 和 `pwd` 都跑昂贵的验证。\n\n**正确做法：** 智能分发模式——一个入口脚本智能路由，只在检测到特定命令（如 `npm run deploy`）时执行昂贵操作。",
+          "line_num": 19
+        },
+        {
+          "title": "高级功能",
+          "node_id": "0004",
+          "prefix_summary": "## 高级功能",
+          "line_num": 25,
+          "nodes": [
+            {
+              "title": "PreToolUse 输入修改（v2.0.10+）",
+              "node_id": "0005",
+              "summary": "### PreToolUse 输入修改（v2.0.10+）\nHooks 可在工具执行前修改其输入，实现：\n- 透明沙箱化\n- 自动安全策略\n- 开发体验增强",
+              "line_num": 27
+            },
+            {
+              "title": "PermissionRequest Hook",
+              "node_id": "0006",
+              "summary": "### PermissionRequest Hook\n自动批准或拒绝工具权限，可自定义逻辑：放行只读工具，拦截危险操作。",
+              "line_num": 33
+            },
+            {
+              "title": "HTTP Hooks（v2.1.63+）",
+              "node_id": "0007",
+              "summary": "### HTTP Hooks（v2.1.63+）\n向 URL 发送 POST JSON，而不是执行 shell 命令。",
+              "line_num": 36
+            }
+          ]
+        },
+        {
+          "title": "配置选项",
+          "node_id": "0008",
+          "summary": "## 配置选项\n\n| 字段 | 作用 |\n|------|------|\n| `continue` | hook 执行后 Claude 是否继续 |\n| `stopReason` | continue=false 时显示的消息 |\n| `suppressOutput` | 隐藏 stdout |\n| `systemMessage` | 向用户显示的警告 |\n| `once` | 限制每 session 只执行一次 |",
+          "line_num": 39
+        },
+        {
+          "title": "最佳实践",
+          "node_id": "0009",
+          "summary": "## 最佳实践\n\n1. 用智能分发 + 单一入口点\n2. 用 `jq` 提取命令细节（带 fallback）\n3. 独立验证并发运行\n4. 跟踪执行时间 + 缓存结果\n5. 非关键 hook 优雅降级\n6. 精确针对特定命令，而非宽泛类别\n\n> \"精确作用域的 hooks 消除手动部署步骤，在问题到达生产环境之前拦截。\"",
+          "line_num": 49
+        },
+        {
+          "title": "我的理解",
+          "node_id": "0010",
+          "summary": "## 我的理解\n\nHooks 是 Claude Code 的 **git hooks / CI pipeline 等价物**。核心原则和 git pre-commit hook 一样：\n\n- **精确作用域** — 不要用大网捞小鱼，为 `npm run deploy` 专门写 hook，而不是对所有 bash 命令都触发\n- **快速失败** — hook 应该在毫秒内完成，慢 hook 会拖慢整个工作流\n- **优雅降级** — 非关键 hook 失败不应阻塞工作\n\nHTTP hooks 开启了有趣的可能性：把 Claude Code 的操作事件推送到外部系统（Slack 通知、监控仪表板、审计日志）。",
+          "line_num": 60
+        }
+      ]
+    }
+  ]
+}

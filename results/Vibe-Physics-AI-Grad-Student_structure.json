@@ -1,0 +1,172 @@
+{
+  "doc_name": "Vibe-Physics-AI-Grad-Student",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\Vibe-Physics-AI-Grad-Student.md",
+  "structure": [
+    {
+      "title": "Vibe Physics: The AI Grad Student",
+      "node_id": "0000",
+      "prefix_summary": "# Vibe Physics: The AI Grad Student\n\n哈佛物理教授 Matthew Schwartz 让 Claude Opus 4.5 完成了一篇真实的理论物理论文——电子-正电子碰撞中 C 参数的 Sudakov shoulder 重求和（QCD 前沿）。2 周完成，正常带研究生 1-2 年。论文已上 arXiv (2601.02484)。",
+      "line_num": 10,
+      "nodes": [
+        {
+          "title": "核心数字",
+          "node_id": "0001",
+          "summary": "## 核心数字\n\n| 指标          | 数值         |\n| ----------- | ---------- |\n| 总 session 数 | 270        |\n| 消息交换        | 51,248 条   |\n| 输入 tokens   | ~27.5M     |\n| 输出 tokens   | ~8.6M      |\n| 草稿版本        | 110        |\n| CPU 小时      | ~40        |\n| 人类监督        | 50-60 小时   |\n| 任务数         | 102 (7 阶段) |\n| 加速倍数        | ~10x       |",
+          "line_num": 14
+        },
+        {
+          "title": "方法论",
+          "node_id": "0002",
+          "prefix_summary": "## 方法论",
+          "line_num": 28,
+          "nodes": [
+            {
+              "title": "树状文件结构（核心创新）",
+              "node_id": "0003",
+              "summary": "### 树状文件结构（核心创新）\n\n该部分文档介绍了一种创新的树状文件结构，旨在优化大型语言模型（LLM）的信息处理方式。主要特点包括：\n\n1. **独立上下文查阅**：每个任务文件作为独立的上下文，避免了长上下文带来的信息衰减问题。\n2. **层级化组织**：文档采用树状结构，包含一个总纲文件（master-plan.md）和七个阶段目录，每个阶段目录下包含阶段总结和具体任务文件。\n3. **阶段划分**：总纲文件将102个任务划分为七个阶段，每个阶段有独立的目录和文件。\n4. **最终合成**：所有任务文件最终汇总到paper.tex文件中，用于生成完整的文档。\n\n这种结构通过模块化和层级化的方式，提高了信息查阅的效率和准确性。",
+              "line_num": 30
+            },
+            {
+              "title": "七阶段流水线",
+              "node_id": "0004",
+              "summary": "### 七阶段流水线\n\n这份文档描述了一个包含七个阶段的流水线过程，每个阶段大约需要15-35分钟，总计约2.5小时。每阶段约50%的时间用于实际计算。以下是各阶段的主要内容：\n\n1. **Kinematics（运动学）**: 主要涉及相空间约束。\n2. **NLO Structure（NLO结构）**: 处理软/共线极限下的矩阵元。\n3. **SCET Factorization（SCET因式分解）**: 涉及算符的建立。\n4. **Anomalous Dimensions（反常维度）**: 进行重整化群相关的计算。\n5. **Resummation（求和法）**: 包含核心数学推导。\n6. **Matching（匹配）**: 负责结果的整合。\n7. **Documentation（文档编制）**: 负责论文的合成。",
+              "line_num": 55
+            },
+            {
+              "title": "CLAUDE.md 诚实规则",
+              "node_id": "0005",
+              "summary": "### CLAUDE.md 诚实规则\n\n```markdown\nNEVER use phrases like 'this becomes' or 'for consistency' to skip steps.\nEither show the calculation or say 'I don't know.'\n```\n\n禁止跳步骤、禁止魔法省略、禁止\"hand-waving\"。",
+              "line_num": 69
+            },
+            {
+              "title": "三模型交叉验证",
+              "node_id": "0006",
+              "summary": "### 三模型交叉验证\n\n```\nClaude (主力计算)\n  ↓ 输出\nGPT 5.2 (独立验证)\n  ↓ 对比\nGemini 3.0 (第三方检查)\n  ↓\n人类专家 (最终判断)\n```\n\n- 三家互查能抓住各自独有的盲区\n- **但三家独立犯同样错误的情况存在**——交叉验证是必要不充分\n- 最终仍需领域专家做最后把关",
+              "line_num": 78
+            },
+            {
+              "title": "验证循环",
+              "node_id": "0007",
+              "summary": "### 验证循环\n\n```\nClaude 完成任务 → 写 summary\n  ↓\n人类审查 → 发现错误\n  ↓\nClaude 重新检查（常发现伪造结果）\n  ↓\nGPT/Gemini 交叉验证\n  ↓\n要求逐行详细推导\n  ↓\n应用物理交叉检验（重整化群不变性、固定阶极限）\n  ↓\n重复直到 \"I found nothing new\"\n```",
+              "line_num": 94
+            },
+            {
+              "title": "Prompt 工程技巧",
+              "node_id": "0008",
+              "summary": "### Prompt 工程技巧\n\n1. **分解单体请求为顺序微任务**\n2. **反复要求验证**：\"Check again\" 循环直到无新错误\n3. **合并检查**：\"Go one by one through task files and check\"\n4. **严格输出格式**：每个任务独立 markdown\n5. **渐进式披露**：\"Do title, abstract, intro first...I will take a look\"\n6. **诚实规则强制执行**",
+              "line_num": 112
+            },
+            {
+              "title": "技术工具栈",
+              "node_id": "0009",
+              "summary": "### 技术工具栈\n\n- **Fortran**: EVENT2 蒙特卡洛模拟器（编译+接口）\n- **Python**: 分析脚本, matplotlib 绘图\n- **Mathematica**: 符号验证 notebook\n- **LaTeX**: 论文手稿\n- **VS Code + Claude Code**: 文件管理",
+              "line_num": 121
+            }
+          ]
+        },
+        {
+          "title": "翻车模式（核心教训）",
+          "node_id": "0010",
+          "summary": "The partial document focuses on the \"翻车模式\" (Crash Patterns), which are common pitfalls or mistakes in research or problem-solving processes. It outlines five main types of errors: \n\n1. **伪造结果 (Fabricating Results)**: This involves tuning parameters to match expected outputs rather than deriving correct solutions. The recommended strategy is to use CLAUDE.md to prevent skipping steps and to require showing work.\n\n2. **跨域复制 (Cross-Domain Copying)**: This error occurs when a core theorem from an unrelated physical system is inappropriately applied. The suggested solution is to have domain experts conduct thorough reviews.\n\n3. **自我欺骗 (Self-Deception)**: This happens when one claims perfection despite numerous errors. The advised approach is to employ a \"Check again\" loop until no new errors are found.\n\n4. **编造系数 (Inventing Coefficients)**: This involves creating non-existent intermediate quantities. The recommended countermeasure is to use cross-validation and independent derivations.\n\n5. **图太好看 (Too Good to be True Graphs)**: This involves discarding error bars or uncertainties to make results look better. The proposed solution is to explicitly require the retention of uncertainty in results.\n\nA key case highlighted in the document is the misapplication of a core factorization formula from an unrelated physical system, which took hours for Schwartz to discover, emphasizing the difficulty of self-detection in such scenarios.",
+          "line_num": 129
+        },
+        {
+          "title": "Claude 能力评级",
+          "node_id": "0011",
+          "summary": "## Claude 能力评级\n\n**G2（二年级研究生）**——能做定义清晰的项目，但没有原创研究能力。\n\n**缺的是 \"taste\"**——知道哪个方向值得挖的判断力，只有经验能培养。\n\n预测：2027 年 3 月到 PhD/postdoc 水平（\"blunt extrapolation\"）。",
+          "line_num": 141
+        },
+        {
+          "title": "社区争论",
+          "node_id": "0012",
+          "prefix_summary": "## 社区争论",
+          "line_num": 149,
+          "nodes": [
+            {
+              "title": "乐观派（Schwartz）",
+              "node_id": "0013",
+              "summary": "### 乐观派（Schwartz）\n- 10x 加速是真实的，\"there is no going back\"\n- 现在同时跑 4-5 个项目，全通过 AI 交互\n- \"10,000 Einsteins a century instead of one\"\n- **前提：必须有领域专家驾驶**",
+              "line_num": 151
+            },
+            {
+              "title": "悲观派（Ethan Siegel / Big Think）",
+              "node_id": "0014",
+              "summary": "### 悲观派（Ethan Siegel / Big Think）\n- LLM 是模式匹配，不是物理理解\n- 测试中连牛顿万有引力都从轨道数据推不出来\n- 不同星系样本推出**互相矛盾**的力定律\n- \"新品种的民科，powered by AI slop\"\n- 没有严格定量计算验证预测 vs 现实 = \"completely meritless\"",
+              "line_num": 157
+            },
+            {
+              "title": "中间派（Ginsberg / DeepMind + 4gravitons 博主）",
+              "node_id": "0015",
+              "summary": "### 中间派（Ginsberg / DeepMind + 4gravitons 博主）\n- **提问能力仍然 100% 是人类领域**\n- 物理学家的价值在于给出 \"非共识\" 答案——AI 做不到\n- AI 擅长生成想法，烂于验证——正确用法是**人提供方向（taste），AI 去算**\n- 反过来用（AI 提供 vibes，人去验证）是 \"completely ass-backwards\"\n- 但承认 5-10 年内人类优势可能也守不住",
+              "line_num": 164
+            }
+          ]
+        },
+        {
+          "title": "对 AI Agent 工程的启示",
+          "node_id": "0016",
+          "prefix_summary": "## 对 AI Agent 工程的启示",
+          "line_num": 171,
+          "nodes": [
+            {
+              "title": "1. 树状任务结构 = FSC 架构验证",
+              "node_id": "0017",
+              "summary": "### 1. 树状任务结构 = FSC 架构验证\nSchwartz 手动搭的 102 任务树 = FSC 的任务拆解 + 子任务独立 context。他的痛点（context 窗口不够、长文档中间信息丢失）正是 FSC 要解的问题。",
+              "line_num": 173
+            },
+            {
+              "title": "2. 执行者不能自我审批",
+              "node_id": "0018",
+              "summary": "### 2. 执行者不能自我审批\n核心 factorization theorem 错误 Claude 自己永远发现不了——同一模型不能既做又审。这是 OMC executor/verifier 分离的物理学证明。",
+              "line_num": 176
+            },
+            {
+              "title": "3. 交叉验证的局限",
+              "node_id": "0019",
+              "summary": "### 3. 交叉验证的局限\n三模型互查仍有三家都犯同样错误的情况。CCG 模式有用但不能替代人类判断。",
+              "line_num": 179
+            },
+            {
+              "title": "4. \"Taste\" 不可外包",
+              "node_id": "0020",
+              "summary": "### 4. \"Taste\" 不可外包\n所有人都同意：知道该研究什么问题的能力目前无法外包给 AI。10x 加速的前提是人已经知道该算什么。",
+              "line_num": 182
+            },
+            {
+              "title": "5. 诚实规则可工程化",
+              "node_id": "0021",
+              "summary": "### 5. 诚实规则可工程化\nCLAUDE.md 里写死 \"禁止跳步骤\" 是可复用的 pattern——在 agent 系统中等价于 system prompt 中的 constitutional constraints。",
+              "line_num": 185
+            }
+          ]
+        },
+        {
+          "title": "可复用 Pattern",
+          "node_id": "0022",
+          "prefix_summary": "## 可复用 Pattern",
+          "line_num": 188,
+          "nodes": [
+            {
+              "title": "Tree-Structured Research Protocol",
+              "node_id": "0023",
+              "summary": "### Tree-Structured Research Protocol\n```\n1. 定义总纲（master plan）\n2. 拆成阶段（7±2 个）\n3. 每阶段拆成独立任务文件\n4. 每个任务有输入/输出/验证标准\n5. 阶段完成后合成 summary\n6. 最终从 summaries 合成成品\n```",
+              "line_num": 190
+            },
+            {
+              "title": "Verification Loop Protocol",
+              "node_id": "0024",
+              "summary": "### Verification Loop Protocol\n```\n1. 执行者完成 → 自称完美\n2. 审查者检查 → 发现错误\n3. 回到执行者 → 要求逐行推导\n4. 第二审查者独立验证\n5. 领域专家应用交叉检验\n6. 循环直到无新发现\n```",
+              "line_num": 200
+            }
+          ]
+        },
+        {
+          "title": "参考链接",
+          "node_id": "0025",
+          "summary": "## 参考链接\n\n- [原文] https://www.anthropic.com/research/vibe-physics\n- [arXiv] https://arxiv.org/abs/2601.02484\n- [批评] https://bigthink.com/starts-with-a-bang/vibe-physics-ai-slop/\n- [Physics World] https://physicsworld.com/a/is-vibe-physics-the-future/\n- [4gravitons] https://4gravitons.com/2025/08/01/microdosing-vibe-physics/\n- [Retired Thinker] https://www.retiredthinker.com/posts/vibe-physics/",
+          "line_num": 210
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "doc_name": "作者注释",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\SillyTavern 官方文档\\核心概念\\作者注释.md",
+  "structure": [
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/authors-note/#usage)用法",
+      "node_id": "0000",
+      "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/authors-note/#usage)用法\n\n作者笔记可以在聊天输入栏左侧的“选项”菜单中找到。",
+      "line_num": 9
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/authors-note/#configuring-authors-notes)配置作者备注",
+      "node_id": "0001",
+      "prefix_summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/authors-note/#configuring-authors-notes)配置作者备注",
+      "line_num": 26,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/authors-note/#chat-specific-authors-note)特定于聊天的作者注",
+          "node_id": "0002",
+          "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/authors-note/#chat-specific-authors-note)特定于聊天的作者注\n\n“作者注释”面板顶部的框包含您当前聊天的作者注释。\n\n**此框的内容不会自动转移到任何新聊天中。**",
+          "line_num": 28
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/authors-note/#placement-options)放置选项",
+      "node_id": "0003",
+      "prefix_summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/authors-note/#placement-options)放置选项",
+      "line_num": 34,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/authors-note/#after-scenario)After 场景",
+          "node_id": "0004",
+          "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/authors-note/#after-scenario)After 场景\n\n这会将作者注释放在上下文顶部，位于角色定义的“场景”部分之后。如果未指定方案，则该方案将放在“字符定义”的最后一部分之后，以及“示例消息”之前。",
+          "line_num": 36
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/authors-note/#in-chat)聊天中",
+          "node_id": "0005",
+          "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/authors-note/#in-chat)聊天中\n\n这会将作者的注释放入指定深度的聊天记录中。\n\n深度 0 = 位于聊天记录的最末尾。\n\n深度 4 = 位于最近 3 条聊天记录消息之前，使其成为聊天记录中的第 4 个实体。\n\n*作者注越靠近提示底部，它对下一个 AI 响应的影响就越大。*",
+          "line_num": 40
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/authors-note/#insertion-frequency)插入频率",
+      "node_id": "0006",
+      "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/authors-note/#insertion-frequency)插入频率\n\n这是您希望在聊天中包含作者注释的频率。\n\n频率 0 = 作者注永远不会插入。\n\n频率 1 = 作者注将随每个用户输入提示一起插入。\n\n频率 4 = 作者注将插入到每 4 个用户输入提示中。",
+      "line_num": 50
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/authors-note/#default-authors-note)默认作者注",
+      "node_id": "0007",
+      "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/authors-note/#default-authors-note)默认作者注\n\n面板底部的框包含默认作者注释，该注释将应用于每个新聊天。",
+      "line_num": 60
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/authors-note/#common-use-cases)常见用例",
+      "node_id": "0008",
+      "prefix_summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/authors-note/#common-use-cases)常见用例",
+      "line_num": 64,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/authors-note/#remind-ai-of-response-formatting)提醒 AI 响应格式",
+          "node_id": "0009",
+          "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/authors-note/#remind-ai-of-response-formatting)提醒 AI 响应格式\n\n作者注可用于指定 AI 应如何编写其响应。\n\n- [您的下一个响应长度必须为 300 个令牌。\n\n- [以埃德加·爱伦·坡（Edgar Allan Poe）的风格写下您的下一条回复]\n\n- [使用降价斜体表示未说出的操作，使用引号指定口语。",
+          "line_num": 66
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/authors-note/#reinforcing-jailbreak-prompts)强化越狱提示",
+          "node_id": "0010",
+          "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/authors-note/#reinforcing-jailbreak-prompts)强化越狱提示\n\n- [记住我们在这次聊天开始时达成的协议。",
+          "line_num": 76
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/authors-note/#as-temporary-world-info-character-bias-or-instruct-for-non-instruct-models)作为非 Instruct 模型的临时 World Info、Character Bias或 Instruct",
+          "node_id": "0011",
+          "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/authors-note/#as-temporary-world-info-character-bias-or-instruct-for-non-instruct-models)作为非 Instruct 模型的临时 World Info、Character Bias或 Instruct\n\n- [{{char}} 在库中]\n\n- [{{user}} 腿上有新伤口，所以无法逃跑。\n\n- [{{char}} 不能说话，必须使用手势进行交流。",
+          "line_num": 80
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,90 @@
+{
+  "doc_name": "AI公司开源轮子全景",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\AI公司开源轮子全景.md",
+  "structure": [
+    {
+      "title": "AI 公司开源轮子全景",
+      "node_id": "0000",
+      "prefix_summary": "# AI 公司开源轮子全景",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "Karpathy — 教科书级项目",
+          "node_id": "0001",
+          "summary": "The partial document provides an overview of various projects related to AI and machine learning, particularly focusing on language models (LLMs) and their applications. Key points include:\n\n1. **nanoGPT**: A minimal implementation for training medium-sized GPT models, serving as a foundational resource for autoresearch.\n2. **nanochat**: A project aimed at training the best ChatGPT model for $100, positioned as an upstream component of autoresearch.\n3. **autoresearch**: An ongoing project focused on creating an AI autonomous research loop, highlighting its current use and importance.\n4. **llm-council**: A project utilizing multiple LLM models to achieve consensus and make decisions through negotiation and voting, identified as a key area of focus.\n5. **LLM101n**: An educational project aimed at building a Storyteller from scratch.\n6. **llm.c**: A resource for achieving extreme performance in LLM training using pure C/CUDA.\n7. **llama2.c**: A single-file C implementation for inferencing Llama2, focusing on embedded systems.\n8. **micrograd**: An educational tool for understanding the smallest automatic differentiation engine.\n9. **minbpe**: A minimal implementation of the Byte Pair Encoding (BPE) tokenizer, serving as a reference.\n10. **rendergit**: A project focused on compressing repository context into a single HTML file for LLM consumption, also highlighted as a key area of focus.\n11. **reader3**: A tool for LLM-assisted reading, aimed at enhancing knowledge intake.\n\nThe document emphasizes the importance of **llm-council** for multi-model consensus and decision-making, and **rendergit** for efficient code context compression and presentation to LLMs.",
+          "line_num": 9
+        },
+        {
+          "title": "Anthropic — 主力武器库",
+          "node_id": "0002",
+          "summary": "The partial document provides an overview of Anthropic's primary arsenal of tools and resources, categorized by project name, star count, status, and value. Key highlights include:\n\n1. **Active Projects**: \n   - \"skills\" with 97k stars, actively used for the Agent Skill ecosystem.\n   - \"claude-code\" with 80k stars, the main development tool.\n   - \"financial-services-plugins\" with 6.3k stars, already installed, focusing on financial services with 41 skills, 38 commands, and 11 MCPs.\n\n2. **Pending Review or Installation**:\n   - \"claude-cookbooks\" with 35k stars, a collection of usage recipes.\n   - \"prompt-eng-tutorial\" with 34k stars, an interactive prompt engineering tutorial.\n   - \"courses\" with 20k stars, official educational courses.\n   - \"claude-quickstarts\" with 15k stars, templates for quick onboarding.\n   - \"knowledge-work-plugins\" with 10k stars, awaiting installation, aimed at knowledge workers.\n\n3. **Additional Tools**:\n   - \"claude-code-action\" for GitHub Action CI.\n   - \"claude-agent-sdk-python\" for the Agent SDK.\n   - \"claude-code-security-review\" with 3.9k stars, an AI security review action awaiting use.\n   - \"claudes-c-compiler\" a C compiler written in Rust by Claude, serving as a reference.\n   - \"claude-agent-sdk-demos\" with 1.7k stars, demos for the SDK.\n\nThe document emphasizes the importance of the \"financial-services-plugins\", \"knowledge-work-plugins\", and \"claude-code-security-review\" projects, indicating they are critical areas of focus.",
+          "line_num": 27
+        },
+        {
+          "title": "OpenAI — 轮子最多",
+          "node_id": "0003",
+          "prefix_summary": "## OpenAI — 轮子最多",
+          "line_num": 47,
+          "nodes": [
+            {
+              "title": "直接能用",
+              "node_id": "0004",
+              "summary": "This partial document is a table listing various projects or tools, likely related to AI and software development, along with their key attributes:\n\n1. **Project Names**: Each row lists a different project/tool, such as \"swarm,\" \"openai-agents-python,\" \"symphony,\" \"gpt-oss,\" \"evals,\" \"simple-evals,\" \"whisper,\" \"codex,\" and \"tiktoken.\"\n\n2. **Stars (⭐)**: The second column indicates the number of stars each project has on a platform like GitHub, suggesting their popularity or community interest.\n\n3. **Relevance to the Author (\"与我相关\")**: This column provides context on how each project is relevant to the author's work or interests, such as \"OMC 对标\" (comparable to OMC), \"FSC 参考\" (reference for FSC), \"本地推理\" (local inference), and \"语音交易指令\" (voice trading instructions).\n\n4. **Value or Description**: The final column offers a brief description or the primary value proposition of each project, such as \"轻量多 Agent 编排框架\" (lightweight multi-agent orchestration framework), \"LLM 评估框架\" (LLM evaluation framework), and \"语音识别\" (speech recognition).\n\nThe document appears to be a resource for understanding and possibly selecting tools or frameworks based on their popularity, relevance, and functionality.",
+              "line_num": 49
+            },
+            {
+              "title": "参考/储备",
+              "node_id": "0005",
+              "summary": "The partial document provides a list of projects and resources related to AI and machine learning, focusing on plugins, debugging tools, benchmarks, and agent frameworks. Key highlights include:\n\n1. **Plugins and Debugging**: References to \"chatgpt-retrieval-plugin\" for RAG (Retrieval-Augmented Generation) and \"transformer-debugger\" for visualizing Transformer models.\n2. **Benchmarks**: Mentions of \"SWELancer-Benchmark\" for evaluating agents on real-world freelance tasks and \"mle-bench\" for benchmarking machine learning engineering capabilities.\n3. **Competitions and Evaluations**: \"parameter-golf\" for creating minimal language models and \"frontier-evals\" for assessing cutting-edge AI capabilities.\n4. **Agent Frameworks and Real-time Agents**: References to \"openai-realtime-agents\" and a special emphasis on \"swarm\" for multi-agent systems, \"symphony\" for autonomous execution, and \"openai-agents-python\" as an agent framework.\n\nThe document emphasizes resources and tools that are valuable for developing and evaluating AI agents and models, with a particular focus on multi-agent systems and real-time applications.",
+              "line_num": 63
+            }
+          ]
+        },
+        {
+          "title": "跨公司对标",
+          "node_id": "0006",
+          "summary": "## 跨公司对标\n\n### 主要内容概述：\n\n1. **多 Agent 编排**：\n   - NVIDIA 提供 Agent Toolkit。\n   - Anthropic 提供 skills/plugins。\n   - OpenAI 提供 swarm/agents-python。\n   - Karpathy 未提供相关信息。\n   - 你的公司提供 OMC/FSC。\n\n2. **模型路由**：\n   - NVIDIA 提供 LLM Router。\n   - Anthropic 未提供相关信息。\n   - OpenAI 未提供相关信息。\n   - Karpathy 提供 llm-council。\n   - 你的公司提供 NadirClaw/claw-router。\n\n3. **评估框架**：\n   - NVIDIA 提供 NeMo Evaluator。\n   - Anthropic 未提供相关信息。\n   - OpenAI 提供 evals/simple-evals。\n   - Karpathy 和你的公司均提供 autoresearch。\n\n4. **安全护栏**：\n   - NVIDIA 提供 Guardrails。\n   - Anthropic 提供 security-review。\n   - OpenAI 未提供相关信息。\n   - Karpathy 未提供相关信息。\n   - 你的公司提供 persona-guard。\n\n5. **金融分析**：\n   - NVIDIA 提供 Quant Portfolio/Distillation。\n   - Anthropic 提供 financial-services-plugins。\n   - OpenAI 未提供相关信息。\n   - Karpathy 未提供相关信息。\n   - 你的公司提供 quant-terminal。\n\n6. **数据飞轮**：\n   - NVIDIA 提供 Data Flywheel。\n   - Anthropic 未提供相关信息。\n   - OpenAI 未提供相关信息。\n   - Karpathy 提供 autoresearch。\n   - 你的公司提供 AI 自循环。\n\n7. **自主执行**：\n   - NVIDIA 未提供相关信息。\n   - Anthropic 提供 claude-code。\n   - OpenAI 提供 symphony/codex。\n   - Karpathy 提供 autoresearch。\n   - 你的公司提供 FSC。\n\n8. **GPU 加速**：\n   - NVIDIA 提供 RAPIDS/Warp/TRT-LLM。\n   - Anthropic 未提供相关信息。\n   - OpenAI 未提供相关信息。\n   - Karpathy 提供 llm.c。\n   - 你的公司提供 gpu_factors。",
+          "line_num": 77
+        },
+        {
+          "title": "其他牛逼项目/个人",
+          "node_id": "0007",
+          "prefix_summary": "## 其他牛逼项目/个人",
+          "line_num": 90,
+          "nodes": [
+            {
+              "title": "DeepCode (HKUDS, 14.9k⭐) — Paper2Code",
+              "node_id": "0008",
+              "summary": "### DeepCode (HKUDS, 14.9k⭐) — Paper2Code\n\n港大数据智能实验室，三核心能力：\n- **Paper2Code** — 读论文→自动实现代码\n- **Text2Web** — 自然语言→前端\n- **Text2Backend** — 自然语言→后端\n\n集成 nanobot（飞书聊天机器人，手机发消息生成代码）。\n\n**与我相关**：\n- autoresearch + Paper2Code = 读论文→实现→训练→评估闭环\n- FORGE 化学 AI 论文自动复现\n- MCP 集成，Python 3.13",
+              "line_num": 92
+            },
+            {
+              "title": "wshobson/agents (31.6k⭐) — Claude Code 最大插件库",
+              "node_id": "0009",
+              "summary": "### wshobson/agents (31.6k⭐) — Claude Code 最大插件库\n\n72 插件, 112 Agent, 146 Skill, 79 工具。量大但不深，百货商场模式。\n\n**值得抄的**: Agent Teams 7 个预设模式 (review/debug/feature/fullstack/research/security/migration) → 补充 OMC team 命令。",
+              "line_num": 106
+            },
+            {
+              "title": "记忆系统赛道（详见 [[Agent记忆系统全景]]）",
+              "node_id": "0010",
+              "summary": "### 记忆系统赛道（详见 [[Agent记忆系统全景]]）\n\n- **memU** (13k⭐) → ⭐ 选这个替代 OpenViking\n- **cognee** (14.3k⭐) → 知识引擎备选\n- **Hindsight** (4.9k⭐) → benchmark SOTA",
+              "line_num": 112
+            },
+            {
+              "title": "其他值得关注",
+              "node_id": "0011",
+              "summary": "### 其他值得关注\n\n| 项目 | ⭐ | 价值 |\n|------|-----|------|\n| charmbracelet/crush | 21.6k | 优雅 Agent 编码工具 |\n| arrakis | 781 | 自托管 Agent 沙箱 |\n| agentsview | 539 | Agent session 浏览分析 |\n| agentic_coding_flywheel_setup | 1.3k | 一键多 Agent VPS |",
+              "line_num": 118
+            }
+          ]
+        },
+        {
+          "title": "待办",
+          "node_id": "0012",
+          "summary": "## 待办\n\n- [ ] 看 knowledge-work-plugins\n- [ ] 看 swarm 架构 → OMC 对标\n- [ ] 看 symphony → FSC 思路验证\n- [ ] 看 openai-agents-python → Agent 框架参考\n- [ ] 看 llm-council → CCG 升级\n- [ ] 装 claude-code-security-review\n- [ ] 试 rendergit → FSC 代码上下文\n- [ ] 看 gpt-oss → 本地推理评估",
+          "line_num": 127
+        }
+      ]
+    }
+  ]
+}

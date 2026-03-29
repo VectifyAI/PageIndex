@@ -1,0 +1,44 @@
+{
+  "doc_name": "SUPER-service-map",
+  "source_path": "E:/knowledge/Knowledge\\02-Infrastructure\\SUPER-service-map.md",
+  "structure": [
+    {
+      "title": "SUPER 服务地图 (192.168.50.213)",
+      "node_id": "0000",
+      "prefix_summary": "# SUPER 服务地图 (192.168.50.213)\n\n> Proxmox VE 宿主机，C宅机柜，NetBird: 100.80.30.139 / 10.10.0.5",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "端口速查",
+          "node_id": "0001",
+          "summary": "This partial document is a \"端口速查\" (Port Quick Reference) table listing various ports, their associated services, and their purposes within a system. Key points covered include:\n\n1. **SSH Access**: Port 22 is used by the sshd service for secure shell access.\n2. **Monitoring and Visualization**: \n   - Port 3000 hosts Grafana for monitoring dashboards.\n   - Port 8080 runs cyberstrike-ai, a cybersecurity AI platform.\n   - Port 8081 and 8082 are used by Horus and Worldmonitor for situational awareness and global monitoring frontends respectively.\n3. **Data Analysis and Management**:\n   - Port 3002 runs Metabase for data analysis.\n   - Port 5984 is a CouchDB proxy for database services.\n   - Port 8418 is a Gitea proxy for code repository management.\n4. **AI and Machine Learning**:\n   - Port 3456 is used by claw-router for AI model routing (GLM/Doubao/MiniMax).\n   - Port 5001 hosts SpiderFoot for OSINT intelligence gathering.\n   - Port 8010-8020 hosts free-llm-hub, a cluster of 11 instances for free LLM API services.\n   - Port 8080 runs hexstrike, a HexStrike server for AI-related tasks.\n5. **Automation and Workflow**: Port 5678 runs n8n for workflow automation.\n6. **Web Management**: Port 8006 hosts pveproxy for Proxmox VE web management.\n7. **Proxies and Gateways**:\n   - Port 3128 runs spiceproxy for PVE SPICE remote console.\n   - Port 8100 hosts china-gateway for economic data engine 106 adapter.\n   - Port 8000 is an old gateway (china-gateway-legacy) that is now deprecated.\n8. **Host Metrics and Exporters**: Port 9090 runs Prometheus for metric collection and 9100 runs node_exporter for host metrics export.\n9. **Miscellaneous Services**: \n   - Port 18060 runs xhs-mcp for Xiaohongshu MCP services (scan/publish/search).\n   - Ports 18790-18796 are associated with bun and FSC-related services.\n   - Port 8787 runs horus-relay for Horus relay services.",
+          "line_num": 11
+        },
+        {
+          "title": "Systemd 托管服务",
+          "node_id": "0002",
+          "summary": "## Systemd 托管服务\n\n| 服务 | 说明 |\n|------|------|\n| china-gateway | 经济数据引擎，106 adapter，事件驱动采集 |\n| claw-router | AI模型路由，12 hub |\n| fsc-agent-daemon | FSC执行daemon |\n| lxc-scheduler | FSC LXC容器自动调度 |\n| mesh-bridge | FSC Mesh心跳 |\n| mini-claw | MiniClaw API路由 |\n| n8n | 工作流自动化 |\n| nas-couchdb-proxy | NAS CouchDB转发 |\n| grafana-server | 监控仪表盘 |\n| prometheus | 指标采集 |\n| node-exporter | 主机指标 |\n| pm2-root | PM2进程管理 |\n| docker | Docker容器引擎 |",
+          "line_num": 42
+        },
+        {
+          "title": "Docker 容器",
+          "node_id": "0003",
+          "summary": "## Docker 容器\n\n| 容器 | 端口 | 说明 |\n|------|------|------|\n| metabase | 3002→3000 | 数据分析/BI |\n| vane-vane-1 | 3001→3000 | Vane |",
+          "line_num": 60
+        },
+        {
+          "title": "非托管进程 (需手动管理)",
+          "node_id": "0004",
+          "summary": "## 非托管进程 (需手动管理)\n\n| 端口 | 进程 | 启动方式 |\n|------|------|---------|\n| 18060 | xhs-mcp | `nohup ./xhs-mcp -headless=true -port ':18060'` |\n| 5001 | SpiderFoot | `python3 sf.py -l 0.0.0.0:5001` |\n| 8081 | horus-ui-react | vite dev server |\n| 8082 | worldmonitor | vite dev server |\n| ~~8100~~ | ~~china-gateway~~ | 已迁移至 systemd 托管 |\n| 8787 | horus-relay | `node src/server.js` |\n| 8888 | hexstrike | `python3 hexstrike_server.py` |",
+          "line_num": 67
+        },
+        {
+          "title": "从C宅局域网访问",
+          "node_id": "0005",
+          "summary": "## 从C宅局域网访问\n\nC宅电脑 (192.168.50.54) 可直接访问以上所有端口：\n- Grafana: `http://192.168.50.213:3000`\n- Metabase: `http://192.168.50.213:3002`\n- PVE管理: `https://192.168.50.213:8006`\n- 小红书扫码: `http://192.168.50.213:18060/api/v1/login/qrcode`\n- n8n: `http://192.168.50.213:5678`",
+          "line_num": 79
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "doc_name": "07-深度思考Ultrathink",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\ClaudeLog-干货\\07-深度思考Ultrathink.md",
+  "structure": [
+    {
+      "title": "深度思考 (Ultrathink)",
+      "node_id": "0000",
+      "prefix_summary": "# 深度思考 (Ultrathink)\n\n> 原文：[claudelog.com/mechanics/ultrathink](https://claudelog.com/mechanics/ultrathink)",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "是什么",
+          "node_id": "0001",
+          "summary": "## 是什么\n\nUltrathink \"为下一轮触发高投入模式\"。v2.1.68 引入，激活增强推理能力来处理复杂问题。",
+          "line_num": 5
+        },
+        {
+          "title": "最佳组合栈",
+          "node_id": "0002",
+          "summary": "## 最佳组合栈\n\n```\nUltrathink（集中推理）\n    + Plan Mode（结构化方法）\n    + 自我批评循环（\"Rev the engine\"，让 Claude 审查自己的计划，找遗漏的边缘情况和效率问题）\n```\n\n据称这套组合能让 **Sonnet 4.5 达到接近 Opus 的表现**，而不需要用更贵的 Opus 模型。",
+          "line_num": 9
+        },
+        {
+          "title": "实用建议",
+          "node_id": "0003",
+          "summary": "## 实用建议\n\n1. **升级模型之前先试 Ultrathink** — \"在用 Opus 之前，先用 ultrathink 配合其他可用机制\"，避免不必要的开销\n2. **用完整组合栈** — Ultrathink + Plan Mode + 自我批评循环 + 分角色子 agent，效果叠加\n3. **成本效率** — 对 API 用户来说，这套方案比直接升级 Opus 划算得多\n4. **迭代精炼** — 多轮批评系统性地提升边缘情况和逻辑排序的质量",
+          "line_num": 19
+        },
+        {
+          "title": "我的理解",
+          "node_id": "0004",
+          "summary": "## 描述\n\n该文档主要讨论了 Ultrathink 的本质、功能及其适用场景。Ultrathink 被描述为 extended thinking 的用户侧触发器，旨在让 Claude 从“够用就行”的模式转变为“认真思考”的模式。通过类比，文档将普通模式比作快速系统（System 1），即直觉反应，而 Ultrathink 则类似于慢速系统（System 2），用于深度推理。文档列举了 Ultrathink 在实战中最有价值的场景，包括复杂的架构决策、多文件重构的计划阶段、调试诡异 bug 以及任何“第一反应可能是错的”场景。同时，文档也指出了不值得使用 Ultrathink 的场景，如简单的 CRUD 操作、机械性工作以及已有明确模式的重复任务。",
+          "line_num": 26
+        }
+      ]
+    }
+  ]
+}

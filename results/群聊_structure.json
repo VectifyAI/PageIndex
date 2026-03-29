@@ -1,0 +1,102 @@
+{
+  "doc_name": "群聊",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\SillyTavern 官方文档\\核心概念\\群聊.md",
+  "structure": [
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#reply-order-strategies)回复订单策略",
+      "node_id": "0000",
+      "prefix_summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#reply-order-strategies)回复订单策略\n\n决定如何起草群聊中的角色进行回复。",
+      "line_num": 9,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#natural-order)自然秩序",
+          "node_id": "0001",
+          "summary": "### 自然秩序\n\n该部分文档主要介绍了在群组聊天中模拟真实人类对话流程的算法，具体包括以下几点：\n\n1. **群组成员名称的提及处理**：\n   - 系统从聊天中的最后一条消息中提取提及的群组成员名称。\n   - 只有整个单词才会被识别为提及。例如，如果角色名称是“御坂美琴”，系统只会识别“御坂”或“美琴”，而不会识别“御坂”或“轨道炮”。\n   - 除非启用了“允许自我回复”设置，否则角色不会回复自己消息中提及其姓名的内容。\n\n2. **角色激活机制**：\n   - 角色通过“健谈”因素激活。\n   - 健谈性决定了角色在未被提及的情况下说话的频率。\n   - 该值可以在字符编辑器的“高级定义”屏幕进行调整，范围从 **0% / 害羞**（角色从不说话）到 **100% / 健谈**（角色总是回复）。\n   - 新角色的默认健谈值为 50%。\n\n3. **随机选择角色**：\n   - 如果在前面的步骤中没有激活任何角色，系统会随机选择一个角色进行发言，忽略其他所有条件。",
+          "line_num": 13
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#list-order)列表顺序",
+          "node_id": "0002",
+          "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#list-order)列表顺序\n\n根据角色在组成员列表中的显示顺序起草角色。没有其他规则适用。",
+          "line_num": 31
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#group-generation-handling-mode)组生成处理模式",
+      "node_id": "0003",
+      "prefix_summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#group-generation-handling-mode)组生成处理模式\n\n此设置决定如何处理群聊成员的角色信息。无论选择哪种方式，群聊历史记录始终在所有成员之间共享。",
+      "line_num": 35,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#swap-character-cards)交换角色卡",
+          "node_id": "0004",
+          "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#swap-character-cards)交换角色卡\n\n默认模式。每次生成消息时，上下文中仅包含当前说话人的字符卡信息。",
+          "line_num": 39
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#join-character-cards)加入角色卡",
+          "node_id": "0005",
+          "summary": "The partial document explains the concept of \"Join Character Cards\" in group chats within the SillyTavern application. It describes how the information from all group members' character cards, excluding muted members who are not currently speaking, is merged in list order to form a single character card. This merged card includes fields such as Description, Scene (if not covered by chat), Personality, Message Examples, and Character Notes/Deep Prompts. The document also warns that due to the typical structure of character cards, using this mode might lead to unexpected behaviors, including characters being confused about their identity, personality blending, and uncertain characteristics.",
+          "line_num": 43
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#other-group-chat-menu-options)其他群聊菜单选项",
+      "node_id": "0006",
+      "prefix_summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#other-group-chat-menu-options)其他群聊菜单选项",
+      "line_num": 61,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#mute-character)静音角色",
+          "node_id": "0007",
+          "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#mute-character)静音角色\n\n群聊菜单中角色头像旁边的删除语音气泡图标可以禁用或启用聊天中特定角色的回复。",
+          "line_num": 63
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#force-talk)原力对话",
+          "node_id": "0008",
+          "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#force-talk)原力对话\n\n群聊菜单中角色头像旁边的气泡图标将仅触发特定角色的回复，绕过回复顺序策略。即使组成员静音，它也会起作用。",
+          "line_num": 67
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#auto-mode)自动模式",
+          "node_id": "0009",
+          "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#auto-mode)自动模式\n\n启用自动模式后，群聊将遵循回复顺序并触发消息生成，无需用户交互。下一个自动模式转弯在延迟 5 秒后触发，当最后一个起草的角色发送其消息时。当用户开始在发送消息文本区域中键入内容时，自动模式将被禁用，但已排队的世代不会自动停止。",
+          "line_num": 71
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#allow-self-responses)允许自我回应",
+          "node_id": "0010",
+          "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#allow-self-responses)允许自我回应\n\n如果在选择自然秩序时由于自我提及而碰巧触发了每回合发送最新消息的角色，则将允许发送每个回合最新消息的角色的连续回复。对列表顺序没有影响。",
+          "line_num": 75
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#group-chat-scenario-override)群聊方案替代",
+          "node_id": "0011",
+          "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#group-chat-scenario-override)群聊方案替代\n\n所有小组成员都将使用输入的场景文本，而不是其角色卡中指定的内容。分支聊天从其父级继承方案替代，之后可以单独更改。",
+          "line_num": 79
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#peek-character-definitions)速览字符定义",
+          "node_id": "0012",
+          "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#peek-character-definitions)速览字符定义\n\n在群聊菜单中点击头像旁边的角色卡图标，会快速导航到常用的角色定义界面。此处所做的任何更改都将保存到卡本身。\n\n要返回群聊，请单击群组名称标题链接。",
+          "line_num": 83
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#member-management)会员管理",
+          "node_id": "0013",
+          "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#member-management)会员管理\n\n您可以在群聊中添加、删除、静音或重新排序任何现有角色。默认情况下，新成员会添加到组成员列表的顶部，然后可以使用箭头图标重新排序。",
+          "line_num": 89
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#group-chat-pop-out)群聊弹出窗口",
+          "node_id": "0014",
+          "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/groupchats/#group-chat-pop-out)群聊弹出窗口\n\n可以通过单击“当前成员”字段旁边的图标来激活群聊菜单弹出。这将创建一个群聊菜单的弹出窗口。通过从用户设置中启用 MovingUI，此菜单可以调整大小并拖动到界面中的任何位置，其功能就像常规群聊菜单一样。",
+          "line_num": 93
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "doc_name": "10-子Agent编排",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\ClaudeLog-干货\\10-子Agent编排.md",
+  "structure": [
+    {
+      "title": "子 Agent 编排 (Task Agent Tools)",
+      "node_id": "0000",
+      "prefix_summary": "# 子 Agent 编排 (Task Agent Tools)\n\n> 原文：[claudelog.com/mechanics/task-agent-tools](https://claudelog.com/mechanics/task-agent-tools)",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "核心能力",
+          "node_id": "0001",
+          "summary": "## 核心能力\n\nTask 工具支持最多 **7 个并行子 agent**，主要处理文件操作、代码搜索和 web 获取，无需等待人类输入的延迟。",
+          "line_num": 5
+        },
+        {
+          "title": "核心原则",
+          "node_id": "0002",
+          "prefix_summary": "## 核心原则",
+          "line_num": 9,
+          "nodes": [
+            {
+              "title": "显式编排",
+              "node_id": "0003",
+              "summary": "### 显式编排\n> \"像用线程编程一样，显式编排哪些步骤委派给子 agent 能得到最好的结果。\"\n\nClaude 对并行操作天然谨慎，除非你提供详细的委派指令。",
+              "line_num": 11
+            },
+            {
+              "title": "平衡效率",
+              "node_id": "0004",
+              "summary": "### 平衡效率\n并行执行加速工作流，但需要权衡 token 成本与性能收益。**把相关任务分组**通常比为每个操作创建单独的 agent 更高效。",
+              "line_num": 16
+            }
+          ]
+        },
+        {
+          "title": "7 步并行实现模式",
+          "node_id": "0005",
+          "summary": "## 7 步并行实现模式\n\n一个功能的并行实现可以拆成：\n\n1. **组件创建** — UI 组件/模块\n2. **样式/CSS** — 样式文件\n3. **测试文件** — 单元测试/集成测试\n4. **类型定义** — TypeScript 类型/接口\n5. **自定义 hooks/工具函数** — 可复用逻辑\n6. **集成**（路由、导入）— 把上面的串起来\n7. **配置/文档更新** — 收尾",
+          "line_num": 19
+        },
+        {
+          "title": "优化准则",
+          "node_id": "0006",
+          "summary": "## 优化准则\n\n- 分析代码时去掉注释（节省 token）\n- 每个任务只处理指定的文件或文件类型\n- 保留现有命名规范和架构模式\n- 对已有项目结构做最小改动",
+          "line_num": 31
+        },
+        {
+          "title": "我的理解",
+          "node_id": "0007",
+          "summary": "The document discusses the application of the Divide & Conquer approach in AI programming, specifically focusing on the orchestration of sub-agents. It highlights two common pitfalls: excessive parallelism, where multiple agents modify the same module simultaneously leading to conflicts, and insufficient context, where sub-agents lack the full context of dependencies between tasks. The recommended best practice is a strategy called \"wide parallel, narrow serial,\" which involves running tasks in parallel when there are no dependencies and executing tasks with dependencies in a serial order based on a Directed Acyclic Graph (DAG).",
+          "line_num": 38
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "doc_name": "22-定价",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\ClaudeLog-干货\\22-定价.md",
+  "structure": [
+    {
+      "title": "定价 (Pricing)",
+      "node_id": "0000",
+      "prefix_summary": "# 定价 (Pricing)\n\n> 原文：[claudelog.com/claude-code-pricing](https://claudelog.com/claude-code-pricing)",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "订阅方案",
+          "node_id": "0001",
+          "summary": "该文档主要介绍了不同订阅方案及其特点和适用场景：\n\n1. **Free方案**：免费提供，模型功能有限，适合用于试用。\n2. **Pro方案**：每月收费17-20美元，提供Sonnet 4.6及以上版本，限额为Free方案的5倍，适合学习和业余项目。\n3. **Max $100方案**：每月收费100美元，提供Sonnet和Opus模型，限额为Pro方案的5倍，并享有优先权，适合专业开发，偶尔有复杂需求。该方案还包括agent teams、自适应思考和早期功能等特色。\n4. **Max $200方案**：每月收费200美元，提供所有模型，包括Opus，限额为Pro方案的20倍，并享有优先权，适合日常专业使用和大项目。该方案还包括1M上下文窗口、agent teams和无限制使用等特色。",
+          "line_num": 5
+        },
+        {
+          "title": "API 定价（每百万 token）",
+          "node_id": "0002",
+          "prefix_summary": "## API 定价（每百万 token）\n\n| 模型 | 输入 | 输出 | 上下文 |\n|------|------|------|--------|\n| Opus 4.5 | $5.00 | $25.00 | 200K |\n| Sonnet 4.6 | $3.00 | $15.00 | 1M* |\n| Haiku 4.5 | $1.00 | $5.00 | 200K |\n\n*Sonnet 4.6 的 1M 上下文目前仅 API 可用",
+          "line_num": 17,
+          "nodes": [
+            {
+              "title": "扩展上下文（>200K token 的 prompt）",
+              "node_id": "0003",
+              "summary": "### 扩展上下文（>200K token 的 prompt）\nSonnet: $6.00 输入 / $22.50 输出（每百万 token）",
+              "line_num": 27
+            },
+            {
+              "title": "批量 API",
+              "node_id": "0004",
+              "summary": "### 批量 API\n所有模型 **50% 折扣**（如 Sonnet → $1.50/$7.50）",
+              "line_num": 30
+            },
+            {
+              "title": "Prompt 缓存",
+              "node_id": "0005",
+              "summary": "### Prompt 缓存\n- 写入成本：1.25-2× 正常价\n- 读取成本：0.1× 正常价（最高 **90% 节省**）",
+              "line_num": 33
+            }
+          ]
+        },
+        {
+          "title": "附加 API 成本",
+          "node_id": "0006",
+          "summary": "## 附加 API 成本\n\n| 功能 | 价格 |\n|------|------|\n| Web Search | $10 / 1000 次搜索 |\n| Code Execution | 1550 免费小时/月，之后 $0.05/小时 |\n| Web Fetch & Text Editor | 仅 token 成本 |",
+          "line_num": 37
+        },
+        {
+          "title": "我的理解",
+          "node_id": "0007",
+          "summary": "该部分文档主要讨论了不同使用场景下的AI服务选择建议和省钱技巧。对于个人学习或小型项目，Pro套餐（每月20美元）已足够；全职AI辅助开发则推荐选择Max套餐（每月200美元），性价比最高；团队或高吞吐量需求则建议使用API结合Prompt缓存和批量API，以节省最多90%的成本。文档还介绍了几个关键的省钱技巧，包括使用Prompt缓存（可节省90%的读取成本）、批量API（适合非实时任务，可享受50%的折扣）以及在Opus之前优先考虑Ultrathink和Sonnet（成本更低）。",
+          "line_num": 45
+        }
+      ]
+    }
+  ]
+}

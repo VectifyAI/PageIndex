@@ -1,0 +1,64 @@
+{
+  "doc_name": "2026-03-16-trading",
+  "source_path": "E:/knowledge/Knowledge\\03-Trading\\sessions\\2026-03-16-trading.md",
+  "structure": [
+    {
+      "title": "2026-03-16 交易Session",
+      "node_id": "0000",
+      "prefix_summary": "# 2026-03-16 交易Session",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "大盘",
+          "node_id": "0001",
+          "summary": "## 大盘\n- 上证 4084 (-0.27%) 盘中最低4048 → V型反转\n- 创业板 3357 (+1.43%) 全天最强\n- 4052三重底守住，短期底部确认",
+          "line_num": 3
+        },
+        {
+          "title": "hist-mat引擎",
+          "node_id": "0002",
+          "summary": "## hist-mat引擎\n- P_risk=0.058 → RISK_ON\n- 信贷脉冲 +0.104\n- 仓位系数 1.00",
+          "line_num": 8
+        },
+        {
+          "title": "决策",
+          "node_id": "0003",
+          "summary": "## 决策\n- **今天不动手** ✅ 正确决策\n- 基建三兄弟回避 ✅ 电建跌停-10%",
+          "line_num": 13
+        },
+        {
+          "title": "标的池",
+          "node_id": "0004",
+          "prefix_summary": "## 标的池",
+          "line_num": 17,
+          "nodes": [
+            {
+              "title": "S级",
+              "node_id": "0005",
+              "summary": "### S级\n| 标的 | 收盘 | FVG位置 | 计划 |\n|------|------|---------|------|\n| 南都电源 300068 | 16.09 | Bull FVG 15.9-16.0支撑 | 16.00-16.10买 止损15.65 目标16.98 |\n| 三花智控 002050 | 46.67 | Bull FVG 45.4-46.4支撑 | 46.00-46.67买 止损45.30 目标47.80 |\n| 数字政通 300075 | 13.77 | Bear FVG 13.80天花板 | 突破13.80追 止损13.39 目标14.35 |",
+              "line_num": 19
+            },
+            {
+              "title": "A级",
+              "node_id": "0006",
+              "summary": "### A级\n| 标的 | 收盘 | 状态 | 等什么 |\n|------|------|------|--------|\n| 拓普集团 601689 | 62.49 | 40日底部4% | 等放量阳线>63 |\n| 智飞生物 300122 | 16.40 | Burry深度价值 | 等突破16.75 |",
+              "line_num": 26
+            }
+          ]
+        },
+        {
+          "title": "经验",
+          "node_id": "0007",
+          "summary": "## 经验\n- DeepEar黑盒不可靠，用自有系统\n- 扫描器走SUPER\n- 十五五3月13日发布，六大未来产业+数字中国",
+          "line_num": 32
+        },
+        {
+          "title": "关联",
+          "node_id": "0008",
+          "summary": "## 关联\n- [[十五五规划]]\n- [[quant-terminal]]\n- [[AI自循环系统]]\n\n#trading #daily #2026-03",
+          "line_num": 37
+        }
+      ]
+    }
+  ]
+}

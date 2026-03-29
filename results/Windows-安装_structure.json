@@ -1,0 +1,24 @@
+{
+  "doc_name": "Windows 安装",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\SillyTavern 官方文档\\安装\\Windows 安装.md",
+  "structure": [
+    {
+      "title": "[#](https://docs.sillytavern.app/installation/windows/#installing-via-git)通过 Git 安装",
+      "node_id": "0000",
+      "summary": "This partial document provides step-by-step instructions for installing SillyTavern on Windows using Git. The main points covered are:\n\n1. **Prerequisites**: \n   - Install the latest LTS version of NodeJS.\n   - Install Git for Windows.\n\n2. **Setup**:\n   - Open Windows Explorer and navigate to or create a folder not controlled or monitored by Windows (e.g., C:\\MySpecialFolder).\n\n3. **Installation Process**:\n   - Open the command prompt in the selected folder by typing `cmd` in the address bar and pressing Enter.\n   - In the command prompt, clone the SillyTavern repository using Git by selecting either the release or staging branch:\n     - For the release branch: `git clone https://github.com/SillyTavern/SillyTavern -b release`\n     - For the staging branch: `git clone https://github.com/SillyTavern/SillyTavern -b staging`\n   - After cloning, run `Start.bat` to install the required dependencies using NodeJS.\n\n4. **Launch**:\n   - The server will start, and SillyTavern will automatically open in the default web browser.",
+      "line_num": 13
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/installation/windows/#installing-via-sillytavern-launcher)通过 SillyTavern Launcher 安装",
+      "node_id": "0001",
+      "summary": "## [#](https://docs.sillytavern.app/installation/windows/#installing-via-sillytavern-launcher)通过 SillyTavern Launcher 安装\n\n1. 安装 [Git for Windows](https://gitforwindows.org/)\n\n1. 打开 Windows 资源管理器 （） 并创建或选择要安装启动器的文件夹`Win+E`\n\n1. 通过单击顶部的“地址栏”，键入 ，然后按 Enter，在该文件夹中打开命令提示符。`cmd`\n\n1. 当您看到黑框时，请插入以下命令：`git clone https://github.com/SillyTavern/SillyTavern-Launcher.git`\n\n1. 双击并选择要安装的内容`installer.bat`\n\n1. 安装后双击`launcher.bat`",
+      "line_num": 35
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/installation/windows/#installing-via-github-desktop)通过 GitHub Desktop 安装",
+      "node_id": "0002",
+      "summary": "This partial document provides a step-by-step guide for installing SillyTavern on Windows using GitHub Desktop. It covers the following main points:\n\n1. **Prerequisites**: \n   - Installation of NodeJS (latest LTS version recommended).\n   - Installation of GitHub Desktop.\n   - Optional installation of Git for Windows if command line usage is desired.\n\n2. **Cloning the Repository**:\n   - Instructions on cloning the SillyTavern repository using GitHub Desktop by entering the repository URL.\n   - Information on the default local path where the repository is cloned.\n\n3. **Running SillyTavern**:\n   - Guidance on navigating to the cloned repository folder using Windows Explorer.\n   - Instructions on running the `start.bat` file to initiate the installation process.\n   - Description of the expected command console window appearance during installation.\n\n4. **Post-Installation**:\n   - Confirmation that a browser tab should open automatically with SillyTavern after successful installation.\n   - Instructions on connecting to a supported API to start using the application.",
+      "line_num": 49
+    }
+  ]
+}

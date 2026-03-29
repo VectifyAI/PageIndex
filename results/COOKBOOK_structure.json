@@ -1,0 +1,50 @@
+{
+  "doc_name": "COOKBOOK",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\Sprachwelt\\_code-backup\\COOKBOOK.md",
+  "structure": [
+    {
+      "title": "Sprachwelt 操作手册",
+      "node_id": "0000",
+      "prefix_summary": "# Sprachwelt 操作手册\n\n> 面向所有 AI agent。具体步骤，照着做就行。",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "1. 加一条提取规则",
+          "node_id": "0001",
+          "summary": "The document outlines adding a new detection rule to the `RuleExtractor::extract()` function in `crates/tension/src/extractor.rs`. A template snippet shows how to append a new rule that pushes a `TensionDefinition` with predefined fields (ID generation, demands, counter-demands, stake, owner, intensity, lineage hash, and closure spec). It emphasizes crafting the detection condition, populating relevant strings (with placeholders like “表面问题” and “真正关乎什么”), and ensuring proper closure metadata (slot fill, evidence type “text”). The document also mandates creating at least three tests: one verifying a Chinese input triggering the rule, another confirming an English input triggers it, and a neutral input (e.g., “今天天气不错”) that does not trigger. Validation is done via `cargo test -p sprachwelt-tension`.",
+          "line_num": 5
+        },
+        {
+          "title": "2. 加一个 Golden Case",
+          "node_id": "0002",
+          "summary": "The document describes how to add a new Golden Case scenario by editing `data/golden_cases/case-NNN.json`, detailing the fields required in the JSON such as case metadata, conversation turns with expected tensions, optional anti-pattern entries, an LLM extractor flag, and Heidegger layer descriptions. It then instructs adding validation tests under `python/tests/`, updating `MockLlmExtractor` in `extractor.rs` if mock LLM fixtures are needed, and running `cargo test --workspace` for verification.",
+          "line_num": 40
+        },
+        {
+          "title": "3. 加一种话语行为（慎重，需要改多处）",
+          "node_id": "0003",
+          "summary": "This section outlines how to add a new discourse act to the system. It notes that the change affects four crates (`core`, `acts`, `audit`, `pipeline`) and briefly states what updates are needed in each: extending the `DiscourseAct` enum, adjusting planner selection logic, adding coverage checks, and mapping in the A5 pipeline. It also lists required questions to answer for the new act: its tension impact, triggering conditions based on frontier state and input features, and the marker words in Chinese and English.",
+          "line_num": 87
+        },
+        {
+          "title": "4. 修改 LLM 提取 prompt",
+          "node_id": "0004",
+          "summary": "## 4. 修改 LLM 提取 prompt\n\n**Rust 版 (生产):** `crates/tension/src/extractor.rs` → `EXTRACTION_SYSTEM_PROMPT`\n**Python 版 (设计参考):** `python/extractors/contradiction_prompt.py`\n\n两个版本必须保持语义一致。改完后用 case-016 验证：\n```bash\ncargo run -p sprachwelt-pipeline -- --input \"凌晨四点，地面竟然是湿的\" --llm\n```",
+          "line_num": 101
+        },
+        {
+          "title": "5. 运行完整管线（带 LLM）",
+          "node_id": "0005",
+          "summary": "## 5. 运行完整管线（带 LLM）\n\n```bash\n# 设置 API key\nexport MINIMAX_API_KEY=\"your-key\"\n\n# 单轮\ncargo run -p sprachwelt-pipeline -- --input \"为什么家里有消毒水的味道？\" --llm\n\n# 输出: JSON { plan, frontier, text, audit_result, field_state }\n```",
+          "line_num": 111
+        },
+        {
+          "title": "6. 调试测试失败",
+          "node_id": "0006",
+          "summary": "Section 6 addresses how to interpret failed test runs during debugging. It enumerates each crate, how many tests run, and the functionality covered (e.g., core handles serialization and lineage hashing; ledger checks FSM transitions and anti-resurrection logic; tension modules cover extractor rules, dynamics, and situation operators; acts tests speech-act selection; audit covers behavioral and drift coverage; pipeline exercises end-to-end integration). It also lists typical causes of failure for key crates, such as ledger FSM or anti-resurrection thresholds, extractor regex mis/over-matches, pipeline frontier re-projection order, and dynamics default configurations.",
+          "line_num": 123
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "doc_name": "2026-03-23-Phase1-设计锚点",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\Sprachwelt\\2026-03-23-Phase1-设计锚点.md",
+  "structure": [
+    {
+      "title": "Phase 1 设计锚点：从描述到开显",
+      "node_id": "0000",
+      "prefix_summary": "# Phase 1 设计锚点：从描述到开显\n\n> 2026-03-23，从\"中文是二维的\"讨论推导到此",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "核心转变",
+          "node_id": "0001",
+          "summary": "## 核心转变\n\nPhase 0 的场是**描述性的**——张力是\"关于\"矛盾的数据结构。\nPhase 1 的场是**存在性的**——矛盾在场中**生存**。",
+          "line_num": 5
+        },
+        {
+          "title": "海德格尔给的",
+          "node_id": "0002",
+          "summary": "讨论了海德格尔关于关切、上手性与开显的概念：关切是场景本身的在乎，由身体、劳动等要素引导张力流转；上手性强调张力指向结构，关联 demand、counter-demand 与 stake 的连续追问，使“刺鼻”等感受牵连整个行动网络；开显则指在关切结构中危险等意义直接显现，不依赖后续推理。",
+          "line_num": 10
+        },
+        {
+          "title": "马克思给的",
+          "node_id": "0003",
+          "summary": "Discusses Marxist perspective that social existence shapes consciousness, using example of cleaning worker mixing chemicals due to structural labor conditions, emphasizes material base of relational tensions grounded in labor relations and bodily exposure, and critiques LLMs as peak of rational self-alienation, calling for reconnecting language with material contexts.",
+          "line_num": 18
+        },
+        {
+          "title": "每条张力应该有什么",
+          "node_id": "0004",
+          "summary": "## 每条张力应该有什么\n\n当前：`{demand, counter_demand, stake, intensity, owner}`\n\nPhase 1 追加（不是 metadata，是存在论结构）：\n- **谁在承受**（bearer）：这个矛盾落在谁的身体上\n- **物质条件**（material_conditions）：什么生产关系、权力结构在约束 bearer\n- **不可见性**（invisibility）：谁的劳动/处境被遮蔽了",
+          "line_num": 26
+        },
+        {
+          "title": "场的架构",
+          "node_id": "0005",
+          "summary": "## 场的架构\n\n```\ntext → LLM → {demand, counter_demand, stake}\n                  ↓\n            物质条件层: 谁的身体？谁的劳动？谁付代价？\n                  ↓\n            关切结构: 场向\"被忽略的承受者\"方向弯曲\n                  ↓\n            开显: \"刺鼻\"不是被推理为危险，\n                  是在场的关切结构中直接显现为危险\n```",
+          "line_num": 35
+        },
+        {
+          "title": "P0 验证了什么",
+          "node_id": "0006",
+          "summary": "## P0 验证了什么\n\n- LLM 能提取三元组，但不会主动做联想跳跃\n- counter_demand 精度可以通过 prompt 约束提升，但联想深度不能\n- 多轮上下文让 LLM 看到前文张力，但它不会从中涌现新的联想\n- 这证实了：prompt 工程的天花板就是 Phase 0 的天花板",
+          "line_num": 48
+        },
+        {
+          "title": "反例：为什么不能靠 prompt",
+          "node_id": "0007",
+          "summary": "## 反例：为什么不能靠 prompt\n\n\"刺鼻→危险\"你告诉 LLM 它就知道。但你不可能穷举所有联想链。\n关键不是\"知道\"——是\"在乎\"。LLM 不在乎任何东西，所以不会主动开显。\nPhase 1 要建的是一个\"在乎\"的结构，让开显从结构中发生。",
+          "line_num": 55
+        }
+      ]
+    }
+  ]
+}

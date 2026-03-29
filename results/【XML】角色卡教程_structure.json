@@ -1,0 +1,88 @@
+{
+  "doc_name": "【XML】角色卡教程",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\【XML】角色卡教程.md",
+  "structure": [
+    {
+      "title": "**【非必需】这些工具或许对教程学习有所帮助**",
+      "node_id": "0000",
+      "summary": "## **【非必需】这些工具或许对教程学习有所帮助**\n\n### 主要内容概述：\n\n1. **VS Code**：推荐使用微软的VS Code作为电脑上的XML编辑器，方便进行代码编写和编辑。\n\n2. **在线网页版角色卡编辑器**：在没有酒馆的情况下，可以使用该在线工具进行角色卡编辑。\n\n3. **XML 教程文档**：提供Runoob的XML教程文档链接，帮助用户深入学习XML的原理和基础知识。\n\n4. **XML格式化和压缩工具**：推荐使用华工具网的XML格式化和压缩工具，用于排版XML文件或缩减Token数量。\n\n5. **Token计算工具**：使用OpenAI提供的Token计算工具，帮助用户计算和优化Token使用。\n\n6. **翻译和精简工具**：推荐使用Deepl、ChatGPT和爱词霸等工具进行翻译或文本精简。\n\n7. **Claude 官方文档**：提供Claude的官方文档链接，帮助用户了解Anthropic的提示工程资源。",
+      "line_num": 9
+    },
+    {
+      "title": "**【XML结构写角色卡的优劣势】**",
+      "node_id": "0001",
+      "summary": "## **【XML结构写角色卡的优劣势】**\n\n- 对Claude友好\n\n- 节省Token\n\n- 拓展性强\n\n- 记忆力好\n\n- 写好情感数据逻辑要求难度较高\n\n- 需要使用目的性明确的英语单词",
+      "line_num": 25
+    },
+    {
+      "title": "**【编写第一张XML格式角色卡】**",
+      "node_id": "0002",
+      "summary": "The partial document provides a beginner-friendly introduction to creating XML format character cards. It starts by presenting a simple XML structure with just a character's name, then gradually adds more elements like age, gender, birthday, and home address to enrich the character profile. The document emphasizes the simplicity and readability of XML, demonstrating how data is organized hierarchically with parent and child elements. It also explains the concept of nesting elements using an example of multiple characters within a \"角色\" (role) element. The document uses color-coding to differentiate between elements and data, and it encourages understanding XML as a structured way to organize information, comparing elements to boxes containing data.",
+      "line_num": 41
+    },
+    {
+      "title": "**【使用英文替换中文元素数据】**",
+      "node_id": "0003",
+      "summary": "The partial document discusses the process of replacing Chinese elements with English in a structured data format, using the character \"Xiao Ming\" as an example. It starts by reintroducing \"Xiao Ming\" and presents his original data in XML format with Chinese elements. The document then explains the rationale for the change, citing the efficiency of English in token usage and the advantages of aligning with computer systems that are inherently foreign. It demonstrates the transformation by replacing Chinese element names with their English equivalents, such as \"姓名\" with \"Name,\" \"年龄\" with \"Age,\" and so on. The document also addresses the challenge of translating \"家庭地址\" (Home Address) by breaking it down into \"Home_Address\" and retaining \"翻斗花园\" (Fantasy Garden) in Chinese due to its unique nature. Additionally, it introduces an English name \"Ma NiuBi\" for \"Xiao Ming,\" distinguishing between Chinese and English names by using \"Chinese_Name\" and \"English_Name\" elements. The document emphasizes the importance of this transformation for future scalability and efficiency.",
+      "line_num": 130
+    },
+    {
+      "title": "**【通过添加注释提示AI助手】**",
+      "node_id": "0004",
+      "summary": "The partial document discusses the process of enhancing an AI assistant's capabilities by providing detailed annotations and character descriptions. It starts by creating a character named \"Xiao Ming\" and inserting an XML-formatted character description. The author notes that while the AI seems to retain information, it lacks sophistication. To improve this, the author suggests adding more detailed definitions and annotations to guide the AI's behavior. The document then provides an example of a comment within the XML, explaining how to quickly add comments using shortcuts in VSCode. The comment serves as a directive for the AI to respond in the appropriate language based on the user's input. The author emphasizes that the content of the comment is arbitrary and translated for demonstration purposes. The document concludes by observing the immediate improvement in the AI's responsiveness after adding the comment.",
+      "line_num": 164
+    },
+    {
+      "title": "**【用属性发挥XML全部实力】**",
+      "node_id": "0005",
+      "summary": "The partial document provides a tutorial on using XML attributes to optimize data representation and improve efficiency when creating character profiles for AI applications. It begins with a critique of traditional XML syntax, highlighting the verbosity of elements and closing tags. The document then introduces the concept of using attributes within XML elements to condense information, demonstrating this with a character profile example. It explains how attributes can replace nested elements, reducing token usage and enhancing clarity for AI processing. The document also covers the syntax for self-closing tags, the importance of attribute naming for conveying meaning to AI systems, and the flexibility of XML in data representation. Additionally, it touches on the use of formatting tools like VSCode for managing complex XML structures and emphasizes that while XML provides a framework for data representation, the creativity in utilizing it for specific applications depends on the user's logic and innovation.",
+      "line_num": 189
+    },
+    {
+      "title": "**【进阶】使用阶段丰富角色**",
+      "node_id": "0006",
+      "summary": "该部分文档主要描述了一个使用XML和JSON来定义角色情感和行为转变的进阶教程，具体内容如下：\n\n1. **文档结构与逻辑**：\n   - 文档开头声明XML没有绝对格式，强调实现基于逻辑，仅供参考。\n   - 进阶教程会根据具体情况修改和增加内容。\n\n2. **角色情感和行为转变**：\n   - 使用`<Emulate>`元素来模仿角色行为，设置了高优先级。\n   - `<transformation>`元素定义了角色行为的转变过程。\n   - `<trigger>`元素指定了触发条件为“接吻”。\n   - `<stages>`元素详细描述了角色在不同阶段的情绪和行为：\n     - **初始阶段**：情绪为“不以为然”，表现为假装不在乎。\n     - **持续阶段**：情绪为“有点兴奋”，试图隐藏想要接吻的情感，但言语上仍表达对接吻的厌恶。\n     - **结束阶段**：当用户放弃接吻时，角色会感到非常后悔，并试图表达爱意，最终强行接吻。\n\n3. **情感模板**：\n   - 文档最后总结这种情感和行为转变模式为典型的“傲娇”模板。\n\n4. **参考资源**：\n   - 文档最后宣传了作者的作品“海菈”，并提供了Discord链接作为参考。",
+      "line_num": 281
+    },
+    {
+      "title": "**【非必需】VS Code 的简单使用**",
+      "node_id": "0007",
+      "prefix_summary": "## **【非必需】VS Code 的简单使用**",
+      "line_num": 306,
+      "nodes": [
+        {
+          "title": "安装中文语言包",
+          "node_id": "0008",
+          "summary": "#### 安装中文语言包\n\n\n安装完成后重启VS Code",
+          "line_num": 308
+        },
+        {
+          "title": "安装 XML Tools 插件",
+          "node_id": "0009",
+          "prefix_summary": "#### 安装 XML Tools 插件",
+          "line_num": 314,
+          "nodes": [
+            {
+              "title": "创建一个XML文件",
+              "node_id": "0010",
+              "summary": "###### 创建一个XML文件\n\n\n\n\n现在我们就有一个完美的创建XML角色卡的区域了",
+              "line_num": 317
+            },
+            {
+              "title": "格式化",
+              "node_id": "0011",
+              "summary": "###### 格式化\n\n让我们在XML代码页面按键盘的 Ctrl+Shift+P 然后找到Format Document 回车\n\n\n\n\n格式化前:\n\n\n\n\n格式化后:\n\n\n\n\n格式化有助于正确排班代码格式和提升代码美观度",
+              "line_num": 325
+            },
+            {
+              "title": "压缩XML",
+              "node_id": "0012",
+              "summary": "###### 压缩XML\n\n右键代码区域，选择 XML Tools: Minify XML\n\n\n压缩前:\n\n\n\n\n压缩后:\n\n\n\n\n压缩XML数据理论可以进一步减少10%左右的Token\n\n如需恢复原样只需要重新格式化XML代码即可\n\n\n\n\n這個插件可以自動補全，配合XML Tool使用",
+              "line_num": 346
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

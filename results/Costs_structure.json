@@ -1,0 +1,54 @@
+{
+  "doc_name": "Costs",
+  "source_path": "E:/knowledge/Knowledge\\02-Infrastructure\\Costs.md",
+  "structure": [
+    {
+      "title": "成本追踪",
+      "node_id": "0000",
+      "prefix_summary": "# 成本追踪\n\n> 每月花了多少钱，花在哪",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "月度成本结构",
+          "node_id": "0001",
+          "prefix_summary": "## 月度成本结构",
+          "line_num": 5,
+          "nodes": [
+            {
+              "title": "服务器",
+              "node_id": "0002",
+              "summary": "### 服务器\n| 节点 | 供应商 | 月费(估) | 用途 |\n|------|--------|---------|------|\n| 中央 | 腾讯云 | ~¥100 | 控制面 |\n| 硅谷 | 腾讯云 | ~¥100 | ZeroClaw |\n| 东京 | 腾讯云 | ~¥100 | 跳板+ZeroClaw |\n| SUPER | ? | ? | 高性能 |\n| Curry | ? | ? | OpenClaw |\n| 新腾讯云 | 腾讯云 | ~¥100 | Claw Router |\n| NAS | 自有 | 电费 | 存储 |",
+              "line_num": 7
+            },
+            {
+              "title": "AI模型API",
+              "node_id": "0003",
+              "summary": "### AI模型API\n| 供应商 | 用途 | 月费(估) |\n|--------|------|---------|\n| Anthropic | Claude Code主力 | 按量 |\n| OpenAI | Codex CLI | 按量 |\n| Google | Gemini CLI | 免费tier |\n| 火山引擎 | Doubao | 免费/极低 |\n| 其他国产 | DeepSeek/MiniMax | 低 |",
+              "line_num": 18
+            },
+            {
+              "title": "其他",
+              "node_id": "0004",
+              "summary": "### 其他\n| 项目 | 月费 |\n|------|------|\n| GitHub Pro | $4 |\n| NetBird | 免费 |\n| 域名 | ? |",
+              "line_num": 27
+            }
+          ]
+        },
+        {
+          "title": "月度记录",
+          "node_id": "0005",
+          "prefix_summary": "## 月度记录",
+          "line_num": 34,
+          "nodes": [
+            {
+              "title": "2026-03",
+              "node_id": "0006",
+              "summary": "### 2026-03\n- 待填\n\n#infrastructure #costs #monthly",
+              "line_num": 36
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

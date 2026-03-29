@@ -1,0 +1,50 @@
+{
+  "doc_name": "14-输出风格",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\ClaudeLog-干货\\14-输出风格.md",
+  "structure": [
+    {
+      "title": "输出风格 (Output Styles)",
+      "node_id": "0000",
+      "prefix_summary": "# 输出风格 (Output Styles)\n\n> 原文：[claudelog.com/mechanics/output-styles](https://claudelog.com/mechanics/output-styles)",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "核心概念",
+          "node_id": "0001",
+          "summary": "## 核心概念\n\nOutput Styles **完全替换**委派 agent 的系统 prompt，让 Claude Code 从软件工程工具变成**任何领域的专用工具**，同时保留所有底层能力。",
+          "line_num": 5
+        },
+        {
+          "title": "保留的能力",
+          "node_id": "0002",
+          "summary": "## 保留的能力\n\n替换系统 prompt 后，以下能力完好保留：\n- CLAUDE.md 项目上下文系统\n- 完整工具生态\n- 子 agent/自定义 agent 委派\n- MCP 集成\n- 上下文管理\n- 自动化工作流\n- 文件系统操作\n- 项目连续性",
+          "line_num": 9
+        },
+        {
+          "title": "与其他机制的区别",
+          "node_id": "0003",
+          "summary": "## 与其他机制的区别\n\n| 机制 | 作用 |\n|------|------|\n| **CLAUDE.md** | 在软件工程框架**内**添加项目上下文 |\n| **--append-system-prompt** | **增强**现有行为 |\n| **Custom Agents** | 创建专门助手，但主 agent 仍是软件工程导向 |\n| **Sub-agents** | 子 agent 保持软件工程系统 prompt |\n| **Output Styles** | **替换**整个系统 prompt，彻底改变主 agent 的身份 |",
+          "line_num": 21
+        },
+        {
+          "title": "跨领域应用场景",
+          "node_id": "0004",
+          "summary": "## 跨领域应用场景\n\n- **内容策略** — 品牌特定的写作风格，跨文档保持一致\n- **研究分析** — 学术论文处理，统一格式\n- **商业分析** — 领域特定的分析师定制\n- **设计系统** — SVG 专家，深度规格知识",
+          "line_num": 31
+        },
+        {
+          "title": "根本愿景",
+          "node_id": "0005",
+          "summary": "## 根本愿景\n\n> \"Claude Code\" 变成 \"Claude Anything\"\n\n同样强大的工具集，适配任何领域的特定推理模式和沟通需求，无需强迫非程序员在软件工程范式内工作。",
+          "line_num": 38
+        },
+        {
+          "title": "我的理解",
+          "node_id": "0006",
+          "summary": "## 我的理解\n\nOutput Styles 的革命性在于：Claude Code 不再是\"编程工具\"，而是**通用执行引擎**。\n\n这和我们用 Output Styles 做 explanatory + learning 模式是同一个思路——改变的不是工具能力，而是 Claude 的\"人格\"和沟通方式。\n\n更大的想象空间：\n- 律师用 Claude Code + 法律 Output Style 审查合同\n- 研究员用 Claude Code + 学术 Output Style 写论文\n- 设计师用 Claude Code + 设计 Output Style 生成 SVG\n\n工具是一样的，身份不一样。",
+          "line_num": 44
+        }
+      ]
+    }
+  ]
+}

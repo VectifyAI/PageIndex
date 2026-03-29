@@ -1,0 +1,56 @@
+{
+  "doc_name": "康德",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\原著文库\\康德.md",
+  "structure": [
+    {
+      "title": "康德 (Immanuel Kant) — 原著资源",
+      "node_id": "0000",
+      "prefix_summary": "# 康德 (Immanuel Kant) — 原著资源\n\n> 黑格尔的源头，整条德国古典哲学谱系的起点",
+      "line_num": 6,
+      "nodes": [
+        {
+          "title": "推荐译者",
+          "node_id": "0001",
+          "summary": "## 推荐译者\n\n**邓晓芒 译 / 杨祖陶 校**（人民出版社）— 德文直译，学界公认最佳中译。配合邓晓芒《句读》系列逐句讲解效果最好。\n\n---",
+          "line_num": 10
+        },
+        {
+          "title": "《纯粹理性批判》(Kritik der reinen Vernunft)",
+          "node_id": "0002",
+          "summary": "The partial document provides links to various translations and editions of Immanuel Kant's \"Critique of Pure Reason\" (Kritik der reinen Vernunft). It includes a PDF of the 1960 Chinese translation by Lan Gongwu available on philosophy.org.cn, an Archive.org link to another Chinese PDF, a link to the book on WeChat Reading, an English full text translation by Meiklejohn on marxists.org, and links to the German original editions from 1781 and 1787 on Project Gutenberg. The document also notes that Lan Gongwu's translation, while translated from English, is fluent and suitable for beginners, while Deng Xiaomang's version, translated directly from German, is more precise.",
+          "line_num": 16
+        },
+        {
+          "title": "《实践理性批判》(Kritik der praktischen Vernunft)",
+          "node_id": "0003",
+          "summary": "## 《实践理性批判》(Kritik der praktischen Vernunft)\n\n| 来源 | 链接 |\n|------|------|\n| Z-Library 邓晓芒译 PDF | z-lib.io 搜书名 |\n| Gutenberg 德文原版 | [#49543](https://www.gutenberg.org/files/49543/49543-h/49543-h.htm) |\n\n---",
+          "line_num": 30
+        },
+        {
+          "title": "《判断力批判》(Kritik der Urteilskraft)",
+          "node_id": "0004",
+          "summary": "## 《判断力批判》(Kritik der Urteilskraft)\n\n| 来源 | 链接 |\n|------|------|\n| Archive.org 邓晓芒04版 PDF | [archive.org](https://archive.org/details/04_20210408_202104) |\n| Z-Library 邓晓芒译 PDF | z-lib.io 搜书名 |\n\n---",
+          "line_num": 39
+        },
+        {
+          "title": "《道德形而上学原理》(Grundlegung zur Metaphysik der Sitten)",
+          "node_id": "0005",
+          "summary": "## 《道德形而上学原理》(Grundlegung zur Metaphysik der Sitten)\n\n| 来源 | 链接 |\n|------|------|\n| 微信读书 (苗力田译) | [weread](https://weread.qq.com/web/bookDetail/bc832280811e326cag010a11) |\n| Bard College 德文学术版 PDF | [bard.edu](https://www.bard.edu/library/pdfs/archives/Kant-Grundlegung_zur_Metaphysik_der_Sitten.pdf) |\n\n---",
+          "line_num": 48
+        },
+        {
+          "title": "获取策略",
+          "node_id": "0006",
+          "summary": "## 获取策略\n\n| 来源 | 说明 |\n|------|------|\n| Z-Library | 邓晓芒三大批判齐全 |\n| 微信读书 | 会员可读大部分 |\n| Gutenberg | 德文原版免费 |\n| marxists.org | 英文全文（无中文） |",
+          "line_num": 57
+        },
+        {
+          "title": "关联",
+          "node_id": "0007",
+          "summary": "## 关联\n- [[黑格尔]] — 继承并超越康德\n- [[马克思]] — 经黑格尔间接继承\n- [[海德格尔]] — 存在与时间中对康德的批判性继承\n\n#philosophy #bibliography #kant",
+          "line_num": 66
+        }
+      ]
+    }
+  ]
+}

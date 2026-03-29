@@ -1,0 +1,46 @@
+{
+  "doc_name": "Memory-Nexus",
+  "source_path": "E:/knowledge/Knowledge\\02-Infrastructure\\Memory-Nexus.md",
+  "structure": [
+    {
+      "title": "Memory Nexus — 记忆汇聚层",
+      "node_id": "0000",
+      "prefix_summary": "# Memory Nexus — 记忆汇聚层\n\n> 6套记忆系统的摘要汇聚点。Obsidian是汇聚层，不是存储层。",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "记忆系统状态",
+          "node_id": "0001",
+          "summary": "## 记忆系统状态\n\n| 系统 | 存储 | 最近更新 | 健康 |\n|------|------|---------|------|\n| GitNexus | Neo4j | 待确认 | ? |\n| OpenViking | 向量RAG | 自动 | ✅ |\n| MemoV | SQLite | 每次交互 | ✅ |\n| auto-memory | MEMORY.md | 2026-03-16 | ✅ |\n| OMC notepad | .omc/ | session级 | ✅ |\n| Obsidian | 本vault | 2026-03-16 | ✅ |",
+          "line_num": 5
+        },
+        {
+          "title": "今日知识流入",
+          "node_id": "0002",
+          "prefix_summary": "## 今日知识流入",
+          "line_num": 16,
+          "nodes": [
+            {
+              "title": "2026-03-16",
+              "node_id": "0003",
+              "summary": "### 2026-03-16\n- **auto-memory**: 新增3条feedback (use-own-quant/scanner-via-super/trading-session)\n- **Obsidian**: 33文件vault搭建完成\n- **OpenViking**: 自动提取本session决策",
+              "line_num": 18
+            }
+          ]
+        },
+        {
+          "title": "跨系统关联",
+          "node_id": "0004",
+          "summary": "## 跨系统关联\n\n```dataview\nTABLE file.mtime as \"最近修改\"\nFROM \"01-Projects\" OR \"03-Trading\" OR \"04-Research\"\nSORT file.mtime DESC\nLIMIT 10\n```",
+          "line_num": 23
+        },
+        {
+          "title": "热/冷分层",
+          "node_id": "0005",
+          "summary": "## 热/冷分层\n\n| 层级 | 定义 | 存储 |\n|------|------|------|\n| **热** | 本周在用的项目/交易 | OMC notepad + Obsidian |\n| **温** | 本月活跃项目 | auto-memory + Obsidian |\n| **冷** | 历史决策/归档 | OpenViking + Obsidian Archive |\n\n#infrastructure #memory #nexus",
+          "line_num": 32
+        }
+      ]
+    }
+  ]
+}

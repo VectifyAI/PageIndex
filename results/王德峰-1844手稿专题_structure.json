@@ -1,0 +1,116 @@
+{
+  "doc_name": "王德峰-1844手稿专题",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\王德峰-1844手稿专题.md",
+  "structure": [
+    {
+      "title": "王德峰《1844年经济学哲学手稿》解读专题",
+      "node_id": "0000",
+      "prefix_summary": "# 王德峰《1844年经济学哲学手稿》解读专题\n\n> 王德峰是中国学界少数用**海德格尔存在论**重读1844手稿的马克思主义哲学家，把异化劳动从\"经济现象\"提升为\"存在论事件\"，把感性意识从\"认识论阶段\"提升为\"存在领悟方式\"。\n\n---",
+      "line_num": 6,
+      "nodes": [
+        {
+          "title": "公开讲座",
+          "node_id": "0001",
+          "summary": "This partial document provides information about a series of public lectures and resources related to Marxist philosophy and the study of \"Das Kapital.\" It includes a lecture series titled \"Marx's Philosophical Revolution and Its Contemporary Significance,\" which is available on Bilibili for a fee of 1 yuan. This series consists of an introduction and at least seven lectures, starting from the 1844 Manuscripts and connecting through the \"Theses\" to \"Das Kapital.\" Another resource mentioned is a 28-lecture series titled \"Rereading Das Kapital,\" also available on Bilibili, which revisits the philosophical foundations of the 1844 Manuscripts in its initial lectures. Additionally, there are recordings of Fudan University lectures on the history of Marxist philosophy, which have been uploaded to Bilibili and include a special section on the 1844 Manuscripts. The document also provides links to transcripts of the lectures on Zhihu, including the introduction and lectures 1-7 of the first series, as well as notes on \"Rereading Das Kapital.\"",
+          "line_num": 12
+        },
+        {
+          "title": "相关论文",
+          "node_id": "0002",
+          "summary": "This partial document provides an overview of scholarly works and discussions centered around Karl Marx's theory of alienation, particularly focusing on his 1844 Manuscripts. The document lists several academic papers published in various journals, highlighting different aspects of Marx's philosophical contributions. Key themes include the interpretation of alienation in Marx's work, the concept of \"sensuous consciousness,\" the nature of Marx's philosophical revolution, and the relationship between Marx's ideas and existential philosophy, particularly that of Martin Heidegger. The document also mentions a monograph co-authored by Wu Xiaoming, which explores the contemporary significance of Marx's philosophical revolution and the opening of new existential horizons. Overall, the document underscores the ongoing scholarly interest in Marx's early works and their foundational role in the development of historical materialism and existential thought.",
+          "line_num": 24
+        },
+        {
+          "title": "核心解读框架",
+          "node_id": "0003",
+          "prefix_summary": "## 核心解读框架",
+          "line_num": 41,
+          "nodes": [
+            {
+              "title": "一、异化劳动四重规定",
+              "node_id": "0004",
+              "prefix_summary": "### 一、异化劳动四重规定\n\n王德峰**反对**将异化劳动当作纯经济学描述，每一重都是存在论事件：",
+              "line_num": 43,
+              "nodes": [
+                {
+                  "title": "1. 劳动产品的异化",
+                  "node_id": "0005",
+                  "summary": "#### 1. 劳动产品的异化\n不仅是\"工人造了产品却不归他\"的经济事实，而是**存在论层面的对象性关系断裂**：人把自身对象化（Vergegenständlichung）的活动被剥夺了。",
+                  "line_num": 47
+                },
+                {
+                  "title": "2. 劳动过程的异化",
+                  "node_id": "0006",
+                  "summary": "#### 2. 劳动过程的异化\n始终存在于对象性中的主体性是**生命活动**，是**理性前的（vor-rational）**。异化的本质是\"产生主体的活动\"变成了\"由主体产生的活动\"——因果关系被颠倒。",
+                  "line_num": 50
+                },
+                {
+                  "title": "3. 类本质的异化",
+                  "node_id": "0007",
+                  "summary": "#### 3. 类本质的异化\n**与传统教科书分歧最大的地方**。明确反对将\"类本质\"理解为费尔巴哈式的先验人本主义设定。王德峰的判断：\n\n> \"人作为类存在物、拥有类本质，**乃是劳动的产物**，而非其前提。\"",
+                  "line_num": 53
+                },
+                {
+                  "title": "4. 人与人的异化",
+                  "node_id": "0008",
+                  "summary": "#### 4. 人与人的异化\n资本不是\"物\"，是\"现代的社会权力\"。权力之为权力，\"非思想，非观念，而是在社会生活中实际地支配个人的**感性力量**\"。\n\n---",
+                  "line_num": 58
+                }
+              ]
+            },
+            {
+              "title": "二、感性意识概念（最独特贡献）",
+              "node_id": "0009",
+              "summary": "### Description of the Partial Document\n\nThe partial document focuses on the concept of \"感性意识\" (Sensuous Consciousness), which is considered the most unique contribution of the discussed work. It defines this concept not as \"sensory experience\" (as in empiricism) but as a way for humans to comprehend \"existence itself.\" The document highlights the foundational role of sensuous consciousness in establishing the concept of \"sensuous activity.\" It further explains that through this concept, Marx pioneered a new path in \"historical ontology,\" transcending both Hegel's pure speculation and Feuerbach's intuitive materialism. The document references a paper titled \"On Marx's Concept of Sensuous Consciousness\" published in the Journal of Yunnan University in 2016.",
+              "line_num": 63
+            },
+            {
+              "title": "三、对象性活动（gegenständliche Tätigkeit）",
+              "node_id": "0010",
+              "summary": "### 三、对象性活动（gegenständliche Tätigkeit）\n\n1844手稿中\"对象性活动\"是整个哲学革命的枢纽：\n- 人的生存 = \"感性意识\"和\"感性活动\"的统一\n- 它们是对\"自然界的属人的本质\"的执行活动\n- **异化 = 对象性与主体性的统一遭到破坏 = 抽象劳动支配具体劳动**\n\n---",
+              "line_num": 72
+            }
+          ]
+        },
+        {
+          "title": "与传统教科书的关键分歧",
+          "node_id": "0011",
+          "summary": "The partial document highlights the key differences between traditional interpretations of Marx's work and Wang Defeng's philosophical reinterpretation. It contrasts how traditional textbooks view concepts like alienated labor, the \"two Marxes\" theory, and the nature of \"Das Kapital\" with Wang's perspective, which emphasizes the philosophical continuity and revolutionary nature of Marx's work. Wang argues that Marx's concept of alienation is a philosophical foundation rather than an early, immature idea, and he rejects the notion of a break between the young and mature Marx. Additionally, Wang reframes key concepts such as \"species-being\" and \"sensuousness\" as products of labor and existential concepts, respectively, and situates Marx's work within a theoretical framework that includes Heidegger's existentialism. He also contends that \"Das Kapital\" is not merely an economic work but a critique of political economy focused on the growth of social power. Ultimately, Wang uses Heidegger's concept of \"forgetfulness of being\" to reinterpret Marx's alienation as the obscuring of being by beings.",
+          "line_num": 81
+        },
+        {
+          "title": "hist-mat 应用价值",
+          "node_id": "0012",
+          "prefix_summary": "## hist-mat 应用价值",
+          "line_num": 97,
+          "nodes": [
+            {
+              "title": "可建模概念",
+              "node_id": "0013",
+              "summary": "### Description of Partial Document\n\nThe partial document focuses on several key concepts related to socio-economic and philosophical theories, particularly those inspired by Marxist thought. The main points covered are:\n\n1. **Alienation Index**: This concept is broken down into four sub-dimensions:\n   - **Product Alienation**: Measured by the ratio of labor income to the value of labor output.\n   - **Process Alienation**: Assessed through labor autonomy, including control over work hours and task selection.\n   - **Species-Being Alienation**: Evaluated by the proportion of creative labor versus repetitive labor.\n   - **Interpersonal Alienation**: Determined by social trust and the ratio of cooperation to competition.\n\n2. **Social Power Field**: This concept views capital as a \"sensible force\" rather than an \"idea.\" It is described as a tensor field that includes:\n   - Capital concentration.\n   - Labor bargaining power.\n   - Access to means of production.\n   The document suggests that this concept is closer to Marx's original intent than the Gini coefficient.\n\n3. **Perceptual Consciousness Vector**: This concept operates on two levels:\n   - **Ontological Level**: Relates to the fundamental nature of existence.\n   - **Ideological Level**: Relates to the prevailing social beliefs and values.\n   It is approximated by social sentiment data, including non-rational market behavior and indicators of consumption alienation. The document notes that this concept complements the \"superstructure lag\" model.\n\n4. **Objectification Fracture Degree**: This concept measures the degree of disconnection in the relationship between laborers and their products. It is proxied by:\n   - The perception of final products by laborers in the platform economy.\n   - The decline rate of the artisan proportion.",
+              "line_num": 99
+            },
+            {
+              "title": "理论框架价值",
+              "node_id": "0014",
+              "summary": "### 理论框架价值\n\n5. **统一理论线** — 否定\"两个马克思\"，从1844异化劳动直接推导到剩余价值，不需两套独立模型\n\n6. **海德格尔-马克思桥接** — 异化 = 存在遗忘，可用信息论（信号被噪声遮蔽）建模\n\n7. **权力非理性本质** — 权力是\"理性前的感性力量\"，支持引入非理性动力学（比 bounded rationality 更激进）\n\n---",
+              "line_num": 118
+            }
+          ]
+        },
+        {
+          "title": "关联",
+          "node_id": "0015",
+          "summary": "## 关联\n\n- [[王德峰]] — 主页\n- [[张双利]] — 同事，西马研究，辩证法框架互补\n- [[hist-mat]] — 理论落地\n- [[原著文库/_index|原著文库]] — 1844手稿原文",
+          "line_num": 128
+        },
+        {
+          "title": "知识看板",
+          "node_id": "0016",
+          "summary": "## 知识看板\n\n- Issue #125（王德峰全集）\n- Issue #140（1844手稿专题）\n\n#research #philosophy #marxism #1844-manuscript #alienation #existential-ontology",
+          "line_num": 135
+        }
+      ]
+    }
+  ]
+}

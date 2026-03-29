@@ -1,0 +1,58 @@
+{
+  "doc_name": "俄联邦-艾琳娜政体到母系统",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\赤島Akashima\\世界书\\未来\\俄联邦-艾琳娜政体到母系统.md",
+  "structure": [
+    {
+      "title": "科学家们的起义",
+      "node_id": "0000",
+      "prefix_summary": "The partial document discusses a significant technological breakthrough in Russia with the development of room-temperature superconductor technology by Mikhail Ivanovich Grigoriev's \"Institute of Future Technology and Innovation.\" This advancement, known as the Grigoriev-1 Room Temperature Superconductor (GRTSC), allows for the conduction of electricity without resistance at room temperature, revolutionizing energy efficiency and potential applications in various industries.\n\nThe document also describes a rebellion that occurred in Russia, partly fueled by dissatisfaction with the government's handling of economic decline, security policies, and social issues, particularly the lack of support for veterans after a military conflict with NATO in 2023. The rebellion was led by General Viktor Mikhailov, but it was an FSB operative, Elena Volonova, who emerged as a key figure, supported by Grigoriev and other scientists. The document suggests that the use of a new AI model may have played a crucial role in the rebellion's success, potentially marking the first instance of AI being used in warfare.",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "（关于她背后有科研部门的支持，这个说法有其依据。艾琳娜与一些顶尖的科技研究人员有着紧密的联系，特别是在人工智能领域。有传言称，她的上升是由一系列精心设计的AI支持的政治策略推动的，这些策略帮助她在政治舞台上脱颖而出，最终走向总统之位。）",
+          "node_id": "0001",
+          "summary": "###### （关于她背后有科研部门的支持，这个说法有其依据。艾琳娜与一些顶尖的科技研究人员有着紧密的联系，特别是在人工智能领域。有传言称，她的上升是由一系列精心设计的AI支持的政治策略推动的，这些策略帮助她在政治舞台上脱颖而出，最终走向总统之位。）",
+          "line_num": 19
+        }
+      ]
+    },
+    {
+      "title": "2030年到2042年（控制论下的俄罗斯实验田）",
+      "node_id": "0002",
+      "prefix_summary": "## 2030年到2042年（控制论下的俄罗斯实验田）\n\n  此后这段时间**艾琳娜**可以说几乎是**米哈伊尔设计局**为首的科学家代言人，在AI神经网络下，艾莉娜政府可以精准且迅速得扫清国内寡头与稳固经济，俄罗斯军事力可以精确的部署在边境防御，并且及时掐灭旧联邦政府的反对势力火苗。",
+      "line_num": 21,
+      "nodes": [
+        {
+          "title": "**OGAS与赛博协同控制工程的结合体（子母系统的由来）**",
+          "node_id": "0003",
+          "summary": "### **OGAS与赛博协同控制工程的结合体（子母系统的由来）**\n\n  米哈伊尔设计局与艾琳娜在将国有资产回收和稳定政治后决定为国家打造一套自动化系统以防止人为因素对国家和社会造成动荡，这套系统包含三个部分",
+          "line_num": 25
+        },
+        {
+          "title": "**基本体（OGAS）**",
+          "node_id": "0004",
+          "summary": "### **基本体（OGAS）**\n\n基本体控制着全国基本物质生产，从重工业到轻工业，每个国有企业都链接着城市子系统，城市子系统连接莫斯科母系统。城市子系统优先满足城市供应需求，然后完成母系统下发的生产任务。母系统收集子系统数据反馈，进行宏观调控，旨在排除人类管理因素的影响，确保国家自动维持人民生活的物质基础。基本体与最初的OGAS不同，OGAS旨在实现全国经济系统自动化，而基本体则专注于保证城市自动运转和基本物质供应。",
+          "line_num": 29
+        },
+        {
+          "title": "**决策体**** ****(赛博协同控制工程)**",
+          "node_id": "0005",
+          "summary": "### **决策体**** ****(赛博协同控制工程)**\n\n   决策体是有智里阿连德时期的**(赛博协同控制工程)**演变而来，主要目的是提高管理效率降低成为管理者的门槛，而管理者们是每个在单位生产的工人，他们对生产任务进行决策，并报告日常生产中的问题，这些决策和问题会到个个工厂的子生产系统进行集中在送至城市子系统进行处理，同样的城市子系统的同时也会发生信息到莫斯科母系统，",
+          "line_num": 35
+        },
+        {
+          "title": "神经网络学习(AI)",
+          "node_id": "0006",
+          "summary": "### 神经网络学习(AI)\n\n  如果说基本体和决策体是子母系统的身躯，那么神经网络就是这个系统的大脑，神经网络会辅助这一信息传达的过程，并向管理者给出最优解决方案，它有时候也会自己做出决策去解决一些临时问题，并且从这些数据中进行自我学习和进化，",
+          "line_num": 39
+        }
+      ]
+    },
+    {
+      "title": "**2047年到2050年（第三次世界大战）**",
+      "node_id": "0007",
+      "summary": "## **2047年到2050年（第三次世界大战）**",
+      "line_num": 45
+    }
+  ]
+}

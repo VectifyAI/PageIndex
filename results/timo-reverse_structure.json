@@ -1,0 +1,300 @@
+{
+  "doc_name": "timo-reverse",
+  "source_path": "E:/knowledge/Knowledge\\Projects\\timo-reverse.md",
+  "structure": [
+    {
+      "title": "Timo \"无限续杯\" 逆向工程分析",
+      "node_id": "0000",
+      "prefix_summary": "# Timo \"无限续杯\" 逆向工程分析\n\n> **版本**: Timo v2.6.1\n> **分析日期**: 2026-03-15\n> **分析深度**: 深入（静态分析 + 数据库分析 + 符号表分析）",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "目录",
+          "node_id": "0001",
+          "summary": "## 目录\n\n1. [概述](#概述)\n2. [核心架构](#核心架构)\n3. [API 端点](#api-端点)\n4. [数据库结构](#数据库结构)\n5. [工作流程](#工作流程)\n6. [Token 管理](#token-管理)\n7. [配额管理](#配额管理)\n8. [安全机制](#安全机制)\n9. [实现文件](#实现文件)\n10. [使用方法](#使用方法)\n\n---",
+          "line_num": 7
+        },
+        {
+          "title": "概述",
+          "node_id": "0002",
+          "prefix_summary": "## 概述\n\nTimo 是一个基于 Tauri 框架的桌面应用，通过本地代理服务器拦截 IDE（如 Cursor、VSCode）的 AI 请求，自动管理 Google Cloud Code API 的配额，实现\"无限续杯\"功能。",
+          "line_num": 22,
+          "nodes": [
+            {
+              "title": "核心功能",
+              "node_id": "0003",
+              "summary": "### 核心功能\n\n- **本地代理拦截**: 在 127.0.0.1:51103 拦截 IDE 的 AI 请求\n- **自动续费**: 配额不足时自动调用后端 API 获取新配额\n- **Token 注入**: 将 Google API Token 注入到请求中\n- **多模型支持**: 支持 Claude 和 Gemini 双模型\n- **统计追踪**: 追踪 Token 使用情况\n\n---",
+              "line_num": 26
+            }
+          ]
+        },
+        {
+          "title": "核心架构",
+          "node_id": "0004",
+          "prefix_summary": "## 核心架构\n\n```\n用户 IDE (Cursor/VSCode)\n    ↓ (配置代理: 127.0.0.1:51103)\n[Timo 本地代理服务器]\n    ↓ (拦截 AI 请求)\n[配额检查 + Token 注入]\n    ↓ (转发请求)\nGoogle Cloud Code API\n    ↓ (返回响应)\n[统计追踪 + 自动续费]\n    ↓ (返回给 IDE)\n用户 IDE\n```",
+          "line_num": 36,
+          "nodes": [
+            {
+              "title": "技术栈",
+              "node_id": "0005",
+              "summary": "### 技术栈\n\n- **框架**: Tauri (Rust + WebView)\n- **数据库**: SQLite (key-value 存储)\n- **网络**: Hyper (HTTP 客户端/服务器)\n- **架构**: Universal Binary (x86_64 + arm64)",
+              "line_num": 52
+            },
+            {
+              "title": "文件位置",
+              "node_id": "0006",
+              "summary": "### 文件位置\n\n- **主程序**: `/Applications/timo.app/Contents/MacOS/app`\n- **数据库**: `/Applications/timo.app/Contents/MacOS/timo.db`\n- **配置**: SQLite kv 表\n\n---",
+              "line_num": 59
+            }
+          ]
+        },
+        {
+          "title": "API 端点",
+          "node_id": "0007",
+          "prefix_summary": "## API 端点",
+          "line_num": 67,
+          "nodes": [
+            {
+              "title": "Timo 后端 API",
+              "node_id": "0008",
+              "prefix_summary": "### Timo 后端 API\n\n**基础 URL**: `https://*.timo.guru` (具体域名未公开)",
+              "line_num": 69,
+              "nodes": [
+                {
+                  "title": "认证相关",
+                  "node_id": "0009",
+                  "summary": "#### 认证相关\n\n| 端点 | 方法 | 描述 | 参数 |\n|------|------|------|------|\n| `/auth/login` | POST | 用户登录 | email, password, fingerprint |\n| `/auth/register` | POST | 用户注册 | email, password, invite_code |\n| `/auth/refresh` | POST | 刷新 Token | refresh_token |\n| `/auth/logout` | POST | 用户登出 | access_token |",
+                  "line_num": 73
+                },
+                {
+                  "title": "续费相关",
+                  "node_id": "0010",
+                  "summary": "The partial document focuses on various API endpoints and methods related to the \"refill\" or renewal process of a service. It outlines the following main points:\n\n1. **Automatic Renewal Management**: \n   - `/refill/start`: Initiates automatic renewal using `session_token` and `device_id`.\n   - `/refill/stop`: Terminates the automatic renewal process with `session_token`.\n\n2. **Status and Quota Inquiries**:\n   - `/refill/status`: Retrieves the current renewal status using `session_token`.\n   - `/refill/quota`: Fetches the available quota information with `session_token`.\n\n3. **Quota Redemption and Usage Reporting**:\n   - `/refill/counts`: Allows for the exchange of quotas, requiring parameters such as `session_token`, `device_id`, `request_id`, `model`, and `tokens`.\n   - `/refill/report`: Submits usage reports, including `session_token`, `status_code`, and `error_json`.\n\n4. **Model Switching**:\n   - `/refill/switch` and `/refill/switchmodel`: Both endpoints facilitate switching the service model, with the latter likely serving as a backup option. Both require `session_token` and `model` parameters.",
+                  "line_num": 82
+                },
+                {
+                  "title": "其他",
+                  "node_id": "0011",
+                  "summary": "#### 其他\n\n| 端点 | 方法 | 描述 |\n|------|------|------|\n| `/support/sessions` | GET | 支持会话 |\n| `/system/notice` | GET | 系统通知 |\n| `/system/update?version=` | GET | 检查更新 |\n| `/tutorial/list` | GET | 教程列表 |\n| `/usage/hourly` | GET | 每小时使用统计 |\n| `/user/activate` | POST | 用户激活 |",
+                  "line_num": 95
+                }
+              ]
+            },
+            {
+              "title": "Google Cloud Code API",
+              "node_id": "0012",
+              "summary": "### Google Cloud Code API\n\n**基础 URL**:\n- 生产环境: `https://daily-cloudcode-pa.googleapis.com`\n- 沙盒环境: `https://daily-cloudcode-pa.sandbox.googleapis.com/v1`\n\n**端点**: `/streamGenerateContent`\n\n---",
+              "line_num": 106
+            }
+          ]
+        },
+        {
+          "title": "数据库结构",
+          "node_id": "0013",
+          "prefix_summary": "## 数据库结构",
+          "line_num": 116,
+          "nodes": [
+            {
+              "title": "表结构",
+              "node_id": "0014",
+              "summary": "### 表结构\n\n```sql\nCREATE TABLE kv (\n    key   TEXT PRIMARY KEY,\n    value TEXT\n);\n```",
+              "line_num": 118
+            },
+            {
+              "title": "配置键",
+              "node_id": "0015",
+              "summary": "### Description of the Partial Document\n\nThe partial document provides a detailed configuration key reference for a system, likely related to authentication, user management, and API interactions. The main points covered include:\n\n1. **Authentication Tokens**: \n   - `access_token`: A JWT token used for backend authentication with a specific length.\n   - `access_token_expiry`: A timestamp indicating when the access token expires.\n   - `refresh_token`: A UUID used to refresh the access token.\n   - `refresh_token_expiry`: A timestamp indicating when the refresh token expires.\n   - `refill_session_token`: A JWT token used for renewing sessions.\n\n2. **Proxy Configuration**:\n   - `proxy_port`: A numerical value representing the port used for proxying.\n   - `proxy_account_version`: A numerical value indicating the version of the proxy account.\n\n3. **User Information**:\n   - `user`: A JSON object containing user-related data.\n   - `account_info`: A JSON object containing account-related information.\n\n4. **Google API Integration**:\n   - `cached_access_token`: A Base64-encoded token for Google API access.\n   - `cached_project_id`: A Base64-encoded Google project ID.\n   - `google_access_token`: A string representing the Google access token.\n   - `google_access_token_expiry`: A timestamp indicating when the Google token expires.\n\n5. **Quota and Session Management**:\n   - `quota_check_requested`: A boolean flag indicating if a quota check has been requested.\n   - `refill_force_stopped`: A boolean flag indicating if the refill process has been forcefully stopped.\n\n6. **Device and Security**:\n   - `fingerprint`: A string representing the device fingerprint.\n   - `original_fingerprint`: The original device fingerprint.\n   - `legacy_fingerprint`: An older version of the device fingerprint.\n\n7. **Project Identification**:\n   - `account_project_id`: A string representing the account's project ID.\n\nThis configuration key reference is designed to provide a comprehensive overview of the various parameters and their purposes within the system, ensuring clarity and consistency in configuration and usage.",
+              "line_num": 127
+            },
+            {
+              "title": "用户信息结构",
+              "node_id": "0016",
+              "summary": "### 用户信息结构\n\n```json\n{\n  \"id\": 2735,\n  \"nickname\": \"2276214182\",\n  \"email\": \"2276214182@qq.com\",\n  \"plan_expiry\": \"2026-03-15T10:24:44.000Z\"\n}\n```\n\n---",
+              "line_num": 151
+            }
+          ]
+        },
+        {
+          "title": "工作流程",
+          "node_id": "0017",
+          "prefix_summary": "## 工作流程",
+          "line_num": 164,
+          "nodes": [
+            {
+              "title": "1. 启动阶段",
+              "node_id": "0018",
+              "summary": "### 1. 启动阶段\n\n```\n1. Timo 启动\n   ↓\n2. 加载 SQLite 数据库\n   ↓\n3. 读取配置:\n   - proxy_port (51103)\n   - access_token\n   - refill_session_token\n   - cached_access_token\n   ↓\n4. 启动本地代理服务器 (127.0.0.1:51103)\n   ↓\n5. 检查 Token 有效性\n   - 如果 access_token 过期 (< 10 分钟)\n   - 调用 /auth/refresh 刷新\n   ↓\n6. 初始化 Tauri WebView (用户界面)\n```",
+              "line_num": 166
+            },
+            {
+              "title": "2. 请求拦截和转发",
+              "node_id": "0019",
+              "summary": "### 描述\n\n该部分文档主要描述了AI请求在IDE与Google Cloud Code API之间的处理流程，具体涵盖以下主要步骤：\n\n1. **请求发送与接收**：\n   - IDE发送AI请求，请求被发送到本地地址`127.0.0.1:51103`。\n\n2. **请求拦截**：\n   - 请求被[Timo代理服务器]拦截。\n\n3. **请求处理流程**：\n   - **读取数据库配置**：代理服务器读取必要的数据库配置信息。\n   - **Token有效性检查**：检查`access_token`的有效性，如果有效期少于10分钟，则调用`/auth/refresh`接口刷新Token。\n   - **配额检查**：\n     - 检查`refill_force_stopped`标志，如果为`true`，则返回429错误（配额已用尽）。\n     - 检查`quota_check_requested`标志，如果需要续费，则调用`/refill/counts`接口。\n   - **构建上游请求**：构建请求的URL和Headers，包括`Authorization`、`Content-Type`、`X-Project-ID`和`X-Fingerprint`等。\n   - **转发请求**：将请求转发到Google Cloud Code API。\n   - **接收响应**：接收来自API的响应。\n   - **更新使用统计**：更新`prompt_tokens`、`candidates_tokens`、`total_tokens`、`cached_tokens`以及`claude_used`/`gemini_used`等使用统计信息。\n   - **返回响应**：将API的响应返回给IDE。\n\n整个流程确保了AI请求的合法性、配额控制以及使用统计的准确性。",
+              "line_num": 188
+            },
+            {
+              "title": "3. 自动续费机制",
+              "node_id": "0020",
+              "summary": "### 自动续费机制\n\n该部分文档主要描述了自动续费机制的工作流程，具体步骤如下：\n\n1. **配额检查触发**：当代理检测到 `quota_check_requested` 标志时，启动配额检查流程。\n2. **条件检查**：检查 `refill_force_stopped` 是否为 `false`，确保续费流程未被强制停止。\n3. **调用 API**：调用 `/refill/counts` API，传递包括 `session_token`、`device_id`、`client_version`、`request_id`、`model`、`prompt_tokens`、`candidates_tokens`、`total_tokens` 和 `cached_tokens` 等参数。\n4. **后端验证**：Timo 后端对 `refill_session_token` 进行有效性验证，检查用户账号状态 (`plan_active`) 和配额重置时间 (`quota_reset_at`)。\n5. **返回新配额**：后端返回新的配额信息，包括 `claude_quota`、`gemini_quota`、`quota_reset_at` 和账号信息。\n6. **更新本地数据库**：更新本地数据库中的 `quota_check_requested` 标志和统计信息。\n7. **转发请求**：继续将原始请求转发到 Google API。",
+              "line_num": 231
+            }
+          ]
+        },
+        {
+          "title": "Token 管理",
+          "node_id": "0021",
+          "prefix_summary": "## Token 管理",
+          "line_num": 272,
+          "nodes": [
+            {
+              "title": "Token 类型",
+              "node_id": "0022",
+              "summary": "### Token 类型\n\n| Token | 格式 | 有效期 | 用途 |\n|-------|------|--------|------|\n| `access_token` | JWT | 10 分钟 | Timo 后端 API 认证 |\n| `refresh_token` | UUID | 7 天 | 刷新 access_token |\n| `refill_session_token` | JWT | 未知 | 自动续费会话标识 |\n| `cached_access_token` | Base64 (加密) | 未知 | Google Cloud Code API 认证 |",
+              "line_num": 274
+            },
+            {
+              "title": "Token 刷新流程",
+              "node_id": "0023",
+              "summary": "### Token 刷新流程\n\n```\n[Token 刷新流程]\n   ↓\n1. 检测 access_token 即将过期\n   - access_token_expiry < 当前时间 + 10分钟\n   ↓\n2. 调用 /auth/refresh API\n   - 参数: refresh_token (UUID)\n   ↓\n3. 后端验证 refresh_token\n   ↓\n4. 返回新的 Token:\n   - access_token: 新的 JWT (有效期 10 分钟)\n   - access_expires_in: 600 秒\n   ↓\n5. 更新数据库:\n   - access_token\n   - access_token_expiry\n   ↓\n6. 更新请求头:\n   - Authorization: Bearer {new_access_token}\n```\n\n---",
+              "line_num": 283
+            }
+          ]
+        },
+        {
+          "title": "配额管理",
+          "node_id": "0024",
+          "prefix_summary": "## 配额管理",
+          "line_num": 310,
+          "nodes": [
+            {
+              "title": "配额类型",
+              "node_id": "0025",
+              "summary": "### 配额类型\n\n- **Claude 配额**: 用于 Anthropic Claude 模型\n- **Gemini 配额**: 用于 Google Gemini 模型",
+              "line_num": 312
+            },
+            {
+              "title": "配额追踪",
+              "node_id": "0026",
+              "summary": "### 配额追踪\n\n```python\nstats = {\n    \"total_requests\": 0,        # 总请求数\n    \"prompt_tokens\": 0,         # 提示词 Token 数\n    \"candidates_tokens\": 0,     # 候选 Token 数\n    \"total_tokens\": 0,          # 总 Token 数\n    \"cached_tokens\": 0,         # 缓存 Token 数\n    \"claude_used\": 0,           # Claude 使用次数\n    \"gemini_used\": 0            # Gemini 使用次数\n}\n```",
+              "line_num": 317
+            },
+            {
+              "title": "配额重置",
+              "node_id": "0027",
+              "summary": "### 配额重置\n\n- 每次调用 `/refill/counts` 后重置\n- 重置时间存储在 `quota_reset_at` 字段\n- 用户计划到期时间: `plan_expiry`\n\n---",
+              "line_num": 331
+            }
+          ]
+        },
+        {
+          "title": "安全机制",
+          "node_id": "0028",
+          "prefix_summary": "## 安全机制",
+          "line_num": 339,
+          "nodes": [
+            {
+              "title": "1. 设备指纹",
+              "node_id": "0029",
+              "summary": "### 1. 设备指纹\n\n**用途**: 防止账号共享和滥用\n\n**生成方式**:\n```python\nimport platform\nimport hashlib\n\ninfo = f\"{platform.system()}-{platform.node()}-{platform.machine()}\"\nfingerprint = hashlib.sha256(info.encode()).hexdigest()\n```\n\n**存储位置**:\n- `fingerprint`: 当前设备指纹\n- `legacy_fingerprint`: 旧版指纹\n- `original_fingerprint`: 原始指纹",
+              "line_num": 341
+            },
+            {
+              "title": "2. Token 过期检查",
+              "node_id": "0030",
+              "summary": "### 2. Token 过期检查\n\n- 自动刷新即将过期的 Token\n- 过期时间: access_token (10 分钟), refresh_token (7 天)",
+              "line_num": 359
+            },
+            {
+              "title": "3. 配额限制",
+              "node_id": "0031",
+              "summary": "### 3. 配额限制\n\n- 通过 `refill_force_stopped` 标志控制\n- 配额用尽时返回 429 错误",
+              "line_num": 364
+            },
+            {
+              "title": "4. 请求签名",
+              "node_id": "0032",
+              "summary": "### 4. 请求签名\n\n- 使用 `request_id` 和 `client_version` 验证\n- 客户端版本: 2.6.1",
+              "line_num": 369
+            },
+            {
+              "title": "安全风险 ⚠️",
+              "node_id": "0033",
+              "summary": "### 安全风险描述\n\n1. **Token 明文存储**:\n   - `access_token` 和 `refill_session_token` 以明文形式存储在 SQLite 数据库中。\n   - 数据库文件权限设置为 644，任何用户都可以读取。\n   - 建议使用 SQLCipher 对数据库进行加密以提高安全性。\n\n2. **本地代理无认证**:\n   - 本地代理在 127.0.0.1:51103 上运行，任何本地进程都可以访问。\n   - 建议在本地代理中添加 Token 或密钥验证机制以防止未经授权的访问。\n\n3. **配额滥用**:\n   - 自动续费机制可能导致配额被快速消耗。\n   - 建议实施速率限制和使用警告，以防止配额被滥用。\n\n4. **缓存 Token 加密未知**:\n   - `cached_access_token` 的加密算法未明确，需要进一步的二进制反编译分析以确定其安全性。",
+              "line_num": 374
+            }
+          ]
+        },
+        {
+          "title": "实现文件",
+          "node_id": "0034",
+          "summary": "## 实现文件\n\n本仓库包含以下实现文件：\n\n1. **timo-api-client.py** - 完整的 API 客户端实现\n2. **timo-proxy-server.py** - 本地代理服务器实现\n3. **timo-examples.py** - 实用示例代码\n4. **timo-tools.sh** - Bash 工具集\n5. **README.md** - 本文档\n\n---",
+          "line_num": 395
+        },
+        {
+          "title": "使用方法",
+          "node_id": "0035",
+          "prefix_summary": "## 使用方法",
+          "line_num": 407,
+          "nodes": [
+            {
+              "title": "1. 查看配置",
+              "node_id": "0036",
+              "summary": "### 1. 查看配置\n\n```bash\n./timo-tools.sh info\n```",
+              "line_num": 409
+            },
+            {
+              "title": "2. 检查 Token",
+              "node_id": "0037",
+              "summary": "### 2. 检查 Token\n\n```bash\n./timo-tools.sh token\n```",
+              "line_num": 415
+            },
+            {
+              "title": "3. 监控代理",
+              "node_id": "0038",
+              "summary": "### 3. 监控代理\n\n```bash\n./timo-tools.sh monitor\n```",
+              "line_num": 421
+            },
+            {
+              "title": "4. 启动代理服务器",
+              "node_id": "0039",
+              "summary": "### 4. 启动代理服务器\n\n```python\npython3 timo-examples.py 4\n```",
+              "line_num": 427
+            },
+            {
+              "title": "5. 抓包分析",
+              "node_id": "0040",
+              "summary": "### 5. 抓包分析\n\n```bash\n# 使用 mitmproxy 监控网络请求\nmitmproxy -p 8888\n\n# 配置系统代理\n# 系统设置 -> 网络 -> 高级 -> 代理\n# HTTP/HTTPS 代理: 127.0.0.1:8888\n```\n\n---",
+              "line_num": 433
+            }
+          ]
+        },
+        {
+          "title": "总结",
+          "node_id": "0041",
+          "prefix_summary": "## 总结",
+          "line_num": 446,
+          "nodes": [
+            {
+              "title": "核心机制",
+              "node_id": "0042",
+              "summary": "### 核心机制\n\nTimo 的\"无限续杯\"通过以下方式实现:\n\n1. **本地代理拦截**: 在 127.0.0.1:51103 拦截 IDE 的 AI 请求\n2. **配额检查**: 检查 `quota_check_requested` 标志\n3. **自动续费**: 调用 `/refill/counts` API 获取新配额\n4. **Token 注入**: 将 `cached_access_token` 注入到 Google API 请求\n5. **统计追踪**: 追踪 Token 使用情况并更新数据库\n6. **透明转发**: 将响应返回给 IDE，用户无感知",
+              "line_num": 448
+            },
+            {
+              "title": "技术亮点",
+              "node_id": "0043",
+              "summary": "### 技术亮点\n\n- **Tauri 架构**: Rust 后端 + WebView 前端，轻量高效\n- **本地代理**: 无需修改 IDE 配置，透明拦截\n- **自动管理**: Token 自动刷新，配额自动续费\n- **多模型支持**: Claude 和 Gemini 双模型配额管理",
+              "line_num": 459
+            },
+            {
+              "title": "改进建议",
+              "node_id": "0044",
+              "summary": "### 改进建议\n\n1. 加密 SQLite 数据库 (SQLCipher)\n2. 添加本地代理认证机制\n3. 实现证书固定 (Certificate Pinning)\n4. 添加速率限制和使用警告\n5. 增强错误处理和日志系统\n\n---\n\n**分析完成**: 2026-03-15\n**应用版本**: Timo v2.6.1\n**分析深度**: 深入（静态分析 + 数据库分析 + 符号表分析）",
+              "line_num": 466
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

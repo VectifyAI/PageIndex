@@ -1,0 +1,82 @@
+{
+  "doc_name": "Apex-多Provider-LLM路由实验",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\Apex-多Provider-LLM路由实验.md",
+  "structure": [
+    {
+      "title": "Apex 多 Provider LLM 路由实验",
+      "node_id": "0000",
+      "prefix_summary": "# Apex 多 Provider LLM 路由实验\n\n**日期**: 2026-03-21\n**项目**: `D:/projects/apex`\n**状态**: ✅ 全链路验证通过\n\n---",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "一句话总结",
+          "node_id": "0001",
+          "summary": "## 一句话总结\n\n在 SUPER 集群上搭建了 4 provider 并行 LLM 路由系统，100 worker 并发处理 200 任务仅需 61 秒，峰值 12 tasks/sec。从单 provider 0.2 QPS 提升到组合 16.6 QPS，**提升 80 倍**。",
+          "line_num": 9
+        },
+        {
+          "title": "架构",
+          "node_id": "0002",
+          "summary": "The partial document outlines an architecture diagram for a system with the following main points:\n\n1. **Strategic Layer**: At the top is \"Claude\" which serves as the strategic layer.\n2. **Decomposer**: Below Claude is the \"Decomposer\" (Doubao-Lite), which is free and can classify 17 files in 6 seconds.\n3. **apexd**: Following the Decomposer is \"apexd\", which uses SUPER, UDS + MessagePack, and handles memory scheduling.\n4. **Tiered Routing**: The architecture employs tiered routing, dividing the system into two main layers:\n   - **Bulk Layer**: Handles requests with a priority less than 100. It includes three components:\n     - volcengine/doubao-seed with a peak QPS of 6.4.\n     - minimax-m25-openai with a peak QPS of 2.4.\n     - minimax-m25-anthropic with a peak QPS of 3.1.\n   - **Premium Layer**: Handles requests with a priority of 100 or higher. It includes:\n     - yunyi/claude-sonnet-4.6 with a peak QPS of 4.8.",
+          "line_num": 13
+        },
+        {
+          "title": "核心数据",
+          "node_id": "0003",
+          "prefix_summary": "## 核心数据",
+          "line_num": 33,
+          "nodes": [
+            {
+              "title": "并发极限",
+              "node_id": "0004",
+              "summary": "### 并发极限\n\n| Provider | 峰值 QPS | 并发极限 | 429 墙 |\n|----------|---------|---------|--------|\n| volcengine/doubao-seed | **6.42** | 50 | 80 降速 |\n| yunyi/claude-sonnet-4.6 | **4.78** | 50 | 80 出 1 fail |\n| minimax/M2.5 [anthropic] | **3.07** | 80 | 未到墙 |\n| minimax/M2.5 [openai] | 2.38 | 50 | 80 撞墙 50% |",
+              "line_num": 35
+            },
+            {
+              "title": "100 Worker Fleet (200 任务)",
+              "node_id": "0005",
+              "summary": "### 100 Worker Fleet (200 任务)\n\n- **200/200** 完成，**61 秒**\n- 平均 3.3 tasks/sec，峰值 **12 tasks/sec**\n- 429 仅 5 次 (2.5%)，自动恢复\n- Provider 分布均匀：volcengine 63, minimax-openai 63, minimax-anthropic 54\n- Premium 路由 **100% 精准**：20 个 priority=200 任务全走 Claude Sonnet",
+              "line_num": 44
+            },
+            {
+              "title": "两层 Decomposer",
+              "node_id": "0006",
+              "summary": "### 两层 Decomposer\n\n| 阶段 | 耗时 | 成本 |\n|------|------|------|\n| Doubao-Lite 分类 17 文件 | 6.3s | 免费 |\n| 提交 13 任务到 SUPER | <1s | — |\n| 13 worker 并行执行 | 99s | 低 |",
+              "line_num": 52
+            },
+            {
+              "title": "渐进式扩容测试",
+              "node_id": "0007",
+              "summary": "### 描述\n\n该文档主要讨论了渐进式扩容测试的结果，涵盖了不同规模下的系统性能表现：\n\n1. **小规模测试（2 workers, 5 tasks）**：\n   - 耗时45秒，吞吐量为0.11任务/秒，完成率100%。\n   - 重点验证了路由的正确性，确保priority=200的任务被正确路由到yunyi-claude-sonnet，而bulk任务则由minimax处理。\n\n2. **中规模测试（4 workers, 20 tasks）**：\n   - 耗时180秒，吞吐量为0.11任务/秒，完成率100%。\n   - 观察到worker的负载分布为3/5/7/5，虽然不均匀但被认为是合理的，取决于任务的耗时。\n\n3. **大规模测试（100 workers, 200 tasks）**：\n   - 耗时61秒，吞吐量为3.3任务/秒，峰值达到12任务/秒，完成率100%。\n   - 观察到前19秒无输出（cold start），之后系统稳定在3-8任务/秒，结束时收敛。\n   - 429限流仅发生5次（2.5%），系统能够自动降级恢复，且无任务丢失。\n\n**关键观察**：\n- 系统在不同规模下均表现出良好的路由和负载处理能力。\n- 大规模测试中，尽管存在cold start现象，但系统能够快速恢复并保持稳定。\n- 限流机制有效，且对任务完成率影响较小。",
+              "line_num": 60
+            }
+          ]
+        },
+        {
+          "title": "瓶颈分析",
+          "node_id": "0008",
+          "summary": "## 瓶颈分析\n\n**LLM API 响应时间占 95%**，apexd 调度 <1ms 可忽略。\n\n提速杠杆（按 ROI）：\n1. 加 provider 数量 → 每加 1 个 endpoint ≈ +3-5 QPS\n2. 缩 prompt / 降 max_tokens → 响应减半\n3. 分层快筛→中审→精审 → 减少昂贵调用\n4. **Browser MCP**（下一步）→ 免费网页 LLM 作 provider",
+          "line_num": 74
+        },
+        {
+          "title": "关键发现",
+          "node_id": "0009",
+          "summary": "## 关键发现\n\n- 同一模型 Anthropic 格式比 OpenAI 格式快 **4 倍**\n- Latency-weighted 路由自适应有效：低延迟 provider 自动获得更多流量\n- 还有 5+ 家 provider 没上（DeepSeek/SiliconFlow/智谱/通义/Moonshot），全有免费额度\n- Chrome DevTools MCP 可以把免费网页 LLM 变成 provider（下一步实验）",
+          "line_num": 84
+        },
+        {
+          "title": "代码位置",
+          "node_id": "0010",
+          "summary": "## 代码位置\n\n- 路由器: `internal/llm/router.go` + `provider.go`\n- Worker v2: `cmd/apex-worker/main.go`\n- Provider 配置: SUPER `/etc/apex/providers.json`\n- 压测工具: `tools/probe_*.py`, `tools/fleet_stress.py`\n- Decomposer: `tools/decomposer.py`\n- 详细实验日志: `research/multi-provider-routing/EXPERIMENT_LOG.md`",
+          "line_num": 91
+        },
+        {
+          "title": "下一步",
+          "node_id": "0011",
+          "summary": "## 下一步\n\n- [ ] Chrome DevTools MCP：扫码登录免费 LLM 网页，每个 tab = 1 个 provider\n- [ ] 注册 DeepSeek + SiliconFlow + 智谱（免费额度），组合 QPS 翻倍到 30+\n- [ ] Decomposer 升级：支持 GitHub PR 自动拆分\n- [ ] 本地 apexd 联邦：WSL 运行 tier-1 编排，SUPER 运行 tier-2 执行",
+          "line_num": 100
+        }
+      ]
+    }
+  ]
+}

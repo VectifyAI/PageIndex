@@ -1,0 +1,50 @@
+{
+  "doc_name": "FORGE",
+  "source_path": "E:/knowledge/Knowledge\\Projects\\FORGE.md",
+  "structure": [
+    {
+      "title": "FORGE",
+      "node_id": "0000",
+      "prefix_summary": "# FORGE\n\n[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)\n[![License: BSD-2-Clause](https://img.shields.io/badge/license-BSD--2--Clause-green.svg)](LICENSE)\n[![Status: Research](https://img.shields.io/badge/status-research-orange.svg)]()\n\n**Framework for Orchestrated Reasoning in Generative chEmistry**\n\nFORGE is a compute-aware multi-agent consensus system for autonomous chemical discovery. It\norchestrates heterogeneous LLM agents over a dynamic task graph (CARG), reaches structured\nconsensus via the Chemical Consensus Protocol (CCP), and accumulates cross-session chemical\nknowledge through a domain-specific Ontology Memory — enabling reproducible, cost-bounded\nreasoning from molecular property prediction to retrosynthetic planning.\n\n---",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "Architecture",
+          "node_id": "0001",
+          "summary": "The partial document describes the architecture of the FORGE Pipeline, which includes several key components and processes. The pipeline begins with a Query that is passed to the CARG (Compute-Aware Reasoning Graph) Builder. The CARG Builder interacts with an Agent Pool, which consists of both Specialist Agents and Generalist Agents. The Agent Pool processes the information and feeds into a Budget Gate, which is controlled by the CCP (Chemical Consensus Protocol) Consensus. The CCP Consensus also interacts with the Ontology Memory, which receives input from Result Synthesis. This architecture outlines a structured flow of data and decision-making processes within the FORGE Pipeline.",
+          "line_num": 17
+        },
+        {
+          "title": "Quick Start",
+          "node_id": "0002",
+          "summary": "The partial document provides a quick start guide for installing and using a software tool called \"forge.\" It covers the following main points:\n\n1. **Installation Instructions**: \n   - Basic installation using `pip install -e .`\n   - Installation with GPU/ML extras using `pip install -e \".[gpu,models]\"`\n   - Full stack installation using `pip install -e \".[all]\"`\n\n2. **Usage Examples**:\n   - Running a query: `python -m forge \"分析阿司匹林的药物性质\"`\n   - Selecting execution mode with a budget: `python -m forge \"设计布洛芬类似物\" --mode consensus --budget 300`\n   - Inspecting the system components: \n     - Nodes: `python -m forge --nodes`\n     - Tools: `python -m forge --tools`\n     - Agents: `python -m forge --agents`\n   - Previewing a CARG graph without execution: `python -m forge \"反应预测：苯 + 氯气\" --dry-run`\n\n3. **Simplified Usage After Installation**:\n   - Running a query directly with `forge \"分析阿司匹林的药物性质\"`\n   - Checking the version with `forge --version`",
+          "line_num": 44
+        },
+        {
+          "title": "Project Structure",
+          "node_id": "0003",
+          "summary": "The partial document outlines the structure of the FORGE project, detailing its main directories and files. The project is organized into several key components:\n\n1. **forge/ Directory**: The core of the project, containing the following subdirectories and files:\n   - `__init__.py`: Indicates the version of the project.\n   - `__main__.py`: Serves as the command-line interface (CLI) entry point.\n   - **core/**: Houses the main components of the project:\n     - `orchestrator.py`: Manages the pipeline coordination.\n     - `carg.py`: Implements the Compute-Aware Reasoning Graph.\n     - `ccp.py`: Contains the Chemical Consensus Protocol.\n     - `types.py`: Defines shared data types.\n   - **agents/**: Includes various agent implementations:\n     - `registry.py`: Manages the agent template registry.\n     - `chemist.py`: Handles molecular property tasks.\n     - `retro.py`: Manages retrosynthesis tasks.\n     - `spectro.py`: Handles spectroscopy tasks.\n   - **tools/**: Contains tool-related functionalities:\n     - `registry.py`: Manages the tool registry.\n     - `rdkit_tools.py`: Provides RDKit wrappers.\n     - `pubchem.py`: Offers PubChem API tools.\n   - **memory/**: Handles memory and knowledge storage:\n     - `ontology.py`: Implements the Ontology Memory engine.\n     - `store.py`: Manages the persistent knowledge store.\n\n2. **tests/ Directory**: Contains the test cases for the project.\n\n3. **pyproject.toml**: Configuration file for the project.\n\n4. **README.md**: Provides documentation and information about the project.",
+          "line_num": 79
+        },
+        {
+          "title": "Three Core Contributions",
+          "node_id": "0004",
+          "summary": "The partial document describes three core contributions in the field of chemical reasoning and computation:\n\n1. **CARG (Compute-Aware Reasoning Graph)**: CARG is a system that dynamically breaks down chemical tasks into a directed acyclic graph of sub-problems. It assigns a cost estimate to each node and directs the execution to the most cost-effective capable agent. This approach reduces token usage by 40–60% compared to flat prompting for multi-step synthesis problems.\n\n2. **CCP (Chemical Consensus Protocol)**: CCP operates by running multiple specialist agents in parallel and combines their outputs using a domain-weighted voting scheme. This method penalizes physically implausible answers, such as invalid SMILES or violated valence rules. As a result, it increases the answer confidence from approximately 0.72 to 0.91 F1 on the ChEMBL benchmark suite.\n\n3. **Ontology Memory**: This is a session-persistent knowledge graph that links discovered molecular entities, reaction pathways, and property assertions to a lightweight OWL-compatible ontology. It allows subsequent queries to retrieve prior conclusions as grounded context, thereby eliminating redundant LLM calls and enabling multi-turn chemical reasoning across sessions.",
+          "line_num": 110
+        },
+        {
+          "title": "Citation",
+          "node_id": "0005",
+          "summary": "## Citation\n\n```bibtex\n@article{forge2026,\n  title   = {{FORGE}: Compute-Aware Multi-Agent Consensus for Autonomous Chemical Discovery},\n  author  = {FORGE Team},\n  journal = {arXiv preprint},\n  year    = {2026},\n  note    = {Submitted to NeurIPS 2026 / Nature Machine Intelligence},\n}\n```\n\n---",
+          "line_num": 131
+        },
+        {
+          "title": "License",
+          "node_id": "0006",
+          "summary": "## License\n\nBSD 2-Clause — see [LICENSE](LICENSE) for details.",
+          "line_num": 145
+        }
+      ]
+    }
+  ]
+}

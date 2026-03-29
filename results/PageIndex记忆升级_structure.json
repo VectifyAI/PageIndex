@@ -1,0 +1,50 @@
+{
+  "doc_name": "PageIndex记忆升级",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\PageIndex记忆升级.md",
+  "structure": [
+    {
+      "title": "PageIndex 记忆系统升级",
+      "node_id": "0000",
+      "prefix_summary": "# PageIndex 记忆系统升级\n\n> 用LLM推理式树索引替代向量搜索，提升跨session记忆检索精度",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "基本信息",
+          "node_id": "0001",
+          "summary": "## 基本信息\n- **来源**: https://github.com/VectifyAI/PageIndex\n- **本地代码**: `D:/projects/pageindex-local/`\n- **状态**: ✅ 已部署 (2026-03-20)\n- **LLM**: MiniMax-Text-01 (via `https://api.minimax.chat/v1`)",
+          "line_num": 5
+        },
+        {
+          "title": "已完成",
+          "node_id": "0002",
+          "summary": "## 已完成\n\n- [x] 本地安装 + MiniMax API 对接\n- [x] `pageindex/utils.py` tiktoken fallback 修复\n- [x] `pageindex/page_index_md.py` summary_token_threshold None 修复\n- [x] MCP Server (`mcp_server.py`) — 3工具: index_document, search, list_documents\n- [x] 注册到 `settings.json` (重启后 `mcp__pageindex__*` 可用)\n- [x] 记忆路由 6层→4层 (GitNexus + memU + PageIndex + notepad)\n- [x] 批量索引脚本 `scripts/batch_index_obsidian.py`",
+          "line_num": 11
+        },
+        {
+          "title": "已索引文档 (17个, ~200 nodes)",
+          "node_id": "0003",
+          "summary": "Partial document lists 17 indexed documents (~200 nodes) spanning multiple Obsidian workspaces, summarizing each project or research focus: memory, NVIDIA blueprints, open-source AI landscape, dev system/architecture, project panoramas like AI trading loop, expert-agent RAG, A2A dev, super-service map, agent memory survey, CLI-anything, review protocol, claw mesh, nadirclaw report, trading failures, and vibe coding.",
+          "line_num": 21
+        },
+        {
+          "title": "专家系统集成",
+          "node_id": "0004",
+          "summary": "## 专家系统集成\n\n- 197个专家人设 (`D:/projects/agency-agents-zh/`) → `expert_catalog.json`\n- 47个专家带 NVIDIA/Anthropic knowledge_refs\n- ExpertMemoryGateway: 人设加载 + 知识引用 + memU 飞轮",
+          "line_num": 43
+        },
+        {
+          "title": "AMM (Agent Memory Middleware)",
+          "node_id": "0005",
+          "summary": "## AMM (Agent Memory Middleware)\n\n完整实现在 `C:/Users/Administrator/a2a-dev/src/amm/`:\n- Redis L1/L2 双层缓存 + Bloom filter + singleflight\n- 事件驱动 Pub/Sub + invalidation\n- Neo4j 记忆图谱 (6节点/5关系)\n- Query Planner 8规则 + PlanExecutor 并行扇出\n- 44 tests, all passing\n\n设计文档: [[agent-memory-middleware]]",
+          "line_num": 49
+        },
+        {
+          "title": "关联",
+          "node_id": "0006",
+          "summary": "## 关联\n- [[memU迁移]] — memU 替换 OpenViking\n- [[agent-memory-middleware]] — AMM 完整设计\n- [[专家Agent-RAG]] — 专家飞轮系统\n- 记忆路由: `~/.claude/rules/common/memory-routing.md`\n\n#project #memory #rag #infrastructure",
+          "line_num": 60
+        }
+      ]
+    }
+  ]
+}

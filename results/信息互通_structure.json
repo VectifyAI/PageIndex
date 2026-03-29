@@ -1,0 +1,58 @@
+{
+  "doc_name": "信息互通",
+  "source_path": "E:/knowledge/Knowledge\\05-Protocols\\信息互通.md",
+  "structure": [
+    {
+      "title": "信息互通方案",
+      "node_id": "0000",
+      "prefix_summary": "# 信息互通方案\n\n> 解决飞书/微信/GitHub/Obsidian信息孤岛问题",
+      "line_num": 5,
+      "nodes": [
+        {
+          "title": "问题",
+          "node_id": "0001",
+          "summary": "## 问题\n- 飞书有会议纪要、文档、多维表格\n- Obsidian有项目架构、交易分析、知识图谱\n- GitHub有Issues、PRs、代码\n- 微信有日常聊天、快速消息\n- 这些互不联通，信息重复或丢失",
+          "line_num": 9
+        },
+        {
+          "title": "架构：Claude作为信息中枢",
+          "node_id": "0002",
+          "prefix_summary": "## 架构：Claude作为信息中枢\n\n```\n飞书 ←──飞书MCP──→ Claude ←──Obsidian MCP──→ Obsidian\n                      ↕\nGitHub ←──GitHub MCP──┘\n微信 ←──wxauto MCP(可选)\n```",
+          "line_num": 16,
+          "nodes": [
+            {
+              "title": "已接入",
+              "node_id": "0003",
+              "summary": "### 已接入\n- [x] Obsidian MCP (HTTPS 27124) ✅\n- [x] GitHub MCP ✅\n- [x] 微信 wxauto MCP (D:/projects/wxauto-mcp) ✅ — 需微信PC端开着\n- [ ] 飞书MCP — App已有(中央OpenClaw)，SSH断了取不到配置，待恢复",
+              "line_num": 25
+            },
+            {
+              "title": "信息流",
+              "node_id": "0004",
+              "summary": "### 信息流\n\n| 从 | 到 | 触发 | 操作 |\n|----|-----|------|------|\n| 飞书会议纪要 | Obsidian Daily Note | 每日整理 | Claude读飞书→提取要点→写vault |\n| Obsidian决策 | 飞书文档 | 需要分享时 | Claude读vault→同步飞书 |\n| GitHub Issues | Obsidian任务看板 | 每次session | Claude读issues→更新看板 |\n| Obsidian交易日志 | 飞书多维表格 | 收盘后 | Claude读session→写表格 |",
+              "line_num": 31
+            }
+          ]
+        },
+        {
+          "title": "飞书MCP配置（待办）",
+          "node_id": "0005",
+          "summary": "## 飞书MCP配置（待办）\n\n1. 去 open.feishu.cn 创建自建应用\n2. 开通权限: docx:document, drive:drive, wiki:wiki\n3. 拿到App ID + App Secret\n4. 运行: `curl -fsSL https://raw.githubusercontent.com/AlexAnys/feishu-mcp/main/setup.sh | bash`\n5. 整合两个MCP: 社区版(文档编辑) + 官方版(多维表格/搜索)",
+          "line_num": 40
+        },
+        {
+          "title": "团队协作模式",
+          "node_id": "0006",
+          "summary": "## 团队协作模式\n\n```\n你（澳洲）:\n  Claude Code → 开发/分析 → 写入Obsidian\n  Obsidian → 飞书同步 → 团队可见\n\n团队成员:\n  飞书文档/多维表格 → 直接看/编辑\n  不需要装Obsidian\n  不需要会用CLI\n```",
+          "line_num": 48
+        },
+        {
+          "title": "关联",
+          "node_id": "0007",
+          "summary": "## 关联\n- [[Memory-Nexus]] — 记忆汇聚层\n- [[复盘流程]] — 每日整理包含飞书信息提取\n- [[Agent-Instructions]] — AI中枢操作规范\n\n#protocol #collaboration #feishu",
+          "line_num": 61
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+{
+  "doc_name": "CFG",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\SillyTavern 官方文档\\核心概念\\CFG.md",
+  "structure": [
+    {
+      "title": "CFG公司",
+      "node_id": "0000",
+      "prefix_summary": "# CFG公司\n\n页面撰写者： kingbri\n\n贡献者：kingbri、Guillaume “Vermeille” Sanchez、AliCat",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/cfg/#what-is-it)这是什么？",
+          "node_id": "0001",
+          "prefix_summary": "## [#](https://docs.sillytavern.app/usage/core-concepts/cfg/#what-is-it)这是什么？\n\nCFG 或无分类器指导是一种用于帮助使提示的某些部分不那么突出或更突出的方法。",
+          "line_num": 13,
+          "nodes": [
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/cfg/#supported-backend-apis)支持的后端 API",
+              "node_id": "0002",
+              "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/cfg/#supported-backend-apis)支持的后端 API\n\n目前支持的后端是 oobabooga 的 textgen WebUI、NovelAI 和 TabbyAPI。NovelAI 有自己的 CFG 文档，您可以[在此处](https://docs.novelai.net/text/cfg.html)阅读\n\n警告：由于摄取超过 1 个提示，CFG 会增加 vram 使用量！如果 GPU 内存在生成提示时 CFG 打开时耗尽，请考虑减小上下文大小、使用较少的参数模型或完全关闭 CFG。\n\n---",
+              "line_num": 17
+            }
+          ]
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/cfg/#configuration)配置",
+          "node_id": "0003",
+          "prefix_summary": "The partial document provides an overview of the CFG (Configuration) settings in SillyTavern. It explains that accessing the CFG settings is similar to accessing author notes. The document includes images of the CFG panel and describes its four main dropdown options: Chat CFG, which limits CFG scale and prompts to the current chat; Character CFG, which limits CFG scale and prompts to a specific character; Global CFG, which globally overrides CFG scale and prompts (including model presets); and CFG Advanced Settings (formerly CFG Prompt Cascading), which combines prompts from the first three dropdowns and sets insertion depth. The document also notes that if the guidance scale is set to 1, no content will be sent, as this represents the CFG being \"off.\"",
+          "line_num": 25,
+          "nodes": [
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/cfg/#group-chats)群聊",
+              "node_id": "0004",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/cfg/#group-chats)群聊\n\n在群聊中，CFG 缩放面板如下所示：\n\n\nCFG面板gcpng\n\n主要变化是删除了字符 CFG，并在聊天 CFG 下拉列表中显示了一个名为的复选框。这允许使用当前角色的指导比例，而不是聊天 CFG 比例设置的任何比例。`Use Character CFG Scales`\n\n此功能的主要用途是根据每个角色的个人需求更改比例。\n\n此外，选中提示级联中的框将附加独立字符否定提示以及聊天提示（如果启用）。`Character Negatives`\n\n---",
+              "line_num": 56
+            }
+          ]
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/cfg/#concepts)概念",
+          "node_id": "0005",
+          "prefix_summary": "## [#](https://docs.sillytavern.app/usage/core-concepts/cfg/#concepts)概念",
+          "line_num": 71,
+          "nodes": [
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/cfg/#isnt-this-in-stable-diffusion)这不是在稳定扩散中吗？",
+              "node_id": "0006",
+              "summary": "The partial document explains the concept of Classifier-Free Guidance (CFG) in the context of Large Language Models (LLMs) and contrasts it with its application in Stable Diffusion. It describes CFG as working on the principle of \"fast blending,\" where it takes positive and negative prompts and mixes the differences between them to generate a response. The document includes a diagram to visualize this process, with red representing negative prompts, blue for neutral prompts, and purple for the blended result. It also provides references to a research paper and an audio version for further understanding of CFG and LLMs.",
+              "line_num": 73
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/cfg/#do-i-need-cfg-prompts)我需要 CFG 提示吗？",
+              "node_id": "0007",
+              "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/cfg/#do-i-need-cfg-prompts)我需要 CFG 提示吗？\n\n不！CFG 提示是完全可选的。只需调整上面的指导量表也有助于对响应产生影响，从而突出聊天和角色互动。`1`",
+              "line_num": 88
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/cfg/#what-makes-a-good-cfg-prompt)什么是好的 CFG 提示？",
+              "node_id": "0008",
+              "summary": "The partial document explains the concept of a CFG (Context-Free Grammar) prompt and its application in modifying character behavior in AI-driven conversations. It distinguishes CFG prompts from negative tags and embeddings used in Stable Diffusion. The document provides an example of using CFG prompts to enhance a character's dialogue by removing unwanted traits and emphasizing desired ones. Specifically, it demonstrates how to use negative prompts to eliminate negative emotions like sadness and depression, and positive prompts to accentuate positive emotions such as happiness and joy in a character named John. The document assumes prior knowledge of using PLists and Ali:Chat for character creation.",
+              "line_num": 92
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/cfg/#positive-prompts)正面提示",
+              "node_id": "0009",
+              "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/cfg/#positive-prompts)正面提示\n\n我在上一节中已经讨论过这个问题，但我想再谈谈这个问题。积极的提示用于进一步突出角色的某些部分。让我们再次以约翰为例。通过用积极的提示让他更快乐，约翰应该开始以一种比不包括积极提示更快乐的感觉输出对话。`[John's feelings: happy, joyful]`",
+              "line_num": 102
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/cfg/#but)但。。。",
+              "node_id": "0010",
+              "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/cfg/#but)但。。。\n\n这些只是根据一种特定字符格式的经验得出**的松散指南**。还有许多其他方法可以创建提示，您应该尝试使用这些方法。欢迎与其他用户分享您的想法！",
+              "line_num": 106
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/cfg/#guidance-scale)指导量表",
+              "node_id": "0011",
+              "summary": "### 指导量表\n\n- **定义与功能**: 指导量表表示CFG（配置）被禁用。当指导比例为1时，SillyTavern不会向后台发送任何内容。指导量表在不同程度上影响输出结果。\n- **反向效果**: 当指导量表小于1时，会产生相反的效果，因为此时否定提示作为主要提示被使用。例如，使用否定提示“[John's feelings: sad, depressed]”和正面提示“[John's feelings: happy, joyful]”以及指导等级0.8，会导致负面提示被强调，约翰的表现会比平时更悲伤。\n- **使用建议**: 建议从指导量表1.5开始，根据输出结果进行上下调整。",
+              "line_num": 110
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/cfg/#prompt-cascading)提示级联",
+              "node_id": "0012",
+              "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/cfg/#prompt-cascading)提示级联\n\n负数和正数可以在 CFG 类型之间级联（类型为每条聊天、每字符和全局覆盖）。有关详细信息，请参阅配置标头。",
+              "line_num": 122
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/cfg/#insertion-depth)插入深度",
+              "node_id": "0013",
+              "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/cfg/#insertion-depth)插入深度\n\n遵循基本规则：提示中的位置越低，它对响应的影响就越大。对于聊天，我建议使用默认深度，因为它对 SillyTavern 的其他组件非常灵活。`1`\n\n但是，如果要进行实验，则插入深度为 打开。但是，这些会极大地改变您的响应外观，因此不建议在此处使用提示级联！`0`",
+              "line_num": 126
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

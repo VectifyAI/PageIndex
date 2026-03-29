@@ -1,0 +1,144 @@
+{
+  "doc_name": "二次元角色卡通渲染—面部篇（上）",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\二次元角色卡通渲染—面部篇（上）.md",
+  "structure": [
+    {
+      "title": "一、面部光影",
+      "node_id": "0000",
+      "prefix_summary": "## 一、面部光影",
+      "line_num": 13,
+      "nodes": [
+        {
+          "title": "1.1 写实光照的软阴影与二分光照的硬阴影",
+          "node_id": "0001",
+          "summary": "### 1.1 写实光照的软阴影与二分光照的硬阴影\n\n该部分讨论了写实光照和二分光照在阴影表现上的差异。写实光照由于其物理准确性，符合日常视觉习惯，因此不需要对面部阴影进行额外修正。然而，在强调边缘刻画的二分光影中，面部阴影的问题变得突出，因为未加干预的阴影形态过于凌乱，与高度概括的卡通表现风格不符。通过对比「GUILTY GEAR Xrd -SIGN-」中对面部法线处理前后的效果，可以明显看出对面部阴影进行修改的必要性，以实现更和谐的视觉效果。",
+          "line_num": 15
+        },
+        {
+          "title": "1.2 阴影概括",
+          "node_id": "0002",
+          "summary": "### 1.2 阴影概括\n\n在做阴影修正之前，第一步先来确定什么样的光影符合卡通的表现特征，下面从动画和现实表现入手，盘点一下常规的面部阴影表现。",
+          "line_num": 27
+        },
+        {
+          "title": "1.2.1 简化的阴影",
+          "node_id": "0003",
+          "summary": "The partial document discusses simplified shadow techniques in animation. It describes two main approaches: 1) Removing shadows entirely except for hair, which is common in low-contrast lighting but can make faces appear flat, often necessitating the addition of details like nose lines and blush. 2) Adding shadows or highlights to the edges of the face in high-contrast lighting or when emphasizing the character's exposure to light, with smooth edges that follow the facial contours. The document includes visual examples for both techniques.",
+          "line_num": 31
+        },
+        {
+          "title": "1.2.3 特征区域",
+          "node_id": "0004",
+          "summary": "### 1.2.3 特征区域\n\n特殊区域的光影表达，面部主要集中在鼻尖，眼底，唇低，眉头，这些区域是面部高光与阴影的表现的密集区，常常会画上高光或阴影等细节，有时也用于情绪的表现。下图也列举了部分动画中的表现。\n\n\n特征区域图示",
+          "line_num": 40
+        },
+        {
+          "title": "1.2.2 伦勃朗光（Rembrandt lighting）",
+          "node_id": "0005",
+          "summary": "### Description of the Partial Document\n\nThe partial document focuses on Rembrandt lighting, a common lighting setup in portrait photography. It highlights the key characteristic of this lighting technique, which is the emphasis on the contrast between light and shadow on the face, creating a high-contrast light ratio. In cartoon and animation, this lighting is often used to create shadow outlines, particularly a triangular highlight on one cheek. The document explains that in rendering, this triangular light is formed by a combination of self-shadowing and self-projection on the face. It also mentions that directly using light to create this shadow in engines is avoided due to issues with shadow accuracy and the difficulty in controlling the dynamic changes of the shadow. The document further discusses how this facial light and shadow characteristic is used as a reference for handling the triangular area in animation, especially when the character is lit from the side.",
+          "line_num": 47
+        },
+        {
+          "title": "1.2.3 其他形状",
+          "node_id": "0006",
+          "summary": "### 1.2.3 其他形状\n\n当然面部光影的表现形式有很多，对于类似下图的特殊形状，这里就不做过多的展开了。\n\n\n特殊形态展开",
+          "line_num": 61
+        },
+        {
+          "title": "1.2.4 动态变化",
+          "node_id": "0007",
+          "summary": "### 描述\n\n该部分文档主要讨论了在3D动画中还原面部阴影的挑战，特别是光照的动态变化。文档指出，动画中的阴影是逐帧调整的，而模型上的计算需要遵循一定的规则，因此需要概括出通用的变化特征，并使用各种技巧来实现目标。文档中提到了几部动画作品，如《奇蛋物语》和《Re：从零开始的异世界生活 第二季 后半》，并展示了这些动画中的动态变化示例。此外，文档还推荐了画师JaneMere和光学核心的研究，特别是光学核心的《动画阴影化简》，该作品不仅概括了面部特征，还涵盖了动画角色的整体阴影特征，具有很高的参考价值。",
+          "line_num": 70
+        }
+      ]
+    },
+    {
+      "title": "二、渲染制作",
+      "node_id": "0008",
+      "prefix_summary": "## 二、渲染制作\n\n为解决3D中面部阴影问题而提出的方案十分丰富。因为法线和阴影计算直接相关，所以最常见的方式就是修改法线，这种方式的资料比较容易查找，除此之外还有SDF记录光照数据、Matcap等方式，这里会逐一分析这三种方式。\n\n首先是不做调整的阴影效果：\n\n，时长00:08\n\n2.1 基于法线的修改",
+      "line_num": 94,
+      "nodes": [
+        {
+          "title": "2.1.1 包裹体法线",
+          "node_id": "0009",
+          "summary": "### 2.1.1 包裹体法线\n该方法通过使用球形或简单结构的包裹体法线映射到面部法线上，使面部呈现包裹体的阴影形状。操作简单，但效果有限，支持的场景不多，应用不广泛。\n\n### 2.1.2 模型拓扑+法线修改\n这是《罪恶装备》中分享的一种方法，被称为法线修改的增强版。它通过修改模型拓扑结构以匹配所需的阴影形状，并在此基础上调整法线，从而实现理想的阴影效果。该方法在《蓝色协议》中也有应用，但法线调整过程繁琐耗时，且可能导致阴影在形态之间快速切换，产生跳变现象。",
+          "line_num": 104
+        },
+        {
+          "title": "2.1.3 其他方式的修改",
+          "node_id": "0010",
+          "summary": "### 2.1.3 其他方式的修改\n\n也有一些类似的法线修改方式在此一并贴出，不过由于修改后的法线不具有连续性，基本都会有上述阴影形态跳变的问题。\n\n拉平的法线，与上述拓扑+修改的方式类似，不过是将法线向几个方向拉平，以此来调整阴影。\n\n\nhttps://twitter.com/Yoolies/status/1232345380991438855\n\n法线贴图，以绘制贴图的方式修改法线。\n\n\nhttps://note.com/sfna32121/n/n8d46090005d1",
+          "line_num": 137
+        },
+        {
+          "title": "2.2 距离场阴影",
+          "node_id": "0011",
+          "summary": "### 描述\n\n该部分文档主要讨论了**有向距离场（SDF）**在面部阴影渲染中的应用及其优缺点：\n\n1. **应用领域**：SDF广泛应用于字体渲染和RayMarching中，面部阴影上的应用最早可能来自mihoyo的技术分享，并在《原神》中有所应用。\n\n2. **工作原理**：通过记录光照数据的距离场，根据光源方向生成相应的阴影形状。这种方法允许完全自定义阴影形态，并在不同形态之间实现自然的过渡。\n\n3. **优势**：\n   - 可自定义阴影形态。\n   - 不同形态之间过渡自然。\n\n4. **存在的问题**：\n   - 为了保持边缘信息的准确性，不建议对距离场图进行压缩。\n   - 对软阴影的支持较差，表现为色阶感和在曲率不同与UV拉伸区域出现软硬阴影交接的边缘。\n   - 缺少光照方向Y轴的变化，虽然可以通过多张图拟合全向光照，但大多数情况下单张图已经足够。\n\n5. **相关资源**：文档中提到了知乎上关于面部距离场阴影的讨论，并提供了相关链接以供进一步阅读。",
+          "line_num": 151
+        },
+        {
+          "title": "2.2.1 距离场阴影原理",
+          "node_id": "0012",
+          "summary": "### 2.2.1 距离场阴影原理\n\n该部分主要介绍了基于距离场贴图的阴影渲染技术。核心内容包括：\n\n1. **基本原理**：利用距离场贴图记录单方向光照信息，通过计算面部向前的向量(forward)、面部向左的向量(left)和光照向量(L)来模拟阴影效果。\n\n2. **计算步骤**：\n   - 首先屏蔽掉光照向量的Y轴，得到水平方向的光照向量(lightDirH)。\n   - 通过lightDirH与forward的点积计算光照衰减阈值(lightAtten)，用于确定光照在距离场贴图中的位置。\n   - 通过left与L的点积确定光照方向在面部的左右位置，并使用sign函数决定是否需要翻转距离场贴图采样方向。\n\n3. **代码实现**：展示了具体的着色器代码，包括：\n   - 计算lightDirH和lightAtten\n   - 确定采样方向filpU\n   - 使用tex2D函数进行贴图采样\n   - 通过step函数生成最终的阴影效果\n\n4. **补充说明**：提供了详细的技术解析文章链接，解释了更深入的实现细节和优化方法。",
+          "line_num": 174
+        },
+        {
+          "title": "2.2.2 制作方式",
+          "node_id": "0013",
+          "summary": "### 2.2.2 制作方式\n\n该部分主要介绍了三种生成三渲二面部阴影贴图的方法：\n\n1. **帧间插值法**：\n   - 过程：先绘制不同光照角度下的面部阴影形状，然后使用算法生成每张光照图的SDF（符号距离场），通过插值混合生成最终图像。\n   - 参考资料：雪涛的卡通脸部阴影贴图生成与渲染原理文章。\n\n2. **单帧SDF生成（等高线填充法）**：\n   - 过程：利用CSP等高线填充工具，先绘制不同光照角度下的面部阴影边界线条，然后使用CSP的等高线填充功能生成SDF。\n   - 参考资料：哔哩哔哩上的CSP等高线填充工具教程。\n\n3. **曲线融合变形法**：\n   - 过程：在Houdini中通过曲线融合变形算法（curve morph algorithm）拟合等高线的变化过程，同时生成高度图，获得SDF。\n   - 参考资料：五行精灵关于三渲二脸部阴影曲线的知乎文章。",
+          "line_num": 198
+        },
+        {
+          "title": "2.2.3 效果",
+          "node_id": "0014",
+          "summary": "### Description of Partial Document\n\nThe document discusses the application and benefits of using Signed Distance Fields (SDF) in computer graphics, specifically for rendering facial features and shadows. It mentions a simplified method for creating SDFs without triangular regions and demonstrates its application with a short video clip. Additionally, the document introduces a technique presented at the Cygames Tech Conference for the game \"Uma Musume,\" which combines SDF with corrected normals to achieve more realistic facial shading. This approach is particularly advantageous when dealing with deformable facial regions, such as around the eyes and mouth, as it prevents shadow boundaries from stretching during facial animations. The document includes a link to a video illustrating this technique.",
+          "line_num": 232
+        },
+        {
+          "title": "2.3.1 还原",
+          "node_id": "0015",
+          "summary": "### Description of Partial Document\n\nThe partial document focuses on the implementation and explanation of a shading technique used in rendering, likely for facial features such as the nose and forehead. The main points covered are:\n\n1. **Overview of the Process**: The document outlines a simplified approach to achieving a specific shading effect, despite the original source not providing detailed calculations. It acknowledges the presence of additional regions (forehead and nose) but excludes them due to unclear application.\n\n2. **Code Breakdown**: The core of the document is a code snippet that demonstrates the shading calculations. Key components include:\n   - **Shadow Ramp**: Utilizes a texture to determine shadow intensity.\n   - **Light Direction**: Calculates the normalized light direction vector.\n   - **Dot Product**: Computes the dot product between the normal and light direction to determine light intensity.\n   - **Area Calculations**: Determines the areas for triangular and nose regions using specific formulas and saturate functions.\n   - **Light Attenuation**: Calculates light attenuation using a combination of dot products, modulo operations, and power functions.\n   - **UV Masking**: Applies a mask based on the UV coordinates and light direction to control the application of shading.\n   - **Shadow Computation**: Combines face shadow, triangular area light, and nose area light/shadow to produce the final shadow value.\n\n3. **SDF (Signed Distance Field) Integration**: The document explains how SDF values are used in conjunction with the light attenuation results. It describes a mapping strategy where different regions (triangular and nose) are assigned specific threshold ranges and then remapped to a [0, 1] interval for further processing.\n\n4. **Parameter Control**: The document mentions the use of a Desmos graph (linked) to visualize and control the remapping of the light attenuation results, indicating a need for precise parameter tuning.\n\n5. **Final Shadow Blending**: The document concludes by describing how the final shadow is a combination of the face shadow, triangular area light, and nose area light/shadow, using min and max functions to blend these components.\n\nOverall, the document provides a technical explanation of a shading algorithm, emphasizing the interplay between light direction, shadow mapping, and area-based masking to achieve a nuanced shading effect.",
+          "line_num": 254
+        },
+        {
+          "title": "2.3.2 效果",
+          "node_id": "0016",
+          "summary": "### 描述\n\n该文档片段主要讨论了游戏图形渲染中的两种技术及其应用：\n\n1. **还原效果**：\n   - 文档首先提到了一种还原效果，指出尽管存在一些偏差，但整体感觉是正确的。\n   - 提到这种效果的时长为00:06。\n\n2. **Matcap技术**：\n   - 文档详细介绍了Matcap技术，引用了《七つの大罪 光と闇の交戦 : グラクロ》中的技术分享内容。\n   - 解释了使用Matcap的原因：在动画演出中，非现实的阴影设定更重视情感传达而非物理事实。\n   - 强调了Matcap在卡通画面中的应用优势，即在非动态光照下，Matcap能够简单且有效地表现角色的光影结构切分。\n   - 文档还提到在PPT中展示了Matcap的代码示例，并使用顶点色来屏蔽不需要的效果。\n   - 补充说明了顶点色的常见应用，如面部阴影修正、屏蔽AO、记录轮廓粗细、曲率与阴影Mask等。\n   - 文档引用了《崩坏3rd》和《新樱花大战》的开发案例，进一步说明顶点色的应用。",
+          "line_num": 296
+        }
+      ]
+    },
+    {
+      "title": "三、扩展",
+      "node_id": "0017",
+      "prefix_summary": "## 三、扩展",
+      "line_num": 330,
+      "nodes": [
+        {
+          "title": "3.1 头发投影",
+          "node_id": "0018",
+          "summary": "### 3.1 头发投影\n\n卡通角色不管面部的阴影如何，头发在面部的投影基本是不会缺的，不过因为还原起来比较复杂，这个细节又比较不明显，所以大多数游戏中都是忽略这个效果的。\n\n\nたんもし\n\n相关内容已经有人分析并且实践的非常全面了，这里同样也是给出跳转链接。\n\n流朔：【Unity URP】以Render Feature实现卡通渲染中的刘海投影\n\n*https://zhuanlan.zhihu.com/p/232450616*",
+          "line_num": 332
+        },
+        {
+          "title": "3.2 SDF扩展",
+          "node_id": "0019",
+          "summary": "### 3.2 SDF扩展\n\n有了距离场的思路实际上可以扩展出很多内容，下面用距离场实践一下鼻尖的高光。",
+          "line_num": 345
+        },
+        {
+          "title": "3.2.1 鼻尖高光",
+          "node_id": "0020",
+          "summary": "### 3.2.1 鼻尖高光\n\n该部分主要讨论了鼻尖高光的实现方法及其相关技术细节。首先，介绍了鼻尖高光的应用范围，即鼻尖左右两侧，并展示了在对应UV位置上制作的距离场图。接着，描述了如何利用面部距离场贴图，通过简单的数学运算来实现鼻尖高光效果。具体步骤包括：\n\n1. **uvMask的计算**：用于屏蔽掉另一侧的高光，确保同一时刻只有一侧高光可见。\n2. **lightAtten的计算**：模拟光在面部不同角度下的衰减效果，使其在侧光时为0，正光与背光时为1。通过调整计算方式，将光的方向与面部法线的关系映射到[0, 1]的范围内。\n3. **noseSDF与noseSpecular的计算**：利用距离场贴图和lightAtten来计算鼻尖的高光强度。\n\n此外，还提到可以通过修改高光变化的速度和过渡边缘的软硬程度来优化效果，例如使用`pow`函数改变灰阶变化速度，或使用`smoothstep`函数使过渡更加平滑。最后，展示了鼻尖高光的效果图。",
+          "line_num": 349
+        },
+        {
+          "title": "3.3.1 视场(Field of View)的影响",
+          "node_id": "0021",
+          "summary": "### 3.3.1 视场(Field of View)的影响\n\n先来解释一下视场，视场即FOV，在摄影中指相机可以接收影像的角度范围，也可以称为视野。\n\n由于显示比例的原因，FOV在水平与垂直方向上的数值不同，以下未作说明的情况下默认为水平FOV。\n\nFOV越大视野越宽，透视的变形就越大，下图可以很好的展示这种特征。\n\n\nHow Focal Length Affects Viewing Angle",
+          "line_num": 382
+        }
+      ]
+    }
+  ]
+}

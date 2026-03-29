@@ -1,0 +1,32 @@
+{
+  "doc_name": "WinForge",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\WinForge.md",
+  "structure": [
+    {
+      "title": "WinForge — Windows优化工具",
+      "node_id": "0000",
+      "prefix_summary": "# WinForge — Windows优化工具\n\n> Rust单exe，benchmark-driven",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "基本信息",
+          "node_id": "0001",
+          "summary": "## 基本信息\n- **GitHub**: 2233admin/WinForge (public)\n- **语言**: Rust\n- **状态**: Issues阶段 (#1-#10)",
+          "line_num": 5
+        },
+        {
+          "title": "设计",
+          "node_id": "0002",
+          "summary": "## 设计\n- 单exe分发\n- benchmark驱动优化\n- gaming + AI 双模式\n- Labels: architecture/benchmark/performance/privacy/network/gpu/debloat/power",
+          "line_num": 10
+        },
+        {
+          "title": "可复用模式",
+          "node_id": "0003",
+          "summary": "## 可复用模式\n- **benchmark-driven开发**: 改动前后必须有数据对比 → 适用于任何性能优化项目\n- **Rust单binary**: 和ZeroClaw同理\n\n#project #rust #windows #performance #reusable",
+          "line_num": 16
+        }
+      ]
+    }
+  ]
+}

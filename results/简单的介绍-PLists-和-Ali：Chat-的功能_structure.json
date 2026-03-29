@@ -1,0 +1,70 @@
+{
+  "doc_name": "简单的介绍 PLists 和 Ali：Chat 的功能",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\SillyTavern 官方文档\\简单的介绍 PLists 和 Ali：Chat 的功能.md",
+  "structure": [
+    {
+      "title": "大约",
+      "node_id": "0000",
+      "summary": "## 大约\n\n本介绍的目的是让您基本了解 PLists 和 Ali：Chat 的功能、它们是如何制作的以及它们为何如此出色。仅此介绍即可作为迷你指南，其中包含的信息应该足以让您开始编写自己的角色。下一章将更深入地了解角色创建过程。",
+      "line_num": 7
+    },
+    {
+      "title": "**阿里：聊天**",
+      "node_id": "0001",
+      "prefix_summary": "## **阿里：聊天**",
+      "line_num": 11,
+      "nodes": [
+        {
+          "title": "**什么是Ali：Chat？**",
+          "node_id": "0002",
+          "summary": "### **什么是Ali：Chat？**\n\nAli：Chat是AliCat基于LLM的各种基础知识创建和推广的一种字符描述格式化方法，使其成为编写字符卡的最佳方式之一。这个概念很简单;你通过让角色通过示例对话描述自己来强化角色的特征。这可以通过采访式的形式（用户问题、角色答案）或角色信息示例来完成。它建立了一种模式，用于教模型如何作为您的角色响应您的信息。",
+          "line_num": 13
+        },
+        {
+          "title": "**阿里基础：聊天**",
+          "node_id": "0003",
+          "summary": "### **阿里基础：聊天**\n\n该文档强调Ali:Chat格式的灵活性和创造性，反对提供固定模板以免限制用户想象力。文档指出，Ali:Chat的核心是通过示例对话来强化角色特征，而这些特征因角色和创作者而异。创作者可以自由选择角色的各种特点，如喜好、特殊能力等，来构建角色。文档鼓励创作者发挥创意，不要盲目模仿他人，以充分利用Ali:Chat格式提供的无限可能性。",
+          "line_num": 17
+        },
+        {
+          "title": "**采访式阿里：聊天示例、分解和解释**",
+          "node_id": "0004",
+          "summary": "### **采访式阿里：对话示例、分解和解释**\n\n这份文档主要讨论了如何使用采访式对话来训练AI模型理解角色特征，并详细介绍了以下要点：\n\n1. **采访式对话示例**：文档展示了一个名为伊甸园的角色通过采访式对话进行自我描述的例子。这个对话不仅包含角色的直接回答，还通过动作和语气等细节丰富了角色的形象。\n\n2. **信息丰富性**：通过一个简单的对话示例，文档展示了如何传达角色的重要性格特征、次要性格特征、衣着、身体特征、举止、说话模式、说话方式、生活故事/传说以及语气等。\n\n3. **Ali:Chat方法**：这是一种将纯文本描述和示例对话结合起来的训练方法。通过采访的形式描述角色，可以同时向模型提供角色的信息和教它如何模仿角色的写作风格。\n\n4. **灵活的结构**：文档强调Ali:Chat不一定需要遵循“用户问题，角色响应”的固定结构。可以包含多个角色之间的互动，甚至可以将自己作为用户角色包含在内。此外，还可以从电影、动漫、书籍或漫画中复制粘贴对话，只要这些内容有助于强化角色的特征。\n\n5. **投入与产出**：文档指出，训练效果取决于所投入的内容，强调了多样化输入的重要性，以获得更全面和准确的角色模型。",
+          "line_num": 23
+        }
+      ]
+    },
+    {
+      "title": "**PLists（英语：PLists）**",
+      "node_id": "0005",
+      "prefix_summary": "## **PLists（英语：PLists）**",
+      "line_num": 39,
+      "nodes": [
+        {
+          "title": "**什么是PLists，为什么它如此有用？**",
+          "node_id": "0006",
+          "summary": "### **什么是PLists，为什么它如此有用？**\n\n文档主要讨论了PLists的概念及其在游戏开发中的重要性。PLists是一种用于列出角色性格特征的方法，被认为是目前最有效的标记方式。它帮助创作者在编写角色时，能够高效地强化角色的特征，同时保持角色的自然说话方式，避免角色听起来像是在背诵维基百科页面。文档还澄清了“PLists”一词的含义，指出它既是格式的名称，也是“PList”的复数形式，代表多个特征列表。",
+          "line_num": 41
+        },
+        {
+          "title": "**PList 示例和细分**",
+          "node_id": "0007",
+          "summary": "### **PList 示例和细分**\n\n该文档主要介绍了 PList 的概念、功能和使用方法：\n\n1. **PList 的定义与用途**：\n   - PList 是一个特征列表，用于指导角色扮演的方向。\n   - 它可以包含任意数量的类别，如角色的外观、性格、扮演风格等。\n\n2. **PList 的内容**：\n   - 可以添加指标来描述角色扮演的具体要求，如恐怖、幻想、色情标签等。\n   - 可以包含场景、书名、电影名称、动漫名称、地点等元素。\n   - 可以指定作者或作品，以指导模型从特定写作风格或故事中汲取灵感。\n   - 还可以包含其他角色、物品或概念。\n\n3. **PList 的格式**：\n   - 使用分号（;）分隔每个类别。\n   - 使用冒号（:）分隔类别名称和其具体内容。\n\n4. **使用建议**：\n   - 保持特征简短，避免浪费代币。\n   - 只在必要时使用关键字，避免不必要的冠词（如“a”或“the”）。\n   - 灵活运用 PList 以确保角色扮演符合预期方向。",
+          "line_num": 49
+        },
+        {
+          "title": "**格式化 PLists 特征的不同方法**",
+          "node_id": "0008",
+          "summary": "### **格式化 PLists 特征的不同方法**\n\n该文档主要介绍了如何通过多种方式格式化 PList 以保存不同类型的描述符，具体包括：\n\n1. **单一描述符的情况**：\n   - 使用“事物（描述符）”的格式，例如“头发（红色）”。\n\n2. **多个独特描述符的情况**：\n   - 使用“事物（描述符，描述符）”的格式，例如“体质（优雅、性感、高大）”。\n\n3. **多个事物共享一个或多个描述符的情况**：\n   - 使用“事物/事物/事物（描述符，描述符）”的格式，例如“耳环/项链/戒指（金色，昂贵）”。\n\n4. **一个词可以分配给多个事物的情况**：\n   - 使用“事物描述符/描述符/描述符”的格式，例如“喜欢酒/唱歌/表演”。\n\n5. **提示与建议**：\n   - 建议保持格式的一致性，以便模型能够更好地学习模式。\n   - 讨论了使用宽泛类别与细分类别的方法，指出细分类别可以提高准确性，但会消耗更多代币。\n   - 建议根据模型的智能程度调整类别的细化程度，智能模型可以处理更广泛的类别。",
+          "line_num": 60
+        }
+      ]
+    },
+    {
+      "title": "**在继续之前要记住一些事情**",
+      "node_id": "0009",
+      "summary": "The partial document emphasizes the flexibility and creativity inherent in using Ali:Chat with PLists. It highlights that there is no single \"correct\" or \"perfect\" way to use Ali:Chat, encouraging users to experiment and be imaginative. The document stresses the importance of learning through example dialogues, which can vary based on the role and creator. It encourages users to be passionate and fearless in trying new approaches with their dialogue and PList writing, suggesting that the best creators are those who embrace the format's infinite possibilities rather than blindly copying others.",
+      "line_num": 92
+    }
+  ]
+}

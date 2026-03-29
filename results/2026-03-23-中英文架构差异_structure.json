@@ -1,0 +1,70 @@
+{
+  "doc_name": "2026-03-23-中英文架构差异",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\Sprachwelt\\2026-03-23-中英文架构差异.md",
+  "structure": [
+    {
+      "title": "2026-03-23 — 中英文架构差异（已知 bug）",
+      "node_id": "0000",
+      "prefix_summary": "# 2026-03-23 — 中英文架构差异（已知 bug）\n\n> 当前代码假设中英文结构相同。这是错的。本文记录具体影响和修复方向。",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "根本差异",
+          "node_id": "0001",
+          "summary": "The document presents the fundamental differences between Chinese (Mandarin) and English by comparing their writing systems, word segmentation, grammar, expression of emphasis and contrast, question formation, and markers for contradictions. It highlights the distinctive features such as Chinese ideographic characters, flexible syntax, and use of imagery and adverbs versus English alphabetic spelling, strict tense/voice structures, and reliance on logical connectors and grammatical constructions.",
+          "line_num": 11
+        },
+        {
+          "title": "代码中的具体 bug",
+          "node_id": "0002",
+          "prefix_summary": "## 代码中的具体 bug",
+          "line_num": 22,
+          "nodes": [
+            {
+              "title": "Bug 1: word_jaccard() 对中文无效",
+              "node_id": "0003",
+              "summary": "Bug 1 addresses the word_jaccard function in `crates/tension/src/dynamics.rs`, which uses `split_whitespace()` and therefore fails for Chinese because Chinese lacks whitespace-based tokenization. This causes entire sentences like “为什么家里有消毒水味” and “为什么家里有消毒液味” to be treated as single words, resulting in a Jaccard similarity of 0 despite their near-identical meaning. As a result, Chinese resurrected tension detection (threshold >0.85) and FieldDynamics additive enhancement do not work for Chinese demands, allowing pseudo-resurrections and preventing similar Chinese tensions from reinforcing each other. The proposed fix is to use a quick character-level bigram Jaccard fallback for Chinese (Phase 0) and later integrate the `jieba-rs` tokenizer so that Chinese uses proper segmentation while English continues with `split_whitespace` (Phase 1).",
+              "line_num": 24
+            },
+            {
+              "title": "Bug 2: check_closure_covered() 对中文无效",
+              "node_id": "0004",
+              "summary": "### Bug 2: check_closure_covered() 对中文无效\n\n**文件:** `crates/audit/src/lib.rs:199-235`\n\n```rust\nlet demand_words: Vec<String> = tension.definition.demand\n    .to_lowercase()\n    .split_whitespace()\n    .filter(|w| w.len() > 2)\n    .collect();\n// 要求 matching >= 3\n```\n\n**问题:** 中文 demand 按空格分只有 1 个 \"word\"，永远 < 3。closure 覆盖对中文永远判定失败。\n\n**修复方向:** 中文走 character overlap 或 substring matching，而非 word matching。",
+              "line_num": 46
+            },
+            {
+              "title": "Bug 3: check_act_covered() 的 Converge 检测对中文无效",
+              "node_id": "0005",
+              "summary": "### Bug 3: check_act_covered() 的 Converge 检测对中文无效\n\n**文件:** `crates/audit/src/lib.rs:131-153`\n\n```rust\ndemand_lower.split_whitespace()\n    .any(|w| w.len() > 3 && text_lower.contains(w))\n```\n\n**问题:** 中文 demand 不含空格，`w.len() > 3` 在 UTF-8 下中文字符是 3 字节，所以单个汉字刚好被过滤掉。",
+              "line_num": 63
+            },
+            {
+              "title": "Bug 4: OpenNew 检测的 overlap_ratio 对中文无效",
+              "node_id": "0006",
+              "summary": "### Bug 4: OpenNew 检测的 overlap_ratio 对中文无效\n\n**文件:** `crates/audit/src/lib.rs:169-194`\n\n同样依赖 `split_whitespace()`，中文 overlap 计算失真。",
+              "line_num": 74
+            }
+          ]
+        },
+        {
+          "title": "不受影响的部分",
+          "node_id": "0007",
+          "summary": "## 不受影响的部分\n\n- **RuleExtractor**: 用 `contains()` 检测关键词，对中文字符串匹配有效\n- **LLM Extractor**: LLM 本身理解中文，不依赖分词\n- **Crystallizer**: LLM 生成，不依赖分词\n- **FSM / Ledger**: 纯事件逻辑，与语言无关",
+          "line_num": 80
+        },
+        {
+          "title": "修复优先级",
+          "node_id": "0008",
+          "summary": "## 修复优先级\n\n| 优先级 | Bug | 影响 | 修复成本 |\n|--------|-----|------|---------|\n| **P0** | word_jaccard 中文无效 | 防复活失效 + 场动力学失效 | 中 (加 bigram fallback 或 jieba) |\n| **P1** | ActAuditor closure/converge 中文无效 | 审计结果不可信 | 低 (加中文 substring path) |\n| **P2** | OpenNew overlap 中文无效 | OpenNew 检测不准 | 低 |",
+          "line_num": 87
+        },
+        {
+          "title": "设计原则（未来）",
+          "node_id": "0009",
+          "summary": "## 设计原则（未来）\n\n1. **所有文本比较函数必须双路径**: `is_chinese()` 检测 → 中文路径 / 英文路径\n2. **中文相似度**: character bigram Jaccard (Phase 0) → jieba 分词 Jaccard (Phase 1) → embedding (Phase 2)\n3. **不要假设空格分词** — 这是英语中心主义的 bug\n4. **测试必须覆盖双语** — 每个比较函数至少有中文和英文两组测试",
+          "line_num": 95
+        }
+      ]
+    }
+  ]
+}

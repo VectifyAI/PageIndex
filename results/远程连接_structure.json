@@ -1,0 +1,86 @@
+{
+  "doc_name": "远程连接",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\SillyTavern 官方文档\\使用方法\\远程连接.md",
+  "structure": [
+    {
+      "title": "Listen for incoming connectionslisten: true",
+      "node_id": "0000",
+      "prefix_summary": "# Listen for incoming connectionslisten: true\n\n激活远程连接侦听后，**还必须**打开下面列出的至少一种限制方法，否则 ST 服务器将拒绝启动。\n\n**注意：**SillyTavern 是一个单用户程序，因此任何登录的人都可以看到所有角色和聊天，并能够更改 UI 中的任何设置。[基本身份验证](https://docs.sillytavern.app/usage/remoteconnections/#HTTPBasicAuthentication)允许在授予对 ST 的访问权限之前请求授权，但单用户原则仍然适用。",
+      "line_num": 15,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/remoteconnections/#whitelist)白名单",
+          "node_id": "0001",
+          "prefix_summary": "## [#](https://docs.sillytavern.app/usage/remoteconnections/#whitelist)白名单",
+          "line_num": 21,
+          "nodes": [
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/remoteconnections/#1-managing-whitelisted-ips)1. 管理列入白名单的IP",
+              "node_id": "0002",
+              "prefix_summary": "The partial document provides instructions for managing whitelisted IPs in SillyTavern. It explains that a `.whitelist.txt` file should be created in the installation folder, where allowed IPs can be listed. Each IP must be on a separate line, and the list must include `127.0.0.1` to allow local connections. The document also details that the whitelist supports individual IPs, wildcard ranges (using `*`), and CIDR masks. Examples are provided to illustrate the different formats for specifying IPs.",
+              "line_num": 23,
+              "nodes": [
+                {
+                  "title": "[#](https://docs.sillytavern.app/usage/remoteconnections/#general-purpose-whitelisttxt)通用whitelist.txt",
+                  "node_id": "0003",
+                  "summary": "The partial document provides instructions on configuring a `whitelist.txt` file for SillyTavern server to allow remote connections. It specifies the content to be added to the whitelist, which includes IP addresses like `192.168.*.*` and `*127.0.0.1` to permit connections from the host and devices on the same network. The document emphasizes the importance of saving the `whitelist.txt` file and restarting the SillyTavern server after making changes. It also mentions an alternative configuration method using the `config.yaml` file but advises against it, stating that the presence of a whitelist array in `config.yaml` will override `whitelist.txt` and is less recommended due to complexity.",
+                  "line_num": 48
+                }
+              ]
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/remoteconnections/#2-getting-the-ip-for-the-st-host-machine)2. 获取 ST 主机的 IP",
+              "node_id": "0004",
+              "summary": "The partial document provides instructions for obtaining the IP address of the ST host machine for remote connections. It covers two scenarios: accessing the ST host within the same WiFi network and accessing it remotely from a different network. For local network access, it details how to find the internal WiFi IP address on a Windows device using the command prompt and the `ipconfig` command. For remote access, it instructs users to obtain the public IP address of the ST host device by visiting a specific website.",
+              "line_num": 66
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/remoteconnections/#3-connect-the-remote-device-to-the-st-host-machine)3. 将远程设备连接到意法半导体主机",
+              "node_id": "0005",
+              "summary": "### [#](https://docs.sillytavern.app/usage/remoteconnections/#3-connect-the-remote-device-to-the-st-host-machine)3. 将远程设备连接到意法半导体主机\n\n无论您最终使用哪种 IP，您都会将该 IP 地址和端口号放入远程设备的 Web 浏览器中。\n\n同一 wifi 网络上 ST 主机的典型地址如下所示：\n\n`http://192.168.0.5:8000`\n\n使用 http:// 不要 https://",
+              "line_num": 78
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/remoteconnections/#opening-your-st-to-all-ips)向所有 IP 开放 ST",
+              "node_id": "0006",
+              "summary": "### [#](https://docs.sillytavern.app/usage/remoteconnections/#opening-your-st-to-all-ips)向所有 IP 开放 ST\n\n我们不建议这样做，但您可以打开并更改为 。`config.yamlwhitelistModefalse`\n\n您必须删除（或重命名）SillyTavern 基本安装文件夹（如果存在）。`whitelist.txt`\n\n这通常是一种不安全的做法，因此我们要求您在执行此操作时设置用户名和密码。\n\n用户名和密码在 中设置。`config.yaml`\n\n重新启动 ST 服务器后，只要知道用户名和密码，任何设备都可以连接到它，无论其 IP 如何。",
+              "line_num": 88
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/remoteconnections/#still-unable-to-connect)仍然无法连接？",
+              "node_id": "0007",
+              "summary": "### [#](https://docs.sillytavern.app/usage/remoteconnections/#still-unable-to-connect)仍然无法连接？\n\n- 为在 中找到的端口创建入站/出站防火墙规则。不要将此误认为是路由器上的端口转发，否则，有人可能会找到您的聊天记录，这是一个很大的禁忌。`config.yaml`\n\n- 在“网络和 Internet >以太网设置”中启用专用网络配置文件>类型。这对于 Windows 11 非常重要，否则，即使使用上述防火墙规则，您也无法连接。",
+              "line_num": 100
+            }
+          ]
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/remoteconnections/#http-basic-authentication)HTTP 基本身份验证",
+          "node_id": "0008",
+          "summary": "This partial document explains how to set up HTTP Basic Authentication for SillyTavern. It covers the following main points:\n\n1. **Purpose and Activation**: HTTP Basic Authentication is used when clients connect via HTTP, requiring a username and password. This feature is only active when remote connections are enabled (listen: true).\n\n2. **Configuration Steps**:\n   - Open the `config.yaml` file in the SillyTavern base directory.\n   - Set `basicAuthMode` to `true`.\n   - Define a `username` and `password` under `basicAuthUser`.\n   - Save the file and restart SillyTavern if it is running.\n\n3. **Security Consideration**: The document notes that the username and password are transmitted in plain text over HTTP. It suggests using HTTPS to secure the connection if this is a concern.",
+          "line_num": 106
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/remoteconnections/#https)HTTPS的",
+          "node_id": "0009",
+          "prefix_summary": "## [#](https://docs.sillytavern.app/usage/remoteconnections/#https)HTTPS的",
+          "line_num": 118,
+          "nodes": [
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/remoteconnections/#start-sillytavern-with-tlsssl)使用 TLS/SSL 启动 SillyTavern",
+              "node_id": "0010",
+              "summary": "### [#](https://docs.sillytavern.app/usage/remoteconnections/#start-sillytavern-with-tlsssl)使用 TLS/SSL 启动 SillyTavern\n\n要加密来自 ST 实例的流量，请使用该标志启动服务器。`--ssl`\n\n例：\n\n```python\nnode server.js --ssl\n```\n\n默认情况下，ST 将在 /cert 文件夹中搜索您的证书。如果文件位于其他位置，则可以使用 and 参数。`--keyPath--certPath`\n\n例：\n\n```python\nnode server.js --ssl --keyPath /home/user/certificates/privkey.pem --certPath /home/user/certificates/cert.pem\n```\n\n运行 SillyTavern 的用户需要对证书文件具有读取权限。",
+              "line_num": 120
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/remoteconnections/#how-to-get-a-certificate)如何获得证书",
+              "node_id": "0011",
+              "summary": "### [#](https://docs.sillytavern.app/usage/remoteconnections/#how-to-get-a-certificate)如何获得证书\n\n获取证书的最简单、最快捷的方法是使用 [certbot](https://letsencrypt.org/getting-started/)。",
+              "line_num": 140
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

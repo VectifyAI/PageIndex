@@ -1,0 +1,222 @@
+{
+  "doc_name": "2022-01-03",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\圈子 考古册\\MMD摧毁了日本的3DCG\\2022-01-03.md",
+  "structure": [
+    {
+      "title": "[MMD摧毁了日本的3DCG（2022年版）添加于2022/08/16](https://archive.is/o/UtdJB/https://tottotoittoiee.hatenablog.com/entry/2022/01/03/154918)",
+      "node_id": "0000",
+      "prefix_summary": "# [MMD摧毁了日本的3DCG（2022年版）添加于2022/08/16](https://archive.is/o/UtdJB/https://tottotoittoiee.hatenablog.com/entry/2022/01/03/154918)\n\n添加于 2022/08/16\n\n我与2018年和2019年写以下文章的人是不同的人。\n\n\n■ [MMD](https://archive.is/o/UtdJB/d.hatena.ne.jp/keyword/MMD)摧毁了日本的3DCG",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "[**MMD摧毁了日本的3DCG**](https://archive.is/o/UtdJB/https://anond.hatelabo.jp/20180207165151)",
+          "node_id": "0001",
+          "summary": "The partial document discusses the impact of MMD (MikuMikuDance) on Japan's 3DCG industry, referencing a blog post from February 7, 2018, and a follow-up from January 28, 2019, which includes additional feedback from Twitter. The main point is the claim that MMD has \"destroyed\" Japan's 3DCG industry, with the document providing context and responses to this assertion.",
+          "line_num": 16
+        },
+        {
+          "title": "[**关于一年前的“MMD摧毁日本3DCG”**](https://archive.is/o/UtdJB/https://anond.hatelabo.jp/20190128220133)",
+          "node_id": "0002",
+          "summary": "The partial document discusses the decline of Japan's 3DCG industry, particularly in the context of the rise of China's Bilibili Douga platform. It references a previous article from 2018 that highlighted how Japanese 3DCG had become insular, akin to the \"加拉帕戈斯\" phenomenon, and contrasts this with the current state where Japan has been surpassed by China. The document also draws a parallel between this decline and the similar fate of Japan's white goods industry, which has been overtaken by Chinese and Korean products.",
+          "line_num": 32
+        }
+      ]
+    },
+    {
+      "title": "**与目前的3DCG标准相比，**[**MMD就是垃圾。**](https://archive.is/o/UtdJB/d.hatena.ne.jp/keyword/MMD)",
+      "node_id": "0003",
+      "prefix_summary": "这篇文档主要讨论了MikuMikuDance（MMD）软件的现状及其局限性，并提出了改进建议。以下是主要内容的概述：\n\n1. **MMD的现状与局限性**：\n   - MMD在图形和技术水平上已经过时，与当前的3DCG标准相比显得落后。例如，东方Project的MMD模型和舞台仍然使用2012年和2017年的版本，图形质量类似于2006年的PlayStation 3游戏。\n   - 尽管有一些工具如Ray-MMD和NexGiMa的出现，试图提升MMD的渲染能力和物理计算效率，但这些工具也存在兼容性和易用性问题。例如，Ray-MMD的复杂操作流程让用户感到困扰，而NexGiMa虽然支持多线程物理计算，但不支持MMD中常用的MikuMikuEffect效果。\n\n2. **MMD的挑战**：\n   - MMD基于DirectX 9开发，物理计算仅支持单线程，难以充分利用现代计算机的多核处理器和显卡性能。\n   - 提高纹理质量和显示大量角色会导致MMD软件性能下降，无法处理高负载任务。\n   - 用户在制作高质量视频时面临技术瓶颈，例如在放置点光源时需要手动调整大量参数，操作复杂且效率低下。\n\n3. **改进建议与解决方案**：\n   - 建议使用外部工具如Unity、Unreal Engine、Blender和Cinema4D来制作MMD视频，通过修改MMD模型和舞台以匹配当前的技术水平。\n   - 提到日本社区仍在使用MMD制作低质量的CG视频，而一些用户通过使用外部工具制作了高质量的MMD视频，认为这是解决MMD局限性的有效方法。\n   - 文档还提到中国社区在这方面取得了进展，暗示中国在MMD视频制作的技术应用上可能更为先进。\n\n4. **结论**：\n   - MMD在当前技术环境下显得过时，但通过结合外部工具和社区的努力，仍然可以制作出高质量的3DCG视频。\n   - 文档呼吁MMD用户和开发者关注技术进步，并积极采用新的工具和方法来提升MMD视频的质量和制作效率。",
+      "line_num": 55,
+      "nodes": [
+        {
+          "title": "[**【傻fufu】棒棒！巴棒！_哔哩哔哩_bilibili**](https://archive.is/o/UtdJB/https://www.bilibili.com/video/BV1yb4y1b7Bx)",
+          "node_id": "0004",
+          "summary": "### 描述\n\n这篇文档主要讨论了一个在哔哩哔哩平台上发布的视频，该视频使用了初音未来（Miku Hatsune）的MMD模型，并配以《Cells at Work!》OP主题曲《Bamban! Babaan!》的音源。视频由LCPD Lampou制作，发布于2021年10月28日，截至2022年1月2日，浏览量已达180万次。视频使用了Cinema4D进行渲染，并展示了初音未来跳舞的场景。尽管MMD最初是为初音未来设计的，但该视频在中国观众中非常受欢迎，显示出中日文化在虚拟偶像和MMD社区中的融合。此外，文档还提到在niconico动画上举办的“MMD Kai”活动中，初音未来跳舞的视频观看次数最高，并简要比较了Cinema4D和虚幻引擎在实时渲染方面的应用。",
+          "line_num": 233
+        },
+        {
+          "title": "[**【4K】风中的初音～许愿的故事，如何真实现实的故事，梦想跳上天空的故事_哔哩哔哩_bilibili**](https://archive.is/o/UtdJB/https://www.bilibili.com/video/BV1ZA411W7zf)",
+          "node_id": "0005",
+          "summary": "The partial document describes a 4K video on Bilibili featuring Hatsune Miku, titled \"The Story of Miku in the Wind ~ A Story of Wishing, How to Realize a Story in Reality, A Story of Dreams Leaping into the Sky.\" It mentions details about the video's technical aspects, such as monitor height, audio equipment used, and 4K resolution adjustments. The video has garnered significant engagement, with 304,592 views, 139 comments, 17,975 likes, and 7,009 shares, and has been favorited by 15,251 users. The document also includes links to the video and mentions related tags like \"Silvertm\" for scenery and \"Fluffy Crayon\" for music.",
+          "line_num": 287
+        },
+        {
+          "title": "[**【4K】初音未来-剪辑屋_哔哩哔哩_bilibili**](https://archive.is/o/UtdJB/https://www.bilibili.com/video/BV1UU4y1K7dL)",
+          "node_id": "0006",
+          "summary": "这段文档主要讨论了使用虚幻引擎（UE4）和MMD（ MikuMikuDance）制作高质量3D CG视频的技术细节和性能对比。文档首先介绍了一个B站视频，该视频使用了初音未来模型和Tda风格，并提到视频使用了虚幻引擎进行实时渲染，展现了高水平的画质和流畅度。接着，文档详细比较了虚幻引擎和MMD在处理数据容量和实时渲染性能上的差异，指出虚幻引擎在处理大型场景和实现高帧率方面具有显著优势。此外，文档还提到视频使用了RTX实时光线追踪技术，并提供了视频创作者使用Maya、Marvelous Designer和Houdini等工具的工作流程说明，强调了创作者的技术水平。",
+          "line_num": 304
+        },
+        {
+          "title": "[**小FUFU电影制作流程记录、搭建模型计算**](https://archive.is/o/UtdJB/https://www.bilibili.com/read/cv11185996)",
+          "node_id": "0007",
+          "summary": "这篇文档主要记录了小fufu舞的制作流程，涵盖了fufu软体解决方案的需求，包括对需求和日本流程的全面了解。文章强调这是一个学习和创作的过程，操作方法并非固定不变，而是通过与他人交流意见来寻找最佳解决方案。此外，文档还提到虚幻引擎在动画制作中的应用，特别是新海诚风格的3DCG表现技巧，并引用了一个使用UnrealEngine的RTXon绘制Tda风格初音未来视频的例子，该视频在哔哩哔哩上获得了170万次的观看量。",
+          "line_num": 352
+        },
+        {
+          "title": "[**Miku_哔哩哔哩_bilibili**](https://archive.is/o/UtdJB/https://www.bilibili.com/video/BV1PE41137ZQ)",
+          "node_id": "0008",
+          "summary": "The partial document discusses the use of RTX features in UE4 and UE5, noting that while RTX is already implemented in UE4 without performance issues, UE5 offers advanced lighting technology like \"Lumen.\" It contrasts the 3DCG environments in Japan and China, highlighting that China's Bilibili platform showcases high-quality, technologically advanced 3DCG content, while Japan's NicoNico platform features lower quality, less advanced 3DCG videos. The document also mentions the potential for creating high-quality MMD animations akin to the style of Makoto Shinkai and the challenges of integrating advanced technologies like RTX and Lumen into MMD workflows.",
+          "line_num": 392
+        },
+        {
+          "title": "[**[虹山寺 MMD x Blender] 夏天 [Numbora]**](https://archive.is/o/UtdJB/https://www.nicovideo.jp/watch/sm39495794)",
+          "node_id": "0009",
+          "summary": "这段文档主要讨论了一个名为“[虹山寺 MMD x Blender] 夏天 [Numbora]”的视频作品。该视频由中国创作者于2021年10月在NicoNico Douga平台上发布，作品使用了Blender进行渲染，并结合了MMD（3D动画软件）和Blender技术。文档中提到该视频在Twitter上获得了大量关注和讨论，评论中既有对视频质量的赞扬，如“衣服太棒了”，也有对物理计算的批评，如“物理计算太糟糕了”。文档还探讨了日本观众对中国高质量CG图像的反应，以及“狂怒”类型交叉模拟在MMD社区中的现状。",
+          "line_num": 428
+        },
+        {
+          "title": "[**[MMD Twist]◆ONE OFF MIND◆[TAMUO风格Davis Crewel]**](https://archive.is/o/UtdJB/https://www.nicovideo.jp/watch/sm38407264)",
+          "node_id": "0010",
+          "summary": "这篇文档主要讨论了MMD（3D动画软件）在日本3DCG社区中的影响和地位，以及技术进步与用户习惯之间的关系。主要内容包括：\n\n1. **MMD视频的流行与争议**：文档提到一个使用虚幻引擎4渲染的MMD视频在2021年发布后引发了社区热议，评论中出现了对视频质量的惊叹和对付费的讨论，反映出MMD社区对高质量作品的渴望。\n\n2. **MMD对日本3DCG的影响**：文档指出MMD在日本3DCG领域的影响力巨大，甚至有人认为日本的3DCG作品只能在MMD上看到。这引发了关于MMD是否限制了其他3D工具发展的讨论。\n\n3. **技术进步与用户习惯的矛盾**：文档通过多个例子（如手写传真、翻盖手机、软盘等）说明，尽管有更先进的技术和工具存在，但人们往往因为习惯或对新技术的不了解而坚持使用传统方法。这种现象也出现在3DCG领域，导致技术进步受阻。\n\n4. **MMD社区的独特文化**：文档提到MMD社区中存在一种独特的文化，即对MMD的依赖和对其他工具的排斥。这种文化在一定程度上限制了技术交流和进步。\n\n5. **对DX（数字化转型）转型的阻碍**：文档最终强调，这种对传统方法的坚持和对新技术的排斥是阻碍数字化转型的重要因素，不仅限于3DCG领域，也存在于更广泛的社会和技术领域。",
+          "line_num": 473
+        }
+      ]
+    },
+    {
+      "title": "**这正是中国和日本目前的情况。**",
+      "node_id": "0011",
+      "prefix_summary": "这篇文档主要讨论了中国、韩国和日本在3DCG技术，特别是MMD（3D动画制作软件）应用方面的差异和现状。主要内容包括：\n\n1. **技术差距**：中国和韩国积极采用尖端技术，将其融入建模和视频制作中，制作出高质量的3DCG作品，而日本在这方面显得落后。\n\n2. **日本MMD界的停滞**：文档批评了日本MMD制作者对新技术缺乏兴趣，不努力学习，导致作品质量低下。作者认为这不仅是技术问题，更是心态问题。\n\n3. **对“爱好”的误解**：文档质疑了以“爱好”为借口拒绝学习和尝试新技术的合理性，指出这种态度阻碍了进步。\n\n4. **文化与年龄的借口**：作者提出，日本MMD玩家用“年老”作为无法迁移到新软件的借口，这反映了更深层次的文化问题，即对变化的抗拒和对停滞的接受。\n\n5. **对比与反思**：文档通过对比中日韩在3DCG技术上的应用，呼吁日本制作者反思现状，鼓励他们积极学习和应用新技术，以提升作品质量和竞争力。",
+      "line_num": 555,
+      "nodes": [
+        {
+          "title": "[**[心都碎了]恭喜十周年！ _哔哩哔哩_bilibili**](https://archive.is/o/UtdJB/https://www.bilibili.com/video/BV1cW4y1m7XW)",
+          "node_id": "0012",
+          "summary": "这篇文档主要讨论了日本和中国在3DCG和MMD（3D动画制作软件）使用上的差异，以及对MMD和更高级工具如虚幻引擎的看法。文档指出，尽管MMD在日本很受欢迎，但其技术已经过时，建议转向更强大的工具如Blender、Cinema4D和虚幻引擎。文档还提到，日本MMD社区的停滞与中国哔哩哔哩平台上年轻创作者的热情形成对比，后者更愿意尝试新技术。此外，文档讨论了硬件需求和成本问题，强调即使使用MMD，多年来也应当考虑升级硬件以提高工作效率。最后，文档鼓励创作者拥抱新技术，不要因为对MMD的熟悉而停滞不前。",
+          "line_num": 643
+        },
+        {
+          "title": "[**虚幻引擎市场 | 用于游戏和 3D 渲染的 UE 资产商店 - UE Marketplace**](https://archive.is/o/UtdJB/https://www.unrealengine.com/marketplace/ja/store)",
+          "node_id": "0013",
+          "summary": "The partial document discusses the Unreal Engine Marketplace, a platform for purchasing and distributing game assets and 3D rendering resources. It highlights the superior quality of effects available on the Unreal Engine Marketplace compared to those from MMD (MikuMikuDance). The document emphasizes the accessibility of high-quality, AAA-grade game assets, suggesting that even free assets distributed by Epic Games can meet high standards. It also mentions Epic Games' practice of offering paid assets for free on a monthly basis, requiring users to complete a purchase process once a month to access these offerings.",
+          "line_num": 762
+        }
+      ]
+    },
+    {
+      "title": "视频不可用",
+      "node_id": "0014",
+      "prefix_summary": "The partial document discusses the limitations and criticisms of using MMD (MikuMikuDance) for creating videos, particularly for genres requiring high-quality textures and effects like those seen in \"Godzilla,\" \"Kamen Rider,\" and \"Armored Core.\" It highlights the frustration with the lack of improvement in MMD's texture and effect quality, which is compared unfavorably to the capabilities of the PS3 from a decade ago. The document suggests that video creators and viewers would benefit more from rendering videos using current technology standards outside of MMD. It also mentions the use of Unreal Engine by franchises like \"Idolmaster,\" \"Kamen Rider,\" and \"Ultraman\" to achieve higher quality visuals.",
+      "line_num": 787,
+      "nodes": [
+        {
+          "title": "[**《假面骑士Saber》的世界观是用什么技术来创造的？匠心畅谈特效进化 | CINEMAS+**](https://archive.is/o/UtdJB/https://cinema.ne.jp/article/detail/45298)",
+          "node_id": "0015",
+          "prefix_summary": "The partial document discusses the use of Unreal Engine in creating the world of \"Kamen Rider Saber,\" highlighting the show's commitment to integrating new technologies. It mentions the challenges faced by MMD (MikuMikuDance) creators who are resistant to adopting new software like Unreal Engine, contrasting them with the show's innovative approach. The document provides a step-by-step guide for beginners on using Unreal Engine with MMD models, including installing necessary software, importing models, adjusting appearances, and using Unreal Engine's video production features. It also suggests troubleshooting steps for common issues and recommends tutorials for further learning.",
+          "line_num": 818,
+          "nodes": [
+            {
+              "title": "** **",
+              "node_id": "0016",
+              "summary": "#### ** **",
+              "line_num": 927
+            },
+            {
+              "title": "**作为先验意识**",
+              "node_id": "0017",
+              "summary": "#### **作为先验意识**",
+              "line_num": 929
+            },
+            {
+              "title": "**“我只需要从现在开始学习，一年内就能完全过渡。”**",
+              "node_id": "0018",
+              "summary": "#### **“我只需要从现在开始学习，一年内就能完全过渡。”**\n**“两年后我实际上可以使用它......”应该认为学习期是必要的，**\n\n**但它应该一切都可以在一两个月内完成。不要以为它会变成**\n\n \n\n**我将介绍一些有趣的案例。**",
+              "line_num": 931
+            },
+            {
+              "title": "** **",
+              "node_id": "0019",
+              "summary": "#### ** **\n\n#### \n\n####",
+              "line_num": 940
+            },
+            {
+              "title": "[您可以使用UE4.Video制作MMD视频](https://archive.is/o/UtdJB/https://www.youtube.com/watch?v=1DoZtVBepHk)",
+              "node_id": "0020",
+              "summary": "#### [您可以使用UE4.Video制作MMD视频](https://archive.is/o/UtdJB/https://www.youtube.com/watch?v=1DoZtVBepHk)",
+              "line_num": 946
+            },
+            {
+              "title": "分享",
+              "node_id": "0021",
+              "summary": "#### 分享",
+              "line_num": 948
+            },
+            {
+              "title": "[观看](https://archive.is/o/UtdJB/https://www.youtube.com/watch?v=1DoZtVBepHk&embeds_euri=https://tottotoittoiee.hatenablog.com/&feature=emb_imp_woyt)",
+              "node_id": "0022",
+              "summary": "The partial document describes a video featuring Hatsune Miku dancing in a snowy, deserted forest, created using Unreal Engine 4 (UE4) and MMD (MikuMikuDance) software. The creator expresses satisfaction with the video, which was published in December 2020, and later, in August 2022, the same creator, Ray, announced the release of another fully MMD-edited video.",
+              "line_num": 950
+            },
+            {
+              "title": "** **",
+              "node_id": "0023",
+              "summary": "The partial document discusses the potential impact of learning Unreal Engine, particularly for a Japanese individual. It mentions the creation of a poster between December 2020 and August 2022 and speculates on the use of Unreal Engine 5 for making MMD (MikuMikuDance) videos related to the anime \"Hetalia.\" The document emphasizes the value of being able to use Unreal Engine for creating character videos and suggests that acquiring this skill could significantly change one's life.",
+              "line_num": 976
+            },
+            {
+              "title": "** **",
+              "node_id": "0024",
+              "summary": "The partial document discusses the challenges and factors affecting success in learning and pursuing creative endeavors. It highlights the time commitment required for learning and the tendency to give up, using the example of creating videos. It mentions the high failure rate among users of software like MMD and Unreal Engine, even among those with prior achievements. The document identifies the lack of financial preparation as a significant barrier to success, contrasting it with the willingness to invest money as a sign of commitment and potential for future success.",
+              "line_num": 998
+            },
+            {
+              "title": "** **",
+              "node_id": "0025",
+              "summary": "#### ** **",
+              "line_num": 1028
+            }
+          ]
+        },
+        {
+          "title": "[**MJH 模块化日本联排别墅：环境 - UE Marketplace**](https://archive.is/o/UtdJB/https://www.unrealengine.com/marketplace/ja/product/mjh-modular-japanese-town-house)",
+          "node_id": "0026",
+          "summary": "该文档主要介绍了一款名为“MJH 模块化日本联排别墅”的虚幻引擎资产。该资产用于构建日本传统联排别墅（町屋）的外部和内部环境，包含模块化套件、道具和装饰品。售价为59.99美元或8750日元，提供免费演示，特别适合从事东方MMD创作的用户。用户需要自行组装该资产，而不是直接使用预组装的立体模型。文档还提到，虚幻引擎5具备剪切、细分、布尔运算和UV编辑等建模工具。此外，文档建议将该资产与“超动态天空”天气操纵资产结合使用，并提到了一款名为“Cinematographer Lite”的逼真摄像机系统。",
+          "line_num": 1031
+        },
+        {
+          "title": "[**Cinematographer Lite - 逼真的摄像机系统：代码插件 - UE Marketplace**](https://archive.is/o/UtdJB/https://www.unrealengine.com/marketplace/ja/product/cinematographer-lite-a-photorealistic-camera-system)",
+          "node_id": "0027",
+          "summary": "The partial document describes \"Cinematographer Lite,\" a photorealistic camera system available on the Unreal Engine Marketplace. It highlights the product's ability to enhance Unreal Engine's camera functionality by offering realistic camera rigs, a simplified user experience, and instant photorealistic results. The document targets both beginners and virtual production professionals, and it mentions the product's price as 2000 yen.",
+          "line_num": 1137
+        },
+        {
+          "title": "[**Cinemotion 2 真实手持摄像机运动套件：效果 - UE Marketplace**](https://archive.is/o/UtdJB/https://www.unrealengine.com/marketplace/ja/product/cinemotion-real-handheld-camera-motion-kit)",
+          "node_id": "0028",
+          "prefix_summary": "The partial document describes the Cinemotion 2 Real Handheld Camera Motion Kit available on the UE Marketplace. It highlights that the kit is designed to create realistic virtual camera movements for Unreal Engine 4 sequences, offering a range of motions from subtle idle layers to dynamic pans and zooms. The document also mentions the price of the kit as 3500 yen and suggests that it can enhance the quality of virtual productions by adding authentic camera movements.",
+          "line_num": 1159,
+          "nodes": [
+            {
+              "title": "**有过游戏制作公司工作经验的人都知道，需要的钱是以十万为单位的。**",
+              "node_id": "0029",
+              "summary": "#### **有过游戏制作公司工作经验的人都知道，需要的钱是以十万为单位的。**",
+              "line_num": 1191
+            },
+            {
+              "title": "[**神动作RPG游戏制作完成！开发成本〇〇万日元！ ？ - YouTube**](https://archive.is/o/UtdJB/https://www.youtube.com/watch?v=T_Z5xptXDIw)",
+              "node_id": "0030",
+              "summary": "#### [**神动作RPG游戏制作完成！开发成本〇〇万日元！ ？ - YouTube**](https://archive.is/o/UtdJB/https://www.youtube.com/watch?v=T_Z5xptXDIw)",
+              "line_num": 1193
+            },
+            {
+              "title": "** **",
+              "node_id": "0031",
+              "summary": "这篇文档主要讨论了3DCG（3D计算机图形）技术在当前和未来的发展，以及相关的学习资源和职业前景。主要内容包括：\n\n1. **3DCG技术的现状与挑战**：3DCG需要大量时间和金钱投入，但具备压倒性优势。文档提到截至2022年8月，世人对虚幻引擎了解甚少，并暗示这可能是一个投资机会。\n\n2. **未来趋势**：文档预测未来哔哩哔哩视频中推崇超高画质和下一代3DCG技术的价值观将渗透到日本，并指出个人创作的3DCG质量普遍较差，未来可能会发生快速变化。\n\n3. **职业前景**：日本CG人才紧缺，年收入可能超过1000万日元。文档建议如果看到日本3DCG因MMD垃圾内容而衰落的机会，应立即行动。\n\n4. **技术选择**：虚幻引擎5比虚幻引擎4重三倍，如果对规格没有信心，建议使用UnrealEngine4 Ver.4.27。\n\n5. **学习资源**：文档提到学习3DCG软件可能需要时间，但Epic Games提供免费的日语学习资源，互联网上也有大量其他资源，无需编程经验或英语能力。\n\n6. **视频制作与游戏开发的区别**：文档指出在视频制作方面，使用3DCG软件与MMD类似，如果只是做视频，不值得花费太多时间研究复杂的3DCG技术。",
+              "line_num": 1195
+            }
+          ]
+        },
+        {
+          "title": "[**第一届虚幻引擎【虚幻引擎4】入门教程课程**](https://archive.is/o/UtdJB/https://www.udemy.com/course/unreal-engine-4-beginner-tutorial/)",
+          "node_id": "0032",
+          "summary": "This partial document describes a beginner-level course titled \"First Unreal Engine [Unreal Engine 4] Introduction Tutorial Course\" available on Udemy. The course is designed to teach the fundamentals of Unreal Engine 4 in approximately 8 hours, making it suitable for those looking to learn UE4 basics for commercial game development in one go. The document emphasizes staying updated with the latest game development practices through this course.",
+          "line_num": 1251
+        },
+        {
+          "title": "[**创建和学习虚幻引擎 [虚幻引擎 4] ~地下城游戏版~**](https://archive.is/o/UtdJB/https://www.udemy.com/course/unreal-engine-4-award/)",
+          "node_id": "0033",
+          "summary": "This partial document discusses the use of Unreal Engine 4 (UE4) for creating a dungeon game featuring Dr. Award, highlighting a Udemy course that teaches game development with UE4. It contrasts UE4 with other software like DirectX9, Unity, Blender, Cinema4D, and MAYA, criticizing the latter for being outdated and difficult to use. The document also delves into the usage terms of MMD (MikuMikuDance) models, particularly the video \"Wafufu\" Bang Bang! Baban!, which has garnered significant views despite potential violations of MMD's usage terms. It explores the differing attitudes towards these violations in Japan and China, suggesting a cultural divide in enforcing such terms. The document further reflects on the decline of Japan's MMD community and the potential future of MMD, contrasting Japanese pessimism with Chinese optimism for advancements like Unreal Engine 5's features.",
+          "line_num": 1265
+        }
+      ]
+    }
+  ]
+}

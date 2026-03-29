@@ -1,0 +1,112 @@
+{
+  "doc_name": "UE动画导入标准流程",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\UE 虚幻引擎\\UE动画导入标准流程.md",
+  "structure": [
+    {
+      "title": "**介绍**",
+      "node_id": "0000",
+      "summary": "本文主要介绍了在虚幻引擎中制作动画的功能增强，包括新添加的约束和动画重定向等改进。文章详细探讨了从第三方应用程序导入动画到虚幻引擎的各种方法和工具，并分析了这些方法的优缺点及其在制作环境中的正确应用。同时，文章还讨论了使用外部导入资源所带来的资产管理、数据存储需求以及制作管线复杂化等问题，旨在帮助读者根据项目需求选择最合适的动画制作方式。",
+      "line_num": 14
+    },
+    {
+      "title": "**控制绑定**",
+      "node_id": "0001",
+      "summary": "控制绑定（Control Rig）是一个功能强大的动画控制系统，允许用户在虚幻引擎中创建完整的动画。它支持FK、IK和样条IK功能，并具有后向解算能力，可以将外部动画和动捕数据重定向到现有的控制绑定上。控制绑定动画可以从Sequencer时间轴导出为FBX格式，并在需要时导回外部DCC工具。Unreal Editor for Fortnite也支持控制绑定，用户可以通过Epic开发者社区的资源了解更多信息。",
+      "line_num": 30
+    },
+    {
+      "title": "**动画导入**",
+      "node_id": "0002",
+      "prefix_summary": "## **动画导入**\n\n\n\n虚幻引擎不断改进和增加动画功能的同时，某些限制也可能使得我们必须通过其他方法从外部资源导入动画。",
+      "line_num": 42,
+      "nodes": [
+        {
+          "title": "**FBX**",
+          "node_id": "0003",
+          "prefix_summary": "### **FBX**\n\n\n\n从外部资源导入动画的标准工作流程用的是FBX格式。关于FBX内容工作管线的文档：《FBX内容管线》 | 虚幻引擎5.2文档",
+          "line_num": 50,
+          "nodes": [
+            {
+              "title": "**混合变形/变换目标**",
+              "node_id": "0004",
+              "summary": "#### **混合变形/变换目标**\n\n\n\nFBX变换目标管线\n\n在外部DCC应用程序中使用非线性变形器是一种常见的工作流程，通过支持FBX文件格式中的变换目标（Morph Target）导入选项，可以制作骨架网格体动画，并添加混合变形来添加动画控制。此外，你可以在Sequencer中将动画烘焙到FK控制绑定上，并且使用时间轴中的变形变换目标值。要了解此工作流程的简要概述，请参考此教程：《使用控制绑定驱动混合变形或变换目标》 | Epic 开发者社区",
+              "line_num": 58
+            },
+            {
+              "title": "**动画片段**",
+              "node_id": "0005",
+              "summary": "### 动画片段\n\n该部分文档主要介绍了在虚幻引擎中使用动画片段和控制绑定进行动画处理的方法和功能：\n\n1. **动画片段的导入与混合**：\n   - 用户可以将导出的动画导入到Sequencer时间轴中，为同一个骨架网格体添加不同的动画片段。\n   - 支持在两个不同的动画之间进行混合，使动画过渡更加平滑。\n   - 提供了关于如何在虚幻引擎中使用FBX导入动画的参考文档。\n\n2. **后向解算与控制绑定**：\n   - 动画可以使用后向解算（Backward Solve）烘焙到完整的控制绑定上。\n   - 后向解算将动画应用到角色的控制绑定（Control Rig）上，允许在引擎内进行动画调整。\n   - 提供了关于控制绑定、正向及后向解算的参考文档。\n\n3. **角色控制绑定的使用**：\n   - 可以在导入动画的基础上，使用角色控制绑定添加更多动画细节。",
+              "line_num": 68
+            }
+          ]
+        },
+        {
+          "title": "**Alembic缓存（ABC）**",
+          "node_id": "0006",
+          "prefix_summary": "### **Alembic缓存（ABC）**\n\n该部分文档主要介绍了虚幻引擎中Alembic缓存（ABC）导入功能及其应用场景和优势。主要内容包括：\n\n1. **功能概述**：Alembic几何体缓存的导入功能扩展了虚幻引擎的可能性，例如支持外部DCC软件中的非线性变形和动态驱动动画。\n\n2. **应用场景**：文档提到可以将Alembic缓存与骨架网格体动画结合使用，例如将Alembic缓存的角色头部与FBX驱动的动画躯干结合。这允许添加角色面部的细微动作，提高肢体动画的灵活度。\n\n3. **导入选项**：在Alembic缓存导入选项对话框中，有三个导入类型选项：静态网格（无动画）、几何体缓存和骨架。\n\n4. **插件启用**：使用该功能需要在插件面板中启用相应的插件。\n\n5. **参考资料**：文档建议参考《虚幻引擎中的Alembic文件导入器》以获取更多详细信息。",
+          "line_num": 84,
+          "nodes": [
+            {
+              "title": "**Alembic几何体缓存**",
+              "node_id": "0007",
+              "summary": "### Alembic几何体缓存\n\nAlembic缓存在某些情况下并非最佳选择，尤其是当通过CPU读取缓存时，速度可能较慢，具体取决于缓存大小和硬件限制。该方法更适合孤立的动画，如单个角色或角色的一部分，而不是大量角色同时进行不同动作的场景，因为多个几何体缓存的导入会降低Sequencer的播放速度，影响虚幻引擎的实时性能。\n\n在24帧动画示例中，使用10个Alembic几何体缓存副本时，播放性能仍可接受。然而，当马匹数量增加到25匹时，回放性能显著下降，远低于可接受限度。每匹马有9.2万个多边形，总多边形数量约200万个。这是因为CPU将每个缓存作为单独的处理对象，即便它们引用的是同一个几何体缓存。",
+              "line_num": 97
+            },
+            {
+              "title": "**Alembic骨架**",
+              "node_id": "0008",
+              "summary": "该部分文档主要讨论了Alembic骨架在动画处理中的应用和性能优化。文档指出，使用Alembic骨架选项时，引擎会将帧到帧的几何体缓存转换为变换目标，并使用基数计算生成目标。这种方法可能会影响原始动画的部分完整性，具体取决于生成的总基数百分比。文档还提到，通过在GPU上进行变换目标的生成工作，可以提高动画生成效率和性能，即使在处理复杂场景（如每秒24帧、96匹马和880万个多边形）时也能保持高效。最后，文档提到相关内容可以在《虚幻引擎中的Alembic文件导入器》中找到。",
+              "line_num": 126
+            },
+            {
+              "title": "**Alembic流送几何体缓存**",
+              "node_id": "0009",
+              "summary": "The partial document discusses the Alembic streaming geometry cache feature in Unreal Engine. It explains that this option allows streaming only parts of an Alembic file into the engine instead of loading the entire cache, transferring data via the network rather than as a .uasset file. Enabling this feature requires activating the Geometry Cache in the Alembic File plugin, which is noted to be in an experimental stage. The document also covers adjusting project settings for the plugin, such as increasing memory allocation and setting a look-ahead time to optimize memory usage without affecting cache playback speed. It warns that a look-ahead time below one second can cause performance issues due to increased loading times. Finally, it mentions that using five Alembic files with these settings resulted in a playback frame rate in Sequencer below 24 frames per second.",
+              "line_num": 144
+            }
+          ]
+        },
+        {
+          "title": "**AnimToTexture / VAT**",
+          "node_id": "0010",
+          "prefix_summary": "### **AnimToTexture / VAT**\n\n\n\n还有另一种同样好用且非常高效的技术或工具，那就是使用顶点动画纹理。虚幻引擎确实有一个能够将骨架网格体动画转换为VAT的插件，叫做“AnimToTexture”。开发者社区里有该插件的详细教程：使用AnimToTexture在编辑器中烘焙顶点动画 | Epic开发者社区",
+          "line_num": 175,
+          "nodes": [
+            {
+              "title": "**顶点动画**",
+              "node_id": "0011",
+              "summary": "### 顶点动画描述\n\n本文档主要讨论了顶点动画的实现方法及其优缺点：\n\n1. **实现方法**：\n   - 顶点动画位置不作为几何体的缓存，而是基于顶点在本地空间中的位置。\n   - 使用特殊的材质函数，通过材质的世界位置偏移功能实现动画。\n   - 动画效果通过材质函数中使用的纹理贴图来表示顶点的位置。\n\n2. **性能表现**：\n   - 在高配置设备上，动画帧率可达每秒120帧。\n   - 在高配置笔记本电脑上，Sequencer中运行超过2200万个多边形仍能实时运行。\n\n3. **主要缺点及解决方案**：\n   - **缺点**：纹理大小可能受限，尤其是在动画帧数较多时。\n   - **解决方案**：\n     - 将长动画拆分为多个小片段，导出为VAT纹理，避免8k纹理限制。\n     - 每个动画片段使用独立的材质和静态网格，在Sequencer中根据需要切换材质。\n     - 将角色或动画模型分割成模块化部分（如头部、身体、手部等），为每个部分导出顶点动画纹理，使用多个小纹理代替一个大纹理。\n\n4. **工具支持**：\n   - 不同的DCC（数字内容创作）工具都有各自的VAT生成方法，效果良好，建议探索适合项目需求的工作流程。\n\n5. **限制**：\n   - 目前顶点动画不支持Groom，因为Groom的绑定不会计算材质的世界位置偏移。",
+              "line_num": 183
+            }
+          ]
+        },
+        {
+          "title": "**USD**",
+          "node_id": "0012",
+          "prefix_summary": "The partial document discusses the use of Universal Scene Description (USD) in Unreal Engine, highlighting its flexibility for importing animations from external Digital Content Creation (DCC) tools like Maya. It emphasizes that USD allows for importing entire animation scenes, individual assets, or their animations, which can be further customized within Unreal Engine. The document also mentions the ability to bake animations onto control rigs for additional refinement and saving changes back to USD files. Additionally, it references the UsdStageWindow as a tool for loading and working with USD assets within Unreal Engine.",
+          "line_num": 213,
+          "nodes": [
+            {
+              "title": "**基础导出/导入**",
+              "node_id": "0013",
+              "summary": "该部分文档主要介绍了在虚幻引擎中从Maya导出和导入USD文件的基础流程和功能点。主要内容包括：\n\n1. **导出/导入范围**：支持整个动画场景或单个资产的导出和导入。\n\n2. **导入方式**：USD文件可以直接导入引擎的内容浏览器或关卡，导入关卡时也会将资产导入内容浏览器，并且可以选择将Actor导入关卡以保留场景设置。\n\n3. **导入选项控制**：虚幻引擎提供详细的USD导入选项窗口，允许用户控制：\n   - 选择要导入的USD文件中的Prim。\n   - 指定要导入的数据类型，如几何体、骨架动画等。\n   - 设置USD选项，如渲染情景和材质目的。\n   - 处理已有资产的方式。\n   - 资产导入后的处理方式。\n\n4. **动画处理**：简单的变换动画以每帧数据的形式输出，而骨架动画则以动画序列的形式输出。",
+              "line_num": 223
+            },
+            {
+              "title": "**USD舞台窗口**",
+              "node_id": "0014",
+              "summary": "The partial document discusses the USD Stage window in Unreal Engine, highlighting it as an alternative method for importing USD files. It explains that USD files opened in the USD Stage window retain their native functionalities, such as layer composition and material assignments. Users can continue to work with the USD files, editing and saving them while preserving their USD properties. The document also mentions that assets can be converted to uassets when imported. Additionally, it describes the ability to manipulate assets within the USD Stage window, including moving them, changing variants, animating transformations, and applying control bindings to UsdSkel assets for complete character animation. All edits are saved back to the USD files in a non-destructive manner.",
+              "line_num": 258
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "**总结**",
+      "node_id": "0015",
+      "summary": "The document discusses the process of creating animations within a game engine, highlighting the ease of use once familiar with control binding and Sequencer. It emphasizes the importance of understanding available import/export tools for external solutions, enabling informed decisions on the most suitable technology for specific needs. The document advises considering factors like time spent on import/export, increased data storage, and efficiency losses when choosing techniques. It concludes by acknowledging the reader's newfound knowledge of standard FBX skeletal mesh animation pipelines and hybrid approaches, empowering them to confidently start their projects and effectively implement their content.",
+      "line_num": 271
+    }
+  ]
+}

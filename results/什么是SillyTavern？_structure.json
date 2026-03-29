@@ -1,0 +1,60 @@
+{
+  "doc_name": "什么是SillyTavern？",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\SillyTavern 官方文档\\什么是SillyTavern？.md",
+  "structure": [
+    {
+      "title": "[#](https://docs.sillytavern.app/#missing-extensions-after-the-update)更新后缺少扩展？",
+      "node_id": "0000",
+      "summary": "### [#](https://docs.sillytavern.app/#missing-extensions-after-the-update)更新后缺少扩展？\n\n自 1.10.6 发布版本以来，大多数以前内置的扩展都已转换为可下载的附加组件。您可以通过扩展面板中的内置“下载扩展和资产”菜单（顶部栏中的堆叠块图标）下载它们。",
+      "line_num": 13
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/#screenshots)截图",
+      "node_id": "0001",
+      "summary": "### [#](https://docs.sillytavern.app/#screenshots)截图",
+      "line_num": 17
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/#branches)分支",
+      "node_id": "0002",
+      "summary": "### [#](https://docs.sillytavern.app/#branches)分支\n\nSillyTavern 正在使用双分支系统进行开发，以确保所有用户都能获得流畅的体验。\n\n- release - 🌟 **建议大多数用户使用。**这是最稳定和最推荐的分支，仅在推送主要版本时更新。它适合大多数用户。\n\n- 分期 - ⚠️ **不建议随意使用。**此分支具有最新功能，但要小心，因为它随时可能中断。仅适用于高级用户和发烧友。\n\n[点击此处](https://docs.sillytavern.app/usage/branches/)了解详情。",
+      "line_num": 37
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/#features)特征",
+      "node_id": "0003",
+      "summary": "The partial document provides an overview of the features of SillyTavern, a versatile and customizable platform for AI-driven interactions. Key highlights include:\n\n1. **Mobile-Friendly Interface**: Ensures usability across various devices.\n2. **Multiple Backend API Connections**: Supports integration with numerous AI models and services such as KoboldAI, AI Horde, NovelAI, OpenAI, and more, offering flexibility in AI backend selection.\n3. **Visual Novel-like Omniscient Mode**: Provides an immersive storytelling experience.\n4. **Stable Diffusion Generation**: Utilizes stable diffusion for generating high-quality content.\n5. **TTS Support**: Incorporates text-to-speech capabilities with providers like ElevenLabs and Silero.\n6. **WorldInfo (Knowledge Book)**: Allows users to input and utilize detailed world-building information.\n7. **Author Notes/Character Bias**: Enables customization of AI behavior and responses.\n8. **Customizable UI**: Offers options to personalize colors, backgrounds, avatars, and panel layouts.\n9. **AI Response Notification Sounds**: Enhances user experience with auditory cues.\n10. **Chat Export**: Facilitates saving conversations as .txt files.\n11. **Automatic Translation**: Leverages Google API for translating single messages or entire chats.\n12. **Extensive Prompt Formatting Options**: Provides tools for crafting diverse and complex prompts.\n13. **Character Hot-Swap Button**: Allows quick switching between favorite characters.\n14. **Token Breakdown View**: Offers insights into the token usage per message.\n15. **Swipe Functionality**: Enhances navigation and interaction within the app.\n16. **Group Chat**: Supports multi-bot rooms for interactive and dynamic conversations among characters and users.\n17. **Chat Bookmarks/Branches**: Enables saving and managing different conversation paths or scenarios.",
+      "line_num": 47
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/#extensions)扩展",
+      "node_id": "0004",
+      "summary": "### [#](https://docs.sillytavern.app/#extensions)扩展\n\nSillyTavern 支持扩展/插件：\n\n- 角色情感表达\n\n- 聊天记录的自动摘要\n\n- 将图像发送到聊天室，并由 AI 解释内容。\n\n- 稳定的扩散图像生成（5 个与聊天相关的预设加上“自由模式”）\n\n- AI 响应消息的文本转语音（通过 ElevenLabs、Silero 或操作系统的系统 TTS）\n\n可以使用 [SillyTavern Extras](https://github.com/SillyTavern/SillyTavern-extras) 添加其他功能。",
+      "line_num": 83
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/#installation-requirements)安装要求",
+      "node_id": "0005",
+      "summary": "### [#](https://docs.sillytavern.app/#installation-requirements)安装要求\n\n- SillyTavern 几乎可以在任何能够运行 NodeJS v18 的设备上运行。\n\n- 注意：由于上述要求，**SillyTavern 将无法在 Windows 7 上运行。**",
+      "line_num": 99
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/#what-do-i-need-other-than-sillytavern)除了 SillyTavern 之外，我还需要什么？",
+      "node_id": "0006",
+      "summary": "### [#](https://docs.sillytavern.app/#what-do-i-need-other-than-sillytavern)除了 SillyTavern 之外，我还需要什么？\n\nSillyTavern 只是一个前端接口，因此您需要访问上面列出的后端 API 之一。",
+      "line_num": 105
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/#how-can-i-get-in-touch-with-the-developers-directly)我怎样才能直接与开发人员取得联系？",
+      "node_id": "0007",
+      "summary": "### [#](https://docs.sillytavern.app/#how-can-i-get-in-touch-with-the-developers-directly)我怎样才能直接与开发人员取得联系？\n\n- Discord：Cohee#1207 或 RossAscends#1779\n\n- Reddit：/u/RossAscends 或 /u/sillylossy\n\n- [发布 GitHub 问题](https://github.com/Cohee1207/SillyTavern/issues)",
+      "line_num": 109
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/#i-like-your-project-how-do-i-contribute)我喜欢你的项目！我该如何贡献？",
+      "node_id": "0008",
+      "summary": "### [#](https://docs.sillytavern.app/#i-like-your-project-how-do-i-contribute)我喜欢你的项目！我该如何贡献？\n\n- 我们欢迎拉取请求！\n\n- 我们也欢迎使用我们的 GitHub 中提供的模板的有用且知情的错误报告。\n\n- 我们不接受项目本身的金钱捐赠。\n\n- Cohee不接受捐款。\n\n- RossAscends 有一个个人[的 Patreon](https://www.patreon.com/RossAscends) & [Kofi](https://ko-fi.com/rossascends)",
+      "line_num": 117
+    }
+  ]
+}

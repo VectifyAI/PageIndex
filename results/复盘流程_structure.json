@@ -1,0 +1,64 @@
+{
+  "doc_name": "复盘流程",
+  "source_path": "E:/knowledge/Knowledge\\05-Protocols\\复盘流程.md",
+  "structure": [
+    {
+      "title": "复盘流程",
+      "node_id": "0000",
+      "prefix_summary": "# 复盘流程\n\n> 三层捕获 + 两级复盘，解决\"开会/看消息/聊天后忘了\"的问题",
+      "line_num": 5,
+      "nodes": [
+        {
+          "title": "第1层：快速捕获（实时，5秒内）",
+          "node_id": "0001",
+          "summary": "## 第1层：快速捕获（实时，5秒内）\n\n**工具**: QuickAdd插件 / 手机Obsidian / 微信发给自己\n\n**操作**: 看到重要的东西，立刻记一行到Daily Note的Inbox里。不管格式，不管分类，先记下来。\n\n```\n快捷键建议:\n  Ctrl+Q → QuickAdd → 追加到今日Daily Note Inbox\n```\n\n**原则**:\n- 宁可多记不要漏记\n- 一句话就够，关键词+人名\n- 别纠结格式，晚上整理",
+          "line_num": 9
+        },
+        {
+          "title": "第2层：每日整理（收盘后/睡前，5分钟）",
+          "node_id": "0002",
+          "summary": "## 第2层：每日整理（收盘后/睡前，5分钟）\n\n**操作**:\n1. 打开今日Daily Note\n2. 过一遍Inbox里的碎片\n3. 重要的 → 移到对应section（会议/信息/项目）\n4. 需要跟进的 → 加到\"明天要做\"\n5. 和项目相关的 → 加[[双链]]关联\n\n**检查清单**:\n- [ ] Inbox清空了吗？\n- [ ] 有需要加到[[任务看板]]的吗？\n- [ ] 有需要写进[[Failures]]的吗？\n- [ ] 交易session记录了吗？",
+          "line_num": 25
+        },
+        {
+          "title": "第3层：周复盘（周日，15分钟）",
+          "node_id": "0003",
+          "summary": "## 第3层：周复盘（周日，15分钟）\n\n**操作**:\n1. 用 `weekly-review` 模板新建周报\n2. 回看本周7天的Daily Notes\n3. 提取: 变成行动的 / 还没处理的 / 可以删的\n4. 更新 [[Roadmap]] 和 [[任务看板]]\n\n**核心问题**:\n- 这周最重要的决策是什么？为什么？\n- 有什么信息我当时没注意但现在回看很重要？\n- 下周什么是最高优先级？",
+          "line_num": 40
+        },
+        {
+          "title": "工具配置",
+          "node_id": "0004",
+          "prefix_summary": "## 工具配置",
+          "line_num": 53,
+          "nodes": [
+            {
+              "title": "QuickAdd设置",
+              "node_id": "0005",
+              "summary": "### QuickAdd设置\n1. Obsidian → 设置 → QuickAdd\n2. 新建Capture → 目标:Daily Note → Inbox section下追加\n3. 绑定快捷键 Ctrl+Q",
+              "line_num": 55
+            },
+            {
+              "title": "Periodic Notes设置",
+              "node_id": "0006",
+              "summary": "### Periodic Notes设置\n1. 设置 → Periodic Notes\n2. Daily Note模板: `06-Templates/daily-note.md`\n3. Weekly Note模板: `06-Templates/weekly-review.md`\n4. Daily Note文件夹: `05-Daily/`",
+              "line_num": 60
+            },
+            {
+              "title": "Reminder设置",
+              "node_id": "0007",
+              "summary": "### Reminder设置\n1. 每天21:00提醒: \"整理今日Daily Note\"\n2. 每周日10:00提醒: \"周复盘\"",
+              "line_num": 66
+            }
+          ]
+        },
+        {
+          "title": "关联",
+          "node_id": "0008",
+          "summary": "## 关联\n- [[Memory-Nexus]] — 记忆汇聚层\n- [[AI自循环系统]] — 复盘是自循环的一部分\n\n#protocol #review #workflow",
+          "line_num": 70
+        }
+      ]
+    }
+  ]
+}

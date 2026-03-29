@@ -1,0 +1,76 @@
+{
+  "doc_name": "2026-03-17-trading",
+  "source_path": "E:/knowledge/Knowledge\\03-Trading\\sessions\\2026-03-17-trading.md",
+  "structure": [
+    {
+      "title": "2026-03-17 交易Session",
+      "node_id": "0000",
+      "prefix_summary": "# 2026-03-17 交易Session",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "大盘",
+          "node_id": "0001",
+          "summary": "## 大盘\n- 上证 4083 (-0.04%) 窄幅震荡\n- 深证 14250 (-0.40%) | 创业板 3337 (-0.58%)\n- 涨562/跌866 比0.65 空方主导\n- 涨停11/跌停2 情绪偏弱非恐慌\n- 板块：新能源/光伏 +2.40% 领涨，消费/基建/金融防守",
+          "line_num": 3
+        },
+        {
+          "title": "持仓诊断",
+          "node_id": "0002",
+          "summary": "## 持仓诊断\n- 总资产 2,119,198 | 市值 804,987 | 持仓亏损 -290,972\n- **全场CMF为负** — 所有持仓都在资金流出\n- VC仓（汇创达/ST中装/TCL中环）不参与算法",
+          "line_num": 10
+        },
+        {
+          "title": "执行交易",
+          "node_id": "0003",
+          "prefix_summary": "## 执行交易",
+          "line_num": 15,
+          "nodes": [
+            {
+              "title": "止盈",
+              "node_id": "0004",
+              "summary": "### 止盈\n| 标的 | 数量 | 成本 | 卖价 | 盈亏 | 卖点逻辑 |\n|------|------|------|------|------|---------|\n| 东方财富 300059 | 1000 | 21.40 | 21.79 | +385 (+1.8%) | 21.80有2473手大卖单压制，VWAP=21.79，挂大单前0.01元 |\n| 启明星辰 002439 | 500 | 14.14 | 14.40 | +120 (+1.7%) | VWAP=14.40+MA20=14.39双阻力，利润薄今日在回吐 |",
+              "line_num": 17
+            },
+            {
+              "title": "止损",
+              "node_id": "0005",
+              "summary": "### 止损\n| 标的 | 数量 | 成本 | 卖价 | 盈亏 | 止损逻辑 |\n|------|------|------|------|------|---------|\n| 天娱数科 002354 | 500 | 6.32 | 6.17 | -75 (-2.4%) | 20日跌-16%，CMF-0.25，Bear FVG 6.18-6.21压制，上方全是大卖单 |",
+              "line_num": 23
+            },
+            {
+              "title": "保留",
+              "node_id": "0006",
+              "summary": "The partial document is a table titled \"保留\" (Retain) that tracks investments in various stocks. It includes the following columns: 标的 (Target), 数量 (Quantity), 成本 (Cost), 现价 (Current Price), 盈亏% (Profit/Loss %), and 理由 (Reason). The table lists five stocks: Hengrui Medicine (600276), Zhongji Xuchuang (300308), Nandu Power (300068), Air China (601111), and Taichen Guangxian (300570). Each stock has a corresponding quantity, cost price, current price, profit or loss percentage, and a reason for holding the stock. The reasons range from defensive strategies, industry leadership, recent purchases, technical indicators, and sector outlook.",
+              "line_num": 28
+            }
+          ]
+        },
+        {
+          "title": "卖点方法论",
+          "node_id": "0007",
+          "summary": "## 卖点方法论\n1. **VWAP** — 日内机构成本线，卖在VWAP以上\n2. **五档大单** — 找最厚卖单挂前0.01元优先成交\n3. **Bear FVG** — 价格触FVG上沿即阻力\n4. **MA均线** — MA5/MA10/MA20压力位\n5. **止损不等** — 市价或挂今日最低价秒出",
+          "line_num": 37
+        },
+        {
+          "title": "全A扫描",
+          "node_id": "0008",
+          "summary": "## 全A扫描\n- 路径：澳洲pytdx超时 → 中央节点(43.163.225.27)跑扫描\n- 无talib版手算MFI/OBV/CMF，扫1441只，候选357只\n- Top: 002217(140) 000423(135) 000838(135) 000761(130)",
+          "line_num": 44
+        },
+        {
+          "title": "踩坑",
+          "node_id": "0009",
+          "summary": "## 踩坑\n1. 澳洲→pytdx/adata所有数据源都不通，必须走中央节点\n2. 通达信TDXGrid是自绘控件，LVM消息无效，只能截图OCR读持仓\n3. 中央节点pip需要 --break-system-packages",
+          "line_num": 49
+        },
+        {
+          "title": "算法优化TODO",
+          "node_id": "0010",
+          "summary": "## 算法优化TODO\n- [ ] 卖点模型加入五档挂单厚度作为阻力因子\n- [ ] CMF全负时止盈阈值从3%降到1.5%\n- [ ] 同赛道持仓检测：弱势标的优先止损\n- [ ] 扫描器部署到中央节点做定时任务",
+          "line_num": 54
+        }
+      ]
+    }
+  ]
+}

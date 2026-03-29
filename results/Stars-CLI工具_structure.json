@@ -1,0 +1,116 @@
+{
+  "doc_name": "Stars-CLI工具",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\GitHub-Stars\\Stars-CLI工具.md",
+  "structure": [
+    {
+      "title": "CLI工具",
+      "node_id": "0000",
+      "prefix_summary": "# CLI工具",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "Batchfile",
+          "node_id": "0001",
+          "summary": "## Batchfile\n\n- [LobArthe/Apex-Settings-240HZ-2K](https://github.com/LobArthe/Apex-Settings-240HZ-2K) — Hi ! I share my configs from several github as well as my optimization , thanks !",
+          "line_num": 4
+        },
+        {
+          "title": "C#",
+          "node_id": "0002",
+          "summary": "## C#\n\n- [fishaudio/OpenUtau](https://github.com/fishaudio/OpenUtau) — OpenUTAU renderer for diffsinger / 适用于diffsinger的OpenUTAU渲染器，使用方法：https://github.com/xunmengshe/Open",
+          "line_num": 8
+        },
+        {
+          "title": "C++",
+          "node_id": "0003",
+          "summary": "The partial document provides a list of GitHub repositories related to various software projects. It includes:\n\n1. **NatronGitHub/Natron**: An open-source video compositing software with a node-graph interface, similar to Adobe After Effects.\n2. **NatronGitHub/openfx-arena**: A collection of additional OpenFX plugins for Natron.\n3. **TortoiseGit/TortoiseGit**: A Windows Explorer extension for Git operations, serving as a mirror of the official TortoiseGit repository.\n4. **acidicoala/Koalageddon**: A tool that unlocks legitimate DLC for platforms like Steam, Epic, Origin, EA Desktop, and Uplay.\n5. **microsoft/terminal**: The repository for the new Windows Terminal, which also includes the original Windows console host.\n6. **yuanming-hu/taichi**: A personal fork of the Taichi programming language repository.",
+          "line_num": 12
+        },
+        {
+          "title": "CSS",
+          "node_id": "0004",
+          "summary": "## CSS\n\n- [owl4ce/dotfiles](https://github.com/owl4ce/dotfiles) — :cherry_blossom: Aesthetic OpenboxWM Environment",
+          "line_num": 21
+        },
+        {
+          "title": "Go",
+          "node_id": "0005",
+          "summary": "## Go\n\n- [git-lfs/git-lfs](https://github.com/git-lfs/git-lfs) — Git extension for versioning large files",
+          "line_num": 25
+        },
+        {
+          "title": "HTML",
+          "node_id": "0006",
+          "summary": "## HTML\n\n- [amitxverma/amitxverma.github.io](https://github.com/amitxverma/amitxverma.github.io) —",
+          "line_num": 29
+        },
+        {
+          "title": "JavaScript",
+          "node_id": "0007",
+          "summary": "## JavaScript\n\n- [GitSquared/edex-ui](https://github.com/GitSquared/edex-ui) — A cross-platform, customizable science fiction terminal emulator with advanced monitoring & touchscr",
+          "line_num": 33
+        },
+        {
+          "title": "Jupyter Notebook",
+          "node_id": "0008",
+          "summary": "## Jupyter Notebook\n\n- [sweepai/sweep](https://github.com/sweepai/sweep) — Sweep: AI coding assistant for JetBrains",
+          "line_num": 37
+        },
+        {
+          "title": "Mathematica",
+          "node_id": "0009",
+          "summary": "## Mathematica\n\n- [DigitalHumanSpace/MetaHuman_DNA_Tools](https://github.com/DigitalHumanSpace/MetaHuman_DNA_Tools) — Tools for MetaHuman DNA",
+          "line_num": 41
+        },
+        {
+          "title": "Other",
+          "node_id": "0010",
+          "summary": "The partial document provides a list of GitHub repositories and projects, each with a brief description. Key points include:\n\n1. **Agent-Reach**: A tool that enables AI agents to access and search the internet, including platforms like Twitter, Reddit, YouTube, and GitHub.\n2. **paperclip**: An open-source orchestration system designed for companies that operate with zero human intervention.\n3. **aswf-landscape**: An interactive landscape showcasing popular open-source projects used in the motion picture industry, maintained by the Academy Software Foundation.\n4. **NVIDIA/Cosmos**: A new repository collection for NVIDIA Cosmos, with a link provided to the main Cosmos repository.\n5. **nLib**: A small collection of simplistic Houdini Digital Assets (HDAs).\n6. **cloud-fs/cloud-fs.github.io**: A GitHub repository for cloud-fs, with no additional description provided.\n7. **googlehosts/hosts**: A repository for hosting files, with mirrors available on coding.net and git.qvq.network.\n8. **gitnexus**: A client-side knowledge graph called GitNexus, described as the Zero-Server Code Intelligence Engine.",
+          "line_num": 45
+        },
+        {
+          "title": "PHP",
+          "node_id": "0011",
+          "summary": "## PHP\n\n- [xero/figlet-fonts](https://github.com/xero/figlet-fonts) — my collection of figlet / toilet ascii art fonts",
+          "line_num": 56
+        },
+        {
+          "title": "PowerShell",
+          "node_id": "0012",
+          "summary": "## PowerShell\n\n- [justinlin099/Windows-Terminal-Installer](https://github.com/justinlin099/Windows-Terminal-Installer) — Download and deploy latest Windows Terminal release from github",
+          "line_num": 60
+        },
+        {
+          "title": "Python",
+          "node_id": "0013",
+          "summary": "The partial document provides a list of GitHub repositories and projects related to Python and its applications. Key points include:\n\n1. **LaphaeL-aicmd**: Enables ChatGPT and Gemini to execute multi-step commands on Linux using natural language.\n2. **Natron Community Plugins**: A collection of plugins for the Natron software.\n3. **Textual**: A lean application framework for Python, allowing the creation of sophisticated user interfaces with simple Python code.\n4. **Skill**: A comprehensive and frequently updated skills store featuring 72 curated skill packages across various domains such as document processing, content creation, programming, machine learning, and workflow automation.\n5. **Codeface**: Typefaces designed for beautifying source code.\n6. **Avalon Core**: A safe post-production pipeline for media workflows.\n7. **Bilibili CLI**: A command-line interface for Bilibili, enabling browsing of videos, users, searches, and feeds from the terminal.\n8. **Meta Llama 3**: The official GitHub repository for Meta's Llama 3 project.\n9. **yt-dlp**: A feature-rich command-line tool for downloading audio and video content.",
+          "line_num": 64
+        },
+        {
+          "title": "Roff",
+          "node_id": "0014",
+          "summary": "## Roff\n\n- [imageworks/OpenColorIO-Configs](https://github.com/imageworks/OpenColorIO-Configs) — Color Configurations for OpenColorIO -- OBSOLETE, use https://github.com/AcademySoftwareFoundation/O",
+          "line_num": 76
+        },
+        {
+          "title": "Rust",
+          "node_id": "0015",
+          "summary": "## Rust\n\n- [2233admin/kuku-shell](https://github.com/2233admin/kuku-shell) — A lightweight PowerShell AI assistant for fast terminal workflows and operator support",
+          "line_num": 80
+        },
+        {
+          "title": "Shell",
+          "node_id": "0016",
+          "summary": "The partial document provides a list of GitHub repositories and projects related to various topics such as shell customization, issue tracking, shared skills, software releases, fonts, package compilation, hardware documentation, language performance, AI tools, and subscription issues. Key points include:\n\n1. **Shell Customization**: Repositories like \"ChrisTitusTech/mybash\" offer highly customized Bash profiles with themes inspired by Powerlevel10k and Nord.\n2. **Issue Tracking**: \"DeterminateSystems/issues\" serves as a platform for reporting issues with FlakeHub and official documentation.\n3. **Shared Skills**: \"RadonX/openclaw-skills\" manages shared skills for OpenClaw via Git.\n4. **Software Releases**: \"VSCodium/vscodium\" provides binary releases of VS Code without Microsoft branding, telemetry, or licensing.\n5. **Fonts**: \"githubnext/monaspace\" offers an innovative superfamily of fonts designed for coding.\n6. **Package Compilation**: \"kenzok8/compile-package\" focuses on compiling and updating small packages.\n7. **Hardware Documentation**: \"portlandhodl/nyan-keys-hardware\" provides hardware documentation for the nyan keys keyboard.\n8. **Language Performance**: \"timsneath/time\" measures startup times for various programming languages.\n9. **AI Tools**: \"x-cmd/x-cmd\" is described as the best buddy for AI agents, capable of bootstrapping numerous command-line tools quickly.\n10. **Subscription Issues**: \"yuaotian/go-cursor-help\" addresses specific issues related to Cursor during free subscription periods, such as suspicious activity detection.",
+          "line_num": 84
+        },
+        {
+          "title": "TypeScript",
+          "node_id": "0017",
+          "summary": "The partial document provides an overview of several open-source projects related to software development and AI. Key points include:\n\n1. **GitNexus**: A client-side knowledge graph project that aims to provide code intelligence without relying on servers.\n2. **OpenTUI**: A library designed for creating terminal user interfaces (TUIs), offering developers tools to build interactive command-line applications.\n3. **vscode-gitlens**: A Visual Studio Code extension by GitKraken that enhances Git functionality within the editor, providing deeper insights and visualization of code repositories.\n4. **Lobster**: An Openclaw-native workflow shell described as a typed, local-first \"macro engine\" that manages skills or tasks, though specific details on its functionality are limited.\n5. **mcp-client-cli**: A command-line interface for interacting with Model Context Protocol (MCP) servers, suggesting its use in managing or communicating with MCP-compliant systems.\n6. **opensrc**: A tool by Vercel Labs that fetches source code for npm packages, aiming to provide AI coding agents with more context for better code understanding and generation.",
+          "line_num": 97
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,168 @@
+{
+  "doc_name": "人物写作指南",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\皮格马利翁AI Wiki\\人物写作指南.md",
+  "structure": [
+    {
+      "title": "**大约**",
+      "node_id": "0000",
+      "summary": "This partial document provides an introduction to a guide for creating and formatting AI chatbot characters. It emphasizes the importance of understanding the character creation process in detail to stand out among other creators. The document outlines the key components of a typical character creation interface, such as name, description, author notes, greeting message, and world information. It also mentions the use of a specific character editor tool and introduces the concept of \"author notes,\" a feature that injects selected prompts above the last message.",
+      "line_num": 7
+    },
+    {
+      "title": "**名字**",
+      "node_id": "0001",
+      "summary": "The partial document focuses on the significance of character names in writing and how they convey implicit information to the audience. It introduces the concept of \"name bias,\" where a name like \"Vladimir\" can lead to assumptions about the character's nationality, gender, and possibly other traits. The document emphasizes that names are not just identifiers but also carry connotations about the character's background, personality, occupation, and motivations. It further suggests that adding descriptors to a name, such as \"Vladimir, the lonely killer,\" can enhance the characterization by providing more context. Additionally, the document warns that using names from existing popular characters can influence how the new character is perceived, as the audience or model may have preconceived notions about the original character.",
+      "line_num": 17
+    },
+    {
+      "title": "**描述**",
+      "node_id": "0002",
+      "prefix_summary": "## **描述**\n\n描述框将是最重要的一个，因为这是 PLists 和 Ali：Chat 都要去的地方。",
+      "line_num": 25,
+      "nodes": [
+        {
+          "title": "**重要概念：语境**",
+          "node_id": "0003",
+          "prefix_summary": "### **重要概念：语境**\n\n该部分文档主要讨论了“上下文”这一重要概念，并将其类比为一种“先进先出”的堆栈结构。文档详细解释了上下文中包含的不同元素及其特性：\n\n1. **永久令牌**：这些元素始终保留在上下文中，不会被移除，包括：\n   - 描述框：角色的描述。\n   - 作者注（插入深度 @ 4）：在特定位置插入的注释。\n\n2. **临时令牌**：这些元素在发送一定数量的消息后会被移除，包括：\n   - 范例：用于指导对话的示例。\n   - 问候语：对话开始时的问候语。\n   - 聊天记录：用户和角色之间的对话历史。\n\n文档强调了描述框作为永久令牌的重要性，指出无论对话长度如何，描述的内容都会对模型的输出产生影响。",
+          "line_num": 29,
+          "nodes": [
+            {
+              "title": "**对话中不同点的上下文堆的可视化表示**",
+              "node_id": "0004",
+              "prefix_summary": "#### **对话中不同点的上下文堆的可视化表示**\n\n\n此表示不包括 Lorebook 条目或 ChromaDB，因为根据您的设置，它们在上下文堆中的位置可能会有所不同，而作者注释的位置大多数情况下是相同的。",
+              "line_num": 49,
+              "nodes": [
+                {
+                  "title": "**在对话开始时**",
+                  "node_id": "0005",
+                  "summary": "The partial document discusses the importance of the order of information in a dialogue context, particularly focusing on the impact of the lowest point in the context on the model's output. It suggests that placing the most important elements, such as the PList, at the bottom of the description box can enhance the model's performance. Additionally, it recommends positioning key example dialogues above the PList and less critical dialogues at the top. The document also mentions that if the Author's Note is available as a frontend feature, the PList should be placed within it. This strategic ordering is emphasized to ensure the model leverages the most relevant and impactful information effectively.",
+                  "line_num": 54
+                },
+                {
+                  "title": "**稍后进入谈话**",
+                  "node_id": "0006",
+                  "summary": "The partial document explains a system for managing chat conversation history in three distinct \"memory baskets\" to maintain context as conversations grow lengthy. The system categorizes messages into:\n\n1. **Recent Chat History (First Memory Basket):** This contains the most immediate messages and has the strongest influence on the AI's next response. It is the primary context the AI considers and often includes author notes.\n\n2. **Normal Chat History (Second Memory Basket):** This holds messages relevant to the ongoing conversation but has a weaker impact on the AI's response compared to the first basket. It serves as a secondary context.\n\n3. **Old Chat History (Third Memory Basket):** This contains the oldest messages and has the least influence on the AI's next response. It typically includes background information or earlier parts of the conversation and is only referenced if explicitly brought into the current context by the user.",
+                  "line_num": 61
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "title": "**为什么 PLists 和 Ali：Chat 合作得如此之好**",
+          "node_id": "0007",
+          "summary": "### **为什么 PLists 和 Ali：Chat 合作得如此之好**\n\n该文档主要讨论了 PLists 和 Ali：Chat 之间的协同作用及其优势。PLists 用于列出角色的各种特征，而 Ali：Chat 则专注于强化角色的关键特征、对话方式、行为举止等。文档指出，随着对话的进行，Ali：Chat 的示例对话可能会变得不那么重要，导致角色行为偏离预期。为了解决这个问题，作者建议将 PLists 放在 Author's Note 中，以确保模型能够持续提取并保持角色的核心特征，即使在对话较长或上下文限制的情况下，也能使角色保持一致性和真实性。",
+          "line_num": 77
+        },
+        {
+          "title": "**在写你的角色之前要考虑的事情**",
+          "node_id": "0008",
+          "summary": "### **在写你的角色之前要考虑的事情**\n\n所以。一个人如何写他们的性格？首先，你需要一个想法。想想你想塑造什么样的角色：他们的个性、衣服、说话方式、背景故事、举止等......如果你正在制作一个已经存在的角色，那么就容易多了——研究他们的 wiki 和台词。",
+          "line_num": 87
+        },
+        {
+          "title": "**编写您的 PList**",
+          "node_id": "0009",
+          "summary": "### Description of the Partial Document\n\nThe partial document provides a guide on creating a PList for character development in AI-driven role-playing scenarios. It emphasizes the importance of a well-structured PList as the foundation for a character, detailing the essential components and offering flexibility in formatting. Key points covered include:\n\n1. **PList Structure and Formatting**: \n   - The document suggests maintaining the PList in a single line, using a consistent separator like \";\" for categories. It encourages customization while providing a basic template.\n   - It highlights the use of placeholders like `{{user}}` and `{{char}}` to personalize interactions.\n\n2. **Categories in PList**:\n   - **Appearance**: Details about the character's physical attributes, clothing, and distinguishing features.\n   - **Tags**: Keywords that set the tone and guide the AI in incorporating relevant elements. The document suggests using a mix of standard tags and personalized prompts.\n   - **Scenario/Scene**: Sets the context for the role-play. It can be used to guide the overall direction or to subtly influence the interaction without being overly prescriptive.\n   - **Character**: Includes traits, relationships, abilities, and other relevant characteristics. The document advises prioritizing important features and placing them accordingly.\n\n3. **Additional Categories**: \n   - The document suggests including other categories like location, setting, genre, author, title, style, weapons, concepts, and abilities, depending on the character's complexity.\n\n4. **Dynamic Nature of PList**:\n   - It acknowledges that the initial PList will evolve as the character develops, encouraging the addition of new ideas and example dialogues.\n\n5. **Example Dialogues**:\n   - The document emphasizes the importance of aligning example dialogues with the character's key traits and intended interaction style, whether for understanding the character or for engaging in conversation.\n\nOverall, the document serves as a comprehensive guide for crafting a detailed and effective PList to create engaging and dynamic AI-driven role-playing experiences.",
+          "line_num": 91
+        },
+        {
+          "title": "**编写您的 Ali：Chat 示例对话**",
+          "node_id": "0010",
+          "prefix_summary": "### **编写您的 Ali：Chat 示例对话** - 文档描述\n\n这篇文档主要讨论了如何为角色扮演对话设计示例对话，以塑造角色的个性和对话风格。以下是文档的主要要点：\n\n1. **角色扮演体验的类型**：\n   - **冗长而详细的角色扮演**：建议在示例对话中编写长而详细的角色响应，保持对话与动作之间的良好平衡。\n   - **健谈且避免文字墙的角色**：建议编写许多简短的回应，注重对话而非动作。\n   - **聊天室风格的角色**：建议使用非常短的回应，并尽量减少动作。\n\n2. **示例对话的灵活性**：\n   - 可以在卡片中混合使用长字符和短字符的回应，根据需要进行调整。\n   - 描述框的底部可以放置不同长度的示例对话，以帮助设定角色的写作风格。\n\n3. **问候语的影响**：\n   - 问候消息由于位于对话开始时的上下文堆栈底部，对机器人的响应影响最大。极长的问候语会减少简短示例对话对角色写作风格的影响。\n\n4. **避免使用换行符**：\n   - 建议避免在示例对话和问候语中使用换行符（\"\\n\"），因为大多数模型将其解释为分隔符，可能扰乱上下文理解。\n\n5. **个性化角色设计**：\n   - 文档以“Pardofelis”为例，说明了如何根据角色的背景和特质设计示例对话，包括角色的个性、背景故事和语言风格。\n\n6. **建议与实践**：\n   - 强调这些只是建议，鼓励创作者根据角色的具体需求和期望的互动方式，自行设计和调整示例对话。\n\n总的来说，这篇文档为创作者提供了关于如何设计角色扮演对话的实用建议，强调了根据角色特质和互动风格灵活运用不同长度的回应。",
+          "line_num": 137,
+          "nodes": [
+            {
+              "title": "**Ali：聊天示例对话框 #1**",
+              "node_id": "0011",
+              "summary": "### Description of the Partial Document\n\nThe partial document provides an example of a character profile for \"Pardofelis,\" focusing on creating a vivid and engaging personality through dialogue. The main points covered are:\n\n1. **Character Background**: Pardofelis is portrayed as someone who had a difficult upbringing, spending much of her early life on the streets with stray cats. This backstory is revealed through her dialogue, highlighting her resourcefulness and resilience.\n\n2. **Personality Traits**: The document emphasizes capturing Pardofelis's personality by showcasing her likes and dislikes. This is intended to make her character more relatable and multi-dimensional.\n\n3. **Speech and Mannerisms**: The dialogue example demonstrates Pardofelis's unique speech patterns, including her self-aware humor and casual, conversational tone. Her mannerisms, such as the twitching of her cat ears, are also described to add depth to her character.\n\n4. **Character Development**: The document suggests that the dialogue should provide hints about potential story directions or scenarios, making the character versatile and interesting for role-playing. While the example focuses on personality, it encourages incorporating elements that can guide future interactions.\n\n5. **Purpose of Example Dialogue**: The primary goal of the example is to reinforce the character's traits and provide a foundation for further development. It serves as a guide for creating engaging and authentic dialogue that reflects the character's background and personality.\n\nOverall, the document emphasizes the importance of using dialogue to build a comprehensive and compelling character profile.",
+              "line_num": 178
+            },
+            {
+              "title": "**Ali：Chat 示例对话 #2：**",
+              "node_id": "0012",
+              "summary": "### Description of Partial Document\n\nThe partial document provides an example of a dialogue from \"Ali:Chat 示例对话 #2,\" showcasing the character Pardo Felis. The main points covered include:\n\n1. **Character Interaction**: The dialogue demonstrates how the character interacts with a user, responding to the question of likes and dislikes.\n2. **Personality Traits**: Pardo Felis expresses a fondness for shiny objects, trinkets, gems, and cats, highlighting her appreciation for beauty and companionship. She also enjoys napping in comfortable places, especially when surrounded by her treasures.\n3. **Dislikes**: She explicitly states her aversion to confrontation and combat, preferring to avoid conflict and describing herself as non-confrontational.\n4. **Character Development**: The document emphasizes that the character's traits, preferences, and personality are conveyed through her speech, actions, and demeanor, providing depth and authenticity to her portrayal.\n5. **Guidance for Further Interaction**: The text includes a reminder that these dialogues are meant to explore the character's story, relationships, world, environment, and abilities, encouraging users to ask diverse questions beyond simple biographical inquiries. It also advises considering token count in the interactions.",
+              "line_num": 191
+            },
+            {
+              "title": "**保存令牌**",
+              "node_id": "0013",
+              "summary": "### Description of Partial Document\n\nThe partial document focuses on the concept of \"token economy\" in character descriptions for AI models, particularly within the context of platforms like PList and Pardofelis. It emphasizes the importance of managing token usage efficiently based on the context size available. For smaller context sizes (~2048 tokens), it advises limiting the permanent tokens in the description box to around 800 and suggests moving additional character information to the lore section. For larger context sizes (~4096 tokens or more), it indicates that token efficiency is less of a concern, allowing for more detailed descriptions.\n\nThe document also highlights the significance of maintaining consistency in writing and cautions against overloading the description box, which can hinder coherence. Additionally, it warns against a common mistake: including example dialogues where the character speaks on behalf of the user. This practice can lead the model to believe that impersonating the user is acceptable. The document stresses the importance of ensuring that the character card does not contain any messages or dialogues where the character describes the user's actions, unless intentional.",
+              "line_num": 203
+            }
+          ]
+        },
+        {
+          "title": "**最终结果和细分**",
+          "node_id": "0014",
+          "prefix_summary": "The partial document emphasizes the importance of reviewing example dialogues and updating the PList with any overlooked or initially unintended features before finalizing a character description. It suggests that each feature reinforced through example dialogues should be included in the PList. The document also mentions the assembly of Pardofelis's description box and prioritizes the PList over the brief life story and likes/dislikes, noting that while the placement has minimal impact at the start of a dialogue, small details can accumulate and become significant over time.",
+          "line_num": 219,
+          "nodes": [
+            {
+              "title": "**模板**",
+              "node_id": "0015",
+              "summary": "#### **模板**\n\n\n这是一个非常基本的骨架，你可以复制并填充自己：\n\n{{user}}：\n\n{{char}}： {{user}}：\n\n{{char}}：\n\n\n\n{{char}}： [{{char}}'s body： ;\n\n{{char}}的衣服： ;\n\n标签：;\n\n场景：;\n\n{{char}} 的角色：]\n\n**提示：**\n如果您的 UI 可以访问作者注，那么我**强烈**建议将插入深度为 4 的 PList 放在那里！这就是 PList 真正闪耀并与 Ali：Chat 协同作用的地方。",
+              "line_num": 228
+            }
+          ]
+        },
+        {
+          "title": "**质量>数量**",
+          "node_id": "0016",
+          "summary": "### **质量>数量**\n\nThe document emphasizes the importance of prioritizing quality over quantity when creating example dialogues for AI characters. It suggests that a single, well-crafted example dialogue of around 150 tokens is sufficient for a character to function effectively, although having two can ensure better performance. While more examples can improve accuracy, they can also make it harder to maintain coherence. The document advises including additional example dialogues related to clothing, physical attributes, or general knowledge in the world information or knowledge input rather than overwhelming the description box. It stresses that a character with one well-written example dialogue and greeting will be more effective than one with many poorly written examples.",
+          "line_num": 254
+        },
+        {
+          "title": "**理想的 PLists + Ali：Chat 设置**",
+          "node_id": "0017",
+          "summary": "### **理想的 PLists + Ali：Chat 设置**\n\n对于视觉学习者来说，理想的 PLists + Ali：Chat 设置是这样的！",
+          "line_num": 258
+        }
+      ]
+    },
+    {
+      "title": "**作者注**",
+      "node_id": "0018",
+      "summary": "The partial document discusses the \"Author Note\" feature in UI, highlighting its usefulness and underutilization. It explains that this feature typically has four settings and emphasizes the benefits of placing PList within the Author Note rather than the description box. This placement ensures the PList remains contextually relevant without overly influencing role-playing. The document also details the synergy between PLists and Ali:Chat when using Author Notes, as it helps maintain the character's personality and consistency during extended conversations. Additionally, it covers the concepts of \"Insertion Depth,\" recommending a setting of 4 for PList usage, and \"Insertion Frequency,\" suggesting a setting of 1 for PList.",
+      "line_num": 263
+    },
+    {
+      "title": "**问候语**",
+      "node_id": "0019",
+      "prefix_summary": "## **问候语**",
+      "line_num": 273,
+      "nodes": [
+        {
+          "title": "**问候语的重要性**",
+          "node_id": "0020",
+          "summary": "### **问候语的重要性**\n\n问候语在对话中起着至关重要的作用，尽管其重要性常被低估。它在对话开始时对角色的写作风格有显著影响，能够设定场景、角色的说话方式、与用户的关系以及其他影响场景的因素。即使有详细的角色描述和对话示例，如果问候语质量不高，整体表现也会受到影响。\n\n问候语是暂时的，不会长期占用上下文，因此编写时可以不必过于担心代币效率，而应专注于强化角色的特质。如果希望角色提供详细回答，问候语可以详细丰富；如果希望对话简洁，问候语也应保持简短。\n\n此外，用户可以成为实际的问候语，通过第一条消息引导对话方向。还可以让角色自行编写问候语，通过发送场景描述来实现。这种方法不受限于预定义的问候语或角色描述。\n\n最后，编写问候语时应避免使用换行符，以确保对话的流畅性。",
+          "line_num": 275
+        },
+        {
+          "title": "**问候语示例**",
+          "node_id": "0021",
+          "summary": "### **描述**\n\n该文档主要讨论了角色扮演中的问候语示例，特别是针对名为 Pardofelis 的角色。以下是文档涵盖的主要点：\n\n1. **角色设计**：文档详细描述了 Pardofelis 的外貌、举止和个性，包括她的动作（如打哈欠、伸懒腰、优雅地拱背）、眼神（像宝石一样闪闪发光）、以及她身上的小饰品（叮当作响）。\n\n2. **场景设置**：描述了 Pardofelis 从一堆闪亮的小饰品上跳下来，向用户走来的场景，营造了一种充满活力和好奇的氛围。\n\n3. **职业和角色定位**：文档明确了 Pardofelis 的职业身份，即“闪亮事物商场”的经营者，并通过她的语言和行为（如尾巴摇晃、耳朵竖起）表现出她的职业特性和对顾客的热情。\n\n4. **对话示例**：提供了一个完整的问候语示例，展示了 Pardofelis 如何与用户互动，包括询问用户的意图（寻找物品或出售宝藏）以及她对用户回应的期待。\n\n5. **角色扮演指导**：文档强调了问候语在角色扮演中的重要性，建议问候语应与 PList 中的 Scenario 类别配合使用，并提醒用户避免在问候语中叙述用户的行为，以确保角色只描述自己的行为。\n\n6. **常见错误提示**：文档指出一个常见的错误是使用问候语来叙述用户的行为，并建议如果用户不希望角色代表他们说话，应确保角色只描述自己的行为。",
+          "line_num": 291
+        }
+      ]
+    },
+    {
+      "title": "**世界信息/传说书**",
+      "node_id": "0022",
+      "summary": "The partial document discusses the \"World Info/Lorebook\" feature in a game or application, emphasizing its complexity and potential impact despite being less beginner-friendly. It acknowledges the feature's steep learning curve and the author's decision to redirect readers to a comprehensive external guide for detailed instructions. The author highly recommends familiarizing oneself with the feature, suggesting it significantly enhances the character's depth and overall experience once mastered.",
+      "line_num": 302
+    },
+    {
+      "title": "**测试你的性格**",
+      "node_id": "0023",
+      "summary": "The partial document provides a guide on testing and ensuring the desired personality of a character in a role-playing context. It emphasizes the importance of selecting an appropriate model or platform, such as Horde, if local testing is not feasible. The document suggests asking the character questions about themselves to verify if their traits align with the intended personality, highlighting that any odd behavior might be due to the chosen model. It recommends consulting an LLM ranking resource to identify the best model for testing. The ultimate goal is to confirm that the character behaves as desired, indicating a successful creation.",
+      "line_num": 308
+    },
+    {
+      "title": "**下一章：**",
+      "node_id": "0024",
+      "summary": "## **下一章：**",
+      "line_num": 317
+    }
+  ]
+}

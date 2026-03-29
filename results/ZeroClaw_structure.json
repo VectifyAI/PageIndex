@@ -1,0 +1,38 @@
+{
+  "doc_name": "ZeroClaw",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\ZeroClaw.md",
+  "structure": [
+    {
+      "title": "ZeroClaw — 极简Rust Agent",
+      "node_id": "0000",
+      "prefix_summary": "# ZeroClaw — 极简Rust Agent\n\n> 16.2MB单二进制，零依赖",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "基本信息",
+          "node_id": "0001",
+          "summary": "## 基本信息\n- **语言**: Rust\n- **大小**: 16.2MB\n- **部署**: 硅谷+东京+SUPER",
+          "line_num": 5
+        },
+        {
+          "title": "编译",
+          "node_id": "0002",
+          "summary": "## 编译\n- Windows交叉编译: `cargo-zigbuild --target x86_64-unknown-linux-gnu.2.36`\n- 注意: 官方release要GLIBC 2.39, Debian 12只有2.36，必须自己编译",
+          "line_num": 10
+        },
+        {
+          "title": "可复用模式",
+          "node_id": "0003",
+          "summary": "## 可复用模式\n- **单binary部署**: 零依赖 → 任何新节点秒级部署\n- **cargo-zigbuild交叉编译**: Windows→Linux跨平台构建方案",
+          "line_num": 14
+        },
+        {
+          "title": "关联",
+          "node_id": "0004",
+          "summary": "## 关联\n- [[OpenClaw]] — 完整版\n- [[集群运维]] — 部署节点\n\n#project #rust #agent #minimal #reusable",
+          "line_num": 18
+        }
+      ]
+    }
+  ]
+}

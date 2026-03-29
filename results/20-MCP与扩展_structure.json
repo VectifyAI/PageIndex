@@ -1,0 +1,58 @@
+{
+  "doc_name": "20-MCP与扩展",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\ClaudeLog-干货\\20-MCP与扩展.md",
+  "structure": [
+    {
+      "title": "MCP 与扩展 (MCPs & Add-ons)",
+      "node_id": "0000",
+      "prefix_summary": "# MCP 与扩展 (MCPs & Add-ons)\n\n> 原文：[claudelog.com/claude-code-mcps](https://claudelog.com/claude-code-mcps)",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "精选 MCP 与工具（21 个）",
+          "node_id": "0001",
+          "prefix_summary": "## 精选 MCP 与工具（21 个）",
+          "line_num": 5,
+          "nodes": [
+            {
+              "title": "开发与监控",
+              "node_id": "0002",
+              "summary": "### 开发与监控\n| 工具 | 用途 |\n|------|------|\n| **CC Usage** | API 成本和 token 追踪分析 |\n| **TDD Guard** | 测试驱动开发自动化，多语言支持 |\n| **CC Statusline** | 实时状态行格式化，Powerline 风格 |\n| **TweakCC** | 界面个性化，自定义主题和动画 |\n| **Claude Code Router** | 替代 provider 路由（OpenRouter、DeepSeek、Ollama） |",
+              "line_num": 7
+            },
+            {
+              "title": "生产力框架",
+              "node_id": "0003",
+              "summary": "### 生产力框架\n| 工具 | 用途 |\n|------|------|\n| **SuperClaude** | 配置框架，专用命令和角色 |\n| **Claudia** | GUI 工具箱，自定义 agent 和 session 管理 |\n| **Moltbot (Clawdbot)** | 个人 AI 助手，连接 WhatsApp/Telegram/Discord/Slack/Signal/iMessage 等 50+ 集成 |",
+              "line_num": 16
+            },
+            {
+              "title": "Web 与数据集成 MCP",
+              "node_id": "0004",
+              "summary": "### Web 与数据集成 MCP\n| MCP | 用途 |\n|-----|------|\n| **Brave Search** | 实时网页搜索 |\n| **Reddit MCP** | Reddit 内容浏览和分析 |\n| **Twitter/X MCP** | 社交媒体发布和内容管理 |\n| **WhatsApp MCP** | 消息搜索和联系人管理 |\n| **Context7** | 当前库文档注入 |\n| **Puppeteer MCP** | AI 视觉驱动的网页自动化 |",
+              "line_num": 23
+            },
+            {
+              "title": "基础设施与专用工具",
+              "node_id": "0005",
+              "summary": "### 基础设施与专用工具\n| 工具 | 用途 |\n|------|------|\n| **GitHub MCP Server** | 官方 GitHub API 集成 |\n| **Desktop Commander** | 终端命令和文件操作 |\n| **Browser Tools** | 网页调试和性能分析 |\n| **Blender MCP** | 自然语言 3D 建模 |\n| **Zen MCP Server** | 多 AI 编排（Claude/Gemini/OpenAI/Grok） |",
+              "line_num": 33
+            },
+            {
+              "title": "资源集合",
+              "node_id": "0006",
+              "summary": "### 资源集合\n| 资源 | 用途 |\n|------|------|\n| **Awesome MCP Servers** | MCP 服务器目录 |\n| **Awesome Claude Code** | 精选斜杠命令和工作流 |\n| **Awesome Claude Prompts** | 优化的 prompt 工程集合 |\n| **Serena** | 免费语义代码检索工具包 |",
+              "line_num": 42
+            }
+          ]
+        },
+        {
+          "title": "我的理解",
+          "node_id": "0007",
+          "summary": "## 我的理解\n\n这个列表的价值在于**筛选**——MCP 生态已经很庞大了，知道装什么比知道有什么更重要。\n\n我们已经在用的：Context7、GitHub MCP、Browser Tools。\n\n值得关注但还没用的：\n- **Claude Code Router** — 能把特定任务路由到更便宜的模型\n- **Serena** — 语义代码检索，可能比 grep 更精准\n- **Zen MCP** — 多 AI 编排，和我们的 CCG 思路类似",
+          "line_num": 50
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "doc_name": "2026-03",
+  "source_path": "E:/knowledge/Knowledge\\03-Trading\\archive\\2026-03.md",
+  "structure": [
+    {
+      "title": "2026年3月 交易归档",
+      "node_id": "0000",
+      "prefix_summary": "# 2026年3月 交易归档",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "已平仓记录",
+          "node_id": "0001",
+          "summary": "The partial document is a table titled \"已平仓记录\" (Closed Positions Records) that lists detailed information about several stock trades. It includes the following columns: Buy Date, Sell Date, Code, Name, Buy Price, Sell Price, Quantity, Profit/Loss, and Profit/Loss Percentage. Each row represents a specific trade with details such as the stock's code and name, the price at which it was bought and sold, the quantity traded, and the resulting profit or loss in both absolute and percentage terms. The records show a mix of profitable and unprofitable trades, with varying holding periods and profit margins.",
+          "line_num": 3
+        },
+        {
+          "title": "月度统计",
+          "node_id": "0002",
+          "summary": "## 月度统计\n\n- 交易天数: 3 (03-09建仓, 03-11换仓, 03-17止盈止损)\n- 已实现盈亏: **+665**\n- 止盈: 4笔 (+740)\n- 止损: 1笔 (-75)\n- 胜率: 4/5 (80%)\n- 平均持仓天数: 5天\n- 最佳: 黑猫股份 +5.2% (2天)\n- 最差: 天娱数科 -2.4% (8天)",
+          "line_num": 13
+        },
+        {
+          "title": "未平仓（月末持仓）",
+          "node_id": "0003",
+          "summary": "## 未平仓（月末持仓）\n\n> 月底更新",
+          "line_num": 24
+        },
+        {
+          "title": "Sessions索引",
+          "node_id": "0004",
+          "summary": "## Sessions索引\n\n- [[sessions/2026-03-16-trading]]\n- [[sessions/2026-03-17-trading]]\n\n#trading #archive #2026-03",
+          "line_num": 28
+        }
+      ]
+    }
+  ]
+}

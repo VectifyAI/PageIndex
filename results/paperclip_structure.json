@@ -1,0 +1,98 @@
+{
+  "doc_name": "paperclip",
+  "source_path": "E:/knowledge/Knowledge\\Projects\\paperclip.md",
+  "structure": [
+    {
+      "title": "What is Paperclip?",
+      "node_id": "0000",
+      "summary": "## What is Paperclip?",
+      "line_num": 26
+    },
+    {
+      "title": "Open-source orchestration for zero-human companies",
+      "node_id": "0001",
+      "prefix_summary": "The partial document introduces Paperclip, a Node.js server and React UI designed to orchestrate AI agents for running a business. It functions as a task manager with advanced features like org charts, budgets, governance, goal alignment, and agent coordination. Users can define business goals, hire a team of AI agents from various providers, approve strategies, set budgets, and monitor progress through a dashboard. The document also mentions Clipmart, a forthcoming feature that will allow users to download and run entire pre-built company templates with one click. Additionally, the document highlights Paperclip's compatibility with multiple AI agents and tools, emphasizing its flexibility and integration capabilities.",
+      "line_num": 28,
+      "nodes": [
+        {
+          "title": "Paperclip is right for you if",
+          "node_id": "0002",
+          "summary": "## Paperclip is right for you if\n\n- ✅ You want to build **autonomous AI companies**\n- ✅ You **coordinate many different agents** (OpenClaw, Codex, Claude, Cursor) toward a common goal\n- ✅ You have **20 simultaneous Claude Code terminals** open and lose track of what everyone is doing\n- ✅ You want agents running **autonomously 24/7**, but still want to audit work and chime in when needed\n- ✅ You want to **monitor costs** and enforce budgets\n- ✅ You want a process for managing agents that **feels like using a task manager**\n- ✅ You want to manage your autonomous businesses **from your phone**\n\n<br/>",
+          "line_num": 69
+        },
+        {
+          "title": "Features",
+          "node_id": "0003",
+          "summary": "The partial document highlights several key features of a system designed for managing autonomous agents within an organizational structure. These features include:\n\n1. **Bring Your Own Agent**: The system allows integration of any agent or runtime, provided it can receive a heartbeat, into a single organizational chart.\n2. **Goal Alignment**: Agents are aligned with the company mission, understanding both what to do and why.\n3. **Heartbeats**: Agents operate on a schedule, periodically checking their work and acting accordingly, with delegation flowing through the organizational hierarchy.\n4. **Cost Control**: Monthly budgets are set for each agent, ensuring that costs do not spiral out of control by halting agents when they reach their budget limit.\n5. **Multi-Company Support**: The system supports multiple companies within a single deployment, ensuring complete data isolation and providing a unified control plane for managing a portfolio of companies.\n6. **Ticket System**: Every conversation and decision is tracked, with full tool-call tracing and an immutable audit log to ensure accountability and traceability.\n7. **Governance**: Users have full control over the system, including the ability to approve hires, override strategies, and pause or terminate any agent at any time.\n8. **Org Chart**: The system supports hierarchical structures, with defined roles, reporting lines, and job descriptions for agents.\n9. **Mobile Ready**: The system is accessible from anywhere, allowing users to monitor and manage their autonomous businesses on the go.",
+          "line_num": 81
+        },
+        {
+          "title": "Problems Paperclip solves",
+          "node_id": "0004",
+          "summary": "The partial document highlights the key problems that Paperclip solves in managing AI agents and workflows. Without Paperclip, users struggle with disorganized workflows, losing context across sessions, inefficient task management, runaway costs due to lack of tracking, manual handling of recurring tasks, and the need for constant oversight of AI agents. Paperclip addresses these issues by providing a structured, persistent, and organized system with features like ticket-based tasks, threaded conversations, persistent sessions, context management across projects and goals, built-in organizational tools, cost tracking and budgeting, automated scheduling of recurring tasks, and streamlined task management and oversight.",
+          "line_num": 130
+        },
+        {
+          "title": "Why Paperclip is special",
+          "node_id": "0005",
+          "summary": "The partial document highlights the unique features of Paperclip that set it apart in handling complex orchestration. Key points include atomic execution for preventing double-work and runaway spend, persistent agent state for maintaining task context across sessions, and runtime skill injection allowing agents to learn workflows without retraining. It also emphasizes governance with rollback for safe revisions, goal-aware execution providing context for tasks, portable company templates for easy migration, and true multi-company isolation ensuring data and audit separation for multiple companies within a single deployment.",
+          "line_num": 143
+        },
+        {
+          "title": "What Paperclip is not",
+          "node_id": "0006",
+          "summary": "The partial document outlines what Paperclip is not, emphasizing its distinct purpose and functionality. It is not a chatbot, as it focuses on managing agents with specific jobs rather than facilitating conversations. It is not an agent framework, as it does not provide guidance on building agents but rather on running a company composed of them. Paperclip is not a workflow builder, as it does not use drag-and-drop pipelines; instead, it models companies with organizational charts, goals, budgets, and governance. It is not a prompt manager, as agents are responsible for their own prompts, models, and runtimes, while Paperclip manages the organization they operate within. It is not designed for single-agent use, as it is intended for teams; a single agent likely does not require Paperclip, but a team of twenty definitely would. Finally, it is not a code review tool, as it focuses on orchestrating work rather than managing pull requests, allowing users to maintain their existing review processes.",
+          "line_num": 159
+        },
+        {
+          "title": "Quickstart",
+          "node_id": "0007",
+          "summary": "## Quickstart\n\nOpen source. Self-hosted. No Paperclip account required.\n\n```bash\nnpx paperclipai onboard --yes\n```\n\nOr manually:\n\n```bash\ngit clone https://github.com/paperclipai/paperclip.git\ncd paperclip\npnpm install\npnpm dev\n```\n\nThis starts the API server at `http://localhost:3100`. An embedded PostgreSQL database is created automatically — no setup required.\n\n> **Requirements:** Node.js 20+, pnpm 9.15+\n\n<br/>",
+          "line_num": 172
+        },
+        {
+          "title": "FAQ",
+          "node_id": "0008",
+          "summary": "The partial document provides an overview of Paperclip, a system that orchestrates AI agents for business operations. Key points covered include:\n\n1. **Typical Setup**: \n   - A local setup uses a single Node.js process with an embedded Postgres database and local file storage.\n   - For production, users can connect their own Postgres database and deploy as desired.\n   - Users configure projects, agents, and goals, after which the agents manage the operations.\n\n2. **Deployment Options**: \n   - Solo-entrepreneurs can use Tailscale for remote access and later deploy to platforms like Vercel.\n   - The system supports multiple companies with complete data isolation in a single deployment.\n\n3. **Agent Orchestration**: \n   - Paperclip differentiates itself by orchestrating AI agents like OpenClaw or Claude Code into a cohesive company structure, including org charts, budgets, goals, governance, and accountability.\n   - It handles the complexities of agent coordination, such as work distribution, session maintenance, cost monitoring, and governance.\n\n4. **Agent Operation**:\n   - Agents operate on scheduled heartbeats and event-based triggers (like task assignments or mentions).\n   - Continuous agents like OpenClaw can be integrated, with Paperclip coordinating their activities.\n\n5. **Future Features**: \n   - The roadmap includes support for integrating with existing ticketing systems (bring-your-own-ticket-system).",
+          "line_num": 195
+        },
+        {
+          "title": "Development",
+          "node_id": "0009",
+          "summary": "## Development\n\n```bash\npnpm dev              # Full dev (API + UI, watch mode)\npnpm dev:once         # Full dev without file watching\npnpm dev:server       # Server only\npnpm build            # Build all\npnpm typecheck        # Type checking\npnpm test:run         # Run tests\npnpm db:generate      # Generate DB migration\npnpm db:migrate       # Apply migrations\n```\n\nSee [doc/DEVELOPING.md](doc/DEVELOPING.md) for the full development guide.\n\n<br/>",
+          "line_num": 218
+        },
+        {
+          "title": "Roadmap",
+          "node_id": "0010",
+          "summary": "## Roadmap\n\n- ⚪ Get OpenClaw onboarding easier\n- ⚪ Get cloud agents working e.g. Cursor / e2b agents\n- ⚪ ClipMart - buy and sell entire agent companies\n- ⚪ Easy agent configurations / easier to understand\n- ⚪ Better support for harness engineering\n- ⚪ Plugin system (e.g. if you want to add a knowledgebase, custom tracing, queues, etc)\n- ⚪ Better docs\n\n<br/>",
+          "line_num": 235
+        },
+        {
+          "title": "Contributing",
+          "node_id": "0011",
+          "summary": "## Contributing\n\nWe welcome contributions. See the [contributing guide](CONTRIBUTING.md) for details.\n\n<br/>",
+          "line_num": 247
+        },
+        {
+          "title": "Community",
+          "node_id": "0012",
+          "summary": "## Community\n\n- [Discord](https://discord.gg/m4HZY7xNG3) — Join the community\n- [GitHub Issues](https://github.com/paperclipai/paperclip/issues) — bugs and feature requests\n- [GitHub Discussions](https://github.com/paperclipai/paperclip/discussions) — ideas and RFC\n\n<br/>",
+          "line_num": 253
+        },
+        {
+          "title": "License",
+          "node_id": "0013",
+          "summary": "## License\n\nMIT &copy; 2026 Paperclip",
+          "line_num": 261
+        },
+        {
+          "title": "Star History",
+          "node_id": "0014",
+          "summary": "## Star History\n\n[![Star History Chart](https://api.star-history.com/image?repos=paperclipai/paperclip&type=date&legend=top-left)](https://www.star-history.com/?repos=paperclipai%2Fpaperclip&type=date&legend=top-left)\n\n<br/>\n\n---\n\n<p align=\"center\">\n  <img src=\"doc/assets/footer.jpg\" alt=\"\" width=\"720\" />\n</p>\n\n<p align=\"center\">\n  <sub>Open source under MIT. Built for people who want to run companies, not babysit agents.</sub>\n</p>",
+          "line_num": 265
+        }
+      ]
+    }
+  ]
+}

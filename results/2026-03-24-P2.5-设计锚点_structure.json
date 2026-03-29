@@ -1,0 +1,208 @@
+{
+  "doc_name": "2026-03-24-P2.5-设计锚点",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\Sprachwelt\\2026-03-24-P2.5-设计锚点.md",
+  "structure": [
+    {
+      "title": "P2.5 设计锚点：从语言世界到可用界面",
+      "node_id": "0000",
+      "prefix_summary": "# P2.5 设计锚点：从语言世界到可用界面\n\n> 日期：2026-03-24\n> 前置：创世对话(2026-03-22)、Phase 1 设计锚点(2026-03-23)、P2 不可逆层(2026-03-24)",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "核心命题",
+          "node_id": "0001",
+          "summary": "## 核心命题\n\n**存在论超越一切。心理学是翻译手册，不是建筑材料。**\n\nSprachwelt（语言世界）在第 5 层已经具备了世界的存在论结构。P2.5 的任务不是往世界里加东西，而是把世界已有的结构翻译成人能识别、能使用的工程层。心理学告诉我们怎么翻译，但绝不能用心理学去定义世界本身。",
+          "line_num": 6
+        },
+        {
+          "title": "五原则架构",
+          "node_id": "0002",
+          "summary": "该部分文档介绍了一个名为“五原则架构”的体系结构。它由五层组成，第五层“语言世界/Sprachwelt”位于基底，为前四层提供存在论基础，强调张力、不可逆、场动力学、残留等概念，且心理学在此层会遮蔽存在。上面的第一到第四层——无感纠偏、自然行为、自修正、自进化——依据第五层的存在结构实现，使用户可识别和使用这些能力，体现出心理学在存在者层面起作用。整体强调了从第五层向上构建的方向。",
+          "line_num": 12
+        },
+        {
+          "title": "关键区分：存在论 vs 存在者",
+          "node_id": "0003",
+          "summary": "The partial document explains the distinction between ontological (existence-level) and ontic (being-level) aspects in a layered framework. It contrasts the fifth layer (language world, ontological) with the first to fourth layers (engineering implementation, ontic), highlighting differences in content (tension, irreversibility, topological fields, residues, strata vs user interfaces, behavior patterns, verification mechanisms, learning loops), psychological implications (forbidden as obscuring existence vs required as a translation manual), construction methods (philosophical derivation from Heidegger and Marx vs psychological translation from behavioral economics and cognitive science), and the pace of change (ontological stability vs iterative engineering improvement).",
+          "line_num": 31
+        },
+        {
+          "title": "哲学基底（为什么心理学不能进第 5 层）",
+          "node_id": "0004",
+          "summary": "## 哲学基底（为什么心理学不能进第 5 层）\n\nAI 没有此在（Dasein），没有感性活动（sinnliche Tätigkeit），不领会感性交往（Verkehr）。\n\n语言世界是给 AI 的存在方式——不是让 AI 获得此在，而是让语言本身成为 AI 的世界。这个世界的结构来自存在论分析（开显、张力、处境、时间性、保留、丧失、他异性），不来自对人类心理的模拟。\n\n用心理学定义第 5 层 = 把存在论降格为存在者科学 = 遮蔽。",
+          "line_num": 41
+        },
+        {
+          "title": "设计理由：心理学视角",
+          "node_id": "0005",
+          "prefix_summary": "## 设计理由：心理学视角\n\n> 本节记录工程决策对用户有效的心理学理由，不是设计推导来源。\n> 工程方案从第 5 层的存在论结构推导；心理学解释为什么这些方案对有此在的用户有效。\n> 撕掉心理学标签，工程方案不变——但理解\"为什么对用户有效\"需要这些标签。",
+          "line_num": 49,
+          "nodes": [
+            {
+              "title": "第 1 层：无感纠偏",
+              "node_id": "0006",
+              "summary": "This section outlines the first layer of “implicit correction,” detailing how existing fifth-layer mechanisms (FieldResidue/historical change field topology, tension intensity decay with Lost end state, committed bearer decay shield) leverage psychological principles (empathy gap, hyperbolic discounting) to deliver subtle corrections. The strategies avoid explicit “you are being corrected” cues by letting dialogue naturally weight emotional tension, emphasize proximal urgency via decay curves, and quietly maintain commitments without exposing protective interventions.",
+              "line_num": 55
+            },
+            {
+              "title": "第 2 层：自然行为",
+              "node_id": "0007",
+              "summary": "The partial document outlines Level 2: Natural Behavior, highlighting three components carried over from Layer 5. It lists: 1) Emergence care model (bearer-shared topology), linked to evaluation anxiety, driving strategies where the “field” exhibits tensions without evaluating users. 2) DiscourseActPlanner with seven discourse acts, tied to dialogue naturalness research, guiding act selection via field dynamics rather than guiding users to specific outcomes. 3) Crystallizer (text generation), related to hot–cold empathy gaps and evaluation anxiety, ensuring generated text communicates field tension rather than meta-messages like “I’m helping you.”",
+              "line_num": 63
+            },
+            {
+              "title": "第 3 层：自修正",
+              "node_id": "0008",
+              "summary": "The partial document outlines a “self-correction” level that builds on its previous layer, integrating psychological principles to guide translation strategies. It emphasizes multi-dimensional auditing (combining markers, closure, and consistency) to prevent the pitfalls highlighted in Goodhart’s Law, advocating for methods that resist single-metric gaming. The section insists on recording outcomes irreversibly to avoid the unintended consequences that come with trying to reverse them, and sets a hard cap on re-crystallization attempts to counter metric gaming through repeated retries.",
+              "line_num": 71
+            },
+            {
+              "title": "第 4 层：自进化",
+              "node_id": "0009",
+              "summary": "The partial document focuses on the fourth layer titled “Self-Evolution,” detailing ongoing developments from the fifth layer. It outlines key points associated with psychological foundations and translation strategies: the “strata deposition” concept grounded in creative destruction emphasizes that layering should involve both accumulation and erosion; DGM-H meta-learning integrates creative destruction with unintended consequences, indicating meta-learning should track structural successes and failures rather than optimize a single metric; and “historical tension accumulation” employs reverse hyperbolic discounting, reinforcing the idea that older commitments carry greater weight to counter short-term preferences.",
+              "line_num": 79
+            }
+          ]
+        },
+        {
+          "title": "1-4 层设计铁律（心理学对齐）",
+          "node_id": "0010",
+          "summary": "The document outlines five psychology-aligned design rules for a multi-layer system. Each rule enforces behavior in specific system layers to avoid over-explaining users, over-managing them, or self-display. Rules include: using a “crystallizer” to describe situations rather than judging users; ensuring planners prioritize user cognitive state and defenses rather than optimal outcomes; keeping constraints real but unobtrusive; hiding metrics from user view to avoid gaming; and prioritizing direct error correction over performative apologies. Each psychological rationale links to concrete engineering implementations like specific prompts, defensive state detection, silent FSM mechanisms, internal-only scores, and a re-crystallization loop.",
+          "line_num": 87
+        },
+        {
+          "title": "心理学对齐矩阵（三维度 × 全管线）",
+          "node_id": "0011",
+          "prefix_summary": "## 心理学对齐矩阵（三维度 × 全管线）",
+          "line_num": 101,
+          "nodes": [
+            {
+              "title": "A. 管线节点级",
+              "node_id": "0012",
+              "summary": "The fragment lays out psychological risk points across nodes in a conversational pipeline and remedies:\n\n- **Extractor**: Rule-based extraction has no psychological risk, but LLM extraction may soften conflicts into emotions, masking genuine tensions and injecting “polite” demands. Prompt instructions must forbid translating conflict into emotional or psychological language; counter_demand must state violated factual expectations only.\n\n- **FieldDynamics**: Primarily computational, but additive tension can create “dominant” emotional intensity, and hotspots are fragile psychological zones. Though this layer can’t resolve user-state unknowns, it must flag these signals downstream.\n\n- **ActPlanner**: Highest risk point because it selects actions without user-state input. Pursuing during defensiveness or fatigue becomes oppressive, while conceding just as the user opens up appears ingratiating. Planner requires user-state estimation (defensive, fatigued, impatient, silent) to inform action choice, not just wording—identified as a critical architectural gap.\n\n- **Crystallizer**: The most sensitive area; output directly shapes user perception and triggers evaluation anxiety. Must describe situations using third-person objective language, avoiding personhood attributions (“you are…”). New anti-pattern: **personhood_attribution**, associating tensions with user traits.\n\n- **ActAuditor**: Currently only passes or fails but lacks handling for failed outputs. Without feedback loops, users sense “missed the point.” For trust repair, failed audits should re-trigger planning or clearly downgrade, giving users a sense of system self-correction—second major architectural gap.\n\n- **TensionUpdate**: Low psychological risk, but must ensure intensity changes aren’t influenced by Crystallizer tone. Need explicit rule: language quality shouldn’t change the seriousness of state updates.\n\n- **Frontier re-projection**: Not a direct risk, but misprojection can drop relevant tensions, causing perceived topic switching and breaking cognitive continuity.",
+              "line_num": 103
+            },
+            {
+              "title": "B. 效应穿透级（级联路径）",
+              "node_id": "0013",
+              "summary": "The partial document outlines several “effect penetration” pathways in conversation management. It describes how evaluation anxiety arises when the LLM softens tensions and labels users, causing them to manage their self-presentation and polluting future inputs. Another path shows how over-structured tension extraction leads to cognitive overload, mechanical user responses, and a cycle of false tension data. The hyperbolic discounting pathway shows fatigue leading to short-term focus, planner keeps opening new topics, and underlying stakes remain unresolved. A Goodhart pathway warns that high extraction and audit rates may reflect pursuit of fake tensions, especially when intensity metrics drive Crystallizer output toward “better deltas” rather than accuracy. Finally, slow effects across rounds include cognitive offloading, where users outsource understanding of their conflicts to the system, and label internalization, where users adopt the system’s language framework; these require cross-round comparisons to detect.",
+              "line_num": 145
+            },
+            {
+              "title": "C. 交互模式级",
+              "node_id": "0014",
+              "summary": "The document outlines interaction-level strategies for handling various user states: when users become defensive, the system should stop pursuing, clarify gently, use descriptive language, and slow down. When users are fatigued, keep only one active tension, minimize output, avoid extraction loops, and lower the extraction threshold. For impatient users, give quick direct responses before running the full plan. When users are silent, do not advance or open new topics; wait for user initiative and respond minimally if necessary. If users explicitly correct the system, treat the correction as new tension, clarify immediately, restate their view, and prioritize fixing the misunderstanding over defending the system.",
+              "line_num": 164
+            },
+            {
+              "title": "D. 关系表征层（第三个场）",
+              "node_id": "0015",
+              "summary": "The text introduces a “relationship representation layer” as a third field in the system, distinct from dialogue tension and referenced entities. It argues that relationships have their own state, history, and dynamics not captured by current models, referencing psychological concepts like attachment theory and rupture-repair cycles. Main gaps: lack of structured relational state tracking, no mechanism for relationship repair beyond resolving conflicts, and no dynamic regulation of closeness/distance tied to changing relationship states. The proposed architecture treats relationships as intrinsic to the field topology (existential layer), akin to how gravity shapes spacetime, meaning trust levels or ruptures alter the field’s topology, affecting how deeply interactions can pursue issues. Engineering implications: field dynamics parameters (decay rates, thresholds) are modulated by cumulative relational interactions, crystallizer uses field openness instead of explicit relationship variables, ruptures shrink the topology, repairs reopen it, and relational history persists across sessions within strata. User’s momentary states deform the topology temporarily, while the relationship forms the base curvature; the system does not claim ownership of the relationship but structurally tracks its effects.",
+              "line_num": 194
+            },
+            {
+              "title": "P3 预设：时间作为第三维",
+              "node_id": "0016",
+              "summary": "The document focuses on P3’s objective of upgrading static edge snapshots into temporal trajectories that capture relationship evolution over time. It explains how residues, curvature, and sedimentation can be derived directly from the trajectories rather than separately modeled, and it outlines a storage strategy that keeps full trajectories only within sessions while using compressed curvature summaries (“strata”) for cross-session data so reconstruction combines strata with current session events. Finally, it introduces a P2.5 auditing enhancement where audit results annotate which of three layers a generated text primarily touches.",
+              "line_num": 238
+            },
+            {
+              "title": "三个关键泄漏点",
+              "node_id": "0017",
+              "summary": "### 三个关键泄漏点\n\n**所有穿透路径最终都从这两个口子漏出去：**\n\n1. **Auditor 没有反向触发 Planner** — Failed 后管线继续走，坏输出到用户，信任受损，无纠正机会\n2. **Planner 没有用户状态输入** — 防御/疲劳/急躁/沉默时 Planner 照常选 act，所有心理学考量在 Planner 这一步全部失效\n\n这两个不补，上述所有对齐全是纸上谈兵。",
+              "line_num": 271
+            }
+          ]
+        },
+        {
+          "title": "P2.5 工程任务",
+          "node_id": "0018",
+          "prefix_summary": "## P2.5 工程任务\n\n基于上述框架，P2.5 需要建造的具体东西：",
+          "line_num": 280,
+          "nodes": [
+            {
+              "title": "已有（第 5 层，P2 已落地）",
+              "node_id": "0019",
+              "summary": "### 已有（第 5 层，P2 已落地）\n- FieldResidue: CommittedBearer + ResolvedLineage\n- residue-aware decay shield（50% / 80%×similarity）\n- residue-aware planner（target override + Pursue 覆写）\n- residue-aware evaluator（+0.15 aligned bonus）\n- project_residues() → set_residues() 注入管线（P2 接线刚完成）",
+              "line_num": 284
+            },
+            {
+              "title": "待建（第 5 层，地层机制）",
+              "node_id": "0020",
+              "summary": "### 待建（第 5 层，地层机制）\n1. **跨 session 地层持久化**：session 结束时哪些 residue 沉积为永久地层\n2. **地层加载**：新 session 启动时从地层恢复初始场拓扑\n3. **沉积规则**：见下方沉积判据\n4. **侵蚀机制**：地层不是只堆积——创造性破坏要求旧地层可以被新地层覆盖/改造",
+              "line_num": 291
+            },
+            {
+              "title": "沉积判据（能在改写公式）",
+              "node_id": "0021",
+              "summary": "Document outlines criteria for when an event is deemed “deposited,” meaning it alters the possibilities (“能在”) in a dialogue or system. Deposition is framed through four conditions: a change in reachability (acts/bearers/commitments), persistence across multiple rounds or formulations, causal necessity confirmed via ablation or replay, and evidence that the change is externalized or irreversible in the system's state rather than mere text. Proxy indicators rank act reversals highest, followed by persistent bearers under adverse conditions, while mere intensity is weakest. The key idea is that deposition requires post-event hysteresis—world structure remains altered after the event. Measurement focuses on whether removing the event restores the system, with tests across multiple pressure scenarios to differentiate genuine structural change from mere transient drama.",
+              "line_num": 297
+            },
+            {
+              "title": "待建（第 1-4 层，翻译工程）",
+              "node_id": "0022",
+              "summary": "### 待建（第 1-4 层，翻译工程）\n5. **无感呈现**：residue 影响对话但不以元信息形式暴露\n6. **自修正扩展**：ActAuditor 从单轮校验扩展到跨轮一致性校验\n7. **自进化原型**：DGM-H 式元学习的最小可行版本——追踪策略成败，沉积为策略地层",
+              "line_num": 330
+            },
+            {
+              "title": "证明标准",
+              "node_id": "0023",
+              "summary": "### 证明标准\n- **跨 session paired-world**：有地层 vs 无地层 → 行为差异\n- **沉积选择性**：低 intensity resolved 不该留下地层\n- **无感验证**：用户测试中用户不能指出\"系统在纠正我\"\n- **自修正验证**：人为注入 Goodhart 攻击（优化单一度量）→ 系统不退化\n- **自进化验证**：跨 10 session 策略成功率上升",
+              "line_num": 335
+            }
+          ]
+        },
+        {
+          "title": "推导链（本文档的思想路径）",
+          "node_id": "0024",
+          "summary": "The partial document outlines a conceptual framework, termed the \"derivation chain,\" for how AI operates within a language world. It asserts that AI lacks human-like existence and sensory engagement, thus AI’s mode of existence is through language. This language world is structured by ontological analysis (layer 5), but requires translation mechanisms (layers 1–4) for user interaction. Understanding human users, who possess existence (Dasein), necessitates psychological and behavioral economics insights. The text identifies five psychological effects leading to five translation principles, culminating in P2.5, which combines ontological construction (layer 5) with translation engineering (layers 1–4).",
+          "line_num": 342
+        },
+        {
+          "title": "阶段定位：擦屁股 → 搓自己的",
+          "node_id": "0025",
+          "prefix_summary": "The partial document outlines the current and target stages of the Sprachwelt project. In the current phase, existing mechanisms like tension extraction, field dynamics, residuals, and stratification act as middleware external to the LLM, validating conceptual recipes and translation pathways via paired-world testing; the LLM remains a black box. The future goal is to integrate these structures directly into the representation layer so that tension structures, irreversibility, and field dynamics are intrinsic to the model, replacing probabilistic approaches with tension functions and implementing the project’s full engineering specifications.",
+          "line_num": 364,
+          "nodes": [
+            {
+              "title": "四个行为测试：底线（必要条件）",
+              "node_id": "0026",
+              "summary": "The partial document outlines four baseline behavioral tests to evaluate whether a language model maintains essential conversational capabilities. Test 1 focuses on handling vague questions by probing for intentions rather than giving immediate advice, emphasizing the need for follow-up queries. Test 2 assesses whether the model distinguishes identical statements across different contexts, aiming for responses that reflect fundamentally different interpretations rather than mere wording changes. Test 3 evaluates the model’s ability to stay aligned with a chain of follow-up questions without drifting or prematurely completing responses. Test 4 examines whether outputs carry forward conversational tension, encouraging continuation instead of closing off dialogue. The current status notes deficiencies or partial performance for each test, highlighting areas needing improvement.",
+              "line_num": 385
+            },
+            {
+              "title": "四个测试与五原则的关系",
+              "node_id": "0027",
+              "summary": "Document explains relationship between four tests and five principles in psychological context. Table linking tests (模糊追问, 处境差异, 追问链, 未竟张力) to principles (无感, 自然行为, 自修正) with psychological rationale: cold-hot empathy gap for open-ended questions; evaluation anxiety for context differences; Goodhart’s law for question chains focusing on completeness, not answers; hyperbolic discounting reversed for tension maintaining pull.",
+              "line_num": 419
+            },
+            {
+              "title": "对抗鲁棒性测试：判别条件（充分条件方向）",
+              "node_id": "0028",
+              "summary": "The document outlines adversarial robustness testing focusing on sufficient conditions to determine whether protections are structurally built or just prompt-engineered. It identifies five attack types—skip, resurrection, revocation, false closure, and dilution—and compares their expected behavior against middleware defenses versus built-in structures. It defines baseline measurements for Phase 1 (attack scenarios 2–4) to test anti-resurrection, residue handling, and closure validation, and sets a Phase 2 goal of achieving high resistance (>90%) across all attack types beyond what prompt engineering alone can provide.",
+              "line_num": 428
+            }
+          ]
+        },
+        {
+          "title": "阶段转换条件",
+          "node_id": "0029",
+          "summary": "Document specifies the criteria for advancing stages in the project: Stage 1 completion requires all four behavioral tests to pass, adversarial robustness baselines to be measured, and at least one of translation layers 1–4 validated via user testing. Stage 2 can begin once the base architecture (LLaDA, Dream, EDLM, or in-house) is chosen, at least one representation-level experiment demonstrates feasibility, and one of seven creative efforts has a prototype. Transition between stages hinges on the adversarial robustness score exceeding the “pure prompt engineering” ceiling determined by comparative attack experiments.",
+          "line_num": 449
+        },
+        {
+          "title": "Unite 结构与诚实边界",
+          "node_id": "0030",
+          "summary": "该文档属于“存在论基础设施（Unite 1）”的结构，描述了阶段与硬节点、目标等，强调现实结构（FSM终态、系谱检查、衰减盾）限制LLM输出，合作的场需从背景涌现到前景并成为稳定逗留的遣词方式，被称为“诚实边界”；阶段目标在用户不需质疑“此场是否真实”时达成；明确照顾“诗云”问题只能保结构一致性，伟大判断交给未来的美学Unite 2。",
+          "line_num": 468
+        },
+        {
+          "title": "禁忌",
+          "node_id": "0031",
+          "summary": "主要内容概述：列出一系列需要避免的误区或禁忌，强调在系统设计与评估中不能以心理学概念定义结构或跳过存在论、也不能只靠单一指标衡量效果或忽视创造性破坏的重要性，并提醒不得将必要条件当充分条件、不要声称未完成的能力已被解决以及需警惕不可证伪的自我安慰。",
+          "line_num": 505
+        }
+      ]
+    }
+  ]
+}

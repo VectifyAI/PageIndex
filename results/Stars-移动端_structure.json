@@ -1,0 +1,62 @@
+{
+  "doc_name": "Stars-移动端",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\GitHub-Stars\\Stars-移动端.md",
+  "structure": [
+    {
+      "title": "移动端",
+      "node_id": "0000",
+      "prefix_summary": "# 移动端",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "C",
+          "node_id": "0001",
+          "summary": "## C\n\n- [xausky/UnityModManager](https://github.com/xausky/UnityModManager) — 一个便捷的程序可以修改游戏内资源包括：Unity游戏资源，Wwise音频资源。",
+          "line_num": 4
+        },
+        {
+          "title": "C++",
+          "node_id": "0002",
+          "summary": "## C++\n\n- [niedev/RTranslator](https://github.com/niedev/RTranslator) — Open source real-time translation app for Android that runs locally",
+          "line_num": 8
+        },
+        {
+          "title": "Dart",
+          "node_id": "0003",
+          "summary": "## Dart\n\n- [bggRGjQaUbCoE/PiliPlus](https://github.com/bggRGjQaUbCoE/PiliPlus) — PiliPlus\n- [flutter/flutter](https://github.com/flutter/flutter) — Flutter makes it easy and fast to build beautiful apps for mobile and beyond",
+          "line_num": 12
+        },
+        {
+          "title": "Go",
+          "node_id": "0004",
+          "summary": "## Go\n\n- [GopeedLab/gopeed](https://github.com/GopeedLab/gopeed) — A modern download manager that supports all platforms.  Built with Golang and Flutter.",
+          "line_num": 17
+        },
+        {
+          "title": "HTML",
+          "node_id": "0005",
+          "summary": "## HTML\n\n- [microsoft/fluentui-system-icons](https://github.com/microsoft/fluentui-system-icons) — Fluent System Icons are a collection of familiar, friendly and modern icons from Microsoft.",
+          "line_num": 21
+        },
+        {
+          "title": "Other",
+          "node_id": "0006",
+          "summary": "## Other\n\n- [2233admin/flutter](https://github.com/2233admin/flutter) — Flutter makes it easy and fast to build beautiful apps for mobile and beyond",
+          "line_num": 25
+        },
+        {
+          "title": "Rust",
+          "node_id": "0007",
+          "summary": "## Rust\n\n- [rustdesk/rustdesk](https://github.com/rustdesk/rustdesk) — An open-source remote desktop application designed for self-hosting, as an alternative to TeamViewer",
+          "line_num": 29
+        },
+        {
+          "title": "Swift",
+          "node_id": "0008",
+          "summary": "## Swift\n\n- [steipete/Trimmy](https://github.com/steipete/Trimmy) — Paste once, run once. — Trimmy flattens those multi-line shell snippets you copy so they actually pa\n- [swiftlang/swift-aoc-starter-example](https://github.com/swiftlang/swift-aoc-starter-example) — Swift starter project for solving Advent of Code challenges.",
+          "line_num": 33
+        }
+      ]
+    }
+  ]
+}

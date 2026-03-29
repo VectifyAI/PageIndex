@@ -1,0 +1,64 @@
+{
+  "doc_name": "09-排列框架",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\ClaudeLog-干货\\09-排列框架.md",
+  "structure": [
+    {
+      "title": "排列框架 (Permutation Frameworks)",
+      "node_id": "0000",
+      "prefix_summary": "# 排列框架 (Permutation Frameworks)\n\n> 原文：[claudelog.com/mechanics/permutation-frameworks](https://claudelog.com/mechanics/permutation-frameworks)",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "核心概念",
+          "node_id": "0001",
+          "summary": "## 核心概念\n\n构建一组共享函数签名的相似功能数组，然后设计一个 CLAUDE.md 来引导 Claude 可靠地生成后续变体。\n\n> \"不再手动编写每个功能，而是创建一个模式数组，覆盖广泛的可能性，同时约束不该改变的部分。\"",
+          "line_num": 5
+        },
+        {
+          "title": "四步流程",
+          "node_id": "0002",
+          "prefix_summary": "## 四步流程",
+          "line_num": 11,
+          "nodes": [
+            {
+              "title": "1. 构建基础示例",
+              "node_id": "0003",
+              "summary": "### 1. 构建基础示例\n手动实现 **10+ 个变体**，在你的领域中建立清晰的模式。",
+              "line_num": 13
+            },
+            {
+              "title": "2. 创建引导文档",
+              "node_id": "0004",
+              "summary": "### 2. 创建引导文档\n开发一个 CLAUDE.md，捕获共享结构、规则和约束条件，确保新变体生成的可靠性。",
+              "line_num": 16
+            },
+            {
+              "title": "3. 大量测试",
+              "node_id": "0005",
+              "summary": "### 3. 大量测试\n初始尝试会频繁失败。根据 Claude 的遵从模式**迭代优化文档**。多跑几轮测试来理解方差水平。",
+              "line_num": 19
+            },
+            {
+              "title": "4. 通过审查来扩展",
+              "node_id": "0006",
+              "summary": "### 4. 通过审查来扩展\n一旦 Claude 展现可靠性，从手动实现转向**大规模审查 AI 生成的变体**。",
+              "line_num": 22
+            }
+          ]
+        },
+        {
+          "title": "关键收益",
+          "node_id": "0007",
+          "summary": "## 关键收益\n\n- 一个框架 → 多个有价值的功能变体\n- 通过明确约束减少代码方差\n- 从\"手动编码\"转型为\"编排和审查\"\n- 指数级而非线性扩展",
+          "line_num": 25
+        },
+        {
+          "title": "我的理解",
+          "node_id": "0008",
+          "summary": "该部分文档主要讨论了将少样本学习（few-shot learning）应用于实际工程中的方法。关键点包括：需要提供足够多的正确示例（建议10个以上）以避免模型过拟合；明确声明约束条件，区分可变和不可变的部分；以及在初期接受生成质量不佳的事实，重点在于通过迭代优化文档而非直接依赖生成结果。文档还提到，这种方法与Sprachwelt项目中通过手写高质量案例建立模式，再利用AI进行批量扩展的思路一致。",
+          "line_num": 32
+        }
+      ]
+    }
+  ]
+}

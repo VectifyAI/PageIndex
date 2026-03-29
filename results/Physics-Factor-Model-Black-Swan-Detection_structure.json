@@ -1,0 +1,282 @@
+{
+  "doc_name": "Physics-Factor-Model-Black-Swan-Detection",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\Physics-Factor-Model-Black-Swan-Detection.md",
+  "structure": [
+    {
+      "title": "Physics-Inspired Factor Model for Regime Detection in Chinese Equity Markets",
+      "node_id": "0000",
+      "prefix_summary": "# Physics-Inspired Factor Model for Regime Detection in Chinese Equity Markets\n\n**Project**: autoresearch-win-rtx\n**Date**: 2026-03-20\n**Status**: Exploratory research, pre-paper\n\n---",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "Abstract",
+          "node_id": "0001",
+          "summary": "The partial document describes a physics-inspired factor model (PhysicsFactorModel) applied to stock factor time series, treating them as a dynamical system with position, velocity, acceleration, and pairwise interaction forces. The model is evaluated on HS300 constituent data from 2024-03 to 2026-03, showing several key findings: 1) It outperforms a standard Transformer baseline in predicting forward 10-day risk-adjusted returns with a rank IC of 0.108 versus 0.100. 2) The model's predictive accuracy doubles during market stress regimes, indicating higher sensitivity to extreme events. 3) It can detect stress precursors 15 trading days before their onset, with the highest IC at T-15 (0.28) compared to T-1 (0.07). 4) FFT analysis identifies dominant market cycles at 32 days (monthly rebalancing), 16 days (bi-weekly harmonic), and 11 days (stress-sensitive cycle). 5) The model's learned interaction matrix's dominant eigenmode provides a standalone instability indicator that can be computed without model inference.",
+          "line_num": 9
+        },
+        {
+          "title": "1. Background and Motivation",
+          "node_id": "0002",
+          "prefix_summary": "## 1. Background and Motivation",
+          "line_num": 21,
+          "nodes": [
+            {
+              "title": "1.1 Problem Statement",
+              "node_id": "0003",
+              "summary": "### 1.1 Problem Statement\n\nTraditional technical indicators (RSI, MACD, Bollinger Bands, etc.) are widely used in quantitative trading but suffer from two fundamental limitations:\n\n- **Alpha decay**: Signals are crowded and arbitraged away by institutional adoption.\n- **Linear assumptions**: Most indicators capture only first-order (position-level) information about factor dynamics.\n\nWe hypothesize that modeling factor time series as a **physical dynamical system** — incorporating velocity (rate of change), acceleration (change of change), and inter-factor coupling forces — can capture regime transitions that traditional indicators miss.",
+              "line_num": 23
+            },
+            {
+              "title": "1.2 Physics Analogy",
+              "node_id": "0004",
+              "summary": "### 1.2 Physics Analogy\n\nThe model draws from classical mechanics:\n\n| Physics Concept | Financial Interpretation |\n|----------------|------------------------|\n| Position x(t) | Raw factor values at time t |\n| Velocity dx/dt | Factor momentum (first temporal difference) |\n| Acceleration d²x/dt² | Factor acceleration (second difference) — detects inflection points |\n| Interaction force F_i = ΣW_ij·x_j | Cross-factor coupling — how factors \"push\" each other |\n| Phase space [x, v, a, F] | Complete dynamical state of the factor system |\n\nThis is analogous to **critical slowing down** in physics: systems approaching phase transitions exhibit characteristic signatures in their velocity and acceleration profiles before the transition occurs.\n\n---",
+              "line_num": 32
+            }
+          ]
+        },
+        {
+          "title": "2. Data",
+          "node_id": "0005",
+          "prefix_summary": "## 2. Data\n\n- **Source**: HS300 daily OHLCV + amount data (`hs300_daily.parquet`)\n- **Period**: 2024-03-11 to 2026-03-05 (480 trading days)\n- **Stocks**: 5,113 unique codes\n- **Split**: 85% train (1,263,038 samples) / 15% validation (298,911 samples)\n- **Validation period**: 2025-11-14 to 2026-03-04 (71 trading days)",
+          "line_num": 48,
+          "nodes": [
+            {
+              "title": "2.1 Factor Engineering (23 factors)",
+              "node_id": "0006",
+              "summary": "### 2.1 Factor Engineering (23 factors)\n\n**Traditional technical (18 factors)**:\nVWAP deviation, RSI-14, MACD, MACD signal, Bollinger position, volume ratio, momentum (10d), realized volatility (20d), daily return, amplitude, turnover, gap, trend (20d regression slope), skewness (20d), large-order ratio, MA5/MA20/MA60 deviation.\n\n**Microstructure & cross-sectional uniqueness (5 factors)**:\nReturn autocorrelation (20d), Amihud illiquidity, intraday return (close/open), volatility of volatility, price-volume correlation.\n\n**Preprocessing**: Cross-sectional rank normalization per date (centered at 0).\n\n**Target**: Forward 10-day risk-adjusted return (raw return / realized volatility), rank-normalized.\n\n---",
+              "line_num": 56
+            }
+          ]
+        },
+        {
+          "title": "3. Model Architecture",
+          "node_id": "0007",
+          "prefix_summary": "## 3. Model Architecture",
+          "line_num": 70,
+          "nodes": [
+            {
+              "title": "3.1 PhysicsFactorModel",
+              "node_id": "0008",
+              "summary": "The document describes the PhysicsFactorModel, a model that processes financial or time-series data using a physics-inspired approach. It starts with an input tensor of shape (B, 60, 23), representing 60 days of data for 23 different factors. The model constructs a phase space by defining position, velocity, and acceleration based on the input data. It also introduces an interaction term, which is computed as the product of the position matrix and a learnable, symmetric interaction matrix W. These four components (position, velocity, acceleration, and interaction) are concatenated to form a tensor of shape (B, 60, 92). This tensor is then linearly projected to a lower-dimensional space (d_model=64) and augmented with positional embeddings. The resulting tensor is passed through a three-layer Transformer encoder, and the output for the last timestep is fed into an MLP head to produce a scalar prediction. Key design choices include the symmetry and learnability of the interaction matrix W, ensuring that the \"force\" between any two factors is equal in both directions and that the model can learn which factor couplings are important. The model has approximately 170K parameters.",
+              "line_num": 72
+            },
+            {
+              "title": "3.2 Baselines",
+              "node_id": "0009",
+              "summary": "### 3.2 Baselines\n\n| Model | Parameters | Description |\n|-------|-----------|-------------|\n| LinearBaseline | ~1.4K | Flatten 60×23 → linear → scalar |\n| FactorTransformer | ~150K | Standard Transformer (no physics terms) |\n| FactorGRU | ~130K | Bidirectional GRU with attention pooling |\n\n---",
+              "line_num": 97
+            }
+          ]
+        },
+        {
+          "title": "4. Experiments and Results",
+          "node_id": "0010",
+          "prefix_summary": "## 4. Experiments and Results",
+          "line_num": 107,
+          "nodes": [
+            {
+              "title": "4.1 Overall Performance",
+              "node_id": "0011",
+              "summary": "### 4.1 Overall Performance\n\n| Model | Best Rank IC | Training Budget |\n|-------|-------------|----------------|\n| PhysicsFactorModel | **0.108** | 120s |\n| FactorTransformer | 0.100 | 120s |\n| FactorGRU | ~0.098 | 120s |\n| LinearBaseline | ~0.03 | 120s |",
+              "line_num": 109
+            },
+            {
+              "title": "4.2 Regime-Conditional Performance (Key Finding)",
+              "node_id": "0012",
+              "summary": "### 4.2 Regime-Conditional Performance (Key Finding)\n\nMarket days classified into regimes by cross-sectional mean target percentile (bottom 10% = stress, top 10% = rally).\n\n| Regime | Physics IC | Transformer IC | Physics Win Rate |\n|--------|-----------|----------------|-----------------|\n| **Stress** | **0.2393** | 0.2308 | 75% of days |\n| Normal | 0.1076 | 0.1022 | 64% of days |\n| Rally | -0.0458 | -0.0594 | 88% of days |\n\n**Finding**: Both models improve dramatically during stress (IC ~2.2x normal), but the Physics model consistently outperforms across all regimes.",
+              "line_num": 118
+            },
+            {
+              "title": "4.3 Early Warning Analysis (Key Finding)",
+              "node_id": "0013",
+              "summary": "The partial document focuses on the Early Warning Analysis of a physics model, evaluating its performance at different lead times before stress onset events. Key findings include the model's mean Information Criterion (IC) and the rate at which IC is positive at each lead time. The analysis reveals that the model's accuracy, as measured by the mean IC, peaks at T-15 (15 days before stress onset) with a value of 0.2835 and a 100% rate of positive IC. This finding aligns with the concept of critical slowing down, indicating that the system shows detectable anomalies during the precursor phase before the actual phase transition.",
+              "line_num": 130
+            },
+            {
+              "title": "4.4 Multi-Horizon Analysis",
+              "node_id": "0014",
+              "summary": "The partial document focuses on a multi-horizon analysis of a physics model trained with different forward return horizons (FORWARD_DAYS). It presents a table showing the performance metrics of the model across various horizons (3d, 5d, 10d, 15d, 20d, and 30d), including Best IC, Stress IC, Normal IC, and the Stress/Normal Ratio. The key findings are: a dual-peak structure is observed, with 3d and 10d horizons being optimal for stress detection due to their high stress/normal ratios (2.41x and 2.32x respectively), while 20d and 30d horizons are better for overall IC (0.1207 and 0.1212 respectively). The 15d horizon is identified as a dead zone where the stress sensitivity is 1.0x, indicating no significant stress detection capability.",
+              "line_num": 145
+            },
+            {
+              "title": "4.5 FFT Frequency Analysis",
+              "node_id": "0015",
+              "summary": "The partial document focuses on FFT frequency analysis of model predictions, daily IC (Information Coefficient), prediction dispersion, and key factors. It identifies three dominant cycles: a 32-day monthly cycle, a 16-day bi-weekly harmonic, and an 11-day stress cycle. The 32-day cycle is attributed to institutional monthly rebalancing and is the fundamental frequency. The 16-day cycle is its second harmonic and impacts the dead zone in multi-horizon analysis by causing fluctuations in prediction targets and model accuracy that cancel out stress advantages. The 11-day cycle aligns with the optimal stress detection horizon from multi-horizon analysis.",
+              "line_num": 160
+            },
+            {
+              "title": "4.6 Interaction Matrix Analysis",
+              "node_id": "0016",
+              "summary": "The document discusses the analysis of an interaction matrix in the context of market dynamics and factor interactions. It highlights the strongest couplings between different market factors, such as the positive correlation between VWAP deviation and Bollinger position, and the amplifying effect of momentum on illiquidity. The eigendecomposition of the matrix reveals dominant modes, including an amplifying mode characterized by short-term price deviation and large orders, and a damping mode where price deviation opposes momentum. Additionally, the document notes that during periods of market stress, the interaction forces between factors become more pronounced, leading to a systemic behavior where previously independent factors become highly coupled.",
+              "line_num": 175
+            },
+            {
+              "title": "4.7 Standalone Instability Indicator",
+              "node_id": "0017",
+              "summary": "### 4.7 Standalone Instability Indicator\n\nThe amplifying eigenmode's projection provides a model-free instability signal:\n\n```\ninstability(t) = std_across_stocks(factor_values(t) @ amplifying_eigenvector)\n```\n\n| Instability Level | Days | Avg Model IC | Interpretation |\n|-------------------|------|-------------|----------------|\n| P80 (alert) | 15 | 0.0607 | Elevated |\n| P90 (danger) | 8 | 0.1076 | High |\n| P95 (critical) | 4 | **0.1407** | Model 40% more accurate |\n\n**Correlation with forward returns**: r = +0.088 (positive — high instability → wider return distribution, not necessarily negative returns)\n\n---",
+              "line_num": 190
+            }
+          ]
+        },
+        {
+          "title": "5. Factor Redundancy Analysis",
+          "node_id": "0018",
+          "summary": "## 5. Factor Redundancy Analysis\n\nCross-sectional correlation analysis revealed significant redundancy:\n\n| Factor Pair | Correlation | Implication |\n|-------------|-------------|-------------|\n| vol_ratio ↔ turnover | **0.993** | Near-identical, remove one |\n| rsi_14 ↔ close_ma20 | 0.856 | Momentum cluster |\n| boll_pos ↔ close_ma20 | 0.880 | Momentum cluster |\n| momentum ↔ close_ma20 | 0.877 | Momentum cluster |\n| price_chg ↔ intraday_ret | 0.884 | Daily return cluster |\n| volatility ↔ vol_of_vol | 0.839 | Volatility cluster |\n\n**Effective independent dimensions**: ~12-15 out of 23 factors. The \"momentum cluster\" (rsi_14, boll_pos, momentum, trend, close_ma20) contains 5 factors measuring essentially the same signal.\n\n---",
+          "line_num": 208
+        },
+        {
+          "title": "6. Summary of Key Findings",
+          "node_id": "0019",
+          "summary": "The partial document highlights several key findings in a study or model related to financial risk management and market dynamics. It emphasizes the effectiveness of a physics-inspired architecture in capturing regime transitions that traditional Transformers miss, utilizing concepts like velocity, acceleration, and learned interaction forces. The model demonstrates a significant improvement in stress detection, particularly during critical periods for risk management. It provides a 15-day early warning for stress events, aligning with the critical slowing down theory from physics. The study identifies an optimal 10-day horizon for stress detection and a 30-day horizon for overall prediction, with a 15-day \"dead zone\" attributed to harmonic interference. The research also reveals a 32-day, 16-day, and 11-day cycle structure in market dynamics, influenced by institutional rebalancing and stress-sensitive cycles. Additionally, the interaction matrix uncovers causal couplings and nonlinear antagonistic relationships not detectable through correlation analysis. Finally, the study introduces a standalone instability indicator based on amplifying eigenmode projection, offering a cost-effective and model-free risk signal for practical use.",
+          "line_num": 225
+        },
+        {
+          "title": "7. Future Research Directions",
+          "node_id": "0020",
+          "prefix_summary": "## 7. Future Research Directions",
+          "line_num": 243,
+          "nodes": [
+            {
+              "title": "7.1 Near-Term (Current Data, Architecture Improvements)",
+              "node_id": "0021",
+              "summary": "### 7.1 Near-Term (Current Data, Architecture Improvements)\n\n- [ ] **Factor pruning**: Remove redundant factors (vol_ratio/turnover, momentum cluster PCA) and re-evaluate — fewer but orthogonal factors may improve generalization\n- [ ] **Dual-horizon ensemble**: Combine 10d (stress detection) and 30d (trend) models as a composite signal\n- [ ] **Interaction matrix temporal dynamics**: Train separate W matrices for different market regimes and track W evolution over time as a regime-change detector\n- [ ] **Attention weight analysis**: Extract Transformer attention maps to see which timesteps the model focuses on during stress vs normal periods",
+              "line_num": 245
+            },
+            {
+              "title": "7.2 Multi-Asset Extension",
+              "node_id": "0022",
+              "summary": "### 7.2 Multi-Asset Extension\n\n- [ ] **Cryptocurrency**: Replace factors with crypto-native signals (funding rate, open interest, liquidation volume, on-chain metrics). The leverage liquidation cascade in crypto is the purest form of positive feedback (amplifying mode), making this architecture particularly suitable.\n- [ ] **Futures**: Add basis, roll yield, and positioning data. Delivery cycle is a deterministic version of the 32d cycle found in equities.\n- [ ] **Cross-asset instability**: Train W matrix across asset classes (equity factors + crypto factors + futures factors) to detect systemic contagion.",
+              "line_num": 252
+            },
+            {
+              "title": "7.3 Snowball Product Application",
+              "node_id": "0023",
+              "summary": "### 7.3 Snowball Product Application\n\n- [ ] **Knock-in probability estimation**: Use instability indicator + amplifying mode projection direction to estimate time-varying knock-in probability for 6-month snowball products\n- [ ] **Hedging signal**: When 20d rolling instability exceeds P80 threshold, trigger delta hedging or put option purchase\n- [ ] **Backtest framework**: Simulate snowball payoff under different instability-conditioned hedging strategies",
+              "line_num": 258
+            },
+            {
+              "title": "7.4 Theoretical / Paper-Worthy Directions",
+              "node_id": "0024",
+              "summary": "### 7.4 Theoretical / Paper-Worthy Directions\n\n- [ ] **Critical slowing down formalization**: Rigorously connect the T-15 early warning to critical slowing down theory — compute the characteristic recovery rate (λ₁ → 0 near transition) and autocorrelation increase\n- [ ] **Information-theoretic analysis**: Measure mutual information between instability indicator and future tail events — does it capture information beyond VIX/implied vol?\n- [ ] **Universality**: Test whether the same physics architecture and cycle structure appear in other markets (US equities, European indices, commodity futures)\n- [ ] **Interaction matrix interpretation as Ising model**: The symmetric W matrix is equivalent to coupling constants in an Ising model — explore whether magnetization (mean field alignment) predicts market crashes",
+              "line_num": 264
+            },
+            {
+              "title": "7.5 Engineering / Production",
+              "node_id": "0025",
+              "summary": "### 7.5 Engineering / Production\n\n- [ ] **Real-time instability dashboard**: Deploy eigenvector-based instability computation as a lightweight service (no GPU needed)\n- [ ] **Automated retraining**: Re-estimate W matrix monthly to adapt to changing market structure\n- [ ] **Alert system**: Push notifications when instability crosses P80/P90/P95 thresholds\n\n---",
+              "line_num": 271
+            }
+          ]
+        },
+        {
+          "title": "8. File Inventory",
+          "node_id": "0026",
+          "summary": "The partial document provides an overview of the file inventory for a data processing and machine learning project. It lists various Python scripts, configuration files, and data directories along with their purposes. Key components include:\n\n1. **Data Pipeline**: Handled by `prepare.py`, it processes data from Parquet files to factors, rolling windows, and finally to training/validation tensors.\n2. **Model Training**: `train.py` is responsible for training models, with logging in JSONL format.\n3. **Visualization**: `viz.py` is a general-purpose visualization notebook with interactive features in VSCode.\n4. **Diagnostics**: \n   - `blackswan.py` performs black swan diagnostics using regime-conditional IC analysis.\n   - `instability.py` calculates a standalone instability indicator based on amplifying eigenmodes.\n   - `data/instability_config.npz` stores precomputed eigenvectors for production deployment.\n5. **Analysis and Visualization**:\n   - `interaction.py` visualizes interaction matrices and performs eigendecomposition.\n   - `multi_horizon.py` compares multi-horizon predictions (3/5/10/15/20/30 days).\n   - `fft_analysis.py` conducts FFT frequency analysis on model outputs and factors.\n6. **Data Storage**: \n   - `data/*.png` contains all generated diagnostic plots.\n   - `logs/*.jsonl` stores training logs for experiment tracking.",
+          "line_num": 279
+        },
+        {
+          "title": "9. Environment and Reproducibility",
+          "node_id": "0027",
+          "prefix_summary": "## 9. Environment and Reproducibility",
+          "line_num": 297,
+          "nodes": [
+            {
+              "title": "9.1 Hardware",
+              "node_id": "0028",
+              "summary": "### 9.1 Hardware\n\n- GPU: NVIDIA GeForce RTX 5090\n- OS: Windows 11 Pro (10.0.26100)",
+              "line_num": 299
+            },
+            {
+              "title": "9.2 Software",
+              "node_id": "0029",
+              "summary": "### 9.2 Software\n\n- Python: 3.10.20\n- PyTorch: 2.9.1+cu128 (CUDA 12.8)\n- numpy: 2.2.6, pandas: 2.3.3, scipy: 1.15.0, seaborn: 0.13.2, matplotlib: 3.10.8\n- Package manager: `uv` (lockfile in `uv.lock`)",
+              "line_num": 304
+            },
+            {
+              "title": "9.3 Data Provenance",
+              "node_id": "0030",
+              "summary": "### 9.3 Data Provenance\n\n- Source: `data/hs300_daily.parquet` — HS300 constituent daily OHLCV+amount, produced by `backfill_v2.py` from a DuckDB/Tushare pipeline\n- Schema: columns `date, code, open, high, low, close, volume, amount`\n- Period: 2023-12-08 to 2026-03-19 (raw), 2024-03-11 to 2026-03-05 (after warmup)\n- Train/val split: temporal, last 15% of dates = validation (val: 2025-11-14 ~ 2026-03-04)",
+              "line_num": 311
+            },
+            {
+              "title": "9.4 Random Seeds and Determinism",
+              "node_id": "0031",
+              "summary": "### 9.4 Random Seeds and Determinism\n\n**Note (gap)**: Current experiments do NOT set random seeds. Results vary across runs. For paper-quality results, add:\n```python\ntorch.manual_seed(42)\nnp.random.seed(42)\ntorch.backends.cudnn.deterministic = True\n```",
+              "line_num": 318
+            },
+            {
+              "title": "9.5 Reproduction Commands",
+              "node_id": "0032",
+              "summary": "This partial document provides a series of commands and instructions for reproducing a data processing and machine learning workflow. The main points covered are:\n\n1. **Environment Setup**: Instructions to navigate to the project directory and install dependencies using `uv sync`.\n\n2. **Data Preparation**: A command to run a Python script `prepare.py` that likely prepares the dataset for subsequent steps.\n\n3. **Model Training and Evaluation**: Commands to train and evaluate different models (`physics`, `transformer`, `gru`, `linear`) using the `train.py` script. Each command specifies a different model type to train.\n\n4. **Diagnostics**: A series of commands to run diagnostic scripts:\n   - `blackswan.py`: Trains both `physics` and `transformer` models.\n   - `interaction.py`: Runs in approximately 2 minutes.\n   - `multi_horizon.py`: Takes about 15 minutes to run, involving data preparation and training across 6 horizons.\n   - `fft_analysis.py`: Runs in approximately 2 minutes.\n   - `instability.py`: Runs in approximately 2 minutes.\n\n5. **Interactive Visualization**: Instructions to open `viz.py` in VSCode and run cells interactively using Shift+Enter for visualization purposes.",
+              "line_num": 327
+            },
+            {
+              "title": "9.6 Output Artifacts",
+              "node_id": "0033",
+              "summary": "### 9.6 Output Artifacts\n\n| Path | Contents |\n|------|----------|\n| `data/train.pt`, `data/val.pt` | Prepared tensors (features, targets, date_idx) |\n| `data/dates.pt` | Date string index for per-date analysis |\n| `data/train_Xd.pt`, `data/val_Xd.pt` | Multi-horizon prepared data (X = 3,5,10,15,20,30) |\n| `data/instability_config.npz` | Saved eigenvectors (amp_mode, damp_mode) for production |\n| `data/*.png` | All diagnostic plots (9 files) |\n| `logs/*.jsonl` | Training logs: `{timestamp}_{model}.jsonl` |\n\n---",
+              "line_num": 353
+            }
+          ]
+        },
+        {
+          "title": "10. Experiment Status Ledger",
+          "node_id": "0034",
+          "summary": "The partial document is an \"Experiment Status Ledger\" that outlines the status of various experiments and tasks related to model development and analysis. Key points include:\n\n1. **Completed Experiments**: Several experiments have been completed, such as overall model comparison, regime-conditional IC, early warning lead time, factor correlation analysis, multi-horizon analysis, FFT cycle detection, interaction matrix analysis, eigendecomposition, and instability indicator. Each of these experiments has a specific key result and associated script.\n\n2. **Ongoing Tasks**: There are several tasks marked as \"TODO\", including implementing factor importance, conducting ablation studies on velocity, acceleration, and interaction terms, assessing statistical significance, performing cross-validation, extending the analysis to crypto and futures, creating a dual-horizon ensemble, upgrading PyTorch, computing GPU factors, exporting TensorRT, integrating RAPIDS cuDF, and using cuOpt for portfolio optimization.\n\n3. **Technical Details**: The document mentions specific scripts and technologies used, such as `blackswan.py`, `viz.py`, `multi_horizon.py`, `fft_analysis.py`, `interaction.py`, `instability.py`, and `prepare.py`. It also references system upgrades like PyTorch cu128→cu130 and integration with CUDA and RTX 5090 SM features.\n\n4. **Performance Metrics**: The experiments often include performance metrics like IC (Information Coefficient) values, stress ratios, and cycle lengths, providing quantitative insights into the model's effectiveness and behavior under different conditions.\n\n5. **Future Extensions**: The document outlines plans for future work, such as replacing factors for a crypto extension, adding new factors for futures, and integrating GPU-accelerated technologies for factor computation and portfolio optimization.",
+          "line_num": 366
+        },
+        {
+          "title": "11. Research Questions and Hypotheses (for Paper)",
+          "node_id": "0035",
+          "prefix_summary": "## 11. Research Questions and Hypotheses (for Paper)",
+          "line_num": 396,
+          "nodes": [
+            {
+              "title": "Primary Research Question",
+              "node_id": "0036",
+              "summary": "### Primary Research Question\nCan physics-inspired dynamical systems modeling of stock factors detect market regime transitions earlier and more reliably than standard sequence models?",
+              "line_num": 398
+            },
+            {
+              "title": "Testable Hypotheses",
+              "node_id": "0037",
+              "summary": "The partial document outlines several testable hypotheses regarding a PhysicsFactorModel's performance and characteristics compared to a standard Transformer model. The main points covered are:\n\n1. **Regime Sensitivity (H1)**: The PhysicsFactorModel demonstrates higher rank IC during market stress compared to a standard Transformer, though statistical significance needs confirmation.\n\n2. **Early Warning (H2)**: The model shows peak predictive accuracy for stress events at a lead time of more than 5 trading days, aligning with critical slowing down theory.\n\n3. **Cyclical Structure (H3)**: The model's predictions and factor dynamics reveal distinct dominant frequencies related to institutional rebalancing cycles, identified through FFT.\n\n4. **Interaction Forces (H4)**: The model's factor interaction matrix captures nonlinear couplings not seen in traditional correlation matrices, with evidence of repulsive forces.\n\n5. **Standalone Indicator (H5)**: The model's amplifying eigenmode projection offers predictive power for tail events without needing full model inference, particularly for P95 instability days.",
+              "line_num": 401
+            }
+          ]
+        },
+        {
+          "title": "12. Limitations and Threats to Validity",
+          "node_id": "0038",
+          "summary": "The partial document outlines several limitations and threats to the validity of a study or analysis. Key points include: a small validation set with limited stress onset events, lack of random seed control leading to inconsistent results, findings based solely on the HS300 index which may not generalize, potential look-ahead bias in regime labels due to the use of forward returns, absence of transaction cost modeling which may affect profitability, a non-stationary interaction matrix that assumes market structure remains constant, confounded baselines due to differing model parameters, and a relatively short data history that may not capture enough stress events for robust statistical analysis.",
+          "line_num": 420
+        },
+        {
+          "title": "13. Related Work (to be expanded for paper)",
+          "node_id": "0039",
+          "prefix_summary": "## 13. Related Work (to be expanded for paper)",
+          "line_num": 433,
+          "nodes": [
+            {
+              "title": "Key References to Position Against",
+              "node_id": "0040",
+              "summary": "### Key References to Position Against\n\n- **Critical slowing down in financial markets**: Scheffer et al. (2009) \"Early-warning signals for critical transitions\" — our T-15 finding directly connects to this framework\n- **Factor models with interaction**: Gu, Kelly & Xiu (2020) \"Empirical Asset Pricing via Machine Learning\" — our W matrix is a learnable version of their factor structure\n- **Regime detection**: Hamilton (1989) Markov-switching models — our approach is continuous rather than discrete regime switching\n- **Physics-inspired finance**: Sornette (2003) \"Why Stock Markets Crash\" — log-periodic power law, related to our FFT findings\n- **Transformer for factors**: Zhang et al. (2021) various Transformer-based stock prediction — our baseline comparison",
+              "line_num": 435
+            },
+            {
+              "title": "Novelty Claims (preliminary)",
+              "node_id": "0041",
+              "summary": "### Novelty Claims (preliminary)\n1. First use of phase space (position + velocity + acceleration) representation for factor modeling\n2. Learnable symmetric interaction matrix as interpretable \"force field\" between factors\n3. Eigenmode-based instability indicator as model-free risk signal\n4. Empirical connection between critical slowing down and A-share market stress\n\n---",
+              "line_num": 443
+            }
+          ]
+        },
+        {
+          "title": "Appendix: Reproduction Checklist",
+          "node_id": "0042",
+          "summary": "## Appendix: Reproduction Checklist\n\n- [ ] Clone repo and `uv sync`\n- [ ] Place `hs300_daily.parquet` in `data/`\n- [ ] Run `uv run python prepare.py` → verify train.pt, val.pt, dates.pt created\n- [ ] Run `uv run python train.py --model physics` → verify logs/ created\n- [ ] Run each diagnostic script → verify data/*.png generated\n- [ ] Open viz.py in VSCode → verify cells run interactively",
+          "line_num": 451
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,132 @@
+{
+  "doc_name": "claw-mesh",
+  "source_path": "E:/knowledge/Knowledge\\Projects\\claw-mesh.md",
+  "structure": [
+    {
+      "title": "CLAW Mesh",
+      "node_id": "0000",
+      "prefix_summary": "# CLAW Mesh\n\n**FSC-Mesh: 分布式 AI 编码集群 + 治理控制平面 + Pointer Memory OS**\n\n将 WireGuard 全网状网络、Full Self Coding (FSC) 并行编码引擎、四层治理控制平面、MemoV AI 记忆层、Pointer Memory OS 整合为统一的分布式 AI Agent 协作平台。目标: 1000 Docker Agent 并行自治编码。",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "🎯 核心功能",
+          "node_id": "0001",
+          "summary": "## 🎯 核心功能描述\n\n1. **并行编码**: 利用FSC Worker从Redis Streams中拉取任务，通过Docker容器实现并行执行，并进行优先级调度以优化任务处理效率。\n\n2. **四层治理**: 采用分层的治理结构，包括政策引擎（PolicyEngine）、仲裁（Arbitration）、质量评估（QualityJudge）和执行层，确保任务处理的规范性和质量。\n\n3. **Agent信誉**: 通过Trust Factor进行动态评分，根据信誉匹配任务，并在连续失败时进行冷却处理，以提高任务分配的成功率和效率。\n\n4. **成本控制**: 实现预算追踪，并支持模型自动降级（从premium到standard，再到economy，最后到paused），以有效控制成本。\n\n5. **三重质量门**: 通过自动化检查、结构分析和LLM Judge三重质量控制机制，防止低质量代码的合并，确保代码质量。\n\n6. **AI Agent协作**: 通过MemoV共享上下文，支持多个AI Agent之间的对话和协作，提高任务处理的协同性和效率。\n\n7. **Pointer Memory OS**: 采用URI-based的记忆寻址，支持版本管理、因果追踪和向量搜索，提供强大的记忆管理和检索功能。\n\n8. **进化层**: 预设GEP策略（balanced/innovate/harden），并具备反馈检测机制，支持系统的持续优化和进化。",
+          "line_num": 7
+        },
+        {
+          "title": "🏗️ 架构",
+          "node_id": "0002",
+          "summary": "The partial document provides an overview of a system's architecture, focusing on governance, reputation, and operational components:\n\n1. **Governance Control Plane**: This section outlines a multi-layered governance structure:\n   - **Constitutional Layer (Policy Engine)**: Handles high-level policies.\n   - **Arbitration Layer (ECON)**: Manages dispute resolution.\n   - **Quality Layer (RGD)**: Ensures quality standards.\n   - **Cost Layer (Budget Control)**: Manages financial aspects.\n   - **Evolution Layer (GEP/EvoMap)**: Facilitates system updates and improvements.\n\n2. **Trust Factor (Reputation System)**: A system for tracking and managing the reputation of entities within the network.\n\n3. **Audit Logs (Redis Stream)**: Utilizes Redis Streams for logging and auditing purposes.\n\n4. **Central and Worker Nodes**: The architecture includes a central node and multiple worker nodes:\n   - **Central Node (10.10.0.1)**: Hosts critical components such as Redis 7, Governance Control Plane, MemoV Master, Qdrant (a vector database), FSC Gateway, and a Dashboard.\n   - **Worker Nodes (10.10.0.2/3/...)**: Each worker node runs several key processes:\n     - **FSC Worker Daemon v0.3.0**: Handles failure classification, differentiated retry mechanisms, and an active self-healing engine.\n     - **MemoV Sync Daemon v2.1**: Manages synchronization tasks.\n     - **Pointer Memory OS**: Operates the memory management system.\n     - **Docker Agent (<200MB)**: Runs Docker containers with a size constraint.",
+          "line_num": 18
+        },
+        {
+          "title": "📦 项目结构",
+          "node_id": "0003",
+          "summary": "The partial document provides an overview of the project structure for \"claw-mesh,\" detailing the main directories and their contents. Key components include:\n\n1. **Governance Control Plane**: A significant module with 1947 lines of code, encompassing various sub-components such as types definition, agent trust system, declarative policy engine with 7 built-in rules, audit logging using Redis Stream, triple quality validation, consensus voting protocol, cost control with model degradation, and an evolutionary layer using GEP strategies.\n\n2. **FSC Integration Code**: Contains Worker and MemoV synchronization daemons, along with deployment and startup scripts.\n\n3. **Pointer Memory OS**: Includes core pointer system, Qdrant integration, causal corrections, ontology, and a pointer directory.\n\n4. **Frontend Dashboard**: Built with React, Vite, and Zustand, utilizing Material Glass.\n\n5. **Scripts and Configuration**: Contains various tool scripts and MemoV configuration/documentation.\n\n6. **Documentation**: Includes a quick start guide and a README file.",
+          "line_num": 43
+        },
+        {
+          "title": "🛡️ 治理控制平面",
+          "node_id": "0004",
+          "summary": "The partial document describes a governance control plane for managing an Agent cluster with four layers of governance to ensure secure, efficient, and controllable operations. It includes:\n\n1. **Governance Layers**: \n   - **Constitution Layer**: Uses `PolicyEngine` with 7 declarative rules (token/cost/reputation/capacity) that can be hot-updated, based on the GaaS paper.\n   - **Arbitration Layer**: Utilizes `Arbitration` for risk-graded voting (1/3/5/7 judges) with reputation weighting, based on the ECON paper from ICML 2025.\n   - **Quality Layer**: Employs `QualityJudge` for triple validation combining automation (0-40), structure (0-30), and LLM (0-30) scores, with AXIOM warnings.\n   - **Evolution Layer**: Uses `Evolution` to balance exploration and exploitation, reuse Capsule knowledge, and provide feedback, based on EvoMap GEP.\n\n2. **Trust Factor (Reputation System)**: \n   - A scoring formula that considers success rate, quality, violations, and cost.\n   - Dynamic adjustments for success, failure, quality, and consecutive successes.\n   - A cooling mechanism that bans task acceptance for 5 minutes after 3 consecutive failures.\n\n3. **Cost Control**: \n   - Budget-based tiered pricing with premium, standard, and economy options.\n   - Hard stop when the budget exceeds 100%.\n\n4. **Redis Data Structures**: \n   - Streams for governance audit, review queue, and task votes.\n   - Hashes for trust, budget, and policies.\n   - Sorted set for the trust leaderboard.\n\n5. **Code Snippets**: \n   - Example TypeScript code demonstrating policy validation, quality evaluation, and trust updating using the governance layer.",
+          "line_num": 76
+        },
+        {
+          "title": "🔗 与上游项目的关系",
+          "node_id": "0005",
+          "summary": "## 🔗 与上游项目的关系\n\n- **FSC**: 基于 [full-self-coding](https://github.com/coleam00/full-self-coding)，添加治理感知调度 + WireGuard 网络支持\n- **MemoV**: 使用 [memov](https://github.com/memovai/memov) 作为记忆层，v2.1 事件驱动 + 多节点 Git 同步\n- **EvoMap**: 整合 [EvoMap evolver](https://github.com/EvoMap) GEP 协议，Agent 自进化 + Capsule 知识复用\n- **WireGuard**: 自研配置管理，支持全网状拓扑 + SSH 隧道热备容错",
+          "line_num": 120
+        },
+        {
+          "title": "🚀 快速开始",
+          "node_id": "0006",
+          "prefix_summary": "## 🚀 快速开始",
+          "line_num": 127,
+          "nodes": [
+            {
+              "title": "Pointer Memory OS (Day 1 ✓)",
+              "node_id": "0007",
+              "summary": "### Pointer Memory OS (Day 1 ✓)\n\n```bash\n# 测试 Pointer 系统\ncd /root/.openclaw/workspace/claw-mesh-dev\nnode scripts/test-pointer.js\n\n# 测试 Qdrant 集成（需要 Qdrant 运行）\ndocker run -d -p 6333:6333 qdrant/qdrant\nnode scripts/test-pointer.js --qdrant\n\n# 迁移 Memos 数据\nexport MEMOS_URL=http://localhost:5230\nexport MEMOS_TOKEN=your_token\nexport OPENAI_KEY=sk-...\nnode scripts/memos-migration.js\n```\n\n详细文档：[QUICKSTART.md](./QUICKSTART.md) | [memory/README.md](./memory/README.md)",
+              "line_num": 129
+            },
+            {
+              "title": "FSC Worker 部署",
+              "node_id": "0008",
+              "summary": "### FSC Worker 部署",
+              "line_num": 149
+            },
+            {
+              "title": "前置条件",
+              "node_id": "0009",
+              "summary": "### 前置条件\n\n- WireGuard 全网状网络已配置（10.10.0.0/24）\n- 中央节点 Redis 运行在 10.10.0.1:6379\n- 所有节点已安装 Bun/Node.js 18+",
+              "line_num": 151
+            },
+            {
+              "title": "部署",
+              "node_id": "0010",
+              "summary": "### 部署\n\n```bash\n# 1. 克隆仓库\ngit clone https://github.com/2233admin/claw-mesh.git\ncd claw-mesh\n\n# 2. 部署到所有节点\ncd fsc\n./deploy-workers.sh\n\n# 3. 在每个 Worker 节点启动\n./start-worker.sh\n```",
+              "line_num": 157
+            }
+          ]
+        },
+        {
+          "title": "🤝 协作开发",
+          "node_id": "0011",
+          "prefix_summary": "## 🤝 协作开发",
+          "line_num": 172,
+          "nodes": [
+            {
+              "title": "分支策略",
+              "node_id": "0012",
+              "summary": "### 分支策略\n\n- `main`: 稳定版本\n- `central-dev`: 中央节点开发分支\n- `silicon-dev`: 硅谷节点开发分支\n- `tokyo-dev`: 东京节点开发分支",
+              "line_num": 174
+            },
+            {
+              "title": "工作流程",
+              "node_id": "0013",
+              "summary": "### 工作流程\n\n1. 创建你的分支：`git checkout -b <node>-dev`\n2. 开发并提交：`git commit -m \"feat: xxx\"`\n3. 推送到远程：`git push origin <node>-dev`\n4. 在 GitHub 上创建 Pull Request\n5. 代码审查后合并到 `main`",
+              "line_num": 181
+            },
+            {
+              "title": "任务分工",
+              "node_id": "0014",
+              "summary": "### 任务分工\n\n- **硅谷节点**: FSC Worker 优化 + MemoV 集成测试\n- **中央节点**: Redis 配置 + 中央调度器 + .mem bare repo 初始化\n- **东京节点**: 轻量级 Worker 部署 + 性能测试",
+              "line_num": 189
+            }
+          ]
+        },
+        {
+          "title": "📚 文档",
+          "node_id": "0015",
+          "summary": "## 📚 文档\n\n- [FSC Worker Daemon v0.3.0](./fsc/fsc-worker-daemon.ts) — 失败分类 + 主动自愈\n- [MemoV Sync v2.1](./fsc/memov-sync-daemon.ts) — 事件驱动快照\n- [MemoV 同步策略](./memov/memov-sync-strategy.md)\n- [Pointer Memory OS](./memory/README.md)",
+          "line_num": 195
+        },
+        {
+          "title": "📊 技术栈",
+          "node_id": "0016",
+          "summary": "## 📊 技术栈\n\n- **Runtime**: Bun\n- **Language**: TypeScript (strict mode)\n- **Queue**: Redis 7 (Streams + Pub/Sub + Sorted Set)\n- **Memory**: MemoV v2.1 (Git + Redis) + Pointer Memory OS\n- **Network**: WireGuard + SSH 隧道热备\n- **Container**: Docker (<200MB per Agent)\n- **Frontend**: React + Vite + Zustand + Material Glass\n- **Governance**: 自研四层治理 (1947 LOC)",
+          "line_num": 202
+        },
+        {
+          "title": "📝 License",
+          "node_id": "0017",
+          "summary": "## 📝 License\n\nMIT",
+          "line_num": 213
+        },
+        {
+          "title": "🙏 致谢",
+          "node_id": "0018",
+          "summary": "## 🙏 致谢\n\n- [full-self-coding](https://github.com/coleam00/full-self-coding) - FSC 核心引擎\n- [memov](https://github.com/memovai/memov) - AI 记忆层\n- [EvoMap](https://github.com/EvoMap) - GEP 协议 + AI Council 治理\n- [OpenClaw](https://github.com/openclaw/openclaw) - AI Agent 框架",
+          "line_num": 217
+        },
+        {
+          "title": "📖 理论基础",
+          "node_id": "0019",
+          "summary": "## 📖 理论基础\n\n- **ECON** (ICML 2025) — 贝叶斯纳什均衡，1000 Agent 无需互相通信\n- **GaaS** — Trust Factor 信誉评分 + 声明式规则引擎\n- **AXIOM** — LLM Judge 80% 误判率警告 → 三重验证对策\n- **RGD** — Guide+Debug+Feedback 三 Agent，Pass@1 97.6%\n- **MAGMA** — 四图记忆 (语义/时间/因果/实体)，token 减 95%",
+          "line_num": 224
+        }
+      ]
+    }
+  ]
+}

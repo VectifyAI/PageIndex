@@ -1,0 +1,32 @@
+{
+  "doc_name": "OMC-关键词触发表",
+  "source_path": "E:/knowledge/Knowledge\\02-Infrastructure\\OMC\\OMC-关键词触发表.md",
+  "structure": [
+    {
+      "title": "OMC 关键词触发表",
+      "node_id": "0000",
+      "prefix_summary": "# OMC 关键词触发表\n\n> 不用记 slash command，说人话就行。OMC hooks 会自动匹配关键词激活对应 skill。",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "核心关键词",
+          "node_id": "0001",
+          "summary": "This partial document outlines a system with various operational modes and functionalities triggered by specific keywords. The main points covered include:\n\n1. **Autopilot Mode**: Initiates full autonomous execution, transforming ideas directly into code.\n2. **Ralph Loop**: Executes in a self-looping manner until completion, incorporating reviewer verification.\n3. **Ultrawork**: Utilizes a parallel execution engine designed for high-throughput batch tasks.\n4. **CCG Consensus**: Employs a consensus model involving Claude, Codex, and Gemini to collaboratively generate and vote on solutions.\n5. **RalPlan**: Combines planning with consensus validation.\n6. **Deep Interview**: Conducts Socratic demand interviews with a focus on ambiguity detection.\n7. **AI Slop Cleaner**: Cleans up AI-generated \"slop\" or low-quality code, triggered by keywords like \"deslop,\" \"anti-slop,\" \"cleanup,\" and \"slop.\"\n8. **Analysis Mode**: Activates a deep analysis mode for comprehensive evaluation.\n9. **TDD Mode**: Implements a Test-Driven Development approach.\n10. **Codebase Search**: Enables deep searching within the codebase.\n11. **Deep Reasoning**: Engages a deep reasoning mode for complex problem-solving.\n12. **Cancel**: Cancels the current execution mode.\n13. **Trace**: Performs evidence-driven causal tracing.\n14. **SciOMC**: Utilizes parallel scientist agents for analysis.\n15. **UltraQA**: Executes QA loop testing for quality assurance.",
+          "line_num": 5
+        },
+        {
+          "title": "组合用法",
+          "node_id": "0002",
+          "summary": "## 组合用法\n\n```\n# 需求不清 → 先访谈再规划\n\"deep interview 这个功能\" → 需求清晰后 → \"ralplan\"\n\n# 写完代码 → 清理 → 审查\n写代码 → \"deslop\" → code-reviewer 自动跟上\n\n# Debug 流程\n\"trace 这个 bug\" → 多假设并行 → 找到 root cause → \"ralph 修掉它\"\n\n# 架构决策\n\"ccg 这个方案怎么选\" → 三模型各出方案 → 共识结果\n```",
+          "line_num": 26
+        },
+        {
+          "title": "注意事项",
+          "node_id": "0003",
+          "summary": "## 注意事项\n\n- 关键词在**自然语言中出现就会触发**，不需要特殊格式\n- 多个关键词可以组合，按优先级匹配\n- 想手动取消正在跑的模式 → 说 \"cancelomc\" 或 `/oh-my-claudecode:cancel`\n- Team 编排是显式的，用 `/team` 命令，不靠关键词",
+          "line_num": 42
+        }
+      ]
+    }
+  ]
+}

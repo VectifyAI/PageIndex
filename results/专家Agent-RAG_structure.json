@@ -1,0 +1,62 @@
+{
+  "doc_name": "专家Agent-RAG",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\专家Agent-RAG.md",
+  "structure": [
+    {
+      "title": "专家 Agent RAG — PageIndex + agency-agents-zh + memU",
+      "node_id": "0000",
+      "prefix_summary": "# 专家 Agent RAG — PageIndex + agency-agents-zh + memU\n\n> 197 个专家人设按需检索，动态注入 Agent，配合 memU 飞轮记忆",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "已完成 (2026-03-20)",
+          "node_id": "0001",
+          "summary": "## 已完成 (2026-03-20)\n\n- [x] 克隆 `jnMetaCode/agency-agents-zh` → `D:/projects/agency-agents-zh/`\n- [x] 生成 `expert_catalog.json` (197 专家, 27 分类)\n- [x] 47 个专家带 NVIDIA/Anthropic knowledge_refs\n- [x] ExpertMemoryGateway 实现 (`a2a-dev/src/memory_gateway.py`)\n- [x] NVIDIA Blueprints 索引 (32 nodes) + AI开源轮子索引 (13 nodes)\n- [x] `build_expert_catalog.py` 脚本 (可重新生成)",
+          "line_num": 11
+        },
+        {
+          "title": "核心架构",
+          "node_id": "0002",
+          "summary": "## 核心架构\n\n```\n用户任务\n    ↓\nExpertMemoryGateway.find_expert(query)\n    ↓ keyword match on expert_catalog.json\n匹配专家 (e.g. 财务预测分析师)\n    ↓\nenrich_as_expert(prompt, expert):\n    ├─ 加载 .md 人设文件 (完整 persona)\n    ├─ PageIndex 搜 knowledge_refs (NVIDIA/Anthropic)\n    ├─ memU 查该专家历史经验\n    └─ 拼装: persona + refs + experience + prompt\n    ↓\nLLM 执行\n    ↓\npersist() → memU (namespace: expert_name) ← 飞轮\n```",
+          "line_num": 20
+        },
+        {
+          "title": "三层知识体系",
+          "node_id": "0003",
+          "summary": "## 三层知识体系\n\n| 层 | 系统 | 内容 | 特性 |\n|----|------|------|------|\n| **静态专家** | expert_catalog.json + .md 文件 | 197 个领域人设 | 关键词匹配，按需加载 |\n| **知识引用** | PageIndex (NVIDIA/Anthropic) | 技术参考文档 | LLM 树索引检索 |\n| **动态记忆** | memU | 专家历史经验、用户偏好 | 飞轮持续学习 |",
+          "line_num": 40
+        },
+        {
+          "title": "数据源",
+          "node_id": "0004",
+          "summary": "## 数据源\n\n- **agency-agents-zh** (jnMetaCode): 197 个人设，27 个分类\n  - engineering (27) | marketing (31) | specialized (29) | testing (9)\n  - design (8) | sales (8) | support (8) | finance (3) | strategy (3)\n  - academic (6) | game-development (5) | spatial-computing (6) ...",
+          "line_num": 48
+        },
+        {
+          "title": "Knowledge Refs 映射",
+          "node_id": "0005",
+          "summary": "## Knowledge Refs 映射\n\n| 分类 | NVIDIA ref | Anthropic ref |\n|------|-----------|---------------|\n| finance | cuOpt portfolio, AI distillation | — |\n| engineering | data-flywheel, aiq-framework | anthropic ecosystem |\n| strategy | cuOpt portfolio | — |\n| testing | — | claude-code-security |\n| product | — | knowledge-work-plugins |",
+          "line_num": 55
+        },
+        {
+          "title": "已完成 (2026-03-27)",
+          "node_id": "0006",
+          "summary": "Document outlines completion of tasks: expert pool expanded to 272 covering market analysis, philosophy, Sprachwelt domain, and game design; specific personas and CCGS agents added; search upgraded to semantic embeddings; ExpertMemoryGateway rebuilt.",
+          "line_num": 65
+        },
+        {
+          "title": "待完成",
+          "node_id": "0007",
+          "summary": "## 待完成\n\n- [ ] A2A Coordinator 集成 ExpertRouter (自动选专家)\n- [ ] OMC hook: Agent 启动时自动检索+注入专家人设\n- [ ] 飞轮验证：跑 10 轮量化分析，对比有/无专家记忆的效果",
+          "line_num": 75
+        },
+        {
+          "title": "关联",
+          "node_id": "0008",
+          "summary": "## 关联\n\n- [[PageIndex记忆升级]] — 索引引擎\n- [[memU迁移]] — 记忆层\n- [[agent-memory-middleware]] — AMM 缓存+图谱\n- [[AI自循环系统]] — 核心驱动\n\n#project #agent #rag #ai-loop #pageindex",
+          "line_num": 81
+        }
+      ]
+    }
+  ]
+}

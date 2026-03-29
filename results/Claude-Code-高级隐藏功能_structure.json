@@ -1,0 +1,56 @@
+{
+  "doc_name": "Claude-Code-高级隐藏功能",
+  "source_path": "E:/knowledge/Knowledge\\02-Infrastructure\\Claude-Code-高级隐藏功能.md",
+  "structure": [
+    {
+      "title": "Claude Code 高级隐藏功能",
+      "node_id": "0000",
+      "prefix_summary": "# Claude Code 高级隐藏功能\n\n基础 16 条技巧见同目录 `Claude-Code-16个实用技巧.md`，本文档记录进阶内容。",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "CLI 参数",
+          "node_id": "0001",
+          "summary": "This partial document provides a detailed overview of various command-line interface (CLI) parameters used in a specific software application or system. The parameters are categorized by their purpose and functionality, such as controlling resource usage, managing sessions, enabling remote execution, configuring settings, and adjusting permissions. Key points include:\n\n1. **Resource Management**: Parameters like `--max-budget-usd` set spending limits to prevent runaway processes, while `--fallback-model` ensures the system can automatically downgrade to a backup model if the primary model is overloaded.\n\n2. **Session Management**: Options such as `--fork-session` and `--resume` allow for creating and managing session forks without overwriting the original session. The `--from-pr` parameter restores sessions associated with specific pull requests.\n\n3. **Remote Execution**: The `--remote` parameter enables tasks to be executed in the cloud, with the ability to pull the session back to the local terminal using `--teleport`. Remote control options like `--remote-control` and `--rc` allow for accessing local sessions via external interfaces.\n\n4. **Configuration and Settings**: Parameters like `--json-schema`, `--setting-sources`, and `--settings` provide flexibility in defining and loading configuration settings, including the ability to enforce structured outputs and control which settings layers are applied.\n\n5. **Privacy and Security**: The `--no-session-persistence` option ensures that session data is not written to disk, which is useful for privacy and CI purposes. The `--permission-mode` and `--permission-prompt-tool` parameters offer control over access permissions and how they are handled.\n\n6. **Plugin and Agent Management**: The `--bare` option allows for a minimal startup by skipping plugins and hooks, while `--agents` enables the inline definition of temporary agents. The `--disable-slash-commands` parameter can lock down agent deployments by disabling all skills and commands.\n\n7. **Debugging and Logging**: The `--debug` parameter provides filtering options for debug output, allowing users to specify which components to include or exclude.\n\n8. **Experimental Features**: The `--betas` parameter allows for testing beta features by sending specific headers, and `--channels` offers preview functionality for receiving messages from platforms like Telegram and Discord.\n\nOverall, the document serves as a reference guide for configuring and managing the application's behavior through CLI parameters, catering to various use cases such as automation, remote work, privacy, and debugging.",
+          "line_num": 11
+        },
+        {
+          "title": "环境变量",
+          "node_id": "0002",
+          "summary": "The partial document provides a list of environment variables used to configure and customize the behavior of the Claude AI system. Key points covered include:\n\n1. **Context Compression**: Variables like `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` allow users to control the percentage of context compression, with the default set at 95%.\n\n2. **Window Size and Model Behavior**: `CLAUDE_CODE_AUTO_COMPACT_WINDOW` adjusts the window size for context, affecting how the model processes and compresses information.\n\n3. **Instruction and Feature Control**: Variables such as `CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS` and `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING` allow users to disable specific features like built-in git instructions and adaptive thinking, respectively.\n\n4. **File Reading and Output Limits**: `CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS` and `MAX_MCP_OUTPUT_TOKENS` control the token limits for file reading and MCP (Multi-Hop-QA) outputs, preventing truncation of large files and controlling the size of responses.\n\n5. **Bash and Shell Integration**: `CLAUDE_CODE_SHELL_PREFIX` and `CLAUDE_ENV_FILE` enable the execution of pre-scripts and the sourcing of environment scripts before running Bash commands, facilitating full auditing and persistent environment activation.\n\n6. **Task Management**: `CLAUDE_CODE_TASK_LIST_ID` allows multiple Claude instances to share a task list, enhancing collaboration and task management.\n\n7. **Session and Hooks Management**: Variables like `CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS` manage the timeout for session end hooks, ensuring efficient resource management.\n\n8. **Traffic and Telemetry Control**: `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` provides a way to disable non-essential traffic such as updates, feedback, error reports, and telemetry.\n\n9. **Model and Header Customization**: `ANTHROPIC_CUSTOM_MODEL_OPTION` and `ANTHROPIC_CUSTOM_HEADERS` allow users to inject custom model IDs and API request headers, providing flexibility in model selection and request customization.\n\n10. **Bash Command Timeout**: `BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS` enable adjustment of timeout settings for Bash commands, allowing users to balance between responsiveness and execution time.\n\n11. **Plugin and Prompt Management**: `CLAUDE_CODE_PLUGIN_SEED_DIR` and `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` control the pre-loading of plugins and the display of prompt suggestions, respectively.\n\n12. **Demo and Tool Search**: `IS_DEMO=1` hides certain features for demo purposes, while `ENABLE_TOOL_SEARCH` controls the loading of MCP tools based on usage patterns.\n\nThese variables provide extensive customization options for users to tailor the Claude AI system to their specific needs and workflows.",
+          "line_num": 39
+        },
+        {
+          "title": "Agent Teams 进阶",
+          "node_id": "0003",
+          "summary": "## Agent Teams 进阶\n\n前提：`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`\n\n- **`Shift+Down`**：终端内切换 teammate 焦点\n- **TeammateIdle hook**：exit code 2 = 给反馈继续干，不让 idle\n- **TaskCompleted hook**：exit code 2 = 阻止标记完成，打回去\n- **`CLAUDE_CODE_TASK_LIST_ID`**：独立 session 共享同一任务队列\n- **`--teammate-mode in-process|tmux|auto`**：控制显示模式\n- 持久化：`~/.claude/teams/{name}/config.json`、`~/.claude/tasks/{name}/`",
+          "line_num": 69
+        },
+        {
+          "title": "Channels（研究预览 v2.1.80+）",
+          "node_id": "0004",
+          "summary": "## Channels（研究预览 v2.1.80+）\n\n运行中的 session 接收 Telegram/Discord/Webhook 消息并回复，保持文件系统/MCP/Git 完整访问。\n\n```bash\nclaude --channels plugin:my-notifier@my-marketplace\n```",
+          "line_num": 80
+        },
+        {
+          "title": "Headless/SDK 自动化模式",
+          "node_id": "0005",
+          "summary": "## Headless/SDK 自动化模式\n\n```bash\n# 双向多轮 JSONL\necho '{\"type\":\"user\",\"content\":\"first message\"}' | \\\n  claude -p --input-format stream-json --output-format stream-json\n\n# 实时 token 流\nclaude -p \"Write a poem\" \\\n  --output-format stream-json --verbose --include-partial-messages | \\\n  jq -rj 'select(.type==\"stream_event\" and .event.delta.type?==\"text_delta\") | .event.delta.text'\n\n# Session 链式调用\nsid=$(claude -p \"Start review\" --output-format json | jq -r '.session_id')\nclaude -p \"Continue review\" --resume \"$sid\"\n```",
+          "line_num": 88
+        },
+        {
+          "title": "Settings 架构",
+          "node_id": "0006",
+          "summary": "## Settings 架构\n\n- **`apiKeyHelper`**：shell 命令动态获取 API key，配合 `CLAUDE_CODE_API_KEY_HELPER_TTL_MS` 刷新\n- **`cleanupPeriodDays`**：session 保留天数\n- **`managed-settings.json`**：企业级策略层，覆盖用户 settings",
+          "line_num": 105
+        },
+        {
+          "title": "交互模式小功能",
+          "node_id": "0007",
+          "summary": "## 交互模式小功能\n\n- **`/rename`**：重命名当前 session\n- **`/terminal-setup`**：自动配置 Warp/Kitty/Alacritty/Zed 快捷键\n- **`Ctrl+B`**：把当前任务送到后台",
+          "line_num": 111
+        }
+      ]
+    }
+  ]
+}

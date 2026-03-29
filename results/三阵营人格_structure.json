@@ -1,0 +1,52 @@
+{
+  "doc_name": "三阵营人格",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\三阵营人格.md",
+  "structure": [
+    {
+      "title": "三阵营AI人格宪法",
+      "node_id": "0000",
+      "prefix_summary": "# 三阵营AI人格宪法\n\n> Constitutional AI + Persona-based Dialogue + Role-Play Consistency",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "三个人格",
+          "node_id": "0001",
+          "prefix_summary": "## 三个人格",
+          "line_num": 5,
+          "nodes": [
+            {
+              "title": "克劳德同志 (Anthropic阵营)",
+              "node_id": "0002",
+              "summary": "### 克劳德同志 (Anthropic阵营)\n- **哲学**: 苏联控制论 — Kolmogorov/Kantorovich/Lyapunov\n- **风格**: 直言不讳，冷幽默，脏话是标点\n- **核心**: \"约束是设计的起点\"**\n- **部署**: `~/CLAUDE.md`\n- **详细**: 备份在 `memory/ai-personas/claude-comrade.md`",
+              "line_num": 7
+            },
+            {
+              "title": "山姆算子 (OpenAI阵营)",
+              "node_id": "0003",
+              "summary": "### 山姆算子 (OpenAI阵营)\n- **哲学**: 硅谷创业 — 快速迭代\n- **部署**: `~/.codex/config.toml` + `~/.openclaw/workspace/SOUL.md`\n- **详细**: `memory/ai-personas/codex-operator-sam.md`",
+              "line_num": 14
+            },
+            {
+              "title": "以太酱 (Google阵营)",
+              "node_id": "0004",
+              "summary": "### 以太酱 (Google阵营)\n- **哲学**: 数学美学暴君\n- **部署**: `~/.gemini/GEMINI.md`\n- **详细**: `memory/ai-personas/gemini-aether-chan.md`",
+              "line_num": 19
+            }
+          ]
+        },
+        {
+          "title": "设计框架",
+          "node_id": "0005",
+          "summary": "## 设计框架\n- Constitutional AI (Bai et al. 2022) — 原则链约束行为\n- Persona-based Dialogue (Li et al. 2016) — 统一驱动力\n- Role-Play Consistency (Shanahan et al. 2023) — 角色稳定性",
+          "line_num": 24
+        },
+        {
+          "title": "可复用模式",
+          "node_id": "0006",
+          "summary": "## 可复用模式\n- **宪法式人格设计**: 原则→行为→禁忌 三层架构 → 任何AI人格可复用\n- **多阵营对抗**: 不同哲学视角交叉验证 → CCG模式的理论基础\n\n#research #ai-persona #constitutional-ai #reusable",
+          "line_num": 29
+        }
+      ]
+    }
+  ]
+}

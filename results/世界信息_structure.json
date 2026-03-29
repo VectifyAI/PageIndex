@@ -1,0 +1,182 @@
+{
+  "doc_name": "世界信息",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\SillyTavern 官方文档\\核心概念\\世界信息.md",
+  "structure": [
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#pro-tips)专业提示",
+      "node_id": "0000",
+      "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#pro-tips)专业提示\n\n- AI 不会在上下文中插入关键字，因此每个 World Info 条目都应该是一个全面的独立描述。\n\n- 为了创建丰富而详细的世界传说，条目可以相互链接并相互引用。\n\n- 为了节省代币，建议保持条目内容简洁。\n\n- World Info 引擎是一个非常强大的提示管理工具。不要只专注于添加角色知识，请随时尝试。",
+      "line_num": 15
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#further-reading)延伸阅读",
+      "node_id": "0001",
+      "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#further-reading)延伸阅读\n\n- [世界信息百科全书](https://rentry.co/world-info-encyclopedia)：世界信息和知识书的详尽深入指南。作者：kingbri、Alicat、Trappu。",
+      "line_num": 25
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#character-lore)角色传说",
+      "node_id": "0002",
+      "prefix_summary": "## [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#character-lore)角色传说\n\n或者，可以将一个世界信息文件分配给一个角色，作为与该角色（包括群组）的所有聊天的专用知识源。\n\n为此，请导航到“角色管理”面板并单击地球按钮，然后从下拉列表中选择“世界信息”并单击“确定”。",
+      "line_num": 29,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#character-lore-insertion-strategy)角色传说插入策略",
+          "node_id": "0003",
+          "prefix_summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#character-lore-insertion-strategy)角色传说插入策略\n\n生成 AI 回复时，来自角色 World Info 的条目将使用以下策略之一与来自全局 World Info 选择器的条目相结合：",
+          "line_num": 35,
+          "nodes": [
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#sorted-evenly-default)均匀排序（默认）",
+              "node_id": "0004",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#sorted-evenly-default)均匀排序（默认）\n\n所有条目都将根据其插入顺序进行排序，就好像它们是一个大文件的一部分一样，忽略源。",
+              "line_num": 39
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#character-lore-first)角色传说优先",
+              "node_id": "0005",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#character-lore-first)角色传说优先\n\n来自角色世界信息的条目将首先按其插入顺序包含，然后是来自全球世界信息的条目。",
+              "line_num": 43
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#global-lore-first)全球绝杀第一",
+              "node_id": "0006",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#global-lore-first)全球绝杀第一\n\n来自全球世界信息信息的条目将首先按其插入顺序包含，然后是来自角色世界信息的条目。",
+              "line_num": 47
+            }
+          ]
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#world-info-entry)世界信息条目",
+          "node_id": "0007",
+          "prefix_summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#world-info-entry)世界信息条目",
+          "line_num": 51,
+          "nodes": [
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#key)钥匙",
+              "node_id": "0008",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#key)钥匙\n\n触发激活“世界信息”条目的关键字列表。默认情况下，键不区分大小写（这是[可配置的](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#case-sensitive-keys)）。",
+              "line_num": 53
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#optional-filter)可选过滤器",
+              "node_id": "0009",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#optional-filter)可选过滤器\n\n与主要关键字结合使用的补充关键字列表。请参阅[可选筛选器](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#optional-filter-1)。",
+              "line_num": 57
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#entry-content)参赛内容",
+              "node_id": "0010",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#entry-content)参赛内容\n\n条目激活时插入到提示符中的文本。",
+              "line_num": 61
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#insertion-order)插入顺序",
+              "node_id": "0011",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#insertion-order)插入顺序\n\n数值。定义条目的优先级（如果同时激活了多个条目）。具有较高顺序号的条目将在上下文末尾插入，因为它们对输出的影响更大。",
+              "line_num": 65
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#insertion-position)插入位置",
+              "node_id": "0012",
+              "summary": "This partial document explains the different insertion positions for World Info entries in a role-playing context and their varying impacts on the dialogue:\n\n1. **Before Char Defs**: Inserts World Info entries before the character descriptions and scene, resulting in a moderate influence on the dialogue.\n\n2. **After Char Defs**: Inserts World Info entries after the character descriptions and scene, leading to a more significant impact on the dialogue.\n\n3. **AN Top**: Inserts World Info entries at the top of the Author's Notes (A/N) content, with the influence varying based on the A/N's position.\n\n4. **AN Bottom**: Inserts World Info entries at the bottom of the A/N content, with the influence also depending on the A/N's position.\n\n5. **@ D**: Inserts World Info entries at a specific depth in the chat, where depth 0 is the bottom of the prompt.\n\nAdditionally, the document outlines how World Info entries can be integrated as system messages (⚙️), user messages (👤), or assistant messages (🤖). It also mentions that if Author's Notes are disabled (insertion frequency = 0), World Info entries at the A/N positions will be ignored.",
+              "line_num": 69
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#entry-title--memo)参赛作品标题/备注",
+              "node_id": "0013",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#entry-title--memo)参赛作品标题/备注\n\n一个文本字段，方便您标记您的条目，AI 或任何触发器逻辑都不会使用该字段。\n\n如果为空，可以通过单击“填写空备忘录”按钮，使用条目的第一个键进行回填。",
+              "line_num": 89
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#status)地位",
+              "node_id": "0014",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#status)地位\n\n1. 🔵 （蓝色圆圈） = 该条目将始终出现在提示符中。\n\n1. 🟢 （绿色圆圈） = 只有在关键字存在的情况下才会触发该条目。\n\n1. ❌ （红十字会） = 进入被禁用。",
+              "line_num": 95
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#optional-filter-1)可选过滤器",
+              "node_id": "0015",
+              "summary": "The partial document explains the concept of optional filters in the context of a system that uses primary keys for activation. It outlines four types of logical operations that can be applied to these optional filters:\n\n1. **AND ANY**: Activates an entry only when the primary key and at least one of the optional filter keys are present in the scanning context.\n2. **AND ALL**: Activates an entry only when the primary key and all of the optional filter keys are present.\n3. **NOT ANY**: Activates an entry only when the primary key is present and none of the optional filter keys are in the scanning context.\n4. **NOT ALL**: Prevents the activation of an entry even if the primary key triggers it, as long as all optional filter keys are present in the scanning context.\n\nThese filters provide flexibility in controlling the activation of entries based on the presence or absence of specific keys.",
+              "line_num": 103
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#probability)概率",
+              "node_id": "0016",
+              "summary": "The partial document explains the concept of \"Probability\" in the context of a system where entries can be activated through various means like constants, primary keys, or recursion. It describes how the probability value acts as a filter that determines the likelihood of an entry being inserted during activation. A probability of 100 means the entry is always inserted, 50 means it has a 50% chance of being inserted, and 0 means the entry is never inserted. The document also provides an example of using probability to create random events in a chat, such as triggering a specific event based on certain keywords with a 1% chance.",
+              "line_num": 115
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#inclusion-group)包容组",
+              "node_id": "0017",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#inclusion-group)包容组\n\n如果激活了具有相同组标签的多个条目，则只会在提示中插入一个条目。参赛作品是根据其触发百分比几率选择的。数字越大 - 概率越高。\n\n**分组条目不使用 Trigger% 来确定其激活的可能性，而仅用于确定选择获胜者。**",
+              "line_num": 127
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#automation-id)自动化 ID",
+              "node_id": "0018",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#automation-id)自动化 ID\n\n允许将世界信息条目与快速回复扩展中的 [STscripts](https://docs.sillytavern.app/usage/st-script/) 集成。如果快速回复命令和 WI 条目具有相同的自动化 ID，则当激活具有匹配 ID 的条目时，将自动执行该命令。\n\n如果激活了具有相同自动化 ID 的多个条目，则脚本命令将仅运行一次。",
+              "line_num": 133
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#activation-settings)激活设置",
+      "node_id": "0019",
+      "prefix_summary": "## [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#activation-settings)激活设置\n\n世界信息屏幕顶部的可折叠菜单。",
+      "line_num": 139,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#scan-depth)扫描深度",
+          "node_id": "0020",
+          "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#scan-depth)扫描深度\n\n可以在入门级上被覆盖。\n\n定义应扫描聊天历史记录中有多少条消息以查找世界信息键。\n\n- 如果设置为 0，则仅评估递归条目和作者注释。\n\n- 如果设置为 1，则 SillyTavern 仅扫描最后一条消息。\n\n- 2 = 最后两条消息，以此类推。",
+          "line_num": 143
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#context---budget)上下文 % / 预算",
+          "node_id": "0021",
+          "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#context---budget)上下文 % / 预算\n\n**定义世界信息条目一次可以使用多少个标记。**您可以定义相对于 API 的最大上下文设置 （Context %） 或目标令牌阈值 （Budget） 的阈值\n\n如果预算用尽，则即使提示中存在键，也不会激活更多条目。\n\n将首先插入常量条目。然后是具有较高订单号的条目。\n\n通过直接提及其键插入的条目比其他条目内容中提及的条目具有更高的优先级。",
+          "line_num": 155
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#min-activations)最小激活次数",
+          "node_id": "0022",
+          "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#min-activations)最小激活次数\n\n最小激活次数：如果设置为非零值，这将忽略“扫描深度”的限制，从关键字的最新消息向后查找所有聊天日志，直到触发了最小激活次数中指定的条目数量。这仍将受到“最大深度”设置或总体预算上限的限制。",
+          "line_num": 165
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#max-depth)最大深度",
+          "node_id": "0023",
+          "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#max-depth)最大深度\n\n使用“最小激活次数”设置时要扫描的最大深度。",
+          "line_num": 169
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#recursive-scanning)递归扫描",
+          "node_id": "0024",
+          "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#recursive-scanning)递归扫描\n\n**条目可以通过在内容文本中提及其关键字来激活其他条目。**\n\n例如，如果您的世界信息包含两个条目：\n\n```python\nEntry #1\nKeyword: Bessie\nContent: Bessie is a cow and is friends with Rufus.\n```\n\n```python\nEntry #2\nKeyword: Rufus\nContent: Rufus is a dog.\n```\n\n如果消息文本**只提到 Bessie**，它们**都将**被拉入上下文中。",
+          "line_num": 173
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#case-sensitive-keys)区分大小写的键",
+          "node_id": "0025",
+          "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#case-sensitive-keys)区分大小写的键\n\n\n可以在入门级上被覆盖。\n\n**要拉入上下文，条目键需要与大小写匹配，因为它们在“世界信息”条目中定义。**\n\n当您的键是常用单词或常用单词的一部分时，这很有用。\n\n例如，当此设置处于活动状态时，键“玫瑰”和“玫瑰”将根据输入进行不同的处理。",
+          "line_num": 193
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#match-whole-words)匹配整个单词",
+          "node_id": "0026",
+          "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#match-whole-words)匹配整个单词\n\n可以在入门级上被覆盖。\n\n仅当搜索文本中存在整个单词时，才会匹配键仅包含一个单词的条目。默认启用。\n\n例如，如果启用了该设置并且输入键为“国王”，则将匹配“国王万岁”等文本，但“这不是我的喜好”不会匹配。",
+          "line_num": 204
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#alert-on-overflow)溢出时发出警报",
+          "node_id": "0027",
+          "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/worldinfo/#alert-on-overflow)溢出时发出警报\n\n如果激活的 World Info 超出分配的令牌预算，则显示警报。",
+          "line_num": 212
+        }
+      ]
+    }
+  ]
+}

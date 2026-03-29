@@ -1,0 +1,50 @@
+{
+  "doc_name": "Stars-Python生态",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\GitHub-Stars\\Stars-Python生态.md",
+  "structure": [
+    {
+      "title": "Python生态",
+      "node_id": "0000",
+      "prefix_summary": "# Python生态",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "C++",
+          "node_id": "0001",
+          "summary": "## C++\n\n- [Taywee/args](https://github.com/Taywee/args) —   A simple header-only C++ argument parser library. Supposed to be flexible and powerful, and attemp\n- [rapidsai/cudf](https://github.com/rapidsai/cudf) — cuDF - GPU DataFrame Library",
+          "line_num": 4
+        },
+        {
+          "title": "JavaScript",
+          "node_id": "0002",
+          "summary": "## JavaScript\n\n- [plasma-umass/scalene](https://github.com/plasma-umass/scalene) — Scalene: a high-performance, high-precision CPU, GPU, and memory profiler for Python with AI-powered",
+          "line_num": 9
+        },
+        {
+          "title": "Jupyter Notebook",
+          "node_id": "0003",
+          "summary": "## Jupyter Notebook\n\n- [colour-science/colour-nuke](https://github.com/colour-science/colour-nuke) — Colour - Nuke\n- [jalalgh7/ISR-MOVINT-data-simulator](https://github.com/jalalgh7/ISR-MOVINT-data-simulator) — An algorithm to simulate and generate synthetic data for intelligence, surveillance, and reconnaissa\n- [jalalgh7/robust-and-real-time-NIDS](https://github.com/jalalgh7/robust-and-real-time-NIDS) — A robust CNN-based framework for real-time anomaly detection of network attacks.",
+          "line_num": 13
+        },
+        {
+          "title": "Other",
+          "node_id": "0004",
+          "summary": "## Other\n\n- [cgerchenhp/UE_TAPython_Plugin_Release](https://github.com/cgerchenhp/UE_TAPython_Plugin_Release) — Release page for UE TAPython Plugin\n- [lscambo13/ElegantMustard](https://github.com/lscambo13/ElegantMustard) — An elegant RTSS Overlay to showcase your benchmark stats in style.",
+          "line_num": 19
+        },
+        {
+          "title": "Python",
+          "node_id": "0005",
+          "summary": "The partial document is a compilation of various Python-based projects and resources, primarily hosted on GitHub. It includes a diverse range of tools and libraries for different applications such as:\n\n1. **VFX and Animation**: Projects like `tik_manager4`, `trigger`, and `LucaScheller/VFX-LYNX` focus on pipeline and project management, rigging tools, and VFX tools respectively.\n\n2. **Machine Learning and AI**: Includes projects like `KohakuBlueleaf/a1111-sd-webui-lycoris` for Stable Diffusion web UI extensions, `imoneoi/openchat` for advancing open-source language models, and `mpquant/zvt` for quantitative trading frameworks.\n\n3. **Image and Video Processing**: Tools such as `CiaraStrawberry/TemporalKit` for temporal stability in Stable Diffusion, `ddankhazi/megascans` for Megascans importers in Maya, and `volotat/SD-CN-Animation` for automating video stylization using Stable Diffusion and ControlNet.\n\n4. **Audio and Speech Processing**: Projects like `w-okada/voice-changer` for real-time voice changing and `fishaudio/fish-speech` for state-of-the-art open-source text-to-speech.\n\n5. **Game Development and Assets**: Includes `isHarryh/Ark-Studio` for Arknights asset management and `REDxEYE/Source2Converter` for converting Source1 models to Source2.\n\n6. **Utilities and Tools**: Various tools for different software like Maya, Nuke, and Blender, including `MKlimenko/aTools_python3`, `MrLixm/maya-tools-lxm`, and `Victor-IX/Blender-Launcher-V2`.\n\n7. **Data Analysis and Visualization**: Projects like `LifeArchiveProject/WeChatDataAnalysis` for WeChat data analysis and `shiyu-coder/Kronos` for financial market language models.\n\n8. **Miscellaneous**: Other notable projects include `colour-science/colour` for color science in Python, `public-apis/public-apis` for a list of free APIs, and `ytdl-org/youtube-dl` for downloading videos from various sites.\n\nThis document serves as a resource for developers and researchers interested in Python-based tools and libraries across different domains.",
+          "line_num": 24
+        },
+        {
+          "title": "TypeScript",
+          "node_id": "0006",
+          "summary": "## TypeScript\n\n- [Yeachan-Heo/My-Jogyo](https://github.com/Yeachan-Heo/My-Jogyo) — Your one-click scientific research lab for Opencode - with seamless .ipynb and REPL integration",
+          "line_num": 129
+        }
+      ]
+    }
+  ]
+}

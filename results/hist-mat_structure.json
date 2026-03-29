@@ -1,0 +1,44 @@
+{
+  "doc_name": "hist-mat",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\hist-mat.md",
+  "structure": [
+    {
+      "title": "hist-mat — 历史唯物主义动力学引擎",
+      "node_id": "0000",
+      "prefix_summary": "# hist-mat — 历史唯物主义动力学引擎\n\n> v6.0 王德峰社会权力 + 三维矛盾分析",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "基本信息",
+          "node_id": "0001",
+          "summary": "## 基本信息\n- **路径**: `D:/projects/hist-mat/`\n- **Gitea**: claudeQWQ/hist-mat\n- **Skill**: `~/.claude/skills/hist-mat.md`\n- **版本**: v6.0.0",
+          "line_num": 5
+        },
+        {
+          "title": "版本链",
+          "node_id": "0002",
+          "summary": "## 版本链\nv5.0 → v5.1(海德格尔) → v6.0(王德峰社会权力+3D矛盾)",
+          "line_num": 11
+        },
+        {
+          "title": "核心理论家",
+          "node_id": "0003",
+          "summary": "## 核心理论家\n- [[王德峰]] — 资本论哲学/1844手稿/社会权力\n- [[张双利]] — 布洛赫/卢卡奇/黑格尔-马克思\n- [[翟东升]] — 货币与权力/民本主义/地缘政经",
+          "line_num": 14
+        },
+        {
+          "title": "在量化中的应用",
+          "node_id": "0004",
+          "summary": "## 在量化中的应用\n- `macro_bridge.py` → P_risk / 信贷脉冲 / regime判断\n- 三维矛盾: 生产力vs生产关系 / 基础vs上层建筑 / 资本积累vs再分配",
+          "line_num": 19
+        },
+        {
+          "title": "关联",
+          "node_id": "0005",
+          "summary": "## 关联\n- [[quant-terminal]] — macro_bridge接入\n- [[AI自循环系统]] — 分析框架之一（非唯一）\n\n#research #philosophy #marxism #trading",
+          "line_num": 23
+        }
+      ]
+    }
+  ]
+}

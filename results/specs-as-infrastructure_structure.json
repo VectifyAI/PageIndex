@@ -1,0 +1,58 @@
+{
+  "doc_name": "specs-as-infrastructure",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\specs-as-infrastructure.md",
+  "structure": [
+    {
+      "title": "Specs are Infrastructure in the Age of Agents",
+      "node_id": "0000",
+      "prefix_summary": "# Specs are Infrastructure in the Age of Agents",
+      "line_num": 8,
+      "nodes": [
+        {
+          "title": "核心论点",
+          "node_id": "0001",
+          "summary": "## 核心论点\n\n传统流程 **设计→审批→实现** 中，spec写完基本废弃。AI agent时代，spec和实现同时演进——从\"一次性文档\"变成**持续运行的基础设施**。",
+          "line_num": 10
+        },
+        {
+          "title": "三个关键洞察",
+          "node_id": "0002",
+          "prefix_summary": "## 三个关键洞察",
+          "line_num": 14,
+          "nodes": [
+            {
+              "title": "1. Spec是Agent的护栏",
+              "node_id": "0003",
+              "summary": "### 1. Spec是Agent的护栏\n\nAgent写代码时面临大量模糊决策：扩展scope？绕过接口？加抽象层？没有spec，agent要么频繁打断你、要么自作主张。好的spec让agent自己查阅边界，在架构意图内行动。\n\n> \"传统工程里spec指导人，AI-native工程里spec还要指导写代码的agent。\"",
+              "line_num": 16
+            },
+            {
+              "title": "2. 设计与实现并发",
+              "node_id": "0004",
+              "summary": "### 2. 设计与实现并发\n\n写spec的同时让agent原型化、跑staging。三周后才发现接口不work的问题，现在在spec review阶段就暴露了。reviewer评审的不是理论架构，是**已被真实数据验证过的架构**。\n\n实际案例：企业用户组功能，spec + 第一个PR两天内同时出炉。第二个PR直接跑通端到端emulator测试——传统流程这是几周后的里程碑。",
+              "line_num": 22
+            },
+            {
+              "title": "3. 明确的坑",
+              "node_id": "0005",
+              "summary": "### 3. 明确的坑\n\n- Spec写错 → agent更快更自信地实现错误方案\n- Spec模糊 → agent用\"听起来合理\"的决策填补空白，没人批准过\n- Working code心理惯性 → 比删文档段落更难放弃\n\n> \"Spec抬高了地板，但不能取消senior review的必要性。\"",
+              "line_num": 28
+            }
+          ]
+        },
+        {
+          "title": "对FSC/OMC的启示",
+          "node_id": "0006",
+          "summary": "## 对FSC/OMC的启示\n\n| 关联 | 现状 | 可借鉴 |\n|------|------|--------|\n| FSC | 任务拆解后agent各自执行，spec靠task description | agent执行时持续参考living spec |\n| claw-grid PolicyEngine | 质量门+trust factor | 加spec-adherence检查 |\n| OMC ralplan | planner→architect→critic共识 | plan应随实现更新，不是一次性 |\n| OMC team | 多agent并行 | 共享同一份spec作为single source of truth |\n\n**最值得偷的想法**: 实现过程中反向更新spec（\"code and spec shipped together\"）。",
+          "line_num": 36
+        },
+        {
+          "title": "原文链接",
+          "node_id": "0007",
+          "summary": "## 原文链接\n\n- Tweet: https://x.com/augmentcode/status/2032503719691194756\n- Blog: https://www.augmentcode.com/blog/specs-are-infrastructure-in-the-age-of-agents\n- 作者背景: 前Riot Games首席工程师，Meta十年",
+          "line_num": 47
+        }
+      ]
+    }
+  ]
+}

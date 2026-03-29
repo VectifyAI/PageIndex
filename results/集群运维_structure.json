@@ -1,0 +1,38 @@
+{
+  "doc_name": "集群运维",
+  "source_path": "E:/knowledge/Knowledge\\02-Infrastructure\\集群运维.md",
+  "structure": [
+    {
+      "title": "集群运维",
+      "node_id": "0000",
+      "prefix_summary": "# 集群运维\n\n> 6节点 mesh 网络",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "节点",
+          "node_id": "0001",
+          "summary": "## 节点\n\n| 节点    | IP             | 用途                 |\n| ----- | -------------- | ------------------ |\n| 中央    | 43.163.225.27  | 控制面                |\n| 硅谷    | 170.106.73.160 | ZeroClaw           |\n| 东京    | 43.167.192.145 | 跳板+ZeroClaw        |\n| SUPER | 跳转中央 10.10.0.5 | 高性能计算+扫描           |\n| Curry | 43.162.99.86   | OpenClaw 149skills |\n| 新腾讯云  | 43.156.202.94  | Claw Router        |\n| NAS   | C宅局域网          | 存储+Docker          |",
+          "line_num": 5
+        },
+        {
+          "title": "网络",
+          "node_id": "0002",
+          "summary": "## 网络\n- NetBird mesh (WG已停用 2026-03-13)\n- SSH跳转: `ssh -o ProxyJump=root@43.167.192.145 root@10.10.0.5`\n- **用户在澳洲**，远程操作必须经跳板",
+          "line_num": 17
+        },
+        {
+          "title": "服务",
+          "node_id": "0003",
+          "summary": "## 服务\n- Gitea: NAS→rathole→中央:8418\n- Redis: 100.80.87.180\n- OpenClaw Dashboard: Curry:18789\n- **SUPER 全端口**: [[SUPER-service-map]] — 30+服务详细清单",
+          "line_num": 22
+        },
+        {
+          "title": "关联",
+          "node_id": "0004",
+          "summary": "## 关联\n- [[quant-terminal]] — 扫描器走SUPER\n- [[claw-mesh]] — 部署在中央\n- [[ZeroClaw]] — 部署在硅谷/东京/SUPER\n\n#infrastructure #cluster #devops",
+          "line_num": 28
+        }
+      ]
+    }
+  ]
+}

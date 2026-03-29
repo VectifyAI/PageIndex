@@ -1,0 +1,38 @@
+{
+  "doc_name": "项目索引",
+  "source_path": "E:/knowledge/Knowledge\\Projects\\项目索引.md",
+  "structure": [
+    {
+      "title": "项目索引",
+      "node_id": "0000",
+      "prefix_summary": "# 项目索引",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "活跃项目",
+          "node_id": "0001",
+          "summary": "## 活跃项目\n- [[cicada]] - CICADA 增强开发\n- [[claw-mesh]] - Claw Mesh 服务网格\n- [[claw-router]] - Claw Router 路由系统",
+          "line_num": 3
+        },
+        {
+          "title": "基础设施",
+          "node_id": "0002",
+          "summary": "## 基础设施\n- [[PantheonOS]] - PantheonOS 操作系统\n- [[FORGE]] - FORGE 构建系统",
+          "line_num": 8
+        },
+        {
+          "title": "应用项目",
+          "node_id": "0003",
+          "summary": "## 应用项目\n- [[finshare]] - FinShare 金融分享\n- [[paperclip]] - Paperclip 文档管理\n- [[ane-analysis]] - ANE 分析工具\n- [[timo-reverse]] - Timo 逆向工程",
+          "line_num": 12
+        },
+        {
+          "title": "标签",
+          "node_id": "0004",
+          "summary": "## 标签\n#projects #workspace #development",
+          "line_num": 18
+        }
+      ]
+    }
+  ]
+}

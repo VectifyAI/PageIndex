@@ -1,0 +1,116 @@
+{
+  "doc_name": "Stars-Windows桌面",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\GitHub-Stars\\Stars-Windows桌面.md",
+  "structure": [
+    {
+      "title": "Windows桌面",
+      "node_id": "0000",
+      "prefix_summary": "# Windows桌面",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "Assembly",
+          "node_id": "0001",
+          "summary": "## Assembly\n\n- [armync/ArminC-Windows-Debloat](https://github.com/armync/ArminC-Windows-Debloat) — ❑ Step-by-step guide for a fresh Windows install with no bloatware",
+          "line_num": 4
+        },
+        {
+          "title": "Batchfile",
+          "node_id": "0002",
+          "summary": "The partial document is a compilation of GitHub repositories focused on optimizing and enhancing Windows operating systems. It includes projects like Atlas-OS for lightweight Windows modifications, Ghost-Toolbox for running tools across different OS, and various optimization scripts for Windows 10 and 11 to improve performance, latency, and remove bloatware. Other repositories offer tools for overclocking USB mice, optimizing internet connections for gaming, and customizing Windows Defender settings. Additionally, there are utilities for cleaning temporary files, activating Windows and Office, and transforming Windows Server into a desktop environment.",
+          "line_num": 8
+        },
+        {
+          "title": "C",
+          "node_id": "0003",
+          "summary": "## C\n\n- [Chuyu-Team/MINT](https://github.com/Chuyu-Team/MINT) — Contains the definitions for the Windows Internal UserMode API from ntdll.dll, samlib.dll and winsta\n- [fontforge/fontforge](https://github.com/fontforge/fontforge) — Free (libre) font editor for Windows, Mac OS X and GNU+Linux\n- [zetaloop/ExplorerPatcher](https://github.com/zetaloop/ExplorerPatcher) — ExplorerPatcher Chinese L10n - 在 Windows 11 上恢复高效的工作环境",
+          "line_num": 41
+        },
+        {
+          "title": "C#",
+          "node_id": "0004",
+          "summary": "This partial document provides an overview of various open-source projects and tools developed using C#. The projects cover a range of functionalities, including system optimization, customization, and utility enhancements for Windows operating systems, particularly Windows 10 and Windows 11. Key themes include:\n\n1. **System Optimization and Tweaking**: Tools like \"AtlasOS Toolbox,\" \"QuickBoost,\" \"SophiApp,\" and \"optimizer\" focus on enhancing system performance, automating tweaks, and providing powerful customization options for Windows users.\n\n2. **Utility Enhancements**: Projects such as \"PowerToys,\" \"QuickLook,\" and \"mpv.net\" aim to bring additional features and functionalities to the Windows environment, such as productivity enhancements, macOS-like quick file previews, and a modern media player with a GUI.\n\n3. **Hardware and Performance Management**: Tools like \"MSIInturruptEnabler,\" \"EnergyStarX,\" and \"RyTuneX\" focus on improving hardware performance, managing power settings, and optimizing battery life for Windows devices.\n\n4. **Customization and Personalization**: Projects like \"HackBGRT\" and \"ContextMenuForWindows11\" allow users to customize their Windows experience by changing boot logos and creating custom right-click menus.\n\n5. **Developer Tools and Frameworks**: \"ValveKeyValue\" and \"ValveResourceFormat\" provide frameworks and tools for working with Valve's key value systems and Source 2 game engine resources, respectively.\n\n6. **Control and Management Tools**: \"g-helper\" offers a lightweight control tool for ASUS laptops and ROG Ally, allowing users to manage performance modes and fans.\n\nOverall, the document highlights a variety of open-source projects that enhance and customize the Windows user experience, providing tools for system optimization, hardware management, and user interface personalization.",
+          "line_num": 47
+        },
+        {
+          "title": "C++",
+          "node_id": "0005",
+          "summary": "The partial document provides a list of C++-related GitHub repositories, each offering specific tools and applications for various purposes:\n\n1. **xSTUDIO**: A modern, high-performance playback and review application designed for professional use.\n2. **PresentMon**: A tool for capturing and analyzing the high-level performance characteristics of graphics applications on Windows.\n3. **NSudo**: A series of system administration tools, with the original repository deprecated and an alternative in progress.\n4. **noMeiryoUI**: A tool for changing the Windows system font on Windows 8.1, 10, and 11.\n5. **OpenRtssText**: A simple C# wrapper and GUI for the RivaTuner Statistics Server.\n6. **SynchronousAudioRouter**: Provides low-latency application audio routing for Windows.\n7. **PythonIDE-PyMe**: A tool for Python programmers to develop Python user interfaces.\n8. **StopDefender**: Allows programmatic control to stop Windows Defender.\n9. **REAL**: Aims to reduce audio latency on Windows 10.",
+          "line_num": 73
+        },
+        {
+          "title": "Cython",
+          "node_id": "0006",
+          "summary": "## Cython\n\n- [NVIDIA/cuda-python](https://github.com/NVIDIA/cuda-python) — CUDA Python: Performance meets Productivity",
+          "line_num": 85
+        },
+        {
+          "title": "Dart",
+          "node_id": "0007",
+          "summary": "## Dart\n\n- [Xmarmalade/alisthelper](https://github.com/Xmarmalade/alisthelper) — Alist Helper is an application developed using Flutter, designed to simplify the use of the desktop \n- [meetrevision/revision-tool](https://github.com/meetrevision/revision-tool) — A tool to personalize ReviOS to your needs",
+          "line_num": 89
+        },
+        {
+          "title": "Go",
+          "node_id": "0008",
+          "summary": "## Go\n\n- [slackhq/nebula](https://github.com/slackhq/nebula) — A scalable overlay networking tool with a focus on performance, simplicity and security",
+          "line_num": 94
+        },
+        {
+          "title": "HLSL",
+          "node_id": "0009",
+          "summary": "## HLSL\n\n- [Blinue/Magpie](https://github.com/Blinue/Magpie) — A general-purpose window upscaler for Windows 10/11.",
+          "line_num": 98
+        },
+        {
+          "title": "HTML",
+          "node_id": "0010",
+          "summary": "## HTML\n\n- [PbL34D/PC-Optimizations](https://github.com/PbL34D/PC-Optimizations) — For Windows 10, 11 and Counter-Strike 2",
+          "line_num": 102
+        },
+        {
+          "title": "Java",
+          "node_id": "0011",
+          "summary": "## Java\n\n- [palexdev/MaterialFX](https://github.com/palexdev/MaterialFX) — A library of material components for JavaFX",
+          "line_num": 106
+        },
+        {
+          "title": "JavaScript",
+          "node_id": "0012",
+          "summary": "## JavaScript\n\n- [1186258278/OpenCodeChineseTranslation](https://github.com/1186258278/OpenCodeChineseTranslation) — 🚀 OpenCode 汉化发行版 | ⚡️ 每日自动同步官方最新版 | 全自动构建三端安装包 (Win/Mac/Linux) | 您的 OpenCode 中文版首选下载站\n- [gravesoft/msdl](https://github.com/gravesoft/msdl) — Microsoft Software Download Listing\n- [yhtt2020/workbench](https://github.com/yhtt2020/workbench) — 想天工作台客户端",
+          "line_num": 110
+        },
+        {
+          "title": "Other",
+          "node_id": "0013",
+          "summary": "This partial document provides a curated list of GitHub repositories focused on PC optimization, gaming enhancements, and software tools. Key points include:\n\n1. **PC Optimization and Performance**: Repositories like \"PC-Optimization-Hub\" and \"MajorGeeks-Windows-Tweaks\" offer resources and tweaks for improving PC performance and reducing input lag, with the latter containing over 200 tweaks using registry, PowerShell, Visual Basic, and batch files.\n\n2. **Gaming Enhancements**: Several repositories focus on enhancing gaming experiences. \"CS2-Secondary-Binding-Autoexec.cfg\" provides guidance on setting up auto-exec files with default bindings for Counter-Strike 2. \"fps_cs\" offers configuration files to improve performance in CS:GO. \"Apex-Legends-Tweaks\" provides configurations to boost FPS, reduce latency, and enhance audio in Apex Legends.\n\n3. **Software Tools**: \"Icaros\" is an official issue tracker and download location for Icaros Shell Extensions. \"streamlabs-obs\" offers free and open-source streaming software built on OBS and Electron.\n\n4. **Miscellaneous Tools**: \"PC-Tuningnew\" is a fork of a deleted PC tuning guide. \"HowToLiveLonger\" is a guide for programmers on how to live longer. \"1000hz\" provides instructions for overclocking old mice to increase their polling rate.\n\nOverall, the document serves as a resource for individuals seeking to optimize their PC's performance, enhance their gaming experience, and utilize various software tools.",
+          "line_num": 116
+        },
+        {
+          "title": "PowerShell",
+          "node_id": "0014",
+          "summary": "This partial document provides a curated list of GitHub repositories focused on enhancing and optimizing Windows systems using PowerShell scripts. Key themes include:\n\n1. **Windows Optimization and Debloating**: Multiple repositories offer scripts to streamline Windows 10 and 11 by removing unnecessary components and improving performance, such as \"Atlas_xART,\" \"win10script,\" and \"Windows10GamingFocus.\"\n\n2. **Utility and Maintenance**: Tools like \"winutil\" and \"Sophia-Script-for-Windows\" provide comprehensive solutions for installing programs, applying tweaks, and automating updates to keep systems running smoothly.\n\n3. **Gaming Performance**: \"GamingPCSetup\" focuses on optimizing gaming PCs through evidence-based configurations and setups.\n\n4. **Network and System Tweaks**: \"Network\" offers a collection of network optimizations, while \"PC-Tuning\" provides configurations for various system tasks.\n\n5. **Language and Localization**: \"LXPs\" and \"Multilingual\" assist in managing local language experience packs and deploying multiple languages on Windows systems.\n\n6. **PowerShell Automation**: \"Instl\" serves as a PowerShell software installer, and \"Fido\" automates the download of Windows and UEFI Shell ISOs.\n\n7. **Privacy and Customization**: \"meetrevision/playbook\" emphasizes creating a lightweight, privacy-focused Windows version.\n\n8. **Additional Tools**: \"Windows-Terminal\" updates PowerShell modules and configures Windows Terminal, while \"Zuntan03/LatentCoupleHelper\" aids in using the Latent Couple extension for Stable Diffusion.",
+          "line_num": 129
+        },
+        {
+          "title": "Python",
+          "node_id": "0015",
+          "summary": "The partial document provides a list of Python-based projects and tools. It includes a script for batch processing Quixel megascans assets in Autodesk Maya, a desktop utility for downloading various media types from multiple websites, a local WebUI tool for batch downloading media with advanced features, a Windows debloater to remove unwanted adware, a simple image format converter with a graphical user interface, tools for real-time stock market data retrieval and automated trading, and a command-line interface for automating graphical desktop environments.",
+          "line_num": 148
+        },
+        {
+          "title": "TypeScript",
+          "node_id": "0016",
+          "summary": "The partial document provides a list of GitHub repositories with brief descriptions of each project:\n\n1. **mediago**: A cross-platform video extraction tool that supports streaming media downloads, video downloads, m3u8 downloads, and Bilibili video downloads. It offers desktop clients for Windows and Mac.\n\n2. **clash-verge-rev**: A modern GUI client built on Tauri, designed to run on Windows, macOS, and Linux. It is tailored for proxy management.\n\n3. **InvokeAI**: A leading creative engine for Stable Diffusion models, aimed at empowering professionals and artists.\n\n4. **kando-menu/kando**: A project focused on efficiency, though the specific functionality is not detailed.\n\n5. **mmpneo/curses**: Provides speech-to-text and keyboard input captions for OBS, VRChat, Twitch chat, and Discord.",
+          "line_num": 159
+        },
+        {
+          "title": "Visual Basic .NET",
+          "node_id": "0017",
+          "summary": "## Visual Basic .NET\n\n- [AndrSator/SteamCMD-GUI](https://github.com/AndrSator/SteamCMD-GUI) — Graphical interface for SteamCMD",
+          "line_num": 167
+        }
+      ]
+    }
+  ]
+}

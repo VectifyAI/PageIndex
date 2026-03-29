@@ -1,0 +1,38 @@
+{
+  "doc_name": "OpenClaw",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\OpenClaw.md",
+  "structure": [
+    {
+      "title": "OpenClaw — 多渠道Agent平台",
+      "node_id": "0000",
+      "prefix_summary": "# OpenClaw — 多渠道Agent平台\n\n> 149 skills，支持QQ/TG等多渠道交互",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "基本信息",
+          "node_id": "0001",
+          "summary": "## 基本信息\n- **部署**: Curry节点 43.162.99.86\n- **Dashboard**: http://43.162.99.86:18789 (密码 7b7q4GrWBm22@Gr)\n- **主模型**: claude-proxy/claude-sonnet-4 (via localhost:3456)\n- **备用**: volcengine/doubao-seed-2.0-code",
+          "line_num": 5
+        },
+        {
+          "title": "架构",
+          "node_id": "0002",
+          "summary": "## 架构\n- 149个技能\n- 多渠道: QQ/Telegram/Web\n- 国产模型后端可选",
+          "line_num": 11
+        },
+        {
+          "title": "可复用模式",
+          "node_id": "0003",
+          "summary": "## 可复用模式\n- **Skill热加载**: JSON定义 → 运行时加载 → 任何Agent平台可借鉴\n- **多渠道适配**: 一套核心逻辑多出口\n- **降级链**: Claude → Doubao fallback",
+          "line_num": 16
+        },
+        {
+          "title": "关联",
+          "node_id": "0004",
+          "summary": "## 关联\n- [[Claw Router]] — 模型路由\n- [[ZeroClaw]] — 极简版\n\n#project #agent #multi-channel #reusable",
+          "line_num": 21
+        }
+      ]
+    }
+  ]
+}

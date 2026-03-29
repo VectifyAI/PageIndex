@@ -1,0 +1,48 @@
+{
+  "doc_name": "《明日方舟》UI_UX 分析——藏在「好看」背后的先进性",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\《明日方舟》UI_UX 分析——藏在「好看」背后的先进性.md",
+  "structure": [
+    {
+      "title": "**一.  Diegetic Interface 风格的主看板观瞄投影设计如何增强沉浸感？**",
+      "node_id": "0000",
+      "summary": "### 描述\n\n这篇文档主要探讨了“画内界面”（Diegetic Interface）风格在游戏设计中的应用及其对增强玩家沉浸感的贡献。以下是主要内容的概述：\n\n1. **画内界面的定义与优势**：\n   - 画内界面是指游戏中的信息单元以角色能够看到的方式呈现给玩家，而不是以传统的HUD（Heads-up Display）形式出现。这种设计旨在打破玩家与游戏角色之间的隔阂，提升沉浸感。\n   - 例如，《Apex 英雄》中弹药数显示在枪械瞄镜侧方，《生化危机》困难模式下通过屏幕颜色和视野模糊程度指示角色血量。\n\n2. **方舟游戏中的画内界面应用**：\n   - 方舟游戏中的主看板设计是一个典型的画内界面案例。游戏设定中，博士通过PRTS系统远程操作罗德岛事务，界面设计成类似钢铁侠头盔内的全息投影，突出了这种远程接入的状态。\n   - 这种设计结合了全息投影、虚拟指示窗和高科技观瞄设备等元素，与游戏的后启示录科幻战争题材相契合，增强了玩家的沉浸感。\n\n3. **画内界面的局限性**：\n   - 尽管画内界面在增强沉浸感方面有优势，但由于方舟是一款二次元养成战略手游，其界面设计需要在美学和可用性之间找到平衡，无法与大型端游相提并论。\n\n4. **案例分析**：\n   - 文档提到EA的《死亡空间》作为画内界面的经典案例，并引用了EA Visceral Games的UI总监Dino Ignacio在2013年GDC上的演讲，探讨了游戏UI设计中拟物（Skeuomorphs）概念的应用。\n\n通过这些内容，文档展示了画内界面在不同游戏中的应用及其对玩家体验的影响。",
+      "line_num": 45
+    },
+    {
+      "title": "**二.  类 Fluent Design 设计思想的多元质感在哪些细节中勾勒？**",
+      "node_id": "0001",
+      "summary": "The document discusses the design philosophy of Microsoft's Fluent Design system, introduced in 2017, which aims to unify visual styles across multiple platforms. It highlights five core aspects of Fluent Design: Light, Depth, Motion, Material, and Scale. The document emphasizes the importance of \"质感\" (texture) and the simplification of skeuomorphism in achieving a Fluent design. It describes the process of creating a Fluent element by identifying a representative material, replicating its texture, simplifying it, and adding lighting and interactive highlights. The document specifically mentions the use of frosted glass and its evolution into the Acrylic Material style in Fluent Design, highlighting its benefits in creating visual hierarchy and background blurring. It also discusses the use of background blur in the game Arknights to enhance interactivity and visual contrast. Additionally, the document touches on the limitations and potential of lighting in mobile UI design, suggesting the integration of shading and lighting techniques for more dynamic and interactive interfaces.",
+      "line_num": 86
+    },
+    {
+      "title": "**三.  界面扁平化后如何追求交互空间和所承载内容的深度？**",
+      "node_id": "0002",
+      "summary": "The partial document discusses the pursuit of interaction space and content depth in the context of interface flattening. It criticizes the misconception that flat design should be purely \"flat,\" arguing that it should aim to reduce irrelevant details, improve efficiency, and enhance visual consistency. The document highlights the use of \"cards, shadows, and rounded corners\" as a common approach in flat design to create hierarchy and depth, as seen in the Material Design and iOS 11. It also mentions the \"vignette effect\" used in the interface to emphasize central information and the parallax effect to enhance perspective and depth. The document suggests further improvements using skeletal animation and particle effects to make certain elements stand out.",
+      "line_num": 134
+    },
+    {
+      "title": "**四.  风格化的装饰字体如何同时成功地表达古典骑士精神与科幻军工风？**",
+      "node_id": "0003",
+      "summary": "The partial document discusses the use of stylized decorative fonts in the game Arknights, focusing on how they successfully blend classical chivalry with a sci-fi military aesthetic. It highlights the prominent use of serif fonts, particularly in the Chinese characters, which contribute to the game's industrial feel. The document contrasts this with the use of serif fonts in Latin text, categorizing them into four types: Roman, Renaissance (Old-Style), Transitional, and Modern. It argues that the traditional view of serif fonts as classical and sans-serif as modern is flawed, using examples like the Didot and Bodoni typefaces to illustrate the modern appeal of certain serif fonts.\n\nThe document further analyzes the design choices in Arknights, noting inconsistencies in the use of fonts across different chapters and suggesting that these choices were influenced by the game's evolving visual identity. It praises the use of the Trajan font in later chapters for its better coordination with the game's art style. The document also discusses the role of the industrial-style pseudo-monospaced font Bender in enhancing the game's tech aesthetic.\n\nAdditionally, the document explores the impact of combining Chinese and English text, suggesting that this approach often enhances the visual appeal and perceived sophistication of the design, linking it to a sense of \"techiness\" often associated with foreign languages in science fiction. It concludes by critiquing the current state of in-game dialogue, which it feels lacks the ability to effectively convey character personality and atmosphere.",
+      "line_num": 170
+    },
+    {
+      "title": "**五.  焦距控制和底图处理等平面设计基础手法如何塑造统一的视觉识别？**",
+      "node_id": "0004",
+      "summary": "该部分文档主要探讨了焦距控制和底图处理等平面设计手法如何塑造统一的视觉识别。文档首先通过方舟游戏中的具体设计案例，阐述了如何通过光线设置、元素重叠和焦距控制来增强画面深度和内容深度。接着，文档提到前景模糊取镜手法在大众中的普及为设计师提供了更多创作空间，并详细介绍了方舟中常用的底图处理方法，如噪点与漫画网点纸风格，以及局部不稳定马赛克化，这些方法不仅增强了画面细腻度，还为游戏剧情埋下伏笔。最后，文档总结了方舟在视觉规范和品牌特点上的严格把控，指出其平面设计风格是一个不断进化的增量过程，并期待未来新元素的加入。",
+      "line_num": 242
+    },
+    {
+      "title": "**六.  有哪些过场衔接技巧降低了页面层级的数量，并构建了场景化的系统结构？**",
+      "node_id": "0005",
+      "summary": "The partial document discusses interface design techniques in \"方舟\" that reduce page hierarchy and enhance user experience by minimizing learning costs. It highlights three main strategies: \n\n1. **Transitional Animations**: These animations reflect the logical connections between pages, using effects like zoom-in/zoom-out for related systems and simple fades for independent ones. Loading screens for resource-heavy systems include illustrations to reduce perceived wait times.\n\n2. **Stylized Overlays and Partial Displacements**: The game uses blurred backgrounds and overlays for secondary systems like sign-ins and notifications, keeping them on the same page. For character development, elements like upgrades and skill enhancements are managed through partial displacements and animations, allowing players to stay on a single canvas without navigating away.\n\n3. **Global Navigation and Thematic Packaging**: A global shortcut system allows players to access item details and their acquisition locations directly, reducing the need to memorize complex material trees. The main interface navigation is themed around the \"方舟\" setting, with systems organized as locations within the \"罗德岛,\" enhancing immersion and creating a more intuitive and memorable interaction path.",
+      "line_num": 294
+    },
+    {
+      "title": "**七.  对于页面与交互的未来展望**",
+      "node_id": "0006",
+      "summary": "The partial document provides a speculative discussion on potential future improvements for the user interface and interaction design of the game Arknights, focusing on enhancing player experience without considering technical feasibility. It suggests that:\n\n1. **Improving Feedback for Player Actions**: The current static interface could be made more engaging by having visual elements, such as particle effects, respond dynamically to player inputs. For example, interacting with chapter selection cards could alter the movement of dust particles, creating a more interactive and immersive experience.\n\n2. **Diversifying Interaction Methods**: The document criticizes the reliance on traditional button clicks for interactions, which can feel monotonous. It proposes incorporating modern interaction techniques like dragging, rotating knobs, zooming, haptic feedback, and multi-touch gestures to make the interface more dynamic and intuitive. Specific examples include dragging cards to manage squads, swiping to accept or delete trade orders, and using knobs or sliders to adjust production quantities.\n\n3. **Exploring Thematic and Philosophical Implications**: The document also delves into the thematic significance of certain game elements, such as the use of \"Motor Learning\" in the context of chip-based skill acquisition. It speculates on the future of human-machine integration and the potential for technology to redefine human capabilities, drawing a comparison between the game's setting and the themes of cyberpunk, while expressing anticipation for the game Cyberpunk 2077.",
+      "line_num": 352
+    }
+  ]
+}

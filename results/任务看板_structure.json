@@ -1,0 +1,30 @@
+{
+  "doc_name": "任务看板",
+  "source_path": "E:/knowledge/Knowledge\\00-Index\\任务看板.md",
+  "structure": [
+    {
+      "title": "Backlog",
+      "node_id": "0000",
+      "summary": "Backlog listing multiple tasks across several projects, including infrastructure setup for quant terminal and claw proxy, enhancements to Obsidian vault (Dataview dashboard replacement, cluster topology canvas, ADR templates, daily note process, standardizing YAML frontmatter), WinForge issue implementations, ClawAPI CLI entry via Typer, gateway analytics improvements (snapshot consumption, Xiaohongshu deep search, dashboards), scalability work such as 1000 Docker agents and performance evaluation/trading strategy iteration.",
+      "line_num": 7
+    },
+    {
+      "title": "This Week",
+      "node_id": "0001",
+      "summary": "Weekly plan outlines various initiatives including deploying complete OpenClaw systems in Silicon Valley and Tokyo, verifying pan-day push notifications, optimizing QQ push format, ensuring interconnectivity of three OpenClaw nodes with skill synchronization, and refining governance structures. It also lists trading-related tasks: tracking FVG support for 南都电源, Bull FVG for 三花智控, breakout for 数字政通, volume breakout for 拓普集团, and running StockScanner across the market.",
+      "line_num": 25
+    },
+    {
+      "title": "In Progress",
+      "node_id": "0002",
+      "summary": "## In Progress\n\n- [ ] quant-terminal CUDA因子升级 (目标4月底) #quant\n- [ ] FORGE NeurIPS 2026冲刺 #research\n- [ ] claw-mesh CPC治理体系开发 #claw-mesh",
+      "line_num": 40
+    },
+    {
+      "title": "Done",
+      "node_id": "0003",
+      "summary": "Completed tasks include establishing sentinel infrastructure with PG tables, API endpoints, and scripts, adjusting scheduler cron behavior, clarifying node roles and project philosophy, launching the claw-mesh governance documentation, expanding the China Gateway adapter coverage with LLM routing plus persistent storage/BI/dashboard setup and event-driven scheduling, documenting China data with Obsidian syncing, setting up an Obsidian vault with MCP server and plugins, deploying NoPUA agents, performing trading analyses, and conducting CCG model audits.",
+      "line_num": 47
+    }
+  ]
+}

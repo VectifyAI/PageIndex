@@ -1,0 +1,56 @@
+{
+  "doc_name": "黑格尔",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\原著文库\\黑格尔.md",
+  "structure": [
+    {
+      "title": "黑格尔 (G.W.F. Hegel) — 原著资源",
+      "node_id": "0000",
+      "prefix_summary": "# 黑格尔 (G.W.F. Hegel) — 原著资源\n\n> 康德→**黑格尔**→费尔巴哈→马克思。德国古典哲学的顶峰。",
+      "line_num": 6,
+      "nodes": [
+        {
+          "title": "综合获取入口",
+          "node_id": "0001",
+          "summary": "## 综合获取入口\n\n| 来源 | 说明 |\n|------|------|\n| **微信读书** | 贺麟全集版几乎全覆盖，免费 |\n| **Keyllo哲学档案** | [黑格尔目录 PDF直下](http://archive.keyllo.com/Z-%E5%93%B2%E5%AD%A6/%E9%BB%91%E6%A0%BC%E5%B0%94/) |\n| Z-Library | [搜索\"黑格尔\"](https://z-library.sk/author/%E9%BB%91%E6%A0%BC%E5%B0%94) |\n| marxists.org | [英文全集](https://www.marxists.org/reference/archive/hegel/index.htm)（无中译） |\n\n---",
+          "line_num": 10
+        },
+        {
+          "title": "《精神现象学》(Phänomenologie des Geistes) ⭐",
+          "node_id": "0002",
+          "summary": "This partial document provides an overview of Hegel's \"Phenomenology of Spirit\" (Phänomenologie des Geistes), highlighting its significance as stated by Marx, who called it the \"true birthplace and secret of Hegel's philosophy.\" It lists different translations and versions of the book, recommending the He Lin/Wang Jiuxing translation published by the Commercial Press as the classic choice and Deng Xiaomang's translation for its rigorous literal approach. The document also provides links to various resources for accessing the book, including the WeChat Reading version of He Lin's complete works, a PDF version from Keyllo, and an English version available on marxists.org.",
+          "line_num": 21
+        },
+        {
+          "title": "《逻辑学》(Wissenschaft der Logik) — 大逻辑",
+          "node_id": "0003",
+          "summary": "The partial document provides information about the book \"Logic\" (Wissenschaft der Logik) by Hegel, also known as \"Greater Logic.\" It highlights the standard Chinese translation by Yang Yizhi, published by the Commercial Press in two volumes, and emphasizes its status as the academic standard. The document includes direct links to PDF versions of both the upper and lower volumes, a link to the book on WeChat Reading, and a link to the English version on marxists.org titled \"Science of Logic.\"",
+          "line_num": 36
+        },
+        {
+          "title": "《小逻辑》(Enzyklopädie, Teil 1)",
+          "node_id": "0004",
+          "summary": "The partial document provides information about the book \"Lesser Logic\" (Enzyklopädie, Teil 1) by Georg Wilhelm Friedrich Hegel. It highlights a recommended version translated by He Lin, published by the Commercial Press in 1980, suggesting it as a classic introduction before studying Hegel's larger works. The document includes links to a PDF version of He Lin's translation, a GitHub repository containing the text in plain format, and an English version available on marxists.org titled \"Shorter Logic.\"",
+          "line_num": 49
+        },
+        {
+          "title": "《法哲学原理》(Grundlinien der Philosophie des Rechts)",
+          "node_id": "0005",
+          "summary": "## 《法哲学原理》(Grundlinien der Philosophie des Rechts)\n\n| 版本 | 说明 |\n|------|------|\n| **范扬/张企泰 译** (商务印书馆) | 学界通行 |\n\n- [微信读书](https://weread.qq.com/web/bookDetail/ff23219072051b77ff2964f)\n- [Keyllo PDF](http://archive.keyllo.com/Z-%E5%93%B2%E5%AD%A6/%E9%BB%91%E6%A0%BC%E5%B0%94/)\n\n---",
+          "line_num": 61
+        },
+        {
+          "title": "《历史哲学讲演录》",
+          "node_id": "0006",
+          "summary": "## 《历史哲学讲演录》\n\n| 版本 | 说明 |\n|------|------|\n| 王造时 译 (上海书店2001) | 历史哲学 |\n| 贺麟/王太庆 译 (商务4卷) | 注意：这是《**哲学史**讲演录》，不同书 |\n\n- [微信读书 历史哲学](https://weread.qq.com/web/bookDetail/5ff32c70811e7ef6fg01797c)\n- marxists.org 英文: [Philosophy of History](https://www.marxists.org/reference/archive/hegel/works/hi/lectures1.htm)\n\n---",
+          "line_num": 72
+        },
+        {
+          "title": "关联",
+          "node_id": "0007",
+          "summary": "## 关联\n- [[康德]] — 黑格尔的起点\n- [[费尔巴哈]] — 对黑格尔的唯物主义翻转\n- [[马克思]] — \"把黑格尔头脚颠倒过来\"\n- [[卢卡奇]] — 《青年黑格尔》研究\n- [[布洛赫]] — 《主体-客体：黑格尔释义》\n\n#philosophy #bibliography #hegel",
+          "line_num": 84
+        }
+      ]
+    }
+  ]
+}

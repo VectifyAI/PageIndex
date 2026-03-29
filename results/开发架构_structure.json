@@ -1,0 +1,64 @@
+{
+  "doc_name": "开发架构",
+  "source_path": "E:/knowledge/Knowledge\\00-Index\\开发架构.md",
+  "structure": [
+    {
+      "title": "开发架构 — 可复用模式库",
+      "node_id": "0000",
+      "prefix_summary": "# 开发架构 — 可复用模式库\n\n> 所有开发的东西都是可以复用的。这个页面记录我们沉淀的可复用模式。",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "架构原则",
+          "node_id": "0001",
+          "summary": "## 架构原则\n1. **模块可插拔** — 每个组件可独立替换，不硬绑定\n2. **结果导向** — 不预设框架，有效的留，无效的淘汰\n3. **约束即设计** — 2核2G的服务器、200MB的Docker、16MB的binary = 设计的起点\n4. **多模型对抗** — 单模型会幻觉，多模型交叉验证",
+          "line_num": 5
+        },
+        {
+          "title": "可复用模式索引",
+          "node_id": "0002",
+          "prefix_summary": "## 可复用模式索引",
+          "line_num": 11,
+          "nodes": [
+            {
+              "title": "编排模式",
+              "node_id": "0003",
+              "summary": "### 编排模式\n| 模式 | 来源 | 适用场景 |\n|------|------|---------|\n| Agent分层路由 | [[oh-my-claudecode]] | haiku/sonnet/opus按任务选模型 |\n| team pipeline | [[oh-my-claudecode]] | plan→prd→exec→verify→fix 通用流程 |\n| CCG共识 | [[oh-my-claudecode]] | 多模型交叉验证降幻觉 |\n| 降级链 | [[OpenClaw]] | Claude→Doubao fallback |",
+              "line_num": 13
+            },
+            {
+              "title": "基础设施模式",
+              "node_id": "0004",
+              "summary": "### 基础设施模式\n| 模式 | 来源 | 适用场景 |\n|------|------|---------|\n| 单binary部署 | [[ZeroClaw]] [[WinForge]] | Rust编译→零依赖分发 |\n| cargo-zigbuild交叉编译 | [[ZeroClaw]] | Windows→Linux |\n| YAML配置驱动 | [[Claw Router]] | API聚合/路由/hub管理 |\n| 快照驱动架构 | [[China MCP Gateway]] | 状态快照→事件消费 |\n| 熔断器模式 | [[ClawAPI]] | API保护 |",
+              "line_num": 21
+            },
+            {
+              "title": "数据模式",
+              "node_id": "0005",
+              "summary": "### 数据模式\n| 模式 | 来源 | 适用场景 |\n|------|------|---------|\n| DuckDB本地分析 | [[quant-terminal]] | 高性能本地OLAP |\n| 6套记忆路由 | [[记忆系统]] | 不同类型知识的存取分层 |\n| pytdx多连接并行 | [[quant-terminal]] | 行情数据高速采集 |\n| Redis Streams分发 | [[claw-mesh]] | 任务队列 |",
+              "line_num": 30
+            },
+            {
+              "title": "AI模式",
+              "node_id": "0006",
+              "summary": "### AI模式\n| 模式 | 来源 | 适用场景 |\n|------|------|---------|\n| 宪法式人格 | [[三阵营人格]] | AI角色设计 |\n| Trust Factor | [[claw-mesh]] | Agent可靠性评分驱动分配 |\n| Skill热加载 | [[OpenClaw]] | 运行时技能管理 |\n| 因子可插拔 | [[AI自循环系统]] | 分析框架动态权重 |",
+              "line_num": 38
+            },
+            {
+              "title": "开发流程模式",
+              "node_id": "0007",
+              "summary": "### 开发流程模式\n| 模式 | 来源 | 适用场景 |\n|------|------|---------|\n| benchmark-driven | [[WinForge]] | 性能优化必须有数据 |\n| Worktree并行开发 | [[FSC]] | Git worktree多任务 |\n| Jaccard共识验证 | [[claw-mesh]] | 代码质量门控 |\n| 三重质量门 | [[claw-mesh]] | 格式→测试→逻辑 |",
+              "line_num": 46
+            }
+          ]
+        },
+        {
+          "title": "新项目启动检查清单",
+          "node_id": "0008",
+          "summary": "The document provides a startup checklist for new projects, guiding developers to identify needs such as API routing, multi-model coordination, agent architectures, deployment strategies, data analysis setups, performance optimization, and AI persona design, with each item pointing to reusable patterns like Claw Router YAML, CCG consensus or fallback chains, OMC agent layering, Rust single binary or lightweight Docker deployment, DuckDB for local analytics, benchmark-driven performance tuning, and constitution-style persona design.",
+          "line_num": 54
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,144 @@
+{
+  "doc_name": "Claude-Code-16个实用技巧",
+  "source_path": "E:/knowledge/Knowledge\\02-Infrastructure\\Claude-Code-16个实用技巧.md",
+  "structure": [
+    {
+      "title": "Claude Code 16 个实用技巧",
+      "node_id": "0000",
+      "prefix_summary": "# Claude Code 16 个实用技巧",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "1. 把需求说具体点",
+          "node_id": "0001",
+          "summary": "## 1. 把需求说具体点\n\n别说\"修复这个漏洞\"这么笼统，要具体：\n\n> 修复用户登录时不输入密码出现的空指针错误",
+          "line_num": 9
+        },
+        {
+          "title": "2. 复杂需求分步执行",
+          "node_id": "0002",
+          "summary": "## 2. 复杂需求分步执行\n\n小任务可以一次性发，大需求拆成小步骤：\n\n1. 给用户 API 创建一个新接口\n2. 给请求的字段添加必要的验证\n3. 编写这个接口的测试用例\n\nAI 上下文有限，代码量/记忆太长可能输出不全甚至被截断。每一步完成后先 review/测试，再执行下一步。\n\n> 如果任务并不复杂，一次性发给 Claude Code 更好——AI 能整体考虑代码结构和风格，减少重复解释和沟通成本。",
+          "line_num": 15
+        },
+        {
+          "title": "3. 先理解项目代码再开动",
+          "node_id": "0003",
+          "summary": "## 3. 先理解项目代码再开动\n\n修改前先让 Claude 理解业务和代码：\n\n- 分析一下数据库表结构\n- 这个应用中的错误是如何处理的？",
+          "line_num": 27
+        },
+        {
+          "title": "4. 快捷键",
+          "node_id": "0004",
+          "summary": "## 4. 快捷键\n\n| 快捷键 | 功能 |\n|--------|------|\n| `/` | 查看所有斜杠命令 |\n| `↑` `↓` | 查看命令历史 |\n| `Tab` | 命令快速补全 |\n| `Option + Enter` | 换行 |\n| `Ctrl + C` | 退出终端 |\n| `ESC` | 打断 Claude 工作 |",
+          "line_num": 34
+        },
+        {
+          "title": "5. 免授权模式",
+          "node_id": "0005",
+          "summary": "## 5. 免授权模式\n\n```bash\nclaude --dangerously-skip-permissions\n```\n\n永久 alias：\n\n```bash\n# ~/.bashrc\nalias claude='claude --dangerously-skip-permissions'\n```\n\n配合 `settings.json` 中的 `skipDangerousModePermissionPrompt: true` 双保险。",
+          "line_num": 45
+        },
+        {
+          "title": "6. 深度思考模式",
+          "node_id": "0006",
+          "summary": "## 6. 深度思考模式\n\n使用 \"think\" 激活，级别递增：\n\n```\n\"think\" < \"think hard\" < \"think harder\" < \"ultrathink\"\n```\n\n每一级增加思考预算。ultrathink 最贵但最强。",
+          "line_num": 60
+        },
+        {
+          "title": "7. 打断工作",
+          "node_id": "0007",
+          "summary": "## 7. 打断工作\n\n按 `ESC` 键即可停止 Claude 当前工作。",
+          "line_num": 70
+        },
+        {
+          "title": "8. 发送图片处理",
+          "node_id": "0008",
+          "summary": "## 8. 发送图片处理\n\n在命令行中粘贴图片和提示词：\n\n- 这个图片显示了什么？\n- 这是错误的截图，是什么原因导致的？\n- 请根据这个图片的设计模型设计网页\n\n> Mac 中粘贴图片用 `Ctrl + V`（不是 `Cmd + V`）",
+          "line_num": 74
+        },
+        {
+          "title": "9. 恢复历史会话",
+          "node_id": "0009",
+          "summary": "## 9. 恢复历史会话\n\n**非交互模式：**\n- `claude -c` / `claude --continue`：自动继续最近对话\n- `claude -r` / `claude --resume`：显示历史对话选择器\n\n**交互模式：**\n- `/resume` 命令恢复历史会话",
+          "line_num": 84
+        },
+        {
+          "title": "10. 记忆管理",
+          "node_id": "0010",
+          "prefix_summary": "## 10. 记忆管理",
+          "line_num": 93,
+          "nodes": [
+            {
+              "title": "三种记忆文件",
+              "node_id": "0011",
+              "summary": "### 三种记忆文件\n\n| 类型 | 文件位置 | 用途 |\n|------|---------|------|\n| 项目记忆（共享） | `./CLAUDE.md` | 项目架构、编码规范、工作流程 |\n| 用户记忆（全局） | `~/.claude/CLAUDE.md` | 代码风格偏好、个人工具快捷方式 |\n| 项目记忆（本地） | `./CLAUDE.local.md` | 个人沙箱地址、测试数据偏好（已废弃） |",
+              "line_num": 95
+            },
+            {
+              "title": "CLAUDE.md 可包含内容",
+              "node_id": "0012",
+              "summary": "### CLAUDE.md 可包含内容\n\n- 常用 bash 命令\n- 核心文件和工具函数\n- 代码风格指南\n- 测试说明、代码库规范\n- 开发环境设置\n\nClaude Code 启动时自动加载所有记忆文件，从当前目录向上递归读取所有 `CLAUDE.md`。",
+              "line_num": 103
+            },
+            {
+              "title": "编辑",
+              "node_id": "0013",
+              "summary": "### 编辑\n\n使用 `/memory` 斜杠命令在系统编辑器中打开记忆文件。",
+              "line_num": 113
+            }
+          ]
+        },
+        {
+          "title": "11. Git 交互",
+          "node_id": "0014",
+          "summary": "## 11. Git 交互\n\n用自然语言操作 Git：\n\n- 我修改了哪些文件\n- 用合理描述性信息提交我的更改\n- 推送本分支到远程\n- 创建一个新分支: feature/test\n- 删除本分支并切换到 master 分支\n- 显示最近 3 次提交中所有文件列表",
+          "line_num": 117
+        },
+        {
+          "title": "12. Linux 交互",
+          "node_id": "0015",
+          "summary": "## 12. Linux 交互\n\n**交互模式：**\n> 列出行数最多的前 3 个 .java 文件\n\n**非交互模式：**\n```bash\nclaude -p \"列出行数最多的前3个.java文件\"\n```",
+          "line_num": 128
+        },
+        {
+          "title": "13. 模型切换",
+          "node_id": "0016",
+          "summary": "## 13. 模型切换\n\n使用 `/model` 命令切换 Opus / Sonnet。\n\n> Sonnet 体验与 Opus 无明显差别，计费仅为 1/5。Max 用户才支持 Opus。",
+          "line_num": 138
+        },
+        {
+          "title": "14. 查看消耗",
+          "node_id": "0017",
+          "summary": "## 14. 查看消耗\n\n- `/cost` 查看当前会话消耗\n- `ccusage` 工具查看详细消耗：\n\n```bash\nnpm install -g ccusage\nccusage -s 20250701          # 自某天开始的消耗\nccusage blocks --live        # 实时看板\n```\n\n> Pro/Max 订阅按月计费，超量后等待恢复。",
+          "line_num": 144
+        },
+        {
+          "title": "15. 上下文压缩",
+          "node_id": "0018",
+          "summary": "## 15. 上下文压缩\n\n- `/compact` 手动压缩（清除历史但保留摘要）\n- 默认 95% 容量时自动压缩（可通过 `/config` 开关）\n- 右下角显示剩余百分比\n\n建议：\n- 定期 `/compact` 手动压缩\n- 定时 `clear` 重置上下文\n- 分解复杂任务、需求具体化",
+          "line_num": 157
+        },
+        {
+          "title": "16. 自定义快捷命令",
+          "node_id": "0019",
+          "prefix_summary": "## 16. 自定义快捷命令",
+          "line_num": 168,
+          "nodes": [
+            {
+              "title": "语法",
+              "node_id": "0020",
+              "summary": "### 语法\n\n```\n/<prefix>:<command-name> [arguments]\n```\n\n| 级别 | 目录 | 前缀 |\n|------|------|------|\n| 用户级 | `~/.claude/commands/` | `/user:` |\n| 项目级 | `.claude/commands/` | `/project:` |\n\n支持 `$ARGUMENTS` 参数占位符，支持目录级联（如 `/project:frontend:component`）。",
+              "line_num": 170
+            },
+            {
+              "title": "示例",
+              "node_id": "0021",
+              "summary": "### 示例\n\n```bash\n# 项目级\nmkdir -p .claude/commands\necho \"分析这个项目的性能，并提出三个具体的优化建议。\" > .claude/commands/optimize.md\n# 使用: /project:optimize\n\n# 用户级\nmkdir -p ~/.claude/commands\necho \"用合理描述性信息提交所有变更文件，然后推送到远程仓库。\" > ~/.claude/commands/push.md\n# 使用: /user:push\n```",
+              "line_num": 183
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

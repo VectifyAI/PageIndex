@@ -1,0 +1,44 @@
+{
+  "doc_name": "16-永远在实验",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\ClaudeLog-干货\\16-永远在实验.md",
+  "structure": [
+    {
+      "title": "永远在实验 (Always Be Experimenting)",
+      "node_id": "0000",
+      "prefix_summary": "# 永远在实验 (Always Be Experimenting)\n\n> 原文：[claudelog.com/mechanics/always-be-experimenting](https://claudelog.com/mechanics/always-be-experimenting)",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "核心观点",
+          "node_id": "0001",
+          "summary": "## 核心观点\n\nA.B.E = Always Be Experimenting — 工程师应该对 AI 技术保持持续实验的心态。",
+          "line_num": 5
+        },
+        {
+          "title": "工程师悖论",
+          "node_id": "0002",
+          "summary": "## 工程师悖论\n\n软件工程师在职业生涯中轻松掌握了 jQuery、Bootstrap、Flash 等各种框架，但面对 AI 这种变革性技术却犹豫不前。这种不情愿和行业历史上对新工具的拥抱态度是矛盾的。",
+          "line_num": 9
+        },
+        {
+          "title": "当前阶段",
+          "node_id": "0003",
+          "summary": "## 当前阶段\n\nAI 采用目前处于 **\"创新者/早期少数派\" 阶段**。一旦有经验的工程师全力投入，开源社区、MCP 和各种插件将显著加速创新。",
+          "line_num": 13
+        },
+        {
+          "title": "A.B.E 心态",
+          "node_id": "0004",
+          "summary": "## A.B.E 心态\n\n> \"当新技术出现时，工程师应该始终在实验、记录、发表发现\"，接受社区验证和迭代。\n\n每个实验都是未来突破的基础知识。把记录的探索变成竞争优势和行业进步。",
+          "line_num": 17
+        },
+        {
+          "title": "我的理解",
+          "node_id": "0005",
+          "summary": "## 我的理解\n\n这篇更偏布道性质，核心信息简单但重要：**不要等 AI 工具\"成熟\"了再学，现在就是最佳实验窗口。**\n\n在技术 S 曲线的早期阶段，实验者的优势是指数级的——不是因为他们用的工具更好，而是因为他们**比别人更早理解了工具的能力边界和最佳实践**。\n\n到所有人都会用的时候，早期实验者已经建立了不可替代的方法论积累。",
+          "line_num": 23
+        }
+      ]
+    }
+  ]
+}

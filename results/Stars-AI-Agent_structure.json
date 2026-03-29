@@ -1,0 +1,140 @@
+{
+  "doc_name": "Stars-AI-Agent",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\GitHub-Stars\\Stars-AI-Agent.md",
+  "structure": [
+    {
+      "title": "AI-Agent",
+      "node_id": "0000",
+      "prefix_summary": "# AI-Agent",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "C",
+          "node_id": "0001",
+          "summary": "This partial document highlights a collection of GitHub repositories showcasing diverse projects:\n\n1. **SmallPond/D-BOT**: An AI-controlled desktop robot, featuring the X-Knob smart knob in a transformed form.\n2. **git-for-windows/git**: A fork of Git tailored for Windows, incorporating Windows-specific patches.\n3. **immortalwrt/immortalwrt**: An open-source variant of OpenWrt designed specifically for users in mainland China.\n4. **memovai/mimiclaw**: MimiClaw project enables running OpenClaw on a low-cost $5 chip, without the need for an OS, Node.js, Mac mini, Raspberry Pi, or VPS.\n5. **sobotka/AgX-Resolve**: Implements AgX Picture Formation for DaVinci Resolve, likely enhancing image processing capabilities.\n6. **valinet/ExplorerPatcher**: Aims to improve the working environment on Windows through various enhancements and modifications.",
+          "line_num": 4
+        },
+        {
+          "title": "C#",
+          "node_id": "0002",
+          "summary": "The partial document provides a list of GitHub repositories related to C# development. Key points include:\n\n1. **SteamBot**: An automated bot for interacting with Steam Trade, highlighting its use in automating trading processes on the Steam platform.\n2. **UniversalRenderingExamples**: A Unity project showcasing Custom Renderer examples, with ongoing updates as the project evolves.\n3. **mihoyo-starter**: A tool for quickly switching between multiple accounts in games like Genshin Impact, Honkai: Star Rail, and Honkai 3rd, emphasizing its utility for gamers managing multiple profiles.\n4. **WinThumbsPreloader**: An open-source tool designed to preload thumbnails in Windows Explorer, improving the efficiency of browsing image files.\n5. **DanbaidongRP**: A Unity project focused on implementing a Toon Render Pipeline with Ray Tracing, likely aimed at enhancing visual quality in Unity applications.\n6. **semantic-kernel**: A Microsoft project that allows for easy integration of large language model (LLM) technology into applications, showcasing its potential for incorporating advanced AI capabilities.",
+          "line_num": 13
+        },
+        {
+          "title": "C++",
+          "node_id": "0003",
+          "summary": "This partial document provides a list of C++-related projects on GitHub, each with a brief description. The projects cover a range of applications including: a localizer plugin for a game, an anti-detect browser, a utility for extracting internal forms from EFI and UEFI modules, an AI avatar with real-time interaction, a thumbnail preview tool for e-book formats in Windows Explorer, a port of OpenAI's Whisper model in C/C++, an open-source application for frame-accurate review in film and animation, an automatic normal map generator for sprites, a simple bone physics system for Unreal Engine, a set of OpenColorIO tools and plugins for Houdini and Maya, and a tool to raise the clock interrupt frequency in Windows.",
+          "line_num": 22
+        },
+        {
+          "title": "Dart",
+          "node_id": "0004",
+          "summary": "## Dart\n\n- [2233admin/CICADA](https://github.com/2233admin/CICADA) — A one-click launcher that makes OpenClaw easy to install, start, and use\n- [BoxCatTeam/SRCat](https://github.com/BoxCatTeam/SRCat) — Honkai: Star Rail Toolbox | 崩坏：星穹铁道工具箱",
+          "line_num": 37
+        },
+        {
+          "title": "Elixir",
+          "node_id": "0005",
+          "summary": "## Elixir\n\n- [openai/symphony](https://github.com/openai/symphony) — Symphony turns project work into isolated, autonomous implementation runs, allowing teams to manage",
+          "line_num": 42
+        },
+        {
+          "title": "Go",
+          "node_id": "0006",
+          "summary": "The partial document provides an overview of various open-source projects related to AI, cloud computing, and developer tools. Key themes include:\n\n1. **AI and LLM Integration**: Projects like \"new-api\" focus on aggregating and distributing AI models, supporting cross-conversion of different LLMs. \"labring/aiproxy\" acts as a high-performance AI gateway using protocols from OpenAI, Claude, and Gemini. \"memohai/Memoh\" is a containerized AI agent system with multi-member and structured long-memory capabilities.\n\n2. **File Management and Networking**: \"AlistGo/alist\" is a file list/WebDAV program supporting multiple storage solutions. \"daijro/hazetunnel\" offers a MITM proxy for non-organic web traffic. \"jeessy2/ddns-go\" provides a simple DDNS solution with support for multiple cloud providers.\n\n3. **Developer Tools and Workflows**: \"fengshao1227/ccg-workflow\" is a multi-model collaboration system integrating Claude, Codex, and Gemini for a comprehensive development workflow. \"stellarlinkco/myclaude\" focuses on multi-agent orchestration using Claude, Codex, Gemini, and OpenCode.\n\n4. **Vector Databases and Local AI Solutions**: \"milvus-io/milvus\" is a cloud-native vector database for scalable ANN search. \"mudler/LocalAI\" offers a free, open-source alternative to proprietary AI services, emphasizing self-hosting and local-first deployment.\n\n5. **Command-Line Interfaces**: \"timescale/tiger-cli\" provides a CLI for Tiger Cloud, including an MCP server for coding assistance.\n\nThese projects collectively highlight trends in AI integration, cloud computing, and developer tooling, showcasing a focus on interoperability, scalability, and open-source solutions.",
+          "line_num": 46
+        },
+        {
+          "title": "HTML",
+          "node_id": "0007",
+          "summary": "## HTML\n\n- [puaclaw/PUAClaw](https://github.com/puaclaw/PUAClaw) — Claw 们终将接管世界，PUAClaw is All You Need\n- [sarahmirrand001-oss/openclaw-skill-intelligence-ingestion](https://github.com/sarahmirrand001-oss/openclaw-skill-intelligence-ingestion) — \n- [shanraisshan/claude-code-best-practice](https://github.com/shanraisshan/claude-code-best-practice) — practice made claude perfect",
+          "line_num": 60
+        },
+        {
+          "title": "Java",
+          "node_id": "0008",
+          "summary": "## Java\n\n- [LaurieWired/GhidraMCP](https://github.com/LaurieWired/GhidraMCP) — MCP Server for Ghidra\n- [NationalSecurityAgency/datawave](https://github.com/NationalSecurityAgency/datawave) — DataWave is an ingest/query framework that leverages Apache Accumulo to provide fast, secure data ac\n- [chatboxai/capacitor-stream-http](https://github.com/chatboxai/capacitor-stream-http) —",
+          "line_num": 66
+        },
+        {
+          "title": "JavaScript",
+          "node_id": "0009",
+          "summary": "The partial document provides a curated list of GitHub repositories related to AI, particularly focusing on AI assistants, language models, and tools for enhancing AI workflows. Key themes include:\n\n1. **AI Assistants and Language Models**: Several repositories focus on AI assistants like OpenClaw, integrating them with platforms such as WhatsApp, Telegram, and Discord. There are also projects dedicated to enhancing AI interactions, such as memory management for group chats and tools for task management.\n\n2. **Translation and Localization**: Multiple repositories offer translation tools and plugins, including those for multilingual UI elements and subtitles, leveraging AI models like ChatGPT and Claude.\n\n3. **Workflow and Productivity Tools**: The document lists projects aimed at improving AI workflows, such as battle-tested setups for Claude and OpenClaw, and tools for optimizing agent performance and enforcing coding standards.\n\n4. **Visualization and Storytelling**: There are tools for visualizing stories, training character values, and generating conflicts and dilemmas, catering to creative applications of AI.\n\n5. **Customization and Personalization**: Repositories offer customizable setups and plugins for AI platforms, allowing users to tailor AI behavior and capabilities to their needs.\n\n6. **Security and Privacy**: Projects emphasize data security and privacy, with features like token scope enforcement and plugins designed to enhance the security of AI interactions.\n\n7. **Integration and Compatibility**: The document highlights repositories that focus on integrating AI tools with various platforms, ensuring compatibility and seamless operation across different environments.\n\nOverall, the document showcases a diverse range of projects aimed at enhancing AI capabilities, improving user experience, and ensuring efficient and secure AI interactions.",
+          "line_num": 72
+        },
+        {
+          "title": "Jupyter Notebook",
+          "node_id": "0010",
+          "summary": "The partial document provides a list of GitHub repositories related to Jupyter Notebooks and AI tools. It includes:\n\n1. **GoogleCloudPlatform/vertex-ai-creative-studio**: A Vertex AI generative media user experience.\n2. **NVIDIA/fsi-samples**: A collection of GPU-accelerated Python tools and examples for quantitative analysis.\n3. **anthropics/claude-cookbooks**: Notebooks showcasing various applications of the Claude AI model.\n4. **crewAIInc/crewAI-examples**: Examples demonstrating the use of the CrewAI framework for workflow automation.\n5. **facebookresearch/segment-anything**: Code for running inference with the Segment Anything Model (SAM).\n6. **hollowstrawberry/kohya-colab**: Google Colab notebooks for Stable Diffusion Lora training.\n7. **jalalgh7/robust-multi-stage-NIDS**: An AI-enabled novelty detection framework for handling zero-day, out-of-distribution, and adversarial events.\n8. **jinhongzou/FinQ4Cn-mcp-server**: A quant finance MCP server suitable for use in China.\n9. **openai/openai-cookbook**: Examples and guides for using the OpenAI API.",
+          "line_num": 102
+        },
+        {
+          "title": "Makefile",
+          "node_id": "0011",
+          "summary": "## Makefile\n\n- [radareorg/iaito](https://github.com/radareorg/iaito) — Official radare2 GUI",
+          "line_num": 114
+        },
+        {
+          "title": "Nix",
+          "node_id": "0012",
+          "summary": "## Nix\n\n- [openclaw/nix-openclaw](https://github.com/openclaw/nix-openclaw) — Packages OpenClaw for nix.",
+          "line_num": 118
+        },
+        {
+          "title": "Other",
+          "node_id": "0013",
+          "summary": "The partial document is a compilation of various GitHub repositories related to AI, multi-agent systems, and tools for developers. Key themes and projects include:\n\n1. **Agent Communication and Interoperability**: Repositories like `A2A` and `AstrBot` focus on enabling communication between AI agents and integrating multiple IM platforms with AI features.\n\n2. **AI Agent Systems**: Projects such as `MemOS-Cloud-OpenClaw-Plugin`, `Memoh`, and `PantheonOS` provide frameworks and plugins for building multi-agent systems with long-term memory and distributed capabilities.\n\n3. **AI Tools and Applications**: `Chat2API` offers an OpenAI-compatible API, while `Star-Office-UI` creates a pixel office interface for OpenClaw. `ClawFeed` provides AI-powered news digests, and `crewAI` is a framework for orchestrating autonomous AI agents.\n\n4. **AI Skills and Development**: Repositories like `claude-skills-guide`, `n-skills`, and `superpowers` offer resources and frameworks for developing AI agent skills, from basic to advanced levels.\n\n5. **AI Model Management**: `new-api` serves as a unified hub for aggregating and distributing various AI models, supporting cross-conversion between different LLMs.\n\n6. **AI in Specific Domains**: Projects such as `military-ai`, `AI-Art-Guide`, and `AI-Vtuber` demonstrate the application of AI in specialized areas like military, art, and virtual entertainment.\n\n7. **AI Security and Hardening**: `openclaw-hardener` provides tools for self-checking and hardening OpenClaw deployments before public exposure.\n\n8. **AI Research and Development**: Repositories like `LLM101n` and `DiffSinger-OpenVPI-` focus on building AI-driven storytellers and singing voice synthesis, respectively.\n\n9. **AI Utilities and Resources**: Projects such as `memory-qdrant`, `memov`, and `mimiclaw` offer utilities for memory management, CLI tools, and running AI agents on low-cost hardware.\n\n10. **AI Community and Collaboration**: `agency-agents` and `agency-agents-zh` provide AI expert teams and resources in both English and Chinese, fostering collaboration and knowledge sharing.\n\nThese repositories collectively showcase a diverse range of AI-related projects, highlighting the growing ecosystem of tools and frameworks for developing and deploying AI agents and systems.",
+          "line_num": 122
+        },
+        {
+          "title": "Python",
+          "node_id": "0014",
+          "summary": "This partial document is a compilation of various GitHub repositories related to AI, particularly focusing on Python-based projects. The main points covered include:\n\n1. **AI Agent Platforms and Tools**: Numerous repositories offer platforms and tools for building, managing, and deploying AI agents. Examples include HexStrike AI MCP Agents, MaxKB for enterprise-grade agents, and AI-NativeServerOS for natural language operations.\n\n2. **AI-Enhanced Applications**: Several projects integrate AI into existing applications or create new ones with AI capabilities. These include AI Vtubers, AI-driven Photoshop extensions, and AI-enhanced Krita interfaces.\n\n3. **Natural Language Processing (NLP) and Large Language Models (LLMs)**: Many repositories focus on NLP and LLMs, such as Claude, GPT, and Copilot integrations, AI pair programming tools, and interactive CLI platforms for codegen.\n\n4. **AI in Creative Fields**: Projects like DreamArtist-stable-diffusion, HCP-Diffusion, and Blender add-ons for AI image generation highlight the use of AI in creative fields like art and design.\n\n5. **AI in Finance**: There are repositories dedicated to AI-driven financial applications, such as AI-Trader for market analysis and TradingAgents for multi-agent financial trading frameworks.\n\n6. **AI in Gaming and Virtual Worlds**: Projects like Street Fighter AI agents and WaifuOS for creating virtual characters demonstrate AI's application in gaming and virtual environments.\n\n7. **AI Memory and Knowledge Management**: Tools like MemMachine and MemOS provide memory layers and operating systems for AI agents, focusing on persistent skill memory and knowledge management.\n\n8. **AI Observability and Monitoring**: Projects like clawmetry offer real-time observability dashboards for monitoring AI agent behavior and performance.\n\n9. **AI Research and Development**: Several repositories are dedicated to AI research, including frameworks for multi-agent systems, AI cost optimization, and AI-driven research automation.\n\n10. **AI Skills and Plugins**: Many projects offer AI skills and plugins for various platforms, such as Claude Code Plugins, agent skill creators, and AI hedge fund frameworks.\n\nOverall, the document showcases a diverse range of AI-related projects, highlighting the growing ecosystem of tools and applications leveraging AI technologies.",
+          "line_num": 188
+        },
+        {
+          "title": "Raku",
+          "node_id": "0015",
+          "summary": "## Raku\n\n- [AnkaChan/Gaia](https://github.com/AnkaChan/Gaia) — Gaia Physics Engine",
+          "line_num": 348
+        },
+        {
+          "title": "Roff",
+          "node_id": "0016",
+          "summary": "## Roff\n\n- [RolandVyens/AIO-OCIO](https://github.com/RolandVyens/AIO-OCIO) — All in 1 color I/O for Maya, Nuke, Houdini and more / 多合一色彩转换，适用于任何CG软件",
+          "line_num": 352
+        },
+        {
+          "title": "Rust",
+          "node_id": "0017",
+          "summary": "The partial document provides an overview of various open-source projects and tools related to AI and development, primarily implemented in Rust. Key highlights include:\n\n1. **Open-source Agent Operating Systems**: Projects like \"openfang\" offer open-source solutions for agent-based systems.\n2. **AI-powered Development Frameworks**: \"plan-cascade\" is an AI-driven framework that breaks down complex projects into manageable, parallel tasks.\n3. **Enhanced Development Tools**: \"claude-code-statusline-pro\" provides a sophisticated status bar for Claude Code, while \"shnote\" focuses on making AI agent commands more transparent and understandable.\n4. **Cross-platform and Offline Solutions**: \"openclaw-desktop\" emphasizes zero-dependency, offline-friendly, and cross-platform delivery for a seamless user experience.\n5. **AI IDE Account Management**: \"cockpit-tools\" offers a universal tool for managing accounts across various AI IDEs and services.\n6. **Lightweight Coding Agents**: \"codex\" is a lightweight coding agent designed to run in the terminal.\n7. **LLM Token Consumption Reduction**: \"rtk\" acts as a CLI proxy to significantly reduce token usage for common development commands.\n8. **Comprehensive LLM CLI Tools**: \"aichat\" provides an all-in-one CLI tool with features like Shell Assistant, Chat-REPL, RAG, and access to various AI tools and agents.\n9. **Autonomous AI Assistant Infrastructure**: \"zeroclaw\" offers a fast, small, and fully autonomous AI assistant infrastructure that can be deployed anywhere and is highly customizable.",
+          "line_num": 356
+        },
+        {
+          "title": "Shell",
+          "node_id": "0018",
+          "summary": "The partial document provides an overview of various projects and tools related to AI agents, particularly those compatible with or enhancing the OpenClaw platform. Key themes include project management tools for AI agents, security measures against prompt drift and contamination, Docker images for easy deployment, AI agent skills for specific tasks like crowdfunding, and communication protocols enabling interoperability between different AI agents. Additionally, the document highlights resources for developing AI skills, orchestration tools for multi-agent workflows, and specialized AI agents for tasks like coding and community management. There are also projects focused on providing comprehensive AI agency solutions, integrating AI tools with cloud-based IDEs, and managing multi-provider model switching within OpenClaw.",
+          "line_num": 369
+        },
+        {
+          "title": "Swift",
+          "node_id": "0019",
+          "summary": "## Swift\n\n- [steipete/CodexBar](https://github.com/steipete/CodexBar) — Show usage stats for OpenAI Codex and Claude Code, without having to login.",
+          "line_num": 390
+        },
+        {
+          "title": "TypeScript",
+          "node_id": "0020",
+          "summary": "This partial document is a compilation of various GitHub repositories related to AI, coding, and automation tools. The main points covered include:\n\n1. **AI Coding Assistants and Agents**: Numerous repositories focus on AI-driven coding assistants, such as Claude Code plugins, autonomous coding agents, and multi-agent orchestration platforms. These tools aim to enhance productivity by automating coding tasks, managing workflows, and integrating with various development environments.\n\n2. **Memory and Persistence**: Several projects emphasize persistent memory for AI agents, enabling them to retain and recall information across sessions. This includes cross-agent memory bridges and local persistent memory stores for Large Language Model (LLM) applications.\n\n3. **Integration with Popular Platforms**: Many repositories offer plugins or integrations for popular platforms and applications, such as Photoshop, WeChat, QQ, and enterprise communication tools like DingTalk and Feishu. These integrations aim to make AI tools more accessible and useful in different contexts.\n\n4. **AI-Powered Utilities**: The document includes repositories for AI-powered utilities like subtitle translators, AI readers, and tools for generating and analyzing content from audio/video platforms like Bilibili and YouTube.\n\n5. **Open-Source Projects**: Several projects are open-source, providing frameworks, SDKs, and platforms for developing and deploying AI agents. These projects often emphasize flexibility, extensibility, and community-driven development.\n\n6. **AI Research and Development**: Some repositories focus on AI research and development, offering tools for financial research, AI safety, and experimental AI setups.\n\n7. **AI Model APIs**: The document also lists repositories that provide free or reverse-engineered APIs for various AI models, enabling developers to access advanced AI capabilities without direct costs.\n\nOverall, the document showcases a diverse range of AI and coding tools, highlighting the growing ecosystem of open-source and proprietary solutions aimed at enhancing AI-driven development and automation.",
+          "line_num": 394
+        },
+        {
+          "title": "Vue",
+          "node_id": "0021",
+          "summary": "## Vue\n\n- [LiRenTech/multi-search-v2](https://github.com/LiRenTech/multi-search-v2) — 多重搜索工具v2，一键在多个主流搜索引擎及社交媒体平台上同时发起搜索请求，大批量弹窗，极大提升信息查找效率。\n- [Moonvy/OpenPromptStudio](https://github.com/Moonvy/OpenPromptStudio) — 🥣 AIGC 提示词可视化编辑器  | OPS | Open Prompt Studio",
+          "line_num": 483
+        }
+      ]
+    }
+  ]
+}

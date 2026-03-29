@@ -1,0 +1,220 @@
+{
+  "doc_name": "经济学失效处的替代传感器",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\研究\\经济学失效处的替代传感器\\经济学失效处的替代传感器.md",
+  "structure": [
+    {
+      "title": "感知不可感知的 — 经济学失效处的替代传感器",
+      "node_id": "0000",
+      "prefix_summary": "# 感知不可感知的 — 经济学失效处的替代传感器\n\n\n\n\n恐惧、信任、意义、欲望——这些东西没有API。\n\n但它们会留下痕迹。\n\n就像暗物质看不见，但能通过引力透镜观测到它的存在。\n\n我们需要找到经济暗物质的引力透镜。\n\n\n\n---",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "核心方法论：六种替代传感器",
+          "node_id": "0001",
+          "summary": "The partial document discusses a core methodology involving six alternative sensors as a means to gain insights beyond traditional economic metrics. Traditional economics relies on direct measurements like GDP, CPI, and PMI, which are effective at a quantifiable level. The alternative sensors proposed are: 1) Language sensors, which analyze what people say, search, or write to reveal their inner states; 2) Behavioral sensors, which observe what people do rather than what they say to uncover their true preferences; 3) Absence sensors, which focus on what is missing, as the absence of something can be a more valuable signal than its presence; 4) Body sensors, which monitor health, sleep, and medication to reflect mental stress physically; 5) Cultural sensors, which track popular songs, memes, and jokes to serve as an outlet for the collective subconscious; and 6) Structural sensors, which look at the shape of data rather than the level, focusing on changes in distribution, volatility, and speed.",
+          "line_num": 26
+        },
+        {
+          "title": "一、语言传感器 — 词就是数据",
+          "node_id": "0002",
+          "prefix_summary": "## 一、语言传感器 — 词就是数据\n\n\n\n人在焦虑、恐惧、绝望时，会不自觉地改变用词。不需要问他\"你焦虑吗\"，只需要看他搜了什么、写了什么、聊了什么。",
+          "line_num": 48,
+          "nodes": [
+            {
+              "title": "1.1 搜索词考古学",
+              "node_id": "0003",
+              "summary": "### Description of the Partial Document\n\nThe partial document delves into the concept of \"Search Term Archaeology,\" using Baidu search queries as a reflection of the collective inner thoughts of 1.4 billion people. It emphasizes that people tend to be honest in their search queries, making them a valuable data source for understanding psychological states.\n\nThe document categorizes various fears and anxieties based on common search queries, including:\n\n1. **Survival Fear**: Queries related to basic needs and assistance, such as \"how to apply for subsistence allowances,\" \"where is the rescue station,\" and \"free lunch.\"\n2. **Employment Despair**: Searches about joblessness and financial instability, like \"what to do if I can't find a job,\" \"35-year-old unemployment,\" and \"daily jobs.\"\n3. **Debt Collapse**: Concerns about debt management and financial ruin, including \"debt rollover,\" \"forced to pay off debts,\" and \"collection calls.\"\n4. **Escape Desire**: Interest in emigration and relocation, with searches like \"immigration,\" \"run,\" and \"how to get a passport.\"\n5. **Class Anxiety**: Worries about social mobility and education, such as \"school district housing,\" \"passing the civil service exam,\" and \"graduate school transfers.\"\n6. **Health Collapse**: Mental and physical health issues, including \"insomnia,\" \"anxiety disorder,\" and \"depression self-assessment.\"\n7. **Relationship Breakdown**: Queries about divorce and single life, such as \"divorce process,\" \"cooling-off period,\" and \"benefits of being single.\"\n8. **Meaning Crisis**: Existential questions and reflections on life purpose, like \"meaning of living,\" \"why do we work,\" and \"is it wrong to lie flat.\"\n9. **Property Fear**: Concerns about property value and financial security, including \"will house prices drop,\" \"should I sell my house,\" and \"how to buy gold.\"\n\nThe document also provides a method for constructing a \"Fear Index\" using Baidu's search data. This involves identifying negative search terms, normalizing them, and calculating a weighted sum to create a time series of fear levels. This index can be correlated with economic indicators like CPI, PMI, and GDP to analyze trends and relationships.\n\nAdditionally, the document mentions a non-official Python library `baidu-index` that can be used to retrieve time series data for any keyword from Baidu Index.",
+              "line_num": 56
+            },
+            {
+              "title": "1.2 评论区语言学",
+              "node_id": "0004",
+              "summary": "### 评论区语言学\n\n该部分文档探讨了不同平台评论区中语言信号的特点及其检测方法：\n\n1. **B站弹幕**：通过高频弹幕词如“润了”“太真实了”的变化来反映用户情绪的转向。\n2. **微博评论**：由于审查环境，用户倾向使用反讽和阴阳怪气的语言来表达负面情绪，密度变化可作为情绪指标。\n3. **知乎回答**：回答长度和认真度的下降，以及“谢邀，人在美国，刚下飞机”等讽刺性表达的增加，反映了用户态度的变化。\n4. **豆瓣评分**：文化产品评分的通胀或通缩，以及整体评分的下降，暗示了用户的审美疲劳或不满情绪。\n5. **小红书**：通过“平替”“省钱”“0元改造”等笔记占比的变化，揭示消费降级的语言编码。\n6. **抖音**：评论区中“同款”“一样”“我也是”等共鸣表达的增加，可作为普遍性度量的指标。\n\n文档还强调，反讽密度是审查环境下真实情绪的度量，用户在无法直接表达时，会使用反讽、阴阳怪气、谐音梗等方式。检测反讽需要自然语言处理技术，但反讽词频本身也提供了重要的情绪信号。",
+              "line_num": 179
+            },
+            {
+              "title": "1.3 网络黑话演化",
+              "node_id": "0005",
+              "summary": "### 1.3 网络黑话演化\n\n该部分主要讨论了网络黑话的演变及其背后的社会意义：\n\n1. **语言进化与审查规避**：语言会不断进化以逃避审查，新造的词汇本身就是一种信号。\n2. **黑话及其含义**：列举了多个网络黑话及其含义，如“润”指移民或跑路，“摆烂”指放弃努力，“发疯文学”指用疯癫表达不满等。\n3. **诞生背景**：分析了每个黑话产生的社会背景，例如“润”出现在2022年封控期间，“摆烂”是内卷到极致的反弹等。\n4. **社会情绪的反映**：这些黑话的出现频率和传播速度被视为社会情绪的“地震仪”，可以反映社会的变化和情绪波动。\n5. **可操作性建议**：建议通过跟踪微博、B站、知乎等平台的热词，建立“黑话词典”时间序列，以监测社会情绪的变化。",
+              "line_num": 263
+            }
+          ]
+        },
+        {
+          "title": "二、行为传感器 — 不听他说什么，看他做什么",
+          "node_id": "0006",
+          "prefix_summary": "## 二、行为传感器 — 不听他说什么，看他做什么",
+          "line_num": 367,
+          "nodes": [
+            {
+              "title": "2.1 消费行为的微观取证",
+              "node_id": "0007",
+              "summary": "The partial document focuses on various micro indicators of consumer behavior shifts that reflect underlying economic pressures. It highlights changes in online shopping habits like abandoning full carts, delaying big purchases, opting for smaller packaging, and cooking at home instead of ordering takeout. The document also points to shifts in transportation choices, increased consumption of free content, and a rise in app uninstallations as signs of financial constraints. Additionally, it identifies a rise in late-night searches as a potential indicator of anxiety, depression, or economic stress, suggesting that analyzing the nature of these searches can provide deeper insights into the reasons behind these behaviors.",
+              "line_num": 371
+            },
+            {
+              "title": "2.2 空间行为 — 脚的投票比嘴的投票诚实",
+              "node_id": "0008",
+              "summary": "### 空间行为 — 脚的投票比嘴的投票诚实\n\n这份文档主要探讨了通过分析不同地点的人流变化来洞察社会经济现象的方法，并列举了多个具体案例：\n\n1. **CBD人流量下降**：反映商务活动萎缩，数据来源于高德/百度地图热力图。\n2. **医院周边拥堵增加**：表明就医需求上升，数据来源于高德拥堵数据。\n3. **劳务市场凌晨人流**：显示零工供给过剩，数据来源于自媒体记录。\n4. **火车站而非机场的出行选择**：意味着出行降级，数据对比铁路客运量与航空客运量。\n5. **城郊到城中心的通勤时间变长**：反映居住降级，数据来源于部分城市的通勤数据。\n6. **墓地探访频率**：清明节之外的访问增加表明精神需求上升，但缺乏数据源。\n7. **宗教场所人流**：寺庙、教堂、清真寺的人流增加反映精神寄托需求上升，部分有POI数据支持。\n\n此外，文档还强调了高德/百度地图热力图的深层用法，指出不应仅关注拥堵情况，而应分析热力图的时空分布变化，例如深夜商业区的人流反映夜经济活跃，工业区白天热力减弱可能表明工厂开工不足。这些变化与空气质量指数（AQI）是从不同角度观察同一现象。",
+              "line_num": 471
+            },
+            {
+              "title": "2.3 金融行为 — 钱的去向不会骗人",
+              "node_id": "0009",
+              "summary": "The partial document discusses various financial behaviors as indicators of economic sentiment and confidence. It highlights the following key points:\n\n1. **Increased Fixed Deposits**: Suggests fear of spending and potential currency devaluation.\n2. **Rise in Gold ETF Purchases**: Indicates a desire for safety and potential distrust in the currency.\n3. **Early Mortgage Repayments**: Reflects a preference to deleverage despite potential financial loss, signaling a lack of confidence in future income growth.\n4. **Higher Insurance Surrender Rates**: Implies cash flow constraints and a need for immediate liquidity.\n5. **Increase in Credit Card Cancellations**: Shows a deliberate effort to reduce financial leverage.\n6. **Growth in Cash Usage**: Suggests distrust in digital payments or a rise in the grey economy.\n7. **Increase in Small-Denomination Transactions**: Indicates a shift towards more affordable spending habits.\n\nThe document emphasizes that the surge in early mortgage repayments in 2023 is a significant behavioral signal, reflecting a collective lack of confidence in future income growth.",
+              "line_num": 564
+            }
+          ]
+        },
+        {
+          "title": "三、缺席传感器 — 消失的东西比出现的东西更有信息量",
+          "node_id": "0010",
+          "prefix_summary": "## 三、缺席传感器 — 消失的东西比出现的东西更有信息量",
+          "line_num": 659,
+          "nodes": [
+            {
+              "title": "3.1 数据的缺席",
+              "node_id": "0011",
+              "summary": "### Description of Partial Document\n\nThe partial document discusses the phenomenon of missing or withheld official data in various economic indicators and its implications. It highlights specific data points such as the Consumer Confidence Index, Youth Unemployment Rate, housing prices in certain cities, monthly land transfer fees, and foreign direct investment (FDI) data, detailing when and why these data series were discontinued or delayed. The document suggests that the cessation or alteration of these data releases indicates a lack of transparency and potentially worsening economic conditions. It further introduces the concept of a \"Data Suspension Index,\" a metric that quantifies the lack of data transparency by assigning scores based on the frequency and nature of data publication issues. This index serves as a reverse indicator of economic health, with higher scores suggesting greater concealment of unfavorable economic realities.",
+              "line_num": 663
+            },
+            {
+              "title": "3.2 声音的缺席",
+              "node_id": "0012",
+              "summary": "### 描述\n\n该部分文档主要探讨了社会中不同群体和现象的“声音缺席”现象及其背后的深层含义：\n\n1. **企业家沉默**：以马云、刘强东等企业家从公众视野消失为例，指出民营企业家的集体噤声现象。\n2. **经济学家预测的转变**：经济学家从积极预测GDP到含糊其辞，反映出不敢说真话的趋势。\n3. **媒体报道的变化**：负面经济新闻的减少并不意味着经济好转，而是媒体报道的自我审查或回避。\n4. **维权声音的消失**：维权帖被删除并不意味着问题得到解决，而是维权声音被压制。\n5. **年轻人情绪的转变**：从愤怒到沉默的转变比从愤怒到平静更令人担忧，沉默代表的是放弃而非满意。\n6. **社会情绪的五个阶段**：从愤怒、讽刺、无力、沉默到最终的用户消失，揭示了社会情绪的演变过程。\n7. **舆情系统的误读**：舆情系统可能将沉默误读为情绪改善，但实际上沉默是更深层次的绝望和放弃的体现。\n8. **检测方法**：通过观察讨论总量的变化而非情绪的正负比，来判断社会情绪的真实状态，讨论量的断崖式下降是集体放弃关注的信号。",
+              "line_num": 740
+            },
+            {
+              "title": "3.3 行为的缺席",
+              "node_id": "0013",
+              "summary": "The partial document discusses the phenomenon of people refraining from certain activities and the implications of these behavioral changes. It covers several key points: a decrease in mall visits not fully explained by a shift to online shopping, reduced tourism with lower per capita spending despite revenue recovery, fewer people getting health check-ups due to high costs, decreased outpatient visits but steady hospitalization rates suggesting delayed treatment, a decline in wedding ceremonies despite unchanged marriage registrations, reduced holiday spending with data from major cultural and tourism departments, and a drop in social media activity attributed to a lack of content to share or social fatigue.",
+              "line_num": 804
+            }
+          ]
+        },
+        {
+          "title": "四、身体传感器 — 身体不会说谎",
+          "node_id": "0014",
+          "prefix_summary": "## 四、身体传感器 — 身体不会说谎",
+          "line_num": 887,
+          "nodes": [
+            {
+              "title": "4.1 药品销量 = 疾病谱 = 社会压力谱",
+              "node_id": "0015",
+              "summary": "The partial document explores the relationship between pharmaceutical sales and societal pressures by analyzing various drug categories and their corresponding states of mental or physical health. It suggests that trends in the sales and search data of specific medications can serve as indicators of societal stress levels. Key points include:\n\n1. **Drug Categories and Corresponding States**: Different drug categories are linked to specific mental or physical health issues, such as insomnia and anxiety for sleep aids, depression and long-term stress for antidepressants, and acute stress for anti-anxiety medications.\n\n2. **Data Sources**: The document identifies various data sources like online pharmacy searches (e.g., JD Health, Meituan) and pharmaceutical sales data (e.g., IQVIA, Mizone) to track the demand for these medications.\n\n3. **Examples of Drug Categories**: \n   - Sleep aids (e.g., melatonin) indicate insomnia and anxiety.\n   - Antidepressants (e.g., SSRIs) reflect depression and long-term stress.\n   - Anti-anxiety medications (e.g., benzodiazepines) point to acute stress.\n   - Stomach and pain medications suggest psychosomatic symptoms due to stress.\n   - Fever and cold medications can indicate the prevalence of infectious diseases.\n   - Birth control and pregnancy tests reflect fertility intentions.\n   - Erectile dysfunction medications highlight male anxiety.\n   - Vitamins and supplements suggest health anxiety.\n   - Weight loss medications indicate body image issues and societal pressure.\n\n4. **JD Health as a Data Source**: The document highlights the utility of JD Health's search trends as a comprehensive, high-frequency, and detailed data source for tracking pharmaceutical demand, which can be used to construct a societal stress index.\n\n5. **Societal Stress Index**: A formula is proposed to calculate a societal stress index based on the search volumes of stress-related medications across different categories.",
+              "line_num": 891
+            },
+            {
+              "title": "4.2 体检数据 = 人体的宏观经济学",
+              "node_id": "0016",
+              "summary": "The partial document discusses the correlation between health examination data and macroeconomic factors. It highlights several key trends: increasing rates of fatty liver disease due to poor diet and lack of exercise, particularly among those who cannot afford healthy food or lack time due to work commitments. The document also points out the rise in hypertension among younger individuals, attributing it to long working hours, high stress, and sedentary lifestyles, which lead to workforce depletion. Another trend is the high myopia rate among high school students, linked to excessive screen time and its potential impact on future workforce quality. The document further addresses the rising infertility rate, associating it with late marriages, pollution, and stress, which exacerbate population issues. Additionally, it notes the increasing detection rates of depression and anxiety, reflecting societal pressures. Lastly, the document mentions the growing prevalence of cervical and lumbar issues among younger people, attributing this to changes in work methods. The document suggests that data from health examination companies like Meinian Onehealth and iKang Guobin can be used to track these trends.",
+              "line_num": 1012
+            }
+          ]
+        },
+        {
+          "title": "五、文化传感器 — 流行什么就说明缺什么",
+          "node_id": "0017",
+          "prefix_summary": "## 五、文化传感器 — 流行什么就说明缺什么",
+          "line_num": 1069,
+          "nodes": [
+            {
+              "title": "5.1 音乐 = 集体情绪的声谱",
+              "node_id": "0018",
+              "summary": "### 描述\n\n这份文档主要探讨了音乐与集体情绪之间的关系，以及当前音乐趋势所反映的社会情绪信号。主要内容包括：\n\n1. **音乐趋势与情绪信号**：音乐趋势可以作为观察社会集体情绪的指标。\n2. **网易云\"emo\"歌单播放量**：反映了抑郁和伤感情绪的流行。\n3. **\"治愈系\"音乐**：播放量上升，表明人们需要安慰，可能是因为感到受伤。\n4. **怀旧金曲翻红**：对当下不满，导致人们美化过去。\n5. **嘻哈/说唱(社会类)**：作为底层表达的出口，但受到管控。\n6. **儿歌/白噪音**：播放量上升，成年人用来助眠，反映了焦虑情绪。\n7. **佛经/冥想音频**：播放量上升，作为精神出口。\n8. **网易云音乐评论区**：被称为中国最大的匿名心理咨询室，其热评的情绪趋势值得追踪。",
+              "line_num": 1073
+            },
+            {
+              "title": "5.2 梗 = 集体潜意识的编码",
+              "node_id": "0019",
+              "summary": "### 梗 = 集体潜意识的编码\n\n**主要内容：**\n\n1. **梗的时代性：** 每个时代都有其代表性的梗，这些梗反映了当时的社会情绪和集体潜意识。\n\n2. **梗的演化趋势：** 通过列举2019年至2024年每年的代表性梗，展示了梗的演化方向从自嘲、苦中作乐、消极抵抗、逃跑、解构到精神极限的变化趋势。\n\n3. **社会情绪的变化：** 梗的演化趋势揭示了社会情绪从自嘲到抵抗，再到逃跑、解构，最终走向精神极限的演变过程。\n\n4. **梗的生命周期：** 梗的生命周期可以量化，通过其在社交媒体上的存活天数来衡量。生命周期越短，说明社会注意力越碎片化，社会越焦躁。\n\n5. **深层共鸣：** 某些梗如“躺平”存活时间较长，表明其触及了社会的深层共鸣。\n\n6. **未来趋势：** 探讨了当前趋势的下一步可能走向沉默或其他未知方向。",
+              "line_num": 1126
+            },
+            {
+              "title": "5.3 影视/文学 = 社会的镜子",
+              "node_id": "0020",
+              "summary": "### 5.3 影视/文学 = 社会的镜子\n\nThis section explores how different genres of film, television, and literature reflect societal trends and collective psychological needs. It highlights the following points:\n\n1. **Sweet Romance Dramas/Light Novels**: These genres remain popular as they provide an escape from the harsh realities of life, offering a form of \"sweet anesthesia\" for audiences.\n\n2. **Workplace Dramas**: The genre has evolved from inspirational stories like \"Du Lala's Promotion\" to satirical takes like \"Annual Meeting Can't Stop,\" reflecting a shift in societal attitudes towards work and career advancement.\n\n3. **Suspense/Crime**: This genre continues to be popular, driven by a deep-seated desire for truth and justice in a world where these are often elusive.\n\n4. **Historical/Period Dramas**: These serve as an escape from the present, providing a safe outlet for dissatisfaction with current realities.\n\n5. **Post-Apocalyptic/Dystopian**: There has been a recent increase in these genres, indicating a shift from optimistic to pessimistic views of the future.\n\n6. **Documentaries**: Focusing on底层题材 (underprivileged subjects like miners, delivery workers, and留守儿童), documentaries act as a window to social conscience.\n\n7. **Stand-up Comedy**: This genre has transitioned from pure entertainment to social satire, but this shift has led to increased regulation and control, signifying a contraction in public expression.\n\n8. **Annual Film/Book List Emotional Analysis**: The themes of the most popular works each year are analyzed to understand the collective psychological needs and trends in societal sentiment.",
+              "line_num": 1162
+            }
+          ]
+        },
+        {
+          "title": "六、结构传感器 — 不看数字，看形状",
+          "node_id": "0021",
+          "prefix_summary": "## 六、结构传感器 — 不看数字，看形状",
+          "line_num": 1249,
+          "nodes": [
+            {
+              "title": "6.1 波动率比水平更重要",
+              "node_id": "0022",
+              "summary": "### 描述\n\n该部分文档主要讨论了在金融分析中，波动率的重要性常常被低估，而均值分析可能掩盖潜在的系统性问题。以下是主要观点：\n\n1. **波动率的重要性**：\n   - 以Shibor为例，虽然其正常水平为2.0%，但如果单日波动剧烈（如周一1.5%，周二2.8%，周三1.2%，周四3.5%），则表明系统不稳定，接近相变点。\n   - 强调不应仅关注均值，而应重视方差分析。方差突然放大意味着临界涨落，可能预示着重大事件的发生。\n\n2. **不同指标的波动率分析**：\n   - **Shibor**：关注利率水平的波动性，以评估流动性稳定性。\n   - **股指**：除了关注涨跌，更应关注市场恐慌度（如VIX和iVIX），以衡量市场情绪的稳定性。\n   - **汇率**：除了关注升贬值，更应关注央行的干预力度，以评估汇率的稳定性。\n   - **舆情情绪**：除了关注正负面情绪的比例，更应关注情绪震荡幅度，以评估市场情绪的极端化程度。\n\n总之，文档强调在金融分析中，波动率分析比单纯的均值分析更能揭示潜在的风险和系统的不稳定性。",
+              "line_num": 1253
+            },
+            {
+              "title": "6.2 分布比总量更重要",
+              "node_id": "0023",
+              "summary": "The partial document emphasizes the importance of distribution over total aggregates when analyzing economic data. It uses GDP growth as an example, showing that while a 5% overall growth seems positive, breaking it down reveals that high-growth sectors like the internet and finance are driving this increase, while most people work in sectors like real estate, manufacturing, agriculture, and services which are experiencing much lower or even negative growth. This highlights that the overall growth figure masks the reality for many individuals.\n\nThe document also discusses proxies for real-time Gini coefficient measurement, suggesting indicators like the ratio of luxury to essential goods prices (e.g., Maotai vs. instant noodles), the ratio of luxury to budget car sales growth, the ratio of rent prices between first and third-tier cities, and the regional dispersion of per capita savings. These proxies aim to provide a more nuanced understanding of economic inequality and wealth distribution.",
+              "line_num": 1316
+            },
+            {
+              "title": "6.3 速度比方向更重要",
+              "node_id": "0024",
+              "summary": "The partial document discusses the importance of the rate of change (velocity) over the direction of change when analyzing trends. It uses the example of declining birth rates in China, showing that while the birth rate is still decreasing, the rate of decline is slowing down, which could be a sign of stabilization. The document contrasts this with the increasing number of foreclosure auctions, where the rate of increase is slowing but the absolute numbers are still growing. It emphasizes the significance of the second derivative (acceleration) over the first derivative (speed) and the level value, suggesting that this approach should be applied to more indicators for a better understanding of trends.",
+              "line_num": 1350
+            }
+          ]
+        },
+        {
+          "title": "七、实操：可以立即构建的\"暗物质探测器\"",
+          "node_id": "0025",
+          "prefix_summary": "## 七、实操：可以立即构建的\"暗物质探测器\"",
+          "line_num": 1380,
+          "nodes": [
+            {
+              "title": "7.1 百度恐惧指数 (技术可行，P0)",
+              "node_id": "0026",
+              "summary": "The partial document describes the \"Baidu Fear Index,\" a technical solution with a priority level of P0. It utilizes the Baidu Index API and the baidu-index Python library to gather data at a daily frequency. The index is composed of six fear sub-dimensions, each analyzed using three to five keywords. The output includes a \"fear_index\" score ranging from 0 to 100, a breakdown of scores for each of the six dimensions (survival, employment, debt, escape, health, and meaning), a seven-day trend indicator, and a meta field indicating the confidence level of the data as \"MEDIUM.\"",
+              "line_num": 1384
+            },
+            {
+              "title": "7.2 沉默指数 (技术可行，P1)",
+              "node_id": "0027",
+              "summary": "### 7.2 沉默指数 (技术可行，P1)\n\n\n\n```python\n数据源: 微博/B站/知乎 热搜讨论量\n方法: 追踪经济相关话题的总讨论量(非情绪)\n\n当讨论量断崖下降时:\n  不是\"大家不关心了\"\n  而是\"大家放弃讨论了\"\n  这比愤怒更危险\n\nsilence_index = 1 - (当期经济话题讨论量 / 基期经济话题讨论量)\n```",
+              "line_num": 1411
+            },
+            {
+              "title": "7.3 时间-金钱替代率 (技术可行，P1)",
+              "node_id": "0028",
+              "summary": "### 7.3 时间-金钱替代率 (技术可行，P1)\n\n\n\n```python\n数据源: 抖音/番茄小说使用时长(行业报告) vs 电商GMV\n方法:\n  time_money_ratio = 免费内容消费时长增速 / 付费消费额增速\n  > 1 = 用时间替代金钱(消费降级的最深层)\n  < 1 = 愿意花钱省时间(消费信心健康)\n```",
+              "line_num": 1429
+            },
+            {
+              "title": "7.4 药品压力指数 (技术可行，P0)",
+              "node_id": "0029",
+              "summary": "### 7.4 药品压力指数 (技术可行，P0)\n\n\n\n```python\n数据源: 京东健康/百度搜索\n方法: 安眠药+抗焦虑药+抗抑郁药+胃药 搜索量加权综合\n频率: 周级\n交叉验证: 与失业率/股指/房价做滞后相关性分析\n```",
+              "line_num": 1443
+            },
+            {
+              "title": "7.5 数据停发指数 (手动+自动化，P1)",
+              "node_id": "0030",
+              "summary": "### 7.5 数据停发指数 (手动+自动化，P1)\n\n\n\n```python\n维护一个列表: 官方定期发布的经济数据\n监控: 是否按时发布、是否改了口径、是否停发\n每次停发/改口径 = +1分\n总分 = 不透明度\n\n这个指数不需要API，只需要一个人定期检查。\n但它的信息密度极高——\n政府选择隐藏什么，就说明什么最严重。\n```",
+              "line_num": 1456
+            },
+            {
+              "title": "7.6 梗生命周期指数 (技术可行，P2)",
+              "node_id": "0031",
+              "summary": "### 7.6 梗生命周期指数 (技术可行，P2)\n\n\n\n```python\n数据源: 微博/B站/抖音热词\n方法:\n  追踪每个新梗从出现到消亡的天数\n  梗均寿命 ↓ = 社会注意力越碎片\n  某个梗存活 > 90天 = 触及深层共鸣，标记为\"时代梗\"\n  \"时代梗\"的情绪方向 = 时代情绪方向\n```\n\n\n\n---",
+              "line_num": 1473
+            }
+          ]
+        },
+        {
+          "title": "八、整合进现有系统",
+          "node_id": "0032",
+          "summary": "The partial document describes the integration of a \"dark matter\" analytics layer into an existing system, which serves as an alternative to traditional economic indicators. It includes:\n\n1. **Adapters for Sentiment Analysis**: New modules like `baidu_fear.py`, `silence.py`, `drug_stress.py`, and `meme_cycle.py` are introduced to measure fear, silence, drug-related stress, and meme lifecycle, respectively.\n\n2. **Analytics Module**: The `dark_matter.py` module provides functions for analyzing various \"dark matter\" indicators such as fear index, silence index, time-money ratio, data opacity index, and meme lifecycle.\n\n3. **Server Integration**: The server is updated to include new endpoints like `/analytics/dark_matter`, `/analytics/fear_index`, and `/analytics/silence_index` for accessing these analytics.\n\n4. **System Architecture**: The system is now structured into two layers:\n   - **明物质层 (Bright Matter Layer)**: Traditional economic indicators like GDP, CPI, PMI, stock prices, and commodity prices.\n   - **暗物质层 (Dark Matter Layer)**: Alternative sensors for situations where traditional economics fail, including fear, silence, drug-related stress, meme lifecycle, and data opacity.\n\n5. **Recommendation**: The document suggests trusting the \"dark matter\" layer over traditional indicators when discrepancies arise, as traditional indicators like GDP can be manipulated, whereas fear and other \"dark matter\" metrics cannot.",
+          "line_num": 1492
+        }
+      ]
+    }
+  ]
+}

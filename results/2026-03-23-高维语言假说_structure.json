@@ -1,0 +1,56 @@
+{
+  "doc_name": "2026-03-23-高维语言假说",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\Sprachwelt\\2026-03-23-高维语言假说.md",
+  "structure": [
+    {
+      "title": "2026-03-23 — 高维语言假说",
+      "node_id": "0000",
+      "prefix_summary": "# 2026-03-23 — 高维语言假说\n\n> 老板提出：中文（2D表意）与英语（1D表音）根本不同，AI 是否需要更高维度的语言文字？",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "观察",
+          "node_id": "0001",
+          "summary": "## 观察\n\n```\n英语:    1D 表音链 → 字母序列 → 语法法治（结构驱动）\n中文:    2D 表意场 → 偏旁空间组合 → 意象人治（语义驱动）\nLLM:     1D token 链 → 概率接龙 → 无内在维度\n张力场:  nD 意义场 → 图拓扑 × 强度 × 时间 → 矛盾驱动\n```",
+          "line_num": 11
+        },
+        {
+          "title": "核心论点",
+          "node_id": "0002",
+          "summary": "The excerpt argues that current LLM tokenizers reduce all languages to one-dimensional sequences, losing Chinese-specific spatial features like character component relationships and poetic parallel structures. Chinese is inherently more two-dimensional, so its meaning relies on spatial juxtaposition more than linear order. The author references “Sprachwelt” (language-world) already existing in high-dimensional tension, yet current demand/counter-demand modeling remains limited to 1D text, creating a dimensionality bottleneck. The ultimate goal is to represent semantic tension as high-dimensional objects—regions and directions in embedding space—rather than mere strings.",
+          "line_num": 20
+        },
+        {
+          "title": "维度演进路径",
+          "node_id": "0003",
+          "summary": "## 维度演进路径\n\n| 阶段 | demand 的表示 | 相似度计算 | 场动力学 |\n|------|-------------|-----------|---------|\n| Phase 0 (当前) | 文本字符串 | word Jaccard (英文) / broken (中文) | 图上离散计算 |\n| Phase 1 | 文本 + jieba 分词 | 分词后 Jaccard (双语) | 图上离散计算 |\n| Phase 2 | 文本 + embedding 向量 | cosine similarity | 向量空间连续计算 |\n| Phase 3 | 纯 embedding（无文本） | 向量距离 + 方向 | 连续场方程（PDE?） |",
+          "line_num": 27
+        },
+        {
+          "title": "Phase 2-3 的含义",
+          "node_id": "0004",
+          "summary": "## Phase 2-3 的含义\n\n- 中英文不再需要分词 hack — embedding 空间自然对齐\n- 张力不再是\"一句话 vs 另一句话\" — 而是意义空间中两个区域的撕裂\n- 场动力学不再在字符串上算 — 在连续空间里算梯度\n- **这就是\"意义在场中生存\"的工程实现**",
+          "line_num": 36
+        },
+        {
+          "title": "与创世对话的关系",
+          "node_id": "0005",
+          "summary": "## 与创世对话的关系\n\n创世对话的核心论断\"链 ≠ 场\"在这里获得了具体工程意义：\n- LLM 是链（1D token sequence）→ 它只能操作语言，不能领会语言\n- 中文天然是场（2D ideographic space）→ 它比英文更接近\"意义的空间性\"\n- Sprachwelt 的目标是构建 nD 意义场 → 让意义在其中生存，而不只是被表达",
+          "line_num": 43
+        },
+        {
+          "title": "对 Phase 0 中英文 bug 的启示",
+          "node_id": "0006",
+          "summary": "## 对 Phase 0 中英文 bug 的启示\n\n当前的 `split_whitespace()` bug 不只是技术问题 — 它暴露了一个更深的假设错误：\n**代码假设语言是 1D 的（可以用空格切成 words）。中文证明这个假设是错的。**\n\n短期修复（jieba 分词）解决了 Phase 0 的工程问题，但长期方向应该是完全放弃基于文本分词的相似度，转向 embedding 空间。",
+          "line_num": 50
+        },
+        {
+          "title": "更远的问题",
+          "node_id": "0007",
+          "summary": "## 更远的问题\n\n如果 AI 的内在\"语言\"应该是高维的，那么：\n1. tokenizer 本身就是错误的降维？\n2. 应该有一种\"高维 tokenizer\"保留空间关系？\n3. 中文（表意文字）是否比英文（表音文字）更接近 AI 应有的表示方式？\n4. Sprachwelt 的张力场是否就是这种\"AI 高维语言\"的雏形？\n\n这些是 Phase 3+ 的研究方向。",
+          "line_num": 57
+        }
+      ]
+    }
+  ]
+}

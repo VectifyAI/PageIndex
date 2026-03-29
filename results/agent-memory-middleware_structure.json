@@ -1,0 +1,140 @@
+{
+  "doc_name": "agent-memory-middleware",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\agent-memory-middleware.md",
+  "structure": [
+    {
+      "title": "Agent Memory Middleware (AMM)",
+      "node_id": "0000",
+      "prefix_summary": "# Agent Memory Middleware (AMM)\n\n> A2A 跨 Agent 统一记忆中间件，事件驱动 + 异构存储 + 混合查询",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "架构总览",
+          "node_id": "0001",
+          "summary": "The partial document sketches an architecture where user queries are processed by a Query Planner that determines whether the request needs exact facts, semantic matches, graph information, or document retrieval. Fact-level responses come from a Redis L1 cache, semantic matches from a Redis L2 store, and relational or provenance data from a Neo4j “memory graph.” Cache misses trigger a Bloom filter plus Singleflight layer for penetration protection, with fallback to an experience repository (memU) and a PageIndex tree for document lookup.",
+          "line_num": 5
+        },
+        {
+          "title": "双层 Redis 缓存",
+          "node_id": "0002",
+          "prefix_summary": "## 双层 Redis 缓存",
+          "line_num": 32,
+          "nodes": [
+            {
+              "title": "L1: 事实层 (Redis Hash)",
+              "node_id": "0003",
+              "summary": "### L1: 事实层 (Redis Hash)\n\n**特征**: 零容错，精确命中，O(1)\n\n| Key Pattern | 示例 | 值 |\n|---|---|---|\n| `fact:{domain}:{entity}:{attr}` | `fact:server:central:ip` | `43.163.225.27` |\n| `tag:{project}` | `tag:quant-terminal` | `py311,cuda,duckdb` |\n| `label:{node}:{role}` | `label:curry:role` | `workstation` |\n| `cred:{service}` | `cred:memu:port` | `8012` |\n\n**刷新**: 仅事件驱动（密码换了、IP变了、服务迁移）→ 精确删除",
+              "line_num": 34
+            },
+            {
+              "title": "L2: 语义层 (Redis Sorted Set)",
+              "node_id": "0004",
+              "summary": "### L2: 语义层 (Redis Sorted Set)\n\n**特征**: 容错OK，关键词前缀匹配，score=相关度\n\n```\nZADD sem:trading 0.92 \"动量因子分析: HS300六维因子...\"\nZADD sem:forge   0.85 \"FORGE化学Agent: NeurIPS 2026...\"\n```\n\n**刷新**: TTL 24h (base±20% 抖动防雪崩)，热点自动续命",
+              "line_num": 47
+            }
+          ]
+        },
+        {
+          "title": "分级生命周期",
+          "node_id": "0005",
+          "summary": "## 分级生命周期\n\n| 层 | 存储 | TTL | 读延迟 | 写时机 |\n|---|---|---|---|---|\n| L0 Session | OMC notepad | session结束清 | 0ms | 随时 |\n| L1 Facts | Redis Hash | ∞ (事件刷新) | <1ms | 事实确认时 |\n| L2 Semantic | Redis SortedSet | 24h±jitter | <5ms | 回源后回填 |\n| L3 Experience | memU REST | ∞ | ~100ms | 交互完成后 |\n| L4 Documents | PageIndex JSON | ∞ (重索引更新) | ~200ms | 手动index |\n\n降级链: L1 miss → L2 miss → Bloom check → L3/L4 回源 → 回填 L2",
+          "line_num": 58
+        },
+        {
+          "title": "缓存穿透保护",
+          "node_id": "0006",
+          "prefix_summary": "## 缓存穿透保护",
+          "line_num": 70,
+          "nodes": [
+            {
+              "title": "穿透 (查不存在的 key)",
+              "node_id": "0007",
+              "summary": "### 穿透 (查不存在的 key)\n\n```python\nbloom = BloomFilter(expected_items=100_000, fp_rate=0.01)\n\nif not bloom.might_contain(key):\n    return None  # 肯定不存在\ncached = await redis.get(key)\nif cached == \"__NULL__\":\n    return None  # 空值缓存 (TTL=5min)\n```",
+              "line_num": 72
+            },
+            {
+              "title": "击穿 (热 key 过期瞬间)",
+              "node_id": "0008",
+              "summary": "### 击穿 (热 key 过期瞬间)\n\n```python\nasync with singleflight(key):  # 合并并发请求\n    result = await backend_query(key)\n    await redis.setex(key, ttl, result)\n```",
+              "line_num": 84
+            },
+            {
+              "title": "雪崩 (大量 key 同时过期)",
+              "node_id": "0009",
+              "summary": "### 雪崩 (大量 key 同时过期)\n\n```python\ndef ttl_with_jitter(base: int = 86400) -> int:\n    return base + random.randint(-base // 5, base // 5)  # ±20%\n```",
+              "line_num": 92
+            }
+          ]
+        },
+        {
+          "title": "事件驱动刷新",
+          "node_id": "0010",
+          "summary": "## 事件驱动刷新\n\n```\n事实变更事件\n    ↓ Redis Pub/Sub: channel=\"amm:state_change\"\n    ↓ payload: {\"type\": \"password_changed\", \"entity\": \"memu\", \"old\": \"...\", \"new\": \"...\"}\n\n订阅者:\n  ├─ L1 Invalidator: DEL fact:cred:memu:*\n  ├─ L2 Purger: SCAN sem:memu:* → DEL\n  ├─ Neo4j Updater: SET n.value = new WHERE n.entity = 'memu'\n  └─ Bloom Rebuilder: remove old key, add new key\n```\n\n事件源:\n- 用户显式更新 (\"密码换了\")\n- Git commit (IP/port 变更检测)\n- 服务健康检查 (端口不通 → 标记 stale)",
+          "line_num": 99
+        },
+        {
+          "title": "图数据库 (Neo4j 扩展)",
+          "node_id": "0011",
+          "summary": "Document outlines extension of GitNexus code graph with memory nodes in Neo4j, including memory provenance, fact version chains, and expert knowledge graph; it provides Cypher snippets for creating memories linked to conversations/projects, superseding fact nodes, and expert-to-domain references, plus sample query retrieving recent experience memories about particular project factors.",
+          "line_num": 118
+        },
+        {
+          "title": "Query Planner 路由逻辑",
+          "node_id": "0012",
+          "summary": "The document outlines a query planner function that determines which backend systems to use based on the query content: extracting entities directs requests to Redis L1 for precise facts, keyword detection leads to Redis L2 for semantic caching, relation patterns trigger Neo4j for graph queries, and document search backends MEMU and PAGEINDEX are always appended as fallbacks.",
+          "line_num": 145
+        },
+        {
+          "title": "接口设计",
+          "node_id": "0013",
+          "summary": "## 接口设计\n\n```python\nclass AgentMemoryMiddleware:\n    async def query(self, q: str, agent: str) -> MemoryResult\n    async def store_fact(self, key: str, value: str, source: str)\n    async def store_experience(self, agent: str, content: str, refs: list[str])\n    async def invalidate(self, event: StateChangeEvent)\n    async def warm_cache(self, agent: str)  # 预热该 agent 常用数据\n```",
+          "line_num": 171
+        },
+        {
+          "title": "实现路径",
+          "node_id": "0014",
+          "summary": "## 实现路径\n\n| Phase | 内容 | 依赖 |\n|---|---|---|\n| P0 | Redis L1/L2 + MemoryGateway 集成 | Redis (已有) |\n| P1 | Bloom filter + singleflight + 穿透保护 | P0 |\n| P2 | 事件驱动 Pub/Sub + 状态变更传播 | P0 |\n| P3 | Neo4j 记忆图谱扩展 | GitNexus (已有) |\n| P4 | Query Planner 混合路由 | P0+P3 |",
+          "line_num": 182
+        },
+        {
+          "title": "开发风险约束",
+          "node_id": "0015",
+          "prefix_summary": "## 开发风险约束",
+          "line_num": 192,
+          "nodes": [
+            {
+              "title": "1. 接口一致性 (Single Source of Truth)",
+              "node_id": "0016",
+              "summary": "### 1. 接口一致性 (Single Source of Truth)\n\n**风险**: 多 AI 工具间无法共享记忆，接口变更导致代码不兼容\n\n**强制规则**:\n- 维护 `C:/Users/Administrator/a2a-dev/src/amm/schema.py` 为唯一接口定义\n- 所有 dataclass/TypedDict 集中于此，其他模块只 import\n- 接口变更必须先改 schema.py，再改实现\n- 切换工具/新 session 前，先读 schema.py 对齐",
+              "line_num": 194
+            },
+            {
+              "title": "2. 环境隔离",
+              "node_id": "0017",
+              "summary": "### 2. 环境隔离\n\n**风险**: AI 生成代码混用不同版本的 redis/neo4j 驱动\n\n**强制规则**:\n- a2a-dev 已有 pyproject.toml，所有依赖锁版本\n- AMM 新增依赖: `redis>=5.0,<6`, `pybloom-live>=4.0` (如用纯 Python Bloom)\n- 不引入新 ORM/框架，直接用 redis-py + neo4j-driver\n- 新依赖先查 pyproject.toml 是否已有，避免重复",
+              "line_num": 204
+            },
+            {
+              "title": "3. 密钥管理 (轻量级)",
+              "node_id": "0018",
+              "summary": "### 3. 密钥管理 (轻量级)\n\n**背景**: 个人局域网开发，非企业环境，不需要企业级安全\n\n**规则**:\n- `.env` 管理配置（习惯好就行，不是安全需求）\n- Redis 连接串: 直接写死也行 (`redis://:fsc-mesh-2026@100.80.87.180:6379`)\n- L1 fact 存密码明文 OK（局域网内无外部风险）\n- 唯一注意: 别把 .env 推到公开 GitHub repo",
+              "line_num": 214
+            },
+            {
+              "title": "4. 异步并发安全",
+              "node_id": "0019",
+              "summary": "Section 4 focuses on asynchronous concurrency safety. It warns about risks such as missing `await` in singleflight operations or locking logic, leading to race conditions. The rules require using `async with` for all lock handling, implementing singleflight via `asyncio.Event` plus a dict rather than `threading.Lock`, adding unit tests for core concurrent paths like penetration protection and event propagation, and providing explicit concurrency-control explanations in pull requests. Example code shows proper `async with` use and disallows manual `acquire/release`.",
+              "line_num": 224
+            }
+          ]
+        },
+        {
+          "title": "关键决策",
+          "node_id": "0020",
+          "summary": "## 关键决策\n\n- **Redis vs 本地缓存**: Redis，因为 A2A 多 agent 多进程需要共享\n- **Bloom filter 实现**: `pybloom_live` 或纯 Redis `BF.ADD/BF.EXISTS`\n- **singleflight**: asyncio.Lock per key (dict[str, Lock])\n- **实体提取**: 正则 + 小模型，不用 LLM (太慢)\n- **L2 score 计算**: TF-IDF keyword overlap，不用 embedding (省钱)",
+          "line_num": 246
+        }
+      ]
+    }
+  ]
+}

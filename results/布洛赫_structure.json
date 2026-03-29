@@ -1,0 +1,44 @@
+{
+  "doc_name": "布洛赫",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\原著文库\\布洛赫.md",
+  "structure": [
+    {
+      "title": "布洛赫 (Ernst Bloch) — 原著资源",
+      "node_id": "0000",
+      "prefix_summary": "# 布洛赫 (Ernst Bloch) — 原著资源\n\n> 希望哲学 / 乌托邦哲学。张双利研究对象。资源相对稀缺。\n\n---",
+      "line_num": 6,
+      "nodes": [
+        {
+          "title": "《希望的原理》(Das Prinzip Hoffnung, 1954-59) ⭐",
+          "node_id": "0001",
+          "summary": "This partial document provides information about Ernst Bloch's magnum opus \"Das Prinzip Hoffnung\" (The Principle of Hope), a three-volume work published between 1954 and 1959. The document highlights the concept of \"ontology of the not-yet\" associated with the work. It lists various versions and sources for accessing the text, including a Chinese translation by Menghai published by Shanghai Translation in 2012, an English introduction available on marxists.org, a three-volume English translation available for borrowing on Archive.org, and a German academic edition accessible as a PDF on Archive.org through the De Gruyter platform.",
+          "line_num": 12
+        },
+        {
+          "title": "《乌托邦的精神》(Geist der Utopie, 1918)",
+          "node_id": "0002",
+          "summary": "## 《乌托邦的精神》(Geist der Utopie, 1918)\n\n布洛赫处女作。**无中译本**。\n\n| 版本 | 来源 |\n|------|------|\n| 德文原版 1918 | [archive.org](https://archive.org/details/geistderutopi00bloc) |\n| **英译 The Spirit of Utopia** | [archive.org](https://archive.org/details/TheSpiritOfUtopiaErnstBloch) |\n\n---",
+          "line_num": 25
+        },
+        {
+          "title": "《主体-客体：黑格尔释义》(Subjekt-Objekt, 1951)",
+          "node_id": "0003",
+          "summary": "## 《主体-客体：黑格尔释义》(Subjekt-Objekt, 1951)\n\n| 版本 | 来源 |\n|------|------|\n| **舒远招/庄振华 译** (中国社科出版社 2024) | 新书，[豆瓣](https://m.douban.com/book/subject/36247025/) |\n| 英文第9章节选 | [archive.org](https://archive.org/details/BlochTheDialecticalMethod) |\n\n---",
+          "line_num": 36
+        },
+        {
+          "title": "获取策略",
+          "node_id": "0004",
+          "summary": "## 获取策略\n\n布洛赫中文资源远不如卢卡奇丰富：\n- 《希望的原理》→ **微信读书**最方便\n- 《乌托邦的精神》→ 只有英/德文，Archive.org\n- 《主体-客体》→ 2024新出中译，Z-Library 搜",
+          "line_num": 45
+        },
+        {
+          "title": "关联",
+          "node_id": "0005",
+          "summary": "## 关联\n- [[卢卡奇]] — 同时代西马，曾是密友\n- [[黑格尔]] — 《主体-客体》即黑格尔释义\n- [[马克思]] — 希望哲学与唯物史观的张力\n- [[张双利]] — 复旦，布洛赫研究\n\n#philosophy #bibliography #bloch #western-marxism",
+          "line_num": 52
+        }
+      ]
+    }
+  ]
+}

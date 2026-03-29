@@ -1,0 +1,64 @@
+{
+  "doc_name": "README",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\Remote-Viewing\\README.md",
+  "structure": [
+    {
+      "title": "Remote Viewing 研究资料",
+      "node_id": "0000",
+      "prefix_summary": "# Remote Viewing 研究资料",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "材料清单",
+          "node_id": "0001",
+          "prefix_summary": "## 材料清单",
+          "line_num": 3,
+          "nodes": [
+            {
+              "title": "Books/",
+              "node_id": "0002",
+              "summary": "### Books/\n- **Ingo-Swann-Penetration.pdf** — Ingo Swann《Penetration: The Question of Extraterrestrial and Human Telepathy》(1998)\n  - Remote viewing 协议发明者的自传\n  - CIA \"深黑\"项目经历：月球远程观察、类人形生物\n  - Mr. Axelrod 事件、木星环预测",
+              "line_num": 5
+            },
+            {
+              "title": "CIA-Docs/",
+              "node_id": "0003",
+              "summary": "### CIA-Docs/\n- **CIA-Evaluation-Remote-Viewing-1995.pdf** (7.7MB, 178页)\n  - American Institutes for Research (AIR) 评估报告\n  - Jessica Utts vs Ray Hyman 的统计争论\n  - 项目终止决策背景\n- **CIA-Stargate-Briefing-Package.pdf** (567KB)\n  - Project STARGATE 简报包",
+              "line_num": 11
+            },
+            {
+              "title": "Transcripts/",
+              "node_id": "0004",
+              "summary": "### Transcripts/\n- **JRE-2314-Hal-Puthoff-2025-05-01.md**\n  - Hal Puthoff 上 Joe Rogan 访谈结构化笔记\n  - 6 个主题：方法论、验证案例、非人类飞行器、ultraterrestrial 假说、CIA/DIA 细节、意识模型",
+              "line_num": 19
+            }
+          ]
+        },
+        {
+          "title": "核心人物",
+          "node_id": "0005",
+          "summary": "## 核心人物\n\n| 人物 | 角色 |\n|------|------|\n| **Ingo Swann** | Remote viewing 协议发明者 (1971)，CRV 创始人 |\n| **Hal Puthoff** | SRI 项目负责人，Stanford 量子物理学家 |\n| **Russell Targ** | SRI 联合负责人，激光物理学家 |\n| **Pat Price** | 远程观察者，Sugar Grove / Semipalatinsk 案例 |\n| **Joe McMoneagle** | 远程观察者 #001，台风级潜艇，国家功勋奖 |\n| **Mr. Axelrod** | Swann 的 CIA 联络人（代号） |",
+          "line_num": 24
+        },
+        {
+          "title": "时间线",
+          "node_id": "0006",
+          "summary": "## 时间线\n\n- 1971: Swann 发明 remote viewing 术语\n- 1972: CIA 资助 SRI 项目\n- 1973: 木星环远程观察（后被 NASA 证实）\n- 1975: Swann 被 Mr. Axelrod 招募进行月球观察\n- 1975-1995: Project STARGATE 运行 ($2000万)\n- 1976: Puthoff 在 IEEE 发表，Bell Labs 复现\n- 1995: AIR 评估 → CIA 终止项目\n- 2017: Harry Reid 发起新 UAP 调查\n- 2025.05.01: Puthoff 上 JRE #2314",
+          "line_num": 35
+        },
+        {
+          "title": "应用方向",
+          "node_id": "0007",
+          "summary": "## 应用方向\n\n1. **Agent 信息获取框架**: CRV 6阶段协议 → 渐进式检索模式\n2. **OSINT 方法论**: CIA 解密文件获取/分析流程\n3. **hist-mat 研究**: 冷战超心理学竞赛的历史唯物主义分析\n4. **意识模型**: 可扩展场假说 → AI 感知架构的隐喻",
+          "line_num": 47
+        },
+        {
+          "title": "外部链接",
+          "node_id": "0008",
+          "summary": "## 外部链接\n\n- [CIA STARGATE FOIA Collection](https://www.cia.gov/readingroom/collection/stargate)\n- [JRE #2314 Transcript](https://singjupost.com/joe-rogan-experience-2314-with-hal-puthoff-transcript/)\n- [Internet Archive — Stargate Documents](https://archive.org/details/CIA-RDP96-00791R000200180005-5)\n- [Rice University — Archives of the Impossible](https://fondren.rice.edu/aoti)",
+          "line_num": 54
+        }
+      ]
+    }
+  ]
+}

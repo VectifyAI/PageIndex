@@ -1,0 +1,30 @@
+{
+  "doc_name": "看板",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\Sprachwelt\\看板.md",
+  "structure": [
+    {
+      "title": "Backlog",
+      "node_id": "0000",
+      "summary": "The document lists a prioritized backlog divided into engineering, philosophy, and future tasks, highlighting completed codex blocks (process atomicity, lineage restructuring, code cleanup) and pending items such as CLI state persistence, storage migration to redb, architecture review, philosophical research on tension and authenticity, development of a temporality layer, and validation of LLM features.",
+      "line_num": 5
+    },
+    {
+      "title": "In Progress",
+      "node_id": "0001",
+      "summary": "## In Progress",
+      "line_num": 20
+    },
+    {
+      "title": "Done (P2.5)",
+      "node_id": "0002",
+      "summary": "The document section summarizes completion of tasks in project phase P2.5, including completing the degrade_act replan loop, implementing keyword-based UserState detection and field-augmented UserState, adding strata persistence with SQLite integrated into process_turn, ensuring adversarial robustness with five attack evaluations, cleaning Chinese Pursue markers, providing Heidegger depth annotations via FieldTouched, establishing Phase 1 behavioral baselines, fixing seven code issues through Codex and Claude reviews, developing conditional strata erosion and ΔReach deposit criteria, proving behavior from field to action, and overhauling strata erosion using session count and drift metrics.",
+      "line_num": 23
+    },
+    {
+      "title": "Archive",
+      "node_id": "0003",
+      "summary": "## Archive\n\n- [x] P0: 7步管线 MVP\n- [x] P1: 开显+关切+处境 三支柱\n- [x] P1B: TraceGraph + Illumination + Situation\n- [x] P1C: Referent layer\n- [x] P2: Irreversibility layer (9 paired proofs)",
+      "line_num": 40
+    }
+  ]
+}

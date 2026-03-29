@@ -1,0 +1,68 @@
+{
+  "doc_name": "OMC-实战Workflow",
+  "source_path": "E:/knowledge/Knowledge\\02-Infrastructure\\OMC\\OMC-实战Workflow.md",
+  "structure": [
+    {
+      "title": "OMC 实战 Workflow",
+      "node_id": "0000",
+      "prefix_summary": "# OMC 实战 Workflow\n\n> 常见开发场景怎么编排，照着用就行。",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "场景 1：新功能开发（需求不清）",
+          "node_id": "0001",
+          "summary": "## 场景 1：新功能开发（需求不清）\n\n```\n1. \"deep interview 这个功能\"\n   → OMC 会持续追问直到模糊度 < 阈值\n\n2. \"ralplan\"\n   → plan + 共识验证，输出实现计划\n\n3. \"ulw 按计划执行\"\n   → ultrawork 并行执行各子任务\n\n4. 写完后说 \"deslop\"\n   → 清理 AI 生成的冗余代码\n\n5. code-reviewer 自动跟上审查\n```\n\n**关键词链**: deep interview → ralplan → ulw → deslop",
+          "line_num": 5
+        },
+        {
+          "title": "场景 2：新功能开发（需求明确）",
+          "node_id": "0002",
+          "summary": "## 场景 2：新功能开发（需求明确）\n\n```\n1. \"autopilot 实现 XXX 功能\"\n   → 全自主：分析 → 规划 → 实现 → 验证\n\n2. 或者手动控制：\n   /oh-my-claudecode:plan → executor 实现 → verifier 验证\n```\n\n**关键词**: autopilot（全自动）",
+          "line_num": 25
+        },
+        {
+          "title": "场景 3：Debug 疑难杂症",
+          "node_id": "0003",
+          "summary": "## 场景 3：Debug 疑难杂症\n\n```\n1. \"trace 这个 bug：[描述现象]\"\n   → tracer 开多条假设线并行排查\n   → 每条假设有证据评分和置信度\n\n2. 找到 root cause 后：\n   \"ralph 修掉它\"\n   → 自循环：修 → 测 → 验证，直到修好\n```\n\n**关键词链**: trace → ralph",
+          "line_num": 37
+        },
+        {
+          "title": "场景 4：架构决策",
+          "node_id": "0004",
+          "summary": "## 场景 4：架构决策\n\n```\n1. \"ccg：Redis Streams vs Kafka 选哪个？\"\n   → Claude、Codex、Gemini 各出方案\n   → Byzantine 共识投票\n\n2. 想要更深入：\n   → architect agent（只读分析）\n   → critic agent（挑刺找漏洞）\n```\n\n**关键词**: ccg",
+          "line_num": 51
+        },
+        {
+          "title": "场景 5：代码审查 + 清理",
+          "node_id": "0005",
+          "summary": "## 场景 5：代码审查 + 清理\n\n```\n1. 写完代码后：\n   \"deslop 清理一下\"\n   → 删多余注释、docstring、过度抽象\n\n2. code-reviewer 自动审查\n   → 严重性评级 + SOLID 原则检查\n\n3. 有安全敏感代码：\n   → security-reviewer 自动介入\n```\n\n**关键词**: deslop",
+          "line_num": 65
+        },
+        {
+          "title": "场景 6：多任务并行开发",
+          "node_id": "0006",
+          "summary": "## 场景 6：多任务并行开发\n\n```\n1. /oh-my-claudecode:project-session-manager\n   → 创建多个 git worktree + tmux session\n\n2. /team 3:executor \"各自的任务\"\n   → 3 个 executor 并行干活\n\n3. verifier 逐个验证\n```",
+          "line_num": 81
+        },
+        {
+          "title": "场景 7：研究分析",
+          "node_id": "0007",
+          "summary": "## 场景 7：研究分析\n\n```\n1. \"sciomc 分析 XXX\"\n   → 多个 scientist agent 并行分析\n   → AUTO 模式自动编排\n\n2. 需要外部资料：\n   /oh-my-claudecode:external-context\n   → 并行 document-specialist 搜索\n\n3. 想问其他模型：\n   /oh-my-claudecode:ask codex \"你怎么看？\"\n   /oh-my-claudecode:ask gemini \"验证一下这个结论\"\n```\n\n**关键词**: sciomc",
+          "line_num": 93
+        },
+        {
+          "title": "场景 8：持续迭代（改到完美）",
+          "node_id": "0008",
+          "summary": "## 场景 8：持续迭代（改到完美）\n\n```\n\"ralph 把这个模块重构到满意为止\"\n→ 自循环：\n  executor 改 → verifier 查 → 不过？继续改\n  → 直到 reviewer 签字\n```\n\n**关键词**: ralph",
+          "line_num": 111
+        },
+        {
+          "title": "编排黄金法则",
+          "node_id": "0009",
+          "summary": "## 编排黄金法则\n\n1. **需求不清 → deep interview 先**，别上来就写\n2. **一个人能干 → 别开 team**，直接 executor\n3. **架构决策 → ccg**，别一个模型说了算\n4. **写完代码 → deslop**，养成习惯\n5. **验证永远最后跑**，别自己说\"搞定了\"\n6. **取消用 cancelomc**，别硬等超时",
+          "line_num": 122
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,176 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1773937555159,
+  "projectRoot": "D:\\projects\\pageindex-local",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Python",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "requirements.txt"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": "pip",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "scripts",
+      "tests"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "cookbook": {
+      "path": "cookbook",
+      "purpose": null,
+      "fileCount": 5,
+      "lastAccessed": 1773937555146,
+      "keyFiles": [
+        "agentic_retrieval.ipynb",
+        "pageIndex_chat_quickstart.ipynb",
+        "pageindex_RAG_simple.ipynb",
+        "README.md",
+        "vision_RAG_pageindex.ipynb"
+      ]
+    },
+    "pageindex": {
+      "path": "pageindex",
+      "purpose": null,
+      "fileCount": 5,
+      "lastAccessed": 1773937555146,
+      "keyFiles": [
+        "config.yaml",
+        "page_index.py",
+        "page_index_md.py",
+        "utils.py",
+        "__init__.py"
+      ]
+    },
+    "results": {
+      "path": "results",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1773937555146,
+      "keyFiles": [
+        "MEMORY_structure.json"
+      ]
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 2,
+      "lastAccessed": 1773937555147,
+      "keyFiles": [
+        "autoclose-labeled-issues.js",
+        "comment-on-duplicates.sh"
+      ]
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 0,
+      "lastAccessed": 1773937555147,
+      "keyFiles": []
+    },
+    "tutorials": {
+      "path": "tutorials",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1773937555147,
+      "keyFiles": []
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "C:\\Users\\Administrator\\.claude\\projects\\C--Users-Administrator\\memory\\MEMORY.md",
+      "accessCount": 3,
+      "lastAccessed": 1773937884544,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\Administrator\\.claude\\settings.json",
+      "accessCount": 2,
+      "lastAccessed": 1773937594302,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\Administrator\\.claude\\rules\\common\\memory-routing.md",
+      "accessCount": 2,
+      "lastAccessed": 1773937652690,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\Administrator\\a2a-dev\\src\\memory_gateway.py",
+      "accessCount": 2,
+      "lastAccessed": 1773938216554,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\Administrator\\a2a-dev\\src\\base_agent.py",
+      "accessCount": 2,
+      "lastAccessed": 1773938230552,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\Administrator\\a2a-dev\\src\\coordinator.py",
+      "accessCount": 1,
+      "lastAccessed": 1773938152664,
+      "type": "file"
+    },
+    {
+      "path": "batch_index.py",
+      "accessCount": 1,
+      "lastAccessed": 1773944482888,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\claude\\D--claude-workspace\\59083cfd-6c79-469c-bdee-64105c8bde69\\tasks\\b1hqr1z74.output",
+      "accessCount": 1,
+      "lastAccessed": 1773945307721,
+      "type": "file"
+    },
+    {
+      "path": "E:\\knowledge\\Knowledge",
+      "accessCount": 1,
+      "lastAccessed": 1773946206528,
+      "type": "directory"
+    },
+    {
+      "path": "E:\\knowledge\\Knowledge\\03-Trading\\AI自循环系统.md",
+      "accessCount": 1,
+      "lastAccessed": 1773946212706,
+      "type": "file"
+    },
+    {
+      "path": "E:\\knowledge\\Knowledge\\01-Projects\\专家Agent-RAG.md",
+      "accessCount": 1,
+      "lastAccessed": 1773946213214,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

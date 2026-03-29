@@ -1,0 +1,102 @@
+{
+  "doc_name": "a2a-dev",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\a2a-dev.md",
+  "structure": [
+    {
+      "title": "a2a-dev — CLAW Agent Lifecycle",
+      "node_id": "0000",
+      "prefix_summary": "# a2a-dev — CLAW Agent Lifecycle\n\n> omc_patches 模块集，从 ClawTeam 移植，实现跨 10 种 AI 编码工具的统一 lifecycle 管理。",
+      "line_num": 8,
+      "nodes": [
+        {
+          "title": "代码位置",
+          "node_id": "0001",
+          "summary": "## 代码位置\n\n- 本地: `C:\\Users\\Administrator\\a2a-dev\\`\n- 核心包: `src/omc_patches/` (11 模块, 零外部依赖)\n- 移植源: `D:\\projects\\clawteam_tmp\\`\n- 治理层参考: `D:\\projects\\claw-mesh\\governance\\` (TS, ~2750 LOC, 73%可复用)",
+          "line_num": 12
+        },
+        {
+          "title": "模块清单（20 exports）",
+          "node_id": "0002",
+          "prefix_summary": "## 模块清单（20 exports）",
+          "line_num": 19,
+          "nodes": [
+            {
+              "title": "P0+P1 移植（已完成）",
+              "node_id": "0003",
+              "summary": "### P0+P1 移植（已完成）\n\n| 模块 | 用途 |\n|------|------|\n| `platform.py` | 6 liveness backend + 10 工具 32 env vars + 原子文件 I/O |\n| `tmux_prompt.py` | load-buffer 安全 prompt 注入 |\n| `spawn_registry.py` | 三级 liveness + hostname 标签 |\n| `env_sanitizer.py` | 多工具 env var 清理 |\n| `task_lock.py` | 死 agent 自动释放锁 |\n| `event_log.py` | JSONL 审计日志 |\n| `on_exit.py` | agent 退出清理编排 |\n| `waiter.py` | 阻塞等待子 agent（信号安全） |",
+              "line_num": 21
+            },
+            {
+              "title": "R2+R6 新建（2026-03-18 完成）",
+              "node_id": "0004",
+              "summary": "### R2+R6 新建（2026-03-18 完成）\n\n| 模块 | 用途 |\n|------|------|\n| `doc_collab.py` | Section-owned 文档协作（1000 agent PR 工作流） |\n| `squad_lead.py` | 层级管理 Sovereign→Lead(~30)→Worker(~33) |\n| `spawn_integration.py` | 多工具 spawn 集成（env注入+prompt+exit hook） |",
+              "line_num": 34
+            }
+          ]
+        },
+        {
+          "title": "六层架构",
+          "node_id": "0005",
+          "summary": "Describes a six-layer architecture detailing each layer’s component and completion status: the arbitration layer with the TrustFactor+Arbitration module completed on 2026-03-18, collaborative layer modules doc_collab.py and squad_lead.py already done, observation layer metrics_collector.py completed on 2026-03-18 for cost/quality aggregation, communication layer using existing A2A Redis Streams, lifecycle involving omc_patches P0+P1 done, archival layer transitioning MemoV snap() to event_log finished, and metabolic layer gc_policy.py finalized on 2026-03-18 for evolution and garbage collection.",
+          "line_num": 42
+        },
+        {
+          "title": "检索栈决策",
+          "node_id": "0006",
+          "summary": "## 检索栈决策\n\n```\nGitNexus (Neo4j)     — 关系：调用链/影响分析（不可替代）\nPageIndex (树索引)   — 定位：代码/文档导航（替代 OpenViking 代码场景）\nevent_log (JSONL)    — 时序：审计/操作历史（替代 MemoV）\nauto-memory (MD)     — 锚点：高频知识（保留）\nOpenViking (向量)    — 降级：仅非结构化文本（会议纪要等）\nMemoV (SQLite)       — 砍：snap() 降级为 event_log 3行 wrapper\n```",
+          "line_num": 54
+        },
+        {
+          "title": "R2 — OpenClaw 注入（研究+实现 已完成）",
+          "node_id": "0007",
+          "summary": "## R2 — OpenClaw 注入（研究+实现 已完成）\n\nClawTeam 用 **命令无关的 CLI 模式**，非传统插件系统：\n- **Env 注入**: `CLAW_AGENT_*` 环境变量传递身份\n- **Prompt 注入**: OpenClaw 用 `-p` flag，Claude 用 tmux buffer\n- **Exit hook**: shell `;` 追加清理命令\n- **无 manifest**: spawn 时自动注册到 team\n- 实现: `spawn_integration.py`，支持 Claude/Codex/Gemini/OpenClaw + 任意 CLI",
+          "line_num": 65
+        },
+        {
+          "title": "R4 — OMC team 接入",
+          "node_id": "0008",
+          "summary": "## R4 — OMC team 接入\n\n决策：**PostToolUse hook** 拦截 TeamCreate/SendMessage → 自动调模块\n理由：token 效率高、无侵入、用户无感。待实现。",
+          "line_num": 74
+        },
+        {
+          "title": "claw-grid 治理层资产（可复用）",
+          "node_id": "0009",
+          "prefix_summary": "The document outlines reusable governance-layer assets from the “claw-grid” project, listing key TypeScript modules, their sizes, reuse percentages, and target Python counterparts—mostly mapping trust-factor, arbitration, policy engine, cost control, quality judge, evolution, and audit logging logic to corresponding `omc_patches` modules such as `sovereign_arbiter.py`, `metrics_collector.py`, and `gc_policy.py`. It also notes the migration approach (TypeScript to Python) and allows optional Redis usage with default filesystem storage.",
+          "line_num": 79,
+          "nodes": [
+            {
+              "title": "2026-03-18 完成的治理层",
+              "node_id": "0010",
+              "summary": "The document outlines key components of a governance system finalized on 2026-03-18. It summarizes four modules: `sovereign_arbiter.py` (approximately 260 lines) which manages GaaS trust scoring (0–100), includes cooling mechanisms, and supports risk-level voting (low/med/high/critical); `metrics_collector.py` (~280 lines) implementing a five-tier model degradation process with three quality gates (40+30+30) and aggregation from Worker to Squad to Sovereign; `gc_policy.py` (~290 lines) handling strategy evolution modes (balanced/innovate/harden/repair/auto), Shannon anti-convergence, and log rotation; and `memov_compat.py` (~25 lines) providing a `snap()` to event-log JSONL wrapper.",
+              "line_num": 93
+            },
+            {
+              "title": "2026-03-18 额外完成",
+              "node_id": "0011",
+              "summary": "Outline of additional tasks on 2026‑03‑18: introduced `agent_selection.py` DTO to isolate Evolution/TrustFactor/CostController, performed code-standard refactors (Strategy enums, unified GCResult returns, explicit `auto_evaluate` param, atomic JSONL handling, exception isolation), enhanced `/codex` (stdin exec, review uncommitted) and `/gemini` commands (`@file` injection, screenshot-to-code, large-context research), created CCG synthesis artifact (Claude fallback), downgraded MemoV via `memov_compat.py` snap→event_log, and issued omc-ask feedback forbidding `$()` expansion in file prompts.",
+              "line_num": 102
+            }
+          ]
+        },
+        {
+          "title": "Next Steps",
+          "node_id": "0012",
+          "summary": "## Next Steps\n\n1. **Codex GPT-5.4 review** — `cd ~/a2a-dev && codex exec review --uncommitted`（一行命令）\n2. **PageIndex 接入** — 加到 .mcp.json，替代 OpenViking 代码检索\n3记忆层 (2026-03-20 新增)\n\n- `src/memory_gateway.py` — MemoryGateway + ExpertMemoryGateway (memU + PageIndex)\n- `src/amm/` — Agent Memory Middleware (Redis L1/L2 + Bloom + Neo4j + Query Planner)\n- 44 tests at `tests/test_amm.py`, all passing\n- 设计文档: `E:/knowledge/Knowledge/01-Projects/agent-memory-middleware.md`",
+          "line_num": 114
+        },
+        {
+          "title": "Next Steps",
+          "node_id": "0013",
+          "summary": "Summary of upcoming work items: complete the AMM follow-up by syncing StateChangeEvent data into a Neo4j graph; implement the R4 hook that intercepts PostToolUse operations from the OMC team so the GC runs after team verification; add optional Redis backends for sovereign_arbiter and metrics_collector to prevent leaderboard TOCTOU issues; build an omc-ask wrapper so Codex and Gemini can pass file prompts through a unified proxy script; execute the full three-model closed loop (Claude planning, Codex implementation, Gemini visual review, Claude decision); restore and inspect OpenClaw environment variables via SUPER SSH once networking returns; and integrate ExpertRouter A2A so the coordinator can automatically choose the appropriate expert agent.",
+          "line_num": 125
+        },
+        {
+          "title": "相关笔记",
+          "node_id": "0014",
+          "summary": "## 相关笔记\n\n- [[CLAW Agent Lifecycle]] — 详细模块表 + 待研究清单",
+          "line_num": 135
+        }
+      ]
+    }
+  ]
+}

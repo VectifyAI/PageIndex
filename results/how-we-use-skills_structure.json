@@ -1,0 +1,156 @@
+{
+  "doc_name": "how-we-use-skills",
+  "source_path": "E:/knowledge/Knowledge\\engineering\\how-we-use-skills.md",
+  "structure": [
+    {
+      "title": "Lessons from Building Claude Code: How We Use Skills",
+      "node_id": "0000",
+      "prefix_summary": "# Lessons from Building Claude Code: How We Use Skills\n\n> **Author**: Thariq (@trq212), Anthropic Claude Code 团队\n> **Date**: 2026-03-12\n> **Source**: https://x.com/trq212/status/2033949937936085378\n> **Tags**: #claude-code #skills #agent-design #best-practices #anthropic",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "TL;DR",
+          "node_id": "0001",
+          "summary": "## TL;DR\n\nSkills 是 Claude Code 最常用的扩展点。Anthropic 内部数百个 skill 在用。9 类 skill 覆盖从库文档到基础设施运维。**Gotchas 是 skill 中信号密度最高的部分**。\n\n---",
+          "line_num": 8
+        },
+        {
+          "title": "9 类 Skill",
+          "node_id": "0002",
+          "prefix_summary": "## 9 类 Skill",
+          "line_num": 14,
+          "nodes": [
+            {
+              "title": "1. Library & API Reference（库/API 参考）",
+              "node_id": "0003",
+              "summary": "### 1. Library & API Reference（库/API 参考）\n教 Claude 正确使用特定库、CLI、SDK。\n\n**关键内容**：\n- 参考代码片段文件夹\n- Gotchas 列表（Claude 常犯的错）\n- 例：内部计费库、CLI wrapper、设计系统",
+              "line_num": 16
+            },
+            {
+              "title": "2. Product Verification（产品验证）",
+              "node_id": "0004",
+              "summary": "### 2. Product Verification（产品验证）\n配合 Playwright、tmux 等外部工具验证代码功能。\n\n> \"值得让一个工程师花一整周来把验证 skill 做到优秀。\"\n\n- 例：注册流程驱动、结账验证器",
+              "line_num": 24
+            },
+            {
+              "title": "3. Data Fetching & Analysis（数据获取与分析）",
+              "node_id": "0005",
+              "summary": "### 3. Data Fetching & Analysis（数据获取与分析）\n连接数据和监控基础设施，包含凭证和 dashboard ID。\n\n- 例：漏斗查询、队列对比、Grafana 集成",
+              "line_num": 31
+            },
+            {
+              "title": "4. Business Process & Team Automation（业务流程自动化）",
+              "node_id": "0006",
+              "summary": "### 4. Business Process & Team Automation（业务流程自动化）\n把重复工作流自动化为单个命令，通常维护日志保证跨次执行一致性。\n\n- 例：standup 汇总、工单创建（schema 约束）、周报",
+              "line_num": 36
+            },
+            {
+              "title": "5. Code Scaffolding & Templates（代码脚手架）",
+              "node_id": "0007",
+              "summary": "### 5. Code Scaffolding & Templates（代码脚手架）\n用自然语言需求生成框架样板代码。\n\n- 例：新服务脚手架、迁移模板、预配置 auth+部署的应用初始化",
+              "line_num": 41
+            },
+            {
+              "title": "6. Code Quality & Review（代码质量与审查）",
+              "node_id": "0008",
+              "summary": "### 6. Code Quality & Review（代码质量与审查）\n执行组织代码标准。\n\n- 例：对抗式 code review agent、风格约束、测试实践指导",
+              "line_num": 46
+            },
+            {
+              "title": "7. CI/CD & Deployment（CI/CD 与部署）",
+              "node_id": "0009",
+              "summary": "### 7. CI/CD & Deployment（CI/CD 与部署）\n管理代码推送和部署。\n\n- 例：PR 监控+冲突解决、渐进流量灰度+自动回滚、cherry-pick 操作",
+              "line_num": 51
+            },
+            {
+              "title": "8. Runbooks（运行手册）",
+              "node_id": "0010",
+              "summary": "### 8. Runbooks（运行手册）\n输入症状（Slack thread、告警、错误签名），输出结构化调查报告。\n\n- 例：服务专用调试、oncall runner、日志关联器",
+              "line_num": 56
+            },
+            {
+              "title": "9. Infrastructure Operations（基础设施运维）",
+              "node_id": "0011",
+              "summary": "### 9. Infrastructure Operations（基础设施运维）\n处理日常维护，对破坏性操作有 guardrail。\n\n- 例：孤儿资源清理、依赖管理、成本调查\n\n---",
+              "line_num": 61
+            }
+          ]
+        },
+        {
+          "title": "Skill 开发最佳实践",
+          "node_id": "0012",
+          "prefix_summary": "## Skill 开发最佳实践",
+          "line_num": 68,
+          "nodes": [
+            {
+              "title": "1. 别写显而易见的东西",
+              "node_id": "0013",
+              "summary": "### 1. 别写显而易见的东西\n> 聚焦于推动 Claude **超越标准行为模式**的知识，不要写通用编程知识。",
+              "line_num": 70
+            },
+            {
+              "title": "2. Gotchas 是最高信号密度的部分",
+              "node_id": "0014",
+              "summary": "### 2. Gotchas 是最高信号密度的部分\n> \"Skill 中信号密度最高的内容就是 Gotchas 部分。\"\n\n迭代捕获 Claude 使用该 skill 时的常见失败点，持续更新。",
+              "line_num": 73
+            },
+            {
+              "title": "3. 利用文件系统结构",
+              "node_id": "0015",
+              "summary": "### 3. 利用文件系统结构\n用文件夹做 progressive disclosure：\n- 参考文档\n- 脚本\n- 示例\n- 资源文件\n\n比单个巨大 markdown 文件更有效。",
+              "line_num": 78
+            },
+            {
+              "title": "4. 给灵活度",
+              "node_id": "0016",
+              "summary": "### 4. 给灵活度\n提供必要信息但不过度指定指令，让 Claude 能适应不同场景。",
+              "line_num": 87
+            },
+            {
+              "title": "5. 处理 Setup 需求",
+              "node_id": "0017",
+              "summary": "### 5. 处理 Setup 需求\n- 配置存 `config.json`\n- 或用 `AskUserQuestion` 获取结构化用户输入",
+              "line_num": 90
+            },
+            {
+              "title": "6. Description 字段写给模型看",
+              "node_id": "0018",
+              "summary": "### 6. Description 字段写给模型看\n描述**何时触发**这个 skill，而不是给人类写功能摘要。",
+              "line_num": 94
+            },
+            {
+              "title": "7. 实现记忆系统",
+              "node_id": "0019",
+              "summary": "### 7. 实现记忆系统\n- Append-only 文本文件 / JSON / SQLite\n- 用 `${CLAUDE_PLUGIN_DATA}` 做跨升级稳定存储",
+              "line_num": 97
+            },
+            {
+              "title": "8. 提供可组合的脚本",
+              "node_id": "0020",
+              "summary": "### 8. 提供可组合的脚本\n提供 helper 函数和库，让 Claude 聚焦组合而非重建样板代码。",
+              "line_num": 101
+            },
+            {
+              "title": "9. 用 On-Demand Hooks",
+              "node_id": "0021",
+              "summary": "### 9. 用 On-Demand Hooks\n会话级 hook：\n- `/careful` — 阻止破坏性命令\n- `/freeze` — 限制编辑范围到特定目录\n\n---",
+              "line_num": 104
+            }
+          ]
+        },
+        {
+          "title": "对 OMC 的启示",
+          "node_id": "0022",
+          "summary": "## 对 OMC 的启示\n\n| Anthropic 做法 | OMC 现状 | 可改进 |\n|---|---|---|\n| Gotchas 是 skill 核心 | 部分 skill 有 | 系统性为每个 skill 加 gotchas |\n| 文件夹结构 progressive disclosure | 大多单文件 | 高频 skill 拆文件夹 |\n| Description 写给模型 | 有些写给人 | 统一为触发条件描述 |\n| `${CLAUDE_PLUGIN_DATA}` 持久化 | 用 .omc/ | 已对齐 |\n| Verification skill 值得一周投入 | QA skill 存在 | 可加强 |\n| 9 类分类法 | 无明确分类 | 可按此分类审计 |\n\n---",
+          "line_num": 111
+        },
+        {
+          "title": "系列文章",
+          "node_id": "0023",
+          "summary": "## 系列文章\n\n1. [Prompt Caching Is Everything](prompt-caching-is-everything.md) (2026-02-19)\n2. [Seeing like an Agent](seeing-like-an-agent.md) (2026-02-27)\n3. **How We Use Skills** (本文, 2026-03-12)",
+          "line_num": 124
+        }
+      ]
+    }
+  ]
+}

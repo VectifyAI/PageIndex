@@ -1,0 +1,54 @@
+{
+  "doc_name": "UI定制",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\SillyTavern 官方文档\\核心概念\\UI定制.md",
+  "structure": [
+    {
+      "title": "UI定制",
+      "node_id": "0000",
+      "prefix_summary": "### UI定制",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/uicustomization/#message-sound)消息声音",
+          "node_id": "0001",
+          "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/uicustomization/#message-sound)消息声音\n\n要在收到来自机器人的新消息时播放您自己的自定义声音，请替换 SillyTavern 文件夹中的以下 MP3 文件：\n\n`public/sounds/message.mp3`\n\n以 80% 的音量播放。\n\n如果启用了“仅背景声音”选项，则仅在 SillyTavern 窗口**未聚焦**时播放声音。",
+          "line_num": 9
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/uicustomization/#ui-colors)UI 颜色",
+      "node_id": "0002",
+      "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/uicustomization/#ui-colors)UI 颜色\n\n您可以使用颜色选取器和滑块以多种方式自定义 UI。\n\n您还可以保存预设并与其他用户共享（保存到 ）。`/public/themes/`",
+      "line_num": 19
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/uicustomization/#power-user-options)高级用户选项",
+      "node_id": "0003",
+      "prefix_summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/uicustomization/#power-user-options)高级用户选项",
+      "line_num": 25,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/uicustomization/#formulas-rendering)公式呈现",
+          "node_id": "0004",
+          "prefix_summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/uicustomization/#formulas-rendering)公式呈现\n\n启用使用 [showdown-katex](https://obedm503.github.io/showdown-katex/) 包呈现数学公式。\n\n支持以下格式规则：",
+          "line_num": 27,
+          "nodes": [
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/uicustomization/#latex-syntax)LaTeX 语法",
+              "node_id": "0005",
+              "summary": "##### [#](https://docs.sillytavern.app/usage/core-concepts/uicustomization/#latex-syntax)LaTeX 语法\n\n```python\n$$formula goes here $$\n```",
+              "line_num": 33
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/uicustomization/#asciimath-syntax)Asciimath 语法",
+              "node_id": "0006",
+              "summary": "##### [#](https://docs.sillytavern.app/usage/core-concepts/uicustomization/#asciimath-syntax)Asciimath 语法\n\n```python\nformula goes here $\n```",
+              "line_num": 39
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

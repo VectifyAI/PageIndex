@@ -1,0 +1,98 @@
+{
+  "doc_name": "Stars-前端Web",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\GitHub-Stars\\Stars-前端Web.md",
+  "structure": [
+    {
+      "title": "前端Web",
+      "node_id": "0000",
+      "prefix_summary": "# 前端Web",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "Astro",
+          "node_id": "0001",
+          "summary": "## Astro\n\n- [AVIDS2/Astris-Blog](https://github.com/AVIDS2/Astris-Blog) — Astris: High-performance, premium aesthetic personal blog starter. Powered by Astro 5, Svelte, and T",
+          "line_num": 4
+        },
+        {
+          "title": "C#",
+          "node_id": "0002",
+          "summary": "## C#\n\n- [KitsuneLab-Development/K4-System](https://github.com/KitsuneLab-Development/K4-System) — K4-Systems is a plugin that enhances the server with features such as a playtime tracker, statistica\n- [NockyCZ/CS2-Deathmatch](https://github.com/NockyCZ/CS2-Deathmatch) — Custom Deathmatch CS2 plugin (Includes custom spawnpoints, multicfg, gun selection, spawn protection\n- [shobhit-pathak/MatchZy](https://github.com/shobhit-pathak/MatchZy) — MatchZy is a plugin for CS2 (Counter Strike 2) for running and managing practice/pugs/scrims/matches",
+          "line_num": 8
+        },
+        {
+          "title": "C++",
+          "node_id": "0003",
+          "summary": "## C++\n\n- [NVIDIA/cudnn-frontend](https://github.com/NVIDIA/cudnn-frontend) — cudnn_frontend provides a c++ wrapper for the cudnn backend API and samples on how to use it",
+          "line_num": 14
+        },
+        {
+          "title": "CSS",
+          "node_id": "0004",
+          "summary": "## CSS\n\n- [LinWin-Cloud/setool-master](https://github.com/LinWin-Cloud/setool-master) — SetoolMaster是一款让你入门即入狱的python3开发的进阶型社会工程学工具。包括了全球定位、Ngrok内网穿透、Seeker高精度定位、网页钓鱼、病毒攻击、恐吓勒索信、爬虫、网站克隆、物联\n- [snowykami/gitea-themes](https://github.com/snowykami/gitea-themes) — 一个简单的gitea主题",
+          "line_num": 18
+        },
+        {
+          "title": "Go",
+          "node_id": "0005",
+          "summary": "## Go\n\n- [filebrowser/filebrowser](https://github.com/filebrowser/filebrowser) — 📂 Web File Browser\n- [gdy666/lucky](https://github.com/gdy666/lucky) — 软硬路由公网神器,ipv6/ipv4 端口转发,反向代理,DDNS,WOL,ipv4 stun内网穿透,cron,acme,rclone,ftp,webdav,filebrowser",
+          "line_num": 23
+        },
+        {
+          "title": "HTML",
+          "node_id": "0006",
+          "summary": "The partial document provides a list of GitHub repositories with brief descriptions. It includes: a repository for Counter-Strike 2 configuration presets, a personal website template showcasing experience and skills, an AI-powered news digest tool using Twitter/RSS feeds, a military ontology for marking up military information, a project to build a programming language in C, and a Hugo theme for creating documentation.",
+          "line_num": 28
+        },
+        {
+          "title": "JavaScript",
+          "node_id": "0007",
+          "summary": "The partial document provides a list of JavaScript-related GitHub repositories, each offering unique functionalities or enhancements. These include tools for downloading projects from Quixel, augmenting the Steam experience, WebGL sculpting, translating Stanford CS183 notes into Chinese, creating buy binds for CS:GO, restoring the old TweetDeck interface, configuring foobar2000, efficient ad-blocking for Chromium and Firefox, full-featured download management, remaking PureRef with additional media support, adding snowfall effects to web pages, monitoring and comparing latencies from RIPEAtlas, and integrating Live2D widgets for web platforms.",
+          "line_num": 37
+        },
+        {
+          "title": "Other",
+          "node_id": "0008",
+          "summary": "## Other\n\n- [keylase/vdo.ninja](https://github.com/keylase/vdo.ninja) — VDO.Ninja is a powerful tool that lets you bring remote video feeds into OBS or other studio softwar\n- [whizkydee/Awesome-APIs](https://github.com/whizkydee/Awesome-APIs) — 📚 A curated list of APIs from round the web.",
+          "line_num": 54
+        },
+        {
+          "title": "Python",
+          "node_id": "0009",
+          "summary": "## Python\n\n- [bisguzar/twitter-scraper](https://github.com/bisguzar/twitter-scraper) — Scrape the Twitter Frontend API without authentication.\n- [openinterpreter/open-interpreter](https://github.com/openinterpreter/open-interpreter) — A natural language interface for computers",
+          "line_num": 59
+        },
+        {
+          "title": "Ruby",
+          "node_id": "0010",
+          "summary": "## Ruby\n\n- [opf/openproject](https://github.com/opf/openproject) — OpenProject is the leading open source project management software.",
+          "line_num": 64
+        },
+        {
+          "title": "SCSS",
+          "node_id": "0011",
+          "summary": "## SCSS\n\n- [catppuccin/gitea](https://github.com/catppuccin/gitea) — 🍵 Soothing pastel theme for Gitea",
+          "line_num": 68
+        },
+        {
+          "title": "Svelte",
+          "node_id": "0012",
+          "summary": "## Svelte\n\n- [catchspider2002/svelte-svg-patterns](https://github.com/catchspider2002/svelte-svg-patterns) — Create seamless patterns in SVG to use as website backgrounds, header images, stationery design and",
+          "line_num": 72
+        },
+        {
+          "title": "TypeScript",
+          "node_id": "0013",
+          "summary": "This partial document showcases a curated list of open-source projects primarily on GitHub, highlighting diverse applications and tools across various domains. Key themes include AI-driven utilities like BibiGPT for summarizing audio/video content and BilibiliSponsorBlock for skipping sponsored segments in videos. There are also developer tools such as Vite for frontend development, tsParticles for JavaScript particle effects, and Epic Stack for full-stack application development. Other notable projects cover specialized areas like molecule sketching with Ketcher, 3D Gaussian splat editing with Supersplat, and UI component libraries like Lobe UI for building AI-generated content web apps. Additionally, there are tools for specific platforms like Rutgers-BetterCourseSchedulePlanner for university course planning and QQ-chat-exporter for exporting QQ chat data.",
+          "line_num": 76
+        },
+        {
+          "title": "Vue",
+          "node_id": "0014",
+          "summary": "## Vue\n\n- [BewlyBewly/BewlyBewly](https://github.com/BewlyBewly/BewlyBewly) — Just make a few small changes to your Bilibili homepage. (English | 简体中文 | 正體中文 | 廣東話)\n- [keleus/BewlyCat](https://github.com/keleus/BewlyCat) — BewlyCat——基于BewlyBewly开发的Bilibili拓展\n- [qier222/YesPlayMusic](https://github.com/qier222/YesPlayMusic) — 高颜值的第三方网易云播放器，支持 Windows / macOS / Linux :electron:",
+          "line_num": 108
+        }
+      ]
+    }
+  ]
+}

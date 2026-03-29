@@ -1,0 +1,38 @@
+{
+  "doc_name": "01-你是主线程",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\ClaudeLog-干货\\01-你是主线程.md",
+  "structure": [
+    {
+      "title": "你是主线程 (You Are the Main Thread)",
+      "node_id": "0000",
+      "prefix_summary": "# 你是主线程 (You Are the Main Thread)\n\n> 原文：[claudelog.com/mechanics/you-are-the-main-thread](https://claudelog.com/mechanics/you-are-the-main-thread)",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "核心隐喻",
+          "node_id": "0001",
+          "summary": "## 核心隐喻\n\n把自己想成 **CPU 调度器**，而不是执行者。\n\nAI 时代之前：`机会成本 = 你的时间 × 1`\nAI 时代之后：`机会成本 = (你的时间 × 1) + (你能并行 spawn 的 agent 数 × N)`\n\n每一个你发呆的瞬间，浪费的不只是你的时间，还有你本可以派出去工作的所有后台进程。",
+          "line_num": 5
+        },
+        {
+          "title": "核心原则",
+          "node_id": "0002",
+          "summary": "## 核心原则\n\n**永远不要阻塞主线程。**",
+          "line_num": 14
+        },
+        {
+          "title": "实践建议",
+          "node_id": "0003",
+          "summary": "## 实践建议\n\n1. **像 CPU 调度器一样思考** — 战略性地排队任务，而不是按顺序一个个干\n2. **高效切换上下文** — 在多个项目之间有意识地管理注意力\n3. **保持所有核心活跃** — 持续 spawn 异步进程，维持并行吞吐量\n4. **委派操作** — 把工作分发给自主 agent，你只做更高层级的决策",
+          "line_num": 18
+        },
+        {
+          "title": "我的理解",
+          "node_id": "0004",
+          "summary": "The document discusses a mental model centered around the concept of **role transformation**, shifting from being a \"coder\" to becoming a \"manager of a group of coding agents.\" Key points include: multiple agents working simultaneously on different tasks like frontend development, writing tests, and code review; the human's role evolving into **decision-making and supervision** rather than direct execution; the limitation shifting from typing speed to the **capacity to manage multiple parallel workflows**. It contrasts with traditional management by emphasizing the management of agents instead of people, highlighting that while agents don't slack or have emotions, they require precise context and instructions. The human's value lies in **providing direction and judgment**, not in hands-on execution.",
+          "line_num": 25
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,104 @@
+{
+  "doc_name": "Browser-Provider-Fleet-性能测试与能力矩阵",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\Browser-Provider-Fleet-性能测试与能力矩阵.md",
+  "structure": [
+    {
+      "title": "Browser Provider Fleet — 性能测试与能力矩阵",
+      "node_id": "0000",
+      "prefix_summary": "# Browser Provider Fleet — 性能测试与能力矩阵\n\n**日期**: 2026-03-21\n**项目**: APEX Browser Bridge\n**状态**: ✅ 9 Provider 全部验证通过\n\n---",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "一句话总结",
+          "node_id": "0001",
+          "summary": "## 一句话总结\n\n9 个免费国内 AI 平台通过 Chrome DevTools 自动化操作，组成 Browser Provider Fleet。性能测试显示 DeepSeek 最快（19.3s），秘塔性价比最高（23.9s + 搜索引用），组合并发 QPS 约 0.25（每分钟 ~15 个并行请求）。",
+          "line_num": 9
+        },
+        {
+          "title": "性能 Benchmark",
+          "node_id": "0002",
+          "prefix_summary": "## 性能 Benchmark\n\n**测试 Prompt**: \"分析2024年美联储降息对A股的传导路径，3句话概括核心逻辑。\"",
+          "line_num": 13,
+          "nodes": [
+            {
+              "title": "速度排名",
+              "node_id": "0003",
+              "summary": "### 速度排名\n\n这份文档主要列出了多个AI模型在特定任务中的速度排名及其相关信息。以下是主要涵盖的内容：\n\n1. **排名与耗时**：\n   - 文档以表格形式展示了不同AI模型在某一任务中的耗时排名。耗时最短的是DeepSeek V3，仅需19.3秒，而耗时最长的是阶跃星辰的Step 3.5 Flash，需54.8秒。\n   - 其他模型如秘塔AI、腾讯元宝、通义千问、豆包、AMiner、小米MiMo和Kimi的耗时在23.9秒到49.2秒之间。\n\n2. **联网搜索与引用源**：\n   - 表格中“联网搜索”和“引用源”两列表明了各模型是否具备联网搜索功能以及具体的引用源信息。\n   - 例如，秘塔AI和豆包具备联网搜索功能，分别返回15个和7个结果；Kimi返回41个结果，引用源包括华尔街见闻；AMiner返回学术搜索结果，引用3篇论文；小米MiMo返回10页内容，引用源为[1]-[8]。\n\n3. **模型与提供商**：\n   - 文档列出了各模型的名称及其所属的提供商，如DeepSeek V3由DeepSeek提供，秘塔搜索由秘塔AI提供，Hunyuan由腾讯元宝提供等。\n\n这份文档主要关注AI模型在特定任务中的执行速度及其在联网搜索和引用源方面的能力。",
+              "line_num": 17
+            },
+            {
+              "title": "质量评估",
+              "node_id": "0004",
+              "summary": "### 质量评估\n\n这份文档主要对多个AI服务提供商的输出质量进行了评估，涵盖以下几个方面：\n\n1. **格式遵从**：大多数提供商在格式遵从方面获得⭐⭐⭐的评价，表明它们在生成符合特定格式要求的文本方面表现良好。\n\n2. **专业度**：专业度评分较为分散，腾讯元宝、DeepSeek、Kimi和AMiner获得⭐⭐⭐，而其他提供商则获得⭐⭐，显示出在专业性上的差异。\n\n3. **特色**：\n   - **腾讯元宝**：以其类似机构投研的语言风格（如“分母端/分子端”）著称。\n   - **DeepSeek**：以其快速响应和清晰的逻辑结构脱颖而出。\n   - **Kimi**：提供最多的引用，并进行关键约束分析。\n   - **秘塔**：在搜索型任务中表现出色，能够在速度和深度之间找到最佳平衡。\n   - **阶跃星辰**：以其最深的推理链和完整的思考过程而闻名。\n   - **AMiner**：是唯一引用学术论文的提供商。\n   - **通义千问**：以简洁精准的输出为特色。\n   - **豆包**：主动提出量化复盘。\n   - **MiMo**：在深度思考方面表现突出，但用时较长（11.2秒）。",
+              "line_num": 31
+            },
+            {
+              "title": "共识",
+              "node_id": "0005",
+              "summary": "### 共识\n\n9 个模型在核心逻辑上高度一致：\n1. 中美利差收窄 → 资本回流 A 股\n2. 人民币汇率稳定 → 央行货币政策空间打开\n3. 全球风险偏好提升 → 成长股估值修复",
+              "line_num": 45
+            },
+            {
+              "title": "速度 vs 深度 Trade-off",
+              "node_id": "0006",
+              "summary": "### 速度 vs 深度 Trade-off\n\n- **不联网**（DeepSeek/元宝/通义）：平均 23.6s，快 2x，无引用\n- **联网搜索**（Kimi/阶跃/AMiner）：平均 49.6s，慢但有引用来源\n- **最佳性价比**：秘塔 23.9s — 又快又有搜索引用",
+              "line_num": 52
+            }
+          ]
+        },
+        {
+          "title": "自动化兼容性",
+          "node_id": "0007",
+          "summary": "该文档主要讨论了不同AI助手在自动化兼容性方面的差异，涵盖了输入方式、发送方式以及特殊处理需求。具体来说：\n\n1. **输入方式**：大多数AI助手使用`fill`方式输入文本，但通义千问使用clipboard paste，元宝使用`type_text`。\n2. **发送方式**：大多数AI助手通过Enter键发送请求，但通义千问通过JS点击发送按钮。\n3. **特殊处理**：部分AI助手需要特殊处理，例如通义千问需要处理Slate编辑器，AMiner在发送后需要恢复输入框的enabled状态，DeepSeek的回复中包含空格，元宝需要处理contenteditable带标签的情况。",
+          "line_num": 58
+        },
+        {
+          "title": "完整能力矩阵",
+          "node_id": "0008",
+          "prefix_summary": "## 完整能力矩阵",
+          "line_num": 72,
+          "nodes": [
+            {
+              "title": "独占能力（只有一家有）",
+              "node_id": "0009",
+              "summary": "### 独占能力（只有一家有）\n\n该部分文档列举了多家公司在不同领域的独占能力及其对相关方的价值：\n\n1. **元宝**：拥有微信公众号+视频号搜索的独占能力，为中文社媒数据独占和A股舆情分析提供支持。\n2. **阶跃**：具备深入核查（事实验证）的独占能力，用于反幻觉验证。\n3. **秘塔**：提供互动网页生成功能，将搜索结果转化为可交互页面；具备学术精确筛选能力，支持JCR/CAS分区学术搜索过滤；拥有\"/\"自定义技能系统，实现可编程搜索。\n4. **AMiner 沉思**：拥有自主文献综述能力，能够自动化处理174篇学术文献。\n5. **MiMo**：实现金山Office深度集成，支持办公文档自动化。\n6. **DeepSeek V3.2**：具备边想边做（推理中调工具）的独占能力，是世界首创的最强推理技术。\n7. **通义**：拥有1000万字上下文的独占能力，能够处理整个代码库。\n8. **Kimi**：提供Agent Swarm（100并行）能力，目前为付费服务，暂不可用。",
+              "line_num": 74
+            },
+            {
+              "title": "按用途分层",
+              "node_id": "0010",
+              "summary": "### Description of Partial Document\n\nThe partial document provides a categorized overview of various AI models and tools based on their primary use cases and capabilities. It is divided into four main sections:\n\n1. **Search/Research (Reducing Claude's Search Burden):**\n   - Mentions tools like Secret Tower for fastest search with an API, Kimi for in-depth search with 41 results and citations, Yuanbao for exclusive WeChat ecosystem data, and AMiner Chen Si for automated literature reviews.\n\n2. **Reasoning/Analysis (Free Top-tier LLMs):**\n   - Highlights DeepSeek V3.2 as the strongest free reasoning model, Tongyi Qwen3.5-Plus for its 10 million character context, and Jieyue for anti-hallucination verification.\n\n3. **Quantification-Related:**\n   - Discusses tools like Doubao for direct data analysis from uploaded files, Tongyi with 10 million character context for code analysis, DeepSeek R1 for deep mathematical reasoning, and Yuanbao for investment research-level discourse.\n\n4. **Model Switching Capabilities:**\n   - Covers the versatility of different models, including Tongyi with six model options, Doubao with three performance levels, DeepSeek with V3 and R1 for deep thinking, and Jieyue with Step 3.5 Flash and multiple specialized agents.\n\nThe document emphasizes the strengths and specific use cases of each tool or model, providing a comprehensive guide for selecting the right AI solution based on the task at hand.",
+              "line_num": 89
+            }
+          ]
+        },
+        {
+          "title": "Bridge 架构",
+          "node_id": "0011",
+          "prefix_summary": "## Bridge 架构\n\n```\nClaude Code / APEX Worker\n  ↓\nBrowser Bridge (Python FastAPI, :8090)\n  ├── /search   → 路由到秘塔/Kimi/元宝(微信)/AMiner(学术)\n  ├── /chat     → 路由到 DeepSeek/通义/豆包/阶跃/MiMo\n  ├── /verify   → 路由到阶跃深入核查\n  ├── /research → 路由到 Kimi/AMiner 沉思\n  ├── /v1/chat/completions → OpenAI 兼容（APEX 集成）\n  ↓\nChrome DevTools Protocol (CDP, port 9222)\n  ↓\n9 个浏览器 Tab（已登录，免费无限额度）\n```",
+          "line_num": 114,
+          "nodes": [
+            {
+              "title": "CDP 限制",
+              "node_id": "0012",
+              "summary": "### CDP 限制\n\n- Chrome 同一时刻只能 select 一个 page → bridge 用 asyncio.Lock 序列化\n- chrome-devtools-mcp 默认用 pipe 连接 → 需加 `--chromeArg --remote-debugging-port=9222`\n- 多 agent 并发操作同一 Chrome 会冲突 → 需要独立 CDP connection per tab",
+              "line_num": 131
+            }
+          ]
+        },
+        {
+          "title": "代码位置",
+          "node_id": "0013",
+          "summary": "## 代码位置\n\n- Bridge 服务器: `tools/browser_bridge.py`\n- Tab 恢复脚本: `browser_profiles/restore_tabs.py`\n- Chrome profile: `browser_profiles/chrome/`\n- MCP 配置: `D:/claude-workspace/.mcp.json`（已加 `--chromeArg --remote-debugging-port=9222`）",
+          "line_num": 137
+        },
+        {
+          "title": "下一步",
+          "node_id": "0014",
+          "summary": "## 下一步\n\n- [ ] 重启 Claude Code session，让 Chrome 加载 TCP 调试端口\n- [ ] 验证 `browser_bridge.py --list` 能发现所有 tab\n- [ ] 验证 `browser_bridge.py --test` 端到端测试\n- [ ] 登录 Google AI Studio，加入 Gemini 3 Pro 作为第 10 个 provider\n- [ ] 接入 APEX providers.json，browser provider 作为新 tier\n- [ ] 优化 response 提取逻辑（每个 provider 的 DOM 结构不同）\n- [ ] 考虑多 tab 并发：每个 provider 开 2-3 个 tab 提升 QPS",
+          "line_num": 144
+        }
+      ]
+    }
+  ]
+}

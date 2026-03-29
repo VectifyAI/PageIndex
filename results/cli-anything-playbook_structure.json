@@ -1,0 +1,224 @@
+{
+  "doc_name": "cli-anything-playbook",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\cli-anything-playbook.md",
+  "structure": [
+    {
+      "title": "GUI软件CLI化：路径指南与最佳实践",
+      "node_id": "0000",
+      "prefix_summary": "# GUI软件CLI化：路径指南与最佳实践\n\n> 源自 CLI-Anything 项目实践 + xhs-cli/AI-digest 等开源参考。\n> 目标：给任意软件做Agent可用的CLI wrapper时，快速选对路径。\n\n---",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "五条路径总览",
+          "node_id": "0001",
+          "summary": "The document outlines five approaches for interacting with software systems, ranked by their level of abstraction and complexity. \n\n1. **L1 - Official API/SDK**: Utilizes OAuth and standard protocols like REST/GraphQL/WebSocket, offering high stability, low maintenance, and no legal risks. Examples include Zoom, Slack, and GitHub.\n\n2. **L2 - Local Script Engine**: Involves using built-in scripting, plugins, or automation tools like AppleScript. It provides high stability, low maintenance, and no legal risks. Examples include GIMP, Blender, and Excel.\n\n3. **L3 - SSR Data Injection**: Involves injecting data by reading from the server-side rendered data structures like `__INITIAL_STATE__` or `__NEXT_DATA__`. It offers moderate stability, medium maintenance, and low legal risk. Examples include platforms like Xiaohongshu and Zhihu.\n\n4. **L4 - Browser Automation**: Uses tools like Playwright or Puppeteer to automate browser interactions. It has low stability, high maintenance, and moderate legal risk. Examples include platforms like Dianping and Meituan.\n\n5. **L5 - Protocol Reverse Engineering**: Involves packet capture, signature algorithm restoration, and simulated requests. It has very low stability, extremely high maintenance, and high legal risk. Examples include platforms like Boss Zhipin and Douyin.\n\nThe document emphasizes the principle of using higher-level approaches over lower-level ones whenever possible, ranking them as L1 > L2 > L3 > L4 >> L5.",
+          "line_num": 8
+        },
+        {
+          "title": "L1: 官方API/SDK — 首选",
+          "node_id": "0002",
+          "prefix_summary": "## L1: 官方API/SDK — 首选",
+          "line_num": 22,
+          "nodes": [
+            {
+              "title": "判断标准",
+              "node_id": "0003",
+              "summary": "### 判断标准\n- 有公开的开发者文档 / Developer Portal\n- 支持OAuth或API Key认证\n- 有官方SDK（Python/Node/Go）",
+              "line_num": 24
+            },
+            {
+              "title": "最佳实践",
+              "node_id": "0004",
+              "summary": "### 最佳实践\n1. **先找官方SDK**，别自己封HTTP。SDK处理了认证刷新、错误重试、分页\n2. **OAuth流程**：用localhost回调 + PKCE，CLI场景不要用隐式授权\n3. **输出JSON**：`--json` flag统一输出格式，供agent消费\n4. **Rate limit处理**：指数退避 + 429状态码检测，打日志告诉用户剩余配额\n5. **Webhook转CLI**：很多平台推送用Webhook，可以起个临时HTTP server接收 → 转stdout",
+              "line_num": 29
+            },
+            {
+              "title": "典型架构",
+              "node_id": "0005",
+              "summary": "### 典型架构\n```\n用户/Agent → Click CLI → 官方SDK → Platform API\n                ↓\n           JSON stdout / Rich table\n```",
+              "line_num": 36
+            },
+            {
+              "title": "代表案例",
+              "node_id": "0006",
+              "summary": "### 代表案例\n| 软件 | API文档 | 认证方式 | 备注 |\n|------|---------|---------|------|\n| Zoom | marketplace.zoom.us | OAuth 2.0 + JWT | 个人开发者友好，Server-to-Server OAuth |\n| Slack | api.slack.com | Bot Token / OAuth | Socket Mode可做实时CLI |\n| Notion | developers.notion.so | Integration Token | 数据库查询强大 |\n| Telegram | core.telegram.org/bots | Bot Token | 最简单的API之一 |\n| GitHub | docs.github.com/rest | PAT / GitHub App | `gh` CLI本身就是标杆 |\n| Linear | linear.app/docs/api | API Key / OAuth | GraphQL，做项目管理CLI很舒服 |\n| Airtable | airtable.com/developers | PAT | 低代码数据库的API |\n\n---",
+              "line_num": 43
+            }
+          ]
+        },
+        {
+          "title": "L2: 本地脚本引擎 — CLI-Anything主力",
+          "node_id": "0007",
+          "prefix_summary": "## L2: 本地脚本引擎 — CLI-Anything主力",
+          "line_num": 56,
+          "nodes": [
+            {
+              "title": "判断标准",
+              "node_id": "0008",
+              "summary": "### 判断标准\n- 软件有内置脚本语言（Python/Lua/Script-Fu/VBA）\n- 有插件/扩展API\n- 支持命令行启动 + 传参执行脚本",
+              "line_num": 58
+            },
+            {
+              "title": "最佳实践",
+              "node_id": "0009",
+              "summary": "### 最佳实践\n1. **无头模式优先**：`blender --background --python script.py`，不弹GUI\n2. **IPC桥接**：软件不支持无头？起WebSocket/TCP bridge（如obs-websocket）\n3. **幂等操作**：脚本执行完就退出，不留后台进程\n4. **错误码规范**：0=成功，1=软件错误，2=参数错误，3=文件不存在",
+              "line_num": 63
+            },
+            {
+              "title": "典型架构",
+              "node_id": "0010",
+              "summary": "### 典型架构\n```\n用户/Agent → Click CLI → subprocess/IPC → 软件脚本引擎\n                ↓                              ↓\n           JSON stdout              实际操作（渲染/编辑/导出）\n```",
+              "line_num": 69
+            },
+            {
+              "title": "CLI-Anything已实现",
+              "node_id": "0011",
+              "summary": "### CLI-Anything已实现\nGIMP, Blender, LibreOffice, Inkscape, OBS, KDenLive, Shotcut, Audacity, Draw.io, 通达信\n\n---",
+              "line_num": 76
+            }
+          ]
+        },
+        {
+          "title": "L3: SSR数据注入 — Web应用的甜蜜点",
+          "node_id": "0012",
+          "prefix_summary": "## L3: SSR数据注入 — Web应用的甜蜜点",
+          "line_num": 81,
+          "nodes": [
+            {
+              "title": "判断标准",
+              "node_id": "0013",
+              "summary": "### 判断标准\n- 目标是SPA（React/Vue/Next.js/Nuxt）\n- 页面源码或JS全局变量里有结构化数据\n- 不需要复杂交互，主要是**读取**",
+              "line_num": 83
+            },
+            {
+              "title": "核心思路",
+              "node_id": "0014",
+              "summary": "### 核心思路\n现代SPA为了SEO/首屏性能，会把服务端数据注入到全局变量：\n```javascript\n// Next.js\nwindow.__NEXT_DATA__ = { props: { pageProps: { ... } } }\n\n// Nuxt.js\nwindow.__NUXT__ = { data: [...] }\n\n// 自定义SSR（小红书、知乎等）\nwindow.__INITIAL_STATE__ = { note: { ... }, user: { ... } }\n```\n\n**拿这个数据比解析DOM稳定10倍**——DOM结构天天改，数据结构半年才动一次。",
+              "line_num": 88
+            },
+            {
+              "title": "最佳实践",
+              "node_id": "0015",
+              "summary": "### 最佳实践\n1. **用轻量浏览器**：camoufox（反指纹Firefox）或 Playwright + stealth插件\n2. **等页面加载完** → `page.evaluate('window.__INITIAL_STATE__')` → 拿到JSON → 关浏览器\n3. **Cookie认证**：从Chrome cookie数据库提取（`browser_cookie3`库），或QR码登录\n4. **缓存页面数据**：同一URL 5分钟内不重复请求\n5. **降级策略**：如果全局变量没了，fallback到DOM解析，但打warning",
+              "line_num": 103
+            },
+            {
+              "title": "典型架构（xhs-cli的思路）",
+              "node_id": "0016",
+              "summary": "### 典型架构（xhs-cli的思路）\n```\n用户/Agent → Click CLI → camoufox/Playwright\n                              ↓\n                    加载页面 → 等待渲染完成\n                              ↓\n                    page.evaluate('__INITIAL_STATE__')\n                              ↓\n                         结构化JSON\n                              ↓\n                    Click CLI → JSON stdout\n```",
+              "line_num": 110
+            },
+            {
+              "title": "常见全局变量速查",
+              "node_id": "0017",
+              "summary": "### 常见全局变量速查\n| 框架/平台 | 变量名 | 内容 |\n|-----------|--------|------|\n| Next.js | `__NEXT_DATA__` | 页面props + 路由数据 |\n| Nuxt.js | `__NUXT__` | SSR注入的完整状态 |\n| 小红书 | `__INITIAL_STATE__` | 笔记/用户/搜索结果 |\n| 知乎 | `__INITIAL_STATE__` | 问题/回答/用户 |\n| B站 | `__INITIAL_STATE__` | 视频/UP主/评论 |\n| 豆瓣 | 无统一变量 | 但HTML内嵌JSON-LD |\n| 微博 | `$render_data` | 部分页面 |",
+              "line_num": 123
+            },
+            {
+              "title": "写操作怎么办？",
+              "node_id": "0018",
+              "summary": "### 写操作怎么办？\nL3主要用于读。写操作（发帖/点赞/评论）退化到L4——通过DOM点击完成。xhs-cli就是这么干的：读数据用`__INITIAL_STATE__`，交互用DOM click。\n\n---",
+              "line_num": 134
+            }
+          ]
+        },
+        {
+          "title": "L4: 浏览器自动化 — 读写都要时的退路",
+          "node_id": "0019",
+          "prefix_summary": "## L4: 浏览器自动化 — 读写都要时的退路",
+          "line_num": 139,
+          "nodes": [
+            {
+              "title": "判断标准",
+              "node_id": "0020",
+              "summary": "### 判断标准\n- 需要写操作（发帖、下单、填表）\n- 没有API，SSR变量不够用\n- 平台有基础反爬但不极端",
+              "line_num": 141
+            },
+            {
+              "title": "最佳实践",
+              "node_id": "0021",
+              "summary": "### 最佳实践\n\n1. **Page Object模式**：通过将每个页面封装成类并集中管理选择器，实现UI更改时只需修改一处代码。\n\n2. **反检测策略**：\n   - 使用Playwright结合`playwright-stealth`插件，适用于基础反爬场景。\n   - 采用camoufox库应对中等强度的反爬需求，如小红书等平台。\n   - 对于高强度反爬场景，可以自建浏览器指纹池，但需注意维护成本较高。\n\n3. **等待策略**：始终使用`wait_for_selector`或`wait_for_load_state`进行等待，禁止使用`sleep`函数。\n\n4. **截图调试**：在每一步操作后可选截图，出错时自动保存截图以便调试。\n\n5. **Session复用**：将浏览器上下文保存到磁盘，下次启动时恢复登录状态，提高效率。\n\n6. **人机协作登录**：首次登录时弹出可见浏览器让用户手动完成，保存cookie后，后续操作可无头运行。",
+              "line_num": 146
+            },
+            {
+              "title": "反爬等级参考",
+              "node_id": "0022",
+              "summary": "### 反爬等级参考\n| 等级 | 特征 | 对策 | 代表 |\n|------|------|------|------|\n| 无 | 静态页面 | requests就行 | 个人博客、文档站 |\n| 低 | UA检测 | 设置正常UA | 豆瓣、Wikipedia |\n| 中 | JS指纹+行为检测 | stealth插件/camoufox | 小红书、知乎 |\n| 高 | 验证码+设备指纹+风控 | 基本放弃自动化 | Boss直聘、抖音 |\n| 极端 | 滑块+短信+设备绑定 | 不可能自动化 | 银行、政务 |\n\n---",
+              "line_num": 157
+            }
+          ]
+        },
+        {
+          "title": "L5: 协议逆向 — 为什么不推荐",
+          "node_id": "0023",
+          "prefix_summary": "## L5: 协议逆向 — 为什么不推荐",
+          "line_num": 168,
+          "nodes": [
+            {
+              "title": "问题",
+              "node_id": "0024",
+              "summary": "### 问题\n1. **签名算法频繁更换**：Boss直聘的加密参数几周一变，你的CLI就是个永动维护机\n2. **法律灰色**：绕过技术保护措施在某些司法管辖区违法（CFAA / 反不正当竞争法）\n3. **封号风险**：请求模式异常 → 封设备指纹 → 连正常使用都受影响\n4. **开源风险**：代码公开 → 平台法务发DMCA → 仓库被删（已有多个先例）",
+              "line_num": 170
+            },
+            {
+              "title": "如果非要做",
+              "node_id": "0025",
+              "summary": "### 如果非要做\n- **仅限个人使用**，不要开源\n- 请求频率压到正常人类水平（每分钟2-3次）\n- 不要碰用户隐私数据\n- 做好随时失效的心理准备\n\n---",
+              "line_num": 176
+            }
+          ]
+        },
+        {
+          "title": "决策树",
+          "node_id": "0026",
+          "summary": "This partial document outlines a decision tree for determining the best approach to interact with a target software application based on its characteristics and the desired operations. The main points covered are:\n\n1. **Official API/SDK Availability**: The first decision point is whether the target software has an official API or SDK. If it does, the recommended approach is to use the official API.\n\n2. **Local Desktop Software**: If there is no official API, the next decision is whether the software is a local desktop application. If it is, the next step is to check for a script engine or plugin API. If such an interface exists, the recommended approach is to use local scripting.\n\n3. **Accessibility API or UI Automation**: If the local desktop software does not have a script engine or plugin API, the recommended approach is to use Accessibility API or UI automation tools.\n\n4. **Web Application**: If the target software is a web application, the decision tree further branches based on the type of interaction required:\n   - **Data Reading**: If only data reading is needed, the next step is to check for Server-Side Rendering (SSR) global variables. If they exist, data injection is recommended. If not, Playwright DOM parsing is suggested.\n   - **Write Operations**: If write operations are required, the decision is based on the anti-scraping measures in place. For low to medium anti-scraping levels, browser automation is recommended. For high or extreme anti-scraping levels, the document advises to either abandon the approach or proceed with caution at one's own risk.",
+          "line_num": 184
+        },
+        {
+          "title": "CLI Wrapper通用规范（不管哪条路径都遵守）",
+          "node_id": "0027",
+          "prefix_summary": "## CLI Wrapper通用规范（不管哪条路径都遵守）",
+          "line_num": 204,
+          "nodes": [
+            {
+              "title": "输出",
+              "node_id": "0028",
+              "summary": "### 输出\n```bash\n# 人类可读（默认）\n$ xhs search \"猫咖\"\n┌──────────┬──────────────┬───────┐\n│ ID       │ 标题          │ 点赞   │\n├──────────┼──────────────┼───────┤\n│ abc123   │ 北京最好的猫咖 │ 12.3k │\n└──────────┴──────────────┴───────┘\n\n# Agent可读\n$ xhs search \"猫咖\" --json\n[{\"id\": \"abc123\", \"title\": \"北京最好的猫咖\", \"likes\": 12300}]\n```",
+              "line_num": 206
+            },
+            {
+              "title": "认证",
+              "node_id": "0029",
+              "summary": "### 认证\n- 首次运行引导用户完成认证（OAuth/QR码/cookie导入）\n- Token存 `~/.config/<tool>/auth.json`，600权限\n- Token过期自动刷新，刷新失败提示重新登录",
+              "line_num": 221
+            },
+            {
+              "title": "错误处理",
+              "node_id": "0030",
+              "summary": "### 错误处理\n- exit code: 0=成功, 1=业务错误, 2=认证失败, 3=网络错误, 4=被风控\n- stderr输出错误详情，stdout保持干净（agent解析stdout）",
+              "line_num": 226
+            },
+            {
+              "title": "Agent集成",
+              "node_id": "0031",
+              "summary": "### Agent集成\n- `--json` flag：所有命令支持\n- `--help` 自描述：agent靠这个发现能力\n- 幂等设计：同一命令跑两次结果一样，不产生副作用（读操作）\n\n---",
+              "line_num": 230
+            }
+          ]
+        },
+        {
+          "title": "参考项目",
+          "node_id": "0032",
+          "summary": "This partial document provides an overview of various CLI (Command Line Interface) projects, highlighting their unique features and implementation details. Key points include:\n\n1. **CLI-Anything**: Utilizes the Click framework to CLI-ify nine desktop software applications, serving as a benchmark for CLI development.\n2. **xhs-cli**: Implements a combination of camoufox and `__INITIAL_STATE__` for read-write separation, operating across levels L3 and L4.\n3. **AI-digest**: Employs local log parsing followed by LLM (Large Language Model) analysis, representing a \"passive CLI-ification\" approach, and operates at L2 with variations.\n4. **gh**: The official GitHub CLI, recognized as the gold standard for API wrappers, operates at L1.\n5. **slack-cli**: The official Slack CLI that incorporates OAuth and Socket Mode, also operates at L1.\n6. **tg-cli**: Focuses on encapsulating the Telegram Bot API, operates at L1.\n7. **yt-dlp**: Known for its advanced protocol reverse engineering, operates across levels L3 and L5, but faces significant maintenance challenges.",
+          "line_num": 237
+        },
+        {
+          "title": "待补充",
+          "node_id": "0033",
+          "summary": "## 待补充\n\n- [ ] 各路径的成本估算（开发时间/维护时间）\n- [ ] 移动App的CLI化思路（ADB + UIAutomator / Appium）\n- [ ] 企业内部系统（SAP/Salesforce等有API但文档烂的）\n- [ ] MCP Server vs CLI：什么时候该做MCP而不是CLI",
+          "line_num": 251
+        }
+      ]
+    }
+  ]
+}

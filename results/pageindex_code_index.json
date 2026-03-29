@@ -1,0 +1,3843 @@
+{
+  "repo_name": "pageindex",
+  "repo_path": "D:\\projects\\pageindex-local\\pageindex",
+  "language_composition": {
+    "python": 8
+  },
+  "files": [
+    {
+      "repo_name": "pageindex",
+      "file_path": "__init__.py",
+      "language": "python",
+      "symbols": [],
+      "imports": [
+        {
+          "source": ".page_index",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": ".page_index_md",
+          "names": [
+            "md_to_tree"
+          ],
+          "target_file": null
+        },
+        {
+          "source": ".retrieve",
+          "names": [
+            "get_document",
+            "get_document_structure",
+            "get_page_content"
+          ],
+          "target_file": null
+        },
+        {
+          "source": ".client",
+          "names": [
+            "PageIndexClient"
+          ],
+          "target_file": null
+        }
+      ],
+      "metrics": {
+        "total_lines": 5,
+        "code_lines": 4,
+        "symbol_count": 0,
+        "complexity_avg": 0.0
+      },
+      "indexed_at": 1774823508.843451,
+      "content_hash": "7d0b39a3749e"
+    },
+    {
+      "repo_name": "pageindex",
+      "file_path": "client.py",
+      "language": "python",
+      "symbols": [
+        {
+          "name": "META_INDEX",
+          "type": "const",
+          "line_range": [
+            15,
+            15
+          ],
+          "signature": "META_INDEX = \"_meta.json\"",
+          "docstring": null,
+          "dependencies": [],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "_normalize_retrieve_model",
+          "type": "function",
+          "line_range": [
+            18,
+            25
+          ],
+          "signature": "def _normalize_retrieve_model(model: str) -> str",
+          "docstring": "Preserve supported Agents SDK prefixes and route other provider paths via LiteLLM.",
+          "dependencies": [
+            "startswith"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 3
+        },
+        {
+          "name": "PageIndexClient",
+          "type": "class",
+          "line_range": [
+            28,
+            234
+          ],
+          "signature": "class PageIndexClient",
+          "docstring": "A client for indexing and retrieving document content.\n    Flow: index() -> get_document() / get_document_structure() / get_page_content()\n\n    For agent-based QA, see examples/agentic_vectorless_rag_demo.py.",
+          "dependencies": [],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "__init__",
+          "type": "method",
+          "line_range": [
+            35,
+            53
+          ],
+          "signature": "def __init__(self, api_key: str = None, model: str = None, retrieve_model: str = None, workspace: str = None)",
+          "docstring": null,
+          "dependencies": [
+            "ConfigLoader",
+            "Path",
+            "expanduser",
+            "getenv",
+            "load",
+            "mkdir"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 9
+        },
+        {
+          "name": "index",
+          "type": "method",
+          "line_range": [
+            55,
+            130
+          ],
+          "signature": "def index(self, file_path: str, mode: str = \"auto\") -> str",
+          "docstring": "Index a document. Returns a document_id.",
+          "dependencies": [
+            "FileNotFoundError",
+            "PdfReader",
+            "ThreadPoolExecutor",
+            "ValueError",
+            "abspath",
+            "append",
+            "exists",
+            "expanduser",
+            "extract_text",
+            "get",
+            "get_running_loop",
+            "lower",
+            "md_to_tree",
+            "page_index",
+            "result",
+            "run",
+            "splitext",
+            "submit",
+            "uuid4"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 9
+        },
+        {
+          "name": "_save_doc",
+          "type": "method",
+          "line_range": [
+            157,
+            168
+          ],
+          "signature": "def _save_doc(self, doc_id: str)",
+          "docstring": null,
+          "dependencies": [
+            "copy",
+            "dump(d",
+            "en(p",
+            "get('",
+            "move_fields(d",
+            "pop('"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 2
+        },
+        {
+          "name": "ebuild_meta(s",
+          "type": "method",
+          "line_range": [
+            170,
+            179
+          ],
+          "signature": "def ebuild_meta(self) - -> ct:\n",
+          "docstring": "Scan individual doc JSON files and return a meta dict.\"\"\"",
+          "dependencies": [
+            "glob(\"",
+            "instance(d"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 4
+        },
+        {
+          "name": "ead_meta(s",
+          "type": "method",
+          "line_range": [
+            181,
+            187
+          ],
+          "signature": "def ead_meta(self) - -> ct | None:\n",
+          "docstring": "Read and validate _meta.json, returning None on any corruption.\"\"\"",
+          "dependencies": [
+            "instance(m",
+            "int(f"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 2
+        },
+        {
+          "name": "ave_meta(s",
+          "type": "method",
+          "line_range": [
+            189,
+            194
+          ],
+          "signature": "def ave_meta(self, doc_id: str, entry: dict):\n",
+          "docstring": null,
+          "dependencies": [
+            "dump(m",
+            "en(m"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "oad_workspace(s",
+          "type": "method",
+          "line_range": [
+            196,
+            206
+          ],
+          "signature": "def oad_workspace(self):\n",
+          "docstring": null,
+          "dependencies": [
+            "ct(e",
+            "get('",
+            "int(f",
+            "isabs(d",
+            "items()",
+            "n(m",
+            "r((",
+            "resolve()"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 5
+        },
+        {
+          "name": "nsure_doc_loaded(s",
+          "type": "method",
+          "line_range": [
+            208,
+            218
+          ],
+          "signature": "def nsure_doc_loaded(self, doc_id: str):\n",
+          "docstring": "Load full document JSON on demand (structure, pages, etc.).\"\"\"",
+          "dependencies": [
+            "get('",
+            "get(d"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 4
+        },
+        {
+          "name": "t_document(s",
+          "type": "method",
+          "line_range": [
+            220,
+            222
+          ],
+          "signature": "def t_document(self, doc_id: str) - -> r:\n",
+          "docstring": "Return document metadata JSON.\"\"\"",
+          "dependencies": [
+            "t_document(s"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "t_document_structure(s",
+          "type": "method",
+          "line_range": [
+            224,
+            228
+          ],
+          "signature": "def t_document_structure(self, doc_id: str) - -> r:\n",
+          "docstring": "Return document tree structure JSON (without text fields).\"\"\"",
+          "dependencies": [
+            "t_document_structure(s"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 2
+        },
+        {
+          "name": "t_page_content(s",
+          "type": "method",
+          "line_range": [
+            230,
+            234
+          ],
+          "signature": "def t_page_content(self, doc_id: str, pages: str) - -> r:\n",
+          "docstring": "Return page content for the given pages string (e.g. '5-7', '3,8', '12').\"\"\"",
+          "dependencies": [
+            "t_page_content(s"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 3
+        }
+      ],
+      "imports": [
+        {
+          "source": "os",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "uuid",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "json",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "asyncio",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "concurrent.futures",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "pathlib",
+          "names": [
+            "Path"
+          ],
+          "target_file": null
+        },
+        {
+          "source": "PyPDF2",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": ".page_index",
+          "names": [
+            "page_index"
+          ],
+          "target_file": null
+        },
+        {
+          "source": ".page_index_md",
+          "names": [
+            "md_to_tree"
+          ],
+          "target_file": null
+        },
+        {
+          "source": ".retrieve",
+          "names": [
+            "get_document",
+            "get_document_structure",
+            "get_page_content"
+          ],
+          "target_file": null
+        },
+        {
+          "source": ".utils",
+          "names": [
+            "ConfigLoader",
+            "remove_fields"
+          ],
+          "target_file": null
+        }
+      ],
+      "metrics": {
+        "total_lines": 235,
+        "code_lines": 203,
+        "symbol_count": 14,
+        "complexity_avg": 3.36
+      },
+      "indexed_at": 1774823508.8469598,
+      "content_hash": "8a4d0da11422"
+    },
+    {
+      "repo_name": "pageindex",
+      "file_path": "code_indexer.py",
+      "language": "python",
+      "symbols": [
+        {
+          "name": "_LANGUAGE =",
+          "type": "const",
+          "line_range": [
+            18,
+            18
+          ],
+          "signature": "_LANGUAGE = Language(tspython.language())\nT",
+          "docstring": null,
+          "dependencies": [],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "_LANGUAGE =",
+          "type": "const",
+          "line_range": [
+            19,
+            19
+          ],
+          "signature": "_LANGUAGE = Language(tstypescript.language_typescript())\nT",
+          "docstring": null,
+          "dependencies": [],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "X_LANGUAGE =",
+          "type": "const",
+          "line_range": [
+            20,
+            20
+          ],
+          "signature": "X_LANGUAGE = Language(tstypescript.language_tsx())\n\n",
+          "docstring": null,
+          "dependencies": [],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "NG_MAP =",
+          "type": "const",
+          "line_range": [
+            22,
+            28
+          ],
+          "signature": "NG_MAP = {\n    \".py\": (\"python\", PY_LANGUAGE),\n    \".ts\": (\"typescript\", TS_LANGUAGE),\n    \".tsx\": (\"tsx\", TSX_LANGUAGE)",
+          "docstring": null,
+          "dependencies": [],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "NORE_DIRS =",
+          "type": "const",
+          "line_range": [
+            30,
+            34
+          ],
+          "signature": "NORE_DIRS = {\n    \".git\", \"node_modules\", \"__pycache__\", \".venv\", \"venv\", \"env\",\n    \"build\", \"dist\", \".next\", \".nuxt\", ",
+          "docstring": null,
+          "dependencies": [],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "NORE_FILES =",
+          "type": "const",
+          "line_range": [
+            36,
+            36
+          ],
+          "signature": "NORE_FILES = {\"package-lock.json\", \"yarn.lock\", \"pnpm-lock.yaml\", \"bun.lockb\"}\n\n",
+          "docstring": null,
+          "dependencies": [],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "deIndexer:\n",
+          "type": "class",
+          "line_range": [
+            92,
+            453
+          ],
+          "signature": "class deIndexer:\n",
+          "docstring": null,
+          "dependencies": [],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "init__(s",
+          "type": "method",
+          "line_range": [
+            93,
+            95
+          ],
+          "signature": "def init__(self, max_files: int = 500):\n",
+          "docstring": null,
+          "dependencies": [],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "et_parser(s",
+          "type": "method",
+          "line_range": [
+            97,
+            101
+          ],
+          "signature": "def et_parser(self, lang_name: str, language: Language) - -> rser:\n",
+          "docstring": null,
+          "dependencies": [
+            "rser(l"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 2
+        },
+        {
+          "name": "dex_directory(\n",
+          "type": "method",
+          "line_range": [
+            103,
+            145
+          ],
+          "signature": "def dex_directory(\n        self,\n        dir_path: str,\n        language_filter: str = None,\n        repo_name: str = None,\n    ) - -> poIndex:\n",
+          "docstring": null,
+          "dependencies": [
+            "abspath(d",
+            "append(c",
+            "append(f",
+            "get(f",
+            "items()",
+            "m(l",
+            "n(f",
+            "poIndex(\n",
+            "th(d",
+            "time()"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 10
+        },
+        {
+          "name": "can_files(s",
+          "type": "method",
+          "line_range": [
+            147,
+            167
+          ],
+          "signature": "def can_files(self, dir_path: str, language_filter: str = None) - -> st[str]:\n",
+          "docstring": null,
+          "dependencies": [
+            "append(o",
+            "get(l",
+            "join(r",
+            "lower()",
+            "n(r",
+            "rted(f",
+            "splitext(f",
+            "startswith(\"",
+            "walk(d"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 10
+        },
+        {
+          "name": "arse_file(s",
+          "type": "method",
+          "line_range": [
+            169,
+            210
+          ],
+          "signature": "def arse_file(self, file_path: str, dir_path: str, repo_name: str) - -> tional[FileIndex]:\n",
+          "docstring": null,
+          "dependencies": [
+            "en(f",
+            "encode(\"",
+            "get(e",
+            "hexdigest()",
+            "leIndex(\n",
+            "leMetrics(\n",
+            "lower()",
+            "m(1",
+            "m(s",
+            "md5(s",
+            "n(l",
+            "n(s",
+            "parse(s",
+            "read()",
+            "relpath(f",
+            "replace(\"",
+            "split(\"",
+            "splitext(f",
+            "startswith(\"",
+            "strip()",
+            "time()",
+            "und(a",
+            "x(l"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 6
+        },
+        {
+          "name": "xtract_symbols(s",
+          "type": "method",
+          "line_range": [
+            212,
+            221
+          ],
+          "signature": "def xtract_symbols(self, tree, lang_name: str, source: str) - -> st[Symbol]:\n",
+          "docstring": null,
+          "dependencies": [],
+          "callers": [],
+          "summary": null,
+          "complexity": 4
+        },
+        {
+          "name": "xtract_python_symbols(s",
+          "type": "method",
+          "line_range": [
+            223,
+            255
+          ],
+          "signature": "def xtract_python_symbols(self, node, source: str, symbols: List[Symbol], depth: int = 0):\n",
+          "docstring": null,
+          "dependencies": [
+            "append(S",
+            "append(s",
+            "child_by_field_name(\"",
+            "isupper()",
+            "mbol(\n"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 15
+        },
+        {
+          "name": "ython_function(s",
+          "type": "method",
+          "line_range": [
+            257,
+            276
+          ],
+          "signature": "def ython_function(self, node, source: str, sym_type: str) - -> tional[Symbol]:\n",
+          "docstring": null,
+          "dependencies": [
+            "child_by_field_name(\"",
+            "mbol(\n"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 4
+        },
+        {
+          "name": "ython_docstring(s",
+          "type": "method",
+          "line_range": [
+            278,
+            293
+          ],
+          "signature": "def ython_docstring(self, node, source: str) - -> tional[str]:\n",
+          "docstring": null,
+          "dependencies": [
+            "child_by_field_name(\"",
+            "endswith(q",
+            "startswith(q",
+            "strip(\"",
+            "strip()"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 8
+        },
+        {
+          "name": "xtract_ts_symbols(s",
+          "type": "method",
+          "line_range": [
+            295,
+            332
+          ],
+          "signature": "def xtract_ts_symbols(self, node, source: str, symbols: List[Symbol]):\n",
+          "docstring": null,
+          "dependencies": [
+            "append(S",
+            "append(s",
+            "child_by_field_name(\"",
+            "isupper()",
+            "mbol(\n"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 19
+        },
+        {
+          "name": "s_function(s",
+          "type": "method",
+          "line_range": [
+            334,
+            346
+          ],
+          "signature": "def s_function(self, node, source: str) - -> tional[Symbol]:\n",
+          "docstring": null,
+          "dependencies": [
+            "child_by_field_name(\"",
+            "mbol(n"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 3
+        },
+        {
+          "name": "s_arrow_function(s",
+          "type": "method",
+          "line_range": [
+            348,
+            356
+          ],
+          "signature": "def s_arrow_function(self, name: str, decl_node, arrow_node, source: str) - -> tional[Symbol]:\n",
+          "docstring": null,
+          "dependencies": [
+            "child_by_field_name(\"",
+            "mbol(n"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 2
+        },
+        {
+          "name": "xtract_imports(s",
+          "type": "method",
+          "line_range": [
+            358,
+            387
+          ],
+          "signature": "def xtract_imports(self, tree, lang_name: str, source: str) - -> st[ImportInfo]:\n",
+          "docstring": null,
+          "dependencies": [
+            "append(I",
+            "child_by_field_name(\"",
+            "extend(s",
+            "portInfo(s",
+            "strip(\""
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 21
+        },
+        {
+          "name": "ollect_import_names(s",
+          "type": "method",
+          "line_range": [
+            389,
+            395
+          ],
+          "signature": "def ollect_import_names(self, node, source: str) - -> st[str]:\n",
+          "docstring": null,
+          "dependencies": [
+            "append(s",
+            "extend(s"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 3
+        },
+        {
+          "name": "xtract_call_names(s",
+          "type": "method",
+          "line_range": [
+            397,
+            401
+          ],
+          "signature": "def xtract_call_names(self, node, source: str) - -> st[str]:\n",
+          "docstring": "Extract function call names within a node (dependencies).\"\"\"",
+          "dependencies": [
+            "rted(c",
+            "t()"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "alk_calls(s",
+          "type": "method",
+          "line_range": [
+            403,
+            414
+          ],
+          "signature": "def alk_calls(self, node, source: str, calls: set):\n",
+          "docstring": null,
+          "dependencies": [
+            "\")\n",
+            "add(name)",
+            "child_by_field_name(\"",
+            "tartswith(\"_\") ",
+            "walk_calls(child"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 6
+        },
+        {
+          "name": "ate_complexity(self,",
+          "type": "method",
+          "line_range": [
+            416,
+            420
+          ],
+          "signature": "def ate_complexity(self, node, source: str) -> in ->    ",
+          "docstring": "gh cyclomatic complexity: 1 + branches.\"\"\"",
+          "dependencies": [
+            "node_text(node,",
+            "ount(kw) f"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 11
+        },
+        {
+          "name": "_call_graph(self,",
+          "type": "method",
+          "line_range": [
+            422,
+            444
+          ],
+          "signature": "def _call_graph(self, files: List[FileIndex]) -> Di -> tr, List[str]]:\n    ",
+          "docstring": "ld cross-file call graph from symbol dependencies.\"\"\"",
+          "dependencies": [
+            "append(key)\n",
+            "append(t)\n  ",
+            "get(dep_n",
+            "n"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 9
+        },
+        {
+          "name": "text(self,",
+          "type": "method",
+          "line_range": [
+            446,
+            447
+          ],
+          "signature": "def text(self, node, source: str) -> st ->    ",
+          "docstring": null,
+          "dependencies": [],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "ndex(self,",
+          "type": "method",
+          "line_range": [
+            449,
+            453
+          ],
+          "signature": "def ndex(self, index: RepoIndex, output_path: str):\n    ",
+          "docstring": null,
+          "dependencies": [
+            "ct(index",
+            "ump(data,",
+            "utpu"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "ct(obj):",
+          "type": "function",
+          "line_range": [
+            456,
+            464
+          ],
+          "signature": "def ct(obj):\n    ",
+          "docstring": "ursively convert dataclass instances to dicts.\"\"\"\n    i",
+          "dependencies": [
+            "ance(obj, ",
+            "ct(v) fo",
+            "ems()}\n  ",
+            "items()}\n  ",
+            "r(obj, "
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 7
+        }
+      ],
+      "imports": [
+        {
+          "source": "shlib\ni",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "\ni",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "\ni",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "me\nf",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "taclasses i",
+          "names": [
+            "taclass, ",
+            "eld, ",
+            "dict\nf"
+          ],
+          "target_file": null
+        },
+        {
+          "source": "thlib i",
+          "names": [
+            "th\nf"
+          ],
+          "target_file": null
+        },
+        {
+          "source": "ping i",
+          "names": [
+            "ct, ",
+            "st, ",
+            "tional, ",
+            "ple\n\n"
+          ],
+          "target_file": null
+        },
+        {
+          "source": "ee_sitter i",
+          "names": [
+            "nguage, ",
+            "rser\n\n"
+          ],
+          "target_file": null
+        }
+      ],
+      "metrics": {
+        "total_lines": 465,
+        "code_lines": 398,
+        "symbol_count": 28,
+        "complexity_avg": 5.39
+      },
+      "indexed_at": 1774823508.8509605,
+      "content_hash": "19b484258bc7"
+    },
+    {
+      "repo_name": "pageindex",
+      "file_path": "code_searcher.py",
+      "language": "python",
+      "symbols": [
+        {
+          "name": "SULTS_DIR =",
+          "type": "const",
+          "line_range": [
+            13,
+            13
+          ],
+          "signature": "SULTS_DIR = Path(__file__).parent.parent / \"results\"\nM",
+          "docstring": null,
+          "dependencies": [],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "DEL =",
+          "type": "const",
+          "line_range": [
+            14,
+            14
+          ],
+          "signature": "DEL = os.getenv(\"PAGEINDEX_MODEL\", \"MiniMax-M2.7-highspeed\")\nA",
+          "docstring": null,
+          "dependencies": [],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "I_KEY =",
+          "type": "const",
+          "line_range": [
+            15,
+            15
+          ],
+          "signature": "I_KEY = os.getenv(\"CHATGPT_API_KEY\")\n\n",
+          "docstring": null,
+          "dependencies": [],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "deSearcher:\n",
+          "type": "class",
+          "line_range": [
+            18,
+            202
+          ],
+          "signature": "class deSearcher:\n",
+          "docstring": null,
+          "dependencies": [],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "init__(s",
+          "type": "method",
+          "line_range": [
+            19,
+            20
+          ],
+          "signature": "def init__(self, results_dir: str = None):\n",
+          "docstring": null,
+          "dependencies": [
+            "th(r"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 2
+        },
+        {
+          "name": "arch(\n",
+          "type": "method",
+          "line_range": [
+            22,
+            52
+          ],
+          "signature": "def arch(\n        self,\n        query: str,\n        repo_names: List[str] = None,\n        top_k: int = 5,\n        mode: str = \"relevance\",\n    ) - -> r:\n",
+          "docstring": null,
+          "dependencies": [
+            "append(s",
+            "get(\"",
+            "update(i"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 10
+        },
+        {
+          "name": "oad_indices(s",
+          "type": "method",
+          "line_range": [
+            54,
+            65
+          ],
+          "signature": "def oad_indices(self, repo_names: Optional[List[str]] = None) - -> st[dict]:\n",
+          "docstring": null,
+          "dependencies": [
+            "append(d",
+            "en(f",
+            "get(\"",
+            "glob(\"",
+            "load(f"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 4
+        },
+        {
+          "name": "earch_definition(s",
+          "type": "method",
+          "line_range": [
+            67,
+            87
+          ],
+          "signature": "def earch_definition(self, query: str, symbols: List[dict]) - -> r:\n",
+          "docstring": null,
+          "dependencies": [
+            "append(\"",
+            "append(f",
+            "append(s",
+            "get(\"",
+            "get('",
+            "join(l",
+            "lower()"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 6
+        },
+        {
+          "name": "earch_impact(s",
+          "type": "method",
+          "line_range": [
+            89,
+            113
+          ],
+          "signature": "def earch_impact(self, query: str, symbols: List[dict], call_graph: Dict) - -> r:\n",
+          "docstring": null,
+          "dependencies": [
+            "append(\"",
+            "append(f",
+            "get(\"",
+            "get('",
+            "join(l",
+            "lower()",
+            "n(c"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 8
+        },
+        {
+          "name": "et_callers(s",
+          "type": "method",
+          "line_range": [
+            115,
+            134
+          ],
+          "signature": "def et_callers(self, target_key: str, call_graph: Dict, depth: int = 3) - -> st[Tuple[str, int]]:\n",
+          "docstring": "BFS to find all callers up to `depth` hops.\"\"\"",
+          "dependencies": [
+            "add(c",
+            "append((",
+            "items()",
+            "nge(1",
+            "t()",
+            "y(c"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 7
+        },
+        {
+          "name": "earch_relevance(s",
+          "type": "method",
+          "line_range": [
+            136,
+            185
+          ],
+          "signature": "def earch_relevance(self, query: str, symbols: List[dict], call_graph: Dict, top_k: int) - -> r:\n",
+          "docstring": null,
+          "dependencies": [
+            "append(\"",
+            "append(f",
+            "atGPT_API(M",
+            "get(\"",
+            "get('",
+            "instance(i",
+            "join(\n",
+            "join(c",
+            "join(l",
+            "loads(r",
+            "n(c",
+            "n(t",
+            "nge(m",
+            "st(r",
+            "strip()",
+            "umerate(c"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 10
+        },
+        {
+          "name": "refilter(s",
+          "type": "method",
+          "line_range": [
+            187,
+            202
+          ],
+          "signature": "def refilter(self, query: str, symbols: List[dict], max_candidates: int = 30) - -> st[dict]:\n",
+          "docstring": "Fast keyword-based pre-filter.\"\"\"",
+          "dependencies": [
+            "append((",
+            "get(\"",
+            "get('",
+            "lower()",
+            "m(1",
+            "sort(k",
+            "split()",
+            "t(q",
+            "y(t"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 8
+        }
+      ],
+      "imports": [
+        {
+          "source": "on\ni",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "\nf",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "thlib i",
+          "names": [
+            "th\nf"
+          ],
+          "target_file": null
+        },
+        {
+          "source": "ping i",
+          "names": [
+            "ct, ",
+            "st, ",
+            "tional, ",
+            "ple\n\n"
+          ],
+          "target_file": null
+        },
+        {
+          "source": "tils i",
+          "names": [
+            "atGPT_API\n\n"
+          ],
+          "target_file": null
+        }
+      ],
+      "metrics": {
+        "total_lines": 203,
+        "code_lines": 163,
+        "symbol_count": 12,
+        "complexity_avg": 4.92
+      },
+      "indexed_at": 1774823508.852966,
+      "content_hash": "c949acdf7b6b"
+    },
+    {
+      "repo_name": "pageindex",
+      "file_path": "page_index.py",
+      "language": "python",
+      "symbols": [
+        {
+          "name": "check_title_appearance",
+          "type": "function",
+          "line_range": [
+            13,
+            45
+          ],
+          "signature": "def check_title_appearance(item, page_list, start_index=1, model=None)",
+          "docstring": null,
+          "dependencies": [
+            "extract_json",
+            "get",
+            "llm_acompletion"
+          ],
+          "callers": [
+            "page_index.py:fix_incorrect_toc",
+            "page_index.py:verify_toc"
+          ],
+          "summary": null,
+          "complexity": 6
+        },
+        {
+          "name": "check_title_appearance_in_start",
+          "type": "function",
+          "line_range": [
+            48,
+            71
+          ],
+          "signature": "def check_title_appearance_in_start(title, page_text, model=None, logger=None)",
+          "docstring": null,
+          "dependencies": [
+            "extract_json",
+            "get",
+            "info",
+            "llm_acompletion"
+          ],
+          "callers": [
+            "page_index.py:check_title_appearance_in_start_concurrent"
+          ],
+          "summary": null,
+          "complexity": 4
+        },
+        {
+          "name": "check_title_appearance_in_start_concurrent",
+          "type": "function",
+          "line_range": [
+            74,
+            101
+          ],
+          "signature": "def check_title_appearance_in_start_concurrent(structure, page_list, model=None, logger=None)",
+          "docstring": null,
+          "dependencies": [
+            "append",
+            "check_title_appearance_in_start",
+            "error",
+            "gather",
+            "get",
+            "info"
+          ],
+          "callers": [
+            "page_index.py:process_large_node_recursively",
+            "page_index.py:tree_parser"
+          ],
+          "summary": null,
+          "complexity": 12
+        },
+        {
+          "name": "toc_detector_single_page",
+          "type": "function",
+          "line_range": [
+            104,
+            122
+          ],
+          "signature": "def toc_detector_single_page(content, model=None)",
+          "docstring": null,
+          "dependencies": [
+            "extract_json",
+            "llm_completion"
+          ],
+          "callers": [
+            "page_index.py:find_toc_pages"
+          ],
+          "summary": null,
+          "complexity": 2
+        },
+        {
+          "name": "check_if_toc_extraction_is_complete",
+          "type": "function",
+          "line_range": [
+            125,
+            140
+          ],
+          "signature": "def check_if_toc_extraction_is_complete(content, toc, model=None)",
+          "docstring": null,
+          "dependencies": [
+            "extract_json",
+            "llm_completion"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 2
+        },
+        {
+          "name": "check_if_toc_transformation_is_complete",
+          "type": "function",
+          "line_range": [
+            143,
+            158
+          ],
+          "signature": "def check_if_toc_transformation_is_complete(content, toc, model=None)",
+          "docstring": null,
+          "dependencies": [
+            "extract_json",
+            "llm_completion"
+          ],
+          "callers": [
+            "page_index.py:extract_toc_content",
+            "page_index.py:toc_transformer"
+          ],
+          "summary": null,
+          "complexity": 2
+        },
+        {
+          "name": "extract_toc_content",
+          "type": "function",
+          "line_range": [
+            160,
+            200
+          ],
+          "signature": "def extract_toc_content(content, model=None)",
+          "docstring": null,
+          "dependencies": [
+            "Exception",
+            "check_if_toc_transformation_is_complete",
+            "llm_completion"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 4
+        },
+        {
+          "name": "detect_page_index",
+          "type": "function",
+          "line_range": [
+            202,
+            220
+          ],
+          "signature": "def detect_page_index(toc_content, model=None)",
+          "docstring": null,
+          "dependencies": [
+            "extract_json",
+            "llm_completion"
+          ],
+          "callers": [
+            "page_index.py:toc_extractor"
+          ],
+          "summary": null,
+          "complexity": 2
+        },
+        {
+          "name": "toc_extractor",
+          "type": "function",
+          "line_range": [
+            222,
+            238
+          ],
+          "signature": "def toc_extractor(page_list, toc_page_list, model)",
+          "docstring": null,
+          "dependencies": [
+            "detect_page_index",
+            "sub",
+            "transform_dots_to_colon"
+          ],
+          "callers": [
+            "page_index.py:check_toc"
+          ],
+          "summary": null,
+          "complexity": 2
+        },
+        {
+          "name": "toc_index_extractor",
+          "type": "function",
+          "line_range": [
+            243,
+            269
+          ],
+          "signature": "def toc_index_extractor(toc, content, model=None)",
+          "docstring": null,
+          "dependencies": [
+            "extract_json",
+            "llm_completion"
+          ],
+          "callers": [
+            "page_index.py:process_toc_with_page_numbers"
+          ],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "toc_transformer",
+          "type": "function",
+          "line_range": [
+            273,
+            336
+          ],
+          "signature": "def toc_transformer(toc_content, model=None)",
+          "docstring": null,
+          "dependencies": [
+            "Exception",
+            "check_if_toc_transformation_is_complete",
+            "convert_page_to_int",
+            "extract_json",
+            "get_json_content",
+            "llm_completion",
+            "rfind",
+            "startswith"
+          ],
+          "callers": [
+            "page_index.py:process_toc_no_page_numbers",
+            "page_index.py:process_toc_with_page_numbers"
+          ],
+          "summary": null,
+          "complexity": 6
+        },
+        {
+          "name": "find_toc_pages",
+          "type": "function",
+          "line_range": [
+            341,
+            366
+          ],
+          "signature": "def find_toc_pages(start_page_index, page_list, opt, logger=None)",
+          "docstring": null,
+          "dependencies": [
+            "append",
+            "info",
+            "toc_detector_single_page"
+          ],
+          "callers": [
+            "page_index.py:check_toc"
+          ],
+          "summary": null,
+          "complexity": 10
+        },
+        {
+          "name": "remove_page_number",
+          "type": "function",
+          "line_range": [
+            368,
+            377
+          ],
+          "signature": "def remove_page_number(data)",
+          "docstring": null,
+          "dependencies": [
+            "keys",
+            "pop",
+            "remove_page_number"
+          ],
+          "callers": [
+            "page_index.py:process_toc_with_page_numbers"
+          ],
+          "summary": null,
+          "complexity": 7
+        },
+        {
+          "name": "extract_matching_page_pairs",
+          "type": "function",
+          "line_range": [
+            379,
+            391
+          ],
+          "signature": "def extract_matching_page_pairs(toc_page, toc_physical_index, start_page_index)",
+          "docstring": null,
+          "dependencies": [
+            "append",
+            "get"
+          ],
+          "callers": [
+            "page_index.py:process_toc_with_page_numbers"
+          ],
+          "summary": null,
+          "complexity": 5
+        },
+        {
+          "name": "calculate_page_offset",
+          "type": "function",
+          "line_range": [
+            394,
+            414
+          ],
+          "signature": "def calculate_page_offset(pairs)",
+          "docstring": null,
+          "dependencies": [
+            "append",
+            "get",
+            "items",
+            "max"
+          ],
+          "callers": [
+            "page_index.py:process_toc_with_page_numbers"
+          ],
+          "summary": null,
+          "complexity": 5
+        },
+        {
+          "name": "add_page_offset_to_toc_json",
+          "type": "function",
+          "line_range": [
+            416,
+            422
+          ],
+          "signature": "def add_page_offset_to_toc_json(data, offset)",
+          "docstring": null,
+          "dependencies": [
+            "get"
+          ],
+          "callers": [
+            "page_index.py:process_toc_with_page_numbers"
+          ],
+          "summary": null,
+          "complexity": 3
+        },
+        {
+          "name": "page_list_to_group_text",
+          "type": "function",
+          "line_range": [
+            426,
+            459
+          ],
+          "signature": "def page_list_to_group_text(page_contents, token_lengths, max_tokens=20000, overlap_page=1)",
+          "docstring": null,
+          "dependencies": [
+            "append",
+            "ceil",
+            "join",
+            "max",
+            "sum"
+          ],
+          "callers": [
+            "page_index.py:process_no_toc",
+            "page_index.py:process_toc_no_page_numbers"
+          ],
+          "summary": null,
+          "complexity": 7
+        },
+        {
+          "name": "add_page_number_to_toc",
+          "type": "function",
+          "line_range": [
+            461,
+            491
+          ],
+          "signature": "def add_page_number_to_toc(part, structure, model=None)",
+          "docstring": null,
+          "dependencies": [
+            "dumps",
+            "extract_json",
+            "llm_completion"
+          ],
+          "callers": [
+            "page_index.py:process_toc_no_page_numbers",
+            "page_index.py:process_none_page_numbers"
+          ],
+          "summary": null,
+          "complexity": 4
+        },
+        {
+          "name": "remove_first_physical_index_section",
+          "type": "function",
+          "line_range": [
+            494,
+            504
+          ],
+          "signature": "def remove_first_physical_index_section(text)",
+          "docstring": "Removes the first section between <physical_index_X> and <physical_index_X> tags,\n    and returns the remaining text.",
+          "dependencies": [
+            "group",
+            "replace",
+            "search"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 2
+        },
+        {
+          "name": "generate_toc_continue",
+          "type": "function",
+          "line_range": [
+            507,
+            539
+          ],
+          "signature": "def generate_toc_continue(toc_content, part, model=None)",
+          "docstring": null,
+          "dependencies": [
+            "Exception",
+            "dumps",
+            "extract_json",
+            "llm_completion"
+          ],
+          "callers": [
+            "page_index.py:process_no_toc"
+          ],
+          "summary": null,
+          "complexity": 3
+        },
+        {
+          "name": "generate_toc_init",
+          "type": "function",
+          "line_range": [
+            542,
+            574
+          ],
+          "signature": "def generate_toc_init(part, model=None)",
+          "docstring": null,
+          "dependencies": [
+            "Exception",
+            "extract_json",
+            "llm_completion"
+          ],
+          "callers": [
+            "page_index.py:process_no_toc"
+          ],
+          "summary": null,
+          "complexity": 3
+        },
+        {
+          "name": "process_no_toc",
+          "type": "function",
+          "line_range": [
+            576,
+            595
+          ],
+          "signature": "def process_no_toc(page_list, start_index=1, model=None, logger=None)",
+          "docstring": null,
+          "dependencies": [
+            "append",
+            "convert_physical_index_to_int",
+            "count_tokens",
+            "extend",
+            "generate_toc_continue",
+            "generate_toc_init",
+            "info",
+            "page_list_to_group_text"
+          ],
+          "callers": [
+            "page_index.py:meta_processor"
+          ],
+          "summary": null,
+          "complexity": 3
+        },
+        {
+          "name": "process_toc_no_page_numbers",
+          "type": "function",
+          "line_range": [
+            597,
+            618
+          ],
+          "signature": "def process_toc_no_page_numbers(toc_content, toc_page_list, page_list,  start_index=1, model=None, logger=None)",
+          "docstring": null,
+          "dependencies": [
+            "add_page_number_to_toc",
+            "append",
+            "convert_physical_index_to_int",
+            "count_tokens",
+            "deepcopy",
+            "info",
+            "page_list_to_group_text",
+            "toc_transformer"
+          ],
+          "callers": [
+            "page_index.py:meta_processor"
+          ],
+          "summary": null,
+          "complexity": 3
+        },
+        {
+          "name": "process_toc_with_page_numbers",
+          "type": "function",
+          "line_range": [
+            622,
+            651
+          ],
+          "signature": "def process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_check_page_num=None, model=None, logger=None)",
+          "docstring": null,
+          "dependencies": [
+            "add_page_offset_to_toc_json",
+            "calculate_page_offset",
+            "convert_physical_index_to_int",
+            "deepcopy",
+            "extract_matching_page_pairs",
+            "info",
+            "min",
+            "process_none_page_numbers",
+            "remove_page_number",
+            "toc_index_extractor",
+            "toc_transformer"
+          ],
+          "callers": [
+            "page_index.py:meta_processor"
+          ],
+          "summary": null,
+          "complexity": 2
+        },
+        {
+          "name": "process_none_page_numbers",
+          "type": "function",
+          "line_range": [
+            656,
+            691
+          ],
+          "signature": "def process_none_page_numbers(toc_items, page_list, start_index=1, model=None)",
+          "docstring": null,
+          "dependencies": [
+            "add_page_number_to_toc",
+            "append",
+            "deepcopy",
+            "get",
+            "rstrip",
+            "split",
+            "startswith",
+            "strip"
+          ],
+          "callers": [
+            "page_index.py:process_toc_with_page_numbers"
+          ],
+          "summary": null,
+          "complexity": 13
+        },
+        {
+          "name": "check_toc",
+          "type": "function",
+          "line_range": [
+            696,
+            732
+          ],
+          "signature": "def check_toc(page_list, opt=None)",
+          "docstring": null,
+          "dependencies": [
+            "find_toc_pages",
+            "toc_extractor"
+          ],
+          "callers": [
+            "page_index.py:tree_parser"
+          ],
+          "summary": null,
+          "complexity": 9
+        },
+        {
+          "name": "single_toc_item_index_fixer",
+          "type": "function",
+          "line_range": [
+            740,
+            756
+          ],
+          "signature": "def single_toc_item_index_fixer(section_title, content, model=None)",
+          "docstring": null,
+          "dependencies": [
+            "convert_physical_index_to_int",
+            "extract_json",
+            "llm_acompletion"
+          ],
+          "callers": [
+            "page_index.py:fix_incorrect_toc"
+          ],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "fix_incorrect_toc",
+          "type": "function",
+          "line_range": [
+            760,
+            874
+          ],
+          "signature": "def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, start_index=1, model=None, logger=None)",
+          "docstring": null,
+          "dependencies": [
+            "append",
+            "check_title_appearance",
+            "copy",
+            "gather",
+            "get",
+            "info",
+            "join",
+            "process_and_check_item",
+            "single_toc_item_index_fixer"
+          ],
+          "callers": [
+            "page_index.py:fix_incorrect_toc_with_retries"
+          ],
+          "summary": null,
+          "complexity": 28
+        },
+        {
+          "name": "fix_incorrect_toc_with_retries",
+          "type": "function",
+          "line_range": [
+            878,
+            894
+          ],
+          "signature": "def fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorrect_results, start_index=1, max_attempts=3, model=None, logger=None)",
+          "docstring": null,
+          "dependencies": [
+            "fix_incorrect_toc",
+            "info"
+          ],
+          "callers": [
+            "page_index.py:meta_processor"
+          ],
+          "summary": null,
+          "complexity": 3
+        },
+        {
+          "name": "verify_toc",
+          "type": "function",
+          "line_range": [
+            900,
+            952
+          ],
+          "signature": "def verify_toc(page_list, list_result, start_index=1, N=None, model=None)",
+          "docstring": null,
+          "dependencies": [
+            "append",
+            "check_title_appearance",
+            "copy",
+            "gather",
+            "get",
+            "min",
+            "reversed",
+            "sample"
+          ],
+          "callers": [
+            "page_index.py:meta_processor"
+          ],
+          "summary": null,
+          "complexity": 14
+        },
+        {
+          "name": "meta_processor",
+          "type": "function",
+          "line_range": [
+            959,
+            997
+          ],
+          "signature": "def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=None, start_index=1, opt=None, logger=None)",
+          "docstring": null,
+          "dependencies": [
+            "Exception",
+            "fix_incorrect_toc_with_retries",
+            "get",
+            "info",
+            "meta_processor",
+            "process_no_toc",
+            "process_toc_no_page_numbers",
+            "process_toc_with_page_numbers",
+            "validate_and_truncate_physical_indices",
+            "verify_toc"
+          ],
+          "callers": [
+            "page_index.py:process_large_node_recursively",
+            "page_index.py:tree_parser"
+          ],
+          "summary": null,
+          "complexity": 14
+        },
+        {
+          "name": "process_large_node_recursively",
+          "type": "function",
+          "line_range": [
+            1000,
+            1027
+          ],
+          "signature": "def process_large_node_recursively(node, page_list, opt=None, logger=None)",
+          "docstring": null,
+          "dependencies": [
+            "check_title_appearance_in_start_concurrent",
+            "gather",
+            "get",
+            "meta_processor",
+            "post_processing",
+            "process_large_node_recursively",
+            "strip",
+            "sum"
+          ],
+          "callers": [
+            "page_index.py:tree_parser"
+          ],
+          "summary": null,
+          "complexity": 11
+        },
+        {
+          "name": "tree_parser",
+          "type": "function",
+          "line_range": [
+            1029,
+            1063
+          ],
+          "signature": "def tree_parser(page_list, opt, doc=None, logger=None)",
+          "docstring": null,
+          "dependencies": [
+            "add_preface_if_needed",
+            "check_title_appearance_in_start_concurrent",
+            "check_toc",
+            "gather",
+            "get",
+            "info",
+            "meta_processor",
+            "post_processing",
+            "process_large_node_recursively",
+            "strip"
+          ],
+          "callers": [
+            "page_index.py:page_index_main"
+          ],
+          "summary": null,
+          "complexity": 6
+        },
+        {
+          "name": "page_index_main",
+          "type": "function",
+          "line_range": [
+            1066,
+            1110
+          ],
+          "signature": "def page_index_main(doc, opt=None)",
+          "docstring": null,
+          "dependencies": [
+            "JsonLogger",
+            "ValueError",
+            "add_node_text",
+            "create_clean_structure_for_description",
+            "endswith",
+            "format_structure",
+            "generate_doc_description",
+            "generate_summaries_for_structure",
+            "get_page_tokens",
+            "get_pdf_name",
+            "info",
+            "isfile",
+            "lower",
+            "page_index_builder",
+            "remove_structure_text",
+            "run",
+            "sum",
+            "tree_parser",
+            "write_node_id"
+          ],
+          "callers": [
+            "page_index.py:page_index"
+          ],
+          "summary": null,
+          "complexity": 10
+        },
+        {
+          "name": "page_index",
+          "type": "function",
+          "line_range": [
+            1113,
+            1121
+          ],
+          "signature": "def page_index(doc, model=None, toc_check_page_num=None, max_page_num_each_node=None, max_token_num_each_node=None,\n               if_add_node_id=None, if_add_node_summary=None, if_add_doc_description=None, if_add_node_text=None)",
+          "docstring": null,
+          "dependencies": [
+            "ConfigLoader",
+            "items",
+            "load",
+            "locals",
+            "page_index_main"
+          ],
+          "callers": [
+            "client.py:index"
+          ],
+          "summary": null,
+          "complexity": 3
+        },
+        {
+          "name": "validate_and_truncate_physical_indices",
+          "type": "function",
+          "line_range": [
+            1124,
+            1154
+          ],
+          "signature": "def validate_and_truncate_physical_indices(toc_with_page_number, page_list_length, start_index=1, logger=None)",
+          "docstring": "Validates and truncates physical indices that exceed the actual document length.\n    This prevents errors when TOC references pages that don't exist in the document (e.g. the file is broken or incomplete).",
+          "dependencies": [
+            "append",
+            "get",
+            "info"
+          ],
+          "callers": [
+            "page_index.py:meta_processor"
+          ],
+          "summary": null,
+          "complexity": 9
+        }
+      ],
+      "imports": [
+        {
+          "source": "os",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "json",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "copy",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "math",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "random",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "re",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": ".utils",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "os",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "concurrent.futures",
+          "names": [
+            "ThreadPoolExecutor",
+            "as_completed"
+          ],
+          "target_file": null
+        }
+      ],
+      "metrics": {
+        "total_lines": 1154,
+        "code_lines": 851,
+        "symbol_count": 36,
+        "complexity_avg": 6.14
+      },
+      "indexed_at": 1774823508.862962,
+      "content_hash": "00ca6d63d52c"
+    },
+    {
+      "repo_name": "pageindex",
+      "file_path": "page_index_md.py",
+      "language": "python",
+      "symbols": [
+        {
+          "name": "get_node_summary",
+          "type": "function",
+          "line_range": [
+            10,
+            16
+          ],
+          "signature": "def get_node_summary(node, summary_token_threshold=200, model=None)",
+          "docstring": null,
+          "dependencies": [
+            "count_tokens",
+            "generate_node_summary",
+            "get"
+          ],
+          "callers": [
+            "page_index_md.py:generate_summaries_for_structure_md"
+          ],
+          "summary": null,
+          "complexity": 3
+        },
+        {
+          "name": "generate_summaries_for_structure_md",
+          "type": "function",
+          "line_range": [
+            19,
+            30
+          ],
+          "signature": "def generate_summaries_for_structure_md(structure, summary_token_threshold=200, model=None)",
+          "docstring": null,
+          "dependencies": [
+            "gather",
+            "get",
+            "get_node_summary",
+            "structure_to_list"
+          ],
+          "callers": [
+            "page_index_md.py:md_to_tree"
+          ],
+          "summary": null,
+          "complexity": 5
+        },
+        {
+          "name": "extract_nodes_from_markdown",
+          "type": "function",
+          "line_range": [
+            33,
+            60
+          ],
+          "signature": "def extract_nodes_from_markdown(markdown_content)",
+          "docstring": null,
+          "dependencies": [
+            "append",
+            "group",
+            "match",
+            "split",
+            "strip"
+          ],
+          "callers": [
+            "page_index_md.py:md_to_tree"
+          ],
+          "summary": null,
+          "complexity": 8
+        },
+        {
+          "name": "extract_node_text_content",
+          "type": "function",
+          "line_range": [
+            63,
+            88
+          ],
+          "signature": "def extract_node_text_content(node_list, markdown_lines)",
+          "docstring": null,
+          "dependencies": [
+            "append",
+            "group",
+            "join",
+            "match",
+            "strip"
+          ],
+          "callers": [
+            "page_index_md.py:md_to_tree"
+          ],
+          "summary": null,
+          "complexity": 6
+        },
+        {
+          "name": "update_node_list_with_text_token_count",
+          "type": "function",
+          "line_range": [
+            90,
+            133
+          ],
+          "signature": "def update_node_list_with_text_token_count(node_list, model=None)",
+          "docstring": null,
+          "dependencies": [
+            "append",
+            "copy",
+            "count_tokens",
+            "find_all_children",
+            "get"
+          ],
+          "callers": [
+            "page_index_md.py:md_to_tree"
+          ],
+          "summary": null,
+          "complexity": 8
+        },
+        {
+          "name": "tree_thinning_for_index",
+          "type": "function",
+          "line_range": [
+            136,
+            188
+          ],
+          "signature": "def tree_thinning_for_index(node_list, min_node_token=None, model=None)",
+          "docstring": null,
+          "dependencies": [
+            "add",
+            "append",
+            "copy",
+            "count_tokens",
+            "endswith",
+            "find_all_children",
+            "get",
+            "pop",
+            "strip"
+          ],
+          "callers": [
+            "page_index_md.py:md_to_tree"
+          ],
+          "summary": null,
+          "complexity": 13
+        },
+        {
+          "name": "build_tree_from_nodes",
+          "type": "function",
+          "line_range": [
+            191,
+            222
+          ],
+          "signature": "def build_tree_from_nodes(node_list)",
+          "docstring": null,
+          "dependencies": [
+            "append",
+            "pop",
+            "zfill"
+          ],
+          "callers": [
+            "page_index_md.py:md_to_tree"
+          ],
+          "summary": null,
+          "complexity": 6
+        },
+        {
+          "name": "clean_tree_for_output",
+          "type": "function",
+          "line_range": [
+            225,
+            241
+          ],
+          "signature": "def clean_tree_for_output(tree_nodes)",
+          "docstring": null,
+          "dependencies": [
+            "append",
+            "clean_tree_for_output"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 3
+        },
+        {
+          "name": "md_to_tree",
+          "type": "function",
+          "line_range": [
+            244,
+            301
+          ],
+          "signature": "def md_to_tree(md_path, if_thinning=False, min_token_threshold=None, if_add_node_summary='no', summary_token_threshold=None, model=None, if_add_doc_description='no', if_add_node_text='no', if_add_node_id='yes')",
+          "docstring": null,
+          "dependencies": [
+            "basename",
+            "build_tree_from_nodes",
+            "count",
+            "create_clean_structure_for_description",
+            "extract_node_text_content",
+            "extract_nodes_from_markdown",
+            "format_structure",
+            "generate_doc_description",
+            "generate_summaries_for_structure_md",
+            "read",
+            "splitext",
+            "tree_thinning_for_index",
+            "update_node_list_with_text_token_count",
+            "write_node_id"
+          ],
+          "callers": [
+            "client.py:index"
+          ],
+          "summary": null,
+          "complexity": 13
+        }
+      ],
+      "imports": [
+        {
+          "source": "asyncio",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "json",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "re",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "os",
+          "names": [],
+          "target_file": null
+        }
+      ],
+      "metrics": {
+        "total_lines": 343,
+        "code_lines": 239,
+        "symbol_count": 9,
+        "complexity_avg": 7.22
+      },
+      "indexed_at": 1774823508.8639624,
+      "content_hash": "8506f299a9ea"
+    },
+    {
+      "repo_name": "pageindex",
+      "file_path": "retrieve.py",
+      "language": "python",
+      "symbols": [
+        {
+          "name": "= []\n    for",
+          "type": "function",
+          "line_range": [
+            12,
+            24
+          ],
+          "signature": "def = []\n    for part in pag -> plit(',')",
+          "docstring": "part = part.strip()\n        if '-' in part:\n            start, end = int(part",
+          "dependencies": [
+            "         i",
+            "\"\"\n",
+            "('page",
+            "<= ",
+            "appe",
+            "cou",
+            "ct) -",
+            "d range '{",
+            "d range '{part}': start mus",
+            "ext",
+            "nd\")\n     ",
+            "s(doc_info: d",
+            "split('",
+            "val"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 7
+        },
+        {
+          "name": "turn doc_inf",
+          "type": "function",
+          "line_range": [
+            27,
+            33
+          ],
+          "signature": "def turn doc_info['page_count']\n -> if ",
+          "docstring": "fo.get('pages'):\n        return len(doc_info['pag",
+          "dependencies": [
+            "  return get",
+            ") -",
+            "t(doc_info: ",
+            "xt for specific PDF"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 3
+        },
+        {
+          "name": "r cached pages, fallb",
+          "type": "function",
+          "line_range": [
+            36,
+            53
+          ],
+          "signature": "def r cached pages, fallback to PDF.\"\"\"\n    cached_pages = doc_ -> .get('page",
+          "docstring": "if cached_pages:\n        page_map = {p['page']: p['content'] for p in cached_pages}",
+          "dependencies": [
+            "   {'page': ",
+            " [\n            {",
+            ": p",
+            "page"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 8
+        },
+        {
+          "name": "    Find nodes whose",
+          "type": "function",
+          "line_range": [
+            56,
+            76
+          ],
+          "signature": "def     Find nodes whose line_num falls within [min(page_nums) -> x(page_num",
+          "docstring": "d return their text.\n    \"\"\"\n    min_line, max_line = min(page_nums), max(page_nums)\n    results = []\n    seen = set()\n\n    def _traverse(nodes):\n        for node i",
+          "dependencies": [
+            "\n\n    _travers",
+            "     _tr",
+            " x['page",
+            "', []))\n",
+            "= m",
+            "a",
+            "nod",
+            "um'",
+            "── Tool f",
+            "───\n\ndef get",
+            "─────────",
+            "────────────"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 4
+        },
+        {
+          "name": "n json.dumps",
+          "type": "function",
+          "line_range": [
+            81,
+            97
+          ],
+          "signature": "def n json.dumps({'error': f'Document {doc_id} ->  fo",
+          "docstring": "result = {\n        'doc_id': doc_id,\n        'doc_name': doc_info.get('doc_name', ''),\n        'doc_description': doc_info.get(",
+          "dependencies": [
+            "\"\"\"\n   ",
+            ", ''),\n      ",
+            "Document {",
+            "Return tree ",
+            "f get_docume",
+            "nfo)\n    els",
+            "o:\n        r",
+            "status': '",
+            "t('line_coun"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 4
+        },
+        {
+          "name": "nd'})\n    structure = ",
+          "type": "function",
+          "line_range": [
+            100,
+            107
+          ],
+          "signature": "def nd'})\n    structure = doc_info.get('structure', [])\n -> str",
+          "docstring": "_no_text = remove_fields(structure, fields=['text'])\n    return json.dump",
+          "dependencies": [
+            " dict, doc",
+            "1-indexed)",
+            "ent for a do",
+            "ext, ensure_a",
+            "r '12'\n    Fo"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 2
+        },
+        {
+          "name": "responding to no",
+          "type": "function",
+          "line_range": [
+            110,
+            137
+          ],
+          "signature": "def responding to node headers.\n\n    Returns JSON list of {'pa ->  in",
+          "docstring": "ntent': str}.\n    \"\"\"\n    doc_info = documents.get(doc_id)\n    if not doc_info:\n        return json.dumps({'error': f'Document {doc_id} not found'})\n\n    try:\n        page_nums = _parse_pages(pages)\n    except (ValueError, AttributeError) as e:\n        return json.dumps({'error':",
+          "dependencies": [
+            ")\n\n    try",
+            "format: {page",
+            "ge_content",
+            "ontent: {e}'"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 6
+        }
+      ],
+      "imports": [
+        {
+          "source": "json",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "PyPDF2",
+          "names": [],
+          "target_file": null
+        }
+      ],
+      "metrics": {
+        "total_lines": 138,
+        "code_lines": 111,
+        "symbol_count": 7,
+        "complexity_avg": 4.86
+      },
+      "indexed_at": 1774823508.8654652,
+      "content_hash": "58f536f3ebb0"
+    },
+    {
+      "repo_name": "pageindex",
+      "file_path": "utils.py",
+      "language": "python",
+      "symbols": [
+        {
+          "name": "CHATGPT_API_KEY",
+          "type": "const",
+          "line_range": [
+            20,
+            20
+          ],
+          "signature": "CHATGPT_API_KEY = os.getenv(\"CHATGPT_API_KEY\")",
+          "docstring": null,
+          "dependencies": [],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "count_tokens",
+          "type": "function",
+          "line_range": [
+            22,
+            30
+          ],
+          "signature": "def count_tokens(text, model=None)",
+          "docstring": null,
+          "dependencies": [
+            "encode",
+            "encoding_for_model",
+            "get_encoding"
+          ],
+          "callers": [
+            "page_index.py:process_no_toc",
+            "page_index.py:process_toc_no_page_numbers",
+            "page_index_md.py:get_node_summary",
+            "page_index_md.py:update_node_list_with_text_token_count",
+            "page_index_md.py:tree_thinning_for_index"
+          ],
+          "summary": null,
+          "complexity": 3
+        },
+        {
+          "name": "ChatGPT_API_with_finish_reason",
+          "type": "function",
+          "line_range": [
+            32,
+            60
+          ],
+          "signature": "def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None)",
+          "docstring": null,
+          "dependencies": [
+            "OpenAI",
+            "append",
+            "create",
+            "error",
+            "error('",
+            "sleep"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 11
+        },
+        {
+          "name": "atGPT_API(m",
+          "type": "function",
+          "line_range": [
+            64,
+            89
+          ],
+          "signature": "def atGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):\n",
+          "docstring": null,
+          "dependencies": [
+            "OpenAI(a",
+            "append({",
+            "create(\n",
+            "error('Ma",
+            "error(f",
+            "int('",
+            "nge(m",
+            "sleep(1"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 9
+        },
+        {
+          "name": "GPT_API_async(mod",
+          "type": "function",
+          "line_range": [
+            92,
+            111
+          ],
+          "signature": "def GPT_API_async(model, prompt, api_key=CHATGPT_API_KEY):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "AsyncOpenAI(api",
+            "create(\n  ",
+            "e(max",
+            "error('Ma",
+            "error(f\"E",
+            "sleep(1) ",
+            "t('**"
+          ],
+          "callers": [
+            "utils.py:rate_node_summary(nod"
+          ],
+          "summary": null,
+          "complexity": 7
+        },
+        {
+          "name": "json_content(res",
+          "type": "function",
+          "line_range": [
+            114,
+            125
+          ],
+          "signature": "def json_content(response):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "find(\"``",
+            "rfind(\"``",
+            "strip()\n "
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 3
+        },
+        {
+          "name": "act_json(con",
+          "type": "function",
+          "line_range": [
+            128,
+            159
+          ],
+          "signature": "def act_json(content):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "error(\"Fa",
+            "error(f\"F",
+            "error(f\"U",
+            "find(\"``",
+            "join(jso",
+            "loads(jso",
+            "replace(',]",
+            "replace(',}",
+            "replace('No",
+            "replace('\\n",
+            "replace('\\r",
+            "rfind(\"``",
+            "split()) ",
+            "strip()\n\n",
+            "strip()\n "
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 7
+        },
+        {
+          "name": "e_node_id(dat",
+          "type": "function",
+          "line_range": [
+            161,
+            171
+          ],
+          "signature": "def e_node_id(data, node_id=0):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "(dat",
+            "dat",
+            "e(len",
+            "e_node_id(dat",
+            "keys()):",
+            "nod",
+            "stance(dat",
+            "zfill(4)\n"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 7
+        },
+        {
+          "name": "nodes(str",
+          "type": "function",
+          "line_range": [
+            173,
+            186
+          ],
+          "signature": "def nodes(structure):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "(str",
+            "deepcopy(str",
+            "extend(get",
+            "keys()):",
+            "nodes(ite",
+            "nodes(str",
+            "pop('no",
+            "stance(str"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 7
+        },
+        {
+          "name": "cture_to_list(str",
+          "type": "function",
+          "line_range": [
+            188,
+            199
+          ],
+          "signature": "def cture_to_list(structure):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "append(str",
+            "cture_to_list(ite",
+            "cture_to_list(str",
+            "extend(str",
+            "stance(str"
+          ],
+          "callers": [
+            "utils.py:k_token_limit(str",
+            "utils.py:rate_summaries_for_structure(str"
+          ],
+          "summary": null,
+          "complexity": 6
+        },
+        {
+          "name": "leaf_nodes(str",
+          "type": "function",
+          "line_range": [
+            202,
+            218
+          ],
+          "signature": "def leaf_nodes(structure):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "(str",
+            "deepcopy(str",
+            "extend(get",
+            "keys()):",
+            "leaf_nodes(ite",
+            "leaf_nodes(str",
+            "pop('no",
+            "stance(str"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 9
+        },
+        {
+          "name": "eaf_node(dat",
+          "type": "function",
+          "line_range": [
+            220,
+            244
+          ],
+          "signature": "def eaf_node(data, node_id):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "get('no",
+            "keys():\n",
+            "stance(dat"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 12
+        },
+        {
+          "name": "last_node(str",
+          "type": "function",
+          "line_range": [
+            246,
+            247
+          ],
+          "signature": "def last_node(structure):\n  ",
+          "docstring": null,
+          "dependencies": [],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "act_text_from_pdf(pdf",
+          "type": "function",
+          "line_range": [
+            250,
+            257
+          ],
+          "signature": "def act_text_from_pdf(pdf_path):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "PdfReader(pdf",
+            "e(len",
+            "extract_text()\n ",
+            "pdf"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 2
+        },
+        {
+          "name": "pdf_title(pdf",
+          "type": "function",
+          "line_range": [
+            259,
+            263
+          ],
+          "signature": "def pdf_title(pdf_path):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "PdfReader(pdf"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 2
+        },
+        {
+          "name": "text_of_pages(pdf",
+          "type": "function",
+          "line_range": [
+            265,
+            275
+          ],
+          "signature": "def text_of_pages(pdf_path, start_page, end_page, tag=True):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "PdfReader(pdf",
+            "e(sta",
+            "extract_text()\n "
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 4
+        },
+        {
+          "name": "first_start_page_from_text(tex",
+          "type": "function",
+          "line_range": [
+            277,
+            282
+          ],
+          "signature": "def first_start_page_from_text(text):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "earch(r'<",
+            "group(1))",
+            "sta"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 2
+        },
+        {
+          "name": "last_start_page_from_text(tex",
+          "type": "function",
+          "line_range": [
+            284,
+            292
+          ],
+          "signature": "def last_start_page_from_text(text):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "(sta",
+            "group(1))",
+            "inditer(r'<",
+            "mat"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 3
+        },
+        {
+          "name": "tize_filename(fil",
+          "type": "function",
+          "line_range": [
+            295,
+            298
+          ],
+          "signature": "def tize_filename(filename, replacement='-'):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "replace('/'"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "pdf_name(pdf",
+          "type": "function",
+          "line_range": [
+            300,
+            309
+          ],
+          "signature": "def pdf_name(pdf_path):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "PdfReader(pdf",
+            "basename(pdf",
+            "stance(pdf",
+            "tize_filename(pdf"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 5
+        },
+        {
+          "name": "Logger:\n  ",
+          "type": "class",
+          "line_range": [
+            312,
+            348
+          ],
+          "signature": "class Logger:\n  ",
+          "docstring": null,
+          "dependencies": [],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "it__(sel",
+          "type": "method",
+          "line_range": [
+            313,
+            321
+          ],
+          "signature": "def it__(self, file_path):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "/",
+            "pdf_name(fil",
+            "s",
+            "strftime(\"%Y"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 2
+        },
+        {
+          "name": "sel",
+          "type": "method",
+          "line_range": [
+            323,
+            332
+          ],
+          "signature": "def self, level, message, **kwargs):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "(sel",
+            "append(mes",
+            "append({'m",
+            "dump(sel",
+            "stance(mes"
+          ],
+          "callers": [
+            "utils.py:idate_keys(sel"
+          ],
+          "summary": null,
+          "complexity": 3
+        },
+        {
+          "name": "(sel",
+          "type": "method",
+          "line_range": [
+            334,
+            335
+          ],
+          "signature": "def (self, message, **kwargs):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "log(\"IN"
+          ],
+          "callers": [
+            "utils.py:sel"
+          ],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "r(sel",
+          "type": "method",
+          "line_range": [
+            337,
+            338
+          ],
+          "signature": "def r(self, message, **kwargs):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "log(\"ER"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "g(sel",
+          "type": "method",
+          "line_range": [
+            340,
+            341
+          ],
+          "signature": "def g(self, message, **kwargs):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "log(\"DE"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "ption(sel",
+          "type": "method",
+          "line_range": [
+            343,
+            345
+          ],
+          "signature": "def ption(self, message, **kwargs):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "log(\"ER"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "epath(sel",
+          "type": "method",
+          "line_range": [
+            347,
+            348
+          ],
+          "signature": "def epath(self):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "join(\"lo"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "_to_tree(dat",
+          "type": "function",
+          "line_range": [
+            353,
+            399
+          ],
+          "signature": "def _to_tree(data):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "'",
+            "append(nod",
+            "get('en",
+            "get('st",
+            "get('ti",
+            "join(par",
+            "n_node(chi",
+            "n_node(nod",
+            "par",
+            "parent_structure(str"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 13
+        },
+        {
+          "name": "preface_if_needed(dat",
+          "type": "function",
+          "line_range": [
+            401,
+            412
+          ],
+          "signature": "def preface_if_needed(data):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "insert(0, ",
+            "stance(dat"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 3
+        },
+        {
+          "name": "page_tokens(pdf",
+          "type": "function",
+          "line_range": [
+            416,
+            440
+          ],
+          "signature": "def page_tokens(pdf_path, model=\"gpt-4o-2024-11-20\", pdf_parser=\"PyPDF2\"):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "PdfReader(pdf",
+            "append((pa",
+            "e",
+            "e(len",
+            "eError(f\"U",
+            "enc",
+            "encode(pag",
+            "encoding_for_model(mod",
+            "extract_text()\n ",
+            "get_text()\n ",
+            "isfile(pdf",
+            "open(pdf",
+            "open(str",
+            "p",
+            "pdf",
+            "stance(pdf"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 10
+        },
+        {
+          "name": "text_of_pdf_pages(pdf",
+          "type": "function",
+          "line_range": [
+            444,
+            448
+          ],
+          "signature": "def text_of_pdf_pages(pdf_pages, start_page, end_page):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "e(sta"
+          ],
+          "callers": [
+            "utils.py:node_text(nod"
+          ],
+          "summary": null,
+          "complexity": 2
+        },
+        {
+          "name": "text_of_pdf_pages_with_labels(pdf",
+          "type": "function",
+          "line_range": [
+            450,
+            454
+          ],
+          "signature": "def text_of_pdf_pages_with_labels(pdf_pages, start_page, end_page):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "e(sta"
+          ],
+          "callers": [
+            "utils.py:node_text_with_labels(nod"
+          ],
+          "summary": null,
+          "complexity": 2
+        },
+        {
+          "name": "number_of_pages(pdf",
+          "type": "function",
+          "line_range": [
+            456,
+            459
+          ],
+          "signature": "def number_of_pages(pdf_path):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "PdfReader(pdf",
+            "pdf"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "_processing(str",
+          "type": "function",
+          "line_range": [
+            463,
+            482
+          ],
+          "signature": "def _processing(structure, end_physical_index):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "erate(str",
+            "get('ap",
+            "get('ph",
+            "pop('ap",
+            "pop('ph",
+            "tre"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 9
+        },
+        {
+          "name": "n_structure_post(dat",
+          "type": "function",
+          "line_range": [
+            484,
+            494
+          ],
+          "signature": "def n_structure_post(data):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "n_structure_post(dat",
+            "n_structure_post(sec",
+            "pop('en",
+            "pop('pa",
+            "pop('st",
+            "stance(dat"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 6
+        },
+        {
+          "name": "ve_fields(dat",
+          "type": "function",
+          "line_range": [
+            496,
+            502
+          ],
+          "signature": "def ve_fields(data, fields=['text']):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "items() i",
+            "stance(dat",
+            "ve_fields(ite",
+            "ve_fields(v, "
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 7
+        },
+        {
+          "name": "t_toc(tre",
+          "type": "function",
+          "line_range": [
+            504,
+            508
+          ],
+          "signature": "def t_toc(tree, indent=0):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "get('no",
+            "t('  ",
+            "t_toc(nod"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 3
+        },
+        {
+          "name": "t_json(dat",
+          "type": "function",
+          "line_range": [
+            510,
+            522
+          ],
+          "signature": "def t_json(data, max_len=40, indent=2):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "dumps(sim",
+            "items()}\n",
+            "lify_data(dat",
+            "lify_data(ite",
+            "lify_data(v) ",
+            "obj",
+            "stance(obj",
+            "t(jso"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 9
+        },
+        {
+          "name": "ve_structure_text(dat",
+          "type": "function",
+          "line_range": [
+            525,
+            533
+          ],
+          "signature": "def ve_structure_text(data):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "pop('te",
+            "stance(dat",
+            "ve_structure_text(dat",
+            "ve_structure_text(ite"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 6
+        },
+        {
+          "name": "k_token_limit(str",
+          "type": "function",
+          "line_range": [
+            536,
+            545
+          ],
+          "signature": "def k_token_limit(structure, limit=110000):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "cture_to_list(str",
+            "t(\"En",
+            "t(\"St",
+            "t(\"Ti",
+            "t(\"\\n",
+            "t(f\"N",
+            "t_tokens(nod"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 3
+        },
+        {
+          "name": "ert_physical_index_to_int(dat",
+          "type": "function",
+          "line_range": [
+            548,
+            568
+          ],
+          "signature": "def ert_physical_index_to_int(data):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "dat",
+            "e(len",
+            "rstrip('>'",
+            "split('_'",
+            "stance(dat",
+            "startswith('<p",
+            "startswith('ph",
+            "strip())\n"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 16
+        },
+        {
+          "name": "ert_page_to_int(dat",
+          "type": "function",
+          "line_range": [
+            571,
+            579
+          ],
+          "signature": "def ert_page_to_int(data):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "ite",
+            "stance(ite"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 5
+        },
+        {
+          "name": "node_text(nod",
+          "type": "function",
+          "line_range": [
+            582,
+            592
+          ],
+          "signature": "def node_text(node, pdf_pages):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "e(len",
+            "get('en",
+            "get('st",
+            "nod",
+            "node_text(nod",
+            "stance(nod",
+            "text_of_pdf_pages(pdf"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 6
+        },
+        {
+          "name": "node_text_with_labels(nod",
+          "type": "function",
+          "line_range": [
+            595,
+            605
+          ],
+          "signature": "def node_text_with_labels(node, pdf_pages):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "e(len",
+            "get('en",
+            "get('st",
+            "nod",
+            "node_text_with_labels(nod",
+            "stance(nod",
+            "text_of_pdf_pages_with_labels(pdf"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 6
+        },
+        {
+          "name": "rate_node_summary(nod",
+          "type": "function",
+          "line_range": [
+            608,
+            616
+          ],
+          "signature": "def rate_node_summary(node, model=None):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "GPT_API_async(mod"
+          ],
+          "callers": [
+            "utils.py:rate_summaries_for_structure(str"
+          ],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "rate_summaries_for_structure(str",
+          "type": "function",
+          "line_range": [
+            619,
+            626
+          ],
+          "signature": "def rate_summaries_for_structure(structure, model=None):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "cture_to_list(str",
+            "gather(*ta",
+            "nod",
+            "rate_node_summary(nod"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 3
+        },
+        {
+          "name": "te_clean_structure_for_description(str",
+          "type": "function",
+          "line_range": [
+            629,
+            649
+          ],
+          "signature": "def te_clean_structure_for_description(structure):\n  ",
+          "docstring": "Create a clean structure for document description generation,\n    excluding unnecessary fields like 'text'.\n    \"\"\"",
+          "dependencies": [
+            "stance(str",
+            "te_clean_structure_for_description(ite",
+            "te_clean_structure_for_description(str"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 11
+        },
+        {
+          "name": "rate_doc_description(str",
+          "type": "function",
+          "line_range": [
+            652,
+            661
+          ],
+          "signature": "def rate_doc_description(structure, model=None):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "GPT_API(mod"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 3
+        },
+        {
+          "name": "der_dict(dat",
+          "type": "function",
+          "line_range": [
+            664,
+            667
+          ],
+          "signature": "def der_dict(data, key_order):\n  ",
+          "docstring": null,
+          "dependencies": [],
+          "callers": [],
+          "summary": null,
+          "complexity": 4
+        },
+        {
+          "name": "at_structure(str",
+          "type": "function",
+          "line_range": [
+            670,
+            681
+          ],
+          "signature": "def at_structure(structure, order=None):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "at_structure(ite",
+            "at_structure(str",
+            "der_dict(str",
+            "get('no",
+            "pop('no",
+            "stance(str"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 8
+        },
+        {
+          "name": "igLoader:\n  ",
+          "type": "class",
+          "line_range": [
+            684,
+            715
+          ],
+          "signature": "class igLoader:\n  ",
+          "docstring": null,
+          "dependencies": [],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "it__(sel",
+          "type": "method",
+          "line_range": [
+            685,
+            688
+          ],
+          "signature": "def it__(self, default_path: str = None):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "(__f"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 2
+        },
+        {
+          "name": "idate_keys(sel",
+          "type": "method",
+          "line_range": [
+            695,
+            698
+          ],
+          "signature": "def idate_keys(self, user_dict):\n  ",
+          "docstring": null,
+          "dependencies": [
+            "eError(f\"U",
+            "sel",
+            "use"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 2
+        },
+        {
+          "name": "(sel",
+          "type": "method",
+          "line_range": [
+            700,
+            715
+          ],
+          "signature": "def (self, user_opt=None) ->  -> ig:\n  ",
+          "docstring": "Load the configuration, merging user options with default values.\n        \"\"\"",
+          "dependencies": [
+            "(use",
+            "Error(\"us",
+            "ig(**m",
+            "stance(use"
+          ],
+          "callers": [
+            "utils.py:sel"
+          ],
+          "summary": null,
+          "complexity": 7
+        }
+      ],
+      "imports": [
+        {
+          "source": "tiktoken",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "openai",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "logging",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "os",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "datetime",
+          "names": [
+            "datetime"
+          ],
+          "target_file": null
+        },
+        {
+          "source": "time",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "json",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "PyPDF2",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "copy",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "asyncio",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "pymupdf",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "io",
+          "names": [
+            "BytesIO"
+          ],
+          "target_file": null
+        },
+        {
+          "source": "dotenv",
+          "names": [
+            "load_dotenv"
+          ],
+          "target_file": null
+        },
+        {
+          "source": "logging",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "yaml",
+          "names": [],
+          "target_file": null
+        },
+        {
+          "source": "pathlib",
+          "names": [
+            "Path"
+          ],
+          "target_file": null
+        },
+        {
+          "source": "types",
+          "names": [
+            "SimpleNamespace as config"
+          ],
+          "target_file": null
+        }
+      ],
+      "metrics": {
+        "total_lines": 716,
+        "code_lines": 569,
+        "symbol_count": 55,
+        "complexity_avg": 4.76
+      },
+      "indexed_at": 1774823508.8719745,
+      "content_hash": "b837111012d6"
+    }
+  ],
+  "call_graph": {
+    "client.py:index": [
+      "page_index_md.py:md_to_tree",
+      "page_index.py:page_index"
+    ],
+    "page_index.py:check_title_appearance_in_start_concurrent": [
+      "page_index.py:check_title_appearance_in_start"
+    ],
+    "page_index.py:extract_toc_content": [
+      "page_index.py:check_if_toc_transformation_is_complete"
+    ],
+    "page_index.py:toc_extractor": [
+      "page_index.py:detect_page_index"
+    ],
+    "page_index.py:toc_transformer": [
+      "page_index.py:check_if_toc_transformation_is_complete"
+    ],
+    "page_index.py:find_toc_pages": [
+      "page_index.py:toc_detector_single_page"
+    ],
+    "page_index.py:process_no_toc": [
+      "utils.py:count_tokens",
+      "page_index.py:generate_toc_continue",
+      "page_index.py:generate_toc_init",
+      "page_index.py:page_list_to_group_text"
+    ],
+    "page_index.py:process_toc_no_page_numbers": [
+      "page_index.py:add_page_number_to_toc",
+      "utils.py:count_tokens",
+      "page_index.py:page_list_to_group_text",
+      "page_index.py:toc_transformer"
+    ],
+    "page_index.py:process_toc_with_page_numbers": [
+      "page_index.py:add_page_offset_to_toc_json",
+      "page_index.py:calculate_page_offset",
+      "page_index.py:extract_matching_page_pairs",
+      "page_index.py:process_none_page_numbers",
+      "page_index.py:remove_page_number",
+      "page_index.py:toc_index_extractor",
+      "page_index.py:toc_transformer"
+    ],
+    "page_index.py:process_none_page_numbers": [
+      "page_index.py:add_page_number_to_toc"
+    ],
+    "page_index.py:check_toc": [
+      "page_index.py:find_toc_pages",
+      "page_index.py:toc_extractor"
+    ],
+    "page_index.py:fix_incorrect_toc": [
+      "page_index.py:check_title_appearance",
+      "page_index.py:single_toc_item_index_fixer"
+    ],
+    "page_index.py:fix_incorrect_toc_with_retries": [
+      "page_index.py:fix_incorrect_toc"
+    ],
+    "page_index.py:verify_toc": [
+      "page_index.py:check_title_appearance"
+    ],
+    "page_index.py:meta_processor": [
+      "page_index.py:fix_incorrect_toc_with_retries",
+      "page_index.py:process_no_toc",
+      "page_index.py:process_toc_no_page_numbers",
+      "page_index.py:process_toc_with_page_numbers",
+      "page_index.py:validate_and_truncate_physical_indices",
+      "page_index.py:verify_toc"
+    ],
+    "page_index.py:process_large_node_recursively": [
+      "page_index.py:check_title_appearance_in_start_concurrent",
+      "page_index.py:meta_processor"
+    ],
+    "page_index.py:tree_parser": [
+      "page_index.py:check_title_appearance_in_start_concurrent",
+      "page_index.py:check_toc",
+      "page_index.py:meta_processor",
+      "page_index.py:process_large_node_recursively"
+    ],
+    "page_index.py:page_index_main": [
+      "page_index.py:tree_parser"
+    ],
+    "page_index.py:page_index": [
+      "page_index.py:page_index_main"
+    ],
+    "page_index_md.py:get_node_summary": [
+      "utils.py:count_tokens"
+    ],
+    "page_index_md.py:generate_summaries_for_structure_md": [
+      "page_index_md.py:get_node_summary"
+    ],
+    "page_index_md.py:update_node_list_with_text_token_count": [
+      "utils.py:count_tokens"
+    ],
+    "page_index_md.py:tree_thinning_for_index": [
+      "utils.py:count_tokens"
+    ],
+    "page_index_md.py:md_to_tree": [
+      "page_index_md.py:build_tree_from_nodes",
+      "page_index_md.py:extract_node_text_content",
+      "page_index_md.py:extract_nodes_from_markdown",
+      "page_index_md.py:generate_summaries_for_structure_md",
+      "page_index_md.py:tree_thinning_for_index",
+      "page_index_md.py:update_node_list_with_text_token_count"
+    ],
+    "utils.py:sel": [
+      "utils.py:(sel",
+      "utils.py:(sel"
+    ],
+    "utils.py:k_token_limit(str": [
+      "utils.py:cture_to_list(str"
+    ],
+    "utils.py:node_text(nod": [
+      "utils.py:text_of_pdf_pages(pdf"
+    ],
+    "utils.py:node_text_with_labels(nod": [
+      "utils.py:text_of_pdf_pages_with_labels(pdf"
+    ],
+    "utils.py:rate_node_summary(nod": [
+      "utils.py:GPT_API_async(mod"
+    ],
+    "utils.py:rate_summaries_for_structure(str": [
+      "utils.py:cture_to_list(str",
+      "utils.py:rate_node_summary(nod"
+    ],
+    "utils.py:idate_keys(sel": [
+      "utils.py:sel"
+    ]
+  },
+  "total_files": 8,
+  "total_symbols": 161,
+  "indexed_at": 1774823508.8719745,
+  "metadata": {}
+}

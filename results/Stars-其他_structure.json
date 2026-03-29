@@ -1,0 +1,44 @@
+{
+  "doc_name": "Stars-其他",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\GitHub-Stars\\Stars-其他.md",
+  "structure": [
+    {
+      "title": "其他",
+      "node_id": "0000",
+      "prefix_summary": "# 其他",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "Go",
+          "node_id": "0001",
+          "summary": "## Go\n\n- [joshp123/xuezh](https://github.com/joshp123/xuezh) —",
+          "line_num": 4
+        },
+        {
+          "title": "Jupyter Notebook",
+          "node_id": "0002",
+          "summary": "## Jupyter Notebook\n\n- [jswoboda/SimISR](https://github.com/jswoboda/SimISR) — ISR Data Simulator",
+          "line_num": 8
+        },
+        {
+          "title": "Other",
+          "node_id": "0003",
+          "summary": "The partial document provides a list of GitHub repositories with brief descriptions or titles for each. These repositories cover a diverse range of topics, including:\n\n1. **Military Ranks Ontology**: A repository related to military ranks.\n2. **Super Prompts**: A repository likely containing advanced or enhanced prompts.\n3. **Awesome Wooting**: A curated list of resources and tools related to Wooting keyboards.\n4. **Feishu Skills**: A repository focused on skills or functionalities related to Feishu, a productivity tool.\n5. **WPSL**: A repository with an unclear description but likely related to a specific software or system.\n6. **Hone**: A repository with an unclear description but likely a project or tool.\n7. **Komodo Lexogrine HUD**: A repository for a Heads-Up Display (HUD) designed for the Lexogrine HUD Manager, specifically for Komodo.\n8. **Quantumult X**: A repository containing a beginner's guide or tutorial for Quantumult X, a network tool.\n9. **Better Timer Resolution**: A repository focused on improving timer resolution.\n10. **HookKeyPlugin**: A repository for a plugin related to key hooks, likely for a specific application or system.\n11. **Handbook**: A repository with an unclear description but likely a guide or manual.\n12. **hdRstr**: A repository for a rendering delegate based on ReSTIR/RTXDI for Hydra.\n13. **Human System Optimization**: A repository focused on optimizing human health and learning, aiming for longevity up to 150 years.",
+          "line_num": 12
+        },
+        {
+          "title": "QML",
+          "node_id": "0004",
+          "summary": "## QML\n\n- [Yu-ki016/SDFTool](https://github.com/Yu-ki016/SDFTool) — 通过黑白图生成SDF图和SDF图集的小工具",
+          "line_num": 28
+        },
+        {
+          "title": "Wolfram Language",
+          "node_id": "0005",
+          "summary": "## Wolfram Language\n\n- [krathjen/studiolibrary](https://github.com/krathjen/studiolibrary) — Studio Library",
+          "line_num": 32
+        }
+      ]
+    }
+  ]
+}

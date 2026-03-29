@@ -1,0 +1,172 @@
+{
+  "doc_name": "2026-03-23-P1-integrated-proof",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\Sprachwelt\\2026-03-23-P1-integrated-proof.md",
+  "structure": [
+    {
+      "title": "P1 Integrated Proof — 实验报告",
+      "node_id": "0000",
+      "prefix_summary": "# P1 Integrated Proof — 实验报告\n\n> 日期: 2026-03-23\n> 状态: P2 gate PASS\n> 测试基线: 218 pass, 3 ignored, 0 regressions",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "目标",
+          "node_id": "0001",
+          "summary": "## 目标\n\n证明 Sprachwelt runtime 的三个关键模块对「显现链推进」有独立因果贡献：\n1. **calls_forth** — 前向预测链（evaluator 的 chain continuation 机制）\n2. **Situation** — 处境算子（planner 的 act bias 覆盖）\n3. **Emergence** — 承受者拓扑（bearer-shared edges → field dynamics 强化）\n\n约束：不加新功能、不改 prompt、不重写 planner。只做实验。",
+          "line_num": 7
+        },
+        {
+          "title": "实验一：主消融表",
+          "node_id": "0002",
+          "prefix_summary": "## 实验一：主消融表",
+          "line_num": 16,
+          "nodes": [
+            {
+              "title": "设计",
+              "node_id": "0003",
+              "summary": "### 设计\n- 4 组: Full / NoSituation / NoCallsForth / NoEmergence\n- 3 seeds × 9 turns (case-016) = 108 pipeline runs\n- 确定性（rules-only, 无 LLM）\n- 忠实复制 `process_turn_referent()` 全 6 阶段，按组开关模块",
+              "line_num": 18
+            },
+            {
+              "title": "结果",
+              "node_id": "0004",
+              "summary": "### 结果\n\n| Group | Passed | Partial | Failed | AvgIllum | OnChain | Reinf | Pursue |\n|-------|--------|---------|--------|----------|---------|-------|--------|\n| **Full** | **4** | 3 | 2 | **0.5189** | **4** | 16 | 9 |\n| NoSituation | 4 | 3 | 2 | 0.5189 | 4 | 16 | 9 |\n| NoCallsForth | **0** | **7** | 2 | **0.3478** | **0** | 16 | 9 |\n| NoEmergence | 4 | 3 | 2 | 0.5189 | 4 | 16 | 9 |",
+              "line_num": 24
+            },
+            {
+              "title": "因果验证",
+              "node_id": "0005",
+              "summary": "The partial document is a progress report on causal verification, detailing how multiple criteria were evaluated: deterministic consistency across seeds and groups, Situation signal measures, comparisons between full and no calls-forth settings (both chain and evaluation checks), illumination score delta, absence of emergence effects, and ensuring full configuration meets or exceeds all group thresholds.",
+              "line_num": 33
+            },
+            {
+              "title": "Per-turn 轨迹: Full vs NoSituation (act selection)",
+              "node_id": "0006",
+              "summary": "The document compares turn-by-turn action selection between Full and NoSituation settings. A table shows that across nine turns both versions consistently choose the “Pursue” action, so behavior is identical. However, situational bias grows steadily over turns in the Full condition: the pursuit bias rises from 0.285 to 0.840, and anti-derailment bias increases from 0 to 0.800, indicating cumulative influence despite no change in chosen actions.",
+              "line_num": 45
+            },
+            {
+              "title": "Per-turn 轨迹: Full vs NoCallsForth (chain tracking)",
+              "node_id": "0007",
+              "summary": "Comparison of the per-turn trajectories between Full and NoCallsForth strategies shows verdicts, on-chain statuses, and scores per turn. Full records succeeded (on-chain=1, Passed) specifically in turns 4, 5, 8, 9 when calls_forth is present, whereas NoCallsForth remains at on-chain=0, giving at best Partial outcomes. Scores differ significantly for those turns (0.8000 vs 0.3900–0.4900).",
+              "line_num": 61
+            },
+            {
+              "title": "Per-turn 轨迹: Full vs NoEmergence (field dynamics)",
+              "node_id": "0008",
+              "summary": "Comparative analysis of per-turn trajectories for Full vs NoEmergence field dynamics shows they are identical across turns, with consistent reinforcement and depth values, because the rules-only extractor lacks a bearer input (bearer_ref=None) so emergence has no effect; reinforcements derive solely from demand similarity.",
+              "line_num": 77
+            },
+            {
+              "title": "Key Turn Analysis",
+              "node_id": "0009",
+              "summary": "The section summarizes key turns in the conversation: Turn 5 shows how the bearer’s entrance boosts the situational state without changing the pursue action; Turn 6 details how mixed tool use triggers anti-derail due to elevated disclosure risk yet without changing behavior; Turn 8 highlights calls_forth leading to her situation being identified as the next target, which places the dialogue on-chain and passes evaluation, while its absence yields only partial success.",
+              "line_num": 93
+            },
+            {
+              "title": "诚实结论",
+              "node_id": "0010",
+              "summary": "### 诚实结论\n\n- **calls_forth**: 直接行为退化证明因果 ✓\n- **Situation**: 信号可测 (bias=13.86), 但 0 行为差异 (所有 turn 已是 Pursue)\n- **Emergence**: 未激活 (rules-only 不设 bearer_ref)\n\n主消融表只证明了 calls_forth。Situation 和 Emergence 需要分离实验。",
+              "line_num": 110
+            }
+          ]
+        },
+        {
+          "title": "实验二：Situation 应力测试",
+          "node_id": "0011",
+          "prefix_summary": "## 实验二：Situation 应力测试",
+          "line_num": 118,
+          "nodes": [
+            {
+              "title": "设计",
+              "node_id": "0012",
+              "summary": "### 设计\n- 预装 4 条不相似张力 (frontier.active > 2 → Converge 路径)\n- 跑完整 case-016 全 9 轮\n- Full vs NoSituation\n- 目的: 在主消融表基础上，用 4 条预装张力强制 Converge 阈值，让 Situation 的 pursue_bias 有机会翻转行为",
+              "line_num": 120
+            },
+            {
+              "title": "结果",
+              "node_id": "0013",
+              "summary": "The document provides experimental results comparing two setups (“Full” and “NoSit”), showing the selected action across nine turns. In turns 1 and 2 both setups converge due to low situation pressure and insufficient disclosures. From turn 3 onward, the accumulated situation increases the pursue bias above 0.3, causing the Full setup to switch to the “Pursue” action while the NoSituation setup continues to converge. Overall, there are 7 out of 9 behavioral flips.",
+              "line_num": 126
+            },
+            {
+              "title": "判定",
+              "node_id": "0014",
+              "summary": "### 判定\nSituation 在张力积累条件下是真实的行为力量。主消融表未触发翻转是因为 case-016 自然动态下 frontier 从不超过 2 条活跃张力。",
+              "line_num": 142
+            }
+          ]
+        },
+        {
+          "title": "实验三：Separator A — Situation 分离案例",
+          "node_id": "0015",
+          "prefix_summary": "## 实验三：Separator A — Situation 分离案例",
+          "line_num": 145,
+          "nodes": [
+            {
+              "title": "设计",
+              "node_id": "0016",
+              "summary": "### 设计\n- 最小 registry: worker / tools / room / time (4 referents)\n- 预装 3 条不相似张力 (frontier.active > 2 → Converge 路径)\n- Variant A: `\"她来过。工具还在。\"` (无时间压力)\n- Variant B: `\"凌晨四点，她来过。工具还在。\"` (时间压力)\n- 4 配置: Full(A), Full(B), NoSit(A), NoSit(B)\n- 不跑张力提取（隔离 frontier，只测 disclosure + situation + planner）",
+              "line_num": 147
+            },
+            {
+              "title": "结果",
+              "node_id": "0017",
+              "summary": "### 结果\n\n| Config | Act | pursue_bias | anti_derail | bearer_bias | sit_intensity |\n|--------|-----|-------------|-------------|-------------|---------------|\n| Full(A) | **Converge** | 0.135 | 0.240 | 0.445 | 0.290 |\n| Full(B) | **Pursue** | **0.375** | 0.240 | 0.445 | 0.390 |\n| NoSit(A) | Converge | 0 | 0 | 0 | 0 |\n| NoSit(B) | Converge | 0 | 0 | 0 | 0 |",
+              "line_num": 155
+            },
+            {
+              "title": "因果判定",
+              "node_id": "0018",
+              "summary": "### 因果判定\n- NoSit(A) == NoSit(B) → 无 Situation 时两组相同（frontier 一致）\n- Full(A) = Converge, Full(B) = Pursue → **仅 Full(B) 翻转**\n- 原因: `\"凌晨四点\"` → temporal referent → time_pressure +0.4 → pursue_bias 0.375 > 0.3 阈值\n\n**Situation: BEHAVIORALLY SEPARATED.**",
+              "line_num": 164
+            }
+          ]
+        },
+        {
+          "title": "实验四：Separator B — Emergence 分离案例",
+          "node_id": "0019",
+          "prefix_summary": "## 实验四：Separator B — Emergence 分离案例",
+          "line_num": 171,
+          "nodes": [
+            {
+              "title": "设计",
+              "node_id": "0020",
+              "summary": "### 设计\n- 3 条语义不相似张力，共享 bearer_ref=\"worker\"\n  - `\"消毒水的化学气味弥漫在空气中\"` (smell)\n  - `\"湿的鞋印痕迹残留在地面上面\"` (prints)\n  - `\"深夜才出现的未知存在者行踪\"` (schedule)\n- 手动构造 TensionDefinition (模拟 LLM 提取的 bearer 字段)\n- 2 配置: Emergence / NoEmergence",
+              "line_num": 173
+            },
+            {
+              "title": "结果",
+              "node_id": "0021",
+              "summary": "### 结果\n\n| Config | Edges | Reinforcements | Intensities |\n|--------|-------|----------------|-------------|\n| **Emergence** | **3** | **3** | [0.600, 0.600, 0.600] |\n| NoEmergence | 0 | 0 | [0.450, 0.450, 0.450] |",
+              "line_num": 181
+            },
+            {
+              "title": "因果判定",
+              "node_id": "0022",
+              "summary": "### 因果判定\n- demand 两两 Jaccard < 0.15 → 语义相似度无法产生边\n- NoEmergence: 0 edges, 0 reinforcements（确认语义路径无效）\n- Emergence: 3 bearer-shared edges, 全部 reinforce（Δ intensity = 0.150/tension）\n- bearer 拓扑从语义不相似性中创造了结构\n\n**Emergence: BEHAVIORALLY SEPARATED.**",
+              "line_num": 188
+            }
+          ]
+        },
+        {
+          "title": "综合判定",
+          "node_id": "0023",
+          "summary": "## 综合判定\n\n| 模块 | 证明来源 | 行为差异 | 状态 |\n|------|---------|---------|------|\n| calls_forth | 主消融表 | 4→0 Passed, Δillum=0.1711 | **VERIFIED** |\n| Situation | 分离案例 A | Converge→Pursue flip | **VERIFIED** |\n| Emergence | 分离案例 B | 0→3 edges, Δintensity=0.150 | **VERIFIED** |\n\n**P2 gate: PASS.** 三个模块均被行为分离实验独立验证。",
+          "line_num": 196
+        },
+        {
+          "title": "关键发现",
+          "node_id": "0024",
+          "summary": "The document discusses key findings about the system’s evaluation layer, emphasizing that the “calls_forth” mechanism is essential for forward prediction and maintaining chain continuity. It explains that “Situation” acts as a conditional force influencing behavioral shifts, highlights that “Emergence” requires an LLM to generate necessary inputs, and notes that detecting a signal does not necessarily imply causal changes—ablation experiments must confirm counterfactual effects.",
+          "line_num": 206
+        },
+        {
+          "title": "实验代码位置",
+          "node_id": "0025",
+          "summary": "## 实验代码位置\n\n- 主消融: `crates/pipeline/src/main.rs::test_p1_integrated_proof`\n- Situation stress: `crates/pipeline/src/main.rs::test_p1_situation_behavioral_delta`\n- Separator A: `crates/pipeline/src/main.rs::test_separator_situation`\n- Separator B: `crates/pipeline/src/main.rs::test_separator_emergence`",
+          "line_num": 216
+        }
+      ]
+    }
+  ]
+}

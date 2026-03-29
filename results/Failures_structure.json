@@ -1,0 +1,40 @@
+{
+  "doc_name": "Failures",
+  "source_path": "E:/knowledge/Knowledge\\03-Trading\\Failures.md",
+  "structure": [
+    {
+      "title": "Failure Log — 失败的解剖学",
+      "node_id": "0000",
+      "prefix_summary": "# Failure Log — 失败的解剖学\n\n> 成功有偏差，失败是真正的老师。每一次亏损、每一个bug、每一次误判都值得记录。",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "格式",
+          "node_id": "0001",
+          "summary": "## 格式\n\n```\n### YYYY-MM-DD | 事件名\n- **发生了什么**:\n- **预期是什么**:\n- **实际结果**:\n- **根因**:\n- **学到什么**:\n- **下次怎么避免**:\n```",
+          "line_num": 5
+        },
+        {
+          "title": "记录",
+          "node_id": "0002",
+          "prefix_summary": "## 记录",
+          "line_num": 17,
+          "nodes": [
+            {
+              "title": "2026-03-16 | DeepEar黑盒信号误导",
+              "node_id": "0003",
+              "summary": "### 2026-03-16 | DeepEar黑盒信号误导\n- **发生了什么**: 盘前用DeepEar信号分析，说\"中国核建资金抢筹+17%目标\"\n- **预期是什么**: 核建应该继续涨\n- **实际结果**: 核建-7%，电建跌停-10%，能建-8%\n- **根因**: DeepEar是第三方黑盒，信号基于历史数据，滞后于真实交易\n- **学到什么**: 不用黑盒信号做决策，用自有系统(quant-terminal)\n- **下次怎么避免**: 盘前先跑StockScanner，DeepEar只作补充参考",
+              "line_num": 19
+            },
+            {
+              "title": "2026-03-16 | 扫描器从澳洲跑太慢",
+              "node_id": "0004",
+              "summary": "### 2026-03-16 | 扫描器从澳洲跑太慢\n- **发生了什么**: StockScanner全市场扫描卡在K线下载（55批×4秒）\n- **预期是什么**: 9:25前出结果\n- **实际结果**: 跑了一整天没跑完，还锁了DuckDB\n- **根因**: 澳洲到通达信服务器延迟1s+，5500只×40根K线数据量巨大\n- **下次怎么避免**: 走SUPER节点跑扫描\n\n#failure #trading #lessons",
+              "line_num": 27
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

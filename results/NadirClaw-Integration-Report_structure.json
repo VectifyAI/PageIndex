@@ -1,0 +1,120 @@
+{
+  "doc_name": "NadirClaw-Integration-Report",
+  "source_path": "E:/knowledge/Knowledge\\02-Infrastructure\\NadirClaw-Integration-Report.md",
+  "structure": [
+    {
+      "title": "NadirClaw 智能 LLM 路由器集成复盘",
+      "node_id": "0000",
+      "prefix_summary": "# NadirClaw 智能 LLM 路由器集成复盘\n\n> 2026-03-19 | SUPER 节点 | claw-router + OpenRouter 免费模型",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "背景",
+          "node_id": "0001",
+          "summary": "## 背景\n\nclaw-router (SUPER:3456) 已有国产 hub (Doubao/GLM/Kimi/MiniMax/Qwen) + ARK，但路由只靠 regex 信号匹配。目标：加入 OpenRouter 免费模型 + 按 prompt 复杂度智能选模型。",
+          "line_num": 5
+        },
+        {
+          "title": "最终架构",
+          "node_id": "0002",
+          "summary": "## 最终架构\n\n```\nClaude Code / Codex / 任何 OpenAI 客户端\n         |\n    micro_router (:8856)     <- 关键词启发式分类 + fallback\n         |\n    claw-router (:3456)      <- 国产 hub 代理 + OpenRouter + circuit breaker\n         |\n    东京反代 (:8443)          <- SUPER 出海通道\n         |\n    openrouter.ai            <- 16 个免费模型\n```",
+          "line_num": 9
+        },
+        {
+          "title": "新增组件",
+          "node_id": "0003",
+          "summary": "## 新增组件\n\n| 组件 | 位置 | 用途 |\n|------|------|------|\n| micro_router.py | SUPER /opt/nadirclaw/ | 智能路由前置层，httpx 直连 claw-router |\n| or-proxy.py | 东京 /opt/ | OpenRouter 反向代理，解决大陆出海 |\n| AI-Digest | 澳洲本机 D:/projects/AI-digest/ | 每日 session 摘要，用 stepfun 免费模型 |",
+          "line_num": 23
+        },
+        {
+          "title": "OpenRouter 免费模型清单 (16个，双 key 轮换)",
+          "node_id": "0004",
+          "prefix_summary": "## OpenRouter 免费模型清单 (16个，双 key 轮换)",
+          "line_num": 31,
+          "nodes": [
+            {
+              "title": "可用模型 (经过实测)",
+              "node_id": "0005",
+              "summary": "### 可用模型 (经过实测)\n- `or-step-flash` — StepFun 3.5 Flash, 256K ctx, **最稳定**\n- `or-nemotron-120b` — NVIDIA 120B MoE, 262K ctx, **推理强**",
+              "line_num": 33
+            },
+            {
+              "title": "已配置但限流频繁",
+              "node_id": "0006",
+              "summary": "The partial document provides a list of AI models and their configurations, highlighting issues with rate limiting. The models listed include specialized coding models like `or-qwen-coder`, heavy inference models like `or-hermes-405b`, and various models from different organizations such as Meta's Llama, Google's Gemma, and OpenAI's open-source models. The document also mentions models with specific features like `or-hunter` with a 1M context and `or-minimax` with privacy policy limitations. Additionally, it includes `or-free`, which likely refers to an automatic routing option, and `or-qwen3-next`, a next-generation model. The recurring theme of \"已配置但限流频繁\" suggests that while these models are configured, they frequently encounter rate limiting issues.",
+              "line_num": 37
+            }
+          ]
+        },
+        {
+          "title": "踩坑记录 (7 个)",
+          "node_id": "0007",
+          "prefix_summary": "## 踩坑记录 (7 个)",
+          "line_num": 51,
+          "nodes": [
+            {
+              "title": "1. LiteLLM Bug #16045 — api_base 被 smart routing 忽略",
+              "node_id": "0008",
+              "summary": "### 1. LiteLLM Bug #16045 — api_base 被 smart routing 忽略\n**现象**: LiteLLM 收到 `openai/or-step-flash` + `api_base=localhost:3456`，但实际请求发到了 `localhost:3456/v1/` 而不是 `/v1/chat/completions`。\n**根因**: LiteLLM 识别到 `openai/` 前缀后触发 smart routing，绕过了显式的 `api_base` 参数。\n**解决**: 彻底绕过 LiteLLM，用 httpx 直连 claw-router（micro_router.py）。\n**GitHub Issue**: https://github.com/BerriAI/litellm/issues/16045",
+              "line_num": 53
+            },
+            {
+              "title": "2. HTTP_PROXY 毒害 localhost 请求",
+              "node_id": "0009",
+              "summary": "### 2. HTTP_PROXY 毒害 localhost 请求\n**现象**: micro_router 的 httpx 调 localhost:3456 返回 502。\n**根因**: systemd 设了 `HTTP_PROXY=http://192.168.50.54:7897`（C宅 Clash），httpx 把 localhost 请求也走代理。curl 默认排除 localhost 但 httpx 不会。\n**解决**: 加 `NO_PROXY=localhost,127.0.0.1,10.10.0.5`",
+              "line_num": 59
+            },
+            {
+              "title": "3. SUPER 到 OpenRouter 直连不通",
+              "node_id": "0010",
+              "summary": "### 3. SUPER 到 OpenRouter 直连不通\n**现象**: SUPER 直连 `openrouter.ai` 超时。\n**根因**: SUPER 在大陆，OpenRouter 被墙。C宅 Clash 代理也打不通 OpenRouter API（只能代理 HuggingFace）。\n**解决**: 在东京服务器 (100.80.58.61) 部署 Python 反向代理 `or-proxy.py`，SUPER 通过 NetBird 内网连东京。",
+              "line_num": 64
+            },
+            {
+              "title": "4. claw-router 不认 `openai/` 前缀模型名",
+              "node_id": "0011",
+              "summary": "### 4. claw-router 不认 `openai/` 前缀模型名\n**现象**: 传 `model: \"openai/or-step-flash\"` 给 claw-router，被当成 ARK 模型发到火山引擎。\n**根因**: `router.py` 的 `resolve_target()` 没处理 `openai/` 前缀。\n**解决**: 一行 fix: `clean = requested_model.removeprefix(\"openai/\")`",
+              "line_num": 69
+            },
+            {
+              "title": "5. claw-router hubs.yaml 环境变量不展开",
+              "node_id": "0012",
+              "summary": "### 5. claw-router hubs.yaml 环境变量不展开\n**现象**: 国产 hub 的 `${HUB_GLM_BASE:-http://localhost:8013}` 被原样传给 upstream。\n**根因**: Python 的 YAML 解析不处理 shell 变量替换。\n**状态**: 已知问题，OpenRouter hub 用固定 URL 不受影响。",
+              "line_num": 74
+            },
+            {
+              "title": "6. NadirClaw 句嵌入分类器返回 bool",
+              "node_id": "0013",
+              "summary": "### 6. NadirClaw 句嵌入分类器返回 bool\n**现象**: `classify()` 返回 `True`/`False` 而不是 `\"simple\"/\"complex\"` 字符串。\n**解决**: micro_router 用关键词启发式分类替代，分类器作为可选升级。",
+              "line_num": 79
+            },
+            {
+              "title": "7. OpenRouter 免费模型限流",
+              "node_id": "0014",
+              "summary": "### 7. OpenRouter 免费模型限流\n**现象**: 连续请求 429 Too Many Requests。\n**限制**: 每账号 ~1 req/10s，两个号轮换有改善但仍紧。\n**缓解**: 双 key 分配到不同模型（KEY1 8个 + KEY2 8个），fallback chain 自动切换。",
+              "line_num": 83
+            }
+          ]
+        },
+        {
+          "title": "LLM 路由器调研 (2026-03)",
+          "node_id": "0015",
+          "summary": "This partial document provides a comparison of different LLM (Large Language Model) router projects as of March 2026. It evaluates each project based on several criteria: the programming language used, the type of classifier employed, the number of stars (a measure of popularity or recognition), and the level of adaptability or compatibility. The projects reviewed include NadirClaw, FreeRouter, RouteLLM, LiteLLM, and NVIDIA Router. NadirClaw is noted for having the most comprehensive features but is built on LiteLLM, which has known bugs. FreeRouter stands out for its highly practical 14-dimensional keyword classifier and zero dependencies, making it a strong contender. The document concludes by recommending the use of NadirClaw's classifier in combination with a custom-built httpx calling layer for optimal performance.",
+          "line_num": 88
+        },
+        {
+          "title": "关键文件",
+          "node_id": "0016",
+          "summary": "This partial document provides an overview of key configuration and service files for the NadirClaw and Claw-Router systems, along with their purposes and locations. It lists essential files such as the micro-router script, environment configuration, systemd service definition, hub configurations, routing chain settings, and a patch for the OpenAI prefix. Additionally, it mentions an OpenRouter reverse proxy in Tokyo and a configuration file for the AI-Digest project using a free stepfun model in Australia. The document emphasizes the \"SUPER\" node, indicating a central role for most of the listed files in the system's architecture.",
+          "line_num": 100
+        },
+        {
+          "title": "后续可做",
+          "node_id": "0017",
+          "summary": "## 后续可做\n\n- [ ] 把 FreeRouter 14维分类器移植到 micro_router（替换关键词启发式）\n- [ ] claw-router 修 hubs.yaml 环境变量展开 bug\n- [ ] 东京 or-proxy.py 改用 httpx/aiohttp 支持 streaming\n- [ ] cheap-llm recipes 包：commit/PR/summarize 场景模板\n- [ ] OpenRouter 隐私策略设置调宽（解锁更多免费模型）",
+          "line_num": 113
+        }
+      ]
+    }
+  ]
+}

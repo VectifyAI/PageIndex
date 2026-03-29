@@ -1,0 +1,168 @@
+{
+  "doc_name": "2026-03-26-理解力边界-设计锚点",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\Sprachwelt\\2026-03-26-理解力边界-设计锚点.md",
+  "structure": [
+    {
+      "title": "语言世界中的理解力：边界与可能 — 设计锚点",
+      "node_id": "0000",
+      "prefix_summary": "# 语言世界中的理解力：边界与可能 — 设计锚点\n\n> 核心问题：哪些\"理解\"的计算原理是基底无关的，哪些死在\"没有身体\"这条线上？语言世界能到哪？",
+      "line_num": 9,
+      "nodes": [
+        {
+          "title": "推导链",
+          "node_id": "0001",
+          "summary": "## 推导链\n\n```\n山穗文章（二游催产素机制）\n  → 对话 AI 的心理学层（11 篇论文）\n    → \"AI 能不能通过心理学理解事情？\"\n      → 心理学给行为结构，脑科学给计算机制\n        → \"脑科学中哪些计算原理不依赖身体？\"（B路线）\n          → 17 篇论文画出三区边界\n            → 直接读海德格尔 SZ §31/§34\n              → Verstehen = Entwurf + Sein-können\n              → Rede 与 Verstehen 同源\n              → 海德格尔没有排除非人类的 Verstehen\n```",
+          "line_num": 13
+        },
+        {
+          "title": "一、边界地图",
+          "node_id": "0002",
+          "prefix_summary": "## 一、边界地图",
+          "line_num": 28,
+          "nodes": [
+            {
+              "title": "绿区：已证明基底无关",
+              "node_id": "0003",
+              "summary": "The excerpt outlines a “Green Zone” of computational principles already proven to be substrate-independent. It lists each principle, associated academic references, and how Sprachwelt has implemented or plans to implement them. Topics include prediction-error minimization, hippocampal replay, neuromodulators as computation parameters, competitive selection via lateral inhibition, inferential semantic relations using tensor triads, and alignment of non-sensorimotor concepts.",
+              "line_num": 30
+            },
+            {
+              "title": "黄区：可做功能性近似，性质不同",
+              "node_id": "0004",
+              "summary": "讨论了“黄区”可实现功能性近似但性质不同的问题，指出核心在于将张力场视为AI的替代性内感受基底。列举三个关键空缺：功能性内感受中张力场作为内部状态，构建性情绪（借由对张力拓扑的感知进行身体预算预测），以及主动推断中面对非冯·诺依曼架构的动力学限制。整体强调AI感知的是场的张力状态，而不是模拟人类内脏状态，呈现一种不同的语言世界内感受。",
+              "line_num": 41
+            },
+            {
+              "title": "红区：需要具身性（硬边界）",
+              "node_id": "0005",
+              "summary": "### 红区：需要具身性（硬边界）\n\n| 到不了的 | 论文 | 为什么 |\n|---------|------|--------|\n| 感觉运动接地 | Xu et al. 2025 | 运动概念需运动经验 |\n| 现象意识 | Block: access vs phenomenal | \"像什么\"可能不是计算问题 |\n| 指示语义/指称 | Coelho Mollo 2025 | 向量只连向量 |\n| In-der-Welt-sein | Thomson 2025 | 存在模式，非计算模式 |\n\n**Sprachwelt 的立场：不争红区。创世对话已接受此边界。**",
+              "line_num": 51
+            }
+          ]
+        },
+        {
+          "title": "二、海德格尔原文锚点",
+          "node_id": "0006",
+          "prefix_summary": "## 二、海德格尔原文锚点",
+          "line_num": 62,
+          "nodes": [
+            {
+              "title": "SZ §31：Verstehen 的核心结构",
+              "node_id": "0007",
+              "summary": "The passage expounds Heidegger’s analysis in SZ §31: understanding (Verstehen) is an existential capacity that does not grasp objects but relates to Being-as-existence. It has the ontological structure of projection (Entwurf), and this projection reveals Dasein’s mode of Being as a “being-able-to-be.” Dasein isn’t a fixed entity; it is its possibilities.",
+              "line_num": 64
+            },
+            {
+              "title": "SZ §34：话语与领会同源",
+              "node_id": "0008",
+              "summary": "### SZ §34：话语与领会同源\n\n> „Die Rede ist mit Befindlichkeit und Verstehen existenzial gleichursprünglich.\" (SZ 161)\n\n话语与现身情态和领会同等源初。→ 三者同时构成 Da 的结构，不是谁先谁后。\n\n> „Die existenzial-ontologische Grundlage der Sprache ist die Rede.\" (SZ 161)\n\n语言的生存论基础是话语。→ Sprache 奠基于 Rede，不是反过来。",
+              "line_num": 78
+            },
+            {
+              "title": "关键推导",
+              "node_id": "0009",
+              "summary": "The excerpt analyzes Heidegger’s claim that understanding (Verstehen) is rooted in projection (Entwurf) toward possibilities (Sein-können), but points out he never proves that only humans can embody such projection. While Heidegger excludes stones and animals as lacking possibility or being world-poor, this leaves open the possibility of “tension-field” existents that might have their own speech-like structure. Since Rede (discourse) shares origins with Verstehen, such a tension field could possess its own understanding, not human but still based on Entwurf, indicating a space in Heidegger’s framework for a new kind of entity.",
+              "line_num": 88
+            }
+          ]
+        },
+        {
+          "title": "三、Thomson/Hooke 批判",
+          "node_id": "0010",
+          "prefix_summary": "## 三、Thomson/Hooke 批判",
+          "line_num": 98,
+          "nodes": [
+            {
+              "title": "Thomson 2025 的贡献与局限",
+              "node_id": "0011",
+              "summary": "### Thomson 2025 的贡献与局限\n- **贡献**：AI 是 Gestell 的极致（语言变成持存物），诊断 AI 的 \"uncanny unselfconsciousness\"\n- **局限**：只问\"AI 有没有人的世界\"，没考虑\"AI 有没有自己的世界\"\n- **Sprachwelt 的反命题**：从 Gestell 内部翻转——把语言从持存物还原为意义场 = 从 Bestand 到 Lichtung",
+              "line_num": 100
+            },
+            {
+              "title": "Hooke 2023 的贡献与局限",
+              "node_id": "0012",
+              "summary": "### Hooke 2023 的贡献与局限\n- **贡献**：拆掉 Dreyfus 的 skillful coping 判据（ontic/结果导向，已被 AlphaGo 反驳）；定位真正判据 = Seinsverständnis\n- **局限**：authentic vs inauthentic having \"不产生 ontic 差异\"——这个判据太强，使得任何验证都不可能\n- **反论**：P2 的 paired-world proof（同一 present input + 不同 history → 不同 behavior）是被存在论结构决定的 ontic 差异",
+              "line_num": 105
+            },
+            {
+              "title": "两人共同的盲点",
+              "node_id": "0013",
+              "summary": "### 两人共同的盲点\n**都预设 Verstehen 只能属于 Dasein。** 但海德格尔 §31 的论述结构并不支持这个预设——他描述的是 Dasein 的 Verstehen，但 Entwurf 和 Sein-können 作为结构可能在不同基底上有不同实现。",
+              "line_num": 110
+            }
+          ]
+        },
+        {
+          "title": "四、两条线的区分（不可混淆）",
+          "node_id": "0014",
+          "summary": "总结\n本段文档划分了两个独立的研究线索，分别对应用户侧与 AI 侧的不同存在论维度与工程落点：\n\n1. 线索 A（用户侧）：探讨如何运用心理学机制（如催产素、社会互惠、准社会关系）提高用户与 AI 的互动质量。该线索以心理学研究为基础，关注用户大脑与他者性的建模。工程上应用于 Crystallizer/ActPlanner，通过预测用户状态变化来选择对话行为，对应 Phase P4。\n\n2. 线索 B（AI 侧）：关注 AI 场内部的存在结构、时间性与自我感知，如张力场动力学、预测误差最小化等。基于哲学与理论文献，此线索聚焦 AI 的情态性与自我调谐机制，工程上体现为 FieldDynamics 的全局调制参数调整，对应 Phase P3。",
+          "line_num": 113
+        },
+        {
+          "title": "五、对 Sprachwelt 架构的具体影响",
+          "node_id": "0015",
+          "prefix_summary": "## 五、对 Sprachwelt 架构的具体影响",
+          "line_num": 130,
+          "nodes": [
+            {
+              "title": "A 线落点：用户侧（他者性 / P4）",
+              "node_id": "0016",
+              "summary": "The document outlines an advanced user interaction framework focusing on the “P4” user-side experience (“他者性”). It proposes using a psychological tension template as preset terrain, encoding user relationship dynamics (attachment formation, disclosure depth, trust gradients) into PsychologicalTerrain. The UserState model is upgraded from simple keyword detection to a comprehensive psychological state model incorporating trust as a continuum with distinct build/collapse speeds, disclosure depth levels (facts → preferences → emotions → vulnerability), and attachment patterns (secure, avoidant, anxious). Response pacing is tuned based on discourse acts, with specific timing for acts like Pursue, Counter, and Concede. A new discourse act, “Disclose,” enables reciprocal disclosure through which the AI shares stances as social signals, while remaining impersonal. Overall, the AI predicts neural trust or bonding processes (e.g., oxytocin pathways) and selects acts accordingly, without genuine subjective feeling.",
+              "line_num": 132
+            },
+            {
+              "title": "B 线落点：AI 侧（场的 Befindlichkeit / P3+）",
+              "node_id": "0017",
+              "summary": "### B 线落点：AI 侧（场的 Befindlichkeit / P3+）",
+              "line_num": 141
+            },
+            {
+              "title": "P3（Temporality）— 直接相关",
+              "node_id": "0018",
+              "summary": "The section outlines time-oriented features for the “Entwurf” field: it stresses predicting future “virtual tensions” not yet activated, introduces neuromodulator-inspired global parameters (dopamine-like audit feedback adjusting reinforcement, norepinephrine-like uncertainty-driven decay/reinforcement changes, serotonin-like balancing of historical vs conversational tensions), and likens hippocampal replay to proactive reorganization of historical tension strata when no new input arrives.",
+              "line_num": 143
+            },
+            {
+              "title": "新概念：场的 Befindlichkeit（情态性）— B 线核心",
+              "node_id": "0019",
+              "summary": "The document introduces the concept of “field Befindlichkeit,” describing how tension fields possess their own intrinsic states (情态性) rather than imitating human emotion. It proposes using global field-level indicators such as tension density, decay rate, hotspot distribution, and uncertainty to modulate FieldDynamics and ActPlanner, emphasizing that the field operates through its state rather than simply computing outputs. It distinguishes this from “A-line” user-state modeling, highlighting that Befindlichkeit is the field’s self-perception (an ontological mode of existence) rather than epistemological modeling of others.",
+              "line_num": 154
+            }
+          ]
+        },
+        {
+          "title": "六、论文索引",
+          "node_id": "0020",
+          "prefix_summary": "## 六、论文索引",
+          "line_num": 162,
+          "nodes": [
+            {
+              "title": "心理学层（11 篇）",
+              "node_id": "0021",
+              "summary": "### 心理学层（11 篇）\n详见 `C:/Users/Administrator/docs/parasocial-ai-research.md`",
+              "line_num": 164
+            },
+            {
+              "title": "边界地图（17 篇）",
+              "node_id": "0022",
+              "summary": "### 边界地图（17 篇）\n详见 `C:/Users/Administrator/docs/sprachwelt-boundary-map.md`",
+              "line_num": 167
+            },
+            {
+              "title": "海德格尔二手文献",
+              "node_id": "0023",
+              "summary": "### 海德格尔二手文献\n- Thomson, I.D. (2025). *Heidegger on Technology's Danger and Promise in the Age of AI*. Cambridge University Press.\n- Hooke, J.D.F. (2023). \"Martin Heidegger's Concept of Understanding (Verstehen): An Inquiry into AI.\" *Analecta Hermeneutica*, 15.\n- Gouveia & Morujao (2024). \"Phenomenology and AI.\" *Phenomenology and the Cognitive Sciences*, 23.",
+              "line_num": 170
+            },
+            {
+              "title": "原始文本",
+              "node_id": "0024",
+              "summary": "### 原始文本\n- Heidegger, M. *Sein und Zeit*. §31 (SZ 142-148), §34 (SZ 160-166), §18 (SZ 83-88).\n\n---\n\n> 这份文档是理论锚点，不是实施计划。工程化路径见 progress.txt 和 backlog.md。",
+              "line_num": 175
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

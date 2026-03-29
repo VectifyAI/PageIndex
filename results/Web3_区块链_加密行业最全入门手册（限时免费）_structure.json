@@ -1,0 +1,24 @@
+{
+  "doc_name": "Web3_区块链_加密行业最全入门手册（限时免费）",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\加密货币\\Web3_区块链_加密行业最全入门手册（限时免费）.md",
+  "structure": [
+    {
+      "title": "前言",
+      "node_id": "0000",
+      "summary": "## 文档描述\n\n这份文档主要介绍了如何进入币圈（加密货币市场）的初步步骤，重点在于降低风险并避免贪婪。文档分为两个主要部分：\n\n1. **交易所App的选择与注册**：\n   - 推荐使用大型交易所，如币安（推荐链接和注册教程）和欧易OKX（推荐链接和注册教程）。\n   - 提供了不同设备的下载方式：安卓设备建议通过官网下载，苹果设备则建议通过海外商店或使用台湾Apple ID在淘宝购买。\n\n2. **入金与购买加密货币**：\n   - 首先使用人民币购买USDT（稳定币），这是币圈最常用的稳定币。\n   - 拥有USDT后，可以将其从资金账户划转到现货账户进行币币交易，例如使用USDT购买比特币（BTC）。\n   - 提供了币安注册后的买币流程作为参考。",
+      "line_num": 7
+    },
+    {
+      "title": "交易交流",
+      "node_id": "0001",
+      "summary": "## 交易交流\n\n点击加入[电报交流群](https://t.me/TomorrowX_Labs)，交易所手续费返佣福利参考[通过我的链接注册都有哪些福利](https://www.notion.so/192f1b18f5d380be9917d794ab36fc2f?pvs=21)。\n\n**切记不要信私聊的人，私聊的都是骗子，他们会骗你买买了卖不掉的链上小币貔貅盘，遇到大群举报！**",
+      "line_num": 35
+    },
+    {
+      "title": "炒币辅助工具",
+      "node_id": "0002",
+      "summary": "The partial document provides an overview of essential tools for cryptocurrency trading to help users better understand market trends and token-specific news. It covers: 1) **Charting Tools**: Recommendations for Bitcoin charting software and crypto market data websites, emphasizing the use of exchanges and gmgn for on-chain data. 2) **Information Platforms**: A list of websites like Coingecko, The Block, Jin10, and Jinse for staying updated on crypto news and data. 3) **Secondary Trading Data Platforms**: Highlighting Coinglass for comprehensive data including on-chain, exchange, positions, liquidations, and ETF information. 4) **Web3 Wallets**: Suggestions for wallets like OKX Wallet and MetaMask, essential for interacting with blockchain applications. 5) **VPN Services**: Recommendations for stable VPN services like Ghelper and Naixi, crucial for accessing certain platforms. 6) **Twitter**: Importance of Twitter for following crypto influencers and accessing diverse opinions, with a mention of the author's Twitter handle and a guide for effective Twitter account management. The document concludes with encouragement to adapt and familiarize oneself with these tools to become proficient in cryptocurrency trading.",
+      "line_num": 41
+    }
+  ]
+}

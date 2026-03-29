@@ -1,0 +1,32 @@
+{
+  "doc_name": "ClawAPI",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\ClawAPI.md",
+  "structure": [
+    {
+      "title": "ClawAPI — API密钥管理+智能路由",
+      "node_id": "0000",
+      "prefix_summary": "# ClawAPI — API密钥管理+智能路由",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "基本信息",
+          "node_id": "0001",
+          "summary": "## 基本信息\n- **路径**: `D:/projects/clawapi-manager/`\n- **GitHub**: CicadaRelay/clawapi-manager (private)\n- **看板**: https://github.com/orgs/CicadaRelay/projects/1",
+          "line_num": 3
+        },
+        {
+          "title": "架构",
+          "node_id": "0002",
+          "summary": "## 架构\n- 40+ 供应商密钥管理\n- AI复杂度预测选模型\n- 熔断器保护\n- 路线图: CLI入口(typer) → OpenAI-compatible Gateway → Mesh集群路由",
+          "line_num": 8
+        },
+        {
+          "title": "关联",
+          "node_id": "0003",
+          "summary": "## 关联\n- [[Claw Router]] — 下游路由\n- [[China MCP Gateway]] — 国产适配层\n\n#project #api #routing",
+          "line_num": 14
+        }
+      ]
+    }
+  ]
+}

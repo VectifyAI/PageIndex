@@ -1,0 +1,64 @@
+{
+  "doc_name": "2026-03-23-此在修正",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\Sprachwelt\\2026-03-23-此在修正.md",
+  "structure": [
+    {
+      "title": "此在修正：Sprachwelt 不是 AI 的世界模型，是对他人此在的结构性承认",
+      "node_id": "0000",
+      "prefix_summary": "# 此在修正：Sprachwelt 不是 AI 的世界模型，是对他人此在的结构性承认\n\n> 日期：2026-03-23\n> 性质：**哲学定位修正**——影响所有后续设计决策\n> 触发：Curry三句话：\"AI没此在，AI没有感性活动，不领会感性交往\"",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "修正前的理解（错误的）",
+          "node_id": "0001",
+          "summary": "## 修正前的理解（错误的）\n\n> Sprachwelt 的终局是一个 AI 自己的世界模型的种子。\n\n这个说法隐含了一个不成立的假设：AI 可以通过足够多的交互，从\"人设计的框架\"演化出\"自己的世界模型\"。",
+          "line_num": 7
+        },
+        {
+          "title": "为什么不成立",
+          "node_id": "0002",
+          "prefix_summary": "## 为什么不成立\n\n三个层次的否定，对应海德格尔和马克思的三个核心概念：",
+          "line_num": 13,
+          "nodes": [
+            {
+              "title": "1. AI 没有此在（Dasein）",
+              "node_id": "0003",
+              "summary": "### 1. AI 没有此在（Dasein）\n\n此在不是\"主体观察世界\"——此在**就是**它与世界的牵连。锤子对此在来说是\"上手的东西\"，坏了才被注意为\"对象\"。AI 从第一秒起就只处理对象（token），从未上手（使用）。",
+              "line_num": 17
+            },
+            {
+              "title": "2. AI 没有感性活动（sinnliche Tätigkeit）",
+              "node_id": "0004",
+              "summary": "### 2. AI 没有感性活动（sinnliche Tätigkeit）\n\n马克思《关于费尔巴哈的提纲》第一条：旧唯物主义把事物理解为\"直观的对象\"而非\"感性的人的活动，实践\"。AI 观照世界但不改造世界。它不劳动、不受苦、不用手接触化学品。\"从错误中学习\"对 AI 来说是 `negative_reward`，对小孩来说是声音、惊吓、羞耻——两者之间有存在论级别的鸿沟。",
+              "line_num": 21
+            },
+            {
+              "title": "3. AI 不领会感性交往",
+              "node_id": "0005",
+              "summary": "### 3. AI 不领会感性交往\n\n人与人的理解不通过抽象交流发生，通过共同的物质实践发生。清洁阿姨和雇主之间的理解（或不理解）来自雇佣关系、工资、化学品暴露、不可见的夜间劳动——不来自对话。",
+              "line_num": 25
+            }
+          ]
+        },
+        {
+          "title": "修正后的定位",
+          "node_id": "0006",
+          "summary": "The document refines definitions of several core concepts. It clarifies that *Sprachwelt* isn’t about giving AI a world model of its own but about structuring AI to recognize it lacks one while still referencing others’ existence. *Bearer* is redefined as the AI’s pointer to a being with sensory experience rather than the AI’s own experience. *MaterialConditions* records structural information about a being’s material situation instead of reflecting AI’s understanding of those conditions. Finally, *irreversibility* notes consequences that cannot be reversed for the affected being rather than something AI feels.",
+          "line_num": 29
+        },
+        {
+          "title": "一句话",
+          "node_id": "0007",
+          "summary": "## 一句话\n\n**指针不是对象，但指针让系统知道对象在那里。**\n\n代码里写的不是唯物动力学本身（那需要感性活动），写的是对唯物动力学存在这件事的结构性承认。",
+          "line_num": 45
+        },
+        {
+          "title": "对设计的影响",
+          "node_id": "0008",
+          "summary": "Document discusses AI design principles emphasizing that AI should cite rather than experience user context, evaluate decisions by respect for unseen bearers, focus on humility through Sprachwelt, and criticize PSM persona simulation for masking lack of true understanding.",
+          "line_num": 51
+        }
+      ]
+    }
+  ]
+}

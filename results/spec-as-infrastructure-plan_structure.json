@@ -1,0 +1,64 @@
+{
+  "doc_name": "spec-as-infrastructure-plan",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\spec-as-infrastructure-plan.md",
+  "structure": [
+    {
+      "title": "Spec-as-Infrastructure 改进方案",
+      "node_id": "0000",
+      "prefix_summary": "# Spec-as-Infrastructure 改进方案",
+      "line_num": 8,
+      "nodes": [
+        {
+          "title": "问题",
+          "node_id": "0001",
+          "summary": "## 问题\n\n当前 FSC/OMC 的 spec 是**一次性的、只写不更新的**：\n- FSC: task description 写完就固化，agent 执行时不回看也不更新\n- OMC ralplan: planner→architect→critic 产出 plan 后，executor 只管执行，plan 不跟着代码演进\n- OMC team: 多 agent 并行但没有共享的 spec 文档，各自凭 prompt 理解意图\n\n结果：agent 遇到模糊决策时要么打断人、要么自作主张、要么偏离架构意图。",
+          "line_num": 10
+        },
+        {
+          "title": "方案：三层 Living Spec",
+          "node_id": "0002",
+          "prefix_summary": "## 方案：三层 Living Spec",
+          "line_num": 19,
+          "nodes": [
+            {
+              "title": "Layer 1: Spec File（持久化）",
+              "node_id": "0003",
+              "summary": "Describes Layer 1 Spec file structure for tasks. Specifies file path, format using Markdown frontmatter (id, status, dates, author). Details sections: Intent and Boundaries are human-written, immutable; Plan can be human or agent with possible modifications; Implementation Log is agent-written append-only records (time, decision, reason, deviation). Includes Spec Drift auto-summary comparing Plan to execution triggering reviews.",
+              "line_num": 21
+            },
+            {
+              "title": "Layer 2: Agent Spec Protocol（执行时行为）",
+              "node_id": "0004",
+              "summary": "The document describes “Layer 2: Agent Spec Protocol,” outlining three runtime rules for FSC agents: read the task-specific spec at startup and inject its boundaries into the system prompt, consult the spec when encountering ambiguity, and append implementation decisions to the log after each commit or PR. It also notes the minimal implementation changes required: adding a `specPath` field to `TaskStateStore`, updating the agent system prompt with `{{spec_boundaries}}`, and using a post-execution hook to automatically record decisions in the Implementation Log.",
+              "line_num": 61
+            },
+            {
+              "title": "Layer 3: Spec Review Gate（质量门）",
+              "node_id": "0005",
+              "summary": "### Layer 3: Spec Review Gate（质量门）\n\n在 OMC team 的 `team-verify` 阶段增加：\n\n```\nspec-adherence check:\n  - Plan vs Implementation 的 drift 分析\n  - Boundaries 有无被违反\n  - 未记录的决策（代码改了但 log 没写）\n```\n\ndrift 超过阈值 → 阻塞，要求人工 review spec 并决定：\n- 更新 spec 以匹配实现（实现比原计划更好）\n- 回滚实现以匹配 spec（偏离了意图）",
+              "line_num": 74
+            }
+          ]
+        },
+        {
+          "title": "实施路径",
+          "node_id": "0006",
+          "summary": "## 实施路径\n\n| 阶段 | 做什么 | 工作量 |\n|------|--------|--------|\n| P0 | `.omc/specs/` 目录 + spec 文件模板 + ralplan 产出自动写 spec | 半天 |\n| P1 | agent 启动时读 spec、Boundaries 注入 prompt | 1天 |\n| P2 | post-execution hook 写 Implementation Log | 1天 |\n| P3 | Spec Drift 分析 + verify 阶段门控 | 2天 |\n\nP0-P1 就够用了。P2-P3 是完整体验。",
+          "line_num": 89
+        },
+        {
+          "title": "与现有系统的关系",
+          "node_id": "0007",
+          "summary": "## 与现有系统的关系\n\n- **OMC notepad**: 草稿纸，临时状态。Spec 是正式契约，不替代 notepad\n- **OMC project-memory**: 跨项目长期知识。Spec 是单任务生命周期\n- **FSC task description**: 现有字段保留，spec 是它的扩展版\n- **ralplan**: 现有 plan 产出直接写入 spec 的 Plan 段，无需改流程",
+          "line_num": 100
+        },
+        {
+          "title": "预期效果",
+          "node_id": "0008",
+          "summary": "## 预期效果\n\n- Agent 自作主张减少（有 Boundaries 可查）\n- 打断人的频率降低（模糊决策先查 spec）\n- Review 质量提升（reviewer 看到的是 spec + drift，不是裸 PR）\n- 架构意图可追溯（Implementation Log 是审计链）",
+          "line_num": 107
+        }
+      ]
+    }
+  ]
+}

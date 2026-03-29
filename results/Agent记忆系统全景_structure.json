@@ -1,0 +1,64 @@
+{
+  "doc_name": "Agent记忆系统全景",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\Agent记忆系统全景.md",
+  "structure": [
+    {
+      "title": "Agent 记忆系统全景",
+      "node_id": "0000",
+      "prefix_summary": "# Agent 记忆系统全景",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "结论",
+          "node_id": "0001",
+          "summary": "## 结论\n\n**OpenViking 废弃，迁移到 memU。**\n\n原因：OpenViking 卡 13 小时写不进数据，不可靠。memU 专为 24/7 Agent 设计，跟我们的 OpenClaw/AI 自循环生态完美对接。",
+          "line_num": 9
+        },
+        {
+          "title": "赛道全景",
+          "node_id": "0002",
+          "prefix_summary": "## 赛道全景",
+          "line_num": 15,
+          "nodes": [
+            {
+              "title": "第一梯队",
+              "node_id": "0003",
+              "summary": "### 第一梯队\n\n| 项目 | ⭐ | 核心思路 | 评价 |\n|------|-----|---------|------|\n| **cognee** | 14.3k | 知识引擎，向量+图+认知科学，持续学习 | 最成熟，通用 |\n| **memU** | 13k | 24/7 常驻 Agent 记忆，文件系统式，主动意图预测 | ⭐ 选这个 |\n| **Hindsight** | 4.9k | \"学习不只记忆\"，LongMemEval SOTA | benchmark 最强 |",
+              "line_num": 17
+            },
+            {
+              "title": "第二梯队",
+              "node_id": "0004",
+              "summary": "### 第二梯队\n\n| 项目 | ⭐ | 核心思路 |\n|------|-----|---------|\n| A-MEM | 920 | NeurIPS 2025，Agentic Memory 学术标杆 |\n| CASS | 287 | 编码 Agent 程序性记忆，跨 Agent 共享 |\n| Total Recall | 232 | 五层观察式记忆，为 OpenClaw 设计，$0.10/月 |\n| Redis Agent Memory | 206 | Redis 基础，快+灵活 |\n| mcp-mem0 | 662 | MCP server 长期记忆 |",
+              "line_num": 25
+            },
+            {
+              "title": "为什么选 memU",
+              "node_id": "0005",
+              "summary": "### 为什么选 memU\n\n1. **24/7 Agent 原生** — 专为常驻 Agent 设计（OpenClaw/Clawdbot）\n2. **主动式记忆** — 预测用户意图，不用问就能行动\n3. **文件系统式结构** — 跟现有 MEMORY.md 兼容，迁移成本低\n4. **token 成本 1/10** — 缓存 insight，避免冗余 LLM 调用\n5. **README 直接提 OpenClaw** — 它就是为这个生态造的",
+              "line_num": 35
+            },
+            {
+              "title": "memU 架构",
+              "node_id": "0006",
+              "summary": "### memU 架构\n\n```\nmemory/\n├── preferences/          # 用户偏好\n├── relationships/        # 关系网络\n├── knowledge/            # 领域知识\n│   ├── domain_expertise/\n│   └── learned_skills/\n└── context/              # 当前上下文\n    ├── recent_conversations/\n    └── pending_tasks/\n```\n\n双 Agent 协作：\n- Main Agent — 处理用户任务\n- MemU Bot — 后台监控、记忆提取、意图预测、主动建议",
+              "line_num": 43
+            },
+            {
+              "title": "对比",
+              "node_id": "0007",
+              "summary": "### 对比\n\n| 维度 | OpenViking ❌ | memU ✅ |\n|------|--------------|--------|\n| 写入可靠性 | 卡 13 小时 | 稳定 |\n| 存储 | 向量 RAG | 文件系统式层级 |\n| 学习 | 只存不学 | 持续学习+意图预测 |\n| 跨 Agent | 不行 | 多 Agent 共享 |\n| token 成本 | 高 | 降 90% |\n| 24/7 | 不支持 | 原生支持 |",
+              "line_num": 61
+            }
+          ]
+        },
+        {
+          "title": "关联",
+          "node_id": "0008",
+          "summary": "## 关联\n\n- [[AI自循环系统]] — 复盘层记忆升级\n- [[NVIDIA-AI-Blueprints-研究]] — Data Flywheel 持续优化",
+          "line_num": 72
+        }
+      ]
+    }
+  ]
+}

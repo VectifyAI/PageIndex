@@ -1,0 +1,68 @@
+{
+  "doc_name": "UE5影片渲染序列、预热和首帧问题",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\UE 虚幻引擎\\UE5影片渲染序列、预热和首帧问题.md",
+  "structure": [
+    {
+      "title": "**概述**",
+      "node_id": "0000",
+      "summary": "### **概述**\n\n本文档主要讨论虚幻引擎在影片渲染过程中遇到的实时性问题，特别是渲染第1帧时由于缺乏前一帧信息而引发的问题。为了解决这一问题，影片渲染序列（MRQ）提供了多种预热选项，包括“渲染预热帧（Render Warm Up Frames）”、“引擎预热计数（Engine Warm-Up Count）”和“使用摄像机剪辑预热（Use Camera Cut for Warm Up）”。文档详细介绍了这些设置选项，并建议在大多数情况下启用“渲染预热帧”并结合使用“引擎预热计数”或“使用摄像机剪辑预热”。此外，文档还提到“渲染预热计数”是之前遗留的功能，通常可以设置为0。",
+      "line_num": 9
+    },
+    {
+      "title": "**什么时候要预热**",
+      "node_id": "0001",
+      "summary": "### **什么时候要预热**\n\n我们在处理第1帧时需要特别考虑到引擎中的部分系统，其中有许多系统需要在渲染场景时创建“场景历史”，它会积累之前的渲染帧工作。\n\n例如：\n\no 粒子模拟\n\no 布料模拟\n\no Lumen全局光照\n\no 动态模糊\n\no 时间抗锯齿/时间超分辨率",
+      "line_num": 17
+    },
+    {
+      "title": "**预热选项**",
+      "node_id": "0002",
+      "prefix_summary": "### **预热选项**\n\n该部分文档主要介绍了影片渲染队列（MRQ）的预热选项及其设置：\n\n1. **渲染预热计数（整数）**：\n   - 描述：继承功能，将画面帧发送到GPU，但不会播放Sequence。\n   \n2. **引擎渲染预热计数（整数）**：\n   - 描述：评估序列的第1帧，并让引擎为指定帧做tick，默认情况下不会发送到GPU。\n   \n3. **渲染预热帧（布尔）**：\n   - 描述：替代渲染预热计数，指示MRQ向GPU发送引擎预热计数或摄像机剪辑预热。\n   \n4. **使用摄像机剪辑预热（布尔）**：\n   - 描述：使用摄像机剪辑轨道播放起始帧之前的序列，默认情况下不会发送到GPU。\n\n此外，文档还提到可以通过添加抗锯齿设置来控制上述预热选项。",
+      "line_num": 33,
+      "nodes": [
+        {
+          "title": "** **",
+          "node_id": "0003",
+          "summary": "#### ** **",
+          "line_num": 56
+        },
+        {
+          "title": "**渲染预热计数**",
+          "node_id": "0004",
+          "summary": "#### **渲染预热计数**\n\n此功能可以用于处理TAA/TSR等仅渲染的特效，它会在正常渲染过程开始前提交额外的渲染次数（默认为32次），从而创建图像历史记录。不过这是一个遗留的选项，现在已经有了Lumen，因此不再推荐使用。",
+          "line_num": 58
+        },
+        {
+          "title": "**引擎预热计数**",
+          "node_id": "0005",
+          "summary": "该部分文档主要讨论了引擎预热计数功能及其应用场景和局限性。引擎预热计数用于处理不依赖序列回放的纯CPU预热系统，如CPU粒子和布料等。由于GPU粒子和其他渲染功能的改进，建议将此功能与渲染预热帧结合使用。引擎预热计数在序列的第1帧进行评估，并在暂停序列的情况下为指定帧数tick引擎。然而，该功能在缺乏序列开始前的数据时存在局限性，例如无法正确处理动画角色奔跑时身上的布料粒子效果。为了解决这一问题，MRQ提供了一种方法，即在第1帧之前逐帧评估序列，就像它们是关卡序列的一部分，无需写入硬盘。这需要在序列起始帧之前获得准确的数据才能正常运行，并建议与渲染预热帧结合使用。",
+          "line_num": 62
+        },
+        {
+          "title": "**渲染预热帧**",
+          "node_id": "0006",
+          "summary": "#### **渲染预热帧**\n\n指定引擎预热计数，或在GPU上渲染时指定预热帧中使用摄像机剪辑预热的摄像机剪辑。出于性能考虑，默认情况下它们会跳过在GPU上渲染。\n\n此选项会强制这些帧在GPU上渲染，因此比较适合基于GPU的效果。不过随着Lumen的全局照明、虚拟纹理以及Nanite的引入，现在我会建议你始终渲染预热帧，从而让这些系统先稳定下来。",
+          "line_num": 71
+        },
+        {
+          "title": "**使用摄像机剪辑预热**",
+          "node_id": "0007",
+          "summary": "该部分文档主要讨论了使用摄像机剪辑进行预热的关键要点：\n\n1. **摄像机剪辑的制作方式**：建议以单个镜头的形式制作摄像机剪辑，而不是在单个轨道中制作多个剪辑，以便单独评估每个镜头，避免重叠干扰。\n\n2. **预热帧数的确定**：摄像机剪辑在镜头开始前会延伸，规定了预热的帧数。用户可以根据镜头需求调整预热时间，例如在不需要太多预热的镜头中使用较短的预热时间。\n\n3. **动画和变换的预热**：动画和变换也会在镜头开始前延伸。如果对象在预热时没有正确的运动或位置，运动模糊和其他模拟效果也会受到影响。\n\n4. **预热时间建议**：建议在序列开始前将摄像机剪辑和动画延长至少1帧，但根据具体情况可能需要更多帧，因此建议尝试延长几帧以获得最佳效果。\n\n5. **示例参考**：文档提到了一些示例，其中一些在序列开始前至少延伸了5帧，供用户参考和借鉴。",
+          "line_num": 77
+        },
+        {
+          "title": "**MRQ推荐设置**",
+          "node_id": "0008",
+          "summary": "The partial document provides recommended settings for MRQ, focusing on optimizing the rendering process. It suggests enabling \"Use Camera Cut for Warm Up\" and \"Render Warm Up Frames\" in the Anti-aliasing settings. These settings allow the sequence data to be provided to the scene history, which can then be cached on the GPU for the first frame. Enabling \"Use Camera Cut for Warm Up\" ensures that the camera is evaluated from the start time of the camera cut rather than the sequence start time. \"Render Warm Up Frames\" renders frames on the GPU, which is crucial for temporal accumulation. This approach prevents frames from the camera cut start to the sequence start from being written to the hard drive, ensuring that the rendering remains synchronized with the shot's timeline.",
+          "line_num": 90
+        },
+        {
+          "title": "**备注**",
+          "node_id": "0009",
+          "summary": "The partial document discusses the behavior of MRQ when the camera clip warm-up is disabled. It explains that MRQ simulates motion blur by reverse evaluation on the first frame, evaluating frame 0, then frame 1, and finally frame 0 again. While this works for most systems, it can cause issues for others like cloth simulations. Enabling the camera clip warm-up feature disables this motion blur simulation but requires at least one frame of data before each shot. Additionally, MRQ's time sampling count function evaluates before frame 1, so it's recommended to add at least one extra frame before the content begins.",
+          "line_num": 106
+        }
+      ]
+    }
+  ]
+}

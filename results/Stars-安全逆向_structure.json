@@ -1,0 +1,62 @@
+{
+  "doc_name": "Stars-安全逆向",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\GitHub-Stars\\Stars-安全逆向.md",
+  "structure": [
+    {
+      "title": "安全逆向",
+      "node_id": "0000",
+      "prefix_summary": "# 安全逆向",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "CSS",
+          "node_id": "0001",
+          "summary": "## CSS\n\n- [dahaha-365/YaNet](https://github.com/dahaha-365/YaNet) — Yet another Internet. Mihomo覆写脚本\n- [kenzok8/openwrt-packages](https://github.com/kenzok8/openwrt-packages) — openwrt常用软件包",
+          "line_num": 4
+        },
+        {
+          "title": "Go",
+          "node_id": "0002",
+          "summary": "## Go\n\n- [netbirdio/netbird](https://github.com/netbirdio/netbird) — Connect your devices into a secure WireGuard®-based overlay network with SSO, MFA and granular acces",
+          "line_num": 9
+        },
+        {
+          "title": "Java",
+          "node_id": "0003",
+          "summary": "## Java\n\n- [NationalSecurityAgency/ghidra](https://github.com/NationalSecurityAgency/ghidra) — Ghidra is a software reverse engineering (SRE) framework",
+          "line_num": 13
+        },
+        {
+          "title": "JavaScript",
+          "node_id": "0004",
+          "summary": "## JavaScript\n\n- [Hackl0us/SS-Rule-Snippet](https://github.com/Hackl0us/SS-Rule-Snippet) — 搜集、整理、维护 Surge / Quantumult (X) / Shadowrocket / Surfboard / clash (Premium) 实用规则。\n- [qeeqbox/social-analyzer](https://github.com/qeeqbox/social-analyzer) — API, CLI, and Web App for analyzing and finding a person's profile in 1000 social media \\\\ websites",
+          "line_num": 17
+        },
+        {
+          "title": "Other",
+          "node_id": "0005",
+          "summary": "## Other\n\n- [DustinWin/proxy-tools](https://github.com/DustinWin/proxy-tools) — 自动同步 mihomo 内核、sing-box 内核、sing-box reF1nd 版内核和 Android 安装包、Dashboard 面板和 AdGuard Home 最新版\n- [imribiy/group-policy-library](https://github.com/imribiy/group-policy-library) — Useful group policy dwords for Windows 10 & 11",
+          "line_num": 22
+        },
+        {
+          "title": "Python",
+          "node_id": "0006",
+          "summary": "## Python\n\n- [lennylxx/ipv6-hosts](https://github.com/lennylxx/ipv6-hosts) — Fork of https://code.google.com/archive/p/ipv6-hosts/, focusing on automation\n- [searxng/searxng](https://github.com/searxng/searxng) — SearXNG is a free internet metasearch engine which aggregates results from various search services a",
+          "line_num": 27
+        },
+        {
+          "title": "TypeScript",
+          "node_id": "0007",
+          "summary": "## TypeScript\n\n- [KeygraphHQ/shannon](https://github.com/KeygraphHQ/shannon) — Shannon Lite is an autonomous, white-box AI pentester for web applications and APIs. It analyzes you",
+          "line_num": 32
+        },
+        {
+          "title": "Visual Basic .NET",
+          "node_id": "0008",
+          "summary": "## Visual Basic .NET\n\n- [MoscaDotTo/Winapp2](https://github.com/MoscaDotTo/Winapp2) — A database of extended cleaning routines for popular Windows PC based maintenance software.",
+          "line_num": 36
+        }
+      ]
+    }
+  ]
+}

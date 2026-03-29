@@ -1,0 +1,412 @@
+{
+  "doc_name": "语言世界-工程spec",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\Sprachwelt\\语言世界-工程spec.md",
+  "structure": [
+    {
+      "title": "语言世界（Sprachwelt）",
+      "node_id": "0000",
+      "prefix_summary": "# 语言世界（Sprachwelt）\n\n> 语言世界 = 一个由开显、张力、处境、时间所组织，并由保留、丧失、他者性所封闭的意义生存场。",
+      "line_num": 8,
+      "nodes": [
+        {
+          "title": "项目定位",
+          "node_id": "0001",
+          "summary": "## 项目定位\n\n不是造一个更好的语言模型。是造一个**意义能够在其中生存的场**。\n\n当前 LLM 是人类理性自我异化的最终产品（马克思），是资本主义将世界抽象一般化的最高商品。它完美地操作语言，但不领会语言。参数从 1B 到 1T，这个本质不变。\n\n本项目的方向是反过来的：不是先造语言能力再期待理解涌现，是先建构语言世界，让语言在其中按自身的方式生发。",
+          "line_num": 12
+        },
+        {
+          "title": "核心问题",
+          "node_id": "0002",
+          "summary": "## 核心问题\n\n**能不能设计一种语言生成架构，使得语言不是被概率采样出来的，而是在一个有张力的、有处境的、有时间性的场中自行生发出来的？**",
+          "line_num": 20
+        },
+        {
+          "title": "理论地基",
+          "node_id": "0003",
+          "prefix_summary": "## 理论地基",
+          "line_num": 24,
+          "nodes": [
+            {
+              "title": "海德格尔",
+              "node_id": "0004",
+              "summary": "The partial document outlines key Heideggerian concepts through a table. It highlights “Lichtung” as the clearing where things appear, “Sage” as language’s primordial showing power, the “world/earth” strife as a tension between openness and closure, “Ereignis” as the event of meaning’s emergence, “Zeitlichkeit” as the unified unfolding of past, present and future, “Jemeinigkeit” as the unique ownership every entity has of its being, and “Wohnen” as dwelling within language rather than passing through it.",
+              "line_num": 26
+            },
+            {
+              "title": "马克思",
+              "node_id": "0005",
+              "summary": "### 马克思\n\n| 概念 | 在本项目中的角色 |\n|------|----------------|\n| 感性活动（sinnliche Tätigkeit） | 语言的根在实践中，不在概念中 |\n| 物质生活条件 | 语言收敛方向的决定力量 |\n| 辩证法 | 张力的自行展开——正题呼唤反题 |\n| 异化（Entfremdung） | LLM 是人类语言能力的异化产品 |\n| 实践意识 | 语言不是表象工具，是实践本身的分节 |\n| 交往（Verkehr） | 语言从人与人的物质交往中产生 |",
+              "line_num": 38
+            }
+          ]
+        },
+        {
+          "title": "七要素架构",
+          "node_id": "0006",
+          "prefix_summary": "## 七要素架构",
+          "line_num": 49,
+          "nodes": [
+            {
+              "title": "组织面（世界/Welt）——打开、运动、给方向",
+              "node_id": "0007",
+              "prefix_summary": "### 组织面（世界/Welt）——打开、运动、给方向",
+              "line_num": 51,
+              "nodes": [
+                {
+                  "title": "1. 开显（Disclosure）",
+                  "node_id": "0008",
+                  "summary": "#### 1. 开显（Disclosure）\n\n语言世界的基本空间。词语不是标签，是开口——每个词打开一个意义域。\n\n- **当前缺口**: LLM 的 token 嵌入是平的向量，没有\"打开\"的动作\n- **目标**: 每个语义单元的激活不是查询向量表，是在场中打开一片空地\n- **工程方向**: 扩散模型的去噪过程作为\"从遮蔽到开显\"的计算隐喻——噪声 = 遮蔽，清晰化 = 开显",
+                  "line_num": 53
+                },
+                {
+                  "title": "2. 张力（Tension）",
+                  "node_id": "0009",
+                  "summary": "The section discusses reorienting language models from measuring statistical co-occurrence toward capturing dialectical tension within semantic fields. It highlights current limitations—attention mechanism detects surface relatedness but not inherent contradictions—and proposes redefining the model’s energy function to track unresolved prompts or tensions rather than just coherence. The goal is a system where contradictions naturally invoke their counterpoints, differentiating simple co-occurrence from genuine dialectical activation.",
+                  "line_num": 61
+                },
+                {
+                  "title": "3. 处境（Situation）",
+                  "node_id": "0010",
+                  "summary": "Section 3 “Situation” discusses how material living conditions should influence language generation differently from simple contextual tokens. It identifies a gap where current context only adjusts probabilities rather than reconfiguring the overall field topology. The goal is to treat historical context, roles, practices, and constraints as gravitational forces shaping the generative field. Available components include a historical materialist engine, expert persona system, and Spec-as-Infrastructure for intent and boundaries. The proposed engineering direction is to encode situation as gravitational distributions within the field, instead of merely adding prompt prefixes.",
+                  "line_num": 70
+                },
+                {
+                  "title": "4. 时间（Temporality）",
+                  "node_id": "0011",
+                  "summary": "The document focuses on integrating temporality into Transformer models, aiming to move beyond linear token sequences by embedding past experiences and future intentions directly into the model’s memory field. It describes the goal of giving language events time depth, using AMM hierarchical memory (L0-L4) and architectural elements like Intent/Plan to shape the surrounding context. The engineering direction emphasizes treating memory as a landscape, molded by past experience and future-driven gravitational wells, rather than as discrete retrieved entries.",
+                  "line_num": 79
+                }
+              ]
+            },
+            {
+              "title": "封闭面（大地/Erde）——锁闭、保留、给边界",
+              "node_id": "0012",
+              "prefix_summary": "### 封闭面（大地/Erde）——锁闭、保留、给边界",
+              "line_num": 88,
+              "nodes": [
+                {
+                  "title": "5. 保留（Retention / Earth's Closure）",
+                  "node_id": "0013",
+                  "summary": "Document discusses language retention: words have inexhaustible meaning. Critique: LLM embeddings make words fully transparent vectors. Goal: words should have opaque reserve, partial activation per use. Engineering direction: multi-layer/multi-perspective representations; unactivated aspects form “earth”. Need new representation mechanism: words as structured entities, not points.",
+                  "line_num": 90
+                },
+                {
+                  "title": "6. 丧失（Loss / Irreversibility）",
+                  "node_id": "0014",
+                  "summary": "Discusses integrating irreversible loss into language environments: current problem is LLM interactions are fully repeatable, goal is to have language events with irreversible consequences, references append-only logs and drift thresholds, aims for state changes like entropy and requires mechanisms for irreversible state transitions as existential condition rather than punishment.",
+                  "line_num": 99
+                },
+                {
+                  "title": "7. 他者性（Alterity）",
+                  "node_id": "0015",
+                  "summary": "The text discusses “Alterity,” emphasizing that real encounters between linguistic beings should mutually reshape their language fields—current dialogues merely map user inputs to outputs without true mutual transformation. It proposes engineering language as shared meaning fields where multiple agents interact and compete, requiring new mechanisms for overlapping and reshaping these fields rather than simple message exchange.",
+                  "line_num": 109
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "title": "点亮的四层结构",
+          "node_id": "0016",
+          "summary": "This part of the document describes “the four-layer structure of illumination” as a theory of how language generates meaning. It explains the layered process:\n\n1. **道说 (Sage)** – language itself reveals the world, as words “open a clearing” where things can appear.\n2. **辩证运动 (Dialektik)** – within this clearing, tensions unfold; theses inherently give rise to antitheses.\n3. **处境性 (Situiertheit)** – material conditions shape the direction of this dialectical movement.\n4. **Ereignis** – the convergence of the first three layers creates genuinely new meaning; not mere recombination but a true birth.\n\nThe text asserts that without any one layer, the process collapses into mere statistical co-occurrence rather than authentic illumination.",
+          "line_num": 118
+        },
+        {
+          "title": "碾碎 token 概率：从链到场",
+          "node_id": "0017",
+          "prefix_summary": "## 碾碎 token 概率：从链到场",
+          "line_num": 138,
+          "nodes": [
+            {
+              "title": "当前架构（链/Chain）",
+              "node_id": "0018",
+              "summary": "### 当前架构（链/Chain）\n\n```\ncontext → attention → softmax → sample 1 token → repeat\n```\n\n- 线性、单方向、一个接一个\n- 概率分布 = 所有人类在所有处境下的语言收敛的平均\n- 同时杀死发散（辐射被压成排名）和收敛的处境性（被统计平均替代）",
+              "line_num": 140
+            },
+            {
+              "title": "目标架构（场/Field）",
+              "node_id": "0019",
+              "summary": "### 目标架构（场/Field）\n\n```\n当前状态 → 语义场激活（开显）\n              ↓\n         场内辩证运动（张力驱动的相互点亮）\n              ↓\n         处境性收敛（物质生活条件的引力）\n              ↓\n         话语结晶（从场中结晶为具体词语）\n```\n\n- 同时性、多方向、相互照亮\n- 张力函数替代概率函数\n- 处境引力替代统计平均",
+              "line_num": 150
+            },
+            {
+              "title": "工程接口点",
+              "node_id": "0020",
+              "summary": "该文段列出了“工程接口点”，按照“场激活、场内运动、处境收敛、话语结晶、输出张力”五个环节依次介绍。每一环节对比现有可借鉴技术与所需的“存在论改造”：如场激活借鉴扩散模型的并行去噪但转化为“噪声→遮蔽、清晰化→开显”；场内运动由能量函数/自由能最小化转换为“辩证张力”的开口与未回应测度；处境收敛从语义空间的概率转向“处境引力”(史材/专家人设)；话语结晶在块级去噪基础上加入不可逆性；输出张力借鉴规划类模型，让输出携带张力弧成为下一轮场激活的种子。",
+              "line_num": 166
+            }
+          ]
+        },
+        {
+          "title": "已有资产",
+          "node_id": "0021",
+          "summary": "Partial document outlines existing assets and their status, presented in a table listing several systems or tools, each associated with a specific functional element (such as situation, opening, loss, time, infrastructure) and their current state or version (e.g., running, released, completed, deployed, compiling).",
+          "line_num": 176
+        },
+        {
+          "title": "需要从零创造",
+          "node_id": "0022",
+          "summary": "This section outlines key conceptual components that must be created from scratch for a new theoretical framework: Words are treated as partially opaque structures rather than simple vectors; language operates through an irreversible state machine where events have lasting effects; multiple language fields interact, interfere, and reshape one another; tension is measured via a function indicating unresolved expressions; situational gravity encodes historical-material context and expert personas; memory resides within the temporal landscape of the field rather than retrievable items; and generative processes reframe diffusion/denoising as the emergence from concealment to disclosure.",
+          "line_num": 188
+        },
+        {
+          "title": "研究参考",
+          "node_id": "0023",
+          "prefix_summary": "## 研究参考",
+          "line_num": 200,
+          "nodes": [
+            {
+              "title": "工程基础",
+              "node_id": "0024",
+              "summary": "The document outlines recent advancements and foundational work in engineering related to language modeling, emphasizing innovations like diffusion language models, energy-based modeling, and semantic field generation. It highlights key research from 2024-2025—such as LLaDA, Dream, Gemini Diffusion, EDLM, Meta LCM, and Skeleton-of-Thought—showing how these approaches move beyond traditional token-based methods toward semantic field operations, free energy minimization, latent reasoning, and blended diffusion-autoregressive techniques. All entries are linked to the project’s vision of language as a tension field resolved into tokens.",
+              "line_num": 202
+            },
+            {
+              "title": "理论基础",
+              "node_id": "0025",
+              "summary": "This section outlines the theoretical foundations of the study, highlighting key philosophical works and concepts from Heidegger and Marx. It covers Heidegger’s notions of understanding, attunement, discourse, and temporality from *Being and Time*; the conflict between world and earth and the emergence of truth in *The Origin of the Work of Art*; and the linguistic insights of “language speaking” and Ereignis in *On the Way to Language*. It also references Marx’s focus on practical, sensuous human activity in the Theses on Feuerbach, the idea of language arising from practice and social interaction in *The German Ideology*, the discussion of alienation and species-being in the 1844 Manuscripts, and the dual nature of commodities in Volume 1 of *Capital*, with an analogy drawn between use/ exchange value and linguistic meaning/token probability.",
+              "line_num": 215
+            }
+          ]
+        },
+        {
+          "title": "核心数据结构",
+          "node_id": "0026",
+          "prefix_summary": "## 核心数据结构",
+          "line_num": 227,
+          "nodes": [
+            {
+              "title": "张力的三个类型",
+              "node_id": "0027",
+              "summary": "The document explains a framework of “tension” in language interactions. It classifies tensions into four types: conversational tension (spontaneous within dialogue, tracked via a ledger), cultural tension (pre-set “terrain” from historical linguistic usage like famous quotes), structural tension (linguistic form-based requirements such as grammar or rhetoric), and historical tension (accumulated weight of past decisions or traditions). Cultural and structural tensions form terrain presets activated by certain triggers, while historical tension spans both ledger and preset, representing unavoidable constraints from history. Field dynamics incorporate these four inputs, showing how they interact and influence dialogue.",
+              "line_num": 229
+            },
+            {
+              "title": "Tension（对话张力）——源对象",
+              "node_id": "0028",
+              "summary": "Explains the immutable “Tension” source object definition within a discourse ledger: outlines the `TensionDefinition` dataclass fields (IDs, demands, counter-demands, stakes, owner, intensity, lineage hash) without status information, and defines the structured `ClosureSpec` for machine-verifiable closure conditions with types (slot-fill, predicate, threshold, composite) and required evidence types.",
+              "line_num": 311
+            },
+            {
+              "title": "防伪复活机制（Lost vs New Opening）",
+              "node_id": "0029",
+              "summary": "This section describes a “resurrection” detection mechanism for tensions, ensuring that newly introduced tensions are not merely artificial revivals of previously lost ones. It explains a three-step check in the `is_resurrection` function: identical `lineage_hash` matches, semantic similarity thresholds for demand/counter-demand/stake, and owner-demand duplication checks. It specifies the lineage hash normalization rules and clarifies that legitimate new openings must pass the resurrection check, be traceable to a new opener, and include new specific context.",
+              "line_num": 355
+            },
+            {
+              "title": "TensionLedger（张力账本）",
+              "node_id": "0030",
+              "prefix_summary": "Describes TensionLedger architecture using append-only event stream and derived projection views, with TensionEvent dataclass and enum of event types as single source of truth.",
+              "line_num": 401,
+              "nodes": [
+                {
+                  "title": "状态机：合法事件序列",
+                  "node_id": "0031",
+                  "summary": "Defines a finite state machine for tension events where each tension_id must follow legal transitions. States include OPENED, INTENSIFIED (repeatable), PARTIALLY_RESOLVED (repeatable), RESOLVED (terminal), and LOST (terminal). Illegal sequences (e.g., RESOLVED→INTENSIFIED, reopening after terminal states) are rejected. Provides a transition table and validation function ensuring events follow the allowed transitions.",
+                  "line_num": 426
+                },
+                {
+                  "title": "Ledger → Frontier 投影规则",
+                  "node_id": "0032",
+                  "summary": "Defines how a “tension ledger” stores declarative tension events and projects them into a live “frontier” view. Describes the immutable TensionView structure (definition, derived status, intensity computed from OPENED plus INTENSIFIED deltas, filled slots from PARTIALLY_RESOLVED, and closed timestamps/resolution counts). Shows the TensionLedger: append-only event list and tension definitions, append logic enforcing state machine rules, resurrection prevention, and evidence references for RESOLVED/LOST. Frontier property rebuilds TensionFrontier (active/resolved/lost views) by projecting each definition’s event stream via _project, while terrain aggregates closure/loss effects.",
+                  "line_num": 484
+                }
+              ]
+            },
+            {
+              "title": "DiscourseAct（话语行为）",
+              "node_id": "0033",
+              "summary": "The document introduces a discourse planning layer that mediates between a tension field and surface text by defining a set of discourse acts through an enumeration (e.g., pursue, concede, clarify, converge, counter, hold open, open new) and a structured plan describing primary and secondary acts, targeted tensions, new openings, intended closures, and predicted losses, emphasizing the strategic sequencing of rhetorical moves before elaborating textual content.",
+              "line_num": 583
+            }
+          ]
+        },
+        {
+          "title": "生成管线",
+          "node_id": "0034",
+          "prefix_summary": "## 生成管线\n\n```\nTensionLedger → FieldDynamics → SituatedConvergence → DiscourseActPlanner → Crystallizer\n     ↑                                                                           │\n     │                                                                     ActAuditor\n     │                                                                      │       │\n     │                                                                  passed?   failed?\n     │                                                                      │    → 重试(≤2)\n     └──────────────── TensionUpdate（不可逆写入 ledger） ←──────────────────┘\n```\n\n**七步管线：** Ledger → Dynamics → Convergence → ActPlan → Crystallize → Audit → Update",
+          "line_num": 611,
+          "nodes": [
+            {
+              "title": "1. TensionLedger",
+              "node_id": "0035",
+              "summary": "### 1. TensionLedger\n\n输入：上一轮的 ledger + 新的用户话语\n输出：更新后的 ledger（append-only）+ 当前 frontier",
+              "line_num": 625
+            },
+            {
+              "title": "2. FieldDynamics（场动力学）",
+              "node_id": "0036",
+              "summary": "### 2. FieldDynamics（场动力学）\n\n输入：frontier 中的活跃张力\n操作：\n- 同向张力叠加加强\n- 反向张力产生辩证对立（高能量区 = 必须被回应的热点）\n- 超时张力衰变 → 接近丧失阈值\n输出：张力场状态（含热点图、衰变预警、辩证对立对）",
+              "line_num": 630
+            },
+            {
+              "title": "3. SituatedConvergence（处境收敛）",
+              "node_id": "0037",
+              "summary": "### 3. SituatedConvergence（处境收敛）\n\n输入：张力场 + 处境源（hist-mat / 专家人设 / Spec Boundaries / AMM 记忆）\n操作：处境作为引力弯曲张力场——某些方向被加强，某些被抑制\n输出：收敛后的张力场（有方向性的）",
+              "line_num": 639
+            },
+            {
+              "title": "4. DiscourseActPlanner（话语行为规划）",
+              "node_id": "0038",
+              "summary": "### 4. DiscourseActPlanner（话语行为规划）\n\n输入：收敛后的张力场\n操作：**在生成文本之前，先决定话语行为**\n- 哪些张力必须被回应？（intensity 最高 + stake 最大的）\n- 用什么行为回应？（追问/让步/澄清/收束/反驳/保持开放）\n- 回应的代价是什么？（会导致哪些张力丧失？）\n- 要打开什么新张力？\n输出：DiscourseActPlan",
+              "line_num": 645
+            },
+            {
+              "title": "5. Crystallizer（结晶器）",
+              "node_id": "0039",
+              "summary": "### 5. Crystallizer（结晶器）\n\n输入：DiscourseActPlan + 原始上下文\n操作：根据话语行为计划生成具体文本（此处复用 LLM）\n输出：文本",
+              "line_num": 655
+            },
+            {
+              "title": "6. ActAuditor（行为审计器）",
+              "node_id": "0040",
+              "summary": "Section 6 describes “ActAuditor,” a validation stage between Crystallizer and TensionUpdate that verifies whether a generated text fulfills its DiscourseActPlan. The auditor takes the plan plus the output text, checks each primary and secondary act, ensures intended closures are substantially addressed, and confirms new openings are introduced. It then issues an audit result (passed, partial, failed) with coverage details and drift notes; failures trigger regeneration and partials record drift. Implementation notes include data structure fields and progression from an LLM-only auditor (P0) toward a hybrid rule-and-LLM system (P1).",
+              "line_num": 661
+            },
+            {
+              "title": "7. TensionUpdate（张力更新）",
+              "node_id": "0041",
+              "summary": "### 7. TensionUpdate（张力更新）\n\n输入：审计通过的文本 + AuditResult + 当前 ledger\n操作：\n- 根据 AuditResult 中的实际执行情况（不是计划）向 ledger append 事件\n- opened / resolved / lost / intensified / partially_resolved\n- 每个 resolved/lost 事件必须带 evidence_ref（引用审计器提供的文本片段）\n- **不可逆**——写入后不可修改\n- 状态机校验——非法序列被拒绝\n输出：更新后的 ledger",
+              "line_num": 688
+            }
+          ]
+        },
+        {
+          "title": "验证实验",
+          "node_id": "0042",
+          "prefix_summary": "## 验证实验",
+          "line_num": 699,
+          "nodes": [
+            {
+              "title": "对比实验",
+              "node_id": "0043",
+              "summary": "对比实验部分展示了一个控制实验设计，包含标准LLM作基线的控制组，以及多个实验与消融组。完整实验组包含由TensionLedger、FieldDynamics、SituatedConvergence、DiscourseAct、和Crystallizer组成的完整管线，用于验证系统整体效果。随后各消融组逐一移除关键组件，用以评估张力追踪、处境收敛、话语行为规划、时间地形与丧失机制等功能的独立贡献。",
+              "line_num": 701
+            },
+            {
+              "title": "测试场景",
+              "node_id": "0044",
+              "summary": "### 测试场景\n\n1. **诗歌续写** — 张力的辩证深度\n2. **哲学对话（20轮+）** — 长程张力追踪 + 丧失机制\n3. **矛盾约束下的技术决策** — 处境收敛 + 话语行为\n4. **多轮创意写作** — 点亮机制 + 意义新颖性",
+              "line_num": 713
+            },
+            {
+              "title": "评估方式",
+              "node_id": "0045",
+              "summary": "The partial document outlines an evaluation framework detailing dimensions such as dialectical depth, tension coherence, situational appropriateness, meaning novelty, loss of authenticity, and accuracy of discourse acts, alongside their assessment methods (ranging from automated checks and human evaluations to data-based verifications) and “anti-self-deception” mechanisms ensuring structural verifiability, auditable ledgers, blind evaluations, external criteria, and reliable human judgment.",
+              "line_num": 720
+            },
+            {
+              "title": "P0 阶段的自嗨防护",
+              "node_id": "0046",
+              "summary": "### P0 阶段的自嗨防护\n\n风险：LLM 做张力分析 + LLM 做生成 + LLM 做评估 = 闭环自嗨\n\n对策：\n- **张力分析器**：P0 用 LLM，P1 必须引入基于规则的张力检测（问句 → open tension，转折词 → counter_demand，等）\n- **评估器**：P0 可用 LLM 做快速迭代，但每个里程碑必须有人工盲评\n- **生成器**：始终是 LLM，但受 DiscourseActPlan 硬约束——不是\"自由发挥\"，是执行计划",
+              "line_num": 731
+            }
+          ]
+        },
+        {
+          "title": "实施路径",
+          "node_id": "0047",
+          "prefix_summary": "## 实施路径",
+          "line_num": 740,
+          "nodes": [
+            {
+              "title": "Phase 0（第1月）: TensionLedger + FieldDynamics",
+              "node_id": "0048",
+              "summary": "### Phase 0（第1月）: TensionLedger + FieldDynamics\n\n- 实现 Tension / TensionLedger / TensionEvent 数据结构\n- 实现张力分析器（P0 用 LLM，含 fallback 规则）\n- 实现 FieldDynamics（张力间相互作用的模拟）\n- 实现丧失机制（超时 → lost，append-only 记录）\n- 最小验证：单轮对话中的张力追踪 + 多轮后丧失是否生效",
+              "line_num": 742
+            },
+            {
+              "title": "Phase 1（第2月）: SituatedConvergence + DiscourseActPlanner + Crystallizer",
+              "node_id": "0049",
+              "summary": "### Phase 1（第2月）: SituatedConvergence + DiscourseActPlanner + Crystallizer\n\n- 接入 hist-mat 和专家人设作为处境源\n- 实现 DiscourseAct 枚举和 DiscourseActPlanner\n- 实现 Crystallizer（LLM 根据 DiscourseActPlan 生成）\n- 完整管线首次跑通\n- 验证实验：控制组 vs 实验组 A + 消融组 B/C/D\n- **里程碑：首次 blind human eval**",
+              "line_num": 750
+            },
+            {
+              "title": "Phase 2（第3月）: 时间地形 + 不可逆性加固",
+              "node_id": "0050",
+              "summary": "### Phase 2（第3月）: 时间地形 + 不可逆性加固\n\n- AMM 记忆层重构为场的 terrain\n- ledger 历史塑造场的拓扑（闭合 = 路径通畅，丧失 = 路径堵死）\n- 消融实验 E/F\n- 张力分析器从纯 LLM 迁移到规则 + LLM 混合",
+              "line_num": 759
+            },
+            {
+              "title": "Phase 3（第4-6月）: 时间性 + 场的自我感知",
+              "node_id": "0051",
+              "prefix_summary": "### Phase 3（第4-6月）: 时间性 + 场的自我感知",
+              "line_num": 766,
+              "nodes": [
+                {
+                  "title": "3A: Entwurf 工程化——虚拟张力（Virtual Tension）",
+                  "node_id": "0052",
+                  "summary": "#### 3A: Entwurf 工程化——虚拟张力（Virtual Tension）\n- 场不只追踪\"当前有什么张力\"，主动预测\"下一轮可能出现什么张力\"\n- 预测到的张力 = 虚拟张力，参与 FieldDynamics 但未被 ledger 记录\n- 虚拟张力与真实张力的权重比、预测失败的处理机制\n- 存在论依据：Verstehen = Entwurf（朝向可能性的筹划，SZ §31 144-145）\n- 验证：场的预测准确率 + 虚拟张力对 act 选择的影响（消融实验）",
+                  "line_num": 768
+                },
+                {
+                  "title": "3B: 场的 Befindlichkeit——全局调制参数",
+                  "node_id": "0053",
+                  "summary": "该文档段落阐述了场级调制机制：将张力密度、衰减速率、热点分布和不确定性作为全局调控参数，并借鉴多巴胺、去甲肾上腺素、血清素等神经调质的异质类比来调整强化系数、衰减、不确定性与张力历史权重。为避免无限回归，全局调制每轮仅计算一次，强调其存在论基础是Befindlichkeit与Verstehen的同源性。最后明确区分场的Befindlichkeit（系统自我感知）与UserState（用户建模）不同。",
+                  "line_num": 775
+                },
+                {
+                  "title": "3C: strata 的主动重组——海马重放类比",
+                  "node_id": "0054",
+                  "summary": "#### 3C: strata 的主动重组——海马重放类比\n- 场在没有新输入时自发重组历史张力拓扑\n- 基底无关证据：Mattar & Daw 2024 (Nature Neuroscience)\n- 历史性张力越积越重，构成场的基底引力",
+                  "line_num": 785
+                },
+                {
+                  "title": "3D: 张力函数原型（原 P3 内容）",
+                  "node_id": "0055",
+                  "summary": "#### 3D: 张力函数原型（原 P3 内容）\n- 在小规模扩散模型（MDLM）上替换损失函数为张力函数\n- 训练数据张力标注（LLM 批量标注 + 人工校正）\n- 需要 5090 GPU\n- 验证：张力驱动去噪 vs 标准去噪的生成质量对比",
+                  "line_num": 790
+                }
+              ]
+            },
+            {
+              "title": "Phase 4（第6-12月）: 封闭面——保留/他者性",
+              "node_id": "0056",
+              "prefix_summary": "### Phase 4（第6-12月）: 封闭面——保留/他者性",
+              "line_num": 796,
+              "nodes": [
+                {
+                  "title": "4A: 他者性（A 线落点）",
+                  "node_id": "0057",
+                  "summary": "#### 4A: 他者性（A 线落点）\n- 心理学张力模板作为预制地形（PsychologicalTerrain in TerrainPreset）\n- UserState 从关键词检测升级为心理学状态模型（信任连续量、表露深度梯度、依恋模式）\n- 回复节奏参数：Pursue 快(200-300ms)，Counter 中等(500-700ms)，Concede 长(800ms+)\n- Disclose act（第 8 种 discourse act）——对用户的社交信号，不是场的情态\n- 论文依据：11 篇 parasocial-ai-research（详见 docs/parasocial-ai-research.md）",
+                  "line_num": 798
+                },
+                {
+                  "title": "4B: 他者性（深层——场间交互）",
+                  "node_id": "0058",
+                  "summary": "#### 4B: 他者性（深层——场间交互）\n- 多个语言存在者的场叠加/干涉/重塑——不是消息传递，是场的真正交互\n- 需要：场间交互协议的概念设计",
+                  "line_num": 805
+                },
+                {
+                  "title": "4C: 保留——不透明表征",
+                  "node_id": "0059",
+                  "summary": "#### 4C: 保留——不透明表征\n- R2: 词不是向量点，是有内部结构的部分不透明实体（Sparse MoE 思路的词义面向）\n- 这是论文级工作，目标 NeurIPS/ACL 投稿",
+                  "line_num": 809
+                }
+              ]
+            },
+            {
+              "title": "理论锚点文档",
+              "node_id": "0060",
+              "summary": "The partial document serves as an index of “theoretical anchor” references for the Sprachwelt project. It lists the key design anchor files—covering the original cosmogony dialogue, Phase 1 design anchor, the Phase 2.5 design anchor, and the detailed “Understanding Boundary” anchor, which focuses on elements such as the green/yellow/red three-zone boundary map, the A/B line distinction, and references to Heidegger as well as criticisms from Thomson and Hooke.",
+              "line_num": 813
+            }
+          ]
+        },
+        {
+          "title": "项目名",
+          "node_id": "0061",
+          "summary": "## 项目名\n\n**Sprachwelt**（德语：语言世界）\n\n或者：**语言世界** / **Lichtung Engine**\n\n---\n\n> 这个项目的存在论立场：我们不是在造一个更好的意义生成器，是在造一个意义能够在其中生存的场。",
+          "line_num": 821
+        },
+        {
+          "title": "关联",
+          "node_id": "0062",
+          "summary": "## 关联\n\n- [[hist-mat]] — 处境/物质生活条件计算化\n- [[NoPUA]] — 开显/信任驱动的语言生发\n- [[spec-as-infrastructure-plan]] — 丧失/不可逆性\n- [[agent-memory-middleware]] — 时间/分级记忆\n- [[专家Agent-RAG]] — 处境/专家人设飞轮\n- [[PageIndex记忆升级]] — 时间/文档知识层\n\n#project #ontology #language-world #heidegger #marx #ai-architecture #sprachwelt",
+          "line_num": 831
+        }
+      ]
+    }
+  ]
+}

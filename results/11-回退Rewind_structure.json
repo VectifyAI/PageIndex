@@ -1,0 +1,56 @@
+{
+  "doc_name": "11-回退Rewind",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\ClaudeLog-干货\\11-回退Rewind.md",
+  "structure": [
+    {
+      "title": "回退 (Rewind)",
+      "node_id": "0000",
+      "prefix_summary": "# 回退 (Rewind)\n\n> 原文：[claudelog.com/mechanics/rewind](https://claudelog.com/mechanics/rewind)",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "概述",
+          "node_id": "0001",
+          "summary": "## 概述\n\nRewind（v2.0.0+）允许你回退到之前的对话点，同时还原代码状态，无需丢失整个 session。",
+          "line_num": 5
+        },
+        {
+          "title": "激活方式",
+          "node_id": "0002",
+          "summary": "## 激活方式\n\n- **双击 Esc**\n- `/rewind` 命令",
+          "line_num": 9
+        },
+        {
+          "title": "工作原理",
+          "node_id": "0003",
+          "summary": "## 工作原理\n\n双重还原：\n1. **代码还原** — 撤销选定点之后的文件编辑、写入和删除\n2. **上下文还原** — 裁剪对话历史到该点\n3. **保留** — 之前的所有工作和上下文完好无损\n\n界面会显示对话历史和文件 diff，你选择一个对话点，还原到该轮**之前**的状态。",
+          "line_num": 14
+        },
+        {
+          "title": "无法回退的操作",
+          "node_id": "0004",
+          "summary": "## 无法回退的操作\n\n- 系统级 bash 命令（`git push`, `npm publish`）\n- 数据库变更或 API 调用\n- 网络操作\n- Claude Code 外部的手动修改\n- 时间敏感的服务交互",
+          "line_num": 23
+        },
+        {
+          "title": "最佳使用时机",
+          "node_id": "0005",
+          "summary": "## 最佳使用时机\n\n- 误解在多轮对话中逐渐升级后\n- 实现方法被证明不可行时\n- 意外的破坏性变更发生后",
+          "line_num": 31
+        },
+        {
+          "title": "安全增强",
+          "node_id": "0006",
+          "summary": "## 安全增强\n\n与 Plan Mode 结合使用：高风险操作先计划、再执行、如有问题再 rewind。多层保护。",
+          "line_num": 37
+        },
+        {
+          "title": "我的理解",
+          "node_id": "0007",
+          "summary": "## 我的理解\n\nRewind 是 Claude Code 的 `git reset` — 但同时重置对话上下文和文件系统。\n\n关键区别：\n- `Ctrl+Z`（编辑器撤销）= 只撤销文件修改\n- `git reset` = 只回退 git 历史\n- **Rewind = 撤销文件 + 回退对话上下文**（Claude \"忘记\"回退点之后的所有事）\n\n这意味着 rewind 之后，Claude 不知道你之前尝试过什么——如果你想让它\"避开之前失败的方案\"，需要在 rewind 后手动告诉它。",
+          "line_num": 41
+        }
+      ]
+    }
+  ]
+}

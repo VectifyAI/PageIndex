@@ -1,0 +1,108 @@
+{
+  "doc_name": "通用设置",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\SillyTavern 官方文档\\使用方法\\通用设置.md",
+  "structure": [
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/common-settings/#context-settings)上下文设置",
+      "node_id": "0000",
+      "prefix_summary": "## [#](https://docs.sillytavern.app/usage/common-settings/#context-settings)上下文设置",
+      "line_num": 9,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/common-settings/#response-tokens)响应（令牌）",
+          "node_id": "0001",
+          "summary": "### [#](https://docs.sillytavern.app/usage/common-settings/#response-tokens)响应（令牌）\n\nAPI 将生成用于响应的最大令牌数。\n\n- 响应长度越长，生成响应所需的时间就越长。\n\n- 如果 API 支持，您可以启用在生成响应时逐位显示响应。`Streaming`\n\n- 关闭时，响应完成后将一次性显示。`Streaming`",
+          "line_num": 11
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/common-settings/#context-tokens)上下文（令牌）",
+          "node_id": "0002",
+          "summary": "### [#](https://docs.sillytavern.app/usage/common-settings/#context-tokens)上下文（令牌）\n\nSillyTavern 将作为提示发送到 API 的最大令牌数减去响应长度。\n\n- 上下文包括角色信息、系统提示、聊天记录等。\n\n- 消息之间的虚线表示聊天的上下文范围。该行上方的消息不会发送到 AI。\n\n- 要在生成消息后查看上下文的组成，请单击消息选项（展开菜单并单击带衬线的方形图标）。`Prompt Itemization...`",
+          "line_num": 21
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/common-settings/#sampler-parameters)采样器参数",
+      "node_id": "0003",
+      "prefix_summary": "## [#](https://docs.sillytavern.app/usage/common-settings/#sampler-parameters)采样器参数",
+      "line_num": 31,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/common-settings/#temperature)温度",
+          "node_id": "0004",
+          "summary": "### [#](https://docs.sillytavern.app/usage/common-settings/#temperature)温度\n\n控制生成文本的随机性。\n\n- 价值较低：回复更合乎逻辑，但创意更差。\n\n- 更高的价值：回答更有创意，但逻辑性更差。",
+          "line_num": 33
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/common-settings/#repetition-penalty)重复处罚",
+          "node_id": "0005",
+          "prefix_summary": "### [#](https://docs.sillytavern.app/usage/common-settings/#repetition-penalty)重复处罚\n\n尝试通过根据令牌在上下文中出现的频率来惩罚令牌来遏制重复。\n\n- 有时，如果角色专注于某事或重复相同的短语，增加此参数会有所帮助。\n\n- 如果设置得太高，此参数将中断响应。除非你知道自己在做什么，否则最好不要超过。`1.15`\n\n将该值设置为 1 以禁用其效果。",
+          "line_num": 41,
+          "nodes": [
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/common-settings/#repetition-penalty-range)重复惩罚范围",
+              "node_id": "0006",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/common-settings/#repetition-penalty-range)重复惩罚范围\n\n上次生成的令牌中有多少个令牌将被考虑用于重复惩罚。如果设置得太高，这可能会破坏响应，因为像“the、a、and”等常用词将受到最大的惩罚。\n\n将该值设置为 0 以禁用其效果。",
+              "line_num": 51
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/common-settings/#repetition-penalty-slope)重复惩罚斜率",
+              "node_id": "0007",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/common-settings/#repetition-penalty-slope)重复惩罚斜率\n\n如果 this 和 都大于 0，则重复惩罚将在提示结束时产生更大的影响。该值越高，效果越强。`Repetition Penalty Range`\n\n将该值设置为 0 以禁用其效果。",
+              "line_num": 57
+            }
+          ]
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/common-settings/#top-k)顶部 K",
+          "node_id": "0008",
+          "summary": "### [#](https://docs.sillytavern.app/usage/common-settings/#top-k)顶部 K\n\n将令牌池限制为 K 个最有可能的令牌。数字越小，越一致，但创意越差。\n\n将该值设置为 0 以禁用其效果。",
+          "line_num": 63
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/common-settings/#top-p)顶部 P",
+          "node_id": "0009",
+          "summary": "### [#](https://docs.sillytavern.app/usage/common-settings/#top-p)顶部 P\n\n将令牌池限制为令牌池的概率加起来为 P 所需的令牌数。数字越小，越一致，但创意越差。\n\n将该值设置为 1 以禁用其效果。",
+          "line_num": 69
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/common-settings/#typical-p)典型 P",
+          "node_id": "0010",
+          "summary": "### [#](https://docs.sillytavern.app/usage/common-settings/#typical-p)典型 P\n\n从可能的令牌列表中随机选择令牌，每个令牌被选中的几率相等。产生更多样化的响应，但也可能不太连贯。\n\n将该值设置为 1 以禁用其效果。",
+          "line_num": 75
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/common-settings/#min-p)最小 P",
+          "node_id": "0011",
+          "summary": "### [#](https://docs.sillytavern.app/usage/common-settings/#min-p)最小 P\n\n通过切断相对于顶级令牌的低概率令牌来限制令牌池。产生更连贯的反应，但如果设置得太高，也会加重重复。\n\n- 在低值（如 ）下效果最好，但可以设置为高值。例如：`0.1-0.01TemperatureTemperature: 5, Min P: 0.5`\n\n将该值设置为 0 以禁用其效果。",
+          "line_num": 81
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/common-settings/#top-a)顶部 A",
+          "node_id": "0012",
+          "summary": "### [#](https://docs.sillytavern.app/usage/common-settings/#top-a)顶部 A\n\n从最可能的选项中选择的代币数量是根据选项的似然分布自动确定的，但它不是选择 or 代币，而是选择概率高于特定阈值的所有代币。`Top PTop K`\n\n将该值设置为 0 以禁用其效果。",
+          "line_num": 89
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/common-settings/#tail-free-sampling)无尾采样",
+          "node_id": "0013",
+          "summary": "### [#](https://docs.sillytavern.app/usage/common-settings/#tail-free-sampling)无尾采样\n\n此设置在文本生成过程中从考虑中删除最不可能的标记，这可以提高生成文本的质量和连贯性。\n\n将该值设置为 1 以禁用其效果。",
+          "line_num": 95
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/common-settings/#smoothing-factor)平滑因子",
+          "node_id": "0014",
+          "summary": "### [#](https://docs.sillytavern.app/usage/common-settings/#smoothing-factor)平滑因子\n\n使用二次变换增加高概率令牌的可能性，同时降低低概率令牌的可能性。旨在产生更具创造性的回应，无论 .`Temperature`\n\n- 在没有截断采样器（如 、 、 等）的情况下效果最佳。`Top KTop PMin P`\n\n将该值设置为 0 以禁用其效果。",
+          "line_num": 101
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/common-settings/#dynamic-temperature)动态温度",
+          "node_id": "0015",
+          "summary": "### [#](https://docs.sillytavern.app/usage/common-settings/#dynamic-temperature)动态温度\n\n根据顶部令牌的可能性动态缩放温度。旨在在不牺牲连贯性的情况下产生更具创造性的产出。\n\n- 接受从最小到最大的温度范围。例如：和`Minimum Temp: 0.75Minimum Temp: 1.25`\n\n- `Exponent`应用基于顶部标记的指数曲线。\n\n取消勾选以禁用其效果。",
+          "line_num": 109
+        }
+      ]
+    }
+  ]
+}

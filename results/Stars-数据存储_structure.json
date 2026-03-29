@@ -1,0 +1,68 @@
+{
+  "doc_name": "Stars-数据存储",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\GitHub-Stars\\Stars-数据存储.md",
+  "structure": [
+    {
+      "title": "数据存储",
+      "node_id": "0000",
+      "prefix_summary": "# 数据存储",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "C",
+          "node_id": "0001",
+          "summary": "## C\n\n- [timescale/timescaledb](https://github.com/timescale/timescaledb) — A time-series database for high-performance real-time analytics packaged as a Postgres extension",
+          "line_num": 4
+        },
+        {
+          "title": "C#",
+          "node_id": "0002",
+          "summary": "## C#\n\n- [XCharts-Team/XCharts](https://github.com/XCharts-Team/XCharts) — A charting and data visualization library for Unity.   Unity数据可视化图表插件。",
+          "line_num": 8
+        },
+        {
+          "title": "C++",
+          "node_id": "0003",
+          "summary": "## C++\n\n- [oceanbase/oceanbase](https://github.com/oceanbase/oceanbase) — The Fastest Distributed Database for Transactional, Analytical, and  AI Workloads.",
+          "line_num": 12
+        },
+        {
+          "title": "Go",
+          "node_id": "0004",
+          "summary": "## Go\n\n- [gogs/gogs](https://github.com/gogs/gogs) — Gogs is a painless self-hosted Git service\n- [googleapis/genai-toolbox](https://github.com/googleapis/genai-toolbox) — MCP Toolbox for Databases is an open source MCP server for databases.",
+          "line_num": 16
+        },
+        {
+          "title": "Java",
+          "node_id": "0005",
+          "summary": "## Java\n\n- [laigeoffer/pmhub](https://github.com/laigeoffer/pmhub) — PmHub，一个基于 SpringCloud & LLM 的智能项目管理系统，该项目旨在帮助小伙伴们快速掌握微服务/分布式项目的架构设计和开发流程。如果你想在校招或者社招中拿到一个满意的 offer，",
+          "line_num": 21
+        },
+        {
+          "title": "Other",
+          "node_id": "0006",
+          "summary": "## Other\n\n- [ycccccccy/echotrace](https://github.com/ycccccccy/echotrace) — EchoTrace 是一个本地、安全的微信聊天记录导出、分析与年度报告生成工具 | EchoTrace is a local, secure tool for exporting, analyzing",
+          "line_num": 25
+        },
+        {
+          "title": "Ruby",
+          "node_id": "0007",
+          "summary": "## Ruby\n\n- [maybe-finance/maybe](https://github.com/maybe-finance/maybe) — The personal finance app for everyone",
+          "line_num": 29
+        },
+        {
+          "title": "TypeScript",
+          "node_id": "0008",
+          "summary": "## TypeScript\n\n- [hicccc77/WeFlow](https://github.com/hicccc77/WeFlow) — WeFlow - 一个本地的微信聊天记录导出和年度报告应用",
+          "line_num": 33
+        },
+        {
+          "title": "Vue",
+          "node_id": "0009",
+          "summary": "## Vue\n\n- [ibaihuo/chanvis](https://github.com/ibaihuo/chanvis) — 基于TradingView本地SDK的可视化前后端代码，适用于缠论量化研究，和其他的基于几何交易的量化研究。 缠论量化 摩尔缠论 缠论可视化 TradingView TV-SDK",
+          "line_num": 37
+        }
+      ]
+    }
+  ]
+}

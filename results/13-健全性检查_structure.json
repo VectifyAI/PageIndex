@@ -1,0 +1,38 @@
+{
+  "doc_name": "13-健全性检查",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\ClaudeLog-干货\\13-健全性检查.md",
+  "structure": [
+    {
+      "title": "健全性检查 (Sanity Check)",
+      "node_id": "0000",
+      "prefix_summary": "# 健全性检查 (Sanity Check)\n\n> 原文：[claudelog.com/mechanics/sanity-check](https://claudelog.com/mechanics/sanity-check)",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "方法",
+          "node_id": "0001",
+          "summary": "## 方法\n\n在 CLAUDE.md 顶部加一行：\n\n```markdown\n# My name is {你的名字}\nThis file provides guidance to Claude Code when working with this repository.\n```\n\n然后问 Claude：\"What is my name?\"\n\n- 回答正确 → 配置生效\n- 回答错误 → 需要排查",
+          "line_num": 5
+        },
+        {
+          "title": "常见失败原因",
+          "node_id": "0002",
+          "summary": "## 常见失败原因\n\n- CLAUDE.md 文件不存在\n- 文件放错目录\n- 意外删除或损坏\n- 文件名拼错（如 `CLAUSE.md`）\n- 上下文窗口耗尽（CLAUDE.md 内容被挤出去了）",
+          "line_num": 19
+        },
+        {
+          "title": "进阶建议",
+          "node_id": "0003",
+          "summary": "## 进阶建议\n\n在 CLAUDE.md 的不同位置放置多个\"完整性检查点\"，监控上下文填满时配置是否还能保持。",
+          "line_num": 27
+        },
+        {
+          "title": "我的理解",
+          "node_id": "0004",
+          "summary": "## 我的理解\n\n这是最简单但最被忽视的调试技巧。\n\n很多人 CLAUDE.md 写了一堆规则，但从来没验证过 Claude 到底读没读到。这个 sanity check 用 10 秒钟就能确认。\n\n更深层的启示：**当 Claude 的行为不符合预期时，先检查最基本的——它是否真的读到了你的指令？** 而不是急着改指令或换模型。90% 的\"Claude 不听话\"问题都是配置没生效。",
+          "line_num": 31
+        }
+      ]
+    }
+  ]
+}

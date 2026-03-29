@@ -1,0 +1,50 @@
+{
+  "doc_name": "角色管理",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\SillyTavern 官方文档\\核心概念\\角色管理.md",
+  "structure": [
+    {
+      "title": "什么是角色？",
+      "node_id": "0000",
+      "summary": "## 什么是角色？\n\nSillyTavern 中的角色代表了用户名和图片的组合，为您在聊天中扮演的角色或标识自己的角色创建了独特的身份。\n\n**创建用户角色是可选的，但它是自动执行日常操作的好方法。**",
+      "line_num": 7
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/personas/#how-to-create-a-persona)如何创建角色？",
+      "node_id": "0001",
+      "summary": "## [#](https://docs.sillytavern.app/usage/core-concepts/personas/#how-to-create-a-persona)如何创建角色？\n\n要创建角色，请执行以下操作：\n\n1. 打开顶部栏中的“角色管理”面板（笑脸图标）。\n\n1. 选择现有的头像，或使用虚拟图像创建空白角色（“创建”按钮）。\n\n1. 在列表中找到角色，然后选择最左侧的上下文操作按钮（“将名称绑定到该头像”）。\n\n1. 在弹出窗口中输入所需的名称。单击“确定”按钮进行确认。\n\n1. 头像现在代表一个角色。点击头像选择它，这也将自动更新用户名。",
+      "line_num": 15
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/personas/#persona-description)角色描述",
+      "node_id": "0002",
+      "summary": "The document explains the \"Persona Description\" feature, detailing that it allows users to input specific information about a selected character, such as psychological and physical traits, age, occupation, etc. It supports the use of replacement macros like {{user}} and {{char}}. The description can be inserted into the AI prompt in one of three locations: the prompt manager/story string, the top of the author notes, or the bottom of the author notes, depending on the configuration. The document also warns that changes made to the user description on an unbound avatar will not be saved unless the avatar is bound to the username.",
+      "line_num": 31
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/personas/#persona-locking)角色锁定",
+      "node_id": "0003",
+      "prefix_summary": "## [#](https://docs.sillytavern.app/usage/core-concepts/personas/#persona-locking)角色锁定\n\n一个选定的角色可以锁定到当前打开的个人或群聊中。如果当前选择的角色与锁定的角色不同，则在您打开该聊天时将自动选择该角色。",
+      "line_num": 47,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/personas/#to-lock-a-persona)锁定角色",
+          "node_id": "0004",
+          "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/personas/#to-lock-a-persona)锁定角色\n\n1. 打开聊天（群组或个人）。\n\n1. 通过单击其头像来选择所需的角色。\n\n1. 单击名称输入旁边的按钮行中的锁定图标。\n\n1. 要恢复此操作，请单击解锁图标。然后，当重新打开聊天时，角色不会自动更改。\n\n或者，您可以使用 /lock 和 /unlock 斜杠命令来实现相同的结果。",
+          "line_num": 51
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/personas/#default-persona)默认角色",
+      "node_id": "0005",
+      "summary": "## [#](https://docs.sillytavern.app/usage/core-concepts/personas/#default-persona)默认角色\n\n您可以选择一个角色作为首选默认身份，自动为所有新聊天和未锁定角色的聊天选择该角色。默认角色由“角色管理”面板上的黄色轮廓表示。\n\n- 要将角色设置为默认值，请单击角色块中的“皇冠”按钮，然后确认您的操作。\n\n- 要撤消此操作并取消设置默认角色，请再次单击“皇冠”按钮。",
+      "line_num": 63
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/personas/#pro-tips)专业提示",
+      "node_id": "0006",
+      "summary": "This partial document provides professional tips for using the SillyTavern application:\n\n1. Switching user roles during a chat does not automatically reassign previous user messages, allowing for simultaneous role-playing of multiple characters.\n2. Users can synchronize all messages in the current chat to a selected role by clicking the \"Sync\" button in the \"Role Management\" panel or using the `/sync` slash command.\n3. To change a character's image without deleting the existing one, users can hover over the avatar in the \"Role Management\" panel, click the button at the bottom left, and select a new image while retaining the description and chat lock status.\n4. The `/persona` slash command allows for quick role changes during a chat without opening the \"Role Management\" panel.\n5. Users can back up their characters and restore them later using the \"Backup\" and \"Restore\" buttons in the \"Role Management\" panel.",
+      "line_num": 71
+    }
+  ]
+}

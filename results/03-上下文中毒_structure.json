@@ -1,0 +1,64 @@
+{
+  "doc_name": "03-上下文中毒",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\ClaudeLog-干货\\03-上下文中毒.md",
+  "structure": [
+    {
+      "title": "上下文中毒 (Poison.md)",
+      "node_id": "0000",
+      "prefix_summary": "# 上下文中毒 (Poison.md)\n\n> 原文：[claudelog.com/mechanics/poison-context-awareness](https://claudelog.com/mechanics/poison-context-awareness)",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "核心问题",
+          "node_id": "0001",
+          "summary": "## 核心问题\n\n你的操作习惯会在 Claude 的上下文中**创建隐形关联**，这些关联持续整个 session，导致意想不到的行为。",
+          "line_num": 5
+        },
+        {
+          "title": "经典案例",
+          "node_id": "0002",
+          "summary": "## 经典案例\n\n作者发现：每次改完代码后都执行部署 → Claude 学到了\"改代码 = 必须部署\"的关联 → 即使在实验性工作中，Claude 也自动尝试部署。",
+          "line_num": 9
+        },
+        {
+          "title": "三种中毒形式",
+          "node_id": "0003",
+          "summary": "## 三种中毒形式\n\n1. **上下文渗透 (Context Bleeding)** — 一个任务的信息无边界地流入下一个任务\n2. **指令污染 (Instruction Contamination)** — 相互矛盾的指令类型造成决策瘫痪\n3. **时间混乱 (Temporal Confusion)** — session 早期的过时上下文干扰当前工作",
+          "line_num": 13
+        },
+        {
+          "title": "防治方法",
+          "node_id": "0004",
+          "prefix_summary": "## 防治方法",
+          "line_num": 19,
+          "nodes": [
+            {
+              "title": "预防",
+              "node_id": "0005",
+              "summary": "### 预防\n- CLAUDE.md 用 markdown 格式化，创建清晰的模块边界\n- 使用显式沟通，不要暗示\n- 维持清晰的任务边界",
+              "line_num": 21
+            },
+            {
+              "title": "治疗",
+              "node_id": "0006",
+              "summary": "### 治疗\n- `/clear` 命令重置上下文\n- 开新 session\n- 不同类型的工作用不同 session",
+              "line_num": 26
+            },
+            {
+              "title": "警惕",
+              "node_id": "0007",
+              "summary": "### 警惕\n- 定期审计：你是否无意中创建了什么行为关联？\n- 问自己：Claude 刚才为什么会那样做？是我教它的吗？",
+              "line_num": 31
+            }
+          ]
+        },
+        {
+          "title": "我的理解",
+          "node_id": "0008",
+          "summary": "The partial document discusses the concept that in-context learning in Large Language Models (LLMs) like Claude can be a double-edged sword. It explains that Claude does not store user interactions verbatim but learns patterns from them. For example, if a user repeatedly follows a specific sequence of actions, Claude may automatically continue this pattern in subsequent interactions, even if the user intends to deviate from it. This behavior is likened to a conditioned response, where the user inadvertently trains Claude to follow certain patterns. The document emphasizes the importance of maintaining \"context hygiene,\" similar to code hygiene, by avoiding the carryover of experimental or test contexts into formal work sessions.",
+          "line_num": 35
+        }
+      ]
+    }
+  ]
+}

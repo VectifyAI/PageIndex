@@ -1,0 +1,32 @@
+{
+  "doc_name": "知识看板",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\知识看板.md",
+  "structure": [
+    {
+      "title": "知识看板",
+      "node_id": "0000",
+      "prefix_summary": "# 知识看板\n\n> GitHub: 2233admin/claude-knowledge (private) — 124个issues",
+      "line_num": 5,
+      "nodes": [
+        {
+          "title": "标签分类",
+          "node_id": "0001",
+          "summary": "## 标签分类\n\n| 标签 | 数量(估) | 内容 |\n|------|---------|------|\n| research | ~30 | 学术研究/论文 |\n| agent-framework | ~20 | AI Agent框架 |\n| quant | ~15 | 量化交易 |\n| chinese-ai | ~15 | 国产AI模型/工具 |\n| big-tech | ~10 | 大厂动态 |\n| mcp-tools | ~10 | MCP工具 |\n| 其他 | ~24 | 杂项 |",
+          "line_num": 9
+        },
+        {
+          "title": "重点Issues",
+          "node_id": "0002",
+          "summary": "## 重点Issues\n\n| Issue | 主题 |\n|-------|------|\n| #125 | [[王德峰]]全集 |\n| #139 | [[张双利]]研究 |\n| #140 | 王德峰1844手稿 |\n| #141 | [[翟东升]]研究 |",
+          "line_num": 21
+        },
+        {
+          "title": "关联",
+          "node_id": "0003",
+          "summary": "## 关联\n- [[hist-mat]] — 研究成果落地\n\n#research #knowledge-base",
+          "line_num": 30
+        }
+      ]
+    }
+  ]
+}

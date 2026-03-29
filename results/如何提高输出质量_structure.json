@@ -1,0 +1,78 @@
+{
+  "doc_name": "如何提高输出质量",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\SillyTavern 官方文档\\本地LLM指南\\如何提高输出质量.md",
+  "structure": [
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-improve-output-quality/#check-if-you-can-run-a-superior-variant)检查是否可以运行高级变体",
+      "node_id": "0000",
+      "summary": "The partial document discusses strategies for improving the output quality of language models. It suggests that if the hardware allows, using a larger model size (e.g., 13B instead of 7B) will yield better results, although it notes that larger variants of certain models like openhermes-2.5-mistral may not be available. Additionally, the document recommends utilizing higher quantization levels (such as q5 or q8 instead of q4) if there is sufficient RAM/VRAM capacity, as this can also enhance output quality.",
+      "line_num": 11
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-improve-output-quality/#adjust-sillytaverns-instruction-prompting)调整 SillyTavern 的指令提示",
+      "node_id": "0001",
+      "prefix_summary": "The partial document focuses on optimizing the instruction prompting for SillyTavern to improve the output quality of language models (LLMs). It emphasizes that different LLMs require distinct instruction styles, especially when running on consumer hardware where models are less powerful than cloud-based ones like GPT-4. The document highlights the importance of customizing instruction templates in SillyTavern to align with the model's expected instruction style, as default prompts may not always yield the best results. It suggests that creating a new, more accurate instruction style in SillyTavern can significantly enhance the output quality, particularly for models that are not as advanced as OpenHermes-2.5-Mistral-7B.",
+      "line_num": 17,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-improve-output-quality/#initial-preparation)初步准备",
+          "node_id": "0002",
+          "summary": "### 初步准备\n\n本部分介绍了在使用 SillyTavern (ST) 时进行的基本设置。首先，创建一个名为 Betty 的简单角色，其描述为“Betty 是工商管理专业的应届毕业生”，并设置第一条消息为“嗨，我是 Betty。我是来面试的？”。接下来，文档推荐使用 [TheBloke/Starling-LM-7B-alpha-GGUF](https://huggingface.co/TheBloke/Starling-LM-7B-alpha-GGUF) 作为需要自定义才能正常工作的模型示例，并指出这是一个高度评价的模型。",
+          "line_num": 33
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-improve-output-quality/#1-what-instruction-style-does-the-model-expect)1. 模型期望什么指令风格？",
+          "node_id": "0003",
+          "summary": "### [#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-improve-output-quality/#1-what-instruction-style-does-the-model-expect)1. 模型期望什么指令风格？\n\nStarling 的页面说：“我们的模型遵循与 Openchat 3.5 完全相同的聊天模板和用法。详情请参阅他们的模型卡。OpenChat 3.5 的页面显示，在“对话模板（点击展开）”下，进行多轮（即聊天）的方法是：",
+          "line_num": 39
+        }
+      ]
+    },
+    {
+      "title": "Multi-turn",
+      "node_id": "0004",
+      "prefix_summary": "The partial document focuses on demonstrating the correct formatting for multi-turn conversations with the GPT-4 model using a tokenizer. It provides a Python code snippet that tokenizes a sequence of user and assistant interactions, highlighting the use of the `<|end_of_turn|>` token to signify the end of each turn. The document emphasizes the importance of correctly structuring the conversation by showing the expected tokenized output and the corresponding plain text representation, ensuring clarity on how to properly prompt the model for multi-turn interactions.",
+      "line_num": 43,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-improve-output-quality/#2-is-sillytavern-using-the-correct-instruction-style)2. SillyTavern 是否使用了正确的教学风格？",
+          "node_id": "0005",
+          "summary": "The partial document discusses the importance of using the correct instruction style in SillyTavern for interacting with Large Language Models (LLMs). It highlights two main configuration sections in SillyTavern: \"context template\" and \"instruction mode,\" each with presets for popular model series. The document emphasizes the need to verify the model's actual instruction style, as demonstrated by the incorrect identification of the Starling model by Ooba. It suggests starting with the OpenOrca-OpenChat instruction mode and provides an example of a poorly configured interaction with the assistant \"Betty.\" The document then analyzes the system's prompt and identifies issues with the default system prompt and the misuse of the \"user\" tag instead of \"GPT4 correct user,\" which contribute to the poor response quality. The main points covered are the configuration of instruction styles, the importance of accurate model identification, and the impact of prompt design on the quality of AI interactions.",
+          "line_num": 58
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-improve-output-quality/#3-how-do-we-create-a-new-more-correct-instruction-style)3. 我们如何创造一种新的更正确的教学风格？",
+          "node_id": "0006",
+          "prefix_summary": "### [#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-improve-output-quality/#3-how-do-we-create-a-new-more-correct-instruction-style)3. 我们如何创造一种新的更正确的教学风格？\n\n我们的目标是将意法半导体的默认提示转换为遵循 OpenChat 3.5 的指示风格，并提供更好的系统提示。我正在编写一个渐进式演练，以便您可以将这种方法应用于您遇到的任何未来模型，并能够自己完成，但如果您想要最终解决方案，请跳到最后。",
+          "line_num": 92,
+          "nodes": [
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-improve-output-quality/#round-1-fix-the-system-prompt)第 1 轮：修复系统提示符",
+              "node_id": "0007",
+              "summary": "The partial document focuses on improving the output quality of a fictional roleplaying chat system by addressing the system prompt and formatting issues. It emphasizes adhering to the OpenChat guidance style, demonstrated through specific code examples for user and assistant interactions. The document outlines the creation of a new Instruct Mode preset named \"Starling\" with a detailed system prompt designed to enhance creativity, proactivity, and narrative flow in the roleplay. It then provides a sample interaction to illustrate the implementation of this prompt. The document identifies three main issues: the incorrect labeling of user and assistant messages once the chat begins, and the improper placement of character descriptions, which do not follow the OpenChat format. These points highlight the need for consistent formatting and adherence to the specified guidelines to ensure the desired quality and structure of the roleplaying chat.",
+              "line_num": 96
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-improve-output-quality/#round-2-more-tweaks)第 2 轮：更多调整",
+              "node_id": "0008",
+              "summary": "The partial document provides instructions for improving the output quality of a local language model in SillyTavern by making adjustments in the Instruct Mode Sequences. It suggests changing the Input Sequence from 'User：' to 'GPT4 Correct User：' and the Output Sequence from '<|end_of_turn|> Assistant：' to '<|end_of_turn|> GPT4 Correct Assistant：' (with a line break before 'GPT4 Correct Assistant'). The document also mentions the option to save these changes as a preset and test them to ensure the issues are resolved. Additionally, it suggests that if the user is satisfied with the current output quality, they can stop there, but if they want to further enhance the output, they can continue reading.",
+              "line_num": 147
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-improve-output-quality/#round-3-optional-final-description-tweak)第 3 轮（可选）：最终描述调整",
+              "node_id": "0009",
+              "summary": "This partial document explains how to perform an optional final adjustment to improve the output quality of AI responses in SillyTavern. It covers the following main points:\n\n1. **Purpose of the Adjustment**: The adjustment is for users who need to make significant changes to their AI's behavior. It involves discarding optional parts of the character card, such as the scenario and personality.\n\n2. **StoryString Setting**: The document explains the StoryString setting in SillyTavern, which defines the content sent to the AI model. It includes the system prompt, world information, character description, and other elements.\n\n3. **Creating a New Context Template**: Users are instructed to create a new context template named \"Starling\" based on the \"Default\" template. This involves modifying the syntax to control what is sent to the AI model.\n\n4. **Modifying the StoryString**: The document provides a code snippet to replace the existing StoryString with a simplified version that stops sending the character description as part of the story string. This is done to allow for more customization using the `<|end_of_turn|>` tag.\n\n5. **Including the Description in the System Prompt**: To ensure the character description is still sent to the AI model, the document shows how to edit the system prompt to include the description. This is demonstrated with a specific format that incorporates the description and other instructions for the AI.\n\n6. **Handling Optional Fields**: The document notes that other optional fields like scenario and personality are also removed in this adjustment. It suggests that users can apply similar fixes to these fields by including them in the system prompt if needed.\n\n7. **Advanced Formatting**: For users who utilize character descriptions or world information, the document emphasizes the importance of adding their macro placeholders to the system prompt or story string to ensure they are sent to the model. It references the advanced formatting settings for more detailed instructions.",
+              "line_num": 153
+            }
+          ]
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-improve-output-quality/#conclusion)结论",
+          "node_id": "0010",
+          "summary": "The partial document focuses on improving the output quality of the Starling model in SillyTavern, using Betty's chat interaction as an example. It emphasizes that the output should be self-explanatory and demonstrates a progression from poorly written responses to decent role-playing chat replies. The document suggests using the new Starling preset in ST for optimal results and provides an example of an improved chat interaction with Betty, showcasing a well-written and contextually appropriate response.",
+          "line_num": 200
+        }
+      ]
+    }
+  ]
+}

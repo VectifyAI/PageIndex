@@ -1,0 +1,148 @@
+{
+  "doc_name": "2026-03-23-Phase0-实验复盘",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\Sprachwelt\\2026-03-23-Phase0-实验复盘.md",
+  "structure": [
+    {
+      "title": "2026-03-23 — Phase 0 实验复盘",
+      "node_id": "0000",
+      "prefix_summary": "# 2026-03-23 — Phase 0 实验复盘\n\n> 不是进度报告。是对过程的反思：什么 worked，什么 failed，什么出乎意料。",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "时间线",
+          "node_id": "0001",
+          "summary": "## 时间线\n\n- 2026-03-22: 创世对话 → 工程 spec → Phase 0 Week 1 实现（99 tests）\n- 2026-03-23: Phase 0 Week 2（团队并行）→ 管线全生命周期 + 气味追问链 + LLM集成（122 tests）",
+          "line_num": 11
+        },
+        {
+          "title": "什么 Worked",
+          "node_id": "0002",
+          "prefix_summary": "## 什么 Worked",
+          "line_num": 16,
+          "nodes": [
+            {
+              "title": "1. 三元组复用（省了大量工作）",
+              "node_id": "0003",
+              "summary": "### 1. 三元组复用（省了大量工作）\n发现 demand/counter_demand/stake 就是 Gefragtes/Befragtes/Erfragtes 的映射，不需要改核心类型。这个判断省了至少一天的重构工作。如果当时加了新字段，所有 6 个 crate 都要改。",
+              "line_num": 18
+            },
+            {
+              "title": "2. 事件溯源架构",
+              "node_id": "0004",
+              "summary": "### 2. 事件溯源架构\nTensionLedger 的 append-only 设计让调试非常容易——可以重放事件流复现任何状态。FSM 校验在开发过程中多次拦住了错误的事件序列。",
+              "line_num": 21
+            },
+            {
+              "title": "3. 团队并行（3 workers）",
+              "node_id": "0005",
+              "summary": "### 3. 团队并行（3 workers）\nW1/W2/W3 并行工作，互不干扰。文件范围隔离（W1=pipeline, W2=golden case, W3=extractor）是关键——没有合并冲突。",
+              "line_num": 24
+            },
+            {
+              "title": "4. Architect review 拦住了真 bug",
+              "node_id": "0006",
+              "summary": "### 4. Architect review 拦住了真 bug\n第一轮 review 被拒，抓到了 frontier ordering bug（plan_act 看到 stale 数据）。如果没有 review，这个 bug 会一直潜伏到多轮对话时才暴露。",
+              "line_num": 27
+            }
+          ]
+        },
+        {
+          "title": "什么 Failed",
+          "node_id": "0007",
+          "prefix_summary": "## 什么 Failed",
+          "line_num": 30,
+          "nodes": [
+            {
+              "title": "1. W1 worker 启动后空转",
+              "node_id": "0008",
+              "summary": "### 1. W1 worker 启动后空转\n第一个 worker 被 spawn 后没有开始工作，需要手动 SendMessage nudge。浪费了约 10 分钟。\n**教训:** 团队 worker 的 prompt 需要更明确的\"立即开始\"指令。",
+              "line_num": 32
+            },
+            {
+              "title": "2. Mock fixtures 合成数据",
+              "node_id": "0009",
+              "summary": "### 2. Mock fixtures 合成数据\nW3 写 mock fixtures 时用了合成文本而不是从 case-016.json 复制。Architect review 抓到了 turns 6, 8 的 `——` vs `。`/`：` 不一致。\n**教训:** mock 必须从 golden case 逐字复制，不能\"差不多就行\"。",
+              "line_num": 36
+            },
+            {
+              "title": "3. MiniMax 中文编码",
+              "node_id": "0010",
+              "summary": "### 3. MiniMax 中文编码\nWindows 上 `reqwest::json()` 发送中文乱码。花了约 30 分钟定位——从\"API 返回错误\"到\"请求体编码问题\"到\"reqwest 的 json 序列化在 Windows 上有问题\"。\n**教训:** 所有涉及非 ASCII 的 HTTP 调用，用 `serde_json::to_vec()` + `.body(bytes)` 而不是 `.json()`。",
+              "line_num": 40
+            },
+            {
+              "title": "4. 规则 8 的 `但` 太宽",
+              "node_id": "0011",
+              "summary": "### 4. 规则 8 的 `但` 太宽\n这是个低级错误——用单字 `但` 做对比连词检测，匹配了\"但我在\"。本应在写规则时就用\"但是\"。\n**教训:** 中文规则必须用完整词语，不能用单字。单字在中文里歧义太大。",
+              "line_num": 44
+            }
+          ]
+        },
+        {
+          "title": "什么出乎意料",
+          "node_id": "0012",
+          "prefix_summary": "## 什么出乎意料",
+          "line_num": 48,
+          "nodes": [
+            {
+              "title": "1. LLM 提取在 turns 4-6, 8-9 不产出新张力",
+              "node_id": "0013",
+              "summary": "### 1. LLM 提取在 turns 4-6, 8-9 不产出新张力\n增强 prompt 后，LLM 在 turn 3 和 7 能识别新矛盾，但 4-6 和 8-9 返回空。分析后发现：这些 turn 确实是在延续已有张力而不是引入新矛盾。LLM 的判断是对的——不是提取失败，是真的没有新张力。\n**洞察:** 并非每轮对话都应该产生新张力。\"没有新张力\"本身是有意义的信号。",
+              "line_num": 50
+            },
+            {
+              "title": "2. 生成文本质量出奇地好",
+              "node_id": "0014",
+              "summary": "### 2. 生成文本质量出奇地好\nTurn 7 的生成：\"她明知不可为而为之，说明那个混合本身承载着她的意志——那么残留物的分布，就不再是随机的物理痕迹，而是一条被她亲手刻下的行为轨迹。\"\n这不像 LLM 的典型输出。张力驱动的 prompt（指定 discourse act + target tension + anti-pattern constraints）确实让生成更有方向感。",
+              "line_num": 54
+            },
+            {
+              "title": "3. split_whitespace 的中文 bug 在开发过程中没暴露",
+              "node_id": "0015",
+              "summary": "### 3. split_whitespace 的中文 bug 在开发过程中没暴露\n所有测试用的是英文 demand/counter_demand。气味追问链的提取用 contains() 所以没问题。但防复活和场动力学的相似度计算对中文完全无效——直到老板指出才发现。\n**教训:** 测试必须双语覆盖。只测英文等于只测了一半。",
+              "line_num": 58
+            }
+          ]
+        },
+        {
+          "title": "过程问题",
+          "node_id": "0016",
+          "prefix_summary": "## 过程问题",
+          "line_num": 62,
+          "nodes": [
+            {
+              "title": "1. 文档偏重\"是什么\"而非\"怎么修\"",
+              "node_id": "0017",
+              "summary": "### 1. 文档偏重\"是什么\"而非\"怎么修\"\n写了大量分析文档（架构、概念、决策），但发现 T0 bug 后只写了分析没写修复计划。老板提醒后才补。\n**改进:** 发现问题 → 分析 + 修复计划同时写。",
+              "line_num": 64
+            },
+            {
+              "title": "2. 复盘不是自发的",
+              "node_id": "0018",
+              "summary": "### 2. 复盘不是自发的\nPhase 0 完成后没有主动复盘，是在整理文档过程中被老板提醒才做的。\n**改进:** 每个里程碑完成后，主动写复盘。不等别人提醒。",
+              "line_num": 68
+            },
+            {
+              "title": "3. 上下文恢复没有预先设计",
+              "node_id": "0019",
+              "summary": "### 3. 上下文恢复没有预先设计\nsession 快满时才开始想\"怎么让下一个 session 不菜\"。应该在项目开始时就建好恢复体系。\n**改进:** 大项目启动时就建 CLAUDE.md + AGENTS.md + progress.txt 结构。",
+              "line_num": 72
+            }
+          ]
+        },
+        {
+          "title": "数据",
+          "node_id": "0020",
+          "summary": "## 数据\n\n| 指标 | Week 1 | Week 2 | 总计 |\n|------|--------|--------|------|\n| 测试 | 99 | +23 | 122 |\n| Crates | 6 | +0 | 6 |\n| Golden cases | 15 | +1 | 16 |\n| Architect review 被拒 | 0 | 1 | 1 |\n| 修复后通过 | - | 1 | 1 |\n| 已知 bug (开放) | 0 | 1 (中文分词) | 1 |",
+          "line_num": 76
+        },
+        {
+          "title": "下一步行动（不是\"下一步方向\"）",
+          "node_id": "0021",
+          "summary": "## 下一步行动（不是\"下一步方向\"）\n\n1. **立即:** 修 T0 中文分词 bug（按 T0-bug-修复计划.md 执行）\n2. **然后:** 多轮上下文传递（pipeline 传 conversation history 给 extractor）\n3. **然后:** Phase 1 规划（SituatedConvergence + 专家人设）",
+          "line_num": 87
+        }
+      ]
+    }
+  ]
+}

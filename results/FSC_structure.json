@@ -1,0 +1,38 @@
+{
+  "doc_name": "FSC",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\FSC.md",
+  "structure": [
+    {
+      "title": "FSC — Full Self Coding",
+      "node_id": "0000",
+      "prefix_summary": "# FSC — Full Self Coding\n\n> 单机全自研编码引擎",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "基本信息",
+          "node_id": "0001",
+          "summary": "## 基本信息\n- **路径**: `D:/projects/full-self-coding/`\n- **栈**: TypeScript / Bun\n- **状态**: 活跃\n- **GitHub**: private",
+          "line_num": 5
+        },
+        {
+          "title": "架构",
+          "node_id": "0002",
+          "summary": "## 架构\n- 单机执行引擎 (containerd)\n- 58 tests, 14 execution modules\n- 7种Agent: claude/codex/gemini/aider/opencode/openclaw/ollama\n- 3 tier 模型路由\n- UnifiedScheduler + WorktreePool + CommitSequencer + TaskStateStore",
+          "line_num": 11
+        },
+        {
+          "title": "关联",
+          "node_id": "0003",
+          "summary": "## 关联\n- 被 [[claw-mesh]] 通过 RunnerAPI 调用\n- modelRouter: analysis→Claude, implementation→Codex, frontend→Gemini",
+          "line_num": 18
+        },
+        {
+          "title": "标签",
+          "node_id": "0004",
+          "summary": "## 标签\n#project #coding-infra #typescript #bun",
+          "line_num": 22
+        }
+      ]
+    }
+  ]
+}

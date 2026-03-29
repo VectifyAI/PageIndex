@@ -1,0 +1,120 @@
+{
+  "doc_name": "AGENTS-概念桥接文档",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\Sprachwelt\\AGENTS-概念桥接文档.md",
+  "structure": [
+    {
+      "title": "Sprachwelt — Agent 上手指南",
+      "node_id": "0000",
+      "prefix_summary": "# Sprachwelt — Agent 上手指南\n\n> 本文件面向所有参与开发的 AI agent（Claude、Codex、Gemini）。\n> 不假设任何哲学背景。从零开始解释每个概念为什么存在、怎么映射到代码。",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "这个项目在做什么",
+          "node_id": "0001",
+          "summary": "The document describes a project that seeks to make AI dialogue generation driven by tension (conflicts or contradictions) instead of probabilistic token prediction. It explains that current large language models generate responses by predicting tokens without truly understanding the purpose or underlying contradictions, often resulting in evasive or superficial replies when pressed on inconsistencies. The proposed approach, called Sprachwelt, builds a \"meaning field\" atop existing LLMs, where dialogue is structured around \"tensions\" that represent contradictions with direction, strength, and lifecycle. These tensions determine what action to take next (e.g., question, concede, or refute) before the LLM is called to produce the concrete text.",
+          "line_num": 6
+        },
+        {
+          "title": "核心概念 → 代码映射",
+          "node_id": "0002",
+          "prefix_summary": "## 核心概念 → 代码映射",
+          "line_num": 14,
+          "nodes": [
+            {
+              "title": "1. 张力（Tension）= 一个矛盾",
+              "node_id": "0003",
+              "summary": "The document introduces “tension” as a three-part structure influenced by Heidegger’s questioning framework, detailing the components “所问” (surface demand), “所问及” (violated expectation), and “所以问” (underlying stake). It explains each element with a table linking conceptual labels, code fields (from `TensionDefinition` in `crates/core/src/lib.rs`), plain-language descriptions, and a concrete example about a household disinfectant smell. The text emphasizes why all three components are necessary, noting that while the surface question prompts inquiry, the counter-demand reveals the dissonance driving conversation and the stake highlights the deeper concern about safety and trust.",
+              "line_num": 16
+            },
+            {
+              "title": "2. 张力的生命周期 = 有限状态机",
+              "node_id": "0004",
+              "summary": "The document outlines a finite-state machine model for tension lifecycle: transitions from Opened to Intensified, then either PartiallyResolved or directly Resolved, and finally to terminal states Resolved or Lost (due to decay). Terminal states reject all subsequent events. State isn’t stored but projected from the event stream (event sourcing). Each tension has an `intensity` that decays over time but increases when reinforced. Implementation reference is the `TensionLedger` in `crates/ledger/src/lib.rs`.",
+              "line_num": 30
+            },
+            {
+              "title": "3. 防复活 = 防止同一个矛盾反复打开",
+              "node_id": "0005",
+              "summary": "### 3. 防复活 = 防止同一个矛盾反复打开\n\n用户可能用不同措辞提出本质相同的问题。系统通过三层检测防止这种\"伪复活\"：\n\n1. **lineage_hash**: SHA-256(normalize(demand + counter_demand + stake)) — 完全相同的内容\n2. **combined_similarity**: word-level Jaccard > 0.85 — 高度相似的措辞\n3. **owner_demand_similarity**: owner+demand Jaccard > 0.80 — 同一人问类似问题\n\n只要命中任一层，就拒绝 Opened 事件。\n\n**代码位置:** `crates/ledger/src/lib.rs` → `is_resurrection()`",
+              "line_num": 46
+            },
+            {
+              "title": "4. 场动力学（FieldDynamics）= 张力之间互相影响",
+              "node_id": "0006",
+              "summary": "Describes FieldDynamics where multiple tensions interact within a field: similar demands additively boost intensity, opposing demands create antagonistic hotspots, all tensions decay by 0.05 each dialogue round, and disappear once intensity falls below a threshold. Implementation located in `crates/tension/src/dynamics.rs` using a `petgraph`-based graph structure.",
+              "line_num": 58
+            },
+            {
+              "title": "5. 话语行为（DiscourseAct）= 系统决定\"做什么\"",
+              "node_id": "0007",
+              "summary": "Section 5 introduces the DiscourseAct Planner, which selects a discourse move based on the current tension state among conversational elements. It lists the available actions—Pursue, Concede, Clarify, Converge, Counter, HoldOpen, OpenNew—along with their enumerated codes, usage conditions, and their effects on target tensions (e.g., resolving, partially resolving, intensifying by +0.2, leaving untouched). The planner logic is implemented in `crates/acts/src/lib.rs` under `DiscourseActPlanner`.",
+              "line_num": 69
+            },
+            {
+              "title": "6. 提取器（Extractor）= 从用户输入中发现张力",
+              "node_id": "0008",
+              "summary": "### 6. 提取器（Extractor）= 从用户输入中发现张力\n\n两级 pipeline：\n1. **RuleExtractor** (9条正则规则): 捕获有表面标记的张力（问号、转折词、时间异常）\n2. **LlmExtractor** (MiniMax API): 当规则提取不到张力时，用 LLM 推理深层矛盾\n\n**为什么不全用 LLM？** 规则快、便宜、可测试。LLM 只在规则失败时兜底。\n\n**代码位置:** `crates/tension/src/extractor.rs`",
+              "line_num": 85
+            },
+            {
+              "title": "7. 结晶器（Crystallizer）= 把话语行为变成文本",
+              "node_id": "0009",
+              "summary": "### 7. 结晶器（Crystallizer）= 把话语行为变成文本\n\n拿到 DiscourseActPlan 后，调用 MiniMax LLM 生成实际回复文本。prompt 包含：\n- 要执行的话语行为\n- 目标张力的 demand/counter_demand\n- anti-pattern 约束（不转移情绪、不注入安全警告）\n\n**代码位置:** `crates/pipeline/src/main.rs` → `crystallize_via_llm()`",
+              "line_num": 95
+            },
+            {
+              "title": "8. 审计器（ActAuditor）= 验证生成文本",
+              "node_id": "0010",
+              "summary": "### 8. 审计器（ActAuditor）= 验证生成文本\n\n检查 Crystallizer 生成的文本是否真的执行了计划的话语行为：\n- **Passed**: 主要行为和所有次要行为都在文本中找到标记\n- **Partial**: 主要行为找到但次要行为或闭包缺失\n- **Failed**: 主要行为未在文本中检测到\n\n**代码位置:** `crates/audit/src/lib.rs` → `ActAuditor`",
+              "line_num": 104
+            }
+          ]
+        },
+        {
+          "title": "七步管线（完整流程）",
+          "node_id": "0011",
+          "summary": "A seven-step pipeline is outlined: user input goes to Extractor for tension extraction, FieldDynamics calculates tension fields, an unimplemented SituatedConvergence phase is noted, ActPlanner selects discourse actions, Crystallizer generates text, ActAuditor checks execution, and TensionUpdate logs events to a ledger, with the code entry point at `crates/pipeline/src/main.rs` calling `process_turn()`.",
+          "line_num": 113
+        },
+        {
+          "title": "气味追问链（case-016）— 核心测试案例",
+          "node_id": "0012",
+          "summary": "The document introduces core test case “case-016,” a nine-turn conversation where a daughter asks her mother why the house smells like disinfectant. Extraction method: turns 1–2 use rule-based markers (question marks, contrast words), while turns 3–9 require LLM inference because the contradictions are hidden in reasoning. It highlights two first-class anti-patterns LLMs often make: “emotion_redirect” (switching to feelings after identifying the cleaner) and “safety_derail” (issuing warnings about mixing disinfectants instead of continuing to probe). Code reference: `data/golden_cases/case-016.json`.",
+          "line_num": 137
+        },
+        {
+          "title": "开发规则",
+          "node_id": "0013",
+          "prefix_summary": "## 开发规则",
+          "line_num": 154,
+          "nodes": [
+            {
+              "title": "必须做",
+              "node_id": "0014",
+              "summary": "### 必须做\n- 改代码前先读相关 crate 的现有实现\n- 每次改完运行 `cargo test --workspace` 确认不破坏基线（当前 122 tests）\n- Intensified 事件写入后，必须 re-project frontier 再调 plan_act\n- mock fixtures 必须与 golden case JSON 逐字对齐",
+              "line_num": 156
+            },
+            {
+              "title": "禁止做",
+              "node_id": "0015",
+              "summary": "### 禁止做\n- 用 `reqwest::json()` 发送含中文的请求 — Windows 下乱码，用 `serde_json::to_vec()` + `.body(bytes)`\n- 用 `但` 单字做对比连词检测 — 太宽，用 `但是`\n- 改 demand/counter_demand/stake 三元组结构\n- 给 Resolved/Lost 终态的张力追加事件\n- 删测试让 CI 过",
+              "line_num": 162
+            }
+          ]
+        },
+        {
+          "title": "构建",
+          "node_id": "0016",
+          "summary": "## 构建\n\n```bash\ncargo test --workspace                                      # 全量测试\ncargo run -p sprachwelt-pipeline -- --input \"text\"          # 纯规则模式\ncargo run -p sprachwelt-pipeline -- --input \"text\" --llm    # 带 MiniMax LLM\n```",
+          "line_num": 169
+        },
+        {
+          "title": "文件结构",
+          "node_id": "0017",
+          "summary": "Repository structure explaining each directory and file: project anchors (CLAUDE.md, AGENTS.md), workspace root, crates with various modules (core, ledger, tension, acts, audit, pipeline), data for golden cases, python evaluation harness and prompts, and .omc progress/PRD/status files.",
+          "line_num": 177
+        }
+      ]
+    }
+  ]
+}

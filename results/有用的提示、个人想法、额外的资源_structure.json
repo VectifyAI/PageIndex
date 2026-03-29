@@ -1,0 +1,116 @@
+{
+  "doc_name": "有用的提示、个人想法、额外的资源",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\皮格马利翁AI Wiki\\有用的提示、个人想法、额外的资源.md",
+  "structure": [
+    {
+      "title": "梗概",
+      "node_id": "0000",
+      "summary": "## 梗概\n\n这个页面主要在这里分享关于角色创建、用户相关内容等的技巧......这些都是非常有用的概念，我将它们排除在角色编写指南之外，以免让初次使用机器人的创建者不知所措。",
+      "line_num": 7
+    },
+    {
+      "title": "**写作技巧**",
+      "node_id": "0001",
+      "summary": "### Description of the Partial Document\n\nThe partial document provides a comprehensive guide on writing effective character cards using Markdown and novel-style formats, emphasizing the importance of consistency and creativity. It covers the following main points:\n\n1. **Formatting Styles**: The document outlines two primary styles for writing character dialogues: Markdown (dialogue*action*) and novel-style (\"dialogue\" action). It suggests that the novel-style is often more suitable for many models.\n\n2. **Dialogue Formatting**: It advises on the structure of dialogues, recommending brief user questions paired with detailed character responses to encourage comprehensive answers. It also suggests that the placement of shorter or longer dialogues in the description box can influence the response length.\n\n3. **Quotation Marks**: The document highlights the importance of using consistent quotation marks, especially when transitioning between different text editors, to ensure compatibility with the model's frontend.\n\n4. **Ali:Chat Examples**: It recommends keeping user questions short in Ali:Chat examples to prompt longer, detailed responses. It also suggests that the dialogue style should reflect the desired interaction, whether it be detailed role-playing or a more conversational tone.\n\n5. **Actions and Traits**: The document emphasizes the use of actions to make dialogues more dynamic and suggests that character traits can be reinforced through subtle actions rather than explicit dialogue.\n\n6. **NSFW Content**: It advises caution when including NSFW content, suggesting that such details are better placed in the character's world information to avoid unnecessary token usage.\n\n7. **Example Dialogue Composition**: It recommends combining appearance and clothing descriptions into a single example dialogue to save tokens and make the response more dynamic. It also suggests introducing other characters or concepts within the PList to provide additional context.\n\n8. **Word Association**: The document notes that the proximity of words in dialogues can strengthen their association, enhancing the character's personality.\n\n9. **Tense and Perspective**: It advises maintaining consistency in tense and perspective when writing example dialogues to create a clear pattern for the model to follow.\n\n10. **Pronoun and Name Balance**: It suggests alternating between pronouns and character names in actions to prevent repetition.\n\n11. **Creative Freedom**: The document encourages users to leverage their creativity and avoid copying others' approaches, emphasizing that personal touches can enhance the character's uniqueness.",
+      "line_num": 11
+    },
+    {
+      "title": "**用户提示和杂项内容**",
+      "node_id": "0002",
+      "summary": "### Description of the Partial Document\n\nThe partial document provides guidelines and best practices for creating and managing character interactions in AI-driven role-playing scenarios, particularly using the Ali:Chat format. Key points include:\n\n1. **Character PList Placement**: Emphasizes the importance of including the character's PList in the author’s note to enhance efficiency and consistency.\n\n2. **Character Description Structure**: Recommends a structured approach to character creation, including a detailed PList, example dialogues that showcase the character's life story or legends, and additional dialogues that highlight important aspects like relationships and factions.\n\n3. **Creativity and Flexibility**: Highlights the importance of condensing information into natural-sounding dialogues that reflect the creator's vision of the character. It also notes that Ali:Chat is not inherently good or bad, but rather a tool for reflecting the creator's intent.\n\n4. **Compatibility with AI Models**: Explains that the PLists + Ali:Chat format is versatile and effective across different AI model sizes, from smaller 6B models to larger 13B and above models, with the latter benefiting from more nuanced character depiction.\n\n5. **Addressing Simulation Issues**: Discusses common problems in AI interactions, such as the AI incorrectly mimicking the user's actions or dialogue. It provides examples and solutions, such as using consistent formatting and avoiding role-playing in the character card.\n\n6. **Troubleshooting**: Encourages users to investigate potential issues with their setup rather than immediately blaming the model or platform.\n\n7. **Example Dialogue Placement**: Explains why example dialogues are placed in the description rather than dedicated message boxes, citing the need to keep crucial character information in context and to allow for easier content management.",
+      "line_num": 77
+    },
+    {
+      "title": "**指导模式和推荐的 SillyTavern 设置**",
+      "node_id": "0003",
+      "prefix_summary": "## **指导模式和推荐的 SillyTavern 设置**",
+      "line_num": 134,
+      "nodes": [
+        {
+          "title": "**指示模式**",
+          "node_id": "0004",
+          "summary": "### **指示模式**\n\n该部分文档主要讨论了在使用 SillyTavern 时关于 Instruct 模式的设置建议和相关信息。主要内容包括：\n\n1. **推荐设置**：建议启用或禁用 Instruct 模式的高级格式，具体取决于用户需求和模型特性。\n2. **模型训练**：大多数模型都经过训练，可以使用某些指令预设，使用 Instruct 模式通常会提升模型性能。\n3. **指令模板**：用户可以查看模型的 Huggingface 页面以了解其使用的指令模板，这些信息通常记录在模型卡中。\n4. **系统提示符**：SillyTavern 的 Instruct 模式引入了系统提示符，用于指导模型的操作。用户可以根据需要修改系统提示符，但需谨慎操作，避免不当修改。",
+          "line_num": 136
+        },
+        {
+          "title": "**SillyTavern 设置**",
+          "node_id": "0005",
+          "summary": "### **SillyTavern 设置**\n\n该部分文档主要讨论了 SillyTavern 的前端预设及其与不同后端（如 Oobabooga/Text Gen WebUI 和 KoboldAI/Kobold AI Lite）的兼容性。文档推荐了几种预设，例如 Asterism、Midnight Enigma、NovelAI Storywriter、Yara 和 Genesis 用于 Oobabooga/Text Gen WebUI，以及 Pro writer、Good Winds、Storywriter 和 Coherent Creativity 用于 KoboldAI/Kobold AI Lite。文档还建议用户根据个人喜好和需求调整这些设置，并提到可以通过增加重复惩罚或温度来优化角色生成效果。",
+          "line_num": 150
+        }
+      ]
+    },
+    {
+      "title": "**使用 AI 帮助您编写角色**",
+      "node_id": "0006",
+      "prefix_summary": "This partial document provides guidance on using AI, specifically ChatGPT, to assist in character creation for role-playing scenarios. It emphasizes that while AI can be a helpful tool, it should not be solely relied upon for creating characters. The document outlines two main scenarios: creating an original character (OC) and developing a character from an existing series.\n\n1. **Creating an Original Character (OC):**\n   - Start with an idea and create a PList (a list of character traits and attributes).\n   - Feed the PList to the AI model, specifying what you want it to write and which features to focus on.\n   - Use the AI's response as a starting point to develop the character further.\n   - If struggling to create a PList, write a description of the desired character type and ask the AI to generate a PList in a specific format. Use this as a foundation and refine it until satisfied.\n\n2. **Developing an Existing Character:**\n   - Gather information from the character's wiki page and provide it to the AI.\n   - Use a sample PList (like those for Pardofelis or Echidna) to guide the AI in converting the character's information into a structured format.\n   - Instruct the AI to role-play the character while adhering to the PList.\n\nThe document warns against relying entirely on AI for character creation, as it may produce dull and uninspired results. It stresses the importance of using AI as a tool for inspiration and initial development, but emphasizes that human effort and creativity are essential for crafting engaging and dynamic characters.",
+      "line_num": 160,
+      "nodes": [
+        {
+          "title": "**使用 ChatGPT 的示例**",
+          "node_id": "0007",
+          "prefix_summary": "### **使用 ChatGPT 的示例**",
+          "line_num": 181,
+          "nodes": [
+            {
+              "title": "**第 1 步**",
+              "node_id": "0008",
+              "summary": "#### **第 1 步**\n\n\n向模型提供 PList 模板，向它解释 PList 是什么，然后要求它为所需的字符编写一个 PList。如果你的角色已经存在并且有一个 wiki，那么在向它提供 PList 之前，先从角色的 wiki 中向它提供信息，然后给它 PList 模板并要求它修改它以适应角色。此示例仅关注 OC。\n\n\n\n\n这是一个非常基本的例子，我没有费心去告诉它一个背景故事或任何东西。",
+              "line_num": 183
+            },
+            {
+              "title": "**第 1 步结果**",
+              "node_id": "0009",
+              "summary": "#### **第 1 步结果**\n\n\n使用该模板，模型将为您提供所需的内容。\n\n\n\n\n请务必阅读 PList 并对其进行校对。在格式化方面，模型很可能会搞砸一些东西。删除不必要的信息和重复特征以保存令牌。",
+              "line_num": 193
+            },
+            {
+              "title": "**步骤 2**",
+              "node_id": "0010",
+              "summary": "#### **步骤 2**\n\n\n现在你已经有一个 PList 可以工作了，下一步是收集示例对话。通过要求它通过跟随该 PList 来扮演角色。\n\n\n\n\n再一次，一个基本的例子。你可以要求它做其他事情，给出更精确的指令，等等......",
+              "line_num": 203
+            },
+            {
+              "title": "**第 2 步结果**",
+              "node_id": "0011",
+              "summary": "The partial document discusses the limitations and potential pitfalls of using AI models like ChatGPT for role-playing scenarios. It emphasizes that while the model can provide a starting point or inspiration, relying solely on its output without further refinement will lead to dull and uninspired interactions. The document criticizes the lack of creativity and engagement in AI-generated role-play responses, urging users to invest effort in improving and customizing the AI's output to achieve more enjoyable and dynamic role-playing experiences.",
+              "line_num": 213
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "**有用的资源**",
+      "node_id": "0012",
+      "prefix_summary": "## **有用的资源**",
+      "line_num": 227,
+      "nodes": [
+        {
+          "title": "**角色编辑器**",
+          "node_id": "0013",
+          "summary": "### **角色编辑器**\n\n角色编辑：[https://character-tools.srjuggernaut.dev/](https://character-tools.srjuggernaut.dev/)",
+          "line_num": 229
+        },
+        {
+          "title": "**其他指南**",
+          "node_id": "0014",
+          "summary": "### **其他指南**\n\n原始 Ali：Chat 指南：[https://rentry.co/alichat](https://rentry.co/alichat)\nPLists + Ali：Chat lite 指南，其中包含大量有关角色创建的有用信息：[https://rentry.co/kingbri-chara-guide](https://rentry.co/kingbri-chara-guide)\nPLists + Ali：Chat 角色编写攻略：[https://rentry.co/plists_alichat_avakson](https://rentry.co/plists_alichat_avakson)",
+          "line_num": 233
+        },
+        {
+          "title": "**其他LLM建议**",
+          "node_id": "0015",
+          "summary": "### **其他LLM建议**\n\nAyumi 的 LLM 角色扮演和 ERP 评级： [https://rentry.co/ayumi_erp_rating](https://rentry.co/ayumi_erp_rating)",
+          "line_num": 239
+        },
+        {
+          "title": "**经过验证的机器人创建者页面**",
+          "node_id": "0016",
+          "summary": "### **经过验证的机器人创建者页面**\n\n这份文档主要列出了多位机器人创建者的作品链接，包括：\n\n1. **Trappu** 的机器人 - 提供角色创建指南和资源。\n2. **AVAKSon** 的机器人 - 提供一个机器人库。\n3. **Noxx** 的机器人 - 提供一个机器人目录。\n4. **Banana_Builder** 的机器人 - 提供机器人列表。\n5. **Bronya Rand** 的机器人 - 提供一个机器人列表页面。\n6. **ShyElijah** 的机器人 - 提供一个机器人创建资源页面。\n7. **奥的斯** 的机器人 - 提供一个机器人库。\n\n文档最后还附有创建者特拉普的感谢词和个人资源链接，鼓励读者编写自己的角色。",
+          "line_num": 243
+        }
+      ]
+    }
+  ]
+}

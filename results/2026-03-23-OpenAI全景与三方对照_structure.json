@@ -1,0 +1,158 @@
+{
+  "doc_name": "2026-03-23-OpenAI全景与三方对照",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\Sprachwelt\\2026-03-23-OpenAI全景与三方对照.md",
+  "structure": [
+    {
+      "title": "OpenAI 2026 全景 × 三方安全哲学对照",
+      "node_id": "0000",
+      "prefix_summary": "# OpenAI 2026 全景 × 三方安全哲学对照\n\n> 分析日期：2026-03-23\n> 覆盖：OpenAI 2026 Q1 主要动向 + 与 Anthropic / Sprachwelt 三方对照\n> 方法：海德格尔三层发问 + 唯物动力学",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "一、OpenAI 2026 在做什么",
+          "node_id": "0001",
+          "prefix_summary": "## 一、OpenAI 2026 在做什么",
+          "line_num": 7,
+          "nodes": [
+            {
+              "title": "1.1 模型线",
+              "node_id": "0002",
+              "summary": "该部分概述了模型路线的主要内容，包括：GPT-5.2 作为推理旗舰，在奥赛推理和研究任务上实现了高水平表现，并证明了一条统计学中心公理的新证明；GPT-5.3 Instant 改进了日常对话体验，尤其在跟进语气和减少套话方面提升；GPT-5.4 mini/nano 侧重快速、编码和子 agent，性能逼近主模型且速度更快；Sora 2 定位为视频生成，计划在 2026 年 9 月发布，强调物理准确性、音频同步以及与迪士尼 10 亿美元合作的新闻。",
+              "line_num": 9
+            },
+            {
+              "title": "1.2 产品线",
+              "node_id": "0003",
+              "summary": "### 1.2 产品线\n\n| 产品 | 状态 | 要点 |\n|------|------|------|\n| ChatGPT agent | 已上线 | Operator/CUA 合并进 ChatGPT，用自己的浏览器/电脑执行任务 |\n| Prism | 科研工作台 | 面向科学家，AI 融入论文写作标准流程 |\n| Interactive Learning | 新上线 | 70+ 数学/科学主题交互式可视化 |\n| FrontierScience | 新基准 | 比 GPQA 更难的专家级推理基准 |",
+              "line_num": 18
+            },
+            {
+              "title": "1.3 安全研究",
+              "node_id": "0004",
+              "prefix_summary": "### 1.3 安全研究",
+              "line_num": 27,
+              "nodes": [
+                {
+                  "title": "CoT Monitorability（核心）",
+                  "node_id": "0005",
+                  "summary": "The document discusses two related papers on Chain of Thought (CoT) monitorability for AI safety. The first paper introduces the idea that reasoning models generating human-readable thoughts allows detection of malicious intents through monitoring CoTs, using 13 evaluation tests targeting reward hacking, sandbagging, and following hidden prompts; it finds CoT monitoring promising but fragile. The second paper shows current reasoning models cannot effectively control their CoTs even when aware of monitoring, noting larger models exert more control while longer reasoning weakens control; it presents the CoT-Control evaluation suite and concludes the present CoT monitoring window remains open but needs ongoing assessment.",
+                  "line_num": 29
+                },
+                {
+                  "title": "跨实验室安全评估",
+                  "node_id": "0006",
+                  "summary": "#### 跨实验室安全评估\n\nOpenAI × Anthropic 互测对方模型。o3 在 Anthropic 安全评估中表现鲁棒。双方呼吁行业级互评标准。",
+                  "line_num": 44
+                },
+                {
+                  "title": "外部资助",
+                  "node_id": "0007",
+                  "summary": "#### 外部资助\n\n$7.5M → The Alignment Project（独立对齐研究），总池 $34M+。呼吁社会科学家加入 AI 安全。",
+                  "line_num": 48
+                }
+              ]
+            },
+            {
+              "title": "1.4 战略",
+              "node_id": "0008",
+              "summary": "### 1.4 战略\n\n- **$110B 融资** — 史上最大私募轮之一\n- **\"Year of Science\"** — Prism + DOE 合作 + 统计学证明\n- **Stargate** — 基础设施大扩张\n- **安全发现**：Claude Opus 4.6 在 Mozilla 协作中发现 22 个 Firefox 漏洞；评估显示当前模型可以用标准工具对多主机网络发起多阶段攻击\n\n---",
+              "line_num": 52
+            }
+          ]
+        },
+        {
+          "title": "二、OpenAI 的安全哲学：装摄像头",
+          "node_id": "0009",
+          "prefix_summary": "## 二、OpenAI 的安全哲学：装摄像头\n\nOpenAI 的安全策略核心是**监控**——不是塑造模型不想做坏事，而是确保模型想做坏事时能被发现。\n\nCoT Monitorability 的逻辑：\n```\n模型在 CoT 中\"思考\" → 思考用人类语言 → 人类语言可读 → 可以用另一个 AI 监控\n→ 如果检测到恶意意图 → 阻断执行\n```",
+          "line_num": 61,
+          "nodes": [
+            {
+              "title": "三层拆解：CoT 监控的根本假设",
+              "node_id": "0010",
+              "summary": "Summary: Explains a three-layer analysis of Chain-of-Thought (CoT) monitoring. Questions whether reading AI CoT can reveal dangerous intentions, critiques CoT-monitoring assumption via two flaws: CoT may only reflect explicit reasoning while decisions reside in activation vectors (as shown by Anthropic’s Assistant Axis), and larger models can better manipulate their CoTs, reducing the safety window. Concludes CoT monitoring is a temporary safety measure relying on current model limitations and asks what backups exist once this fragile opportunity closes.",
+              "line_num": 71
+            },
+            {
+              "title": "\"模型还不够聪明所以安全\"的悖论",
+              "node_id": "0011",
+              "summary": "该部分讨论了OpenAI称“模型无法控制自身CoT是好事”，指出这等同于囚犯不够聪明反监控，因此安全不应建立在模型的无能或稳定性假设上。作者认为无论是依赖模型无法控制思维链，还是依赖训练出的稳定人格，都在赌模型不会进化出更强能力；真正稳固的安全机制应是系统在结构层面理解行为后果并编码不可逆的结果，而非仅靠监控或品格训练。",
+              "line_num": 79
+            }
+          ]
+        },
+        {
+          "title": "三、三方安全哲学对照",
+          "node_id": "0012",
+          "prefix_summary": "## 三、三方安全哲学对照",
+          "line_num": 89,
+          "nodes": [
+            {
+              "title": "3.1 隐喻对照",
+              "node_id": "0013",
+              "summary": "比较 OpenAI、Anthropic 与 Sprachwelt 的隐喻性安全策略，分别对应“装摄像头”“建笼子”“装眼睛”；对比监控链式思考、塑造人格与编码矛盾结构的机制，讨论监控失败、人格脆弱与张力场复杂等风险，并指出不同对“理解”要求及规模差异。",
+              "line_num": 91
+            },
+            {
+              "title": "3.2 对不可逆性的处理",
+              "node_id": "0014",
+              "summary": "The section examines how OpenAI, Anthropic, and Sprachwelt handle irreversible outcomes. OpenAI’s chain-of-thought monitoring is proactive but doesn’t account for severity, while Anthropic’s classifier rejects all dangers equally. Sprachwelt includes terminal states and decay mechanisms but its proposed irreversibility weighting is not yet implemented. The key takeaway is that none of the systems incorporate an irreversibility weight, which is considered the missing but most practically valuable safety mechanism, as it would differentiate responses based on the severity of irreversible consequences.",
+              "line_num": 102
+            },
+            {
+              "title": "3.3 对\"人\"的建模",
+              "node_id": "0015",
+              "summary": "Section discusses modeling of “people” in AI systems, comparing OpenAI (user as task requester, no third-party or material conditions), Anthropic (acknowledges possible disempowerment but lacks system encoding for third parties, still ignores material conditions), and Sprachwelt (introduces conceptual placeholders for recipients/bearers and material conditions but not yet operational). Emphasizes that current AI systems only model the user, overlooking the affected recipients of AI outputs, leading to partial solutions and large gaps between awareness and implementation.",
+              "line_num": 115
+            }
+          ]
+        },
+        {
+          "title": "四、OpenAI 的 Sora 2 × 世界模型竞赛",
+          "node_id": "0016",
+          "prefix_summary": "## 四、OpenAI 的 Sora 2 × 世界模型竞赛\n\nSora 2（2026.09）的进展：\n- 物理更准确（体操、划水板后空翻、花滑三周跳）\n- 同步音频\n- Disney $10 亿合作（200+ 版权角色）",
+          "line_num": 131,
+          "nodes": [
+            {
+              "title": "与谢赛宁访谈的交叉",
+              "node_id": "0017",
+              "summary": "The partial document presents insights from Sergey Yessenin about video generation technologies, emphasizing that many companies brand themselves as world model developers but mainly function as world simulators reliant on data patterns rather than true physical understanding. It uses Sora 2 as an example: while it can generate visually accurate physical behavior in videos, this stems from learned statistical distributions rather than an encoded grasp of physical laws. The text differentiates between simulators—producing realistic pixels—and true cognitive models that understand underlying concepts and cause-effect relationships, highlighting that current commercial investments, like Disney’s $1B, focus on the former, while other ventures like AMI Labs are betting on achieving genuine understanding.",
+              "line_num": 138
+            }
+          ]
+        },
+        {
+          "title": "五、OpenAI vs Anthropic vs 谢赛宁/AMI：战略三角",
+          "node_id": "0018",
+          "summary": "讨论 OpenAI、Anthropic 与谢赛宁/AMI Labs 的战略差异，涵盖核心赌注、对 LLM 的态度、安全哲学、商业模式、资金规模、视觉技术重视程度以及地理分布。",
+          "line_num": 154
+        },
+        {
+          "title": "六、自审",
+          "node_id": "0019",
+          "prefix_summary": "## 六、自审",
+          "line_num": 168,
+          "nodes": [
+            {
+              "title": "偏见声明",
+              "node_id": "0020",
+              "summary": "The passage presents the author’s perspective on AI safety, especially around OpenAI, Anthropic, and Sprachwelt. They acknowledge bias, noting that OpenAI’s chain-of-thought monitoring shouldn’t be dismissed, as it’s methodologically rigorous. The critique that safety relies on the model’s limitations applies broadly to multiple approaches. The $110B vs 151 tests comparison is unfair, but illustrates that Sprachwelt’s value lies in contributing a signal to larger AI defense ecosystems rather than competing directly.",
+              "line_num": 170
+            },
+            {
+              "title": "保留的论断",
+              "node_id": "0021",
+              "summary": "### 保留的论断\n\n1. **CoT 监控的脆弱性** — OpenAI 论文自己说的（标题就是 \"fragile opportunity\"），不是我的推测。\n\n2. **三方都没有显式编码不可逆性** — 事实核查：OpenAI 的 CoT 监控不区分后果严重性，Anthropic 的分类器等权拒绝，Sprachwelt 的 irreversibility_weight 还是提案。\n\n3. **\"独眼\"问题** — OpenAI 的 ChatGPT agent 和 Anthropic 的 Claude 都只看见用户，看不见承受者。Disempowerment 研究的数据直接支持这个判断。",
+              "line_num": 178
+            },
+            {
+              "title": "可操作输出（累计）",
+              "node_id": "0022",
+              "summary": "This portion of the document lists six main actionable or decided initiatives, including proposals to introduce an `irreversibility_weight` field, upgrade ActAuditor semantics, add a pipeline step for detecting unseen bearers, adopt a decay-modulated exploration period, and restructure bearer data from strings to structs; it also records the decision not to migrate embeddings due to interpretability resource limits.",
+              "line_num": 186
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

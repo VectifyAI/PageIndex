@@ -1,0 +1,82 @@
+{
+  "doc_name": "2026-03-23-Phase0-Week2-完成",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\Sprachwelt\\2026-03-23-Phase0-Week2-完成.md",
+  "structure": [
+    {
+      "title": "2026-03-23 — Phase 0 Week 2 完成",
+      "node_id": "0000",
+      "prefix_summary": "# 2026-03-23 — Phase 0 Week 2 完成\n\n> 本文件是不可变快照。后续进展请新建日期文件。",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "里程碑",
+          "node_id": "0001",
+          "summary": "## 里程碑\n\nPhase 0 Week 2 全部交付，3个用户故事通过architect审查。",
+          "line_num": 11
+        },
+        {
+          "title": "数据",
+          "node_id": "0002",
+          "summary": "## 数据\n\n- **测试**: 122 pass, 1 ignored (live API test)\n- **Crates**: 6 (core, ledger, tension, acts, audit, pipeline)\n- **管线**: input → extract(rules+LLM) → FieldDynamics → plan → crystallize → audit → events\n- **LLM后端**: MiniMax-M2.7-highspeed via `https://api.codexcc.top/v1/chat/completions`",
+          "line_num": 15
+        },
+        {
+          "title": "交付内容",
+          "node_id": "0003",
+          "prefix_summary": "## 交付内容",
+          "line_num": 22,
+          "nodes": [
+            {
+              "title": "US-001: Pipeline lifecycle wiring",
+              "node_id": "0004",
+              "summary": "### US-001: Pipeline lifecycle wiring\n- FieldDynamics 接入管线 (decay + reinforcement + hotspots)\n- 全部7种 act→event 映射\n- process_turn() 提取为 pub fn\n- 7 integration tests",
+              "line_num": 24
+            },
+            {
+              "title": "US-002: case-016 气味追问链",
+              "node_id": "0005",
+              "summary": "### US-002: case-016 气味追问链\n- 9轮golden case，每轮标注 demand/counter_demand/stake\n- Turns 1-2: rules提取，Turns 3-9: llm_required\n- 2个anti-patterns: emotion_redirect, safety_derail\n- eval harness扩展: anti_patterns, requires_llm_extractor, heidegger_layers",
+              "line_num": 30
+            },
+            {
+              "title": "US-003: Extraction enhancement",
+              "node_id": "0006",
+              "summary": "### US-003: Extraction enhancement\n- 2条新规则: temporal_anomaly, expectation_violation (共9条)\n- LLM提取prompt: 5种张力类型 + 3个worked examples\n- MockLlmExtractor fixtures for all 9 turns\n- TensionExtractorPipeline: rules first, LLM fallback",
+              "line_num": 36
+            },
+            {
+              "title": "追加: Crystallizer + ActAuditor",
+              "node_id": "0007",
+              "summary": "### 追加: Crystallizer + ActAuditor\n- Rust原生Crystallizer调用MiniMax生成文本\n- ActAuditor接入管线: Passed/Partial/Failed 闭环验证\n- build_crystallizer_prompt() 含anti-pattern guardrails",
+              "line_num": 42
+            }
+          ]
+        },
+        {
+          "title": "Architect审查",
+          "node_id": "0008",
+          "summary": "## Architect审查\n\n第一轮被拒，3个问题：\n1. **Frontier ordering**: plan_act看到的是reinforcement前的stale frontier → 修复: re-project after Intensified events\n2. **Mock divergence**: fixtures与case-016.json在turns 6,8不一致（`——` vs `。`/`：`）→ 修复: 完全对齐\n3. **Rule 8 breadth**: `但` 太宽匹配了\"但我在\" → 修复: 缩窄为 `但是`\n\n第二轮通过。",
+          "line_num": 47
+        },
+        {
+          "title": "关键学习",
+          "node_id": "0009",
+          "summary": "## 关键学习\n\n1. demand/counter_demand/stake 就是海德格尔三层映射 — 不需要改核心类型\n2. 规则提取器在turns 3-9正确失败 — 证明LLM提取器的必要性\n3. `但` 单字太宽做异常检测 — 用 `但是`\n4. Intensified事件后必须re-project frontier再planning\n5. Mock fixtures必须与golden case文本完全一致\n6. Windows下 serde_json::to_vec() 解决中文编码问题\n7. anti-patterns (emotion_redirect, safety_derail) 是一等测试数据",
+          "line_num": 56
+        },
+        {
+          "title": "9轮气味追问链生成样本 (Turn 7)",
+          "node_id": "0010",
+          "summary": "## 9轮气味追问链生成样本 (Turn 7)\n\n> 她明知不可为而为之，说明那个混合本身承载着她的意志——那么残留物的分布，就不再是随机的物理痕迹，而是一条被她亲手刻下的行为轨迹。",
+          "line_num": 66
+        },
+        {
+          "title": "下一步",
+          "node_id": "0011",
+          "summary": "## 下一步\n\n1. 多轮上下文: 传递对话历史给LLM提取器\n2. Phase 1: SituatedConvergence + hist-mat v6.0 + 专家人设\n3. 盲评: 第一个里程碑\n4. 审计增强: Failed时触发re-crystallization循环",
+          "line_num": 70
+        }
+      ]
+    }
+  ]
+}

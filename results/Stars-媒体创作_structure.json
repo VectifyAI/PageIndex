@@ -1,0 +1,56 @@
+{
+  "doc_name": "Stars-媒体创作",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\GitHub-Stars\\Stars-媒体创作.md",
+  "structure": [
+    {
+      "title": "媒体创作",
+      "node_id": "0000",
+      "prefix_summary": "# 媒体创作",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "C#",
+          "node_id": "0001",
+          "summary": "## C#\n\n- [NickeManarin/ScreenToGif](https://github.com/NickeManarin/ScreenToGif) — 🎬 ScreenToGif allows you to record a selected area of your screen, edit and save it as a gif or vide",
+          "line_num": 4
+        },
+        {
+          "title": "C++",
+          "node_id": "0002",
+          "summary": "## C++\n\n- [AaronFeng753/Waifu2x-Extension-GUI](https://github.com/AaronFeng753/Waifu2x-Extension-GUI) — Video, Image and GIF upscale/enlarge(Super-Resolution) and Video frame interpolation. Achieved with \n- [NeilJed/VTFLib](https://github.com/NeilJed/VTFLib) — VTFLib is a LGPL open source programming library that provides a C and C++ API for reading and writi\n- [snowie2000/mactype](https://github.com/snowie2000/mactype) — Better font rendering for Windows.",
+          "line_num": 8
+        },
+        {
+          "title": "Go",
+          "node_id": "0003",
+          "summary": "## Go\n\n- [spddl/CS2FontConfigurator](https://github.com/spddl/CS2FontConfigurator) —",
+          "line_num": 14
+        },
+        {
+          "title": "HTML",
+          "node_id": "0004",
+          "summary": "## HTML\n\n- [TakWolf/ark-pixel-font](https://github.com/TakWolf/ark-pixel-font) — 开源的泛中日韩像素字体，黑体风格",
+          "line_num": 18
+        },
+        {
+          "title": "JavaScript",
+          "node_id": "0005",
+          "summary": "## JavaScript\n\n- [be5invis/Sarasa-Gothic](https://github.com/be5invis/Sarasa-Gothic) — Sarasa Gothic / 更纱黑体 / 更紗黑體 / 更紗ゴシック / 사라사 고딕",
+          "line_num": 22
+        },
+        {
+          "title": "Other",
+          "node_id": "0006",
+          "summary": "## Other\n\n- [WootingKb/wooting-design](https://github.com/WootingKb/wooting-design) — Design and hardware files for Wooting keyboards\n- [ZHO-ZHO-ZHO/ComfyUI-Workflows-ZHO](https://github.com/ZHO-ZHO-ZHO/ComfyUI-Workflows-ZHO) — 我的 ComfyUI 工作流合集 | My ComfyUI workflows collection",
+          "line_num": 26
+        },
+        {
+          "title": "Python",
+          "node_id": "0007",
+          "summary": "This partial document provides a curated list of GitHub repositories related to Python projects, primarily focusing on AI, machine learning, and multimedia processing. Key highlights include:\n\n1. **ChatTTS_colab**: A user-friendly tool for deploying ChatTTS with features like streaming output, voice customization, long audio generation, and multi-character narration.\n\n2. **VideoLingo**: Offers automated subtitle cutting, translation, alignment, and dubbing, aiming for Netflix-level quality.\n\n3. **Squirrel-RIFE**: An advanced frame interpolation software that enhances video smoothness, boasting better performance and lower memory usage compared to alternatives like DAIN.\n\n4. **LyCORIS**: Extends Stable Diffusion with novel rank adaptation implementations, improving upon conventional Lora methods.\n\n5. **GPT-SoVITS**: Enables high-quality text-to-speech (TTS) model training with minimal voice data, facilitating few-shot voice cloning.\n\n6. **sd-webui-segment-anything**: Integrates the \"Segment Anything\" model into the Stable Diffusion WebUI, enhancing image segmentation capabilities.\n\n7. **sd-webui-deforum**: Provides a Deforum extension for AUTOMATIC1111's Stable Diffusion webui, likely adding animation and deformation features.\n\n8. **video-style-transfer**: Allows users to transfer artistic styles to videos, leveraging the ClarityAI platform.\n\n9. **ebsynth_utility**: An extension for AUTOMATIC1111's UI that facilitates video creation using image-to-image translation and ebsynth.\n\n10. **subtitles_translator**: Automatically generates subtitles for videos and audio using Whisper, TranslatePy, and FFmpeg, streamlining the subtitling process.",
+          "line_num": 31
+        }
+      ]
+    }
+  ]
+}

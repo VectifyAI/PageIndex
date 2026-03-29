@@ -1,0 +1,44 @@
+{
+  "doc_name": "06-自动计划模式",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\ClaudeLog-干货\\06-自动计划模式.md",
+  "structure": [
+    {
+      "title": "自动计划模式 (Auto Plan Mode)",
+      "node_id": "0000",
+      "prefix_summary": "# 自动计划模式 (Auto Plan Mode)\n\n> 原文：[claudelog.com/mechanics/auto-plan-mode](https://claudelog.com/mechanics/auto-plan-mode)",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "核心概念",
+          "node_id": "0001",
+          "summary": "## 核心概念\n\n自动计划模式在 Claude 即将执行**潜在破坏性操作**时自动触发计划流程，无需手动激活 Plan Mode。",
+          "line_num": 5
+        },
+        {
+          "title": "实现机制",
+          "node_id": "0002",
+          "summary": "## 实现机制\n\n通过 `--append-system-prompt` 标志（v1.0.51+）配合隐藏的 `exit_plan_mode` 工具，\"让 Claude 根据条件动态进入 Plan Mode\"。",
+          "line_num": 9
+        },
+        {
+          "title": "与手动 Plan Mode 的区别",
+          "node_id": "0003",
+          "summary": "## 与手动 Plan Mode 的区别\n\n| | 手动 Plan Mode | 自动 Plan Mode |\n|---|---|---|\n| 激活 | `Shift+Tab` × 2 | 系统自动触发 |\n| 触发条件 | 人为判断 | 检测到危险操作时 |\n| 心智负担 | 需要记住何时激活 | 零负担 |",
+          "line_num": 13
+        },
+        {
+          "title": "实现方式",
+          "node_id": "0004",
+          "summary": "## 实现方式\n\n在系统 prompt 中追加要求：\n- \"使用 exit_plan_mode 工具展示你的计划\"\n- \"等待：在执行前等待用户明确批准\"\n- \"批准不跨指令延续\" — 每个新指令都需要重新批准\n\n核心流程：**计划 → 用户批准 → 执行**（永远不是：执行 → 计划）",
+          "line_num": 21
+        },
+        {
+          "title": "我的理解",
+          "node_id": "0005",
+          "summary": "## 我的理解\n\n这是 Plan Mode 的\"安全气囊\"版本。普通 Plan Mode 需要你记得系安全带（手动激活），Auto Plan Mode 是碰撞时自动弹出的气囊。\n\n适合新手或高风险场景。但对熟练用户来说，可能会感觉过度保护——每次操作都弹确认框的 Windows UAC 既视感。\n\n实际使用中，更推荐有选择地在 CLAUDE.md 中为特定操作类型（如部署、数据库迁移）配置自动计划。",
+          "line_num": 30
+        }
+      ]
+    }
+  ]
+}

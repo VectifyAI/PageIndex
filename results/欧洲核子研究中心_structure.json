@@ -1,0 +1,72 @@
+{
+  "doc_name": "欧洲核子研究中心",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\赤島Akashima\\世界书\\近代\\欧洲核子研究中心.md",
+  "structure": [
+    {
+      "title": "历史",
+      "node_id": "0000",
+      "prefix_summary": "这段文本主要讲述了欧洲核子研究中心（CERN）的历史沿革：\n\n1. **成立背景**：CERN最初成立于1952年，由11个欧洲政府共同建立，最初的名称是\"欧洲核子研究理事会\"（Conseil Européen pour la Recherche Nucléaire），是一个临时的实验室管理机构。\n\n2. **名称变更**：1954年9月29日，临时理事会解散后，实验室更名为\"欧洲核子研究中心\"（Organisation Européenne pour la Recherche Nucléaire），但保留了原有的缩写CERN。\n\n3. **名称争议**：在Lew Kowarski担任主任期间，曾尝试将名称正式改为\"European Organization for Nuclear Research\"，但新的缩写OERN被认为不够理想。沃纳·海森堡则认为虽然名称改变，但缩写仍可保持为CERN。\n\n4. **成员国信息**：文本还提到1954年CERN有12个创始成员国，并附有相关地图信息（1954-1990年）。",
+      "line_num": 21,
+      "nodes": [
+        {
+          "title": "**重要科学成就**",
+          "node_id": "0001",
+          "prefix_summary": "### **重要科学成就**\n\n这份文档主要介绍了欧洲核子研究中心（CERN）在粒子物理学领域取得的一系列重要成就：\n\n1. **1973年**：Gargamelle气泡室发现了中性流。\n2. **1983年**：UA1和UA2实验组发现了W及Z玻色子，这一发现使得卡洛·鲁比亚和西蒙·范德梅尔获得了1984年的诺贝尔物理学奖。\n3. **1992年**：夏帕克因其在粒子探测器方面的贡献获得了诺贝尔物理学奖。\n4. **1995年**：成功制造出反氢原子。\n5. **1999年**：NA48实验中发现了CP破坏存在的证据。\n6. **2011年**：伯尔尼大学的物理学家声称中微子的速度超过了光速，但随后被证实为实验误差，导致相关研究人员引咎辞职。\n7. **2012年**：CERN宣布通过大型强子对撞机的紧凑渺子线圈和超环面仪器探测到疑似希格斯玻色子的新粒子，质量分别为125.3 GeV/c²和126.0 GeV/c²，统计显著性超过5个标准差。这一发现被认为是希格斯玻色子的重大突破。",
+          "line_num": 27,
+          "nodes": [
+            {
+              "title": "**计算机科学**",
+              "node_id": "0002",
+              "summary": "该部分文档主要介绍了计算机科学领域的一些重要发展，特别是与欧洲核子研究中心（CERN）相关的内容。主要内容包括：\n\n1. **网页服务器和万维网**：文档提到世界上第一个网页服务器收藏于CERN博物馆，并详细介绍了万维网的起源。万维网是由蒂姆·伯纳斯-李和罗伯特·卡里奥在1989年发起的，旨在通过超文本概念帮助研究人员更好地分享信息。第一个网站建于1991年，而万维网在1993年4月30日被CERN宣布开放给所有人使用。文档还提到蒂姆·伯纳斯-李制作的第一个网页的存档。\n\n2. **网格计算**：文档指出CERN成为网格计算的发展中心，主持了多个重要的网格计算计划，如欧洲科学网格计划（EGEE）和大型强子对撞机网格计算计划。此外，CERN还运营着CERN互联网交换点（CIXP），这是瑞士的两个互联网交换点之一。",
+              "line_num": 47
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "粒子加速器",
+      "node_id": "0003",
+      "prefix_summary": "这篇文档主要介绍了欧洲核子研究中心（CERN）正在运作的粒子加速器网络及其各个组成部分。主要内容包括：\n\n1. **粒子加速器网络概述**：CERN拥有一个由六个加速器和一个减速器组成的网络，这些机器在粒子束进行实验或被送往更强的加速器前为其提高能量。\n\n2. **直线加速器（Linac2和Linac3）**：提供低能量粒子，分别用于质子和重离子注入质子同步加速器。下一代加速器Linac4正在开发中。\n\n3. **质子同步加速增辐器（Proton Synchrotron Booster）**：用于进一步加速粒子。\n\n4. **质子同步加速器（Proton Synchrotron, PS）**：建于1959年，提供28 GeV的能量，为其他更强的加速器提供粒子束。\n\n5. **超级质子同步加速器（Super Proton Synchrotron, SPS）**：直径两公里的环形加速器，能量输出从300 GeV至450 GeV不等，用于质子-反质子对撞，并为电子和正电子加速，最终注入大型电子正子对撞机。2007年后，它将为大型强子对撞机注入质子和重离子。\n\n6. **上线同位素质量分离器（ISOLDE）**：用于研究不稳定的核子，粒子由质子同步加速器提供，1967年建成，1974年和1992年升级。\n\n7. **反质子减速器（Antiproton Decelerator, AD）**：研究低速反质子的物理特性，并与正子合成反氢以研究反物质特性。\n\n8. **紧凑直线加速对撞机测试设备（Compact Linear Collider, CLIC）**：用于开发下一代国际大型直线加速对撞机计划。",
+      "line_num": 59,
+      "nodes": [
+        {
+          "title": "**大型强子对撞机**",
+          "node_id": "0004",
+          "summary": "### **大型强子对撞机**\n\n大型强子对撞机（LHC）于2008年9月10日投入运作，位于总长约27公里的环形隧道中。该隧道之前由大型电子正子对撞机使用，位于地下100米，在日内瓦国际机场和汝拉山之间。LHC由五个实验对撞机组成：紧凑μ子线圈（CMS）、超环面仪器（ATLAS）、LHCb、TOTEM与ALICE，这些对撞侦测器在加速器上不同的地点运用不同的技术进行研究及相互验证。建设这些实验设施需要复杂的工程计划，例如为CMS实验侦测器组件使用从比利时租来的起重机，能够举起约2000吨重的组件。约5000块磁铁在2005年3月7日被下放在一个轴上。\n\nLHC产生大量电脑资料，单一研究机构无法负担，因此CERN以流方式发送到全球合作实验室进行分散处理。2005年4月，研究人员成功试验以每秒600MB的传输速度发送到世界七个不同地点。",
+          "line_num": 79
+        },
+        {
+          "title": "**已拆除的加速器**",
+          "node_id": "0005",
+          "summary": "### **已拆除的加速器**\n\n- Linac1\n\n- 600 MeV [同步回旋加速器](https://zh.wikipedia.org/w/index.php?title=同步迴旋加速器&action=edit&redlink=1)（1957-1991）\n\n- [交叉碰撞存储环](https://zh.wikipedia.org/w/index.php?title=交叉碰撞儲存環&action=edit&redlink=1)（ISR，1971-1984)\n\n- 大型电子正子对撞机（LEP，1989-2000)\n\n- [低能反质子环](https://zh.wikipedia.org/w/index.php?title=低能反質子環&action=edit&redlink=1)（LEAR，1982-1996)",
+          "line_num": 91
+        }
+      ]
+    },
+    {
+      "title": "各个实验地点",
+      "node_id": "0006",
+      "summary": "这段文档主要描述了CERN（欧洲核子研究组织）位于法国和瑞士边境的多个实验地点及其设施分布情况。主要内容包括：\n\n1. **梅兰实验地点（西区）**：\n   - 位于汝拉山下，横跨法国和瑞士边境。\n   - 六个入口分别位于瑞士和法国境内，瑞士境内的入口在上下班时段对所有CERN人员开放，法国境内的入口则由海关管理。\n   - 法国境内的货运通道免税，但需通行证。\n\n2. **主要实验设施**：\n   - 超级质子同步加速器及大型强子对撞机的隧道主要位于法国境内的地下。\n   - 地面设有实验大楼、低温冷却工厂等设施，实验室位于隧道深度相同的地下。\n\n3. **具体实验区域**：\n   - **北区（Prévessin）**：位于法国安省的Gex区，是超级质子同步加速器的非对撞机实验目标站。\n   - 其他实验区域用于UA1、UA2和大型强子对撞机的实验。\n   - ATLAS实验位于瑞士境内。\n\n4. **其他实验地点**：\n   - 文档还提到了其他具有正式名称或编号的实验地点，如NA32（位于北区Prévessin，用于查找含粲夸克的粒子）和WA22（位于西区梅兰，利用大型欧洲气泡室BEBC检验中微子的互作用）。\n   - UA1和UA2代表在超级质子同步加速器中进行的地下区域实验。",
+      "line_num": 103
+    },
+    {
+      "title": "成员",
+      "node_id": "0007",
+      "summary": "The partial document provides a list of countries and organizations categorized into different membership statuses within a particular group or organization. It includes:\n\n1. **Formal Members**: A list of 21 countries, including Belgium, Denmark, Germany, France, Greece, Italy, Norway, Sweden, Switzerland, Netherlands, UK, Austria, Spain, Portugal, Finland, Poland, Hungary, Czech Republic, Slovakia, Bulgaria, and Israel.\n\n2. **Applicant**: Romania is listed as an applicant member.\n\n3. **Associate Members**: Serbia is listed as an associate member.\n\n4. **Observers**: The document lists several observers, including the European Commission, UNESCO, the Joint Institute for Nuclear Research, India, Japan, Russia, and the United States.",
+      "line_num": 128
+    },
+    {
+      "title": "对外开放的设施",
+      "node_id": "0008",
+      "summary": "## 对外开放的设施\n\n对外开放的设施包括：\n\n- 科学创新球形礼堂\n\n- 粒子物理学博物馆，展览粒子物理学及欧洲核子研究中心的历史",
+      "line_num": 198
+    },
+    {
+      "title": "流行文化中的CERN",
+      "node_id": "0009",
+      "summary": "## 流行文化中的CERN\n\n日内瓦的18路有轨电车开往欧洲核子研究中心\n\n[印度](https://zh.wikipedia.org/wiki/印度)的[原子能局](https://zh.wikipedia.org/w/index.php?title=原子能局&action=edit&redlink=1)所赠送的[宇宙之舞](https://zh.wikipedia.org/wiki/纳塔罗阇)状态的[湿婆神](https://zh.wikipedia.org/wiki/濕婆神)雕像。\n\n- 游戏[Ingress](https://zh.wikipedia.org/wiki/Ingress)中CERN是Exotic Matter (XM)被发现的所在地。",
+      "line_num": 206
+    }
+  ]
+}

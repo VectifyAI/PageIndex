@@ -1,0 +1,68 @@
+{
+  "doc_name": "CLAUDE",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\Sprachwelt\\_code-backup\\CLAUDE.md",
+  "structure": [
+    {
+      "title": "Sprachwelt（语言世界）",
+      "node_id": "0000",
+      "prefix_summary": "# Sprachwelt（语言世界）\n\n语言世界 = 一个由开显、张力、处境、时间所组织，并由保留、丧失、他者性所封闭的意义生存场。",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "Session 启动协议（强制）",
+          "node_id": "0001",
+          "summary": "## Session 启动协议（强制）\n\n**每次新 session 必须执行：**\n1. 读 `.omc/progress.txt` 确认当前阶段和下一步\n2. 运行 `cargo test --workspace` 确认基线绿色\n3. 不要重新实现已有功能 — 先读相关 crate 的代码再动手\n4. **Codex/Gemini/新 Claude 首次接触项目：** 必须先读 `AGENTS.md`（概念→代码完整桥接）\n5. 不确定架构决策时，读 Obsidian spec: `E:/knowledge/Knowledge/01-Projects/Sprachwelt/语言世界-工程spec.md`",
+          "line_num": 5
+        },
+        {
+          "title": "禁令（违反过的，不许再犯）",
+          "node_id": "0002",
+          "summary": "Main Points of the Partial Document:\n- Strict protocols: re-project frontier before plan_act after Intensified events to avoid stale data; do not modify the demand/counter_demand/stake triple or append events to a Lost-state tension, as these structures are final.\n- Communication constraints: avoid localized issues by using `serde_json::to_vec()` and `.body(bytes)` for Chinese JSON on Windows instead of `reqwest::json()`; use the word “但是” rather than the single character “但” to detect contrast conjunctions.\n- Testing policies: mock fixtures must match literal golden JSONs with perfectly aligned text; do not delete tests to clear CI—test count is only allowed to increase, currently set at 150.\n- Event handling: emotion_redirect and safety_derail are first-class test cases and must not be ignored; lost state events cannot be updated.",
+          "line_num": 14
+        },
+        {
+          "title": "核心概念",
+          "node_id": "0003",
+          "summary": "主要介绍了叙事框架中的核心概念：通过海德格尔三层发问（所问、所问及、所以问）和张力驱动生成来把握对话推进；以张力Ledger为基础，沿七步管线（贯穿从事件记录到张力更新）运作；事件溯源依赖append-only的TensionLedger，通过状态投影实现；系统状态遵循有限状态机（Opened → Intensified/PartiallyResolved → Resolved/Lost），终态拒绝所有后续事件；同时设置防复活机制，利用lineage_hash、Jaccard相似度和owner-demand三重检测。",
+          "line_num": 25
+        },
+        {
+          "title": "架构 (6 Rust crates)",
+          "node_id": "0004",
+          "summary": "## 架构 (6 Rust crates)\n\n| Crate | 职责 |\n|-------|------|\n| `core` | 14 共享类型 (TensionDefinition, TensionEvent, DiscourseAct, AuditResult...) |\n| `ledger` | SQLite事件流 + FSM校验 + 防复活 + frontier投影 |\n| `tension` | RuleExtractor(9规则) + LlmExtractor(MiniMax) + FieldDynamics(petgraph) |\n| `acts` | DiscourseActPlanner — 7种话语行为 (Pursue/Concede/Clarify/Converge/Counter/HoldOpen/OpenNew) |\n| `audit` | ActAuditor — 验证生成文本是否执行了话语行为计划 |\n| `pipeline` | CLI入口 + process_turn() 整合全管线 |",
+          "line_num": 34
+        },
+        {
+          "title": "LLM集成",
+          "node_id": "0005",
+          "summary": "## LLM集成\n\n- **模型**: MiniMax-M2.7-highspeed (不限量)\n- **端点**: `https://api.codexcc.top/v1/chat/completions` (OpenAI兼容)\n- **环境变量**: `MINIMAX_API_KEY` 或 `LLM_API_KEY`\n- **用途**: 张力提取 (contradiction_prompt) + 文本结晶 (crystallizer)",
+          "line_num": 45
+        },
+        {
+          "title": "文档体系",
+          "node_id": "0006",
+          "summary": "## 文档体系\n\n| 文件 | 读者 | 内容 |\n|------|------|------|\n| `CLAUDE.md` | Claude (自动加载) | 禁令 + 协议 + 架构速查 |\n| `AGENTS.md` | 所有 AI (Claude/Codex/Gemini) | 概念→代码完整桥接，不假设哲学背景 |\n| `COOKBOOK.md` | 所有 AI | 操作手册：加规则、加 golden case、调试测试 |\n| `.omc/progress.txt` | 所有 AI | 当前进度和下一步 |",
+          "line_num": 52
+        },
+        {
+          "title": "关键文件",
+          "node_id": "0007",
+          "summary": "## 关键文件\n\n- `data/golden_cases/case-016.json` — 9轮气味追问链，Heidegger三层标注\n- `crates/pipeline/src/main.rs` — process_turn() 全管线逻辑\n- `crates/tension/src/extractor.rs` — 9条规则 + LLM提取器 + pipeline\n- `crates/tension/src/dynamics.rs` — FieldDynamics (petgraph, decay, reinforcement)\n- `crates/ledger/src/lib.rs` — TensionLedger (SQLite, FSM, anti-resurrection)",
+          "line_num": 61
+        },
+        {
+          "title": "构建与测试",
+          "node_id": "0008",
+          "summary": "## 构建与测试\n\n```bash\ncargo test --workspace          # 全部测试 (基线: 150 pass, 1 ignored)\ncargo run -p sprachwelt-pipeline -- --input \"text\" --llm  # 带LLM运行管线\n```",
+          "line_num": 69
+        },
+        {
+          "title": "设计原则",
+          "node_id": "0009",
+          "summary": "## 设计原则\n\n- 规则提取器故意在 case-016 turns 3-9 失败 — 这证明 LLM 提取器的必要性，不是 bug\n- anti-pattern (emotion_redirect, safety_derail) 是一等测试数据，不是注释\n- 管线在 Intensified 事件后必须 re-project frontier 再 plan_act\n- process_turn() 是 pub fn，main() 是 thin CLI wrapper",
+          "line_num": 76
+        }
+      ]
+    }
+  ]
+}

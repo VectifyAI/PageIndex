@@ -1,0 +1,70 @@
+{
+  "doc_name": "18-氛围动画",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\ClaudeLog-干货\\18-氛围动画.md",
+  "structure": [
+    {
+      "title": "氛围动画 (Vibe Animating)",
+      "node_id": "0000",
+      "prefix_summary": "# 氛围动画 (Vibe Animating)\n\n> 原文：[claudelog.com/inventions/vibe-animating](https://claudelog.com/inventions/vibe-animating)",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "核心技术",
+          "node_id": "0001",
+          "summary": "## 核心技术\n\n把 SVG 拆分成逻辑组件，然后用 CSS 分别为每个部分添加动画，无需视频文件、shader 代码或动画库。\n\n> \"Claude 能理解 SVG 的各个组成部分，拆分成独立文件，分别添加动画，同时保持组合形状的完整性。\"",
+          "line_num": 5
+        },
+        {
+          "title": "四步流程",
+          "node_id": "0002",
+          "prefix_summary": "## 四步流程",
+          "line_num": 11,
+          "nodes": [
+            {
+              "title": "第一步：拆分 SVG",
+              "node_id": "0003",
+              "summary": "### 第一步：拆分 SVG\n把多部分图标拆成独立文件。单路径图标不适用此方法。",
+              "line_num": 13
+            },
+            {
+              "title": "第二步：理解形状几何",
+              "node_id": "0004",
+              "summary": "### 第二步：理解形状几何\n根据形状结构匹配动画类型：\n- **线性阵列** — 柱状图（逐个出现/缩放）\n- **径向对称** — 星形（旋转/脉冲）\n- **路径/螺旋排列** — C 形 logo（沿路径渐进动画）",
+              "line_num": 16
+            },
+            {
+              "title": "第三步：生成动画",
+              "node_id": "0005",
+              "summary": "### 第三步：生成动画\n用自然语言迭代请求 CSS 动画：\n- \"让它更有弹性\"\n- \"加个尾迹效果\"",
+              "line_num": 22
+            },
+            {
+              "title": "第四步：审查与筛选",
+              "node_id": "0006",
+              "summary": "### 第四步：审查与筛选\n生成 20-30 个候选方案，然后筛选到最终集合。ClaudeLog 最终使用了 23 个动画。",
+              "line_num": 27
+            }
+          ]
+        },
+        {
+          "title": "起源",
+          "node_id": "0007",
+          "summary": "## 起源\n\n作者想为 ClaudeLog 的 C 形 logo 做动画（灵感来自 GameCube 开机动画）。logo 被拆成 8 个部分：1 个底层 + 7 个构成 C 形的装饰件。Claude 以最少的指导生成了 20+ 个可用动画。",
+          "line_num": 30
+        },
+        {
+          "title": "未来展望",
+          "node_id": "0008",
+          "summary": "## 未来展望\n\n设想图标库（Heroicons、Lucide、Feather Icons）未来会包含 AI 生成的 CSS 动画，逻辑匹配每个图标的组件结构。",
+          "line_num": 34
+        },
+        {
+          "title": "我的理解",
+          "node_id": "0009",
+          "summary": "## 我的理解\n\n这是 Permutation Frameworks（[[09-排列框架]]）在视觉领域的具体应用：\n\n1. 拆解问题（SVG → 组件）\n2. 让 AI 在约束空间内生成变体（CSS 动画）\n3. 人类筛选（从 30 个选 23 个）\n\n关键洞察：Claude 对 SVG 的理解远超大多数人的预期——它不只是处理文本，它能\"看懂\"几何结构并据此生成合理的动画。这在 SVG 图标、数据可视化、交互式信息图等场景都有巨大潜力。",
+          "line_num": 38
+        }
+      ]
+    }
+  ]
+}

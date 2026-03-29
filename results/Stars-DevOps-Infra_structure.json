@@ -1,0 +1,86 @@
+{
+  "doc_name": "Stars-DevOps-Infra",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\GitHub-Stars\\Stars-DevOps-Infra.md",
+  "structure": [
+    {
+      "title": "DevOps-Infra",
+      "node_id": "0000",
+      "prefix_summary": "# DevOps-Infra",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "C",
+          "node_id": "0001",
+          "summary": "## C\n\n- [LazySlavik/RTSS_Crosshair](https://github.com/LazySlavik/RTSS_Crosshair) — Crosshair overlay for RivaTuner Statistics Server\n- [openvelinux/kernel](https://github.com/openvelinux/kernel) — ByteDance kernel for use on cloud.",
+          "line_num": 4
+        },
+        {
+          "title": "C#",
+          "node_id": "0002",
+          "summary": "## C#\n\n- [IceDBorn/rtssh](https://github.com/IceDBorn/rtssh) — An application that hooks to RivaTuner Statistics Server and displays CPU temperature and frequency \n- [KitsuneLab-Development/K4-DamageInfo](https://github.com/KitsuneLab-Development/K4-DamageInfo) — CS2 server extension that displays the amount of damage players have inflicted on the victim's HP an\n- [roflmuffin/CounterStrikeSharp](https://github.com/roflmuffin/CounterStrikeSharp) — CounterStrikeSharp allows you to write server plugins in C# for Counter-Strike 2/Source2/CS2",
+          "line_num": 9
+        },
+        {
+          "title": "C++",
+          "node_id": "0003",
+          "summary": "## C++\n\n- [ShittyCodeMan/RTSS_Timer](https://github.com/ShittyCodeMan/RTSS_Timer) — Timer for RivaTuner Statistics Server",
+          "line_num": 15
+        },
+        {
+          "title": "Go",
+          "node_id": "0004",
+          "summary": "## Go\n\n- [H1d3r/1Panel](https://github.com/H1d3r/1Panel) — 🔥 🔥 🔥 现代化、开源的 Linux 服务器运维管理面板。\n- [NVIDIA/aistore](https://github.com/NVIDIA/aistore) — AIStore: scalable storage for AI applications\n- [go-gitea/gitea](https://github.com/go-gitea/gitea) — Git with a cup of tea! Painless self-hosted all-in-one software development service, including Git h\n- [gravitl/netmaker](https://github.com/gravitl/netmaker) — Netmaker makes networks with WireGuard. Netmaker automates fast, secure, and distributed virtual net",
+          "line_num": 19
+        },
+        {
+          "title": "HTML",
+          "node_id": "0005",
+          "summary": "## HTML\n\n- [peng-zhihui/Planck-Pi](https://github.com/peng-zhihui/Planck-Pi) — Super TINY & Low-cost Linux Develop-Kit Based On F1C200s.",
+          "line_num": 26
+        },
+        {
+          "title": "JavaScript",
+          "node_id": "0006",
+          "summary": "## JavaScript\n\n- [eip-work/kuboard-press](https://github.com/eip-work/kuboard-press) — Kuboard 是基于 Kubernetes 的微服务管理界面。同时提供 Kubernetes 免费中文教程，入门教程，最新版本的 Kubernetes v1.23.4 安装手册，(k8s insta\n- [tobychui/arozos](https://github.com/tobychui/arozos) — Web Desktop Operating System for low power platforms, Now written in Go!",
+          "line_num": 30
+        },
+        {
+          "title": "Other",
+          "node_id": "0007",
+          "summary": "## Other\n\n- [2233admin/tunnelto](https://github.com/2233admin/tunnelto) — Expose your local web server to the internet with a public URL.\n- [RafhaanShah/grAfterburner](https://github.com/RafhaanShah/grAfterburner) — Monitor your PC in style with Grafana and MSI Afterburner\n- [baldavenger/BaldavengerPlugins](https://github.com/baldavenger/BaldavengerPlugins) — OFX Plugins for DaVinci Resolve (macOS, Win10, Linux)",
+          "line_num": 35
+        },
+        {
+          "title": "PHP",
+          "node_id": "0008",
+          "summary": "## PHP\n\n- [nextcloud/all-in-one](https://github.com/nextcloud/all-in-one) — 📦 The official Nextcloud installation method. Provides easy deployment and maintenance with most fea",
+          "line_num": 41
+        },
+        {
+          "title": "Python",
+          "node_id": "0009",
+          "summary": "The partial document provides a list of GitHub repositories with brief descriptions:\n1. **Cortex-Cover-Art-Grabber**: A Python script for extracting cover art from Steam servers to integrate with Razer Cortex.\n2. **Monocraft**: A monospaced programming font inspired by the typography used in Minecraft.\n3. **DDNS**: A tool for automatically updating domain name system (DNS) records to reflect the current machine's IP address, supporting multiple DNS providers like DNSPod, Alibaba DNS, Cloudflare, Huawei Cloud, and DNSCOM.\n4. **Qwen3**: A large language model developed by the Qwen team at Alibaba Cloud.\n5. **distrochooser**: A resource aimed at guiding newcomers in selecting a suitable Linux distribution.",
+          "line_num": 45
+        },
+        {
+          "title": "Ruby",
+          "node_id": "0010",
+          "summary": "## Ruby\n\n- [anomalyco/homebrew-tap](https://github.com/anomalyco/homebrew-tap) —",
+          "line_num": 53
+        },
+        {
+          "title": "Shell",
+          "node_id": "0011",
+          "summary": "## Shell\n\n- [DaoCloud/public-image-mirror](https://github.com/DaoCloud/public-image-mirror) — 很多镜像都在国外。比如 gcr 。国内下载很慢，需要加速。致力于提供连接全世界的稳定可靠安全的容器镜像服务。\n- [Runner-Go-Team/RunnerGo](https://github.com/Runner-Go-Team/RunnerGo) — RunnerGo是一款国内开发者自研的性能压测工具，可以进行接口测试、场景自动化测试、性能压测等一系列功能。",
+          "line_num": 57
+        },
+        {
+          "title": "TypeScript",
+          "node_id": "0012",
+          "summary": "## TypeScript\n\n- [jeremyckahn/chitchatter](https://github.com/jeremyckahn/chitchatter) — Secure peer-to-peer chat that is serverless, decentralized, and ephemeral\n- [modelcontextprotocol/servers](https://github.com/modelcontextprotocol/servers) — Model Context Protocol Servers",
+          "line_num": 62
+        }
+      ]
+    }
+  ]
+}

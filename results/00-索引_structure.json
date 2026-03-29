@@ -1,0 +1,38 @@
+{
+  "doc_name": "00-索引",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\ClaudeLog-干货\\00-索引.md",
+  "structure": [
+    {
+      "title": "ClaudeLog 干货索引",
+      "node_id": "0000",
+      "prefix_summary": "# ClaudeLog 干货索引\n\n> 来源：[claudelog.com](https://claudelog.com/) — 独立社区 Claude Code 文档站（非 Anthropic 官方）\n> 作者：InventorBlack (Wilfred Kasekende)，r/ClaudeAI 版主\n> 汉化整理：2026-03-23",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "心智模型（最核心）",
+          "node_id": "0001",
+          "summary": "## 心智模型（最核心）\n\n| 文件 | 核心一句话 |\n|------|-----------|\n| [[01-你是主线程]] | 你是 CPU 调度器，不是执行者；永远不要阻塞主线程 |\n| [[02-CLAUDE.md至上]] | CLAUDE.md 是不可变系统规则，优先级高于用户 prompt |\n| [[03-上下文中毒]] | 不经意的行为配对会创建持久关联，污染整个 session |\n| [[04-从约束中学习]] | 200K token 限制是训练场，不是障碍 |",
+          "line_num": 7
+        },
+        {
+          "title": "实用技巧",
+          "node_id": "0002",
+          "summary": "This partial document provides a series of practical tips and techniques for optimizing workflow and efficiency in a computational or AI-assisted environment. Key points include:\n\n1. **Separation of Research and Execution**: Emphasizes planning before taking action.\n2. **Automated Planning**: Suggests using automated triggers for planning processes to eliminate manual activation.\n3. **Deep Thinking (Ultrathink)**: Highlights the ability to trigger high-effort reasoning, with performance approaching that of advanced models like Opus.\n4. **Dynamic Memory**: Involves temporarily modifying a file (CLAVDE.md) to perform specific tasks and then reverting it afterward.\n5. **Arrangement Framework**: Advocates for establishing patterns and then generating variations in bulk, transitioning from manual to review-based methods.\n6. **Sub-Agent Coordination**: Recommends using up to seven parallel agents, with explicit coordination outperforming implicit methods.\n7. **Rewind Functionality**: Allows users to revert to previous states in conversations and code by double-clicking the Esc key.\n8. **Context Inspection**: Suggests using the /context command to monitor token usage and optimize Memory-Context Processing (MCP) overhead.\n9. **Sanity Checks**: Advises placing a name at the top of CLAUDE.md to verify configuration settings.",
+          "line_num": 16
+        },
+        {
+          "title": "风格与哲学",
+          "node_id": "0003",
+          "summary": "## 风格与哲学\n\n| 文件 | 核心一句话 |\n|------|-----------|\n| [[14-输出风格]] | Output Styles 替换系统 prompt，Claude Code 变 Claude Anything |\n| [[15-氛围编程]] | Vibe coding 在特定场景有效，需 Plan Mode + Ultrathink 护航 |\n| [[16-永远在实验]] | 工程师精神 = 持续实验 + 记录 + 发表 |\n| [[17-品味]] | 品味 = 直觉 + 经验，功能 × 美 × 持久 |\n| [[18-氛围动画]] | 拆分 SVG 组件后用 CSS 逐部分动画 |",
+          "line_num": 30
+        },
+        {
+          "title": "参考资料",
+          "node_id": "0004",
+          "summary": "## 参考资料\n\n| 文件 | 核心一句话 |\n|------|-----------|\n| [[19-Hooks钩子]] | 确定性自动化：精确作用域 + 智能分发 |\n| [[20-MCP与扩展]] | 21 个精选 MCP 和工具推荐 |\n| [[21-配置指南]] | 全部配置项、CLI 标志、环境变量速查 |\n| [[22-定价]] | 订阅与 API 定价一览 |",
+          "line_num": 40
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "doc_name": "SillyTavern酒館更新方法(實驗性）",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\CW 工具箱\\SillyTavern酒館更新方法(實驗性）.md",
+  "structure": [
+    {
+      "title": "**更新酒館**",
+      "node_id": "0000",
+      "prefix_summary": "# **更新酒館**\n\n先停止酒館項目，并且複製備份一份酒館目錄！！！備份備份備份，因爲我沒有測試，所以保護好數據\n\n对于第一种安装方法的，只需要停止酒馆项目，然后终端\n\n```\ngit pull\n```\n\n等待完成再启动酒馆即可\n\n第二种方法需要使用以下方法",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "進入酒館目錄，打開終端",
+          "node_id": "0001",
+          "summary": "#### 進入酒館目錄，打開終端\n\n```\ngit init\n```\n\n```\ngit remote add origin https://github.com/SillyTavern/SillyTavern.git\n```\n\n```\ngit fetch --all\n```\n\n```\ngit reset --hard origin/release\n```\n\n\n\n出現酒館無法訪問請在 config.yaml 將listen 的 false 修改爲 true\n\n啓動酒館項目，注意容器位置是否為HOST，可能會變",
+          "line_num": 21
+        }
+      ]
+    }
+  ]
+}

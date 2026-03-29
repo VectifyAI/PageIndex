@@ -1,0 +1,134 @@
+{
+  "doc_name": "AI自循环系统",
+  "source_path": "E:/knowledge/Knowledge\\03-Trading\\AI自循环系统.md",
+  "structure": [
+    {
+      "title": "AI自循环交易系统 — 飞轮记忆系统",
+      "node_id": "0000",
+      "prefix_summary": "# AI自循环交易系统 — 飞轮记忆系统\n\n> 不预设框架，结果导向，飞轮驱动，持续进化",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "核心哲学",
+          "node_id": "0001",
+          "summary": "## 核心哲学\n\n**一切分析框架都是假说，不是真理。唯一的真理是账户余额有没有增长。**\n\n- 赚了 → 为什么赚？记录，强化\n- 亏了 → 为什么亏？记录，修正\n- 不确定 → 不动手，观察",
+          "line_num": 5
+        },
+        {
+          "title": "飞轮记忆系统",
+          "node_id": "0002",
+          "prefix_summary": "这段文档描述了一个名为“飞轮记忆系统”的循环过程，主要涵盖以下几个关键点：\n\n1. **专家检索**：系统通过PageIndex进行专家检索，利用161个专家人设进行按需注入。\n2. **任务执行**：Agent（结合OMC和Agent-S）执行任务。\n3. **结果沉淀**：任务结果被沉淀到memU中，memU提供24/7的记忆功能，并进行动态学习。\n4. **反馈优化**：memU的反馈用于优化PageIndex的权重调整和意图预测。\n5. **循环改进**：通过不断的循环，系统实现更好的专家检索、更高效的任务执行、更深的记忆沉淀，从而形成一个良性循环。\n\n**飞轮效应**：每一轮循环都会使专家更准确、记忆更深、成本更低（token成本降低90%）、决策更优。文档还引用了NVIDIA Adaptive Data Flywheel作为参考，提到内部有30k用户，并实现了10倍模型压缩。",
+          "line_num": 13,
+          "nodes": [
+            {
+              "title": "三层知识体系",
+              "node_id": "0003",
+              "summary": "### 三层知识体系\n\n| 层 | 系统 | 内容 | 特性 |\n|----|------|------|------|\n| **静态专家** | PageIndex + agency-agents-zh | 161 个领域人设 | 向量检索，按需加载 |\n| **动态记忆** | memU | 24/7 交互经验/偏好/知识 | 持续学习，意图预测 |\n| **实时上下文** | OMC notepad | 当前任务状态 | 会话级 |",
+              "line_num": 30
+            }
+          ]
+        },
+        {
+          "title": "闭环设计",
+          "node_id": "0004",
+          "prefix_summary": "## 闭环设计\n\n```\n感知 → 分析 → 决策 → 执行 → 复盘\n  ↑                              ↓\n  └──── 飞轮记忆系统 ←──────────┘\n        (PageIndex + memU)\n```",
+          "line_num": 38,
+          "nodes": [
+            {
+              "title": "感知层（数据源可插拔）",
+              "node_id": "0005",
+              "summary": "### 感知层（数据源可插拔）\n- pytdx 实时行情\n- 舆情Agent (东财+新浪+LLM)\n- NewsNow API\n- 其他...持续加",
+              "line_num": 47
+            },
+            {
+              "title": "分析层（框架可插拔，结果差的淘汰）",
+              "node_id": "0006",
+              "summary": "### 分析层（框架可插拔，结果差的淘汰）\n- hist-mat 唯物主义引擎\n- StockScanner 6维因子\n- ICT Fair Value Gap\n- 高盛宏观/Burry逆向/Druckenmiller不对称\n- 其他...让P&L决定权重",
+              "line_num": 53
+            },
+            {
+              "title": "决策层",
+              "node_id": "0007",
+              "summary": "### 决策层\n- 多框架交叉，权重由历史结果动态调整\n- 不预设\"正确方法\"",
+              "line_num": 60
+            },
+            {
+              "title": "执行层",
+              "node_id": "0008",
+              "summary": "### 执行层\n- paper → 实盘渐进",
+              "line_num": 64
+            },
+            {
+              "title": "复盘层",
+              "node_id": "0009",
+              "summary": "### 复盘层\n- Obsidian双链归档\n- 自动提取pattern\n- 每笔交易=一次实验",
+              "line_num": 67
+            }
+          ]
+        },
+        {
+          "title": "NVIDIA 轮子映射（技术选型路线图）",
+          "node_id": "0010",
+          "prefix_summary": "## NVIDIA 轮子映射（技术选型路线图）\n\n```\n你的循环:     感知 → 分析 → 决策 → 执行 → 复盘\nNVIDIA:      Observe → Orient → Decide → Act → Flywheel\n落地轮子:    cuDF/   cuML/   cuOpt/  NIM/   Data Flywheel/\n             Streaming TimeOmni Router  Guardrails Evaluator\n```",
+          "line_num": 72,
+          "nodes": [
+            {
+              "title": "感知层",
+              "node_id": "0011",
+              "summary": "### 感知层\n| 当前 | NVIDIA 轮子 | 行动 |\n|------|------------|------|\n| pytdx + pandas | **cuDF** GPU DataFrame | K 线处理从 pandas 换 cuDF |\n| CPU 数据加载瓶颈 | **DALI** (5.6k⭐) GPU 数据管线 | 数据预处理全 GPU，去 CPU 瓶颈 |\n| 舆情 Agent | **NeMo Retriever** + **Riva** | 多源数据连接 |\n| 多数据源并行 | **Streaming Data to RAG** Blueprint | 实时数据摄入参考架构 |",
+              "line_num": 81
+            },
+            {
+              "title": "分析层",
+              "node_id": "0012",
+              "summary": "The partial document focuses on enhancing various components of a system by leveraging advanced technologies and frameworks. Key points include:\n\n1. **Factor Computation**: Transitioning from using NVIDIA libraries to **cuML** for GPU-accelerated machine learning to enable full GPU-based factor calculation.\n2. **Python CUDA Development**: Replacing hand-written CUDA code with **Warp**, a Python JIT compiler for GPU, to accelerate development speed by 10x.\n3. **Algorithm Acceleration**: Utilizing **RAPIDS RAFT** for accelerating low-level algorithms in the `gpu_factors.py` module.\n4. **Time Series and LLM Integration**: Implementing the **TimeOmni-1** engine (presented at ICLR 2026) to enhance the `hist-mat` engine with time series analysis and large language model-based factor discovery.\n5. **Framework Optimization**: Introducing the **Data Flywheel** Blueprint to automate the iteration and optimization of the multi-framework elimination mechanism.\n6. **Financial Data Distillation**: Adopting the **AI Model Distillation** Blueprint for improving the `decision_fusion` component by distilling financial data.",
+              "line_num": 89
+            },
+            {
+              "title": "决策层",
+              "node_id": "0013",
+              "summary": "### 决策层\n| 当前 | NVIDIA 轮子 | 行动 |\n|------|------------|------|\n| 历史结果动态权重 | **Adaptive Data Flywheel** (2510.27051) | MAPE 控制环 |\n| 不预设正确方法 | **LLM Router** | 路由到最优策略 |\n| 组合权重 | **cuOpt** GPU 求解器 | 投资组合优化 |\n| 风险管理 | **Quant Portfolio Optimization** Blueprint | 参考实现 |",
+              "line_num": 99
+            },
+            {
+              "title": "执行层",
+              "node_id": "0014",
+              "summary": "The partial document focuses on various components and tools within the \"执行层\" (Execution Layer) of a system. It highlights several key elements:\n\n1. **NeMo Guardrails**: A tool with 5.8k stars, likely used for ensuring safety and security in agent operations.\n2. **Agent-S**: A GUI-based agent similar to \"simular-ai\" that automates operations on platforms like 同花顺 and 通达信 by interpreting screenshots and performing mouse and keyboard actions.\n3. **NadirClaw Routing**: Utilizes **NIM** and **LLM Router** for containerized inference and intelligent routing of tasks.\n4. **Nemotron**: An open-source orchestration tool used in the \"claw-router 12 hub\" for decision-making with expensive models and execution with cheaper alternatives.\n5. **garak**: A tool with 7.3k stars for scanning LLM vulnerabilities, ensuring security by running checks through OpenClaw/NadirClaw.\n\nThese components collectively aim to enhance the security, efficiency, and automation of operations within the execution layer.",
+              "line_num": 107
+            },
+            {
+              "title": "复盘层",
+              "node_id": "0015",
+              "summary": "### 复盘层\n| 当前 | NVIDIA 轮子 | 行动 |\n|------|------------|------|\n| Obsidian 知识图谱 | **NeMo Evaluator** 100+ benchmark | 评估框架 |\n| 自动提取 pattern | **NeMo Curator** + **Data Flywheel** | 数据清洗+持续优化 |\n| 每笔交易=实验 | **autoresearch** 实验循环 | 固定时间预算跑实验 |\n| OODA 闭环 | **LLo11yPop** OODA 模式 | 完全同构 |",
+              "line_num": 116
+            },
+            {
+              "title": "关键论文",
+              "node_id": "0016",
+              "summary": "### 关键论文\n| 论文 | 对应层 | 价值 |\n|------|--------|------|\n| Adaptive Data Flywheel (2510.27051) | 决策+复盘 | MAPE 控制环，NVIDIA 内部 30k+ 用户验证 |\n| TimeOmni-1 (ICLR 2026) | 分析 | 时间序列+LLM，量化因子发现 |\n| NEMO-4-PAYPAL (2512.21578) | 执行 | 小模型生产部署，廉价模型路线验证 |\n| KernelEvolve (2512.23236) | 分析 | Agent 自动写 CUDA kernel |\n| Safety Framework (2511.21990) | 执行 | Agent 安全框架 |",
+              "line_num": 124
+            },
+            {
+              "title": "落地优先级",
+              "node_id": "0017",
+              "summary": "### 落地优先级\n1. **autoresearch 跑通 RAPIDS** — cuDF smoke test on RTX 5090\n2. **quant-terminal 感知层** — cuDF 替代 pandas K 线处理\n3. **quant-terminal 分析层** — cuML 替代 numpy 因子计算\n4. **决策层 cuOpt** — 组合优化 GPU 加速\n5. **Data Flywheel 闭环** — 自动迭代淘汰差策略\n6. **NIM 本地部署** — Nemotron on RTX 5090 自托管",
+              "line_num": 133
+            }
+          ]
+        },
+        {
+          "title": "状态",
+          "node_id": "0018",
+          "summary": "## 状态\n- 2026-03-16: 概念确认，架构规划中\n- 2026-03-19: NVIDIA 生态映射完成，技术选型路线图确定",
+          "line_num": 141
+        },
+        {
+          "title": "关联",
+          "node_id": "0019",
+          "summary": "## 关联\n- [[quant-terminal]] — 现有量化系统\n- [[hist-mat]] — 分析引擎之一\n- [[NVIDIA-AI-Blueprints-研究]] — NVIDIA 生态全景研究\n\n#project #trading #ai-loop #planning #nvidia #rapids",
+          "line_num": 145
+        }
+      ]
+    }
+  ]
+}

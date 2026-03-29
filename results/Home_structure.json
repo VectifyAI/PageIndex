@@ -1,0 +1,94 @@
+{
+  "doc_name": "Home",
+  "source_path": "E:/knowledge/Knowledge\\00-Index\\Home.md",
+  "structure": [
+    {
+      "title": "Home",
+      "node_id": "0000",
+      "prefix_summary": "# Home\n\n> 全局入口。所有东西从这里开始找。",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "架构",
+          "node_id": "0001",
+          "summary": "## 架构\n- [[Architecture]] — 全系统架构图 + 项目索引\n- [[开发系统]] — 我们怎么开发：工具链/流程/多模型协作/记忆体系\n- [[开发架构]] — 可复用模式库：每个项目沉淀的pattern",
+          "line_num": 5
+        },
+        {
+          "title": "按域导航",
+          "node_id": "0002",
+          "prefix_summary": "## 按域导航",
+          "line_num": 10,
+          "nodes": [
+            {
+              "title": "🔧 编码基础设施",
+              "node_id": "0003",
+              "summary": "### 🔧 编码基础设施\n- [[FSC]] — 全自研编码引擎\n- [[claw-mesh]] — 分布式AI编码集群\n- [[ClawAPI]] — API密钥管理+路由\n- [[Claw Router]] — 多Hub路由 v3.0\n- [[China MCP Gateway]] — 国产MCP适配 77个",
+              "line_num": 12
+            },
+            {
+              "title": "🤖 Agent生态",
+              "node_id": "0004",
+              "summary": "### 🤖 Agent生态\n- [[oh-my-claudecode]] — 多Agent编排层\n- [[OpenClaw]] — 149 skills Agent平台\n- [[ZeroClaw]] — 16MB Rust极简Agent\n- [[三阵营人格]] — 克劳德同志/山姆算子/以太酱",
+              "line_num": 19
+            },
+            {
+              "title": "📈 量化交易",
+              "node_id": "0005",
+              "summary": "### 📈 量化交易\n- [[quant-terminal]] — A股+OKX量化终端\n- [[hist-mat]] — 唯物主义动力学引擎\n- [[AI自循环系统]] — 结果导向自进化系统\n- [[交易日志]] — 每日session归档",
+              "line_num": 25
+            },
+            {
+              "title": "📚 思想研究",
+              "node_id": "0006",
+              "summary": "### 📚 思想研究\n- [[知识看板]] — 124 issues\n- [[王德峰]] / [[张双利]] / [[翟东升]]\n- [[hist-mat理论]] — v6.0 社会权力框架",
+              "line_num": 31
+            },
+            {
+              "title": "🖥️ 基础设施",
+              "node_id": "0007",
+              "summary": "### 🖥️ 基础设施\n- [[集群运维]] — 6节点拓扑\n- [[SUPER-service-map]] — SUPER 30+服务端口地图\n- [[记忆系统]] — 6套记忆路由\n- [[WinForge]] — Windows优化\n- [[NAS]] — DS718+",
+              "line_num": 36
+            },
+            {
+              "title": "📋 协议",
+              "node_id": "0008",
+              "summary": "### 📋 协议\n- [[Agent-Instructions]] — AI元指令（所有Agent遵循）\n- [[Security-Audit]] — 安全审计+敏感信息边界",
+              "line_num": 43
+            },
+            {
+              "title": "🧠 记忆",
+              "node_id": "0009",
+              "summary": "### 🧠 记忆\n- [[Memory-Nexus]] — 6套记忆系统汇聚层",
+              "line_num": 47
+            },
+            {
+              "title": "📅 日常",
+              "node_id": "0010",
+              "summary": "### 📅 日常\n- `05-Daily/` — 每日笔记\n- `07-Archive/` — 归档",
+              "line_num": 50
+            }
+          ]
+        },
+        {
+          "title": "项目管理",
+          "node_id": "0011",
+          "summary": "## 项目管理\n- [[任务看板]] — Kanban看板（Backlog/This Week/In Progress/Done）\n- [[项目全景]] — 37个自有repo全索引（2233admin + CicadaRelay + Gitea）",
+          "line_num": 54
+        },
+        {
+          "title": "治理",
+          "node_id": "0012",
+          "summary": "## 治理\n- [[Roadmap]] — 各项目下一步做什么\n- [[Costs]] — 月度成本追踪\n- [[Incidents]] — 事故记录\n- [[Failures]] — 失败的解剖学（交易+开发）",
+          "line_num": 58
+        },
+        {
+          "title": "快捷",
+          "node_id": "0013",
+          "summary": "## 快捷\n- 最新交易session: [[2026-03-16-trading]]\n- 十五五规划: [[十五五规划]]",
+          "line_num": 64
+        }
+      ]
+    }
+  ]
+}

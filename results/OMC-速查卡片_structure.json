@@ -1,0 +1,56 @@
+{
+  "doc_name": "OMC-速查卡片",
+  "source_path": "E:/knowledge/Knowledge\\02-Infrastructure\\OMC\\OMC-速查卡片.md",
+  "structure": [
+    {
+      "title": "OMC 速查卡片",
+      "node_id": "0000",
+      "prefix_summary": "# OMC 速查卡片\n\n> 场景驱动，不用记命令，找到场景就知道该干嘛。",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "写代码",
+          "node_id": "0001",
+          "summary": "## 写代码\n\n| 我想...      | 用什么             | 怎么触发                     |\n| ---------- | --------------- | ------------------------ |\n| 写新功能前理清需求  | Deep Interview  | 说\"deep interview\"        |\n| 规划实现方案     | Plan            | `/oh-my-claudecode:plan` |\n| 多文件并行改     | Ultrawork       | 说\"ulw\"                   |\n| 写完自动精简     | AI Slop Cleaner | 说\"deslop\"                |\n| 改到对为止（自循环） | Ralph           | 说\"ralph\"                 |",
+          "line_num": 5
+        },
+        {
+          "title": "Debug",
+          "node_id": "0002",
+          "summary": "## Debug\n\n| 我想... | 用什么 | 怎么触发 |\n|---------|--------|---------|\n| 找 root cause | Trace | 说\"trace 一下这个bug\" |\n| 系统性调试 | Debugger Agent | 自动派发 |\n| QA 循环直到全绿 | UltraQA | 说\"ultraqa\" |",
+          "line_num": 15
+        },
+        {
+          "title": "架构决策",
+          "node_id": "0003",
+          "summary": "## 架构决策\n\n| 我想... | 用什么 | 怎么触发 |\n|---------|--------|---------|\n| 三模型投票决策 | CCG | 说\"ccg\" 或 `/oh-my-claudecode:ccg` |\n| 只读架构分析 | Architect Agent | 自动派发（opus，不改代码） |\n| 方案评审挑刺 | Critic Agent | 自动派发（opus） |",
+          "line_num": 23
+        },
+        {
+          "title": "代码审查",
+          "node_id": "0004",
+          "summary": "## 代码审查\n\n| 我想... | 用什么 | 怎么触发 |\n|---------|--------|---------|\n| 全面 code review | Code Reviewer | 自动派发（opus） |\n| 清理 AI 垃圾代码 | AI Slop Cleaner | 说\"deslop\"/\"anti-slop\" |\n| 精简但保留功能 | Code Simplifier | 自动派发（opus） |",
+          "line_num": 31
+        },
+        {
+          "title": "项目管理",
+          "node_id": "0005",
+          "summary": "## 项目管理\n\n| 我想... | 用什么 | 怎么触发 |\n|---------|--------|---------|\n| 初始化新项目文档 | DeepInit | 说\"deepinit\" |\n| 多 worktree 并行开发 | Project Session Manager | `/oh-my-claudecode:project-session-manager` |\n| 提取经验为 skill | Learner | `/oh-my-claudecode:learner` |\n| 配置通知推送 | Configure Notifications | `/oh-my-claudecode:configure-notifications` |",
+          "line_num": 39
+        },
+        {
+          "title": "研究分析",
+          "node_id": "0006",
+          "summary": "## 研究分析\n\n| 我想... | 用什么 | 怎么触发 |\n|---------|--------|---------|\n| 并行多 agent 分析 | SciOMC | 说\"sciomc\" |\n| 查外部文档 | External Context | `/oh-my-claudecode:external-context` |\n| 问 Codex/Gemini 第二意见 | Ask | `/oh-my-claudecode:ask codex \"...\"` |",
+          "line_num": 48
+        },
+        {
+          "title": "写作",
+          "node_id": "0007",
+          "summary": "## 写作\n\n| 我想... | 用什么 | 怎么触发 |\n|---------|--------|---------|\n| 追踪角色/场景/主题 | Writer Memory | `/oh-my-claudecode:writer-memory` |\n| 轻量文档生成 | Writer Agent | 自动派发（haiku，便宜快） |",
+          "line_num": 56
+        }
+      ]
+    }
+  ]
+}

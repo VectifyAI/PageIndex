@@ -1,0 +1,62 @@
+{
+  "doc_name": "21-配置指南",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\ClaudeLog-干货\\21-配置指南.md",
+  "structure": [
+    {
+      "title": "配置指南 (Configuration)",
+      "node_id": "0000",
+      "prefix_summary": "# 配置指南 (Configuration)\n\n> 原文：[claudelog.com/configuration](https://claudelog.com/configuration)",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "API Key 设置",
+          "node_id": "0001",
+          "summary": "## API Key 设置\n\n```bash\nexport ANTHROPIC_API_KEY=\"your-api-key-here\"\n```",
+          "line_num": 5
+        },
+        {
+          "title": "模型选择",
+          "node_id": "0002",
+          "summary": "## 模型选择\n\n| 模型 | ID | 特点 |\n|------|-----|------|\n| Sonnet 4.6 | `claude-sonnet-4-6` | 最佳编码模型，一致性改善 |\n| Opus 4.6 | `claude-opus-4-6` | 最强，1M 上下文 |\n| Opus 4.5 | `claude-opus-4-5-20251101` | 上一代 |\n| Haiku 3.5 | `claude-3-5-haiku-20241022` | 最快最便宜，复杂任务受限 |\n\n启动时指定：`claude --model claude-sonnet-4-6`\n中途切换：`/model`",
+          "line_num": 11
+        },
+        {
+          "title": "MCP 配置位置（优先级从高到低）",
+          "node_id": "0003",
+          "summary": "## MCP 配置位置（优先级从高到低）\n\n1. `.mcp.json`（项目级，可版本控制）\n2. `~/.claude/settings.local.json`（用户本地）\n3. `~/.claude/settings.json`（用户全局）\n4. `~/.claude.json`（主配置，推荐）",
+          "line_num": 23
+        },
+        {
+          "title": "关键 CLI 标志",
+          "node_id": "0004",
+          "summary": "## 关键 CLI 标志\n\n| 标志 | 用途 | 版本 |\n|------|------|------|\n| `-n \"name\"` / `--name` | 命名 session | v2.1.76+ |\n| `--add-dir /path` | 添加工作目录 | - |\n| `--model` | 指定模型 | - |\n| `--append-system-prompt` | 追加系统 prompt | v1.0.51+ |",
+          "line_num": 30
+        },
+        {
+          "title": "关键配置项",
+          "node_id": "0005",
+          "summary": "This partial document outlines key configuration settings for a system or application, focusing on directories, tool management, attribution, and model customization. It specifies the storage directory for plans, disables the loading spinner, enables attribution for commits and pull requests, defines allowed and disallowed tools, overrides a default model with a custom provider, sets a custom directory for auto memory, and configures sparse paths for the worktree.",
+          "line_num": 39
+        },
+        {
+          "title": "环境变量",
+          "node_id": "0006",
+          "summary": "## 环境变量\n\n| 变量 | 用途 | 版本 |\n|------|------|------|\n| `CLAUDE_CODE_DISABLE_1M_CONTEXT` | 使用标准上下文 | v2.1.50+ |\n| `CLAUDE_CODE_DISABLE_CRON` | 停止 cron 任务 | v2.1.72+ |\n| `CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS` | hook 超时时间 | v2.1.74+ |\n| `ENABLE_CLAUDEAI_MCP_SERVERS` | claude.ai MCP 开关 | v2.1.63+ |",
+          "line_num": 61
+        },
+        {
+          "title": "中途添加工作目录",
+          "node_id": "0007",
+          "summary": "## 中途添加工作目录\n\n```\n/add-dir /path/to/other/project\n/add-dir ~/shared/libraries\n```",
+          "line_num": 70
+        },
+        {
+          "title": "我的理解",
+          "node_id": "0008",
+          "summary": "## 我的理解\n\n这篇是速查手册，没有太多深度，但有几个实用发现：\n\n1. **`disallowedTools: [\"MCPSearch\"]`** — 禁用 Tool Search 可以节省上下文空间\n2. **`worktree.sparsePaths`** — worktree 只 checkout 指定路径，大 monorepo 的救星\n3. **`modelOverrides`** — 可以把 sonnet/opus 指向自定义 provider，为 Claude Code Router 铺路\n4. **`CLAUDE_CODE_DISABLE_1M_CONTEXT`** — 有时候主动限制上下文反而更好（参见 [[04-从约束中学习]]）",
+          "line_num": 77
+        }
+      ]
+    }
+  ]
+}

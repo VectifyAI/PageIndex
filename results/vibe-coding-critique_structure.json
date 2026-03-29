@@ -1,0 +1,120 @@
+{
+  "doc_name": "vibe-coding-critique",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\vibe-coding-critique.md",
+  "structure": [
+    {
+      "title": "Vibe Coding 批判性分析",
+      "node_id": "0000",
+      "prefix_summary": "# Vibe Coding 批判性分析\n\n基于对 klöss 文章的三路并行深度研究（批判性分析 + 工具验证 + 学术证据），2026-03-17。",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "一句话判决",
+          "node_id": "0001",
+          "summary": "## 一句话判决\n\n文章 70% 金子，20% 过度简化，10% 被学术证据打脸。核心直觉对（大多数人缺结构），但开的药方剂量过猛——六份规范文档的重量级方案会触发 context pollution。\n\n---",
+          "line_num": 11
+        },
+        {
+          "title": "金子（拿走就用）",
+          "node_id": "0002",
+          "prefix_summary": "## 金子（拿走就用）",
+          "line_num": 17,
+          "nodes": [
+            {
+              "title": "1. \"AI 在你的清晰度结束时产生幻觉\"",
+              "node_id": "0003",
+              "summary": "### 1. \"AI 在你的清晰度结束时产生幻觉\"\n- Frontiers in AI 2025 综述：结构化提示减少幻觉最高 36%\n- Chain-of-thought 推理准确率 +35%，数学错误 -28%",
+              "line_num": 19
+            },
+            {
+              "title": "2. Interrogation 系统（审问优于预写规范）",
+              "node_id": "0004",
+              "summary": "### 2. Interrogation 系统（审问优于预写规范）\n- ClarifyGPT (2024) + De-Hallucinator (2024)：**迭代澄清 > 一次性喂完美规范**\n- 最大收益来自迭代 grounding，不是前置文档\n- → 已落地为 `/interrogate` command",
+              "line_num": 23
+            },
+            {
+              "title": "3. progress.txt（会话桥）",
+              "node_id": "0005",
+              "summary": "### 3. progress.txt（会话桥）\n- 最朴素最有效的跨会话状态保持方案",
+              "line_num": 28
+            },
+            {
+              "title": "4. 组件化思维",
+              "node_id": "0006",
+              "summary": "### 4. 组件化思维\n- 不需要懂代码，需要懂分解",
+              "line_num": 31
+            },
+            {
+              "title": "5. 多工具分工",
+              "node_id": "0007",
+              "summary": "### 5. 多工具分工\n- Claude 做思考（46% most-loved，规划最强）\n- Codex 做收尾（3x 更少 token，methodical finisher）\n- Cursor 四模式（Ask/Plan/Agent/Debug，已验证）\n- Kimi K2.5 视觉还原最强（OCRBench 92.3%，但不是全面最强）",
+              "line_num": 34
+            },
+            {
+              "title": "6. CLAUDE.md 自我改进循环",
+              "node_id": "0008",
+              "summary": "### 6. CLAUDE.md 自我改进循环\n- 活的规则文件 + lessons.md = 反馈闭环 = 训练数据\n\n---",
+              "line_num": 40
+            }
+          ]
+        },
+        {
+          "title": "被学术证据打脸的",
+          "node_id": "0009",
+          "prefix_summary": "## 被学术证据打脸的",
+          "line_num": 45,
+          "nodes": [
+            {
+              "title": "六份规范文档 = Context Pollution",
+              "node_id": "0010",
+              "summary": "这份文档主要讨论了上下文污染的问题，并提出了三条独立的研究线来阐述这一现象：\n\n1. **Lost in the Middle**: 斯坦福大学在2024年的TACL上发表的研究发现，长上下文中间位置的信息容易被忽略，导致性能下降30%以上。\n2. **Context Length Alone Hurts**: arXiv上的研究指出，即使每个字都与任务相关，过长的上下文长度本身也会降低生成内容的质量。\n3. **Prompt Bloat**: MLOps社区的研究表明，额外的细节会降低生成内容的准确性、连贯性和相关性。\n\n此外，Google的Addy Osmani强调，简单地将大量规范信息交给AI是不可行的，建议编写简洁的规范，引导清晰，保持在实际的上下文大小内，并随着项目的发展进行演进。基于这些研究，文档提出了一项名为`minimal-context-loading.md`的规则，建议在每次任务中只提供与当前任务相关的最小上下文。",
+              "line_num": 47
+            },
+            {
+              "title": "三个月墙",
+              "node_id": "0011",
+              "summary": "### 三个月墙\n- docs-first 和 ad-hoc 项目在 ~3 个月以相同速率崩溃\n- 代码库复杂度超过上下文窗口容量后，文档救不了你",
+              "line_num": 61
+            },
+            {
+              "title": "Cargo Cult 风险",
+              "node_id": "0012",
+              "summary": "### Cargo Cult 风险\n- Anup.io: 复制专业开发形式（PRD/规范/规则文件）而不理解本质 = 仪式不是工程",
+              "line_num": 65
+            },
+            {
+              "title": "METR RCT（唯一随机对照试验）",
+              "node_id": "0013",
+              "summary": "### METR RCT（唯一随机对照试验）\n- 16 个经验开发者，246 个真实 issue\n- 使用 AI 后**慢了 19%**，但自己觉得**快了 20%**\n- 感知差距 39 个百分点 → 工具和文档可能喂虚假信心\n\n---",
+              "line_num": 68
+            }
+          ]
+        },
+        {
+          "title": "工具验证总结",
+          "node_id": "0014",
+          "summary": "## 工具验证总结\n\n| 工具 | klöss 的 claim | 实际验证 |\n|------|---------------|---------|\n| Kimi K2.5 | \"设计匹配最佳\" | ✅ 视觉还原赛道最强，全面最强不成立 |\n| Codex | \"debugger 和 finisher\" | ⚠️ methodical finisher，silent failures 是弱点 |\n| Claude | \"thinking partner\" | ✅ 社区共识最强 |\n| Cursor 4 模式 | Ask/Plan/Agent/Debug | ✅ 事实准确 |",
+          "line_num": 75
+        },
+        {
+          "title": "竞品对照",
+          "node_id": "0015",
+          "summary": "## 竞品对照\n\n| 方案 | 重量 | 适合 | 天花板 |\n|------|------|------|--------|\n| klöss 6文档+多工具 | 重 | 有软件思维的非传统开发者 | 3月墙+context pollution |\n| Addy Osmani 小规范+迭代 | 轻-中 | 有经验开发者 | 需判断力 |\n| Replit/Bolt | 无 | 零基础 MVP | 复杂项目碰壁 |\n| OMC+FSC 多模型编排 | 重但自动化 | 基础设施老兵 | 维护成本 |\n\n---",
+          "line_num": 84
+        },
+        {
+          "title": "优化落地",
+          "node_id": "0016",
+          "summary": "## 优化落地\n\n1. **`/interrogate`** — 每个新项目/功能前审问需求，输出 <30 行 task-spec\n2. **最小上下文加载** — 按任务类型只读相关文档，不全量灌入\n3. **CLAUDE.md 瘦身** — 核心 <80 行，详情按需读取（待做）\n\n---",
+          "line_num": 95
+        },
+        {
+          "title": "关键源文献",
+          "node_id": "0017",
+          "summary": "This partial document provides a curated list of key academic papers, articles, and studies focused on AI, software development, and related challenges. It includes research on AI limitations like context length issues, hallucinations, and context window poisoning. Several entries discuss the importance of well-defined specifications versus relying on informal approaches (\"vibes\") in software development. The document also references studies on AI's impact on operating system development and explores tools for software design. Additionally, it touches on the concept of perfection paradoxes and the challenges of maintaining long contexts in AI systems.",
+          "line_num": 103
+        }
+      ]
+    }
+  ]
+}

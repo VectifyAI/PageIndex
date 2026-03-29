@@ -1,0 +1,212 @@
+{
+  "doc_name": "NVIDIA-AI-Blueprints-研究",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\NVIDIA-AI-Blueprints-研究.md",
+  "structure": [
+    {
+      "title": "NVIDIA 开发者生态全景研究",
+      "node_id": "0000",
+      "prefix_summary": "# NVIDIA 开发者生态全景研究",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "概览",
+          "node_id": "0001",
+          "summary": "## 概览\n\nGitHub org: [NVIDIA-AI-Blueprints](https://github.com/NVIDIA-AI-Blueprints) — 30 个仓库，企业级 AI 参考实现。",
+          "line_num": 9
+        },
+        {
+          "title": "与我相关的 Blueprint（按优先级）",
+          "node_id": "0002",
+          "prefix_summary": "## 与我相关的 Blueprint（按优先级）",
+          "line_num": 13,
+          "nodes": [
+            {
+              "title": "P0 — 直接可用",
+              "node_id": "0003",
+              "summary": "### P0 — 直接可用\n\n| Blueprint | ⭐ | 关联项目 | 行动 |\n|-----------|-----|---------|------|\n| **llm-router** | 208 | NadirClaw/micro_router | 抄路由算法，替换 heuristic |\n| **AI Model Distillation for Financial Data** | 18 | quant-terminal | 蒸馏廉价模型做财报分析 |\n| **Quantitative Portfolio Optimization** (cuOpt) | 88 | quant-terminal | RTX 5090 CUDA 加速组合优化 |\n| **data-flywheel** | 136 | autoresearch | 数据飞轮迭代架构 |",
+              "line_num": 15
+            },
+            {
+              "title": "P1 — 架构参考",
+              "node_id": "0004",
+              "summary": "### P1 — 架构参考\n\n| Blueprint | ⭐ | 关联项目 | 价值 |\n|-----------|-----|---------|------|\n| **aiq** | 358 | FSC | TypeScript Agent 框架对标 |\n| **biomedical-aiq-research-agent** | 114 | FORGE | 生物医学 Agent 参考 |\n| **safety-for-agentic-ai** | 32 | OpenFang | 自循环 Agent 安全防护 |\n| **Multi-Agent Intelligent Warehouse** | 47 | claw-mesh | 多 Agent 编排模式 |",
+              "line_num": 24
+            },
+            {
+              "title": "P2 — 技术储备",
+              "node_id": "0005",
+              "summary": "### P2 — 技术储备\n\n| Blueprint | ⭐ | 备注 |\n|-----------|-----|------|\n| pdf-to-podcast | 803 | 最高星，PDF→语音 |\n| rag | 511 | RAG 基础管线参考 |\n| video-search-and-summarization | 447 | 视频摄入+摘要 |\n| ai-virtual-assistant | 237 | 客服 Agent |\n| vulnerability-analysis | 195 | 容器安全分析 |\n| 3d-guided-genai-rtx | 230 | 3D+RTX |",
+              "line_num": 33
+            }
+          ]
+        },
+        {
+          "title": "关键技术发现",
+          "node_id": "0006",
+          "prefix_summary": "## 关键技术发现",
+          "line_num": 44,
+          "nodes": [
+            {
+              "title": "LLo11yPop — OODA Loop 数据中心 Agent",
+              "node_id": "0007",
+              "summary": "### Description of Partial Document\n\nThe document discusses NVIDIA's internal GPU cluster management framework named **LLo11yPop**, which utilizes the OODA Loop strategy for optimizing data center performance. The framework is structured into a three-tier, five-role system:\n\n1. **Director**: Acts as the Orchestrator Agent, responsible for routing and distribution tasks.\n2. **Manager**: Comprises the Analyst Agent for domain analysis and the Action Agent for issuing alerts.\n3. **Worker**: Includes the Retrieval Agent for translating natural language to SQL and the Task Execution Agent for executing tasks.\n\nKey approaches of the framework include:\n- Employing a **Mixture of Agents** with different models assigned to different roles, such as the lightweight Mixtral 8x7b and the heavier Llama 405b.\n- **No model fine-tuning** is performed; instead, the system relies on prompt engineering and microservices composition.\n- The **OODA Loop** (Observe, Orient, Decide, Act) is used to guide the decision-making process.\n- **RLHF (Reinforcement Learning from Human Feedback)** is implemented to enable continuous learning from SRE (Site Reliability Engineering) feedback.\n\nThe document also outlines the **isomorphic mapping** of the framework's components:\n- The Orchestrator is mapped to the NadirClaw micro_router heuristic for traffic distribution.\n- The multi-model approach (MoA) is managed by a claw-router with 12 hubs that select models based on complexity.\n- The lightweight and heavyweight models are compared to Doubao+MiniMax and Claude, respectively.\n- The OODA monitoring is handled by ops-monitor.py, which is planned to be upgraded to an Agent-based system.",
+              "line_num": 46
+            },
+            {
+              "title": "NVIDIA Agent Toolkit（2026-03-16 发布）",
+              "node_id": "0008",
+              "summary": "### NVIDIA Agent Toolkit（2026-03-16 发布）\n\n三件套：\n1. **OpenShell** — 开源 Agent 运行时，策略安全\n2. **AI-Q** — LangChain 智能搜索（GitHub 358⭐ 那个 aiq 仓库）\n3. **Nemotron** — 开源编排模型\n\n关键：frontier 模型编排 + Nemotron 研究，成本降 50%+。与 FreeClaw \"贵模型决策、廉价模型执行\" 同一思路。\n\n15+ 企业接入：Adobe/Salesforce/ServiceNow/Box/Atlassian。",
+              "line_num": 67
+            },
+            {
+              "title": "NVIDIA 对 AI Agent 的定义",
+              "node_id": "0009",
+              "summary": "### NVIDIA 对 AI Agent 的定义\n\n> \"autonomously decide how to complete assigned tasks\" — 自主决定如何完成任务\n\n核心组件：LLM 决策核心 + 短/长期记忆 + 规划系统（CoT/ReAct）+ 工具集成（API/DB/RAG）",
+              "line_num": 78
+            }
+          ]
+        },
+        {
+          "title": "build.nvidia.com Blueprint 目录（42 个，摘要）",
+          "node_id": "0010",
+          "summary": "## build.nvidia.com Blueprint 目录（42 个，摘要）\n\n金融: Quantitative Portfolio Optimization, AI Model Distillation, Financial Fraud Detection\n医疗: Ambient Healthcare Agents, Biomedical AI-Q, Single-Cell Analysis\n零售: Retail Shopping Assistant, Retail Catalog Enrichment, Retail Agentic Commerce\n基础设施: AI Factory Digital Twins, Data Flywheel, AI Observability (W&B), AI Orchestration (Iguazio)\n通用: RAG, LLM Router, Voice Agent, Video Search, PDF-to-Podcast, Safety for Agentic AI",
+          "line_num": 84
+        },
+        {
+          "title": "术语表要点（nvidia.cn/glossary）",
+          "node_id": "0011",
+          "summary": "## 术语表要点（nvidia.cn/glossary）\n\n19 个中文术语，重点：AI 智能体、多智能体系统、大语言模型、AI 推断/推理、AI 基础设施/工厂\n\n---",
+          "line_num": 92
+        },
+        {
+          "title": "NVIDIA 开发者生态全景",
+          "node_id": "0012",
+          "prefix_summary": "## NVIDIA 开发者生态全景",
+          "line_num": 98,
+          "nodes": [
+            {
+              "title": "GitHub 主站（github.com/NVIDIA — 701 repos）",
+              "node_id": "0013",
+              "prefix_summary": "### GitHub 主站（github.com/NVIDIA — 701 repos）",
+              "line_num": 100,
+              "nodes": [
+                {
+                  "title": "推理加速",
+                  "node_id": "0014",
+                  "summary": "#### 推理加速\n\n| 项目 | ⭐ | 干嘛的 | 与我相关 |\n|------|-----|--------|---------|\n| **TensorRT-LLM** | 13.1k | LLM 推理优化，FP8/FP4/INT4 量化，speculative decoding | NIM 自托管、本地推理 |\n| **Dynamo** | — | 开源分布式推理框架，多节点 | 集群推理 |\n| **Triton Inference Server** | — | 生产级推理服务 | 模型部署 |\n\nTensorRT-LLM 支持：Llama 3.x, DeepSeek R1/V3, Mixtral, GPT-OSS 等。B200 上 Llama 4 跑到 40,000 tok/s。",
+                  "line_num": 102
+                },
+                {
+                  "title": "GPU 数据科学（RAPIDS — 138 repos）",
+                  "node_id": "0015",
+                  "summary": "The partial document provides an overview of GPU-accelerated data science tools and their applications, specifically focusing on the RAPIDS suite of libraries. It highlights five key projects: cuDF for GPU-accelerated DataFrame operations as a pandas alternative, cuML for machine learning, cuGraph for graph analytics, cuVS for vector search and clustering, and RAFT for foundational ML/IR algorithms with CUDA acceleration. The document also suggests optimal use cases for an RTX 5090 GPU, such as using cuDF for processing K-lines, cuML for factor modeling, and cuOpt for portfolio optimization.",
+                  "line_num": 112
+                },
+                {
+                  "title": "基础设施",
+                  "node_id": "0016",
+                  "summary": "#### 基础设施\n\n| 项目 | ⭐ | 干嘛的 |\n|------|-----|--------|\n| **open-gpu-kernel-modules** | 16.8k | Linux GPU 内核模块开源 |\n| **nvidia-container-toolkit** | 4.2k | GPU 容器运行时 |\n| **aistore** | 1.8k | AI 专用可扩展存储 |\n| **GenerativeAIExamples** | 3.9k | 生成式 AI 示例集 |\n| **cuopt** | 764 | GPU 决策优化求解器 |",
+                  "line_num": 124
+                }
+              ]
+            },
+            {
+              "title": "平台产品",
+              "node_id": "0017",
+              "summary": "### 平台产品描述\n\n该文档主要介绍了NVIDIA的多款AI平台产品及其定位和应用场景：\n\n1. **NIM**：提供容器化推理微服务，支持一行部署，主要用于本地RTX 5090自托管模型。\n2. **NeMo**：涵盖训练、微调、对齐、评估和护栏的全家桶解决方案，主要用于FORGE模型训练。\n3. **NeMo Curator**：专注于多模态数据清洗管线，支持数据飞轮。\n4. **NeMo Guardrails**：提供对话安全护栏，确保Agent安全。\n5. **NeMo Agent Toolkit**：用于Agent端到端优化，支持FSC和OpenFang。\n6. **CUDA-X**：AI、HPC和图形加速库的集合，作为全局基础。\n7. **Cosmos**：用于物理世界建模，作为技术储备。\n8. **Riva**：提供语音识别（ASR）和语音合成（TTS）服务，支持Voice Agent。\n9. **Omniverse**：用于数字孪生和3D仿真，作为技术储备。\n10. **AI Enterprise**：企业版软件套件，提供商业参考。",
+              "line_num": 134
+            },
+            {
+              "title": "NeMo 七件套详解",
+              "node_id": "0018",
+              "summary": "### NeMo 七件套详解\n\n1. **Data Designer** — 合成高质量领域数据，减少隐私风险\n2. **Curator** — GPU 加速多模态数据清洗管线\n3. **Customizer** — 高性能微调/对齐微服务\n4. **Evaluator** — 100+ benchmark 评估 SDK\n5. **Retriever** — 企业数据连接微服务（RAG）\n6. **Guardrails** — 对话安全/准确性护栏\n7. **Agent Toolkit** — 开源 Agent 系统端到端优化\n\n---",
+              "line_num": 149
+            }
+          ]
+        },
+        {
+          "title": "相关论文（按主题）",
+          "node_id": "0019",
+          "prefix_summary": "## 相关论文（按主题）",
+          "line_num": 161,
+          "nodes": [
+            {
+              "title": "Agent 系统",
+              "node_id": "0020",
+              "summary": "This partial document provides an overview of various research papers and projects related to AI agents and their applications. Key points include:\n\n1. **Adaptive Data Flywheel**: Discusses MAPE control loops, NVIDIA's internal NVInfo deployment with over 30,000 employees, and a 10x model compression.\n2. **Safety Framework for Real-World Agentic Systems**: Introduces AI-Q Research Assistant's safety framework, focusing on sandbox red-teaming for AI safety.\n3. **Trusted AI Agents in Cloud (Omega)**: Explores the deployment of trusted multi-agent systems using H100 Confidential VMs.\n4. **NEMO-4-PAYPAL**: Details the use of NeMo and Nemotron small models for PayPal's e-commerce agent production deployment.\n5. **KernelEvolve**: Focuses on agent-based automatic generation of CUDA kernels, achieving a 100% pass rate on 250 problems.\n6. **On Data Engineering for Terminal Agents**: Covers data engineering for Nemotron-Terminal models in terminal agents.\n7. **Saarthi for AGI: Formal Verification**: Highlights the use of multi-agent systems and GraphRAG for formal verification, achieving a 70% increase in accuracy.\n8. **VibeTensor**: Describes the use of AI agents to automatically generate deep learning runtimes, tested on H100 and Blackwell hardware.",
+              "line_num": 163
+            },
+            {
+              "title": "推理优化",
+              "node_id": "0021",
+              "summary": "### 推理优化\n\n| 论文 | 日期 | 要点 |\n|------|------|------|\n| **SPEED-Bench** (2602.—) | 2026-02 | Speculative decoding 统一评测 |\n| **Test-Time Alignment via Textual MPC** (ICLR 2026) | 2026-04 | 推理时对齐，不用重训 |\n| **TimeOmni-1** (ICLR 2026) | 2026-04 | 时间序列 + LLM 推理 — **量化直接相关** |",
+              "line_num": 176
+            },
+            {
+              "title": "硬件/系统",
+              "node_id": "0022",
+              "summary": "### 硬件/系统\n\n| 论文 | 日期 | 要点 |\n|------|------|------|\n| **cuFuzz: Hunting CUDA Bugs at Scale** | 2026-03 | GPU 软件 fuzzing 框架 |\n| **HiDVFS: Hierarchical Multi-Agent DVFS** (2601.06425) | 2026-01 | 3 Agent 调度器，Jetson TX2 上 3.44x 加速 |\n| **ZeroDVFS: Zero-Shot LLM-Guided Allocation** (2601.08166) | 2026-01 | LLM 零样本工作负载调度 |\n| **Alpha-Vision: 787µs Face Detection <5mW** | 2026-02 | 超低功耗视觉处理器 |",
+              "line_num": 184
+            },
+            {
+              "title": "气象/科学计算",
+              "node_id": "0023",
+              "summary": "### 气象/科学计算\n\n| 论文 | 日期 | 要点 |\n|------|------|------|\n| **Storm-Scale Evolution from Observations** | 2026-01 | 数据驱动气象预报 |\n| **HealDA / Elucidated Rolling Diffusion** | 2025-12~2026-01 | 概率天气预报 |\n| **Isaac Lab: GPU Multi-Modal Robot Learning** | 2025-09 | GPU 加速机器人训练框架 |",
+              "line_num": 193
+            },
+            {
+              "title": "与我直接相关的论文（标记）",
+              "node_id": "0024",
+              "summary": "The partial document lists several key research papers and projects that are directly related to the author's work. The main points covered include:\n\n1. **Adaptive Data Flywheel**: This paper focuses on the academic foundation of the data flywheel architecture, utilizing the MAPE control loop for adaptive data management.\n\n2. **TimeOmni-1 (ICLR 2026)**: This project combines time series analysis with large language models (LLMs) to discover factors in quant-terminal applications.\n\n3. **NEMO-4-PAYPAL**: This project serves as a small model production deployment example, validating the FreeClaw approach for cost-effective model deployment.\n\n4. **KernelEvolve**: This project involves an agent automatically writing CUDA kernels, with a focus on FSC CUDA factor generation.\n\n5. **Safety Framework**: This paper provides a reference for the OpenFang self-cycling agent safety framework.\n\n6. **VibeTensor**: This project describes an agent-based fully automated system software generation system, representing the ultimate form of FSC.",
+              "line_num": 201
+            }
+          ]
+        },
+        {
+          "title": "生态总结",
+          "node_id": "0025",
+          "summary": "This document provides an overview of NVIDIA's developer ecosystem, organized into six main layers:\n\n1. **Model Layer**: Includes Nemotron, an open-source orchestration model, and NeMo, which supports training, fine-tuning, and alignment of models.\n\n2. **Inference Layer**: Features TensorRT-LLM for optimizing LLM inference, NIM for containerized inference microservices, Triton Server for production deployment, and Dynamo for distributed inference.\n\n3. **Data Layer**: Comprises RAPIDS suite (cuDF, cuML, cuGraph) for data processing and machine learning, cuVS for vector search, and NeMo Curator for data cleaning.\n\n4. **Agent Layer**: Includes OpenShell for agent runtime, AI-Q/aiq for intelligent search agents, NeMo Agent Toolkit, and NeMo Guardrails for safety.\n\n5. **Application Layer**: Offers Blueprints with 42 reference implementations, cuOpt for combinatorial optimization, and Riva for speech, Cosmos for physics, and Omniverse for digital twins.\n\n6. **Infrastructure Layer**: Includes CUDA-X and open-gpu-kernel-modules for GPU support, nvidia-container-toolkit for container management, and aistore for AI storage.",
+          "line_num": 212
+        },
+        {
+          "title": "隐藏轮子（700 repos 里挖出来的）",
+          "node_id": "0026",
+          "prefix_summary": "## 隐藏轮子（700 repos 里挖出来的）",
+          "line_num": 245,
+          "nodes": [
+            {
+              "title": "🔴 立刻能用",
+              "node_id": "0027",
+              "summary": "### 🔴 立刻能用\n\n| 项目 | ⭐ | 干嘛的 | 对应项目 |\n|------|-----|--------|---------|\n| **Warp** | 6.3k | Python JIT 编译 GPU kernel，纯 Python 写 CUDA | quant-terminal gpu_factors.py 重写 |\n| **ChatRTX** | 3.1k | Windows 本地 TensorRT RAG chatbot | RTX 5090 零成本本地 RAG，替代 API |\n| **garak** | 7.3k | LLM 漏洞扫描（injection/jailbreak/泄露） | OpenClaw/NadirClaw 安全审计 |",
+              "line_num": 247
+            },
+            {
+              "title": "🟡 近期上",
+              "node_id": "0028",
+              "summary": "### 🟡 近期上\n\n| 项目 | ⭐ | 干嘛的 | 对应项目 |\n|------|-----|--------|---------|\n| **TransformerEngine** | 3.2k | FP8/FP4 训练加速 | autoresearch train.py 加速 |\n| **DALI** | 5.6k | GPU 数据预处理管线 | quant-terminal K 线加载去 CPU 瓶颈 |\n| **NeMo-Retriever** | 2.9k | PDF/表格/图表结构化提取 | China MCP Gateway 数据清洗 |",
+              "line_num": 255
+            },
+            {
+              "title": "🟢 技术储备",
+              "node_id": "0029",
+              "summary": "### 🟢 技术储备\n\n| 项目 | ⭐ | 干嘛的 | 对应项目 |\n|------|-----|--------|---------|\n| **cuda-python** | 3.2k | Python 原生 CUDA Runtime API | quant-terminal CUDA 底层 |\n| **PhysicsNeMo** | 2.6k | 物理 ML 框架 | hist-mat 经济物理模型 |\n| **Isaac GR00T** | 6.5k | 机器人基础模型 | FORGE 实验自动化储备 |\n| **Cosmos** | 8.1k | 物理世界模型/时序生成 | 市场模拟/压力测试 |",
+              "line_num": 263
+            },
+            {
+              "title": "其他高星项目速览",
+              "node_id": "0030",
+              "summary": "### 其他高星项目速览\n\n| 项目 | ⭐ | 备注 |\n|------|-----|------|\n| NeMo | 16.9k | 训练/微调/对齐全家桶 |\n| Megatron-LM | 15.7k | 大规模 Transformer 训练，FP8，462B 参数 |\n| CUTLASS | 9.5k | CUDA 线性代数模板，TensorRT-LLM 底层 |\n| NCCL | 4.5k | 多 GPU 集群通信原语 |\n| DeepLearningExamples | 14.7k | 各种 DL 示例集 |\n| apex | 8.9k | PyTorch 混合精度+分布式训练 |",
+              "line_num": 272
+            }
+          ]
+        },
+        {
+          "title": "下一步",
+          "node_id": "0031",
+          "summary": "The partial document outlines several key tasks and objectives for future work:\n\n1. **Deep Dive into llm-router Source Code**: Focus on upgrading the NadirClaw routing system.\n2. **Run Quantitative Portfolio Optimization Demo**: Utilize an RTX 5090 for the demonstration.\n3. **Research data-flywheel Architecture**: Work on the iterative design of autoresearch.\n4. **AI Model Distillation**: Explore using quant-terminal for cost-effective model alternatives.\n5. **OODA Loop Implementation**: Transform the ops-monitor into an agent-based system.\n6. **Study Adaptive Data Flywheel Paper**: Gain insights into data flywheel theory.\n7. **Read TimeOmni-1 Paper**: Investigate the application of time series and LLM for quantitative factors.\n8. **autoresearch RAPIDS Branch**: Fork autoresearch-win-rtx to autoresearch/rapids-smoke, replace pandas with cuDF for parquet reading, and validate the RTX 5090 RAPIDS environment.\n9. **RAPIDS Integration with quant-terminal**: Implement cuDF for candlestick data, cuML for factor analysis, and cuOpt for portfolio optimization.\n10. **Evaluate NIM Local Deployment of Nemotron**: Assess the feasibility of self-hosting on an RTX 5090.\n11. **Read KernelEvolve**: Assess the feasibility of automatic CUDA kernel generation for FSC.",
+          "line_num": 283
+        }
+      ]
+    }
+  ]
+}

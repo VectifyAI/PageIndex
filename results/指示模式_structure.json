@@ -1,0 +1,200 @@
+{
+  "doc_name": "指示模式",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\SillyTavern 官方文档\\核心概念\\指示模式.md",
+  "structure": [
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#api-support)API 支持",
+      "node_id": "0000",
+      "prefix_summary": "## [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#api-support)API 支持",
+      "line_num": 9,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#text-completion-api)文本补全 API",
+          "node_id": "0001",
+          "prefix_summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#text-completion-api)文本补全 API\n\n完全支持。这包括：\n\n- “文本完成”下的所有源\n\n- KoboldAI 经典\n\n- AI 部落",
+          "line_num": 11,
+          "nodes": [
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#choosing-a-formatting)选择格式",
+              "node_id": "0002",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#choosing-a-formatting)选择格式\n\n所选的指令模板必须与在后端运行的实际模型的期望相匹配。\n\n这通常反映在 HuggingFace 上的模型卡中，有些甚至提供与 SillyTavern 兼容的 JSON 文件。\n\n示例：[NeverSleep/Noromaid-13b-v0.1.1](https://huggingface.co/NeverSleep/Noromaid-13b-v0.1.1#prompt-template-custom-format-or-alpaca)",
+              "line_num": 21
+            }
+          ]
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#chat-completion-api-openai-claude-etc)聊天完成 API（OpenAI、Claude 等）",
+          "node_id": "0003",
+          "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#chat-completion-api-openai-claude-etc)聊天完成 API（OpenAI、Claude 等）\n\n聊天完成 API 不支持**（也不需要）**此功能。他们使用完全不同的提示生成器。\n\n异常：启用了 instruct 覆盖的 OpenRouter。这是旧设置，最终将被删除。",
+          "line_num": 29
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#novelai)新颖人工智能",
+          "node_id": "0004",
+          "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#novelai)新颖人工智能\n\n虽然 NovelAI *在技术*上支持，但他们的模型都没有经过训练来理解指令格式。Kayra 使用一个特殊的 instruct 模块，当聊天消息中遇到用大括号包裹的指令时，该模块*会自动*激活，因此对整个提示使用 Instruct 模式将导致输出**质量下降**。\n\n下面是一个自动激活 NovelAI 的 instruct 模块的示例：\n\n```python\nUser: { Write a happy song about Nintendo Switch. }\n```",
+          "line_num": 35
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#instruct-mode-settings)指示模式设置",
+      "node_id": "0005",
+      "prefix_summary": "## [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#instruct-mode-settings)指示模式设置",
+      "line_num": 45,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#presets)预设",
+          "node_id": "0006",
+          "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#presets)预设\n\n为一些知名的指示模型提供现成的预设，其中包含提示和序列。\n\n*更改预设会将系统提示重置为默认值！如果您进行了任何不想丢失的更改，请不要忘记保存您的预设。*",
+          "line_num": 47
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#default-preset-heart-icon)默认预设（心形图标）",
+          "node_id": "0007",
+          "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#default-preset-heart-icon)默认预设（心形图标）\n\n如果切换，如果正则表达式匹配未触发其他预设，则连接到 API 将自动选择此预设。\n\n需要事先启用指示模式。只能将一个预设标记为默认值。",
+          "line_num": 53
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#activation-regex)激活正则表达式",
+          "node_id": "0008",
+          "prefix_summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#activation-regex)激活正则表达式\n\n如果定义为有效的正则表达式，则当连接到模型并且其名称与此正则表达式匹配时，将自动选择此预设。\n\n需要事先启用指示模式。仅选择预设中的第一个正则表达式匹配（按字母顺序计算）。",
+          "line_num": 59,
+          "nodes": [
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#wrap-sequences-with-newline)使用换行符换行序列",
+              "node_id": "0009",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#wrap-sequences-with-newline)使用换行符换行序列\n\n插入提示时，每个序列文本都将用换行符换行。羊驼及其衍生物是必需的。\n\n如果要完全控制线路终止符，请禁用。",
+              "line_num": 65
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#replace-macro-in-sequences)替换序列中的宏",
+              "node_id": "0010",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#replace-macro-in-sequences)替换序列中的宏\n\n如果启用，则在消息换行序列中定义的已知 {{macro}} 替换将被替换。\n\n此外，可以在消息前缀中使用特殊的 {{name}} 宏来引用附加到消息的实际名称（而不是当前活动的 {{char}} 或 {{user}}），这在使用群聊或 /sendas 命令时会很有帮助。如果无法确定名称，则使用“System”作为回退占位符。",
+              "line_num": 71
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#include-names)包括名称",
+              "node_id": "0011",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#include-names)包括名称\n\n如果启用，请在插入序列后将字符和用户名添加到聊天历史记录日志中。\n\n*自动启用使用角色发送的群聊和消息，除非未选中****“群组和角色强制****”设置！*",
+              "line_num": 77
+            }
+          ]
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#system-prompt)系统提示符",
+          "node_id": "0012",
+          "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#system-prompt)系统提示符\n\n\n通常添加到每个提示的开头。应定义模型要遵循的指令。支持通过任何支持的 {{macro}} 参数进行替换。\n\n例如：\n\n为 {{char}} 写一个互联网 RP 风格的回复。要啰嗦，要有创意。",
+          "line_num": 83
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#sequences-system-prompt-wrapping)序列：系统提示符包装",
+          "node_id": "0013",
+          "prefix_summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#sequences-system-prompt-wrapping)序列：系统提示符包装\n\n定义系统提示符的包装方式。",
+          "line_num": 92,
+          "nodes": [
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#system-prompt-prefix)系统提示前缀",
+              "node_id": "0014",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#system-prompt-prefix)系统提示前缀\n\n插入在系统提示符之前。",
+              "line_num": 96
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#system-prompt-suffix)系统提示后缀",
+              "node_id": "0015",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#system-prompt-suffix)系统提示后缀\n\n在系统提示符后插入。\n\n**重要提示：**这*仅*适用于系统提示符本身，*不*适用于整个故事字符串！如果要包装故事字符串，请将这些序列添加到“上下文模板”部分的“故事字符串”模板中。",
+              "line_num": 100
+            }
+          ]
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#sequences-chat-messages-wrapping)序列：聊天消息包装",
+          "node_id": "0016",
+          "prefix_summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#sequences-chat-messages-wrapping)序列：聊天消息包装\n\n这些设置定义在生成提示时如何包装属于不同角色的消息。\n\n所有前缀序列也将自动用作停止字符串。",
+          "line_num": 106,
+          "nodes": [
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#user-message-prefix)用户消息前缀",
+              "node_id": "0017",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#user-message-prefix)用户消息前缀\n\n插入在用户消息之前，并在模拟时作为最后一行提示。",
+              "line_num": 112
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#user-message-suffix)用户消息后缀",
+              "node_id": "0018",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#user-message-suffix)用户消息后缀\n\n插入在用户消息之后。",
+              "line_num": 116
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#assistant-message-prefix)Google 助理消息前缀",
+              "node_id": "0019",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#assistant-message-prefix)Google 助理消息前缀\n\n插入在 Google 助理消息之前，并在生成 AI 回复时作为最后一行提示。",
+              "line_num": 120
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#assistant-message-suffix)助理消息后缀",
+              "node_id": "0020",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#assistant-message-suffix)助理消息后缀\n\n在 Google 助理消息后插入",
+              "line_num": 124
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#system-message-prefix)系统消息前缀",
+              "node_id": "0021",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#system-message-prefix)系统消息前缀\n\n插入在系统（通过斜杠命令或扩展添加）消息之前。",
+              "line_num": 128
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#system-message-suffix)系统消息后缀",
+              "node_id": "0022",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#system-message-suffix)系统消息后缀\n\n插入到系统消息之后。",
+              "line_num": 132
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#system-same-as-user)系统与用户相同",
+              "node_id": "0023",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#system-same-as-user)系统与用户相同\n\n如果选中 true，则系统消息将使用用户角色消息序列。\n\n否则，系统消息将使用自己的序列（如果不是空的），或者根本不会进行任何换行（如果为空）。",
+              "line_num": 136
+            }
+          ]
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#misc-sequences)杂项序列",
+          "node_id": "0024",
+          "prefix_summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#misc-sequences)杂项序列\n\n各种高级配置，用于对提示构建进行更精细的调整",
+          "line_num": 142,
+          "nodes": [
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#first-assistant-prefix)第一助理前缀",
+              "node_id": "0025",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#first-assistant-prefix)第一助理前缀\n\n插入到第一个 Assistant 的消息之前。\n\n\n只有**聊天记录**的第一条消息才算数，而不是实际首先进入提示的消息！",
+              "line_num": 146
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#last-assistant-prefix)最后助手前缀",
+              "node_id": "0026",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#last-assistant-prefix)最后助手前缀\n\n\n插入到最后一个 Assistant 消息之前，或在生成 AI 回复时作为最后一行提示。\n\n在背景中生成文本时不使用（例如稳定扩散提示或摘要）。将改用“系统指令前缀”或“常规助手前缀”。",
+              "line_num": 153
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#system-instruction-prefix)系统指令前缀",
+              "node_id": "0027",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#system-instruction-prefix)系统指令前缀\n\n在背景中生成中性/系统文本时作为最后一行提示插入（例如稳定扩散提示或摘要）。",
+              "line_num": 160
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#user-filler-message)用户填充消息",
+              "node_id": "0028",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#user-filler-message)用户填充消息\n\n如果聊天历史记录不是以用户消息开头，则将插入聊天记录的开头。\n\n**用例：**当 instruct 格式*严格要求*提示以用户为先并且仅具有交替角色的消息时，例如：Llama 2 Chat、Mistral Instruct。",
+              "line_num": 164
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#stop-sequence)停止序列",
+              "node_id": "0029",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/core-concepts/instructmode/#stop-sequence)停止序列\n\n表示回复结束的文本。也作为停止字符串发送到后端 API。\n\n如果生成了停止序列，则从输出中删除超过它的所有内容（包括序列本身）。",
+              "line_num": 170
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

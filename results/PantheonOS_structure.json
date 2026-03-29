@@ -1,0 +1,90 @@
+{
+  "doc_name": "PantheonOS",
+  "source_path": "E:/knowledge/Knowledge\\Projects\\PantheonOS.md",
+  "structure": [
+    {
+      "title": "`1` [What is PantheonOS?](#1-what-is-pantheonos)",
+      "node_id": "0000",
+      "prefix_summary": "## `1` [What is PantheonOS?](#1-what-is-pantheonos)\n\nPantheonOS is an **evolvable and privacy-preserving multi-agent framework** designed to reconcile generality with domain specificity. PantheonOS automates, scales and accelerates data sciences, with a particular focus on end-to-end single cell biology analyses. Cruicially, PantheonOS leverages agentic code evolution to optimize state-of-the-art and nascent algorithms, achieving super-human performance on specialized scientific tasks.",
+      "line_num": 35,
+      "nodes": [
+        {
+          "title": "Key Highlights",
+          "node_id": "0001",
+          "summary": "### Key Highlights\n\n- **Evolvable** — Pantheon-Evolve module enables agents to improve algorithms and code through genetic-algorithm-driven agentic code evolution\n- **Multi-Agent Teams** — PantheonTeam, Sequential, Swarm, Mixture-of-Agents (MoA), and AgentAsTool team patterns for flexible orchestration\n- **Distributed Architecture** — NATS-based messaging for scalable, fault-tolerant deployments across machines\n- **Friendly Interfaces** — Interactive CLI (`pantheon cli`) and Chatroom UI (`pantheon ui`)",
+          "line_num": 39
+        }
+      ]
+    },
+    {
+      "title": "`2` [Quick Start & Community](#2-quick-start--community)",
+      "node_id": "0002",
+      "summary": "## `2` [Quick Start & Community](#2-quick-start--community)\n\n| | |\n| :--- | :--- |\n| [![][online-app-shield]][online-app] | Play with our Web UI! |\n| [![][pypi-shield]][pypi-link] | `pip install pantheon-agents` |\n| [![][slack-shield-badge]][slack-link] | Join our Slack community! |\n| [![][discord-shield-badge]][discord-link] | Join our Discord community! |",
+      "line_num": 46
+    },
+    {
+      "title": "`3` [Installation](#3-installation)",
+      "node_id": "0003",
+      "prefix_summary": "## `3` [Installation](#3-installation)",
+      "line_num": 55,
+      "nodes": [
+        {
+          "title": "Using uv (Recommended)",
+          "node_id": "0004",
+          "summary": "### Using uv (Recommended)\n\n[uv](https://github.com/astral-sh/uv) is a fast Python package manager that handles dependencies efficiently.\n\n```bash\n# Install uv (if not already installed)\n# macOS/Linux\ncurl -LsSf https://astral.sh/uv/install.sh | sh\n# Windows\npowershell -c \"irm https://astral.sh/uv/install.ps1 | iex\"\n\n# Clone and install\ngit clone https://github.com/aristoteleo/PantheonOS.git\ncd PantheonOS\nuv sync\n\n# With optional dependencies\nuv sync --extra knowledge  # RAG/vector search support\nuv sync --extra slack      # Slack integration\nuv sync --extra r          # R language support (requires R installed)\n```",
+          "line_num": 57
+        },
+        {
+          "title": "Using pip",
+          "node_id": "0005",
+          "summary": "### Using pip\n\n```bash\n# Basic installation\npip install pantheon-agents\n\n# With optional dependencies\npip install \"pantheon-agents[knowledge]\"  # RAG/vector search support\npip install \"pantheon-agents[slack]\"      # Slack integration\n```",
+          "line_num": 79
+        },
+        {
+          "title": "Development Installation",
+          "node_id": "0006",
+          "summary": "### Development Installation\n\n```bash\ngit clone https://github.com/aristoteleo/PantheonOS.git\ncd PantheonOS\nuv sync --extra dev --extra knowledge\n\n# Run tests\nuv run pytest tests/\n```",
+          "line_num": 90
+        }
+      ]
+    },
+    {
+      "title": "`4` [Usage](#4-usage)",
+      "node_id": "0007",
+      "prefix_summary": "## `4` [Usage](#4-usage)",
+      "line_num": 101,
+      "nodes": [
+        {
+          "title": "CLI Mode",
+          "node_id": "0008",
+          "summary": "### CLI Mode\n\n```bash\n# Start the interactive REPL\npantheon cli\n```",
+          "line_num": 103
+        },
+        {
+          "title": "Chatroom UI",
+          "node_id": "0009",
+          "summary": "### Chatroom UI\n\n```bash\n# Start the multi-agent chatroom\npantheon ui --auto-start-nats --auto-ui\n```",
+          "line_num": 110
+        },
+        {
+          "title": "API Usage",
+          "node_id": "0010",
+          "summary": "### API Usage\n\nPlease refer to our [Documents][docs] for detailed API usage, including creating agents, using toolsets, and building teams.",
+          "line_num": 117
+        }
+      ]
+    },
+    {
+      "title": "`5` [Contributing](#5-contributing)",
+      "node_id": "0011",
+      "summary": "## `5` [Contributing](#5-contributing)\n\nContributions of all types are more than welcome! If you are interested in contributing code, feel free to check out our GitHub [Issues][github-issues-link] to dive in.\n\n[![][pr-welcome-shield]][pr-welcome-link]",
+      "line_num": 121
+    },
+    {
+      "title": "License",
+      "node_id": "0012",
+      "summary": "The partial document is a README or similar informational file for the open-source project PantheonOS. It highlights the following main points:\n\n1. **License Information**: The project is licensed under the BSD 2-Clause license, with copyright held by Qiu Lab.\n\n2. **Project Links and Badges**: The document includes a variety of links and corresponding badges for:\n   - GitHub repository metrics (contributors, forks, issues, stars, license)\n   - Official website and manuscript access\n   - Social media presence (X, Bluesky)\n   - Online application availability\n   - Community engagement platforms (Discord, Slack)\n   - Package distribution (PyPI)\n   - Programming language requirements (Python 3.10+)\n\n3. **Community Engagement**: The project welcomes contributions through pull requests, as indicated by the \"PR welcome\" badge.\n\n4. **Project Status**: The project is currently in a beta development stage.\n\nThese elements collectively provide an overview of the project's licensing, community, and development status, along with multiple avenues for engagement and contribution.",
+      "line_num": 127
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "doc_name": "cicada",
+  "source_path": "E:/knowledge/Knowledge\\Projects\\cicada.md",
+  "structure": [
+    {
+      "title": "Cicada (知了猴)",
+      "node_id": "0000",
+      "prefix_summary": "# Cicada (知了猴)\n\n> OpenClaw 一键启动器 Community 版 — 下载双击，5分钟用上 AI",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "功能",
+          "node_id": "0001",
+          "summary": "The partial document describes a software tool with the following main features:\n\n1. **One-Click Installation**: Provides a visual, step-by-step installation process including environment detection, Node.js installation, and OpenClaw installation.\n\n2. **Offline Installation**: Offers an installation option that includes built-in Node.js and OpenClaw, allowing for installation without an internet connection, ideal for intranet environments.\n\n3. **Pre-Configured Models**: Supports various pre-installed AI models such as Doubao, DeepSeek, Kimi, GLM, Qianwen, and Ollama, which can be activated by simply entering an API key.\n\n4. **Skill Store**: Allows users to browse, search, and install ClawHub skills with a single click.\n\n5. **Dashboard**: Features a real-time service status polling system, one-click start/stop functionality, and the ability to open the Web UI.\n\n6. **Connection Test**: Enables users to verify the availability of their API keys with a single click after configuration.\n\n7. **Automatic Updates**: Automatically checks for the latest version on GitHub Releases and updates the software accordingly.",
+          "line_num": 5
+        },
+        {
+          "title": "下载",
+          "node_id": "0002",
+          "summary": "## 下载\n\n从 [Releases](https://github.com/2233admin/cicada/releases) 下载：\n- Windows: `cicada-windows.zip`\n- macOS / Linux: 即将支持",
+          "line_num": 15
+        },
+        {
+          "title": "开发",
+          "node_id": "0003",
+          "summary": "## 开发\n\n```bash\nflutter pub get\nflutter run -d windows\n```",
+          "line_num": 21
+        },
+        {
+          "title": "构建",
+          "node_id": "0004",
+          "prefix_summary": "## 构建",
+          "line_num": 28,
+          "nodes": [
+            {
+              "title": "标准构建（在线安装）",
+              "node_id": "0005",
+              "summary": "### 标准构建（在线安装）\n\n```bash\nflutter build windows --release\n```",
+              "line_num": 30
+            },
+            {
+              "title": "离线安装包构建（推荐）",
+              "node_id": "0006",
+              "summary": "### 离线安装包构建（推荐）\n\n```bash\n# 一键构建（自动下载离线资源）\ndart scripts/build_with_bundled.dart\n\n# 或分步执行\n# 1. 准备离线资源\ndart scripts/prepare_bundled_deps.dart\n\n# 2. 构建应用\nflutter build windows --release\n```\n\n详细说明见 [OFFLINE_INSTALL.md](./OFFLINE_INSTALL.md)。",
+              "line_num": 36
+            }
+          ]
+        },
+        {
+          "title": "技术栈",
+          "node_id": "0007",
+          "summary": "## 技术栈\nFlutter 3.29 + Dart 3.7 + Material 3",
+          "line_num": 52
+        },
+        {
+          "title": "双版本",
+          "node_id": "0008",
+          "summary": "## 双版本\n\n| 版本 | 面向 | 技术栈 |\n|------|------|--------|\n| **Cicada Community**（本项目） | 普通用户、开发者 | Flutter Desktop |\n| **Cicada Enterprise** | 央企/内网/离线 | Tauri + React + Rust |",
+          "line_num": 55
+        },
+        {
+          "title": "协议",
+          "node_id": "0009",
+          "summary": "## 协议\nGPL 3.0",
+          "line_num": 62
+        }
+      ]
+    }
+  ]
+}

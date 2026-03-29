@@ -1,0 +1,130 @@
+{
+  "doc_name": "王德峰-资本时间性",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\王德峰-资本时间性.md",
+  "structure": [
+    {
+      "title": "王德峰：资本的时间性、虚拟资本理论与社会必要劳动时间",
+      "node_id": "0000",
+      "prefix_summary": "# 王德峰：资本的时间性、虚拟资本理论与社会必要劳动时间\n\n> 关联看板 issue：#125（王德峰全集）| 关联项目：quant-terminal、hist-mat\n\n---",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "一、马克思本体论革命与资本哲学",
+          "node_id": "0001",
+          "prefix_summary": "The partial document discusses Marx's ontological revolution and philosophy of capital, focusing on Wang Defeng's core proposition that Marx created a new ontological realm where any contemporary philosophy must critique capital ontologically. It highlights Marx's discovery of \"power\" as an irrational entity, contrasting with traditional European philosophy rooted in Platonism, which only explains rational beings. The document further explains that money represents the exchange value of commodities, which is the embodiment of social relations, not a property of objects. It concludes with the statement that capital is fundamentally an irrational force, and rationality can only prove equality among people, not justify the domination of one group by another.",
+          "line_num": 13,
+          "nodes": [
+            {
+              "title": "马克思-海德格尔会通",
+              "node_id": "0002",
+              "summary": "### 马克思-海德格尔会通\n\n| 维度 | 马克思 | 海德格尔 | 会通点 |\n|------|--------|----------|--------|\n| 病症 | 劳动异化 | 遗忘存在 | 本体论上同一事件 |\n| 存在方式 | 商品拜物教 | 技术座架(Gestell) | 现代性两面 |\n| 时间概念 | 社会必要劳动时间 | Zeitlichkeit | 见下节 |\n| 解放 | 扬弃异化劳动 | 诗意栖居 | 同一事变不同述说 |\n\n---",
+              "line_num": 22
+            }
+          ]
+        },
+        {
+          "title": "二、资本的时间性",
+          "node_id": "0003",
+          "prefix_summary": "## 二、资本的时间性",
+          "line_num": 33,
+          "nodes": [
+            {
+              "title": "时间性的三重结构",
+              "node_id": "0004",
+              "summary": "### 时间性的三重结构\n\n1. **过去**：已凝结的劳动时间 = 不变资本 = 死劳动\n2. **现在**：正在进行的活劳动 = 价值增殖的唯一源泉\n3. **未来**：资本的自我预期 = M-C-M'的完成 = **希望与恐惧的领域**",
+              "line_num": 35
+            },
+            {
+              "title": "海德格尔对接",
+              "node_id": "0005",
+              "summary": "### 海德格尔对接\n\n- 海德格尔：此在\"先行到死\"(Vorlaufen zum Tode)，时间性是\"将来-曾在-当前\"的绽出统一\n- 马克思：资本\"先行到增殖\"(M到M')，资本的\"时间性\"是\"投入-生产-实现\"的循环统一\n- **会通**：资本把人的本真时间性（有限的、向死的）替换为伪时间性（无限增殖的、否定有限性的）\n\n---",
+              "line_num": 41
+            }
+          ]
+        },
+        {
+          "title": "三、虚拟资本理论",
+          "node_id": "0006",
+          "prefix_summary": "## 三、虚拟资本理论",
+          "line_num": 49,
+          "nodes": [
+            {
+              "title": "虚拟资本(fiktives Kapital)定价",
+              "node_id": "0007",
+              "summary": "### 虚拟资本(fiktives Kapital)定价\n\n```\nC = R / r    (资本化公式)\nC = 虚拟资本量，R = 年收入，r = 利息率\n```",
+              "line_num": 51
+            },
+            {
+              "title": "资本的四个内在界限",
+              "node_id": "0008",
+              "summary": "The partial document outlines four inherent limits of capital, detailing the content and consequences of each. The first limit is that necessary labor constrains wages, leading to insufficient consumption and excess production, resulting in surplus crises. The second limit is that surplus value constrains surplus labor, making production unprofitable and leading to technological unemployment and unemployment crises. The third limit is that money constrains production, causing capital chain ruptures, prompting state printing of money, and inevitably leading to the creation of virtual capital, with consequences of inflation and financial bubbles. The fourth limit is that exchange value constrains use value, leading to consumption expansion and resource depletion, resulting in ecological crises.",
+              "line_num": 58
+            },
+            {
+              "title": "金融危机的本体论根源",
+              "node_id": "0009",
+              "summary": "The partial document discusses the ontological roots of financial crises. It argues that financial models like Black-Scholes, CAPM, and DCF are based on flawed premises. The text challenges the notion that greed is the cause of crises, suggesting instead that greed is a tool for financial capital to achieve market operations and value multiplication. It also posits that the expansion of virtual capital is not a market failure but an inevitable stage in the unfolding of capital logic. The document emphasizes the speculative nature of financial markets, where the future is commodified based on financial logic, leading to the creation of a virtual economy.",
+              "line_num": 67
+            },
+            {
+              "title": "货币商品化与利息率",
+              "node_id": "0010",
+              "summary": "### 货币商品化与利息率\n\n- 货币使用价值 = 产生利润的能力；货币交换价值 = 利息率\n- **利息率不是跟实体经济产业资本的盈利状况直接联系的，而是与市场上货币供应量大小连在一起的**\n- 量化启示：利率与实体利润率的脱钩是虚拟资本自我膨胀的机制基础\n\n---",
+              "line_num": 77
+            }
+          ]
+        },
+        {
+          "title": "四、社会必要劳动时间→股价\"锚\"",
+          "node_id": "0011",
+          "prefix_summary": "## 四、社会必要劳动时间→股价\"锚\"",
+          "line_num": 85,
+          "nodes": [
+            {
+              "title": "\"锚\"的双重性",
+              "node_id": "0012",
+              "summary": "### \"锚\"的双重性\n\n1. **实体锚**：企业利润→剩余价值→活劳动→社会必要劳动时间仍是终极锚\n2. **虚拟锚**：利息率由货币市场决定，与实体脱钩→价格可长期偏离价值",
+              "line_num": 87
+            },
+            {
+              "title": "量化对应表",
+              "node_id": "0013",
+              "summary": "The partial document provides a quantitative correspondence table that maps Marxist economic concepts to financial and market indicators, along with their operational implications. Key points include: 1) Social necessary labor time is linked to industry average production efficiency, suggesting that inefficient enterprises will eventually be eliminated. 2) Value-price deviation is connected to PE/PB ratios versus industry averages, indicating a mean reversion over an uncertain time frame. 3) Virtual capital inflation is associated with market-wide valuation bubbles, highlighting systemic risk. 4) The tendency of the rate of profit to fall is related to the long-term trend of industry ROE, emphasizing the need for additional verification of high ROE sustainability. 5) The four limits of capital are tied to macroeconomic cycle turning points, with tight capital chains being a precursor to crises. 6) The relationship between hope/fear and knowledge is represented by the emotional factor versus the fundamental factor, acknowledging that models can never eliminate uncertainty. 7) The determination of interest rates by money supply is linked to the liquidity factor, identified as the strongest short-term driver.",
+              "line_num": 92
+            }
+          ]
+        },
+        {
+          "title": "五、三层认识论框架（对quant-terminal最直接的理论校准）",
+          "node_id": "0014",
+          "summary": "The partial document outlines a three-tiered epistemological framework for calibrating the \"quant-terminal\" system. The first tier, \"Known,\" focuses on the relationship between socially necessary labor time, value, and long-term anchors, using factors like industry efficiency, ROE, and profitability trends, analyzed on a yearly or quarterly basis. The second tier, \"Perceivable but Not Precisely Calculable,\" deals with the impact of liquidity and interest rates on medium-term market movements, considering elements such as money supply, central bank policies, and credit expansion/contraction, evaluated on a monthly or weekly basis. The third tier, \"Unknown,\" addresses the influence of hope and fear on short-term market volatility, using proxies like turnover rate, volatility, and public sentiment, assessed on a daily or hourly basis. This tier is acknowledged as being beyond complete model resolution, only manageable.",
+          "line_num": 106
+        },
+        {
+          "title": "六、与当代金融哲学对话",
+          "node_id": "0015",
+          "summary": "## 六、与当代金融哲学对话\n\n### 主要内容概述：\n\n1. **与David Harvey的对话**：\n   - **切入角度**：王德峰从本体论角度探讨问题，而David Harvey则关注空间-时间压缩。\n   - **共同点**：两人都认为虚拟资本的膨胀是资本逻辑的必然结果。\n\n2. **与Sraffa的对话**：\n   - **切入角度**：王德峰采用哲学批判的方法，而Sraffa则使用数学内爆（循环论证）。\n   - **共同点**：两人都对新古典经济学的基础持否定态度。\n\n3. **与行为金融学（BF）的对话**：\n   - **切入角度**：王德峰认为未来不是知识的对象，而行为金融学则试图用“偏差”来修补理性框架。\n   - **差异**：王德峰的观点是对传统金融哲学的本体论颠覆，而行为金融学则是从认识论角度进行修补。",
+          "line_num": 122
+        },
+        {
+          "title": "七、《重读资本论》关键讲次",
+          "node_id": "0016",
+          "summary": "The partial document provides an overview of key lectures from the series \"Rereading Capital.\" It outlines the main themes and related concepts for specific lecture segments. The document highlights lectures 1-3, which focus on the subtitle \"Critique of Political Economy\" and philosophical premises, linking to ontological revolution. Lectures 4-7 delve into the dual nature of commodities and labor, and value forms, connecting to socially necessary labor time. Lectures 8-12 cover M-C-M' and the production of surplus value, relating to the temporality of capital. Lectures 22-26 emphasize financial capitalism, linking to concepts of fictitious capital, credit, and stocks. Finally, lectures 31-34 discuss the inherent contradictions and limits of capitalism, connecting to the theory of crisis and four limits.",
+          "line_num": 132
+        },
+        {
+          "title": "关键引用",
+          "node_id": "0017",
+          "summary": "## 关键引用\n\n- \"未来并不是知识推断的对象，未来始终是希望和恐惧的对象\"\n- \"资本本质上是一种非理性的力量\"\n- \"凡是有当代意义的哲学都要在本体论上构成对资本的批判\"\n- \"资本市场的本质就是把某种用金融学逻辑推断出来的未来放到今天的市场上进行买卖\"",
+          "line_num": 146
+        },
+        {
+          "title": "Sources",
+          "node_id": "0018",
+          "summary": "The partial document is a compilation of resources and references related to the philosophical and economic works of Karl Marx, with a focus on interpretations and discussions by contemporary scholars. It includes links to articles and lectures by Wang Defeng, a prominent Chinese philosopher, who explores the intersection of Heidegger's and Marx's philosophies, offers philosophical reflections on the financial crisis, and discusses the importance of studying Marx. Additionally, there is a reference to a lecture series by David Harvey, a renowned Marxist scholar, titled \"On Sraffa's Trail,\" which likely delves into economic theories and their historical contexts. The document also mentions a comprehensive study note on Wang Defeng's reinterpretation of \"Das Kapital\" from a modern perspective. The resources are tagged with keywords such as research, philosophy, Marxism, capital, quant, and historical materialism, indicating a focus on the theoretical and practical implications of Marxist thought in contemporary society.",
+          "line_num": 153
+        }
+      ]
+    }
+  ]
+}

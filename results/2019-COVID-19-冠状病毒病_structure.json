@@ -1,0 +1,244 @@
+{
+  "doc_name": "2019 COVID-19 冠状病毒病",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\赤島Akashima\\世界书\\近代\\全球瘟疫事件（新冠肺炎 OR SARS-CoV）\\2019 COVID-19 冠状病毒病.md",
+  "structure": [
+    {
+      "title": "名称[",
+      "node_id": "0000",
+      "summary": "The excerpt outlines the evolution of official names used for COVID-19. It details early labeling as “unknown pneumonia” in Wuhan, subsequent naming by Hong Kong and Macau authorities as forms of “severe” or “new” coronavirus infections, and mainland China’s adoption of “新型冠状病毒感染的肺炎,” later abbreviated as “新冠肺炎 (NCP)” with the English name updated to “COVID-19.” Taiwan named it “严重特殊传染性肺炎” with the colloquial “武汉肺炎,” while the World Health Organization established the global official name “COVID-19” to avoid stigmatization. Finally, in December 2022, China renamed the disease “新型冠状病毒感染.”",
+      "line_num": 30
+    },
+    {
+      "title": "症状[",
+      "node_id": "0001",
+      "prefix_summary": "该文段介绍了2019冠状病毒病的临床症状与潜伏期特征，指出多数患者症状轻微，常见表现包括发热（最常见）、咳嗽、疲劳、鼻塞、肌肉与关节疼痛、流鼻水、嗅觉及味觉丧失等；少数患者出现胃肠不适、咽喉痛、头痛等症状，严重者可发展为呼吸困难、胸痛、意识混乱等，并可能出现急性呼吸窘迫综合征、败血性休克、凝血障碍等危及生命的并发症。文中还强调存在无症状感染者且具有传播能力，潜伏期通常为4–5天而不超过14天，以及南加州大学研究发现的症状出现顺序（先发热，再咳嗽和肌肉疼痛，随后胃肠症状）。",
+      "line_num": 48,
+      "nodes": [
+        {
+          "title": "**临床分类**[",
+          "node_id": "0002",
+          "summary": "The partial document outlines the clinical classification of COVID-19 as per the guidelines from China’s National Health Commission, detailing four severity levels: mild (mainly upper respiratory symptoms like sore throat, fever, cough), moderate (persistent high fever over three days or cough/shortness of breath with RR<30, SpO₂>93%, imaging shows pneumonia), severe (adult criteria include RR≥30, SpO₂≤93%, PaO₂/FiO₂≤300 mmHg, or rapid radiologic progression >50%), and critical (respiratory failure needing mechanical ventilation, shock, or multi-organ failure requiring ICU care).",
+          "line_num": 65
+        }
+      ]
+    },
+    {
+      "title": "病因[",
+      "node_id": "0003",
+      "prefix_summary": "## 病因[",
+      "line_num": 79,
+      "nodes": [
+        {
+          "title": "**传播途径**[",
+          "node_id": "0004",
+          "summary": "Main points: discussion of transmission routes of COVID-19 in early outbreak; primary transmission shift from animal-to-human to human-to-human. Overview of droplet and fomite transmission, potential aerosol transmission with possible survival for days, and uncertainty regarding fecal-oral route though viral presence detected in feces. Highlights effective airborne spread in crowded, poorly ventilated indoor spaces including restaurants, nightclubs, public transport, funerals. Notes presence of virus in sputum and saliva; though not sexually transmitted, kissing and close contact can spread virus. Mentions possible presence in breast milk but unclear infant transmission risk.",
+          "line_num": 81
+        }
+      ]
+    },
+    {
+      "title": "检测[",
+      "node_id": "0005",
+      "prefix_summary": "Partial document discusses diagnostic methods for COVID-19, emphasizing the use of RT-PCR on respiratory specimens or blood, integrating epidemiological and clinical data due to potential false results, and confirming cases via nucleic acid detection or genetic sequencing. It also notes the role of imaging when RT-PCR is inconclusive and highlights research from the Chinese University of Hong Kong showing high viral presence in feces, deep throat saliva, and other samples, which can reduce false negatives compared with throat saliva alone.",
+      "line_num": 89,
+      "nodes": [
+        {
+          "title": "**病毒检测**[",
+          "node_id": "0006",
+          "prefix_summary": "### **病毒检测**[",
+          "line_num": 101,
+          "nodes": [
+            {
+              "title": "**RT-PCR**[",
+              "node_id": "0007",
+              "summary": "The provided document section focuses on RT-PCR as the primary diagnostic method for COVID-19, examining its limitations, including potential false negatives from nasal swabs and the need for bronchoalveolar lavage samples. It also introduces the SHERRY sequencing technique for RNA viruses developed by Chinese universities, outlines key milestones in the rapid development of nucleic acid testing kits by Chinese and international companies following the publication of the SARS-CoV-2 genome, and highlights Roche’s FDA-authorized high-throughput molecular testing system.",
+              "line_num": 103
+            },
+            {
+              "title": "**CRISPR**[",
+              "node_id": "0008",
+              "summary": "#### **CRISPR**[\n\n针对COVID-19常用的检测手段为RT-PCR。([104])有研究认为，现在主要的qRT-PCR检测耗时从获取样本到得出结果超过24小时，因此试图利用[CRISPR](https://zh.wikipedia.org/wiki/CRISPR)技术在实践中提供更快的检测。([105])这一研究中开发的DETECTR检测技术基于Cas12蛋白，由于其试剂的便携性认为可以用于在实验室外的地方以提高效率。([105])",
+              "line_num": 113
+            }
+          ]
+        },
+        {
+          "title": "**影像学检测**[",
+          "node_id": "0009",
+          "prefix_summary": "该段内容介绍了在影像学检测中，采用胸腔断层扫描观察患者肺部表现：早期出现多发小斑片及间质改变，主要位于肺外带；随着病情发展，双肺可见多发毛玻璃状病变与浸润影；严重时可形成次节叶或大叶性肺实变，而胸腔积液较少见；另外部分患者虽然逆转录聚合酶链式反应检测为阴性，但在CT上仍显示典型的早期肺实变。",
+          "line_num": 117,
+          "nodes": [
+            {
+              "title": "**胸部电脑断层**[",
+              "node_id": "0010",
+              "summary": "胸部电脑断层在COVID-19中的典型表现包括双侧周边为主的毛玻璃状病变、肺部血管增厚与细网状阴影；少见征象如淋巴结肿大、胸腔积液、中心周边为主的影像变化和胸膜增厚，此外提及典型与快速进展阶段的CT成像特点。",
+              "line_num": 121
+            }
+          ]
+        },
+        {
+          "title": "**实验室检测**[",
+          "node_id": "0011",
+          "summary": "Early laboratory findings included decreased white and lymphocyte counts, elevated liver enzymes, LDH, muscle enzymes, myoglobin, and in severe cases troponin; CRP and ESR were typically elevated while procalcitonin remained normal. Severe cases showed increased D-dimer and progressive lymphocytopenia, with elevated cytokines such as IL-2, IL-7, IL-10, G-CSF, IP-10, MCP-1, MIP1A, and TNF-α.",
+          "line_num": 145
+        }
+      ]
+    },
+    {
+      "title": "预防[",
+      "node_id": "0012",
+      "prefix_summary": "The document discusses COVID-19 prevention strategies, emphasizing the importance of social distancing, vaccination, and mask-wearing to slow viral spread. It details the approval and rollout of the Pfizer-BioNTech vaccine by UK and US regulators and notes guidelines from the NIH regarding preventive drug use. The text explains the “flatten the curve” concept to manage healthcare capacity and reduce infections. It lists preventive measures such as staying home, avoiding crowds, practicing hand hygiene, wearing masks, covering coughs and sneezes properly, and maintaining respiratory hygiene. It also mentions recommendations for infected individuals to isolate and wear masks, highlights research on droplet spread without masks, and advises healthcare workers to use additional protective equipment like goggles when treating suspected or confirmed cases.",
+      "line_num": 149,
+      "nodes": [
+        {
+          "title": "**疫苗**[",
+          "node_id": "0013",
+          "summary": "Partial document discusses COVID-19 vaccines, highlighting global authorization statuses and their usage, the established knowledge about coronaviruses aiding rapid vaccine development in 2020, the sharing of SARS-CoV-2 gene sequence that spurred pharmaceutical commitments, the initial rollout of emergency-authorized vaccines (including two-dose regimens with Johnson & Johnson as single-dose exception), and the subsequent need for booster doses due to waning immunity.",
+          "line_num": 159
+        },
+        {
+          "title": "**手部卫生**[",
+          "node_id": "0014",
+          "summary": "- Emphasizes proper hand hygiene, including CDC advice to wash hands for at least 20 seconds with soap after activities like using the restroom, before eating, or after coughing/sneezing, and to use hand sanitizer with at least 60% alcohol.\n- Notes WHO guidance to avoid touching the mouth, nose, and eyes with unwashed hands.\n- Details WHO recommendations for 80% ethanol or 75% isopropyl alcohol solutions (with glycerol) as fast-acting, broad-spectrum disinfectants proven effective against SARS-CoV, MERS-CoV, and SARS-CoV-2.",
+          "line_num": 183
+        },
+        {
+          "title": "**呼吸道卫生**[",
+          "node_id": "0015",
+          "summary": "### **呼吸道卫生**[\n\n各地的卫生机构建议在咳嗽或打喷嚏时，利用手肘或一次性卫生纸遮盖口鼻部，并将卫生纸立刻处理掉。([38])([139])同时，医用口罩或N95口罩被推荐用于易感染人群，以限制在说话、咳嗽、打喷嚏时产生的带病毒粒子气溶胶的扩散。([140])([141])([142])世界卫生组织对口罩的使用场景及时间发布了相关指导。([140])",
+          "line_num": 189
+        },
+        {
+          "title": "**个体防护**[",
+          "node_id": "0016",
+          "summary": "### **个体防护**[\n\n以医务群体为主的人群在实施治疗时，需要采取更多的预防措施。在插管或使用急救袋时，可能会出现带病气溶胶。([143])因此如美国疾控中心等公共卫生机构建议医护人员在照顾SARS-CoV-2携带者时，需要穿戴如防护衣、口罩或人工呼吸器、护目镜以及手套再进行相关的医疗操作。([144])([145])([146])",
+          "line_num": 193
+        },
+        {
+          "title": "**保持社交距离**[",
+          "node_id": "0017",
+          "summary": "The partial document discusses social distancing as a non-pharmaceutical infection control measure aimed at reducing contact between infected and uninfected individuals to slow disease spread. It explains the methods used, such as quarantine, travel restrictions, canceling mass gatherings, and closing public venues. It also covers personal practices like staying home, limiting travel, avoiding crowds, and maintaining physical distance. The text notes that many governments are enforcing or recommending social distancing in affected areas, while noncompliance in some regions contributes to further outbreaks.",
+          "line_num": 197
+        },
+        {
+          "title": "**通风和空气过滤**[",
+          "node_id": "0018",
+          "summary": "### **通风和空气过滤**[\n\n在公共场所进行[通风](https://zh.wikipedia.org/wiki/通風)和[空气过滤](https://zh.wikipedia.org/wiki/空气滤清器)，有助于稀释并清除潜在的传染性[气溶胶](https://zh.wikipedia.org/wiki/气溶胶)([149])。",
+          "line_num": 201
+        }
+      ]
+    },
+    {
+      "title": "治疗[",
+      "node_id": "0019",
+      "prefix_summary": "Partial document describes a section on medical treatment for COVID-19. It highlights a study in the UK showing corticosteroid dexamethasone reduces mortality in severe patients, noting its effectiveness only in critical cases. Prior treatments focused on supportive care, oxygen therapy, respiratory support, and organ support, with ECMO usage and guidance from WHO and China’s National Health Commission. It also covers China’s protocols for isolating suspected cases, conducting pathogen testing, and monitoring close contacts.",
+      "line_num": 205,
+      "nodes": [
+        {
+          "title": "**药物治疗**[",
+          "node_id": "0020",
+          "prefix_summary": "### **药物治疗**[",
+          "line_num": 215,
+          "nodes": [
+            {
+              "title": "**有共识**[",
+              "node_id": "0021",
+              "summary": "讨论了使用对乙酰氨基酚与非甾体抗炎药作为一线治疗的共识及相关监管意见；提及关于ACEI和ARB可能影响ACE2水平的假说以及不建议停药的观点；提到固醇类药物目前仅推荐用于急性呼吸窘迫综合征患者。",
+              "line_num": 217
+            },
+            {
+              "title": "**有争议**[",
+              "node_id": "0022",
+              "summary": "Section outlines controversial or investigational COVID‑19 treatments: remdesivir approved in US and Japan; chloroquine/hydroxychloroquine data including azithromycin combos but safety concerns; IL‑6 pathway inhibitors; convalescent plasma use; favipiravir; lopinavir/ritonavir lack benefit; traditional Chinese medicine claims and skeptical regulators; dexamethasone and other glucocorticoids reducing mortality in severe cases.",
+              "line_num": 223
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "预后[",
+      "node_id": "0023",
+      "prefix_summary": "The document section focuses on the prognosis of COVID-19, detailing symptom severity ranging from mild cases resembling common upper respiratory infections to severe cases requiring weeks of recovery. It highlights that children are also susceptible but more often experience mild illness compared to adults. The WHO report from February 2020 is cited, indicating that about 80% of cases in China were mild-to-moderate, 13.8% severe, and 6.1% critical. The crude fatality rate was approximately 3.8%, though early data may be biased. Indicators of poorer prognosis include lymphopenia, acute kidney injury, elevated liver function markers, lactate dehydrogenase, inflammation markers like C-reactive protein and ferritin, prolonged D-dimer and prothrombin time, and raised troponin levels.",
+      "line_num": 243,
+      "nodes": [
+        {
+          "title": "**并发症**[",
+          "node_id": "0024",
+          "summary": "The document outlines complications of COVID-19, including respiratory issues like pneumonia, ARDS, multi-organ failure, septic shock, and death; cardiovascular complications such as heart failure, arrhythmias, myocarditis, and thrombosis; liver damage indicated by elevated transaminases; neurological problems like seizures, stroke, encephalitis, Guillain-Barré syndrome, and rare acute encephalopathy; and post-infection pediatric conditions resembling Kawasaki disease, such as multisystem inflammatory syndrome in children.",
+          "line_num": 249
+        },
+        {
+          "title": "**长期影响**[",
+          "node_id": "0025",
+          "summary": "Long-term impacts of COVID-19 are discussed, noting that early studies found persistent symptoms lasting over a month in roughly one out of every five to ten patients, especially those hospitalized with severe disease, who commonly face ongoing fatigue and shortness of breath. Reports also describe post-infection “brain fog” manifested as difficulties with attention and memory, highlighting cognitive impairments among sufferers.",
+          "line_num": 259
+        },
+        {
+          "title": "**免疫**[",
+          "node_id": "0026",
+          "summary": "该文段介绍了人类对SARS-CoV-2的免疫反应，强调细胞介导免疫与抗体共同作用；指出中和抗体会随时间下降，部分轻症患者在感染两个月后检测不到抗体，但记忆B细胞针对刺突蛋白和核衣壳蛋白至少存在6个月；并提到已有再感染病例，一旦再感染普遍，群体免疫不足以彻底消除病毒。",
+          "line_num": 267
+        }
+      ]
+    },
+    {
+      "title": "流行病学[",
+      "node_id": "0027",
+      "prefix_summary": "本节介绍了2019冠状病毒病在全球的流行病学情况，强调其作为新兴传染病的性质；引用约翰斯·霍普金斯大学的数据说明截至2023年3月10日全球累计病例约6.76亿、死亡约688万，以及因国家与时间差异致死率约0.5%–5%；并提到喷嚏飞沫传播的可视化。",
+      "line_num": 273,
+      "nodes": [
+        {
+          "title": "**分布**[",
+          "node_id": "0028",
+          "summary": "### **分布**[\n\n疫情自2019年12月首次暴发于[中华人民共和国](https://zh.wikipedia.org/wiki/中华人民共和国)[湖北省](https://zh.wikipedia.org/wiki/湖北省)[武汉市](https://zh.wikipedia.org/wiki/武漢市)([222])，后逐渐扩散至全球各个国家和地区([5])。2020年3月11日，[世界卫生组织](https://zh.wikipedia.org/wiki/世界衛生組織)（WHO）正式宣布成为全球大流行（global pandemic）性疾病([223])。",
+          "line_num": 281
+        },
+        {
+          "title": "**死亡率**[",
+          "node_id": "0029",
+          "prefix_summary": "The partial document details COVID-19 mortality statistics, highlighting high death rates among patients with comorbidities like hypertension, diabetes, cardiovascular and chronic lung diseases, cancer, and chronic kidney disease. It notes a nearly 90% mortality for those requiring mechanical ventilation, a median time from symptom onset to death of 14 days, higher fatality rates in men (2.8%) than women (1.7%), greater risk with age—especially over 80 where mortality reaches 21.9%—and that cases in children under 10 are rare and fatalities extremely uncommon.",
+          "line_num": 285,
+          "nodes": [
+            {
+              "title": "**致死率（CFR）**[",
+              "node_id": "0030",
+              "summary": "该部分主要介绍了COVID-19的致死率（CFR）概念，说明死亡率与基础疾病和年龄的关系，并强调实时数据中“死亡人数/确诊人数”与实际致死率存在偏差，需通过修正方法进行更准确估算。文中列举了不同国家及地区COVID-19致死率的观测数据，指出各国数据差异较大，强调了实时数据的参考意义及统计方法的考量。",
+              "line_num": 289
+            },
+            {
+              "title": "**感染者死亡率（IFR）**[",
+              "node_id": "0031",
+              "summary": "The document discusses infection fatality rate (IFR), defining it as the proportion of deaths among all infected individuals, including asymptomatic and unconfirmed cases. It notes variability in IFR estimates: a September 2020 Australian study derived an average IFR of 0.68% but highlighted regional and data quality variations; an October 2020 WHO-associated analysis estimated a global IFR of 1.15%; and an October 2020 U.S. study detailed age-specific IFRs rising sharply with age, from 0.002% at age 10 to 15% at age 85.",
+              "line_num": 358
+            }
+          ]
+        },
+        {
+          "title": "**性别差异**[",
+          "node_id": "0032",
+          "summary": "The document discusses gender differences in COVID-19 outcomes, noting early reports showed higher male mortality in China and Italy (2.8% vs 1.7% in China). Later studies (June 2020) found no significant sex difference in susceptibility or infection fatality rate. Review suggests higher male mortality likely due to lifestyle factors like smoking, drinking, and complications such as hypertension rather than genetics. Gender-based immunological differences, lower female smoking rates, and earlier male hypertension might contribute to male mortality. In Europe, 57% of cases were male, and 72% of deaths male. As of April 2020, the U.S. wasn't tracking sex-specific COVID-19 data. Other viral diseases (Ebola, AIDS, influenza, SARS) also show sex-specific impacts.",
+          "line_num": 368
+        }
+      ]
+    },
+    {
+      "title": "动物感染[",
+      "node_id": "0033",
+      "summary": "The document details COVID-19 infections among animals. It covers confirmed cases in various species, such as pet dogs in Hong Kong, big cats at U.S. zoos, minks on Dutch farms, and domestic cats in New York State, alongside cases in tigers, lions, snow leopards, and gorillas in different locations. It highlights zoonotic concerns, including potential animal-to-human transmission events, particularly in mink farms.",
+      "line_num": 373
+    },
+    {
+      "title": "参见[",
+      "node_id": "0034",
+      "summary": "概要介绍了一系列与 2019 冠状病毒病相关的门户与主题链接，包括医学、病毒、肺炎、新兴传染病及历史疫情事件等参考义项，涵盖 SARS、MERS、埃博拉、西非疫情、香港鼠疫、甲型肝炎、甲型H1N1流感等重大传染病及其历史爆发记录。",
+      "line_num": 395
+    },
+    {
+      "title": "注释[",
+      "node_id": "0035",
+      "summary": "本部分文档主要引用了有关2019新冠病毒病的注释，包括：首例患者的发病和就医日期；对实时致死率估算偏差及世界卫生组织的相关报告；关于传播距离和密切接触的定义（WHO与CDC）；以及世界卫生组织对不同国家病死率估算差异的说明。",
+      "line_num": 426
+    }
+  ]
+}

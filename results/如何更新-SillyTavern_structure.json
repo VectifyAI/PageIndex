@@ -1,0 +1,74 @@
+{
+  "doc_name": "如何更新 SillyTavern",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\SillyTavern 官方文档\\使用方法\\如何更新 SillyTavern.md",
+  "structure": [
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/update/#linuxtermux)Linux/Termux",
+      "node_id": "0000",
+      "summary": "## [#](https://docs.sillytavern.app/usage/update/#linuxtermux)Linux/Termux\n\n你肯定是通过 git 安装的，所以只需在 SillyTavern 目录中“git pull”即可。\n\n- `cd SillyTavern`输入正确的文件夹。\n\n- `git pull`获取更新。\n\n- `./start.sh`或启动 ST。`bash start.sh`\n\n---",
+      "line_num": 15
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/update/#windowsmacos)Windows/MacOS操作系统",
+      "node_id": "0001",
+      "prefix_summary": "## [#](https://docs.sillytavern.app/usage/update/#windowsmacos)Windows/MacOS操作系统\n\n\n首先尝试使用位于 SillyTavern 安装基础文件夹中的 which。`UpdateAndStart.bat`\n\n如果失败，请返回此处并继续阅读。",
+      "line_num": 27,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/update/#method-1---git)方法 1 - GIT",
+          "node_id": "0002",
+          "prefix_summary": "### [#](https://docs.sillytavern.app/usage/update/#method-1---git)方法 1 - GIT\n\n我们始终建议用户使用“git”进行安装。原因如下：\n\n安装后，只需[在 ST 文件夹中输入命令行](https://www.google.com/search?q=how+to+open+command+prompt+in+a+folder)即可进行更新。或者，如果命令提示符出现问题（并且您安装了 GitHub Desktop），则可以使用菜单并选择 .`git clonegit pullRepositoryPull`\n\n更新将自动安全地应用。",
+          "line_num": 34,
+          "nodes": [
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/update/#help-i-originally-installed-via-zip-and-now-want-to-convert-to-git-install)“帮助我最初通过 Zip 安装，现在想转换为 Git 安装”",
+              "node_id": "0003",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/update/#help-i-originally-installed-via-zip-and-now-want-to-convert-to-git-install)“帮助我最初通过 Zip 安装，现在想转换为 Git 安装”\n\n你选择了一条明智的道路。\n\n由于您的安装是通过 Zip 完成的，因此您需要使用 git 进行新安装。\n\n值得庆幸的是，我们有关于如何执行此[操作的说明](https://docs.sillytavern.app/installation/windows/)。\n\n使用 git 将新的 SillyTavern 安装到不同的文件夹后，请返回此页面并继续执行以下“Zip 更新”说明的**第 4 步**。",
+              "line_num": 42
+            }
+          ]
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/update/#method-2---zip)方法 2 - ZIP",
+          "node_id": "0004",
+          "prefix_summary": "### [#](https://docs.sillytavern.app/usage/update/#method-2---zip)方法 2 - ZIP\n\n如果您坚持通过zip进行安装，则执行更新的繁琐过程如下：\n\n1. 下载新版本 zip。\n\n1. 将其解压缩到当前 ST 安装之外的文件夹中。\n\n1. 为您的操作系统执行通常的设置过程以安装 NodeJS 要求。\n\n1. 根据需要从旧的 ST 安装中复制以下文件/文件夹 （*）：\n\n(*)'As necessary' = “如果您制作了与这些文件夹相关的任何自定义内容”。没有一个文件夹是必需的，因此只需复制您需要的内容。",
+          "line_num": 52,
+          "nodes": [
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/update/#note-do-not-copy-the-entire-public-folder)注意：不要复制整个 /PUBLIC/ 文件夹",
+              "node_id": "0005",
+              "summary": "The partial document provides instructions for updating the SillyTavern application by copying specific folders and files from the existing installation to a new installation. It emphasizes not to copy the entire /PUBLIC/ folder to avoid disrupting the new installation and preventing new features from appearing. The document lists the essential folders and files to copy, including Assets, Backgrounds, Characters, Chats, Context, Groups, Group chats, Instruct, movingUI, various AI settings, QuickReplies, Themes, User Avatars, Worlds, User, settings.json, and secrets.json (with the latter being placed in the base folder). After copying, users are instructed to restart SillyTavern using the appropriate method for their operating system and verify that all content displays correctly before deleting the old SillyTavern folder.",
+              "line_num": 66
+            }
+          ]
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/update/#common-update-problems)常见更新问题",
+          "node_id": "0006",
+          "prefix_summary": "### [#](https://docs.sillytavern.app/usage/update/#common-update-problems)常见更新问题",
+          "line_num": 101,
+          "nodes": [
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/update/#there-are-unresolved-conflicts-in-the-working-directory)“工作目录中存在未解决的冲突。”",
+              "node_id": "0007",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/update/#there-are-unresolved-conflicts-in-the-working-directory)“工作目录中存在未解决的冲突。”\n\n这意味着您已经修改了远程存储库中已更改的默认文件（例如设置预设）。\n\n要解决此问题，请在终端中运行此操作。谨慎使用，因为它可能具有破坏性。如果需要，请确保有备份。\n\n```python\ngit merge --abort\ngit reset --hard\ngit pull --rebase --autostash\n```",
+              "line_num": 103
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/update/#file-changes-prevent-git-pull)文件更改阻止 git 拉取",
+              "node_id": "0008",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/update/#file-changes-prevent-git-pull)文件更改阻止 git 拉取\n\n- 如果您更改 SillyTavern 系统文件，可能无法正常工作。`git pull`\n\n- 有时，更新可能需要我们更改重要文件，这可能会导致相同的问题。\n\n- 通常它是默认的预设文件或.`package-lock.json`\n\n- 在这种情况下，您可以尝试将文件移动到其他文件夹（或删除文件），然后执行 。`git pull`\n\n- 另一种解决方案是使用`git pull --rebase --autostash`",
+              "line_num": 115
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/update/#error-cannot-find-module--when-starting-the-server)错误：启动服务器时找不到模块“***”",
+              "node_id": "0009",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/update/#error-cannot-find-module--when-starting-the-server)错误：启动服务器时找不到模块“***”\n\n- 这意味着 SillyTavern 添加了一个新的 npm 包要求。\n\n- 在 SillyTavern 目录中运行以解决此问题。前提是 Start.bat 和 start.sh 脚本将自动执行此操作。`npm install`\n\n- 没有帮助？删除 node_modules 文件夹\n\n**窗户**\n\n```python\nrmdir /s /q node_modules\nnpm cache clean --force\nnpm install\n```\n\n**Unix/Linux系统**\n\n```python\nrm -rf node_modules\nnpm cache clean --force\nnpm install\n```",
+              "line_num": 127
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

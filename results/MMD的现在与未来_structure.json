@@ -1,0 +1,62 @@
+{
+  "doc_name": "MMD的现在与未来",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\圈子 考古册\\MMD摧毁了日本的3DCG\\MMD的现在与未来.md",
+  "structure": [
+    {
+      "title": "**MMD的现在与未来**",
+      "node_id": "0000",
+      "prefix_summary": "This partial document reflects on the current state and future of MikuMikuDance (MMD) as a 3DCG animation tool and community. It acknowledges the nostalgia for the past enthusiasm while recognizing the benefits of the present, such as advanced tools and diverse models. The author expresses uncertainty about the future growth of the MMD community, viewing it as potentially at a turning point or reaching its peak. Despite this, the document sees potential for MMD to continue as a platform for casual creators. It also provides personal advice for newcomers to enjoy MMD, emphasizing topics like not being overly ambitious, the importance of consistent effort, and the value of taking breaks.",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "**■ MMD 衰落了吗？**",
+          "node_id": "0001",
+          "summary": "The partial document discusses the current state and evolution of the MMD (MikuMikuDance) community and software. It highlights that while MMD's growth has slowed compared to its peak, it remains a popular and enduring tool for 3DCG creation. The decline in growth is attributed to factors like community fragmentation, the shift of video platforms from Nico Nico Douga to YouTube and Bilibili, and changes in social and work environments. Despite these challenges, MMD videos continue to be more viewed than other content on Nico Nico Douga, suggesting a stable, albeit less dynamic, user base. The document also acknowledges the role of the community in maintaining and enhancing MMD through tools like PMXeditor and various scripts. It contrasts MMD's simplicity and ease of use with more complex tools like Blender and game engines, suggesting that MMD remains valuable for hobbyists and amateur creators who prioritize quick and intuitive 3DCG creation.",
+          "line_num": 43
+        },
+        {
+          "title": "**■ 未来MMD生活**",
+          "node_id": "0002",
+          "summary": "The partial document emphasizes the importance of dedication and strategic effort in creating content with MMD. It highlights that while MMD is a tool, achieving visibility and success requires additional actions beyond just using the software. The document encourages steady progress towards goals, continuous learning and observation, thoughtful self-expression balanced with setting boundaries, and the value of consistency and volume in creative output. It acknowledges that while these principles may seem obvious, they are often overlooked, and following them can lead to meaningful progress over time.",
+          "line_num": 89
+        },
+        {
+          "title": "**■ 做梦的时候，不要飞向梦想，而是稳步走向梦想。**",
+          "node_id": "0003",
+          "summary": "The partial document emphasizes the importance of steady progress and accumulation in achieving creative goals, rather than relying on sudden inspiration or talent. It highlights that while creative desires are common, turning them into reality requires consistent effort and learning. The document suggests utilizing online communities to overcome challenges and gain necessary skills, while also stressing the importance of clear communication and resourcefulness when seeking help. It advises using voice chat if text is insufficient and encourages building supportive relationships while maintaining appropriate boundaries.",
+          "line_num": 102
+        },
+        {
+          "title": "**■ 总是看到什么、听到什么、总是感觉到什么、总是思考**",
+          "node_id": "0004",
+          "summary": "The partial document emphasizes the importance of observation, accumulation, and reflection in the process of learning and creating, particularly in the context of animation and motion design using software like MMD (MikuMikuDance). It highlights the significance of careful observation, suggesting that simply seeing or hearing is not enough; one must actively remember and record observations to avoid reinventing the wheel or imitating others. The document uses the example of a walking motion to illustrate how detailed observation can reveal nuances, such as the significant movement of the hips and the balance of the upper body, which are crucial for realistic animation. It also suggests different methods for creating walking animations, such as starting with hip rotation instead of leg IK (inverse kinematics). The document encourages building a strong foundation through practice and the use of tools like vmd files to track progress, ultimately leading to the ability to create animations more efficiently with fewer keyframes.",
+          "line_num": 119
+        },
+        {
+          "title": "**■ 适度的自我表露并不是坏事**",
+          "node_id": "0005",
+          "summary": "The partial document emphasizes the importance of self-disclosure and visibility in content creation. It argues that being seen is crucial for engagement, even if it starts small. The text discusses the use of techniques like thumbnails and advertising to attract viewers, while also cautioning against \"thumbnail fraud\" and suggesting that creators set intermediate goals to guide their content strategy. It advises against expecting immediate feedback and highlights the value of any response, no matter how minor or delayed. The document also suggests that creators should focus on creating for themselves rather than solely for audience approval, as the relationship between effort and desired response is often unpredictable. Finally, it notes that simpler, relatable content can sometimes resonate more with audiences and lead to better engagement.",
+          "line_num": 137
+        },
+        {
+          "title": "**■ 确保使用休息时间**",
+          "node_id": "0006",
+          "summary": "这段文字主要讨论了创作过程中的心态和策略：\n\n1. **创作的动力与目标**：作者认为创作是一场与自我的较量，目标是创造出令自己满意的作品，这种欲望会推动持续创作。\n\n2. **创作的无尽性**：创作过程被比喻为一场看不到胜利的百年战争，强调了创作活动的持续性和无终点性。\n\n3. **设定界限的重要性**：通过参加类似MMD杯这样的视频赛事，可以被动地获得截止日期和边界，帮助创作者更好地管理时间和进度。\n\n4. **自我设定的规则**：建议像游戏一样设定自己的创作规则，例如“shibari game”，以帮助自己更好地完成作品。\n\n5. **避免过度追求完美**：建议不要试图将所有做过的事情都融入到一次创作中，否则容易导致放弃。建议设定明确的目标，例如“一旦完成就上传”。\n\n6. **防止精神耗尽**：全力以赴创作可能导致精神上的耗尽，因此外部刺激和休息是必要的。\n\n7. **休息与分阶段创作**：强调休息的重要性，建议将创作过程分成多个阶段，避免过度劳累。\n\n8. **扎实基础与负担**：虽然扎实的基础很重要，但过度依赖过去经验可能会成为负担，影响创作。",
+          "line_num": 177
+        },
+        {
+          "title": "**■ 连续性和数量本身就是力量，同志。**",
+          "node_id": "0007",
+          "summary": "The partial document emphasizes the importance of continuity and quantity as a form of power, advocating for steady progress while setting and achieving intermediate goals. It highlights the significance of self-discipline, maintaining motivation, and drawing inspiration from the community. The text underscores the necessity of sustaining a balanced lifestyle amidst a constantly changing world, particularly focusing on the essentials of food, clothing, and shelter. It advises against neglecting diet and exercise due to overemphasis on work and communication, and suggests leveraging the community for sharing information and insights, especially in creative fields like MMD and creative technology.",
+          "line_num": 197
+        },
+        {
+          "title": "**■ 换句话说**",
+          "node_id": "0008",
+          "summary": "The partial document emphasizes the importance of community and communication in creative endeavors. It argues that creativity thrives on interaction and consumption by others, suggesting that isolation is detrimental to creative motivation. The text acknowledges the challenges of finding and connecting with like-minded individuals in today's dispersed communities, using the example of the MMD (MikuMikuDance) community's decline. It encourages proactive efforts to engage with others, even if it feels inconvenient, as consistent communication and community involvement can significantly impact one's creative journey. The document also highlights the potential for individuals to support each other within a community, becoming pillars of strength for one another.",
+          "line_num": 211
+        }
+      ]
+    }
+  ]
+}

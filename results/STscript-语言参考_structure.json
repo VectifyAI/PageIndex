@@ -1,0 +1,388 @@
+{
+  "doc_name": "STscript 语言参考",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\SillyTavern 官方文档\\核心概念\\STscript 语言参考.md",
+  "structure": [
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/st-script/#what-is-stscript)什么是STscript？",
+      "node_id": "0000",
+      "prefix_summary": "Explains that STscript is a lightweight yet powerful scripting language built into SillyTavern, enabling users to extend functionality without heavy coding, for tasks like custom mini-games, AI chat insights, and creativity sharing. Notes it’s built on the slash-command engine (with command batching, data pipelines, macros, and variables), and highlights that STscript is still in active development with staging branch recommended for new features.",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#security-precaution)安全预防措施",
+          "node_id": "0001",
+          "summary": "### [#](https://docs.sillytavern.app/usage/st-script/#security-precaution)安全预防措施\n\n能力越大，责任越大。在执行脚本之前，请小心并始终检查脚本。",
+          "line_num": 22
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/st-script/#hello-world)世界您好！",
+      "node_id": "0002",
+      "summary": "Explains how to run a simple SillyTavern script in chat, demonstrating command syntax using `/pass` and `/echo`, how commands sequentially execute and pass data through a pipe, mentions `/help slash` for available commands, and shows the simplified equivalent `/echo Hello, World!` usage.",
+      "line_num": 26
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/st-script/#user-input)用户输入",
+      "node_id": "0003",
+      "prefix_summary": "## [#](https://docs.sillytavern.app/usage/st-script/#user-input)用户输入\n\n现在让我们在脚本中添加一点交互性。我们将接受用户的输入值并将其显示在通知中。\n\n```python\n/input Enter your name |\n/echo Hello, my name is {{pipe}}\n```\n\n1. 该命令用于显示一个输入框，其中包含在未命名参数中指定的提示符，然后将输出写入管道。`/input`\n\n1. 由于已经有一个未命名的参数来设置输出的模板，因此我们使用宏来指定将呈现管道值的位置。`/echo{{pipe}}`",
+      "line_num": 54,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#other-inputoutput-commands)其他输入/输出命令",
+          "node_id": "0004",
+          "prefix_summary": "Describes the commands `/popup`, `/setinput`, `/speak`, and `/buttons` for managing blocking pop-ups, text input replacement, TTS narration with voice mapping, and button-based pop-up interactions (with HTML support) in SillyTavern’s ST Script.",
+          "line_num": 68,
+          "nodes": [
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/st-script/#arguments-for-popup-and-input)`/popup` 和 `/input` 的参数",
+              "node_id": "0005",
+              "summary": "Overview of special arguments for `/popup` and `/input` commands. Parameters include toggling vertical (`large`) and horizontal (`wide`) size, customizing OK button text (`okButton`), and setting row count for input fields (`rows`). Example command provided.",
+              "line_num": 78
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/st-script/#arguments-for-echo)`/echo` 的参数",
+              "node_id": "0006",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/st-script/#arguments-for-echo)`/echo` 的参数\n\n`/echo`支持设置所显示消息样式的附加参数的以下值。`severity`\n\n- `warning`\n\n- `error`\n\n- `info`（默认）\n\n- `success`\n\n例：\n\n```python\n/echo severity=error Something really bad happened.\n```",
+              "line_num": 96
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/st-script/#variables)变量",
+      "node_id": "0007",
+      "prefix_summary": "Document explains using variables in scripts: commands for getting, setting, adding, incrementing, decrementing, and flushing local/global variables; default empty string/zero behavior; numeric addition vs concatenation; local priority; command outputs pipeline; macros return values for get/inc/dec only; example storing SD input, echoing, using with imagine and note variable persists unless flushed.",
+      "line_num": 114,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#arrays-and-objects)数组和对象",
+          "node_id": "0008",
+          "summary": "This section explains handling arrays and objects within S/T script: variable values may be JSON-serialized arrays or key-value objects. It also covers operations like `/len` to count array elements, using the `index=` named parameter in `/getvar` and `/setvar` to access or modify values by zero-based indices or string keys, auto-creation of empty arrays or objects when indexed variables don’t exist, and `/addvar`/`/addglobalvar` for pushing new values into array variables.",
+          "line_num": 176
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/st-script/#flow-control---conditionals)流量控制 - 条件",
+      "node_id": "0009",
+      "prefix_summary": "## [#](https://docs.sillytavern.app/usage/st-script/#flow-control---conditionals)流量控制 - 条件\n\n您可以使用该命令创建条件表达式，这些表达式根据定义的规则对执行进行分支。`/if`\n\n`/if left=valueA right=valueB rule=comparison else=\"(command on false)\" \"(command on true)\"`\n\n让我们回顾一下以下示例：\n\n```python\n/input What's your favorite drink? |\n/if left={{pipe}} right=\"black tea\" rule=eq else=\"/echo You shall not pass \\| /abort\" \"/echo Welcome to the club, \\{\\{user\\}\\}\"\n```\n\n此脚本根据所需值评估用户输入，并根据输入值显示不同的消息。",
+      "line_num": 198,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#arguments-for-if)`/if` 的参数",
+          "node_id": "0010",
+          "summary": "Describes the `/if` command’s arguments: identifying left and right operands, the operation rule, optional else clause, and unnamed true-case subcommands. It outlines operand evaluation order (numeric literals, local variables, global variables, strings) and indicates that string arguments can be quoted for multiword values with quotes removed afterward.",
+          "line_num": 213
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#boolean-operations)布尔运算",
+          "node_id": "0011",
+          "summary": "The document outlines supported boolean comparison operations, detailing how each operator—equality, inequality, less/greater than (and inclusive variants), unary negation, and substring inclusion/exclusion—evaluates operands to true or false, with substring checks being case-insensitive.",
+          "line_num": 237
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#subcommands)子命令",
+          "node_id": "0012",
+          "summary": "The document section explains how to use subcommands in SillyTavern scripts: use escaped separators (`\\|`) for command batching within subcommands, escape macros as `\\{\\{\\macro\\}\\}` to defer evaluation until subcommand execution, note results of subcommands feed into following `/if` command, and that the `/abort` command stops the script. It also shows `/if` acting as a ternary operator, providing a `/pass` example that outputs “true” or “false” based on a variable comparison.",
+          "line_num": 259
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/st-script/#flow-control---loops)流量控制 - 回路",
+      "node_id": "0013",
+      "prefix_summary": "## [#](https://docs.sillytavern.app/usage/st-script/#flow-control---loops)流量控制 - 回路\n\n如果需要在循环中运行某些命令，直到满足特定条件，请使用该命令。`/while`\n\n`/while left=valueA right=valueB rule=operation guard=on \"commands\"`\n\n在循环的每个步骤中，它将变量 A 的值与变量 B 的值进行比较，如果条件产生 true，则执行任何用引号括起来的有效斜杠命令，否则循环存在。此命令不会将任何内容写入输出管道。",
+      "line_num": 278,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#arguments-for-while)`/while` 的参数",
+          "node_id": "0014",
+          "summary": "Explains `/while` command: arguments same as `/if`; guard parameter to limit iterations 100 prior infinite loops disable guard=off; example increments variable i from 0 to 10 using /setvar, /while with rule lt, /addvar, /echo, /flushvar.",
+          "line_num": 286
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#arguments-for-times)`/times` 的参数",
+          "node_id": "0015",
+          "summary": "### [#](https://docs.sillytavern.app/usage/st-script/#arguments-for-times)`/times` 的参数\n\n运行子命令指定次数。\n\n`/times (repeats) \"(command)\"`– 任何用引号括起来的有效斜杠命令都会重复多次，例如 将 1 加到“i”的值上 5 次。`/setvar key=i 1 | /times 5 \"/addvar key=i 1\"`\n\n- {{timesIndex}} 替换为迭代数（从零开始），例如 呼应数字 0 到 4。`/times 4 \"/echo {{timesIndex}}\"`\n\n- 默认情况下，循环限制为 100 次迭代，传递到禁用。`guard=off`",
+          "line_num": 301
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/st-script/#math-operations)数学运算",
+      "node_id": "0016",
+      "prefix_summary": "Covers available math operations in st-script: explains general rules (input handling, invalid operations). Lists commands with syntax: addition `/add`, multiplication `/mul`, max, min, subtraction, division, modulus, power, trig `/sin` `/cos`, natural log, absolute value, square root, rounding, and `/rand` for random ranges with optional rounding modes (ceil, floor, round).",
+      "line_num": 311,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#example-1-get-an-area-of-a-circle-with-a-radius-of-50)示例 1：获取半径为 50 的圆的面积。",
+          "node_id": "0017",
+          "summary": "### [#](https://docs.sillytavern.app/usage/st-script/#example-1-get-an-area-of-a-circle-with-a-radius-of-50)示例 1：获取半径为 50 的圆的面积。\n\n```python\n/setglobalvar key=PI 3.1415 |\n/setvar key=r 50 |\n/mul r r PI |\n/round |\n/echo Circle area: {{pipe}}\n```",
+          "line_num": 355
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#example-2-calculate-a-factorial-of-5)示例 2：计算 5 的阶乘。",
+          "node_id": "0018",
+          "summary": "### [#](https://docs.sillytavern.app/usage/st-script/#example-2-calculate-a-factorial-of-5)示例 2：计算 5 的阶乘。\n\n```python\n/setvar key=input 5 |\n/setvar key=i 1 |\n/setvar key=product 1 |\n/while left=i right=input rule=lte \"/mul product i \\| /setvar key=product \\| /addvar key=i 1\" |\n/getvar product |\n/echo Factorial of {{getvar::input}}: {{pipe}} |\n/flushvar input |\n/flushvar i |\n/flushvar product\n```",
+          "line_num": 365
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/st-script/#using-the-llm)使用 LLM",
+      "node_id": "0019",
+      "prefix_summary": "## [#](https://docs.sillytavern.app/usage/st-script/#using-the-llm)使用 LLM\n\n脚本可以使用以下命令向当前连接的 LLM API 发出请求：\n\n- `/gen (prompt)`— 使用所选字符的提示生成文本，并包括聊天消息。\n\n- `/genraw (prompt)`— 仅使用提供的提示生成文本，忽略当前字符和聊天。\n\n- `/trigger`— 触发正常生成（相当于单击“发送”按钮）。如果在群聊中，您可以选择提供从 1 开始的群成员索引或角色名称来让他们回复，否则会根据群组设置触发群组回合。",
+      "line_num": 379,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#arguments-for-gen-and-genraw)`/gen` 和 `/genraw` 的参数",
+          "node_id": "0020",
+          "summary": "Explains the `/gen` and `/genraw` commands within SillyTavern’s scripting, listing their parameters (`lock`, `stop`, `instruct`, `as`) and default behaviors, along with how these commands’ output can be piped into other commands or UI elements for further use.",
+          "line_num": 389
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/st-script/#prompt-injections)快速注射",
+      "node_id": "0021",
+      "prefix_summary": "This section explains how to use the “快速注射” scripting tools for custom LLM prompt injections, detailing a set of commands (`/inject`, `/listinjects`, `/flushinjects`, `/note`, `/interval`, `/depth`, `/position`) that insert text into prompts, manage author notes, and control their placement and frequency in the chat metadata.",
+      "line_num": 409,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#arguments-for-inject)`/inject` 的参数",
+          "node_id": "0022",
+          "summary": "Explains the `/inject` command arguments, including required `id`, optional `position` (with values `after`, `before`, `chat`), and `depth` to control placement within the chat history. Also notes unnamed parameter as injection text and how identical IDs overwrite previous injections or can be cleared with an empty string.",
+          "line_num": 427
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/st-script/#access-chat-messages)访问聊天消息",
+      "node_id": "0023",
+      "prefix_summary": "## [#](https://docs.sillytavern.app/usage/st-script/#access-chat-messages)访问聊天消息",
+      "line_num": 445,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#read-messages)阅读消息",
+          "node_id": "0024",
+          "summary": "The document explains how to use the `/messages` command to read messages in the current chat, covering parameters for including character names, specifying message indexes or ranges (which are inclusive and must be valid), handling hidden messages, retrieving the latest message index via macros, and calculating ranges for tasks like fetching the last N messages through variable operations.",
+          "line_num": 447
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#send-messages)发送消息",
+          "node_id": "0025",
+          "summary": "Covers script commands for sending messages in SillyTavern: `/send` to post as selected character, `/sendas name=` to send as specified character or via macro, `/sys` for neutral narrator messages with customizable name, `/comment` for hidden comments, `/addswipe` to add swipes to last character message, `/hide`/`/unhide` to manage hidden messages by IDs or ranges. Also notes optional `at=` parameter for commands to insert messages at specific positions, defaulting to end, with example inserting at beginning.",
+          "line_num": 472
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#delete-messages)删除邮件",
+          "node_id": "0026",
+          "summary": "This section explains potentially destructive chat deletion commands in SillyTavern’s ST script, warning users that deletions can’t be undone except through backups. It lists commands for removing specific messages by ID or range, deleting the last N messages, deleting a particular swipe variation, deleting all messages from a specific character, and wiping the entire chat.",
+          "line_num": 498
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/st-script/#world-info-commands)World Info 命令",
+      "node_id": "0027",
+      "prefix_summary": "This part of the document describes the “World Info commands” used in SillyTavern scripts for working with the lorebook. It explains how to manage world information entries through commands such as retrieving or creating a lorebook file, searching for entries by field values, reading entry fields, updating them (including allowing comma-separated multiple values), and creating new entries, along with syntax examples demonstrating piping of results.",
+      "line_num": 512,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#valid-entry-fields)有效的输入字段",
+          "node_id": "0028",
+          "summary": "### [#](https://docs.sillytavern.app/usage/st-script/#valid-entry-fields)有效的输入字段\n\n\n**位置值**\n\n- 0 = 主提示符之前\n\n- 1 = 主提示后\n\n- 2 = 作者注顶部\n\n- 3 = 作者注的底部\n\n- 4 = 深度聊天",
+          "line_num": 526
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#example-1-read-a-content-from-the-chat-lorebook-by-key)示例 1：按键阅读聊天知识书中的内容",
+          "node_id": "0029",
+          "summary": "### [#](https://docs.sillytavern.app/usage/st-script/#example-1-read-a-content-from-the-chat-lorebook-by-key)示例 1：按键阅读聊天知识书中的内容\n\n```python\n/getchatbook | /setvar key=chatLore |\n/findentry file=chatLore field=key Shadowfang |\n/getentryfield file=chatLore field=key |\n/echo\n```",
+          "line_num": 541
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#example-2-create-a-chat-lorebook-entry-with-key-and-content)示例 2：创建包含密钥和内容的聊天知识簿条目",
+          "node_id": "0030",
+          "summary": "### [#](https://docs.sillytavern.app/usage/st-script/#example-2-create-a-chat-lorebook-entry-with-key-and-content)示例 2：创建包含密钥和内容的聊天知识簿条目\n\n```python\n/getchatbook | /setvar key=chatLore |\n/createentry file=chatLore key=\"Milla\" Milla Basset is a friend of Lilac and Carol. She is a hush basset puppy who possesses the power of alchemy. |\n/echo\n```",
+          "line_num": 550
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#example-3-expand-an-existing-lorebook-entry-with-new-information-from-the-chat)示例 3：使用聊天中的新信息扩展现有知识书条目",
+          "node_id": "0031",
+          "summary": "### [#](https://docs.sillytavern.app/usage/st-script/#example-3-expand-an-existing-lorebook-entry-with-new-information-from-the-chat)示例 3：使用聊天中的新信息扩展现有知识书条目\n\n```python\n/getchatbook | /setvar key=chatLore |\n/findentry file=chatLore field=key Milla |\n/setvar key=millaUid |\n/getentryfield file=chatLore field=content |\n/setvar key=millaContent |\n/gen lock=on Tell me more about Milla Basset based on the provided conversation history. Incorporate existing information into your reply: {{getvar::millaContent}} |\n/setvar key=millaContent |\n/echo New content: {{pipe}} |\n/setentryfield file=chatLore uid=millaUid field=content {{getvar::millaContent}}\n```",
+          "line_num": 558
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/st-script/#text-manipulation)文本操作",
+      "node_id": "0032",
+      "prefix_summary": "Overview of text manipulation utilities, detailing commands like /trimtokens, /trimstart, /trimend for clipping text by sentences or tokens, /fuzzy for fuzzy matching against string lists, and /regex for running regex scripts from defined expansions.",
+      "line_num": 572,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#arguments-for-trimtokens)`/trimtokens` 的参数",
+          "node_id": "0033",
+          "summary": "### [#](https://docs.sillytavern.app/usage/st-script/#arguments-for-trimtokens)`/trimtokens` 的参数\n\n`/trimtokens limit=number direction=start/end (input)`\n\n1. `direction`设置修剪方向，可以是 或 。违约：。`startendend`\n\n1. `limit`将令牌的数量设置为输出中的左边。还可以指定包含数字的变量名称。**必需参数。**\n\n1. 未命名参数是要修剪的输入文本。",
+          "line_num": 586
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#arguments-for-fuzzy)`/fuzzy` 的参数",
+          "node_id": "0034",
+          "summary": "### [#](https://docs.sillytavern.app/usage/st-script/#arguments-for-fuzzy)`/fuzzy` 的参数\n\n`/fuzzy list=[\"candidate1\",\"candidate2\"] (input)`\n\n1. `list`是包含候选项的字符串的 JSON 序列化数组。还可以指定包含列表的变量名称。**必需参数。**\n\n1. 未命名参数是要匹配的输入文本。输出是与输入最接近的候选之一。",
+          "line_num": 596
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/st-script/#quick-replies-script-library-and-auto-execution)快速回复：脚本库和自动执行",
+      "node_id": "0035",
+      "prefix_summary": "## [#](https://docs.sillytavern.app/usage/st-script/#quick-replies-script-library-and-auto-execution)快速回复：脚本库和自动执行\n\nQuick Replies 是一个内置的 SillyTavern 扩展，它提供了一种存储和执行脚本的简单方法。",
+      "line_num": 604,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#configuring-quick-replies)配置快速回复",
+          "node_id": "0036",
+          "summary": "The partial document explains how to configure quick replies in SILLYTavern. It introduces enabling the extension panel, setting up quick reply buttons with custom labels and scripts, adjusting the number of slots (up to 100), and managing quick reply presets with the `/qrset` command. It also advises disabling automatic input injection when using STscript and using macros like `{{input}}` instead to access the input field value.",
+          "line_num": 608
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#manual-execution)手动执行",
+          "node_id": "0037",
+          "summary": "### [#](https://docs.sillytavern.app/usage/st-script/#manual-execution)手动执行\n\n现在，您可以将第一个脚本添加到库中。选择任何空闲插槽（或创建一个），在左侧框中键入“单击我”以设置标签，然后将其粘贴到右侧框中：\n\n```python\n/addvar key=clicks 1 |\n/if left=clicks right=5 rule=eq else=\"/echo Keep going...\" \"/echo You did it!  \\| /flushvar clicks\"\n```\n\n然后在聊天栏上方出现的按钮上单击 5 次。每次单击都会将变量递增 1，并在值等于 5 时显示不同的消息并重置变量。`clicks`",
+          "line_num": 625
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#automatic-execution)自动执行",
+          "node_id": "0038",
+          "summary": "The excerpt explains how to manage automatic execution for scripts in the interface: opening the mode menu via the script command button, editing scripts in a full-screen editor, hiding buttons for auto-only use, and enabling automation based on events such as app launch, user or AI messages, opening chats, group replies, and world info activations. It also covers adding custom tooltips for quick replies, testing scripts, and clarifies that auto-execution requires the quick replies extension. An example script counts user messages and triggers a response after five messages.",
+          "line_num": 636
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/st-script/#calling-procedures)调用过程",
+      "node_id": "0039",
+      "prefix_summary": "Procedure calling in the scripting system is demonstrated via quick replies, showing how a `/run ScriptLabel` command allows reusable script blocks, where one procedure (`GetMessage`) calls another (`GetRandom` rolling a d100) and passes its result through `/echo` to display a message; procedures share caller variables, don’t support arguments, and recursion should be avoided to prevent call stack errors.",
+      "line_num": 675,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#calling-procedures-from-a-different-quick-reply-preset)Calling procedures from a different Quick Reply preset",
+          "node_id": "0040",
+          "summary": "### [#](https://docs.sillytavern.app/usage/st-script/#calling-procedures-from-a-different-quick-reply-preset)Calling procedures from a different Quick Reply preset\n\nYou can call a procedure from a different quick reply preset using the syntax, where a = QR preset name and b = QR label name`a.b`\n\n`/run QRpreset1.QRlabel1`\n\nBy default, the system will first look for a quick reply label , so if one of your labels is literally \"QRpreset1.QRlabel1\" it will try to run that. If no such label is found, it will search for a QR preset name \"QRpreset1\" with a QR labelled \"QRlabel1\".`a.b`",
+          "line_num": 715
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#quick-replies-management-commands)Quick Replies management commands",
+          "node_id": "0041",
+          "prefix_summary": "### [#](https://docs.sillytavern.app/usage/st-script/#quick-replies-management-commands)Quick Replies management commands",
+          "line_num": 723,
+          "nodes": [
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/st-script/#create-quick-reply)Create Quick Reply",
+              "node_id": "0042",
+              "summary": "Instructions on using `/qr-create` command to create quick reply buttons in SillyTavern, detailing required syntax and options like label, set name, and various boolean flags (hidden, startup, user, bot, load) along with optional title tooltip.",
+              "line_num": 725
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/st-script/#delete-quick-reply)Delete Quick Reply",
+              "node_id": "0043",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/st-script/#delete-quick-reply)Delete Quick Reply\n\n- `/qr-delete (set=string [label])` – deletes Quick Reply",
+              "line_num": 747
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/st-script/#update-quick-reply)Update Quick Reply",
+              "node_id": "0044",
+              "summary": "The document section explains the `/qr-update` command used for modifying Quick Reply buttons, describing its arguments such as new label, existing label, set name, visibility, auto-execution triggers (startup, user, bot, load), and optional tooltip/title, along with usage examples.",
+              "line_num": 751
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/st-script/#create-or-update-qr-preset)Create or update QR preset",
+              "node_id": "0045",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/st-script/#create-or-update-qr-preset)Create or update QR preset\n\n- `/qr-presetupdate (arguments [label])` or `/qr-presetadd (arguments [label])`\n\nArguments:\n\n- `enabled` - bool - enable or disable the preset\n\n- `nosend` - bool - disable send / insert in user input (invalid for slash commands)\n\n- `before` - bool - place QR before user input\n\n- `slots` - int - number of slots\n\n- `inject` - bool - inject user input automatically (if disabled use `{{input}}`)\n\nCreate a new preset (overrides existing ones), example: `/qr-presetadd slots=3 MyNewPreset`",
+              "line_num": 775
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/st-script/#add-qr-context-menu)Add QR context menu",
+              "node_id": "0046",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/st-script/#add-qr-context-menu)Add QR context menu\n\n- `/qr-contextadd (set=string label=string chain=bool [preset name])` – add context menu preset to a QR, example: `/qr-contextadd set=MyPreset label=MyButton chain=true MyOtherPreset`",
+              "line_num": 793
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/st-script/#remove-all-context-menus)Remove all context menus",
+              "node_id": "0047",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/st-script/#remove-all-context-menus)Remove all context menus\n\n- `/qr-contextclear (set=string [label])` – remove all context menu presets from a QR, example: `/qr-contextclear set=MyPreset MyButton`",
+              "line_num": 797
+            },
+            {
+              "title": "[#](https://docs.sillytavern.app/usage/st-script/#remove-one-context-menu)Remove one context menu",
+              "node_id": "0048",
+              "summary": "#### [#](https://docs.sillytavern.app/usage/st-script/#remove-one-context-menu)Remove one context menu\n\n- `/qr-contextdel (set=string label=string [preset name])` – remove context menu preset from a QR, example: `/qr-contextdel set=MyPreset label=MyButton MyOtherPreset`",
+              "line_num": 801
+            }
+          ]
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#quick-reply-value-escaping)Quick Reply value escaping",
+          "node_id": "0049",
+          "summary": "### [#](https://docs.sillytavern.app/usage/st-script/#quick-reply-value-escaping)Quick Reply value escaping\n\n`|{}` can be escaped with backslash in the QR message / command.\n\nFor example, use to create a QR that calls .`/qr-create label=MyButton /getvar myvar \\| /echo \\{\\{pipe\\}\\}/getvar myvar | /echo {{pipe}}`",
+          "line_num": 805
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/st-script/#extension-commands)Extension commands",
+      "node_id": "0050",
+      "summary": "Describes how SillyTavern extensions can introduce custom slash commands and lists examples from official extensions, including commands for web search, image generation, character expressions, dynamic audio control, and dice rolling.",
+      "line_num": 811
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/st-script/#ui-interaction)UI interaction",
+      "node_id": "0051",
+      "prefix_summary": "## [#](https://docs.sillytavern.app/usage/st-script/#ui-interaction)UI interaction\n\nScripts can also interact with SillyTavern's UI: navigate through the chats or change styling parameters.",
+      "line_num": 829,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#character-navigation)Character navigation",
+          "node_id": "0052",
+          "summary": "### [#](https://docs.sillytavern.app/usage/st-script/#character-navigation)Character navigation\n\n1. `/random` — opens a chat with the random character.\n\n1. `/go (name)` — opens a chat with the character of the specified name. First, searches for the exact name match, then by a prefix, then by a substring.",
+          "line_num": 833
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#ui-styling)UI styling",
+          "node_id": "0053",
+          "summary": "### [#](https://docs.sillytavern.app/usage/st-script/#ui-styling)UI styling\n\n1. `/bubble` — sets the message style to the \"bubble chat\" style.\n\n1. `/flat` — sets the message style to the \"flat chat\" style.\n\n1. `/single` — sets the message style to the \"single document\" style.\n\n1. `/movingui (name)` — activates a MovingUI preset by name.\n\n1. `/resetui` — resets the MovingUI panels state to their original positions.\n\n1. `/panels` — toggles the UI panels visibility: top bar, left and right drawers.\n\n1. `/bg (name)` — finds and sets a background using fuzzy names matching. Respect the chat background lock state.\n\n1. `/lockbg` — locks the background image for the current chat.\n\n1. `/unlockbg` — unlocks the background image for the current chat.",
+          "line_num": 839
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/st-script/#more-examples)More examples",
+      "node_id": "0054",
+      "prefix_summary": "## [#](https://docs.sillytavern.app/usage/st-script/#more-examples)More examples",
+      "line_num": 859,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#generate-chat-summary-by-ikaridevgit)生成聊天摘要（按@IkariDevGIT）",
+          "node_id": "0055",
+          "summary": "Describes a script workflow for creating a chat summary (attributed to IkariDev) in SillyTavern ST-Script: it sets a global summary prompt, captures chat messages up to last message, trims tokens, stores the content, generates a summary via `/genraw`, then reports completion and cleans up temporary variables.",
+          "line_num": 861
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#buttons-popup-usage)按钮弹出窗口用法",
+          "node_id": "0056",
+          "summary": "### [#](https://docs.sillytavern.app/usage/st-script/#buttons-popup-usage)按钮弹出窗口用法\n\n```python\n/setglobalvar key=genders [\"boy\", \"girl\", \"other\"] |\n/buttons labels=genders Who are you? |\n/echo You picked: {{pipe}}\n```",
+          "line_num": 878
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/st-script/#get-nth-fibonaccis-number-using-binets-formula)获取第 N 个斐波那契数（使用 Binet 公式）",
+          "node_id": "0057",
+          "summary": "### [#](https://docs.sillytavern.app/usage/st-script/#get-nth-fibonaccis-number-using-binets-formula)获取第 N 个斐波那契数（使用 Binet 公式）\n\n\n**提示**：将值设置为所需数字`fib_no`\n\n```python\n/setvar key=fib_no 5 |\n/pow 5 0.5 | /setglobalvar key=SQRT5 |\n/setglobalvar key=PHI 1.618033 |\n/pow PHI fib_no | /div {{pipe}} SQRT5 |\n/round |\n/echo {{getvar::fib_no}}th Fibonacci's number is: {{pipe}}\n```",
+          "line_num": 886
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "doc_name": "04-从约束中学习",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\ClaudeLog-干货\\04-从约束中学习.md",
+  "structure": [
+    {
+      "title": "从约束中学习 (Learn from the Constraint)",
+      "node_id": "0000",
+      "prefix_summary": "# 从约束中学习 (Learn from the Constraint)\n\n> 原文：[claudelog.com/mechanics/context-window-constraints-as-training](https://claudelog.com/mechanics/context-window-constraints-as-training)",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "核心论点",
+          "node_id": "0001",
+          "summary": "## 核心论点\n\n> \"200K token 的上下文窗口通常被视为负面技术约束。事实不必如此：约束本身就是训练场，用来发展高效驾驭更大上下文的技能。\"",
+          "line_num": 5
+        },
+        {
+          "title": "悖论",
+          "node_id": "0002",
+          "summary": "## 悖论\n\n在约束中工作的开发者，反而比拥有无限资源的人更强。他们发展出的纪律性习惯：\n\n- 刻意选择哪些文件要包含在上下文中\n- 把复杂任务拆解成合适大小的块\n- 模块化组织代码以便选择性读取\n- 写精确、有针对性的 prompt",
+          "line_num": 9
+        },
+        {
+          "title": "性能现实",
+          "node_id": "0003",
+          "summary": "## 性能现实\n\n**接近 token 上限时，模型性能反而下降。**\n\n目标不是提供最大上下文，而是提供**最小够用上下文**——这同时最大化了准确率和效率。",
+          "line_num": 18
+        },
+        {
+          "title": "持久价值",
+          "node_id": "0004",
+          "summary": "## 持久价值\n\n> \"拥抱约束的人，无论上下文大小如何，都会成为更好的协作者。\"\n\n通过战略性策展和优先排序发展出的技能，超越任何技术限制，并能无缝扩展到更大的上下文窗口。",
+          "line_num": 24
+        },
+        {
+          "title": "我的理解",
+          "node_id": "0005",
+          "summary": "The partial document discusses the concept that constraints can lead to better outcomes in various contexts. It draws a parallel between Twitter's 140-character limit, which encourages concise expression, and the benefits of constraints in AI collaboration. The document emphasizes that providing AI with a smaller, curated set of information and clear instructions is more effective than overwhelming it with excessive data. It cites research from Stanford TACL 2024 to support the idea that longer contexts can lead to decreased performance due to information being ignored. The document concludes by highlighting that the CLAUDE.md is kept under 80 lines due to cognitive limitations, reinforcing the principle that \"more is not always better.\"",
+          "line_num": 30
+        }
+      ]
+    }
+  ]
+}

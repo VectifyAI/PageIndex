@@ -1,0 +1,56 @@
+{
+  "doc_name": "17-品味",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\ClaudeLog-干货\\17-品味.md",
+  "structure": [
+    {
+      "title": "品味 (On Taste)",
+      "node_id": "0000",
+      "prefix_summary": "# 品味 (On Taste)\n\n> 原文：[claudelog.com/design/taste](https://claudelog.com/design/taste)",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "定义",
+          "node_id": "0001",
+          "summary": "## 定义\n\n品味 = **直觉 + 经验**的混合体，使人能够在审美和感官层面做出判断。结合客观与主观元素，评估创意作品是否优雅地服务于其目的。",
+          "line_num": 5
+        },
+        {
+          "title": "品味的三个衡量标准",
+          "node_id": "0002",
+          "summary": "## 品味的三个衡量标准\n\n1. **功能性 (Functionality)** — 它是否有效地完成目标？\n2. **美 (Beauty)** — 它是否在审美上令人愉悦？\n3. **持久性 (Longevity)** — 它是否经得起时间考验？\n\n品味决定了这三者如何平衡。",
+          "line_num": 9
+        },
+        {
+          "title": "发展路径",
+          "node_id": "0003",
+          "summary": "## 发展路径\n\n品味通过 **\"接触 + 反思\"** 发展。对一门手艺的理解构成了辨别力的基础。",
+          "line_num": 17
+        },
+        {
+          "title": "设计中的品味",
+          "node_id": "0004",
+          "summary": "## 设计中的品味\n\n在设计中，品味在 brief 的约束内运作，让设计师行使\"判断力、创意和风格\"。核心原则：\n- 形式 (Form)\n- 比例 (Scale & Proportion)\n- 材料选择 (Material)\n- 层次 (Hierarchy)\n- 清晰度 (Clarity)",
+          "line_num": 21
+        },
+        {
+          "title": "跨领域学习",
+          "node_id": "0005",
+          "summary": "## 跨领域学习\n\n获取多样化的、看似无关的技能会创建**良性循环**：当前的审美观影响新技能的应用，而新知识扩展整体思维和评估能力。",
+          "line_num": 30
+        },
+        {
+          "title": "受众感知",
+          "node_id": "0006",
+          "summary": "## 受众感知\n\n> 受众能直觉地感知质量水平和真实性，即使无法表达为什么。\n\n设计师必须通过形式、比例、复杂度、色彩和对比度的 **\"深思熟虑的决策\"** 来引导这种感知。",
+          "line_num": 34
+        },
+        {
+          "title": "我的理解",
+          "node_id": "0007",
+          "summary": "## 我的理解\n\n这篇的启示在于：**AI 能生成\"正确\"的东西，但不一定能生成\"有品味\"的东西。**\n\n品味是人类在 AI 时代最不可替代的能力之一——Claude 可以生成 100 个设计方案，但选择哪个、如何微调、什么\"感觉对\"，这是人的判断。\n\n跨领域学习的观点也很重要：一个懂音乐理论的程序员写出的 UI 动画，和一个只看过 CSS 文档的程序员写出的，在\"感觉\"上有本质区别。品味无法速成，但可以有意识地培养。",
+          "line_num": 40
+        }
+      ]
+    }
+  ]
+}

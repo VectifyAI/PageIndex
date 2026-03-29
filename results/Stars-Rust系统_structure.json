@@ -1,0 +1,176 @@
+{
+  "doc_name": "Stars-Rust系统",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\GitHub-Stars\\Stars-Rust系统.md",
+  "structure": [
+    {
+      "title": "Rust系统",
+      "node_id": "0000",
+      "prefix_summary": "# Rust系统",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "C",
+          "node_id": "0001",
+          "summary": "This partial document provides a curated list of open-source projects and tools across various domains. Key highlights include:\n\n1. **UI and Display Technologies**: Projects like \"oled-ui-astra\" offer smooth, easy-to-deploy OLED UI frameworks, while \"X-Knob\" presents a smart knob with LVGL UI support for smart home integration. \"HoloCubic\" is a pseudo-holographic transparent display with networking capabilities.\n\n2. **Firmware and Hardware Tools**: \"UEFITool\" serves as a UEFI firmware image viewer and editor, and \"flipperzero-firmware\" provides the source code for Flipper Zero devices. \"libopencm3\" is an open-source library for ARM Cortex-M microcontrollers, and \"hwinfo\" is a hardware information tool.\n\n3. **Input Devices and Peripherals**: \"KeypadHE\" utilizes Arduino and Hall effect sensors for customizable keypad projects, and \"XDrive\" features a stepper motor with a multi-function interface and closed-loop control.\n\n4. **Software and Applications**: \"Streamline\" is an integration framework by NVIDIA, and \"OBS Studio\" offers free software for live streaming and screen recording. \"7-Zip-zstd\" extends 7-Zip with additional compression algorithm support.\n\n5. **Miscellaneous Tools**: \"cmatrix\" provides a terminal-based \"The Matrix\" style display, and \"cpu-internals\" offers insights into Intel and AMD CPU internals. \"MacType-Patch\" is a patch for DirectWrite Hook in MacType.\n\nThese projects collectively showcase advancements in UI development, hardware integration, firmware management, and software applications, catering to a wide range of technical interests and applications.",
+          "line_num": 4
+        },
+        {
+          "title": "C#",
+          "node_id": "0002",
+          "summary": "The partial document provides a list of GitHub repositories related to various software tools and projects, primarily focusing on utilities for gaming, graphics, system optimization, and localization. Key points include:\n\n1. **Gaming and Graphics Tools**: \n   - CapFrameX for frametime capture and analysis.\n   - Redream for real-time diffusion using Stable Diffusion API.\n   - Tools for translating visual novels.\n   - DLSS swapper for managing NVIDIA's Deep Learning Super Sampling.\n   - AntiDupl for finding similar and defective images on disk.\n\n2. **System Optimization and Management**:\n   - NatTypeTester for testing network NAT types.\n   - nvidiaProfileInspector for managing NVIDIA GPU profiles.\n   - CoreDirector as a process manager for Intel® Hybrid Technology.\n   - ZenStates for managing CPU states.\n   - CPUDoc for CPU documentation.\n\n3. **Plugins and Extensions**:\n   - SPCRJointDynamics as a physics engine.\n   - HoYoStudio for game development.\n   - VRoidChinese and VRoidXYTool as plugins for VRoid Studio, including a Chinese localization plugin.\n   - cs2-LiteVIP and cs2-retakes-allocator as plugins for CS2, offering VIP functions and advanced weapon allocation respectively.\n\n4. **Localization and Translation**:\n   - CapFrameX-i18n for internationalization of CapFrameX.\n   - PowerToys-CN for a Simplified Chinese translation of Microsoft PowerToys.\n\n5. **Miscellaneous Tools**:\n   - InteractiveLogin for Live2D interactive login experiences.",
+          "line_num": 27
+        },
+        {
+          "title": "C++",
+          "node_id": "0003",
+          "summary": "The partial document is a compilation of various GitHub repositories related to C++ and multimedia software development. It includes repositories for:\n\n1. **C++ Learning Resources**: A repository dedicated to the latest C++ features (C++11/14/17/20/23), tutorials, recommended books, articles, and videos.\n\n2. **Color Management and Media Review**: Repositories for OpenColorIO, a color management framework for visual effects and animation, and OpenRV, an open-source media review and playback software.\n\n3. **Shading Languages and Rendering**: OpenShadingLanguage, an advanced shading language for production GI renderers.\n\n4. **Plugins and Extensions**: \n   - Unreal Engine plugins like LiveLink for Autodesk Maya, UnLua for Lua scripting, and MobuLiveLink for MotionBuilder integration.\n   - Tools for Autodesk Maya such as brSmoothWeights for skin cluster weights smoothing and boneDynamicsNode for simple bone dynamics.\n   - Plugins for Unreal Engine like IM4UPlugin, glTFRuntime for loading glTF files, and VRM4U for runtime VRM loading.\n\n5. **Game Development Tools**: \n   - Unreal Engine source code repositories like NvRTX/UnrealEngine.\n   - Tools for exporting and importing MetaHuman meshes using Unreal Engine.\n\n6. **Graphics and Rendering**: \n   - PhysX SDK by NVIDIA.\n   - AMD FEMFX Plugin for Unreal Engine 5.3.\n   - OBS plugins for capturing CS:GO with Trusted Mode enabled and audio visualizer plugins.\n\n7. **Animation Software**: OpenToonz, an open-source 2D animation creation software.\n\n8. **Networking and Utilities**: \n   - SRS, a real-time media server supporting various protocols.\n   - TrafficMonitor, a desktop software for displaying network speed, CPU, and memory usage.\n\n9. **Miscellaneous Tools**: \n   - NanaRun for customizing application runtime environments.\n   - NanaZip, a 7-Zip derivative for modern Windows experience.\n   - Lifecast software for immersive volumetric VR videos and photos.\n\nThese repositories cover a wide range of topics from C++ programming, color management, media review, shading languages, game development tools, animation software, networking utilities, and more.",
+          "line_num": 49
+        },
+        {
+          "title": "CMake",
+          "node_id": "0004",
+          "summary": "## CMake\n\n- [OSS-Pipeline/rez-usdview](https://github.com/OSS-Pipeline/rez-usdview) — Rez build configuration for Pixar USD's usdview.\n- [dreamworksanimation/openmoonray](https://github.com/dreamworksanimation/openmoonray) — MoonRay is DreamWorks’ open-source, award-winning, state-of-the-art production MCRT renderer.",
+          "line_num": 97
+        },
+        {
+          "title": "Classic ASP",
+          "node_id": "0005",
+          "summary": "## Classic ASP\n\n- [SWRT-dev/softcentermips](https://github.com/SWRT-dev/softcentermips) —  for grx500\n- [koolshare/rogsoft](https://github.com/koolshare/rogsoft) — software center for hnd/axhnd/axhnd.675x routers",
+          "line_num": 102
+        },
+        {
+          "title": "Dart",
+          "node_id": "0006",
+          "summary": "## Dart\n\n- [dart-lang/sdk](https://github.com/dart-lang/sdk) — The Dart SDK, including the VM, JS and Wasm compilers, analysis, core libraries, and more.\n- [xunchahaha/echotrace](https://github.com/xunchahaha/echotrace) — EchoTrace 是一个本地、安全的微信聊天记录导出、分析与年度报告生成工具 | EchoTrace is a local, secure tool for exporting, analyzing",
+          "line_num": 107
+        },
+        {
+          "title": "Go",
+          "node_id": "0007",
+          "summary": "## Go\n\n- [sourcegraph/zoekt](https://github.com/sourcegraph/zoekt) — Fast trigram based code search  \n- [spddl/GoInterruptPolicy](https://github.com/spddl/GoInterruptPolicy) — I just tried to create a better version of the \"Interrupt Affinity Policy\" and \"MSI Mode\" Tool\n- [spddl/csgo-reporter](https://github.com/spddl/csgo-reporter) — \n- [spddl/disableDWMactivitys](https://github.com/spddl/disableDWMactivitys) —",
+          "line_num": 112
+        },
+        {
+          "title": "HLSL",
+          "node_id": "0008",
+          "summary": "## HLSL\n\n- [JamesCJ60/Universal-x86-Tuning-Utility](https://github.com/JamesCJ60/Universal-x86-Tuning-Utility) — Unlock the full potential of your Intel/AMD based device.",
+          "line_num": 119
+        },
+        {
+          "title": "Java",
+          "node_id": "0009",
+          "summary": "## Java\n\n- [chen-banxia/okx-open](https://github.com/chen-banxia/okx-open) — okx的开源项目，用来做虚拟币价格监控、开单监控，自动跟单，交易功能。引入钉钉机器人做提醒",
+          "line_num": 123
+        },
+        {
+          "title": "JavaScript",
+          "node_id": "0010",
+          "summary": "## JavaScript\n\n- [opendatacam/opendatacam](https://github.com/opendatacam/opendatacam) — An open source tool to quantify the world",
+          "line_num": 127
+        },
+        {
+          "title": "Jupyter Notebook",
+          "node_id": "0011",
+          "summary": "This partial document provides a list of notable GitHub repositories and their descriptions, primarily focused on cutting-edge research and applications in machine learning and artificial intelligence. Key highlights include:\n\n1. **HVision-NKU/StoryDiffusion**: A project accepted as a Spotlight Presentation Paper at NeurIPS 2024, indicating significant recognition in the AI research community.\n\n2. **KevinWang676/Bark-Voice-Cloning**: Focuses on voice cloning, with specific applications for Chinese speech, showcasing advancements in speech synthesis and voice imitation.\n\n3. **KohakuBlueleaf/guanaco-lora**: A repository dedicated to instruct-tuning the LLaMA model on consumer hardware, making advanced language models more accessible.\n\n4. **OpenBioLink/ITO**: Develops an Intelligence Task Ontology (ITO), contributing to structured knowledge representation and reasoning in AI systems.\n\n5. **anthropics/prompt-eng-interactive-tutorial**: Offers an interactive tutorial on prompt engineering by Anthropic, emphasizing the importance of effective human-AI interaction.\n\n6. **jalalgh7/Deep-PackGen**: Utilizes deep reinforcement learning (DDQN, PPO) for generating adversarial attacks, highlighting security challenges in AI and machine learning.\n\n7. **jalalgh7/evaluation-of-autoencoder-models-in-NIDS**: Provides an empirical evaluation of various autoencoder models for network intrusion detection systems, focusing on cybersecurity applications.\n\n8. **prophesier/diff-svc**: Implements singing voice conversion using diffusion models, demonstrating advancements in audio processing and voice transformation.",
+          "line_num": 131
+        },
+        {
+          "title": "Lua",
+          "node_id": "0012",
+          "summary": "## Lua\n\n- [Helfima/helmod](https://github.com/Helfima/helmod) — Factorio Mod\n- [KakaruHayate/CODEY_Dataset](https://github.com/KakaruHayate/CODEY_Dataset) — 一个第三方的泠鸢yousa歌声数据集\n- [loonaticx/xNormal_App](https://github.com/loonaticx/xNormal_App) — Distributed version of the xNormal library. (v3.19.3)",
+          "line_num": 142
+        },
+        {
+          "title": "M4",
+          "node_id": "0013",
+          "summary": "## M4\n\n- [giellalt/keyboard-hak](https://github.com/giellalt/keyboard-hak) — Keyboards for the Hakka Chinese language",
+          "line_num": 148
+        },
+        {
+          "title": "MLIR",
+          "node_id": "0014",
+          "summary": "## MLIR\n\n- [triton-lang/triton](https://github.com/triton-lang/triton) — Development repository for the Triton language and compiler",
+          "line_num": 152
+        },
+        {
+          "title": "Mathematica",
+          "node_id": "0015",
+          "summary": "## Mathematica\n\n- [andrewsilke/studiolibrary](https://github.com/andrewsilke/studiolibrary) — Studio Library\n- [gaki131/maya_bifrost](https://github.com/gaki131/maya_bifrost) — Compounds for Maya Bifrost",
+          "line_num": 156
+        },
+        {
+          "title": "Meson",
+          "node_id": "0016",
+          "summary": "## Meson\n\n- [adapta-project/adapta-backgrounds](https://github.com/adapta-project/adapta-backgrounds) — A wallpaper collection for adapta-project",
+          "line_num": 161
+        },
+        {
+          "title": "Other",
+          "node_id": "0017",
+          "summary": "The partial document is a collection of GitHub repositories, each with a brief description. It includes repositories for:\n\n1. **Gaming Configurations and Tools**: Autoexec scripts and configurations for Counter-Strike 2 and CS:GO, aiming for optimal performance and well-documented settings.\n2. **Graphics and Rendering**: Tools for GPU driver affinity benchmarking, Unreal Engine notes and code snippets, and tools for generating SDF textures in Unreal Engine.\n3. **Financial and Market Analysis**: A foundation model for the language of financial markets and plugins for financial services.\n4. **Artificial Intelligence and Machine Learning**: A soft VC VITS singing voice conversion tool and an ontology for incident response and threat intelligence.\n5. **Privacy and Security**: An anti-advertising tool that supports multiple platforms and a backdoor analysis for a popular mobile application.\n6. **Audio and Voice**: A real-time information tool for a popular online game and a Chinese version of a path of building tool.\n7. **System Utilities**: Solutions for applying MacType to unsupported programs, a Chinese configuration document for rEFInd, and a tool for changing the logo in AMI.\n8. **Miscellaneous**: Repositories for photorealistic world generation, affordable eye and face-tracking devices for VR, and a multi-layout hotswap PCB design.",
+          "line_num": 165
+        },
+        {
+          "title": "PHP",
+          "node_id": "0018",
+          "summary": "## PHP\n\n- [H1d3r/sinopec](https://github.com/H1d3r/sinopec) — sinopec 无纸化会议自助使用\n- [easychen/one-person-businesses-methodology-v2.0](https://github.com/easychen/one-person-businesses-methodology-v2.0) — 《一人企业方法论》第二版，也适合做其他副业（比如自媒体、电商、数字商品）的非技术人群。",
+          "line_num": 203
+        },
+        {
+          "title": "Python",
+          "node_id": "0019",
+          "summary": "## Python\n\n- [MarkFzp/act-plus-plus](https://github.com/MarkFzp/act-plus-plus) — Imitation learning algorithms with Co-training for Mobile ALOHA: ACT, Diffusion Policy, VINN",
+          "line_num": 208
+        },
+        {
+          "title": "Roff",
+          "node_id": "0020",
+          "summary": "## Roff\n\n- [Joegenco/PixelManager](https://github.com/Joegenco/PixelManager) — Tries to manage pixels colors\n- [colour-science/OpenColorIO-Configs](https://github.com/colour-science/OpenColorIO-Configs) — Color Configurations for OpenColorIO",
+          "line_num": 212
+        },
+        {
+          "title": "Rust",
+          "node_id": "0021",
+          "summary": "This partial document provides an overview of various Rust-related projects and repositories. Key points include:\n\n1. **Utility Repositories**: \n   - Atlas-OS/utilities: A collection of utilities used in the Atlas project.\n   - UnblockNeteaseMusic/server-rust: A Rust implementation of UnblockNeteaseMusic/server, focusing on performance, stability, and maintainability.\n\n2. **Audio and Signal Processing**:\n   - HEnquist/camilladsp: A cross-platform engine for IIR and FIR processing, applicable to crossovers and room correction.\n   - teamclouday/AndroidMic: Allows using an Android phone as a microphone for PC.\n\n3. **Networking and Connectivity**:\n   - Yeachan-Heo/clawhip: An event-to-channel notification router designed to bypass gateway sessions and avoid context pollution.\n   - agrinman/tunnelto: Enables exposing a local web server to the internet via a public URL.\n   - n0-computer/iroh: A modular networking stack in Rust, emphasizing resilience over traditional IP-based networking.\n\n4. **Gaming and Automation**:\n   - lbjlaq/Antigravity-Manager: A professional account manager and switcher for Antigravity, offering one-click seamless account switching.\n   - rpeabody43/cs2autoexec: An application that generates a Counter Strike 2 autoexec.cfg file.\n\n5. **Development Tools**:\n   - tokio-rs/loom: A concurrency permutation testing tool for Rust, aiding in the development of concurrent applications.\n   - tw93/Kaku: A fast, AI-focused terminal designed for efficient coding.\n   - wezterm/wezterm: A GPU-accelerated, cross-platform terminal emulator and multiplexer.\n   - zed-industries/zed: A high-performance, multiplayer code editor emphasizing speed and collaboration.",
+          "line_num": 217
+        },
+        {
+          "title": "Swift",
+          "node_id": "0022",
+          "summary": "## Swift\n\n- [axtonliu/verbatim-flow](https://github.com/axtonliu/verbatim-flow) — A fast, zero-rewrite dictation app for macOS — your words, exactly as spoken.",
+          "line_num": 233
+        },
+        {
+          "title": "Text",
+          "node_id": "0023",
+          "summary": "## Text\n\n- [Factorio-Resources/FactorioBlueprintsWarehouse](https://github.com/Factorio-Resources/FactorioBlueprintsWarehouse) — 游戏\"异星工场\"的蓝图仓库",
+          "line_num": 237
+        },
+        {
+          "title": "TypeScript",
+          "node_id": "0024",
+          "summary": "## TypeScript\n\n- [mixelpixx/arduino-mcp](https://github.com/mixelpixx/arduino-mcp) — Arduino IDE 2.x - Model Context Protocol built in.\n- [toeverything/AFFiNE](https://github.com/toeverything/AFFiNE) — There can be more than Notion and Miro. AFFiNE(pronounced [ə‘fain]) is a next-gen knowledge base tha",
+          "line_num": 241
+        },
+        {
+          "title": "Visual Basic .NET",
+          "node_id": "0025",
+          "summary": "## Visual Basic .NET\n\n- [ZeqMacaw/Crowbar](https://github.com/ZeqMacaw/Crowbar) — Crowbar - GoldSource and Source Engine Modding Tool",
+          "line_num": 246
+        },
+        {
+          "title": "Visual Basic 6.0",
+          "node_id": "0026",
+          "summary": "## Visual Basic 6.0\n\n- [aces-aswf/aces-core](https://github.com/aces-aswf/aces-core) — ACES Core Transforms\n- [aces-aswf/aces-look](https://github.com/aces-aswf/aces-look) — ACES Look Transforms",
+          "line_num": 250
+        },
+        {
+          "title": "Wolfram Language",
+          "node_id": "0027",
+          "summary": "## Wolfram Language\n\n- [Autodesk/maya-usd](https://github.com/Autodesk/maya-usd) — A common USD (Universal Scene Description) plugin for Autodesk Maya",
+          "line_num": 255
+        }
+      ]
+    }
+  ]
+}

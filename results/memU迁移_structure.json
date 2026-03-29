@@ -1,0 +1,50 @@
+{
+  "doc_name": "memU迁移",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\memU迁移.md",
+  "structure": [
+    {
+      "title": "memU 迁移 — 替换 OpenViking",
+      "node_id": "0000",
+      "prefix_summary": "# memU 迁移 — 替换 OpenViking\n\n> OpenViking 废弃，迁移到 memU ✅ 完成",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "迁移范围",
+          "node_id": "0001",
+          "summary": "## 迁移范围\n\n| 当前 | 迁移到 | 状态 |\n|------|--------|------|\n| OpenViking MCP (向量 RAG) | memU 24/7 记忆 | ✅ 已替换 |\n| auto-memory (MEMORY.md) | memU knowledge/ + PageIndex | ✅ 已索引 |\n| OMC notepad | 保留 (session 草稿) | ✅ 不动 |\n| Agent memory | memU learned_skills/ | ✅ 目录已建 |",
+          "line_num": 11
+        },
+        {
+          "title": "完成步骤",
+          "node_id": "0002",
+          "summary": "## 完成步骤\n\n1. [x] 安装 memU: `pip install memu-py` — Python311, v0.1.8\n2. [ ] Docker 部署 memU Bot 到 SUPER 节点 — 暂缓\n3. [x] 迁移现有 MEMORY.md 内容到 memU knowledge/\n4. [x] 配置 MCP server 替换 OpenViking — `~/.memu/mcp_server.py`\n5. [ ] 接入 OpenClaw 24/7 Agent — 暂缓\n6. [x] 接入 AI 自循环系统复盘层 — 2026-03-26 完成\n7. [x] 停用 OpenViking — 进程已停，MCP 已移除",
+          "line_num": 20
+        },
+        {
+          "title": "最终4层架构 (2026-03-20)",
+          "node_id": "0003",
+          "summary": "## 最终4层架构 (2026-03-20)\n\n| 系统 | 职责 | MCP |\n|------|------|-----|\n| GitNexus | 代码图谱 | `mcp__gitnexus__*` |\n| memU | 动态记忆 (决策/偏好/经验) | `mcp__memu__*` |\n| PageIndex | 文档检索 (Obsidian/专家人设) | `mcp__pageindex__*` |\n| OMC notepad | session 草稿 | `notepad_write_*` |",
+          "line_num": 30
+        },
+        {
+          "title": "部署信息",
+          "node_id": "0004",
+          "summary": "## 部署信息\n\n- **memU**: `http://127.0.0.1:8012`, LLM: MiniMax-Text-01\n- **PageIndex**: `D:/projects/pageindex-local/mcp_server.py`, 17文档已索引\n- **AMM**: `C:/Users/Administrator/a2a-dev/src/amm/` — Redis缓存+Neo4j图谱+Query Planner",
+          "line_num": 39
+        },
+        {
+          "title": "复盘层接入 (2026-03-26)",
+          "node_id": "0005",
+          "summary": "## 复盘层接入 (2026-03-26)\n\n- `quant-terminal/backend/app/strategy/review_memory.py` — subprocess 调 memU venv\n- store: ReviewEngine 完成后自动存 insight → PG + pgvector\n- recall: AI 分析前召回历史 pattern 注入上下文\n- 自定义 categories (避 bge-m3 NaN), route_intention=False (避 MiniMax 误判)\n- 踩坑: WMI 死锁卡 3.13 platform.machine() / bge-m3 NaN / 0.1.6 不支持自定义 base_url",
+          "line_num": 45
+        },
+        {
+          "title": "关联",
+          "node_id": "0006",
+          "summary": "## 关联\n\n- [[PageIndex记忆升级]] — PageIndex 部署详情\n- [[agent-memory-middleware]] — AMM 设计文档\n- [[Agent记忆系统全景]] — 技术选型\n\n#project #memory #migration",
+          "line_num": 53
+        }
+      ]
+    }
+  ]
+}

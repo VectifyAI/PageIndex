@@ -1,0 +1,38 @@
+{
+  "doc_name": "还原指令",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\Sprachwelt\\还原指令.md",
+  "structure": [
+    {
+      "title": "Sprachwelt 新 Session 还原指令",
+      "node_id": "0000",
+      "prefix_summary": "# Sprachwelt 新 Session 还原指令\n\n新开 session 时，`cd D:\\claude-workspace\\sprachwelt` 然后说：\n\n---\n\n```\n继续 Sprachwelt。读 progress.txt 确认当前状态。\n```\n\nCLAUDE.md 会自动加载（架构+概念+构建命令），memory 文件跨 session 持久。不需要重复解释项目。\n\n---",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "如果需要深度恢复（新 AI / 长时间未接触）",
+          "node_id": "0001",
+          "summary": "### Description of the Partial Document\n\nThe partial document provides an overview of the \"Sprachwelt\" (Language World) project, which aims to redesign AI language generation architecture based on the existential theories of Heidegger and Marx. The project defines \"language world\" as a field of meaning organized by concepts like disclosure, tension, situation, and time, and enclosed by retention, loss, and otherness. The document instructs the reader to review several files for a comprehensive understanding of the project's philosophy, specifications, current progress, and architectural foundation. These files include detailed records of the project's theoretical development, engineering specifications, current progress status, and key architectural points. The document emphasizes the importance of understanding these materials to grasp the project's goals and implementation status.",
+          "line_num": 21
+        },
+        {
+          "title": "文件清单",
+          "node_id": "0002",
+          "summary": "This partial document provides an overview of key files and their contents within the \"Sprachwelt\" project. It highlights the following main points:\n\n1. **File Structure and Organization**: The document outlines a structured list of files, each with a specific path, content description, and importance level. This suggests a well-organized project with clear documentation practices.\n\n2. **Core Documents**:\n   - **创世对话**: Contains a detailed derivation chain from Heidegger's three-layered questioning to the engineering specifications, marked as highest importance.\n   - **工程 Spec**: Covers the seven key elements, data structures, a seven-step pipeline, and verification design, also marked as highest importance.\n   - **工程状态**: Provides an overview of the architecture, progress, and decision-making, deemed of high importance.\n   - **里程碑快照**: Contains immutable snapshots of the project, recorded in an incremental manner, labeled for retrospective analysis.\n   - **项目索引**: Acts as a snapshot index and roadmap for different project phases, serving as an index reference.\n\n3. **Additional Resources**:\n   - **项目 CLAUDE.md**: Includes an architecture overview, build commands, and design principles, set to load automatically.\n   - **Progress**: Details the current progress, learnings, and next steps, marked as high importance.\n   - **Memory**: Serves as a cross-session memory anchor, automatically loaded to maintain continuity.\n   - **还原指令**: Provides instructions on how to initiate a new session, acting as a reference guide.\n\n4. **Importance Levels**: The document uses a clear labeling system to indicate the importance of each file, ranging from \"最高\" (highest) to \"复盘\" (retrospective) and \"参考\" (reference), aiding in prioritization and focus.\n\n5. **Automation and Accessibility**: Certain files are marked for automatic loading, indicating a focus on efficiency and ease of access for key project information.",
+          "line_num": 41
+        },
+        {
+          "title": "当前状态速览 (2026-03-23)",
+          "node_id": "0003",
+          "summary": "## 当前状态速览 (2026-03-23)\n\n**Phase 0 Week 2: 完成** ✅\n- 6 Rust crates, 122 tests passing\n- 全管线端到端: input → extract → dynamics → plan → crystallize → audit → events\n- MiniMax-M2.7-highspeed 集成 (提取+结晶)\n- 气味追问链 golden case (9轮, Heidegger三层标注)\n\n**下一步:** 多轮上下文 → Phase 1 (SituatedConvergence + hist-mat + 专家人设 + 盲评)",
+          "line_num": 55
+        },
+        {
+          "title": "还原后的验证",
+          "node_id": "0004",
+          "summary": "## 还原后的验证\n\n### 主要内容概述：\n\n1. **新会话AI的能力要求**：\n   - 新会话AI需要能够回答关于其存在方式、理解问题局限、四层结构、张力类型、七步管线、TensionLedger、防伪复活机制、DiscourseActPlanner行为、需求层次以及ActAuditor状态等关键问题。\n\n2. **LLM的存在方式**：\n   - 探讨了LLM（大型语言模型）的存在方式，包括纯应答、被对方构成以及语言即全部实质等观点。\n\n3. **理解问题的局限性**：\n   - 解释了为什么在当前架构内无法解决理解问题，指出概率不等于领会，链不等于场。\n\n4. **四层结构**：\n   - 描述了“道说 → 辩证运动 → 处境性 → Ereignis”这一四层结构。\n\n5. **张力的三种类型**：\n   - 讨论了对话、文化和结构这三种张力类型。\n\n6. **七步管线**：\n   - 详细列出了七步管线的顺序：Ledger → Dynamics → Convergence → ActPlan → Crystallize → Audit → Update。\n\n7. **TensionLedger的真相源**：\n   - 指出TensionLedger的唯一真相源是append-only事件流。\n\n8. **防伪复活的三重检测**：\n   - 介绍了防伪复活的三重检测机制：lineage_hash、semantic_similarity和owner-demand。\n\n9. **DiscourseActPlanner的行为**：\n   - 列举了DiscourseActPlanner的多种行为，包括追问、让步、澄清、收束、反驳、保持开放和开新口。\n\n10. **需求层次**：\n    - 将需求/counter_demand/stake对应到海德格尔的Gefragtes/Befragtes/Erfragtes三层结构。\n\n11. **ActAuditor的状态**：\n    - 描述了ActAuditor的三种状态：Passed、Partial和Failed，用于闭环验证生成文本是否执行了计划。",
+          "line_num": 65
+        }
+      ]
+    }
+  ]
+}

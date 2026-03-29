@@ -1,0 +1,78 @@
+{
+  "doc_name": "海德格尔",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\原著文库\\海德格尔.md",
+  "structure": [
+    {
+      "title": "海德格尔 (Martin Heidegger) — 原著资源",
+      "node_id": "0000",
+      "prefix_summary": "# 海德格尔 (Martin Heidegger) — 原著资源\n\n> hist-mat v5.1 理论来源，马克思-海德格尔会通的一侧",
+      "line_num": 6,
+      "nodes": [
+        {
+          "title": "《存在与时间》(Sein und Zeit)",
+          "node_id": "0001",
+          "prefix_summary": "## 《存在与时间》(Sein und Zeit)\n\n核心文本。此在分析 = hist-mat 的存在论锚点。",
+          "line_num": 10,
+          "nodes": [
+            {
+              "title": "中文",
+              "node_id": "0002",
+              "summary": "### 中文\n| 版本 | 说明 |\n|------|------|\n| **陈嘉映/王庆节 译** (三联2012修订) | 首选，汉语圈流传最广 |\n| 陈嘉映《存在与时间读本》(2019) | 入门精简版，336页 |\n| 海德格尔文集版 (商务印书馆) | 孙周兴校，学术全本 |\n\n- 微信读书可在线阅读",
+              "line_num": 14
+            },
+            {
+              "title": "德文原版",
+              "node_id": "0003",
+              "summary": "### 德文原版\n- [UPenn 直链PDF](https://www.sas.upenn.edu/~cavitch/pdf-library/Heidegger_Sein_und_Zeit.pdf)\n- [Archive.org 多格式](https://archive.org/details/sein_und_zeit)",
+              "line_num": 23
+            },
+            {
+              "title": "英译",
+              "node_id": "0004",
+              "summary": "### 英译\n- [Macquarrie & Robinson 1962 — Archive.org](https://archive.org/details/being-and-time-martin-heidegger-1962) — 经典学术译本\n- [Stambaugh 译本 PDF](https://www.planksip.org/content/files/2023/10/Martin-Heidegger--Joan-Stambaugh_Being-and-Time-A-Translation-of-Sein-und-Zeit--Z-Library-.pdf)\n\n---",
+              "line_num": 27
+            }
+          ]
+        },
+        {
+          "title": "《林中路》(Holzwege)",
+          "node_id": "0005",
+          "summary": "## 《林中路》(Holzwege)\n\n六篇：《艺术作品的本源》《世界图像的时代》《黑格尔的经验概念》《尼采的话\"上帝死了\"》《诗人何为？》《阿那克西曼德之箴言》\n\n| 版本 | 说明 |\n|------|------|\n| **孙周兴 译** (上海译文修订本) | 首选 |\n\n- 微信读书有在线版\n- [豆瓣](https://book.douban.com/subject/1030294/)\n\n---",
+          "line_num": 33
+        },
+        {
+          "title": "《形而上学导论》(Einführung in die Metaphysik)",
+          "node_id": "0006",
+          "summary": "This partial document provides information about different versions of the book \"Introduction to Metaphysics\" (《形而上学导论》). It highlights two main translations: the preferred new translation by Wang Qingjie published by the Commercial Press in 2015, and the older translation by Xiong Wei and Wang Qingjie included in the Chinese Translation Classics series. The document also includes links to a direct PDF download of the book and mentions that an online version is available on WeChat Reading.",
+          "line_num": 46
+        },
+        {
+          "title": "《演讲与论文集》(Vorträge und Aufsätze)",
+          "node_id": "0007",
+          "prefix_summary": "## 《演讲与论文集》(Vorträge und Aufsätze)\n\n含《技术的追问》《物》《筑·居·思》等名篇。\n\n| 版本 | 说明 |\n|------|------|\n| **孙周兴 译** (三联2005 / 商务2018修订) | 首选 |",
+          "line_num": 58,
+          "nodes": [
+            {
+              "title": "英文: The Question Concerning Technology and Other Essays",
+              "node_id": "0008",
+              "summary": "### 英文: The Question Concerning Technology and Other Essays\n- [Archive.org 完整214页](https://archive.org/details/214p-heidegger-the-question-concerning-technology-and-other-essays)\n- [Monoskop 直链PDF](https://monoskop.org/images/4/44/Heidegger_Martin_The_Question_Concerning_Technology_and_Other_Essays.pdf)\n- [MIT PDF](https://fab.cba.mit.edu/classes/865.18/people/geletina/papers/the-question-concerning-technology.pdf)\n\n---",
+              "line_num": 66
+            }
+          ]
+        },
+        {
+          "title": "获取策略",
+          "node_id": "0009",
+          "summary": "## 获取策略\n\n| 来源 | 适合 |\n|------|------|\n| **Archive.org** | 德文/英文原版，免费合法 |\n| **Z-Library** (z-lib.io) | 中文扫描版最全 |\n| **微信读书** | 手机在线读中文 |\n| **libgen.is** | 英/德学术版 |",
+          "line_num": 73
+        },
+        {
+          "title": "关联",
+          "node_id": "0010",
+          "summary": "## 关联\n- [[王德峰]] — 马克思-海德格尔会通\n- [[hist-mat]] — v5.1 海德格尔层\n- [[马克思]] — 对照阅读\n\n#philosophy #bibliography #heidegger",
+          "line_num": 82
+        }
+      ]
+    }
+  ]
+}

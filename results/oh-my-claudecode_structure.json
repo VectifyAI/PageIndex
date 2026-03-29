@@ -1,0 +1,58 @@
+{
+  "doc_name": "oh-my-claudecode",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\oh-my-claudecode.md",
+  "structure": [
+    {
+      "title": "oh-my-claudecode — 多Agent编排层",
+      "node_id": "0000",
+      "prefix_summary": "# oh-my-claudecode — 多Agent编排层\n\n> Claude Code的增强编排系统",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "基本信息",
+          "node_id": "0001",
+          "summary": "## 基本信息\n- **路径**: `~/.claude/plugins/oh-my-claudecode/`\n- **状态**: 活跃，日常开发主力",
+          "line_num": 5
+        },
+        {
+          "title": "核心能力",
+          "node_id": "0002",
+          "prefix_summary": "## 核心能力",
+          "line_num": 9,
+          "nodes": [
+            {
+              "title": "编排模式",
+              "node_id": "0003",
+              "summary": "### 编排模式\n- `autopilot` — 全自动执行\n- `ralph` — 自循环直到完成\n- `ultrawork` — 最大并行\n- `team` — N个Agent协调\n- `ccg` — Claude+Codex+Gemini三模型共识",
+              "line_num": 11
+            },
+            {
+              "title": "Agent目录",
+              "node_id": "0004",
+              "summary": "### Agent目录\n| Agent             | 模型     | 用途    |\n| ----------------- | ------ | ----- |\n| explore           | haiku  | 代码探索  |\n| analyst           | opus   | 需求分析  |\n| planner           | opus   | 任务规划  |\n| architect         | opus   | 系统设计  |\n| executor          | sonnet | 代码实现  |\n| debugger          | sonnet | 调试    |\n| verifier          | sonnet | 验证    |\n| code-reviewer     | opus   | 代码审查  |\n| security-reviewer | sonnet | 安全审查  |\n| test-engineer     | sonnet | 测试    |\n| writer            | haiku  | 文档    |\n| git-master        | sonnet | Git操作 |",
+              "line_num": 18
+            },
+            {
+              "title": "工具",
+              "node_id": "0005",
+              "summary": "### 工具\n- State管理 / Notepad / Project Memory\n- LSP集成 / AST grep\n- Python REPL\n- Session搜索",
+              "line_num": 34
+            }
+          ]
+        },
+        {
+          "title": "可复用模式",
+          "node_id": "0006",
+          "summary": "## 可复用模式\n- **Agent分层**: haiku(探索) / sonnet(实现) / opus(架构) → 任何多Agent系统可复用\n- **team pipeline**: plan→prd→exec→verify→fix → 通用开发流程\n- **CCG共识**: 多模型交叉验证 → 降低单模型幻觉",
+          "line_num": 40
+        },
+        {
+          "title": "关联",
+          "node_id": "0007",
+          "summary": "## 关联\n- [[开发架构]] — 编排层组件\n- [[FSC]] — 底层编码引擎\n- [[三阵营人格]] — AI人格系统\n\n#project #agent #orchestration #reusable",
+          "line_num": 45
+        }
+      ]
+    }
+  ]
+}

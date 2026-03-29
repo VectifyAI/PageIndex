@@ -1,0 +1,110 @@
+{
+  "doc_name": "角色设计",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\SillyTavern 官方文档\\核心概念\\角色设计.md",
+  "structure": [
+    {
+      "title": "角色描述",
+      "node_id": "0000",
+      "summary": "### 角色描述\n\n用于添加角色描述和 AI 应该知道的其余部分。这将始终出现在提示中，因此所有重要事实都应包含在此处。\n\n例如，您可以添加有关动作发生的世界的信息，并描述您正在扮演的角色的特征。\n\n它可以是任何长度（无论是 200 个还是 2000 个令牌），也可以是任何样式（自由文本、W++、对话风格等）的格式。",
+      "line_num": 7
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#methods-and-format)方法和格式",
+      "node_id": "0001",
+      "summary": "### 方法和格式\n\n本部分讨论了字符格式设置方法，指出这是一个复杂的主题，超出了当前文档的范围。文档推荐了几种经过测试或依赖于 SillyTavern 功能的指南，包括 Trappu 的 PLists + Ali：Chat 指南、AliCat 的 Ali：Chat 指南、Kingbri 的极简主义指南以及隈研吾的 W++ 指南，并提供了相应的链接供读者参考。",
+      "line_num": 15
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#character-tokens)字符令牌",
+      "node_id": "0002",
+      "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#character-tokens)字符令牌\n\n**TL;DR：如果你正在使用一个具有 2048 个上下文标记限制的 AI 模型，那么 1000 个标记字符定义会将 AI 的“内存”减半。**\n\n从这个角度来看，一个好的人工智能的体面反应很容易达到200-300个代币左右。在这种情况下，人工智能只能“记住”大约3次聊天记录。\n\n---",
+      "line_num": 29
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#why-did-my-characters-token-counter-turn-red)为什么我的角色的代币计数器会变成红色？",
+      "node_id": "0003",
+      "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#why-did-my-characters-token-counter-turn-red)为什么我的角色的代币计数器会变成红色？\n\n当我们看到您的角色在其定义中具有超过一半的模型定义上下文长度的标记时，我们会为您突出显示它，因为这会降低 AI 提供愉快对话的能力。",
+      "line_num": 37
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#what-happens-if-my-character-has-too-many-tokens)如果我的角色有太多代币会怎样？",
+      "node_id": "0004",
+      "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#what-happens-if-my-character-has-too-many-tokens)如果我的角色有太多代币会怎样？\n\n别担心 - 它不会破坏任何东西。在最坏的情况下，如果角色的永久标记太大，那只是意味着上下文中留给其他事情的空间会更少（见下文）。\n\n这可能产生的唯一负面影响是人工智能的“内存”会减少，因为它可以处理的聊天记录会更少。\n\n这是因为每个 AI 模型一次可以处理的上下文量都有限制。",
+      "line_num": 41
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#context)“语境”？",
+      "node_id": "0005",
+      "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#context)“语境”？\n\n这是每次要求 AI 生成响应时发送给 AI 的信息：\n\n- 字符定义\n\n- 聊天记录\n\n- 作者笔记\n\n- 特殊格式字符串\n\n- [括号命令]\n\nSillyTavern 在将信息发送到 AI 模型之前，会自动计算分配可用上下文令牌的最佳方式。",
+      "line_num": 49
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#what-are-a-characters-permanent-tokens)什么是角色的“永久代币”？",
+      "node_id": "0006",
+      "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#what-are-a-characters-permanent-tokens)什么是角色的“永久代币”？\n\n这些将始终与每个生成请求一起发送到 AI：\n\n- 角色名称（保持名称简短！在每个字符消息的开头发送）\n\n- 角色描述框\n\n- 角色个性框\n\n- 场景框",
+      "line_num": 65
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#what-parts-of-a-characters-definitions-are-not-permanent)角色定义的哪些部分不是永久性的？",
+      "node_id": "0007",
+      "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#what-parts-of-a-characters-definitions-are-not-permanent)角色定义的哪些部分不是永久性的？\n\n- 第一个消息框 - 仅在聊天开始时发送一次。\n\n- 示例消息框 - 仅保留到聊天历史记录填满上下文（可选）可以强制将这些消息保留在上下文中）",
+      "line_num": 77
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#popular-ai-model-context-token-limits)流行的 AI 模型上下文令牌限制",
+      "node_id": "0008",
+      "summary": "This partial document provides an overview of context token limits for various popular AI models used in applications like SillyTavern. It categorizes models by their parameter size and version, detailing the specific token limits for each. Key points include:\n\n1. Older models with fewer than 6 billion parameters have a token limit of 1024.\n2. Models like Pygmalion 6B and LLaMA 1 have a limit of 2048 tokens.\n3. LLaMA 2 and its fine-tuned versions support up to 4096 tokens.\n4. OpenAI's ChatGPT (3.5 Turbo) has a token limit of either 4096 or 16k.\n5. OpenAI's GPT-4 supports up to 8192 or 32k tokens.\n6. Anthropic's Claude models have a limit of 8000 tokens for older versions and 100k for Claude 2.\n7. NovelAI's token limits vary by model and layer: Kayra and Opus layers support 8192 tokens, Clio supports 6144 tokens for all layers, Kayra's Rolling layer supports 6144 tokens, and Kayra's Tablet layer supports 3072 tokens.",
+      "line_num": 83
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#personality-summary)性格总结",
+      "node_id": "0009",
+      "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#personality-summary)性格总结\n\n性格的简要描述。\n\n例子：\n\n- `Cheerful, cunning, provocative`\n\n- `Aqua likes to do nothing and also likes to get drunk`",
+      "line_num": 99
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#first-message)第一条消息",
+      "node_id": "0010",
+      "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#first-message)第一条消息\n\n第一条信息是一件重要的事情，它准确地设定了角色将如何以及以何种方式进行交流。\n\n角色的第一条消息应该很长，这样以后角色不太可能回复非常短的消息。\n\n您还可以使用星号**来描述角色的动作。\n\n例如：\n\n`*I noticed you came inside, I walked up and stood right in front of you*`` Welcome. I'm glad to see you here. ``*I said with a toothy smug sunny smile looking you straight in the eye*`` What brings you...`",
+      "line_num": 109
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#examples-of-dialogue)对话示例",
+      "node_id": "0011",
+      "summary": "### 描述\n\n该部分文档主要介绍了角色对话设计的示例，展示了如何通过示例对话来描述角色的说话方式。文档中提到：\n\n1. **标记使用**：每个示例对话块前需添加 `<START>` 标记，但在实际提示中不会显示该标记，而是由文本完成 API 的高级格式设置和聊天完成 API 的“新示例聊天”提示内容所替代。\n   \n2. **角色和用户替换**：在对话中，使用 `{{char}}` 代替角色名称，使用 `{{user}}` 代替用户名。\n\n3. **示例对话**：文档提供了具体的对话示例，展示了如何通过对话体现角色的个性。例如，角色 Aqua 的对话中体现了她的兴奋、乐于助人以及幽默感。\n\n4. **上下文插入**：示例对话块仅在有可用上下文空间时插入，并会逐块推出旧的上下文内容。\n\n这些示例旨在帮助设计者更好地理解如何通过对话塑造角色的个性和互动方式。",
+      "line_num": 121
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#scenario)场景",
+      "node_id": "0012",
+      "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#scenario)场景\n\n对话的情况和背景。",
+      "line_num": 147
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#replacement-tags-macros)替换标记（宏）",
+      "node_id": "0013",
+      "prefix_summary": "### 替换标记（宏）\n\n该部分文档主要介绍了在 SillyTavern 聊天中使用的各种替换标记（宏），用于在发送消息时动态替换特定内容。以下是主要涵盖的要点：\n\n1. **用户和角色信息替换**：\n   - `{{user}}` 和 `<USER>`：替换为用户名。\n   - `{{char}}` 和 `<BOT>`：替换为角色名称。\n   - `{{charPrompt}}`：角色的主提示覆盖。\n   - `{{charJailbreak}}`：角色的越狱提示覆盖。\n   - `{{persona}}`：用户的角色描述。\n\n2. **角色属性替换**：\n   - `{{description}}`：角色的描述。\n   - `{{scenario}}`：角色的场景或聊天场景覆盖（如果已设置）。\n   - `{{personality}}`：角色的个性。\n   - `{{mesExamples}}`：角色的对话示例（未更改和未拆分）。\n\n3. **消息和交互相关替换**：\n   - `{{lastMessageId}}`：最后聊天消息的 ID。\n   - `{{lastMessage}}`：最后一条聊天消息的文本。\n   - `{{lastCharMessage}}`：角色发送的最后一条聊天消息。\n   - `{{lastUserMessage}}`：用户发送的最后一条聊天消息。\n   - `{{currentSwipeId}}`：当前显示的最后一次消息滑动的基于 1 的 ID。\n   - `{{lastSwipeId}}`：上次聊天消息中的滑动次数。\n\n4. **时间和日期替换**：\n   - `{{time}}`：当前系统时间。\n   - `{{time_UTC±X}}`：指定 UTC 偏移量（时区）中的当前时间。\n   - `{{date}}`：当前系统日期。\n   - `{{ISOTIME}}`：当前 ISO 日期（YYYY-MM-DD）。\n   - `{{isodate}}`：当前 ISO 时间（24 小时制）。\n   - `{{weekday}}`：当前工作日。\n   - `{{idle_duration}}`：插入自上次用户消息发送以来的时间范围。\n\n5. **随机和选择替换**：\n   - `{{random:(args)}}`：从列表中返回一个随机项。\n   - `{{random::arg1::arg2}}`：随机的替代语法，支持逗号。\n   - `{{pick:(args)}}`：类似于 `random`，但如果源字符串保持不变，则所选参数在当前聊天中的后续评估中是稳定的。\n   - `{{roll:(formula)}}`：生成一个随机值，使用 D&D 骰子语法 XdY+Z。\n\n6. **其他替换**：\n   - `{{original}}`：用于提示覆盖字段，包含系统设置中的相应默认提示。\n   - `{{bias \"text here\"}}`：为 AI 设置行为偏差，直到下一个用户输入。\n   - `{{// (note)}}`：允许留下一个将被替换为空白内容的注释，对 AI 不可见。\n\n文档还提醒用户，宏列表可能不完整或已过时，建议使用 `/help macros` 命令获取最新的宏列表。",
+      "line_num": 151,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#instruct-mode-and-context-template-macros)指示模式和上下文模板宏：",
+          "node_id": "0014",
+          "summary": "The partial document provides an overview of various macros and placeholders used in the \"Instruct Mode and Context Template Macros\" section of the SillyTavern application, specifically within the \"Advanced Formatting Settings.\" These macros are designed to help structure and format interactions within the AI's context template, including separators, prefixes, suffixes, and system instructions. Key points covered include:\n\n1. **Separators and Start/Stop Indicators**: Macros like `{{exampleSeparator}}`, `{{chatStart}}`, and `{{instructStop}}` are used to delineate sections of dialogue and indicate the start and end of interactions.\n\n2. **System, User, and Assistant Prefixes/Suffixes**: The document details macros for prefixes and suffixes for system messages (`{{instructSystemPrompt}}`, `{{instructSystemPrefix}}`, `{{instructSystemSuffix}}`), user messages (`{{instructUserPrefix}}`, `{{instructUserSuffix}}`), and assistant messages (`{{instructAssistantPrefix}}`, `{{instructAssistantSuffix}}`). These are used to format the beginning and end of messages from different participants in the conversation.\n\n3. **First and Last Assistant Prefixes**: Specific macros like `{{instructFirstAssistantPrefix}}` and `{{instructLastAssistantPrefix}}` are used to format the first and last outputs from the assistant.\n\n4. **Instruction Prefixes**: Macros such as `{{instructSystemInstructionPrefix}}` are used to prefix system instructions within the context.\n\n5. **Filler Messages**: The `{{instructUserFiller}}` macro allows for placeholder or filler text in user messages.\n\n6. **Prompt Size Management**: The `{{maxPrompt}}` macro is used to manage the maximum size of the prompt in terms of tokens, ensuring that the context length and response length are balanced.\n\nThese macros provide a flexible and structured way to manage and format AI interactions within the application.",
+          "line_num": 217
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#chat-variables-macros)聊天变量宏：",
+          "node_id": "0015",
+          "summary": "The partial document explains the concept of chat variables and macros in the context of character design for a specific application. It distinguishes between two types of variables: local variables, which are unique to a specific chat, and global variables, which can be accessed across any chat and any character.\n\nThe document provides a list of macros used to manipulate these variables:\n    - Retrieval macros: {{getvar::name}} retrieves the value of a local variable, while {{getglobalvar::name}} retrieves the value of a global variable.\n    - Setting macros: {{setvar::name::value}} and {{setglobalvar::name::value}} set the value of a local and global variable respectively.\n    - Addition macros: {{addvar::name::increment}} and {{addglobalvar::name::value}} add a numerical value to a local and global variable respectively.\n    - Increment macros: {{incvar::name}} and {{incglobalvar::name}} increment the value of a local and global variable by 1 respectively.\n    - Decrement macros: {{decvar::name}} and {{decglobalvar::name}} decrement the value of a local and global variable by 1 respectively.\n\nThese macros allow for dynamic and interactive manipulation of variables within the chat environment.",
+          "line_num": 255
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#favorite-character)最喜欢的角色",
+      "node_id": "0016",
+      "summary": "### [#](https://docs.sillytavern.app/usage/core-concepts/characterdesign/#favorite-character)最喜欢的角色\n\n将角色标记为收藏夹，以便按“星号”按钮在侧边菜单栏上快速过滤。",
+      "line_num": 281
+    }
+  ]
+}

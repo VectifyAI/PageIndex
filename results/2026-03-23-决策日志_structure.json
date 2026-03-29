@@ -1,0 +1,68 @@
+{
+  "doc_name": "2026-03-23-决策日志",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\Sprachwelt\\2026-03-23-决策日志.md",
+  "structure": [
+    {
+      "title": "2026-03-23 — 决策日志（Phase 0）",
+      "node_id": "0000",
+      "prefix_summary": "# 2026-03-23 — 决策日志（Phase 0）\n\n> 不可变。记录\"选了什么\"和\"拒绝了什么以及为什么\"。防止未来重新提出已否决方案。",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "D1: 语言选择",
+          "node_id": "0001",
+          "summary": "## D1: 语言选择\n\n**选择:** Rust (纯 CPU)\n**拒绝:**\n- Python — 性能不够做实时场动力学\n- C++ — 开发效率低，borrow checker 比手动内存管理安全\n- Rust + Triton 混合 — Phase 0 不需要 GPU，CPU 足够\n\n**判断依据:** Phase 0-2 的数据量（几十条张力、毫秒级计算）远不需要 GPU。Phase 3 按需加 Triton，Phase 4 考虑 CUTLASS。\n**复查条件:** FieldDynamics 在 profiler 中成为热点时重新评估。",
+          "line_num": 11
+        },
+        {
+          "title": "D2: LLM 后端",
+          "node_id": "0002",
+          "summary": "## D2: LLM 后端\n\n**选择:** MiniMax-M2.7-highspeed (via codexcc.top API)\n**拒绝:**\n- Claude API — 太贵，有限量。MiniMax 不限量。\n- GPT-4 — 同上，且 API 延迟不可控\n- 本地模型 — Phase 0 不值得搞部署\n\n**判断依据:** 提取和结晶是高频调用（每轮 2 次）。MiniMax 免费不限量，质量足够 Phase 0。\n**复查条件:** 如果 MiniMax 提取质量不够（case-016 turns 3-9 无法产出张力），考虑换 Claude。",
+          "line_num": 22
+        },
+        {
+          "title": "D3: LlmExtractor 同步 vs 异步",
+          "node_id": "0003",
+          "summary": "## D3: LlmExtractor 同步 vs 异步\n\n**选择:** 同步 (`fn extract` 而非 `async fn extract`)\n**拒绝:** async — 引入 tokio 运行时、async-trait 复杂度\n\n**判断依据:** Phase 0 是单线程 CLI pipeline，每轮顺序执行。async 带来的并发优势在单轮处理中不存在，只增加复杂度。\n**复查条件:** Phase 1 如果需要并行提取多轮历史，改为 async。",
+          "line_num": 33
+        },
+        {
+          "title": "D4: 图库选择",
+          "node_id": "0004",
+          "summary": "## D4: 图库选择\n\n**选择:** petgraph\n**拒绝:**\n- 邻接矩阵 — 张力数量少（<100），矩阵浪费内存且不直观\n- 自建图 — petgraph 成熟、API 丰富，没必要重新造\n\n**判断依据:** petgraph 是 Rust 生态标准图库，支持有向/无向、节点/边数据、遍历算法。\n**复查条件:** 除非需要 GPU 加速的图计算。",
+          "line_num": 41
+        },
+        {
+          "title": "D5: 事件溯源 vs 直接状态存储",
+          "node_id": "0005",
+          "summary": "## D5: 事件溯源 vs 直接状态存储\n\n**选择:** Append-only event stream + projection\n**拒绝:** 直接在 DB 里存 status 字段\n\n**判断依据:** 张力的状态变化本身是有意义的数据（什么时候加剧了？什么时候衰减了？）。如果只存最终状态，丢失了过程信息。事件流可以随时重新投影，也方便审计和调试。\n**复查条件:** 事件量超过百万条时考虑 snapshot + compaction。",
+          "line_num": 51
+        },
+        {
+          "title": "D6: 防复活策略",
+          "node_id": "0006",
+          "summary": "Focuses on anti-revival strategy D6, advocating a three-layer detection approach (lineage hash, high Jaccard similarity, and owner-demand thresholds) while rejecting single-method checks due to easy bypass, lack of embeddings, or cost. Provides rationale for the layered method as precise match → word-level similarity → owner-demand alignment, noting Jaccard adequacy for Phase 0 and calling for embedding layer addition if Jaccard misses revivals.",
+          "line_num": 59
+        },
+        {
+          "title": "D7: demand/counter_demand/stake 不改",
+          "node_id": "0007",
+          "summary": "## D7: demand/counter_demand/stake 不改\n\n**选择:** 复用现有三元组作为海德格尔三层映射\n**拒绝:** 加新字段（如 gefragtes/befragtes/erfragtes）\n\n**判断依据:** demand 就是 Gefragtes（所问），counter_demand 就是 Befragtes（所问及），stake 就是 Erfragtes（所以问）。名字不同但语义完全对应。加别名只会制造混乱。\n**复查条件:** 永不改。这是架构级决策。",
+          "line_num": 70
+        },
+        {
+          "title": "D8: 规则提取器 + LLM 双级 pipeline",
+          "node_id": "0008",
+          "summary": "## D8: 规则提取器 + LLM 双级 pipeline\n\n**选择:** Rules first, LLM fallback\n**拒绝:**\n- 全规则 — turns 3-9 证明规则无法捕获深层矛盾\n- 全 LLM — 慢、贵、不可测试\n- LLM first, rules verify — 浪费 API 调用\n\n**判断依据:** 9 条规则覆盖有表面标记的 ~60% 输入。无标记时 LLM 兜底。pipeline 结构可测试（mock LLM）。\n**复查条件:** 如果规则覆盖率下降到 <40%，考虑加更多规则或降低 LLM 调用阈值。",
+          "line_num": 78
+        },
+        {
+          "title": "D9: ActAuditor 信息性 vs 阻断性",
+          "node_id": "0009",
+          "summary": "## D9: ActAuditor 信息性 vs 阻断性\n\n**选择:** 信息性（返回 Passed/Partial/Failed，不阻断 pipeline）\n**拒绝:** 阻断性（Failed 时不返回文本或强制重新生成）\n\n**判断依据:** Phase 0 先收集审计数据，了解 Crystallizer 的漂移模式。Phase 1 可以基于数据决定是否加 retry loop。\n**复查条件:** 如果 Failed 率 > 20%，加 re-crystallization loop。",
+          "line_num": 89
+        }
+      ]
+    }
+  ]
+}

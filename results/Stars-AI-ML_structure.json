@@ -1,0 +1,56 @@
+{
+  "doc_name": "Stars-AI-ML",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\GitHub-Stars\\Stars-AI-ML.md",
+  "structure": [
+    {
+      "title": "AI-ML",
+      "node_id": "0000",
+      "prefix_summary": "# AI-ML",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "C",
+          "node_id": "0001",
+          "summary": "## C\n\n- [PriesiaMioShirakana/DragonianVoice](https://github.com/PriesiaMioShirakana/DragonianVoice) — 多个SVC/TTS的C++推理库",
+          "line_num": 4
+        },
+        {
+          "title": "C++",
+          "node_id": "0002",
+          "summary": "## C++\n\n- [NVlabs/intrinsic3d](https://github.com/NVlabs/intrinsic3d) — Intrinsic3D - High-Quality 3D Reconstruction by Joint Appearance and Geometry Optimization with Spat",
+          "line_num": 8
+        },
+        {
+          "title": "Jupyter Notebook",
+          "node_id": "0003",
+          "summary": "The partial document provides a list of GitHub repositories with brief descriptions of their purposes. It includes:\n\n1. A repository for an AI-driven stock trading platform that offers a comprehensive suite of tools for learning, simulation, and live trading, covering various aspects of stock trading, machine learning, and deployment.\n2. A repository for a graph representation learning framework designed to detect attacks using dynamic graph structures, likely in the context of network intrusion detection systems (NIDS).\n3. A repository for a collaborative neural rendering project using anime character sheets, presented at IJCAI 2023.",
+          "line_num": 12
+        },
+        {
+          "title": "Other",
+          "node_id": "0004",
+          "summary": "## Other\n\n- [OpenGVLab/GITM](https://github.com/OpenGVLab/GITM) — Ghost in the Minecraft: Generally Capable Agents for Open-World Environments via Large Language Mode",
+          "line_num": 18
+        },
+        {
+          "title": "Python",
+          "node_id": "0005",
+          "summary": "This partial document provides a curated list of Python-based projects and repositories, primarily focused on artificial intelligence, computer vision, and audio processing. Key highlights include:\n\n1. **Stable Diffusion Web UI**: A user-friendly interface for generating images using Stable Diffusion.\n2. **Ultimate Vocal Remover GUI**: A graphical tool that leverages deep neural networks to remove vocals from audio tracks.\n3. **AI Aimbot**: An AI-driven aimbot for popular games like CS2, Valorant, Fortnite, and APEX.\n4. **MonoNPHM**: A CVPR 2024 highlighted project for dynamic head reconstruction from monocular videos.\n5. **Super SloMo**: A PyTorch implementation of the Super SloMo technique for slow-motion video generation.\n6. **OASIS**: A simulation platform for social interactions with one million agents.\n7. **Gaussian Splatting**: The original implementation of a method for real-time radiance field rendering.\n8. **CascadePSP**: A CVPR 2020 project focusing on high-resolution segmentation.\n9. **Mask R-CNN**: An implementation of Mask R-CNN for object detection and instance segmentation using Keras and TensorFlow.\n10. **NeRF Studio**: A collaborative environment for working with Neural Radiance Fields (NeRFs).\n11. **PyTorch**: The official repository for PyTorch, a deep learning framework with strong GPU acceleration.\n12. **SoftVC VITS Singing Voice Conversion**: A project for converting singing voices using SoftVC VITS.\n13. **YOLOv5**: A popular object detection model implemented in PyTorch and compatible with multiple platforms.\n14. **so-vits-svc-fork**: A fork of the SoftVC VITS Singing Voice Conversion project with added features like real-time support and improved interface.",
+          "line_num": 22
+        },
+        {
+          "title": "QML",
+          "node_id": "0006",
+          "summary": "## QML\n\n- [alicevision/Meshroom](https://github.com/alicevision/Meshroom) — Node-based Visual Programming Toolbox",
+          "line_num": 39
+        },
+        {
+          "title": "Rust",
+          "node_id": "0007",
+          "summary": "## Rust\n\n- [qdrant/qdrant](https://github.com/qdrant/qdrant) — Qdrant - High-performance, massive-scale Vector Database and Vector Search Engine for the next gener",
+          "line_num": 43
+        }
+      ]
+    }
+  ]
+}

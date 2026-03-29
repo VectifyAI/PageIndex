@@ -1,0 +1,52 @@
+{
+  "doc_name": "OMC-Agent能力矩阵",
+  "source_path": "E:/knowledge/Knowledge\\02-Infrastructure\\OMC\\OMC-Agent能力矩阵.md",
+  "structure": [
+    {
+      "title": "OMC Agent 能力矩阵",
+      "node_id": "0000",
+      "prefix_summary": "# OMC Agent 能力矩阵\n\n> 19 个 agent，按模型分层，知道派谁就行。",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "按模型分层",
+          "node_id": "0001",
+          "prefix_summary": "## 按模型分层",
+          "line_num": 5,
+          "nodes": [
+            {
+              "title": "Opus 层（贵，强，用于高价值决策）",
+              "node_id": "0002",
+              "summary": "The partial document describes the \"Opus Layer,\" which is characterized as expensive, powerful, and used for high-value decision-making. It outlines several specialized agents within this layer, each with distinct responsibilities, use cases, and key features:\n\n1. **Analyst**: Acts as a pre-consultant for requirement analysis, used when requirements are unclear or before solution selection. It provides in-depth analysis and outputs structured requirements.\n\n2. **Architect**: Serves as an advisory role for architecture and debugging, utilized during architecture reviews and technology selection. It operates in a read-only mode, providing pure advice without altering the code.\n\n3. **Planner**: Handles strategic planning, particularly useful for breaking down complex tasks. It may involve optional interview workflows.\n\n4. **Code-Reviewer**: Conducts code reviews, specifically during pull request (PR) reviews and after significant changes. It provides severity ratings and checks for SOLID principles.\n\n5. **Critic**: Involved in solution review, used when a solution is ready to be critiqued. It offers multi-angle criticism, being straightforward and thorough.\n\n6. **Code-Simplifier**: Focuses on code simplification, automatically triggered after code is written. It aims to maintain functionality while removing redundancies.",
+              "line_num": 7
+            },
+            {
+              "title": "Sonnet 层（标准，日常主力）",
+              "node_id": "0003",
+              "summary": "The partial document describes the \"Sonnet 层\" (Sonnet Layer), which is a standard and primary tool for daily use. It outlines various agents within this layer, detailing their specific responsibilities, when to use them, and their key features. These agents include:\n\n1. **Executor**: Handles code implementation, primarily used for writing code, with the ability to specify complex tasks using `model=opus`.\n2. **Debugger**: Used for debugging, particularly during error occurrences or test failures, focusing on root cause analysis and stack tracing.\n3. **Verifier**: Responsible for verification before task completion, using evidence-driven checks to ensure tests are genuinely passed.\n4. **Tracer**: Engages in causal tracing for difficult bugs, employing competing hypotheses and uncertainty scoring.\n5. **Security-reviewer**: Conducts security reviews for aspects involving authentication, input, or APIs, adhering to OWASP Top 10 standards.\n6. **Test-engineer**: Manages test engineering, including Test-Driven Development (TDD), integration testing, and fixing flaky tests, aiming for over 80% coverage.\n7. **Designer**: Handles UI/UX design for frontend interfaces, combining visual design with code implementation.\n8. **QA-tester**: Performs QA testing, specifically for CLI interaction testing, utilizing tmux session management.\n9. **Git-master**: Manages Git operations, focusing on atomic commits, rebasing, history organization, and automatic detection of commit styles.\n10. **Scientist**: Conducts data analysis for research, experiments, and data processing, with the capability for parallel processing using SciOMC.\n11. **Document-specialist**: Handles external documentation, prioritizing Context Hub for SDK documents and API references, with web resources as a fallback.",
+              "line_num": 18
+            },
+            {
+              "title": "Haiku 层（便宜快，探索和轻量任务）",
+              "node_id": "0004",
+              "summary": "### Haiku 层（便宜快，探索和轻量任务）\n\n| Agent | 职责 | 什么时候用 | 关键特点 |\n|-------|------|-----------|---------|\n| **explore** | 代码库探索 | 找文件、搜关键词 | 快速，不改代码 |\n| **writer** | 文档撰写 | README、注释、文档 | 便宜，批量写 |",
+              "line_num": 34
+            }
+          ]
+        },
+        {
+          "title": "选择决策树",
+          "node_id": "0005",
+          "summary": "The partial document outlines a structured decision tree for various software development and code management tasks. It categorizes actions into different roles or tools, specifying which tool (sonnet, opus, or haiku) should be used for each task. The main points covered include: writing and simplifying code, conducting code reviews, debugging and tracing bugs, evaluating and analyzing solutions, planning tasks, verifying completion, performing security checks, writing tests, conducting experiments, documenting and exploring code, and managing Git operations. Each task is associated with a specific tool, indicating a recommended approach for task execution.",
+          "line_num": 41
+        },
+        {
+          "title": "自动 vs 手动",
+          "node_id": "0006",
+          "summary": "## 自动 vs 手动\n\n- **大部分 agent 是自动派发的**，OMC 根据任务类型选择合适的 agent\n- 你也可以显式指定：`Agent(subagent_type=\"oh-my-claudecode:architect\")`\n- 复杂任务用 `/team N:executor \"task\"` 并行派多个 agent\nwd",
+          "line_num": 64
+        }
+      ]
+    }
+  ]
+}

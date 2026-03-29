@@ -1,0 +1,106 @@
+{
+  "doc_name": "【全平台可用】VPS服务器轻松安装SillyTavern酒馆和Clewd教程",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\CW 工具箱\\【全平台可用】VPS服务器轻松安装SillyTavern酒馆和Clewd教程.md",
+  "structure": [
+    {
+      "title": "**安装面板**",
+      "node_id": "0000",
+      "prefix_summary": "## **安装面板**\n\n先根据购买的服务器后台提供的信息使用终端软件SSH连接服务器；\n\n教程演示发行版为Debian11 发问题求助时注意隐藏好自己的服务器IP地址",
+      "line_num": 67,
+      "nodes": [
+        {
+          "title": "更新服务器",
+          "node_id": "0001",
+          "summary": "#### 更新服务器\n\n```\napt update -y && apt full-upgrade -y\n```\n\n遇到提示请选择 *install the package maintainer’s version*\n\n\n重启服务器\n\n```\nreboot\n```",
+          "line_num": 73
+        },
+        {
+          "title": "安装1Panel面板",
+          "node_id": "0002",
+          "summary": "This partial document provides a step-by-step guide for installing the 1Panel control panel. It begins with a command to download and execute a quick start script using curl. The document outlines the installation process, including setting the installation directory, port, user name, and password, with default options provided for ease of use. Upon successful installation, the document details how to access the panel, including the panel's URL, user credentials, and important links such as the project website, documentation, and code repository. It also advises users to open the necessary port in their cloud server's security group to ensure access to the panel.",
+          "line_num": 90
+        }
+      ]
+    },
+    {
+      "title": "**面板环境配置**",
+      "node_id": "0003",
+      "prefix_summary": "## **面板环境配置**",
+      "line_num": 154,
+      "nodes": [
+        {
+          "title": "访问面板",
+          "node_id": "0004",
+          "summary": "#### 访问面板\n\n复制面板地址到浏览器，将$LOCAL_IP更改为自己服务器的IP地址访问然后登录面板\n\n```\n如果服务器ip地址为 127.0.0.1 则在浏览器的面板地址为 http://127.0.0.1:27104/4ee9e37f77\n注意这里的端口和入口为你自己设定和默认的值 面板地址为 IP:端口/入口地址\n```",
+          "line_num": 156
+        },
+        {
+          "title": "连接终端",
+          "node_id": "0005",
+          "summary": "#### 连接终端\n\n[官方文档](https://1panel.cn/docs/user_manual/hosts/terminal/)\n\n输入SSH密码后点击连接测试-保存并连接",
+          "line_num": 166
+        },
+        {
+          "title": "安装配置防火墙",
+          "node_id": "0006",
+          "summary": "#### 安装配置防火墙\n\n[官方文档](https://1panel.cn/docs/user_manual/hosts/firewall/)\n\n根据系统版本安装防火墙\n\n```\napt install ufw -y\n```\n\n允许SSH端口\n\n```\nufw allow 22/tcp\n```\n\n允许面板端口 自己的面板端口！\n\n```\nufw allow 27104/tcp\n```\n\n允许酒馆SillyTavern默认端口\n\n```\nufw allow 8000/tcp\n```\n\n启动防火墙\n\n```\nufw enable\n```\n\n```\nCommand may disrupt existing ssh connections. Proceed with operation (y|n)? y 回车\n```\n\n\n*此图有误仅供参考写法*",
+          "line_num": 173
+        }
+      ]
+    },
+    {
+      "title": "**安装SillyTavern和修改版Clewd**",
+      "node_id": "0007",
+      "prefix_summary": "## **安装SillyTavern和修改版Clewd**",
+      "line_num": 214,
+      "nodes": [
+        {
+          "title": "方法一 ： 命令安装（推荐好更新）",
+          "node_id": "0008",
+          "summary": "#### 方法一 ： 命令安装（推荐好更新）\n\n主机-文件-目录：/opt/1panel/apps\n\n点击终端\n\n安装SillyTavern酒馆\n\n```\ngit clone https://github.com/SillyTavern/SillyTavern.git\n```\n\n安装Clewd\n\n```\ngit clone https://github.com/teralomaniac/clewd.git\n```",
+          "line_num": 216
+        },
+        {
+          "title": "方法二 ：手动下载安装",
+          "node_id": "0009",
+          "summary": "The partial document provides instructions for manually downloading and installing two related projects: SillyTavern and Clewd. It includes links to the GitHub repositories for the original SillyTavern project, the modified Clewd project, and the original Clewd project. The document specifies the directory path for installation (/opt/1panel/apps) and provides direct download URLs for the projects, recommending the \"test\" branch for the modified Clewd project. It also includes commands for installing zip and unzip utilities if they are not already installed, and instructions to unzip the downloaded files into the current directory.",
+          "line_num": 234
+        }
+      ]
+    },
+    {
+      "title": "**配置SillyTavern和修改版Clewd**",
+      "node_id": "0010",
+      "summary": "The partial document provides instructions for setting up and configuring the SillyTavern application and a modified version of Clewd. It covers the following main points:\n\n1. **Environment Setup**: Instructions on setting up the runtime environment using Node.js, including creating and configuring the environment.\n\n2. **Installation Notes**: A mention that there are differences in directory names between command-line and manual installations, but both include SillyTavern and Clewd.\n\n3. **SillyTavern Configuration**: Details on accessing and modifying the configuration files for SillyTavern. It specifies the configuration file names for different versions (config.conf for versions before 1.10.10 and config.yaml for 1.10.10 and later).\n\n4. **Modification of SillyTavern Settings**: Specific instructions on modifying configuration parameters for different versions of SillyTavern:\n   - For versions before 1.10.9, it involves changing the values of `whitelistMode` and `basicAuthMode`.\n   - For versions 1.10.10 and later, the document implies a similar modification process but does not provide explicit details.\n\n5. **Clewd Configuration**: A brief mention of setting up the modified version of Clewd, though specific details are not provided.\n\n6. **Process Management**: Instructions on stopping the services after configuration changes are made.\n\nThe document is primarily focused on the technical aspects of setting up and configuring these applications, with an emphasis on modifying configuration files to alter application behavior.",
+      "line_num": 274
+    },
+    {
+      "title": "Listen for incoming connections //此选项限1.11.0以后的版本，默认为false，需要改为truelisten: trueToggle whitelist modewhitelistMode: falseWhitelist of allowed IP addresseswhitelist:- 127.0.0.1Toggle basic authentication for endpointsbasicAuthMode: trueBasic authentication credentials  这里的密码要注意加''号basicAuthUser:username: 'user'password: 'password'",
+      "node_id": "0011",
+      "prefix_summary": "This partial document provides a step-by-step guide to setting up and configuring the SillyTavern application with Clewd. Key points covered include:\n\n1. **Server Configuration**: Instructions to modify the server settings by enabling the listen option, setting whitelist mode, and configuring allowed IP addresses.\n2. **Authentication Setup**: Details on enabling basic authentication, including setting up a username and password for access control.\n3. **Configuration File Editing**: Guidance on locating and editing the `config.js` file in the Clewd source directory to add a Cookie for authentication.\n4. **Running the Application**: Steps to save changes, start the project, and verify the application is running by checking the SillyTavern interface.\n5. **Accessing the Application**: Information on accessing the SillyTavern application via a web browser using the server's IP address and port number.\n6. **Network Settings**: Directions to modify the network settings of the application container to 'host' for proper connectivity.",
+      "line_num": 311,
+      "nodes": [
+        {
+          "title": "**SillyTavern酒馆连接Clewd**",
+          "node_id": "0012",
+          "prefix_summary": "## **SillyTavern酒馆连接Clewd**",
+          "line_num": 345,
+          "nodes": [
+            {
+              "title": "连接Clewd",
+              "node_id": "0013",
+              "summary": "#### 连接Clewd\n\nAPI 和 ChatCompletion如图所设\n\n\n打开预设 OpenAI API反向代理填写\n\n```\nhttp://127.0.0.1:8444/v1\n```\n\n\n1：先点击Connect连接Clewd\n\n2：再打勾Show \"External\" models (provided by API)\n\n3：最后在OpenAI模型里选择claude-2 或2.1",
+              "line_num": 347
+            }
+          ]
+        },
+        {
+          "title": "**完成安装**",
+          "node_id": "0014",
+          "summary": "## **完成安装**",
+          "line_num": 366
+        }
+      ]
+    }
+  ]
+}

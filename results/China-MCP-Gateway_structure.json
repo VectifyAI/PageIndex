@@ -1,0 +1,68 @@
+{
+  "doc_name": "China MCP Gateway",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\China MCP Gateway.md",
+  "structure": [
+    {
+      "title": "China MCP Gateway — 经济数据采集引擎",
+      "node_id": "0000",
+      "prefix_summary": "# China MCP Gateway — 经济数据采集引擎",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "基本信息",
+          "node_id": "0001",
+          "summary": "## 基本信息\n- **路径**: `D:/projects/china-mcp-gateway/`\n- **部署**: SUPER:8100 (systemd: china-gateway)\n- **状态**: 生产运行，106 adapter",
+          "line_num": 3
+        },
+        {
+          "title": "架构",
+          "node_id": "0002",
+          "summary": "该部分介绍了分析系统架构：共有106个数据适配器，数据先入Redis缓存，形成不可变快照，再提供给分析模块；同时数据也持久化到PostgreSQL的“NAS harvest schema”，并可供Metabase(SUPER:3002)与Grafana(SUPER:3001)使用。系统采取快照驱动策略，所有分析模块统一消费同一个snapshot_id；调度采用事件驱动方式，在盘前(05:30±60分钟)和盘后(15:30±60分钟)的随机时间窗口进行采集。采集频率分为HOT（交易时段内分钟级）、WARM（日频/5分钟）和COLD（周月频/1小时）三档。同时使用国产大语言模型联网搜索替代传统爬虫，并按数据源专长对模型进行路由。",
+          "line_num": 8
+        },
+        {
+          "title": "106 Adapter 经济范畴分布",
+          "node_id": "0003",
+          "summary": "The partial document outlines a distribution of 106 adapters across various economic categories, detailing each category’s adapter count and representative adapters. It lists categories like 金融/信用 (18 adapters including shibor, dr007), 宏观/政策 (15 such as macro, nbs), 社会情绪 (14 including weibo, douban), Crypto (15 like spot, derivatives), and other sectors such as 生产资料, 消费/电商, 流通, 传感器, 劳动力, 地租/不动产, and 上层建筑 with their respective counts and representative adapters.",
+          "line_num": 21
+        },
+        {
+          "title": "LLM 模型路由策略",
+          "node_id": "0004",
+          "summary": "LLM模型路由策略说明了用17个适配器通过联网搜索替代传统爬虫，根据数据源选择最合适的模型，并列出各模型擅长的领域和使用场景，如字节系、腾讯生态、阿里系数据及结构化搜索等。",
+          "line_num": 37
+        },
+        {
+          "title": "关键设计决策",
+          "node_id": "0005",
+          "summary": "The document outlines key design decisions for a data system, including using large language models for indirect web data collection, routing queries to specialized models based on data sources, reusing an existing PostgreSQL database with a separate schema, maintaining immutable snapshots to address timing discrepancies, and implementing asynchronous persistent storage that doesn't block API responses.",
+          "line_num": 49
+        },
+        {
+          "title": "持久化层",
+          "node_id": "0006",
+          "summary": "## 持久化层\n- PG: NAS paperclip-db (192.168.50.130:5433, harvest schema)\n- 表: items / collect_log / sources\n- Metabase: SUPER:3002, DB id=3 \"Harvest (NAS PG)\"\n- Grafana: SUPER:3001, pre-market sentiment dashboard",
+          "line_num": 57
+        },
+        {
+          "title": "剩余缺口",
+          "node_id": "0007",
+          "summary": "## 剩余缺口\n- 小红书深度搜索 — XHS MCP 需扫码登录\n- 大众点评客单价 — 反爬严重\n- 产能利用率 — nbs adapter 已有，需找对 path\n- 城投债二级市场 — 企业预警通",
+          "line_num": 63
+        },
+        {
+          "title": "里程碑",
+          "node_id": "0008",
+          "summary": "## 里程碑\n- 2026-03-15: v0.2.0, 77 adapter, CCG三模型协同\n- 2026-03-18: 106 adapter, PG持久化+Metabase BI, 事件驱动调度, LLM模型专长路由",
+          "line_num": 69
+        },
+        {
+          "title": "下一步",
+          "node_id": "0009",
+          "summary": "## 下一步\n- 小红书深度搜索突破\n- Metabase/Grafana Dashboard 完善\n- analytics 消费 snapshot (transmission_chain, pattern_match)\n- 轮子集成 (ruptures/stumpy/PyOD)\n\n#project #mcp #chinese-ai #economics",
+          "line_num": 73
+        }
+      ]
+    }
+  ]
+}

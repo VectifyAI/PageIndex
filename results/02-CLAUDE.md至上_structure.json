@@ -1,0 +1,64 @@
+{
+  "doc_name": "02-CLAUDE.md至上",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\ClaudeLog-干货\\02-CLAUDE.md至上.md",
+  "structure": [
+    {
+      "title": "CLAUDE.md 至上 (CLAUDE.md Supremacy)",
+      "node_id": "0000",
+      "prefix_summary": "# CLAUDE.md 至上 (CLAUDE.md Supremacy)\n\n> 原文：[claudelog.com/mechanics/claude-md-supremacy](https://claudelog.com/mechanics/claude-md-supremacy)",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "核心观点",
+          "node_id": "0001",
+          "summary": "## 核心观点\n\nCLAUDE.md 不是\"建议\"，是**不可变的系统规则**。它的优先级高于用户 prompt，在整个 session 中持续生效。",
+          "line_num": 5
+        },
+        {
+          "title": "优先级层次",
+          "node_id": "0002",
+          "summary": "## 优先级层次\n\n1. **CLAUDE.md 指令** — 权威系统规则，不可覆盖\n2. **用户 prompt** — 灵活的请求，在 CLAUDE.md 划定的边界内运作\n3. **流程执行** — 按 CLAUDE.md 定义的步骤顺序执行，不随意调整",
+          "line_num": 9
+        },
+        {
+          "title": "关键技巧",
+          "node_id": "0003",
+          "prefix_summary": "## 关键技巧",
+          "line_num": 15,
+          "nodes": [
+            {
+              "title": "1. 战略性 Prompt 委派",
+              "node_id": "0004",
+              "summary": "### 1. 战略性 Prompt 委派\n不要把指令塞在用户 prompt 里。正确做法：\n- **CLAUDE.md** 里写清流程和规则\n- **用户 prompt** 只传参数和方向\n\n> \"在 CLAUDE.md 中精确描述流程，用户 prompt 只需提供参数或方向调整。\"",
+              "line_num": 17
+            },
+            {
+              "title": "2. 模块化架构",
+              "node_id": "0005",
+              "summary": "### 2. 模块化架构\n用 markdown 格式把 CLAUDE.md 拆成功能模块，创建清晰的边界，防止**指令渗透**（instruction bleed）——一个模块的规则意外影响另一个模块。",
+              "line_num": 24
+            },
+            {
+              "title": "3. 前置加载上下文",
+              "node_id": "0006",
+              "summary": "### 3. 前置加载上下文\n在 CLAUDE.md 里预加载大量上下文（包括多个示例和明确的文件访问规则），而不是让 Claude \"随意读取可能污染 session 的文件\"。",
+              "line_num": 27
+            }
+          ]
+        },
+        {
+          "title": "可衡量的收益",
+          "node_id": "0007",
+          "summary": "## 可衡量的收益\n\n- 更高的指令遵从率（权威规则定义）\n- 一致的执行（顺序流程步骤）\n- 全 session 上下文持久性\n- 减少不受控文件访问的污染\n- 有组织的功能防止指令重叠",
+          "line_num": 30
+        },
+        {
+          "title": "我的理解",
+          "node_id": "0008",
+          "summary": "The partial document emphasizes the importance of CLAUDE.md as a foundational document governing the interaction between the user and the AI, akin to a constitution. It advises users to treat CLAUDE.md as a set of guiding principles rather than a detailed instruction manual. The document suggests that users should avoid repeating procedural instructions in their prompts and instead include them in CLAUDE.md, allowing prompts to focus on specific tasks. It highlights the benefit of a precise CLAUDE.md in ensuring predictable AI behavior, while also warning against making it excessively long, as brevity is crucial for effectiveness.",
+          "line_num": 38
+        }
+      ]
+    }
+  ]
+}

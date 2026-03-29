@@ -1,0 +1,30 @@
+{
+  "doc_name": "UE 渲染命令行指令",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\UE 虚幻引擎\\UE 渲染命令行指令.md",
+  "structure": [
+    {
+      "title": "**常用渲染命令行指令**",
+      "node_id": "0000",
+      "summary": "# **常用渲染命令行指令**",
+      "line_num": 7
+    },
+    {
+      "title": "**控制台变量**",
+      "node_id": "0001",
+      "summary": "### 描述\n\n该文档主要介绍了Unreal Engine 5（UE5）中与控制台变量相关的渲染设置和优化方法，涵盖了以下几个方面：\n\n1. **控制台变量**：\n   - **r.shadowquality**：调整动态阴影质量，范围从0（无动态阴影）到5（最高质量动态阴影）。\n   - **t.maxfps**：取消帧率限制。\n   - **stat命令**：用于显示帧率（stat.fps）、渲染时间（stat.unit）、GPU内存占用（stat rhi）、渲染命令时间（stat scenerendering）等信息。\n   - **freezerendering/unfreezerendering**：冻结和停止冻结渲染。\n   - **stat initviews**：提供遮挡相关的渲染结果，如被隐藏的对象数量。\n\n2. **UE5 Lumen阴影与AO（环境光遮蔽）**：\n   - **r.SeparateTranslucency**：强制透明材质进入景深。\n   - **解决Foliage光追阴影问题**：通过调整r.RayTracing.Geometry.InstancedStaticMeshes.Culling等参数，解决阴影消失和错误问题。\n   - **Nanite光追阴影错误**：通过调整r.RayTracing.Nanite.Mode等参数，解决Nanite光追阴影错误，但需注意可能导致的崩溃和阴影偏移问题。\n   - **植被阴影问题**：通过勾选“计算全局位置偏移”或使用强制LOD0代码（如r.ForceLOD 0）解决植被阴影错误和风动问题。\n\n3. **其他优化设置**：\n   - **关闭摄像机裁剪**：使用r.SetNearClipPlane 0。\n   - **修改纹理流送池大小**：通过调整r.Streaming.PoolSize解决纹理池报错导致的贴图模糊问题。\n   - **叠加启用SSAO**：使用r.Lumen.DiffuseIndirect.SSAO 1等命令。\n\n4. **路径追踪**：\n   - **显示进度条**：使用r.PathTracing.ProgressDisplay 1。\n   - **降噪器与延迟渲染**：讨论了路径追踪中渲染出现两倍序列帧时是否需要关闭延迟渲染。\n\n文档还提到，这些控制台命令可以添加到Movie Render Queue控制台命令中，或写入项目Config文件夹下的DefaultEngine.ini文件中，以便自动启用。",
+      "line_num": 9
+    },
+    {
+      "title": "**一键切换中英文**",
+      "node_id": "0002",
+      "summary": "# **一键切换中英文**",
+      "line_num": 82
+    },
+    {
+      "title": "**渲染命令**",
+      "node_id": "0003",
+      "summary": "### Partial Document Description\n\nThe partial document provides a detailed list of rendering commands and parameters, primarily focused on optimizing visual quality and performance in a rendering or gaming environment. The main points covered include:\n\n1. **Rendering Quality Settings**: Commands like `r.MotionBlurQuality`, `r.DepthOfFieldQuality`, and `r.Bloom.ScreenPercentage` control the quality of motion blur, depth of field, and bloom effects, respectively.\n\n2. **Denoising Techniques**: Multiple parameters starting with `r.AmbientOcclusion.Denoiser`, `r.RayTracing.GloballIlumination.Denoiser`, and `r.Shadow.Denoiser` are dedicated to applying denoising to various aspects of the rendering process, such as ambient occlusion, global illumination, reflections, and shadows.\n\n3. **Ray Tracing**: Settings like `r.RayTracing.Skylight.Denoiser`, `r.RayTracing.GloballIlumination.SamplesPerPixel`, and `r.RayTracing.Recflections.SamplesPerPixel` are related to ray tracing, focusing on improving the quality and performance of ray-traced effects.\n\n4. **LOD (Level of Detail) Management**: Commands such as `r.Forcelod`, `r.ForceLOD`, and `r.foliage.ForceLOD` enforce specific LOD settings for models, ensuring consistent quality and performance.\n\n5. **Shadow and Lighting**: Parameters like `r.Shadow.Virtual.UseFarShadowCulling` and `r.Shadow.Virtual.NormalBias` control shadow culling and bias, affecting the appearance and performance of shadows.\n\n6. **Volumetric Fog**: Settings such as `r.Volumetricfog`, `r.Volumetricfog.GridPixelSize`, and `r.Volumetricfog.GridSize` manage the quality and density of volumetric fog effects.\n\n7. **Miscellaneous Enhancements**: Additional commands like `r.Tonemapper.Sharpen` and `r.SSS.Burley.NumSamplesOverride` enhance image sharpness and subsurface scattering quality, respectively.\n\n8. **Performance Optimization**: The document includes settings like `r.foliage.MaxTrianglesToRender` and `r.HeterogeneousVolumes.MaxTraceDistance` to optimize rendering performance by controlling the number of triangles rendered and the maximum trace distance for volumes.\n\nOverall, the document serves as a guide for configuring rendering settings to achieve a balance between visual quality and performance, with a focus on advanced rendering techniques such as ray tracing and denoising.",
+      "line_num": 86
+    }
+  ]
+}

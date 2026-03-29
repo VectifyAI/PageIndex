@@ -1,0 +1,70 @@
+{
+  "doc_name": "Roadmap",
+  "source_path": "E:/knowledge/Knowledge\\00-Index\\Roadmap.md",
+  "structure": [
+    {
+      "title": "Roadmap — 各项目路线图",
+      "node_id": "0000",
+      "prefix_summary": "# Roadmap — 各项目路线图\n\n> 下一步做什么",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "活跃项目",
+          "node_id": "0001",
+          "prefix_summary": "## 活跃项目",
+          "line_num": 5,
+          "nodes": [
+            {
+              "title": "quant-terminal",
+              "node_id": "0002",
+              "summary": "### quant-terminal\n- [ ] SUPER节点部署扫描器环境\n- [ ] StockScanner走SUPER跑\n- [ ] ICT FVG分析模块化（从手动脚本→strategy/ict_analyzer.py）\n- [ ] AI自循环系统架构设计\n- [ ] CUDA因子升级（RTX 5090）— 目标4月底",
+              "line_num": 7
+            },
+            {
+              "title": "claw-mesh / FSC",
+              "node_id": "0003",
+              "summary": "### claw-mesh / FSC\n- [ ] 待确认当前sprint",
+              "line_num": 14
+            },
+            {
+              "title": "China MCP Gateway",
+              "node_id": "0004",
+              "summary": "### China MCP Gateway\n- [ ] analytics消费snapshot\n- [ ] 适配器工厂\n- [ ] transmission_chain",
+              "line_num": 17
+            },
+            {
+              "title": "ClawAPI",
+              "node_id": "0005",
+              "summary": "### ClawAPI\n- [ ] CLI入口(typer)\n- [ ] OpenAI-compatible Gateway",
+              "line_num": 22
+            },
+            {
+              "title": "WinForge",
+              "node_id": "0006",
+              "summary": "### WinForge\n- [ ] Issues #1-#10 实现\n- [ ] 基准测试框架",
+              "line_num": 26
+            },
+            {
+              "title": "hist-mat",
+              "node_id": "0007",
+              "summary": "### hist-mat\n- [ ] v7.0 规划（if needed）",
+              "line_num": 30
+            },
+            {
+              "title": "Obsidian Vault",
+              "node_id": "0008",
+              "summary": "### Obsidian Vault\n- [ ] 装插件: Dataview + Templater + Calendar\n- [ ] YAML frontmatter标准化\n- [ ] Canvas集群拓扑图\n- [ ] ADR架构决策记录\n- [ ] Daily Note模板+流程",
+              "line_num": 33
+            },
+            {
+              "title": "FORGE",
+              "node_id": "0009",
+              "summary": "### FORGE\n- [ ] NeurIPS 2026投稿 — 8周冲刺\n\n#roadmap #planning",
+              "line_num": 40
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

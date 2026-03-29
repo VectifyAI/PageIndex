@@ -1,0 +1,112 @@
+{
+  "doc_name": "ane-analysis",
+  "source_path": "E:/knowledge/Knowledge\\Projects\\ane-analysis.md",
+  "structure": [
+    {
+      "title": "ANE Training — Backpropagation on Apple Neural Engine",
+      "node_id": "0000",
+      "prefix_summary": "# ANE Training — Backpropagation on Apple Neural Engine\n\nTraining neural networks directly on Apple's Neural Engine (ANE) via reverse-engineered private APIs. No CoreML training APIs, no Metal, no GPU — pure ANE compute.",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "Project Scope & Intent",
+          "node_id": "0001",
+          "prefix_summary": "## Project Scope & Intent\n\nI'm genuinely grateful for all the attention this project has received — I never expected a weekend research hack to blow up like this. Thank you to everyone who starred, forked, ran benchmarks on their own hardware, and shared the work. It means a lot.\n\nThat said, I want to set clear expectations about what this project is and isn't.\n\nThis is a **research project**, not a production framework.\n\nThe goal was to demonstrate that **training on the Apple Neural Engine — and potentially other NPUs — is possible**, and that the barrier has always been software support, not hardware capability. The ANE is a remarkably capable piece of silicon that Apple restricts to inference-only use through CoreML. This project bypasses that restriction using reverse-engineered private APIs to show what's possible when you give the hardware a chance.",
+          "line_num": 5,
+          "nodes": [
+            {
+              "title": "What This Project Is",
+              "node_id": "0002",
+              "summary": "### What This Project Is\n\n- A proof of concept for ANE training via `_ANEClient` and `_ANECompiler` private APIs\n- A set of benchmarks documenting real ANE performance characteristics (throughput, power, SRAM behavior)\n- A reference for anyone exploring direct ANE access outside CoreML\n- Research code that I update when I find something interesting",
+              "line_num": 15
+            },
+            {
+              "title": "What This Project Is Not",
+              "node_id": "0003",
+              "summary": "### What This Project Is Not\n\n- A maintained framework or library\n- A replacement for CoreML, MLX, llama.cpp, or any production inference stack\n- A path to training large models on consumer hardware (yet)",
+              "line_num": 22
+            },
+            {
+              "title": "On The Hype",
+              "node_id": "0004",
+              "summary": "### On The Hype\n\nSome coverage of this project has overstated its implications. To be clear:\n\n- Training works, but utilization is low (~5-9% of peak) with significant engineering challenges remaining\n- Many element-wise operations still fall back to CPU\n- This does **not** replace GPU training for anything beyond small research models today\n\nThe honest results — including all limitations — are documented in the accompanying articles:\n- [Part 1: Reverse Engineering](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine)\n- [Part 2: Benchmarks](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine-615)\n- [Part 3: Training](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine-c8b)",
+              "line_num": 28
+            },
+            {
+              "title": "On Maintenance",
+              "node_id": "0005",
+              "summary": "### On Maintenance\n\nI don't intend to grow this into a large community project. My focus is on original research (compiler infrastructure for edge AI optimization), and maintaining an open-source framework takes time away from that.\n\nThat said:\n- I'll keep pushing updates when I discover something interesting\n- Bug fixes and benchmark contributions (especially on hardware I don't own) are welcome\n- Feature requests will likely go unaddressed — but feel free to fork\n- PRs will be merged at a relatively slow pace, otherwise I become the bottleneck for community growth around this tech",
+              "line_num": 41
+            },
+            {
+              "title": "Fork it, build on it",
+              "node_id": "0006",
+              "summary": "### Fork it, build on it\n\nThis is MIT licensed for a reason. Everyone now has access to AI-assisted development tools that can adapt and extend code in hours. If this project is useful to you — take it, modify it, build something better. If you do something cool with it, I'd love to hear about it.If in future, community decides to maintain one source of truth repo, I'm in full support of that.\n\n---",
+              "line_num": 51
+            }
+          ]
+        },
+        {
+          "title": "What This Is",
+          "node_id": "0007",
+          "summary": "This partial document describes a project that implements transformer training, including both forward and backward passes, on Apple's ANE (Apple Neural Engine) in Apple Silicon. The ANE is a 15.8 TFLOPS FP16 inference accelerator not officially supported for training, and the project achieves this by reverse-engineering private APIs and the MIL format to run custom compute graphs on ANE hardware. The document highlights current results, showing the performance of two models: Stories110M and Qwen3-0.6B, with per-step processing times of 91 ms and 412 ms, respectively. The implementation includes dynamic pipelines without recompilation, support for the Adam optimizer, gradient accumulation, checkpointing, and GQA (Grouped-Query Attention) with per-head tiling. It also details a zero-copy pipeline between GPU and ANE using shared IOSurface. Additionally, the document discusses INT8 W8A8 quantization, which achieves a 1.88x throughput improvement, and explains how INT8 activations reduce L2 SRAM bandwidth between tiles.",
+          "line_num": 57
+        },
+        {
+          "title": "Architecture",
+          "node_id": "0008",
+          "summary": "The partial document focuses on the architecture and optimization techniques for dynamic pipelines in machine learning models, specifically MHA (Multi-Head Attention) and GQA (Grouped-Query Attention) models. It highlights the use of shared ANE (Apple Neural Engine) kernels with weights packed into spatial dimensions to avoid recompilation when weights change. For MHA models like Stories110M, the architecture uses six kernels per layer, including functions for QKV projection, SDPA (Scaled Dot-Product Attention), output projection, and SwiGLU Feed-Forward Network (FFN) operations, along with their backward counterparts. GQA models, such as Qwen3-0.6B, utilize ten kernels per layer, adding separate kernels for grouped-query attention. The document also details the CPU's role in handling operations like RMSNorm, residual connections, loss computation, gradient accumulation, and optimizer updates. Key optimizations include channel-first CPU layout, vDSP vectorized RMSNorm, GCD asynchronous for cblas operations, ANE RMSNorm fusion, and forward taps to expose intermediate states, among others, aimed at improving performance and efficiency.",
+          "line_num": 82
+        },
+        {
+          "title": "File Structure",
+          "node_id": "0009",
+          "summary": "The partial document outlines the file structure of a project related to ANE (Apple Neural Engine) API exploration and development. It includes several MATLAB scripts for tasks such as initial API discovery, in-memory MIL (Machine Intermediate Language) compilation, benchmarking dispatch latency and peak TFLOPS, and comparing INT8 and FP16 throughput. Additionally, there are scripts for probing ANE SRAM bandwidth and size/layout exploration, as well as a demonstration of GPU↔ANE zero-copy IOSurface functionality and a GPU prefill to ANE decode pipeline.\n\nThe \"bridge\" directory contains headers and implementations for a C-callable ANE API, including support for INT8 and FP16 weight blobs. The \"training\" directory focuses on ANE runtime and classifier implementations, with scripts for static and dynamic training loops, configuration helpers, MIL generators for dynamic weight kernels, and IOSurface I/O. It also includes model configuration files for specific models like Stories110M and Qwen3-0.6B, a live training dashboard script, and Makefiles for building the components.",
+          "line_num": 110
+        },
+        {
+          "title": "Training Data",
+          "node_id": "0010",
+          "summary": "## Training Data\n\nTraining requires pretokenized TinyStories data. To download:\n```bash\ncd training && bash download_data.sh\n```\nSee [training/README.md](training/README.md) for detailed training instructions.",
+          "line_num": 143
+        },
+        {
+          "title": "Building",
+          "node_id": "0011",
+          "summary": "The partial document provides instructions for building and training machine learning models on Apple Silicon, specifically targeting macOS 15+ and the M4 chip. It outlines two primary pipelines: a dynamic pipeline, which allows model selection at build time, and a static pipeline, which is considered legacy and recompiles weights at each step. The document details specific commands for building and training models like Stories110M and Qwen3-0.6B, including options to train from scratch or resume from a checkpoint. Additionally, it includes instructions for benchmarking INT8 operations and building a bridge library that offers a C-callable API for Apple's ANE (Apple Neural Engine). The build process relies solely on system frameworks and private ANE APIs, with no external dependencies.",
+          "line_num": 151
+        },
+        {
+          "title": "How It Works",
+          "node_id": "0012",
+          "summary": "The partial document describes the workflow and key components of a machine learning inference system, likely for Apple's Neural Engine (ANE). It covers: 1) The generation of MIL (Machine Intermediate Language) code in Objective-C at runtime, specifying operations like convolutions, matrix multiplication, and element-wise operations. 2) In-memory compilation where MIL code and weights are compiled directly to ANE programs without needing a disk-based mlmodelc. 3) The use of IOSurface for efficient input/output tensor I/O in shared memory, with a format of [1, channels, 1, spatial] and support for both fp16 and fp32 data types. 4) Dynamic weight handling where activations and weights are packed into a single spatial input dimension, allowing weight changes without recompilation. 5) Gradient flow management, with forward taps providing intermediates for backward passes, backward kernels computing input gradients on the ANE, and weight gradients computed on the CPU using cblas. 6) INT8 quantization support, including affine dequantization for weights and quantization/dequantization between layers for activation caching in L2 SRAM, which boosts throughput by 1.88x.",
+          "line_num": 178
+        },
+        {
+          "title": "Limitations",
+          "node_id": "0013",
+          "summary": "## Limitations\n\n- **SDPA causal masking** — ANE hardware ignores `attn_mask` in SDPA ops; causal attention is decomposed into separate Q@K^T (ANE) → mask+softmax (CPU) → scores@V (ANE)\n- **~119 compile limit** — ANE compiler leaks resources; worked around via `exec()` restart with checkpoint\n- **FP16 gradient underflow** — backward matmuls underflow in fp16; fixed with global loss scaling (`256 * NLAYERS`)\n- **Single-input constraint** — multi-input ANE requests cause 0x1d error; inputs packed into spatial dimension instead",
+          "line_num": 187
+        },
+        {
+          "title": "Performance",
+          "node_id": "0014",
+          "summary": "The partial document focuses on the performance metrics of two language models, Stories110M and Qwen3-0.6B, across different hardware configurations. It provides details on training throughput, highlighting the time per step, number of layers, and kernel configuration for each model. The document also presents ANE (AI Neural Engine) peak throughput data, comparing FP16 and INT8 precision modes in terms of TOPS (Tera Operations Per Second) and configuration specifics. Additionally, it outlines the inference pipeline performance between GPU and ANE, detailing the time taken for GPU prefill, ANE decode, and the total inference time for each model with a sequence length of 256.",
+          "line_num": 194
+        },
+        {
+          "title": "Disclaimer",
+          "node_id": "0015",
+          "summary": "## Disclaimer\n\nThis project uses Apple's private, undocumented APIs (`_ANEClient`, `_ANECompiler`, `_ANEInMemoryModelDescriptor`). These APIs are not covered by any public stability guarantee and may change or break with any macOS update. This is independent research into Apple Neural Engine architecture, using APIs discovered through runtime introspection for research and educational purposes under fair use and interoperability provisions (see *Sega v. Accolade*, 1992; DMCA §1201(f)). No Apple proprietary code or binaries are included in this repository. This project is not affiliated with or endorsed by Apple Inc. Use at your own risk.",
+          "line_num": 217
+        },
+        {
+          "title": "License",
+          "node_id": "0016",
+          "summary": "## License\n\nMIT — see [LICENSE](LICENSE)\n\n---\n\n*Built by a human + Claude, one weekend at a time.*",
+          "line_num": 221
+        }
+      ]
+    }
+  ]
+}

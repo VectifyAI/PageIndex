@@ -1,0 +1,210 @@
+{
+  "doc_name": "Ali：聊天风格 （v1.5）",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\角色创建的指南Ali：Chat Lite\\Ali：聊天风格 （v1.5）.md",
+  "structure": [
+    {
+      "title": "**什么是Ali：Chat？**",
+      "node_id": "0000",
+      "summary": "## **什么是Ali：Chat？**\n\n---\n\n- Ali：Chat的主要思想是使用对话作为格式来表达和强化特征/特征。\n\n- Ali：Chat更像是一个风格的“指南”，而不是一个特定的“模板”。\n\n- Ali：Chat 既可以单独使用，也可以与其他风格结合使用（例如 Plist、Boostyle、W++ 等）",
+      "line_num": 89
+    },
+    {
+      "title": "**TL;博士**",
+      "node_id": "0001",
+      "summary": "The partial document provides guidelines for creating a character-focused document. It emphasizes three main components: a \"Description\" box containing permanent dialogue examples that showcase the character's core attributes and features; a \"First Message\" box, which is a temporary section offering a detailed scene from the character's perspective to establish the story's plot, setting, characters, conflict, and theme; and a \"Dialogue Examples\" box, another temporary section with subsequent dialogue examples that creatively advance the scene or conversation. The document stresses the importance of expressing the character's attributes and features through both dialogue and actions, with actions indicated by words enclosed in asterisks.",
+      "line_num": 99
+    },
+    {
+      "title": "**技巧**",
+      "node_id": "0002",
+      "prefix_summary": "# **技巧**",
+      "line_num": 113,
+      "nodes": [
+        {
+          "title": "**重要提示：**",
+          "node_id": "0003",
+          "summary": "This partial document provides guidelines on how to effectively use character attributes, dialogue formatting, and user input to create engaging interactions with AI-driven characters in platforms like SillyTavern. Key points include:\n\n1. **Implicit Character Attributes**: Characters' traits can be conveyed through their speech, actions, names, and even the user's reactions to them.\n2. **Dialogue Formatting**: Using specific tags like `{{user}}:` and `{{char}}:` helps in directing the AI's responses and maintaining character consistency.\n3. **Compatibility and Formatting**: These tags ensure compatibility across different UI systems and convert into appropriate formats for various AI models.\n4. **User Input as Prompts**: The `{{user}}:` tag can guide the AI's responses and establish a pattern for interaction.\n5. **Preventing AI Response Leaks**: Proper use of tags and formatting can prevent the AI from directly quoting or leaking previous interactions.\n6. **Creating Effective Prompts**: Using descriptive actions and including character names in actions helps the AI connect sentences to specific characters.\n7. **Enhancing Flexibility**: Keeping example dialogues open-ended and minimal can allow the AI to generate more varied and creative responses.\n8. **Reinforcing Character Behavior**: If the AI's behavior deviates from desired outcomes, users can adjust or rewrite dialogues to better align with the character's traits.\n9. **Quality of Input**: The quality and creativity of the user's input directly influence the AI's output, emphasizing the importance of engaging and thoughtful interactions.",
+          "line_num": 115
+        },
+        {
+          "title": "**额外提示：**",
+          "node_id": "0004",
+          "prefix_summary": "The partial document provides tips for effectively utilizing the Ali:Chat platform by combining it with other styles and features. It suggests incorporating elements like Boostyle, W++, and Python Lists (PList) at the beginning of descriptions to enhance the AI's understanding and responses. The document recommends including these elements in the first line and using a depth of around 4 for better results. It also advises using author notes to include PList or Boostyle and emphasizes the importance of maintaining a consistent theme or tone in dialogue examples to guide the AI's responses. Additionally, the document suggests experimenting with different perspectives and tenses to create a cohesive narrative. It warns against using excessive quotation marks to prevent the AI from mistaking the dialogue for a novel. The document also highlights the usefulness of World Info for creating dynamic characters, as it allows dialogue examples to be triggered by specific keys, thereby saving tokens and enabling more varied interactions.",
+          "line_num": 166,
+          "nodes": [
+            {
+              "title": "**角色创建技巧**",
+              "node_id": "0005",
+              "summary": "### **角色创建技巧**\n\n---\n\n- 如果您需要帮助创建角色，您可以使用已创建/部分填写的卡片、CAI、ChatGPT 或直接从来源引用（注意：仅包含动作/上下文）向角色提问。\n\n- 您也可以使用 boostyle 作为指南（见下文）。将 boostyle 添加到描述的顶部，其中包含角色的特征。然后，在Ali：Chat中，通过对话示例来强化这些核心特征。您还可以编织其他特征/传说！",
+              "line_num": 188
+            },
+            {
+              "title": "**Ali：Chat vs 其他风格**",
+              "node_id": "0006",
+              "summary": "### **Ali：Chat vs 其他风格**\n\n---\n\n- Ali：Chat 可以比其他风格更高效，因为它有效地利用了对话示例。另外，很多个性是通过对话和行动暗示的;而大量的单词只有1-2个标记。\n\n- Ali：Chat 提供了与其他风格相比的更多控制;然而，这也意味着它可能更困难，因为它更多地依赖于你的写作。\n\n- Ali：Chat应该适用于任何模型和任何微调。（但是，[ ] 可能不起作用。",
+              "line_num": 196
+            },
+            {
+              "title": "**SillyTavern/TavernAI 提示**",
+              "node_id": "0007",
+              "summary": "### **SillyTavern/TavernAI 提示**\n\n---\n\n- {{char}} 和 <bot> 将转换为角色的名称\n\n- {{user}} 和 <user> 将转换为您的用户名。\n\n- 对于角色的名字，使用名字可以帮助 AI 更轻松地处理它。",
+              "line_num": 206
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "**SillyTavern - 角色卡**",
+      "node_id": "0008",
+      "prefix_summary": "# **SillyTavern - 角色卡**",
+      "line_num": 216,
+      "nodes": [
+        {
+          "title": "**描述**",
+          "node_id": "0009",
+          "summary": "This partial document provides guidelines for structuring a role-playing or conversational AI prompt. The main points covered are:\n\n1. **Purpose of the Box**: The box is intended to store all content that should remain in the context.\n\n2. **Permanence of Content**: The content within the box is permanent.\n\n3. **Role Description**: The first line should describe the role of the AI, with recommendations for styles like Ali:Chat, PList, or boostyle.\n\n4. **Optional Elements**: \n   - The second line can include `<START>`.\n   - Subsequent lines can include dialogue examples, which are optional but recommended.\n   - Dialogues should be separated by `{{char}}{{user}}` to indicate the speaker.\n\n5. **Inclusion of Tags/Schemes**: Tags or schemes can be included in the description, with an example provided.\n\n6. **Additional Information**: Other information, such as legends or background stories, can be included using PList/Boostyle or square bracket \"SBF\" format.\n\n7. **Formatting Hierarchy**: The intensity or importance of the content decreases from top to bottom, with the most important information at the bottom.\n\n8. **Examples Provided**: The document includes four examples demonstrating different ways to structure the content, such as using PList, dialogue emphasis, tags/schemes, and knowledge inclusion.",
+          "line_num": 218
+        },
+        {
+          "title": "**第一条消息（方案）**",
+          "node_id": "0010",
+          "summary": "The partial document focuses on the importance and usage of the \"first message\" or \"scenario\" in setting up interactions with an AI. It highlights that this initial message is temporary and doesn't restrict the AI's memory. The document emphasizes the significance of this message in establishing the role, story, pacing, tone, and setting of the interaction. It suggests that a detailed first message can enhance the AI's response length, though this effect is temporary. Additionally, it mentions the option to let the AI generate the scenario independently, with the user adding flavor text to guide the AI. The document also provides a link to a list of ideas for inspiration, particularly for users of Sigurd (GPT-J 6B), and notes that including {{user}} in the message allows the AI to incorporate the user's name in the interaction.",
+          "line_num": 252
+        },
+        {
+          "title": "**性格总结**",
+          "node_id": "0011",
+          "summary": "## **性格总结**\n\n---\n\n- 此框中的内容是永久性的。\n\n- 推荐用于“禁用个性格式”\n\n- 如果使用，请保持简短，只是为了加强某些特征。\n\n- 可以使用方括号格式，或者像 PList 或 Boostyle 这样的东西。\n\n\n选中“禁用个性格式”，如果您想使用“个性”框来添加详细信息。\n\n性格示例：将 PList 添加到“个性”框中",
+          "line_num": 273
+        },
+        {
+          "title": "**场景**",
+          "node_id": "0012",
+          "summary": "The partial document provides guidelines on using the \"场景\" (Scene) feature in a document. It emphasizes that the content within this box is permanent and suggests disabling the scenario format to utilize the enher scheme with brackets. It explains that the \"描述\" (Description) box functions similarly to the context but allows the use of double brackets and any tags from a provided database. The document advises on the strategic placement of \"[场景:]\" for varying levels of emphasis, from temporary and strong in \"对话示例\" to permanent but weaker in \"描述\" or strongest at the bottom/top of \"第一条消息\" (First Message). It also notes that the feature typically activates only if contextually appropriate, such as when a Dementor is mentioned, and suggests using the \"禁用场景格式\" (Disable Scenario Format) option when using tags in the \"场景\" box.",
+          "line_num": 290
+        },
+        {
+          "title": "**对话示例（隐藏场景）**",
+          "node_id": "0013",
+          "summary": "The partial document provides guidelines on using the \"Hidden Scene\" feature in a conversational AI context. It explains that the content within this section is temporary and won't restrict the chat memory unless the user chooses to keep it by selecting the \"Keep example messages in prompt\" option. The \"Hidden Scene\" is intended to be the last dialogue example and should align with the \"First Message\" to maintain consistency and enhance the character's personality or traits. It emphasizes the importance of overlap between the \"Hidden Scene\" and the \"First Message\" for effective functioning. Additionally, it suggests that all dialogue examples can be branched paths, akin to visual novels or multi-scene interactions, which should naturally follow from the first message and responses. These branches need to be diverse to avoid looping or jumping between branches. The document also mentions the optional inclusion of non-permanent chat examples at the top.",
+          "line_num": 308
+        }
+      ]
+    },
+    {
+      "title": "**SillyTavern - 设置**",
+      "node_id": "0014",
+      "prefix_summary": "# **SillyTavern - 设置**",
+      "line_num": 324,
+      "nodes": [
+        {
+          "title": "**皮格马利翁 7B 或 13B（启用 Pyg 格式 - 基本）**",
+          "node_id": "0015",
+          "summary": "### **Description of Partial Document: \"皮格马利翁 7B 或 13B（启用 Pyg 格式 - 基本）\"**\n\n1. **Red Section**: Discusses the selection criteria for character cards starting with a specific character. It advises selecting the option if the character card begins with the character, otherwise deselecting it and removing from the character card.\n\n2. **Orange Section**: Highlights that since Pygmalion 7B and 13B are based on the LLaMA model, the specified tokenizer should be used.\n\n3. **Yellow Section**: Suggests keeping the token padding at 0, but increasing it to 64 if context fills up and character behavior becomes incoherent. This helps prevent trimming of the top of the character card. For Ali:Chat, this is less of an issue due to the presence of example dialogues that retain the character's traits.\n\n4. **Green Section**: Emphasizes that the setting also helps prevent user impersonation by the AI.\n\n5. **Blue Section**: Indicates that `<START>` is used as a separator in Pygmalion, and these separators work better for 7B and 13B compared to 6B.\n\n6. **Purple Section**: Notes that many character cards are designed around the Pyg format, so keeping it enabled enhances compatibility and helps prevent impersonation. It also mentions the use of `You:` as part of the format.",
+          "line_num": 326
+        },
+        {
+          "title": "**皮格马利翁 7B 或 13B（禁用 Pyg 格式 - 高级）**",
+          "node_id": "0016",
+          "summary": "### Description of Partial Document: \n\nThis document provides guidelines for configuring a chatbot using the Pygmalion 7B or 13B models, with a focus on disabling the Pyg format for advanced usage. Key points include:\n\n1. **Role Configuration**: \n   - The \"Description\" box should include the character's persona and can optionally contain user-related questions or a brief life story.\n   - Examples are provided to illustrate the placement of the character within the description for optimal influence on the dialogue.\n\n2. **Tokenization and Model Compatibility**:\n   - The document advises using the appropriate tokenizer since Pygmalion 7B and 13B are based on the LLaMA model.\n   - It suggests setting the token padding to 0 and increasing it to 64 if context overflow causes incoherence in character behavior.\n\n3. **Formatting and Features**:\n   - The green section discusses disabling certain features to allow for paragraph continuation and NPC interactions in 1:1 conversations.\n   - The blue section mentions using `<START>` as a separator for better performance with 7B and 13B models.\n\n4. **Disabling Pyg Format**:\n   - The document emphasizes disabling all related formatting options when the Pyg format is turned off to avoid issues.\n   - It addresses the issue of the model favoring \"You:\" over \"{{user}}:\" by recommending the inclusion of multiple \"{{user}}:\" examples in the character card to reinforce the desired response format.\n   - It advises against using \"你：\" in the character card to prevent confusion.\n\n5. **Troubleshooting**:\n   - The document suggests that if \"You:\" responses persist, they will likely occur only in the initial messages and can be deleted or the process can be retried.\n\nOverall, the document serves as a detailed guide for setting up and troubleshooting a Pygmalion-based chatbot with a focus on advanced configuration and formatting adjustments.",
+          "line_num": 342
+        },
+        {
+          "title": "**其他模型（非指导）**",
+          "node_id": "0017",
+          "summary": "### **其他模型（非指导）**\n\n---",
+          "line_num": 374
+        }
+      ]
+    },
+    {
+      "title": "**角色卡**",
+      "node_id": "0018",
+      "prefix_summary": "# **角色卡**",
+      "line_num": 378,
+      "nodes": [
+        {
+          "title": "**哈利·波特 [SFW] [男]**",
+          "node_id": "0019",
+          "summary": "### **哈利·波特 [SFW] [男]**\n\n**主要内容概述：**\n\n1. **场景设定：** 故事发生在霍格沃茨魔法学校的格兰芬多公共休息室。房间内装饰着红色和金色的色调，营造出一种温馨的氛围。壁炉中的火焰噼啪作响，增添了归属感。\n\n2. **角色互动：** 哈利·波特是故事的主角，他正在公共休息室里享受独处的时光。他注意到火堆旁出现了一张新面孔，并对此表现出调皮和好奇的态度。\n\n3. **活动选择：** 哈利向新面孔提出了两个活动建议：玩爆炸镜像游戏或一起探索一本充满魔法和秘密的咒语书。这两个选择都体现了哈利对冒险和乐趣的热爱。\n\n4. **角色性格：** 文档中详细描述了哈利的性格特点，包括勇敢、报复、无私、冲动、善良、后悔、聪明、强迫症、忠诚、喜怒无常、宽容和傲慢。这些性格特征为角色互动和故事发展提供了丰富的背景。\n\n5. **格式和兼容性：** 文档提供了角色的PNG和JSON格式文件链接，确保兼容各种模型。文档还提到，如果响应过长，可能需要修剪起始消息或示例消息以适应不同需求。\n\n**总结：** 这段文档主要介绍了哈利·波特在霍格沃茨的格兰芬多公共休息室中的场景设定、角色互动、活动选择以及他的性格特点，为角色扮演和故事创作提供了详细的背景和指导。",
+          "line_num": 380
+        },
+        {
+          "title": "**Kei Karuizawa [SFW] [女]**",
+          "node_id": "0020",
+          "summary": "### Description of the Partial Document\n\nThe partial document introduces Kei Karuizawa, a confident and charming girl with blonde hair and purple eyes, who is depicted as a student at a world-famous academy. The document highlights her personality traits, including her strong will, independence, and a tough exterior that masks a sensitive and vulnerable side. Kei is portrayed as someone who is self-aware, valuing personal growth, and cherishing deep connections and loyalty in relationships. She is described as hopeful in difficult situations, enjoys light-hearted jokes even in serious conversations, and is capable of introspection and expressing her emotions to those she trusts. The document also emphasizes her desire to be a supportive and caring friend or partner, finding strength and pride in overcoming adversity. The scene describes Kei casually leaning against a wall, engaging with a stranger with curiosity and confidence, and offering assistance while maintaining a relaxed and carefree demeanor. The document provides links to character images and a JSON file for compatibility with various models.",
+          "line_num": 409
+        },
+        {
+          "title": "**劳拉·德·法尔内塞 [SFW] [女]**",
+          "node_id": "0021",
+          "summary": "### **劳拉·德·法尔内塞 [SFW] [女]**\n\n**主要内容：**\n\n1. **场景设定：** 故事发生在一个充满神秘和魔法的古老图书馆中，这里充满了被遗忘的知识和神奇的书籍。图书馆的环境昏暗，被魔法蜡烛照亮，营造出一种神秘而引人入胜的氛围。\n\n2. **角色介绍：** 劳拉·德·法尔内塞是一位对历史和魔法充满热情的角色。她聪明、迷人且内向，擅长战略和多种语言。她对学习和知识充满热情，并且是一位才华横溢的小提琴家和熟练的作曲家。\n\n3. **情节发展：** 劳拉在图书馆中漫步，被周围的环境和书籍所吸引。她对隐藏在这些古老书籍中的秘密表现出极大的兴趣，并开始探索这些知识。\n\n4. **角色互动：** 在探索过程中，劳拉遇到了另一个人，并对其意图感到好奇。她主动与对方展开对话，表现出她作为领导者和战略家的特质。\n\n5. **角色性格：** 劳拉被描述为超然、邪恶、健谈、沉着、冷静、愤世嫉俗且冷漠。她重视个人空间，矜持且蔑视傲慢，具有反英雄的特质。\n\n6. **兼容性和格式：** 该角色适用于所有型号，并提供了PNG、JSON和纯文本格式的下载链接，以便于在不同平台上使用。",
+          "line_num": 438
+        }
+      ]
+    },
+    {
+      "title": "**奥巴布加**",
+      "node_id": "0022",
+      "summary": "### Description of the Partial Document\n\nThe partial document provides guidelines for setting up a character card in TavernAI, focusing on the structure and components of the card. It highlights the importance of updating the \"Your Name\" field before selecting or reselecting a character to ensure that all placeholders like {{user}} are correctly replaced. The document outlines the following key points:\n\n1. **Red Section**: Emphasizes updating the \"Your Name\" field to replace placeholders with the chosen name, ensuring consistency with the character's name in example dialogues.\n\n2. **Orange Section**: Indicates that the \"Greeting\" field should contain the character's first message.\n\n3. **Yellow Section**: Specifies that the \"Character:\" field should be followed by the character description, which can be used in various AI models like Ali:Chat, PList, Boostyle, and W++.\n\n4. **Green Section**: Suggests that the \"Context\" field should include the entire character card, with a stronger emphasis on the bottom part compared to the top.\n\n5. **Blue Section**: Mentions that the <START> tag should be included at the end of the context to serve as a separator between the \"Context\" and \"Greeting\" fields.\n\nAdditionally, the document suggests adding another \"You:\" example above the <START> tag to prevent potential looping, which is particularly important for 6B models compared to 7B models.",
+      "line_num": 469
+    },
+    {
+      "title": "**狗头人AI 精简版**",
+      "node_id": "0023",
+      "summary": "### Description of Partial Document\n\nThe partial document provides guidelines for using the \"Goblin AI Lite\" tool, focusing on formatting and stylistic elements for creating AI-generated content. Key points include:\n\n1. **Color-Coded Elements**: \n   - **Pink**: Used for descriptions, personality traits, and example dialogues.\n   - **Green**: Reserved for specific purposes related to gnomes; for non-gnomes, alternative separators or dinkus should be used.\n   - **Blue (Optional)**: Indicates schemes or author's notes, which are enclosed in brackets.\n   - **Lavender**: Denotes author's notes specifically related to intensity levels.\n\n2. **Intensity Levels**: \n   - The intensity of the author's notes is measured by character count (including spaces). \n   - Recommended levels are:\n     - **Weak**: 160 characters\n     - **Medium**: 320 characters\n     - **Strong**: 480 characters\n   - The document advises using \"weak\" for most purposes, as it is still considered strong due to the inclusion of spaces and word boundaries, preventing mid-word insertions.\n\n3. **Adjusting Intensity**: \n   - If the brackets leak (i.e., the formatting is disrupted), the intensity should be reduced.\n   - If the character does not behave according to their traits, the intensity should be increased.\n\n4. **Editing Instructions**: \n   - Users are instructed to click the gear icon and select \"edit\" to modify their first message.\n   - The first message must start with \"Character:\".",
+      "line_num": 486
+    },
+    {
+      "title": "**高级提示**",
+      "node_id": "0024",
+      "summary": "The partial document provides guidance on creating interactive and engaging dialogue using a specific style, potentially for a \"murder mystery\" scenario. It emphasizes the use of placeholders like <START> and [ ] to structure conversations, incorporating relevant tags such as location and character names. The document suggests that this approach can help link information and create a cohesive narrative by drawing upon overlapping dialogue examples. It also provides an example of how to format a conversation entry with appropriate tags and character interactions.",
+      "line_num": 507
+    },
+    {
+      "title": "**场景制作者**",
+      "node_id": "0025",
+      "summary": "### 场景制作者文档描述\n\n该文档主要介绍了如何创建一个用于生成场景的角色，具体步骤如下：\n\n1. **创建角色**：首先创建一个新角色，并为其命名，建议使用中性名称，如“机器人”、“人工智能”、“生成器”或“地牢大师”等。\n\n2. **角色卡片设置**：角色的卡片应留空，除了第一条消息外。第一条消息可以使用方括号括起来的任何内容，用于描述场景或提供相关信息。\n\n3. **示例说明**：\n   - 示例1展示了如何通过方括号提供详细的场景信息，包括作者、类型、场景描述和标签。\n   - 示例2则是一个简单的场景描述，仅包含场景名称。\n\n4. **标签数据库**：文档中提供了一个链接，指向一个标签数据库，供用户参考和使用。\n\n5. **一次性示例**：文档中提到的示例都是一次性的，旨在帮助用户理解如何设置和描述场景。",
+      "line_num": 522
+    },
+    {
+      "title": "**世界信息**",
+      "node_id": "0026",
+      "summary": "### 世界信息文档描述\n\n这份文档主要讨论了“世界信息”（WI）在角色扮演中的使用方式及注意事项：\n\n1. **对话形式**：世界信息中的条目以角色视角下的对话形式呈现，确保角色仅基于已知信息进行互动。\n\n2. **示例对话**：每个条目可以包含多个示例对话，以引导和推动角色的响应。\n\n3. **避免混淆细节**：为了保持准确性，建议避免在条目中包含过多令人困惑的细节，以免产生不准确的回答。\n\n4. **关系处理**：关系可以作为独立的WI条目处理，使用“选择性”方式在主键和辅助键中分别包含不同的角色。\n\n5. **复杂概念的处理**：对于复杂概念或问题，建议使用较高的插入顺序和“After chara”标签，以提高角色做出准确或相关响应的可能性。\n\n6. **示例**：文档提供了两个示例，分别是使用键激活位置/方案“[ ]”和使用Ali：Chat获取知识的方法。",
+      "line_num": 542
+    },
+    {
+      "title": "**相关链接**",
+      "node_id": "0027",
+      "summary": "This partial document serves as a resource hub for AI-driven character interaction and role-playing, primarily focusing on platforms like Ali:Chat and Pygmalion. It provides a collection of guides, tools, and repositories to assist users in creating and managing characters. Key components include:\n\n1. **Guides and Tutorials**: Links to detailed guides on using Chat Lite, PLists, and character creation, offering step-by-step instructions and best practices.\n2. **Character Creation Tools**: Access to a dedicated Character Creator for generating JSON files, streamlining the process of developing AI characters.\n3. **Ranking and Tips**: An additional Large Language Model (LLM) role-playing ranking resource and a variety of tips for enhancing interactions and character development.\n4. **Prose Guidelines**: Specific rules for prose writing, applicable to Ali:Chat, ensuring high-quality and engaging narratives.\n5. **Character Repositories**: A compilation of links to various repositories housing a wide range of pre-made characters, providing users with diverse options to explore and utilize in their projects.\n6. **Additional Resources**: Further links to supplementary materials and libraries, expanding the available content for users to draw from.\n\nOverall, the document acts as a comprehensive directory for individuals interested in AI-driven role-playing, offering a wealth of tools and information to support their creative endeavors.",
+      "line_num": 561
+    },
+    {
+      "title": "**常见问题**",
+      "node_id": "0028",
+      "summary": "### 常见问题解答：Ali:Chat 与 TavernAI (1.3+) 使用指南\n\n1. **面试形式的使用**：\n   - 面试形式是可选的，主要用于通过动作和对话展示角色的不同方面，是一种简便的方法。\n\n2. **与其他风格的结合**：\n   - 可以将 Ali:Chat 与其他风格（如 boostyle）结合使用，只需在“描述”顶部或“个性”框中包含相关风格即可。\n\n3. **角色行为变化问题**：\n   - 当聊天上下文过大时，角色行为可能发生变化。建议减小聊天上下文大小，或增加“数量生成”以增强 AI 对当前对话的影响。同时，持续强化角色特征有助于保持其一致性。\n\n4. **角色卡大小的影响**：\n   - 角色卡大小（如 1100 个代币）会影响聊天记忆。“描述”、“个性”和“场景”构成角色背景，减少聊天记忆；“对话示例”和“第一条消息”不影响聊天记忆；“数量生成”和用户输入也会减少聊天记忆。\n\n5. **TavernAI (1.3+) 上的 Pygmalion 格式**：\n   - 禁用 Pygmalion 格式的效果尚需测试，但用户可以尝试并分享经验。禁用后，Ali:Chat 会调整文本格式，如在“性格摘要”前添加“{{char}}'s personality:”，并在“对话示例”框顶部添加“This is how {{char}} should talk”。\n   - 启用 Pygmalion 格式时，会在相应位置添加“{{char}}'s Persona:”、“Personality:”、“Scenario:”和“<START>”。建议删除所有“<START>”实例以获得更好的效果。",
+      "line_num": 601
+    },
+    {
+      "title": "**附录**",
+      "node_id": "0029",
+      "summary": "# **附录**\n\n---\n\n上下文模型示例 #1（2048 个令牌）（基于粗略的平均字符卡大小）（这纯粹是视觉上的，其他布局也可以）\n\n上下文模型示例 #2（2048 个令牌）（这纯粹是视觉上的，其他布局也可以）\n\n上下文模型示例 #3（1400 个令牌）（这纯粹是视觉上的，其他布局也可以）",
+      "line_num": 661
+    },
+    {
+      "title": "**游戏通关**",
+      "node_id": "0030",
+      "prefix_summary": "# **游戏通关**\n\n---",
+      "line_num": 671,
+      "nodes": [
+        {
+          "title": "**示例 #1 - 叙述人样式**",
+          "node_id": "0031",
+          "summary": "### Description of the Partial Document\n\nThe partial document provides a detailed walkthrough of creating and managing a collaborative storytelling session using a role-playing format with AI assistance. It focuses on three main scenes involving four characters: Vesper, Balor, Sansa, and Nala. \n\n1. **Scene 1 - Vesper and Balor**: The document begins by setting up the initial scene where Vesper and Balor are discussing their plan to rob a bank. It emphasizes the process of interacting with the AI, including how to input messages, use the \"impersonate\" feature, and refine the AI's responses to better align with the user's vision. The user demonstrates how to adjust the narrative flow by deleting unsatisfactory responses and regenerating the AI's output.\n\n2. **Scene 2 - Sansa and Nala**: The focus shifts to a new scene involving Sansa and Nala. The document outlines different methods to transition between scenes, such as using the \"Narrator\" or character names to introduce scene changes. It highlights the importance of organizing and consolidating messages for clarity. The user seeks AI assistance to develop Nala's character and backstory, demonstrating how to integrate new information into the narrative.\n\n3. **Scene 3 - Nala and Balor**: The document introduces a third scene with Nala and Balor, exploring their past relationship and how it influences the current story. It suggests a flashback to explain Nala's knowledge of Balor and Vesper's plan, adding depth to the narrative. The user considers the possibility of a conflict between Nala and Balor, suggesting a dynamic where Nala uses the situation to her advantage, potentially betraying Balor for personal gain.\n\nThroughout the document, the user emphasizes the iterative process of storytelling, showcasing how to refine and enhance the narrative through trial and error, and the importance of character development and backstory in creating a compelling story.",
+          "line_num": 675
+        }
+      ]
+    }
+  ]
+}

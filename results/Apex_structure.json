@@ -1,0 +1,80 @@
+{
+  "doc_name": "Apex",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\Apex.md",
+  "structure": [
+    {
+      "title": "Apex — Agent Scheduling Daemon",
+      "node_id": "0000",
+      "prefix_summary": "# Apex — Agent Scheduling Daemon\n\n> Unified agent scheduler replacing ASL / FSC scheduler / A2A coordinator\n> Created: 2026-03-20",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "What",
+          "node_id": "0001",
+          "summary": "## What\n\nGo 单进程 daemon，管理 1000 并发 AI agent 的任务调度、预算控制、能力匹配。\n运行在 SUPER (64核/377GB)，通过 UDS + MessagePack 服务 Python 和 TypeScript 调用方。",
+          "line_num": 6
+        },
+        {
+          "title": "Why",
+          "node_id": "0002",
+          "summary": "## Why\n\n- ARL-Tangram 论文 (arXiv:2603.13019) 启发：action 级资源建模比 trajectory 级高效 4.3x\n- 原来 8 个组件名太碎 (ASL/FSC/A2A/clawapi/OMC/NanoClaw/OpenClaw/ClawMesh)\n- Python + TypeScript 双运行时在弱 CPU 上开销大，Go 单进程解决",
+          "line_num": 11
+        },
+        {
+          "title": "Architecture",
+          "node_id": "0003",
+          "summary": "## Architecture\n\n```\napexd (Go, ~50MB)\n├── Orchestration: submit_job, upsert_tasks, cancel\n├── Execution: register_agent, heartbeat, pull_tasks, finish_task\n└── Budget: request_action_budget, finish_action\n\nAgents (1000x, PULL model)\n├── Claude Code agents\n├── Codex agents\n└── Custom agents\n\nRedis ← backing store only (snapshots, not hot path)\nLiteLLM ← API gateway below Apex\n```",
+          "line_num": 17
+        },
+        {
+          "title": "Key Decisions (Claude × Codex × Gemini)",
+          "node_id": "0004",
+          "summary": "## Key Decisions (Claude × Codex × Gemini)\n\n| Decision                    | Rationale                         |\n| --------------------------- | --------------------------------- |\n| Go over Rust                | 控制面并发，不是计算面性能                     |\n| PULL over PUSH              | 自然负载均衡 + 崩溃自愈                     |\n| UDS + MessagePack over HTTP | 50-100x faster, 低 CPU 开销          |\n| Redis 降级                    | 单线程 Lua 脚本在 1000 agent 下是瓶颈       |\n| LiteLLM 在 Apex 下面           | Apex = 调度脑, LiteLLM = provider 管道 |\n| Planner agent 拆任务           | Daemon 不调 LLM，无智能                 |",
+          "line_num": 34
+        },
+        {
+          "title": "Three-Layer Abstraction",
+          "node_id": "0005",
+          "summary": "## Three-Layer Abstraction\n\n```\nJob  (\"给项目加 OAuth\")      — 用户意图\nTask (\"写 auth middleware\")  — 可调度单元，有依赖\nAction (一次 Claude API 调用) — 计费粒度\n```",
+          "line_num": 45
+        },
+        {
+          "title": "Naming Convention",
+          "node_id": "0006",
+          "summary": "## Naming Convention\n\n| Old | New |\n|---|---|\n| asl-daemon, FSC scheduler, A2A coordinator | **apexd** |\n| clawapi-manager | **apex-router** |\n| Claw Mesh | **apex-mesh** |\n| NanoClaw | **apex-cli** |\n| OMC + agents repo | **apex-plugins** |",
+          "line_num": 53
+        },
+        {
+          "title": "Repo",
+          "node_id": "0007",
+          "summary": "## Repo\n\n- `D:/projects/apex` — Go daemon\n- `D:/projects/clawapi-manager` — Python prototype + client (pending rename to apex-router)\n- `D:/projects/a2a-dev` — coordinator integration",
+          "line_num": 63
+        },
+        {
+          "title": "Status (2026-03-20)",
+          "node_id": "0008",
+          "summary": "## Status (2026-03-20)\n\n- Go daemon: 9 RPC, 4 packages, 25 tests, E2E passing\n- Python prototype: 5 modules, 29 tests\n- Python client: apex_client.py\n- Capability matching: AllOf/AnyOf/Avoid/MinModelTier\n- DAG cycle detection: BFS ancestor walk\n- Research report: `apex/RESEARCH_REPORT.md`",
+          "line_num": 69
+        },
+        {
+          "title": "Next Steps",
+          "node_id": "0009",
+          "summary": "## Next Steps\n\n1. Deploy apexd to SUPER\n2. RouteLLM integration (replace 4-zone heuristic)\n3. Redis snapshot for crash recovery\n4. TypeScript client for FSC\n5. Sharded state for >1000 agents",
+          "line_num": 78
+        },
+        {
+          "title": "Related Papers",
+          "node_id": "0010",
+          "summary": "## Related Papers\n\n- ARL-Tangram (2603.13019) — action-level resource modeling\n- PROSERVE (2512.12928) — multi-priority LLM scheduling\n- Adaptive Budget Routing (2508.21141) — bandit + budget\n- Agent.xpu (2506.24045) — heterogeneous scheduling + backfill\n- RouteLLM (2406.18665) — learned weak-vs-strong routing",
+          "line_num": 86
+        },
+        {
+          "title": "Links",
+          "node_id": "0011",
+          "summary": "## Links\n\n- [[claw-mesh]] — 跨节点网络 (→ apex-mesh)\n- [[FSC]] — 执行引擎 (scheduler 部分被 apexd 替代)\n- [[a2a-dev]] — agent 协调 (coordinator 集成了 Apex)\n- [[ClawAPI]] — API 路由 (→ apex-router)\n- [[oh-my-claudecode]] — 插件生态 (→ apex-plugins)",
+          "line_num": 94
+        }
+      ]
+    }
+  ]
+}

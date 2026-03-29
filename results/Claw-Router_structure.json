@@ -1,0 +1,256 @@
+{
+  "doc_name": "claw-router",
+  "source_path": "E:/knowledge/Knowledge\\Projects\\claw-router.md",
+  "structure": [
+    {
+      "title": "Claw Router",
+      "node_id": "0000",
+      "prefix_summary": "# Claw Router\n\n智能 LLM API 路由器，提供统一的 OpenAI 兼容接口，支持多上游系统、协议转换、智能路由和熔断保护。",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "核心功能",
+          "node_id": "0001",
+          "summary": "The partial document outlines the core features of a system designed for seamless integration and enhanced performance in AI model interactions. Key points include:\n\n1. **Protocol Conversion**: Enables bidirectional conversion between OpenAI and Anthropic Messages API formats.\n2. **Intelligent Routing**: Automatically selects the most suitable AI model (vision, code, reasoning, fast, default) based on the content of the request.\n3. **Circuit Breaker Protection**: Implements automatic failover with a circuit breaker that activates after three failures and resets after 60 seconds.\n4. **Multi-Upstream Support**: Supports multiple upstream sources including Volcano Engine Ark, local CLI agents, and internal Hub clusters.\n5. **Monitoring Dashboard**: Provides real-time monitoring of routing status, circuit breaker status, and Hub health.\n6. **Security Enhancements**: Includes API key verification, rate limiting, and request size restrictions to ensure secure operations.",
+          "line_num": 5
+        },
+        {
+          "title": "快速开始",
+          "node_id": "0002",
+          "prefix_summary": "## 快速开始",
+          "line_num": 14,
+          "nodes": [
+            {
+              "title": "1. 安装依赖",
+              "node_id": "0003",
+              "summary": "### 1. 安装依赖\n\n```bash\n# 克隆项目\ngit clone https://github.com/2233admin/claw-router.git\ncd claw-router\n\n# 安装（Python 3.11+）\npip install -e .\n```",
+              "line_num": 16
+            },
+            {
+              "title": "2. 配置环境变量",
+              "node_id": "0004",
+              "summary": "### 2. 配置环境变量\n\n```bash\n# 复制配置模板\ncp config/.env.example .env\n\n# 编辑 .env 填入 API keys\n# ARK_API_KEY=your_ark_key\n# CLIPROXY_KEY=your_cliproxy_key\n# HUB_*_AUTH=your_hub_auth_tokens\n```",
+              "line_num": 27
+            },
+            {
+              "title": "3. 配置路由规则",
+              "node_id": "0005",
+              "summary": "### 3. 配置路由规则\n\n编辑 `config/routes.yaml`:\n\n```yaml\nroutes:\n  vision:    [ark:doubao-seed-2.0-pro]\n  code:      [hub:deepseek, hub:gemini]\n  reasoning: [hub:deepseek-think, hub:kimi]\n  fast:      [hub:gemini-flash, hub:glm]\n  default:   [hub:gemini, hub:qwen]\n\naliases:\n  claude: \"cli:claude-sonnet-4-6\"\n  deepseek: \"hub:deepseek\"\n```",
+              "line_num": 39
+            },
+            {
+              "title": "4. 配置上游服务",
+              "node_id": "0006",
+              "summary": "### 4. 配置上游服务\n\n编辑 `config/hubs.yaml`:\n\n```yaml\nupstreams:\n  ark:\n    base: \"https://ark.cn-beijing.volces.com/api/coding/v1\"\n    protocol: anthropic\n    auth: \"${ARK_API_KEY}\"\n\nhubs:\n  deepseek:\n    base: \"http://10.10.0.3:8011\"\n    model: deepseek-chat\n    auth: \"${HUB_DEEPSEEK_AUTH}\"\n```",
+              "line_num": 56
+            },
+            {
+              "title": "5. 启动服务",
+              "node_id": "0007",
+              "summary": "### 5. 启动服务\n\n```bash\n# 开发模式（自动重载）\nclaw-router serve --reload\n\n# 生产模式\nclaw-router serve --port 3456 --host 0.0.0.0\n```\n\n服务启动后访问：\n- API 端点: `http://localhost:3456/v1/chat/completions`\n- 仪表板: `http://localhost:3456/dashboard`\n- 健康检查: `http://localhost:3456/health`\n- 监控指标: `http://localhost:3456/metrics`",
+              "line_num": 74
+            }
+          ]
+        },
+        {
+          "title": "API 使用",
+          "node_id": "0008",
+          "prefix_summary": "## API 使用",
+          "line_num": 90,
+          "nodes": [
+            {
+              "title": "基本请求",
+              "node_id": "0009",
+              "summary": "### 基本请求\n\n```bash\ncurl -X POST http://localhost:3456/v1/chat/completions \\\n  -H \"Content-Type: application/json\" \\\n  -H \"Authorization: Bearer your_api_key\" \\\n  -d '{\n    \"model\": \"auto\",\n    \"messages\": [\n      {\"role\": \"user\", \"content\": \"Hello!\"}\n    ]\n  }'\n```",
+              "line_num": 92
+            },
+            {
+              "title": "指定模型",
+              "node_id": "0010",
+              "summary": "### 指定模型\n\n```bash\n# 使用别名\ncurl ... -d '{\"model\": \"deepseek\", \"messages\": [...]}'\n\n# 使用完整前缀\ncurl ... -d '{\"model\": \"hub:deepseek\", \"messages\": [...]}'\ncurl ... -d '{\"model\": \"ark:doubao-seed-2.0-pro\", \"messages\": [...]}'\ncurl ... -d '{\"model\": \"cli:claude-sonnet-4-6\", \"messages\": [...]}'\n```",
+              "line_num": 106
+            },
+            {
+              "title": "流式响应",
+              "node_id": "0011",
+              "summary": "### 流式响应\n\n```bash\ncurl ... -d '{\n  \"model\": \"auto\",\n  \"messages\": [...],\n  \"stream\": true\n}'\n```",
+              "line_num": 118
+            },
+            {
+              "title": "多模态（图片）",
+              "node_id": "0012",
+              "summary": "### 多模态（图片）\n\n```bash\ncurl ... -d '{\n  \"model\": \"auto\",\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": [\n      {\"type\": \"text\", \"text\": \"What is in this image?\"},\n      {\"type\": \"image_url\", \"image_url\": {\"url\": \"data:image/jpeg;base64,...\"}}\n    ]\n  }]\n}'\n```",
+              "line_num": 128
+            }
+          ]
+        },
+        {
+          "title": "智能路由",
+          "node_id": "0013",
+          "summary": "## 智能路由\n\n路由器会根据请求内容自动分类并选择最佳模型：\n\n| 分类 | 触发条件 | 优先模型 |\n|------|----------|----------|\n| **vision** | 包含图片内容 | doubao-seed-2.0-pro |\n| **code** | 代码关键词（code, debug, function, 写代码） | deepseek → gemini |\n| **reasoning** | 推理关键词（analyze, think, 分析, 推理） | deepseek-think → kimi |\n| **fast** | 简短文本 + 快速关键词（translate, hello） | gemini-flash → glm |\n| **default** | 其他 | gemini → qwen |",
+          "line_num": 143
+        },
+        {
+          "title": "熔断器",
+          "node_id": "0014",
+          "summary": "## 熔断器\n\n自动保护系统免受故障模型影响：\n\n- **阈值**: 3 次失败后打开\n- **冷却**: 60 秒后自动尝试恢复\n- **降级**: 自动跳过打开的熔断器，选择下一个可用模型\n\n查看熔断器状态：\n\n```bash\ncurl http://localhost:3456/status\n```",
+          "line_num": 155
+        },
+        {
+          "title": "CLI 工具",
+          "node_id": "0015",
+          "summary": "## CLI 工具\n\n```bash\n# 启动服务\nclaw-router serve --port 3456\n\n# 显示路由表\nclaw-router status\n\n# 检查所有 Hub 健康状态\nclaw-router health\n\n# 部署到生产环境\nclaw-router deploy\n```",
+          "line_num": 169
+        },
+        {
+          "title": "配置说明",
+          "node_id": "0016",
+          "prefix_summary": "## 配置说明",
+          "line_num": 185,
+          "nodes": [
+            {
+              "title": "路由规则 (routes.yaml)",
+              "node_id": "0017",
+              "summary": "### 路由规则 (routes.yaml)\n\n```yaml\nroutes:\n  <capability>: [<model1>, <model2>, ...]  # 优先级列表\n\naliases:\n  <short_name>: \"<prefix>:<model_id>\"      # 别名映射\n\nno_vision:\n  - \"<model>\"                              # 不支持视觉的模型\n\nsignals:\n  <capability>: '<regex_pattern>'          # 分类正则表达式\n```",
+              "line_num": 187
+            },
+            {
+              "title": "上游配置 (hubs.yaml)",
+              "node_id": "0018",
+              "summary": "### 上游配置 (hubs.yaml)\n\n```yaml\nupstreams:\n  <name>:\n    base: \"<base_url>\"\n    protocol: \"openai\" | \"anthropic\"\n    auth: \"${ENV_VAR}\"\n    timeout: <seconds>\n\nhubs:\n  <name>:\n    base: \"<base_url>\"\n    model: \"<model_id>\"\n    auth: \"${ENV_VAR}\"\n```",
+              "line_num": 203
+            },
+            {
+              "title": "环境变量 (.env)",
+              "node_id": "0019",
+              "summary": "### 环境变量 (.env)\n\n```bash\n# 火山引擎 Ark\nARK_API_KEY=your_ark_key\n\n# 本地 CLI 代理\nCLIPROXY_KEY=your_cliproxy_key\n\n# Hub 认证（可选）\nHUB_KIMI_AUTH=your_token\nHUB_DEEPSEEK_AUTH=your_token\n# ...\n```",
+              "line_num": 220
+            }
+          ]
+        },
+        {
+          "title": "部署",
+          "node_id": "0020",
+          "prefix_summary": "## 部署",
+          "line_num": 235,
+          "nodes": [
+            {
+              "title": "Systemd 服务",
+              "node_id": "0021",
+              "summary": "### Systemd 服务\n\n```bash\n# 复制服务文件\nsudo cp deploy/claw-router.service /etc/systemd/system/\n\n# 启用并启动\nsudo systemctl daemon-reload\nsudo systemctl enable claw-router\nsudo systemctl start claw-router\n\n# 查看状态\nsudo systemctl status claw-router\n\n# 查看日志\nsudo journalctl -u claw-router -f\n```",
+              "line_num": 237
+            },
+            {
+              "title": "Docker 部署",
+              "node_id": "0022",
+              "summary": "### Docker 部署\n\n```bash\n# 构建镜像\ndocker build -t claw-router .\n\n# 运行容器\ndocker run -d \\\n  --name claw-router \\\n  -p 3456:3456 \\\n  -v $(pwd)/config:/app/config \\\n  -v $(pwd)/.env:/app/.env \\\n  claw-router\n```",
+              "line_num": 255
+            },
+            {
+              "title": "一键部署",
+              "node_id": "0023",
+              "summary": "### 一键部署\n\n```bash\n# 部署到生产服务器（43.156.202.94）\nclaw-router deploy\n```",
+              "line_num": 270
+            }
+          ]
+        },
+        {
+          "title": "监控",
+          "node_id": "0024",
+          "prefix_summary": "## 监控",
+          "line_num": 277,
+          "nodes": [
+            {
+              "title": "仪表板",
+              "node_id": "0025",
+              "summary": "### 仪表板\n\n访问 `http://localhost:3456/dashboard` 查看：\n- 路由表和熔断器状态\n- Hub 健康状态和延迟\n- 实时刷新（10 秒）",
+              "line_num": 279
+            },
+            {
+              "title": "Prometheus 指标",
+              "node_id": "0026",
+              "summary": "### Prometheus 指标\n\n访问 `http://localhost:3456/metrics` 获取：\n- `claw_router_requests_total` - 总请求数\n- `claw_router_request_duration_seconds` - 请求延迟\n- `claw_router_errors_total` - 错误数\n- `claw_router_breaker_open` - 熔断器状态",
+              "line_num": 286
+            },
+            {
+              "title": "健康检查",
+              "node_id": "0027",
+              "summary": "### 健康检查\n\n```bash\ncurl http://localhost:3456/health\n```\n\n返回所有上游的健康状态和延迟。",
+              "line_num": 294
+            }
+          ]
+        },
+        {
+          "title": "故障排查",
+          "node_id": "0028",
+          "prefix_summary": "## 故障排查",
+          "line_num": 302,
+          "nodes": [
+            {
+              "title": "服务无法启动",
+              "node_id": "0029",
+              "summary": "### 服务无法启动\n\n```bash\n# 检查配置文件\nclaw-router status\n\n# 检查环境变量\ncat .env\n\n# 检查端口占用\nlsof -i :3456\n```",
+              "line_num": 304
+            },
+            {
+              "title": "Hub 连接失败",
+              "node_id": "0030",
+              "summary": "### Hub 连接失败\n\n```bash\n# 检查 Hub 健康状态\nclaw-router health\n\n# 手动测试连接\ncurl http://10.10.0.3:8011/v1/models\n```",
+              "line_num": 317
+            },
+            {
+              "title": "熔断器频繁打开",
+              "node_id": "0031",
+              "summary": "### 熔断器频繁打开\n\n```bash\n# 查看熔断器状态\ncurl http://localhost:3456/status\n\n# 检查上游日志\nsudo journalctl -u claw-router -f | grep breaker\n```",
+              "line_num": 327
+            },
+            {
+              "title": "请求被拒绝",
+              "node_id": "0032",
+              "summary": "### 请求被拒绝\n\n```bash\n# 检查 API key\ncurl -H \"Authorization: Bearer your_key\" http://localhost:3456/v1/models\n\n# 检查速率限制\n# 默认：100 req/min per key\n```",
+              "line_num": 337
+            }
+          ]
+        },
+        {
+          "title": "架构",
+          "node_id": "0033",
+          "summary": "### 架构描述\n\n该文档描述了一个兼容OpenAI的客户端架构，主要由以下几个部分组成：\n\n1. **客户端 (OpenAI 兼容)**:\n   - 作为用户接口，与Claw Router进行交互。\n\n2. **Claw Router (FastAPI)**:\n   - 核心组件，负责处理来自客户端的请求。\n   - 主要功能包括：\n     - **请求分类**: 对接收到的请求进行分类。\n     - **模型选择**: 根据请求类型选择合适的模型。\n     - **协议转换**: 将请求协议转换为目标上游服务所需的协议。\n     - **上游调用**: 将转换后的请求发送到上游服务。\n   - 包含以下子组件：\n     - **正则匹配**: 用于请求分类。\n     - **熔断器检查**: 监控请求状态，防止服务过载。\n     - **OpenAI↔Anthropic**: 协议转换模块，负责在OpenAI和Anthropic之间进行协议转换。\n     - **httpx**: 用于发送HTTP请求。\n\n3. **熔断器**:\n   - 监控上游服务的失败情况，并根据失败率进行流量控制。\n\n4. **健康检查**:\n   - 通过后台ping所有上游服务，确保其可用性。\n\n5. **上游服务**:\n   - **Ark (火山)**: Anthropic的上游服务。\n   - **CLI (本地)**: 本地运行的OpenAI服务。\n   - **Hub (内网)**: 内网中的OpenAI服务。\n\n该架构设计旨在通过Claw Router统一管理不同类型的服务请求，并提供熔断器和健康检查机制以确保系统的稳定性和可靠性。",
+          "line_num": 347
+        },
+        {
+          "title": "开发",
+          "node_id": "0034",
+          "prefix_summary": "## 开发",
+          "line_num": 374,
+          "nodes": [
+            {
+              "title": "运行测试",
+              "node_id": "0035",
+              "summary": "### 运行测试\n\n```bash\n# 安装开发依赖\npip install -e \".[dev]\"\n\n# 运行测试\npytest\n\n# 测试覆盖率\npytest --cov=claw_router --cov-report=html\n```",
+              "line_num": 376
+            },
+            {
+              "title": "代码格式化",
+              "node_id": "0036",
+              "summary": "### 代码格式化\n\n```bash\n# 使用 ruff\nruff check src/\nruff format src/\n```",
+              "line_num": 389
+            }
+          ]
+        },
+        {
+          "title": "许可证",
+          "node_id": "0037",
+          "summary": "## 许可证\n\nMIT License",
+          "line_num": 397
+        },
+        {
+          "title": "贡献",
+          "node_id": "0038",
+          "summary": "## 贡献\n\n欢迎提交 Issue 和 Pull Request！",
+          "line_num": 401
+        }
+      ]
+    }
+  ]
+}

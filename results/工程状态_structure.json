@@ -1,0 +1,56 @@
+{
+  "doc_name": "工程状态",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\Sprachwelt\\工程状态.md",
+  "structure": [
+    {
+      "title": "Sprachwelt 工程状态",
+      "node_id": "0000",
+      "prefix_summary": "# Sprachwelt 工程状态",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "概览",
+          "node_id": "0001",
+          "summary": "## 概览\n\n| 维度 | 状态 |\n|------|------|\n| 阶段 | Phase 0 Week 2 完成 |\n| 语言 | Rust (纯CPU) |\n| 测试 | 122 pass, 1 ignored |\n| LLM后端 | MiniMax-M2.7-highspeed (不限量) |\n| 项目路径 | `D:\\claude-workspace\\sprachwelt\\` |",
+          "line_num": 9
+        },
+        {
+          "title": "架构：6 Crates",
+          "node_id": "0002",
+          "summary": "Describes project structure with six Rust crates: core defining shared types; ledger providing SQLite event log, FSM validation, anti-resurrection, projection; tension containing rule and LLM extractors plus graph dynamics; acts implementing seven discourse act planner; audit verifying generated texts execute plan; pipeline integrating everything through CLI and process_turn. Also notes data/golden_cases sample annotated interaction, Python tools for prompts, evaluation, legacy crystallizer, and CLAUDE.md as architecture anchor auto-loaded in sessions.",
+          "line_num": 19
+        },
+        {
+          "title": "七步管线",
+          "node_id": "0003",
+          "summary": "A seven-step pipeline is described, comprising: (1) a rule-based and LLM fallback extractor, (2) a field dynamics module using decay, additive reinforcement, and antagonistic hotspots to mark intensified or lost events, (3) an unimplemented situated convergence phase, (4) an action planner selecting utterances from frontier states, (5) a crystallizer using MiniMax to generate text, (6) an action auditor verifying outcomes (Passed/Partial/Failed), and (7) mapping actions to events in a ledger.",
+          "line_num": 39
+        },
+        {
+          "title": "核心概念→代码映射",
+          "node_id": "0004",
+          "summary": "The document outlines a mapping between Heideggerian conceptual terms and corresponding code fields. It pairs philosophical notions such as the asked (Gefragtes), the questioned (Befragtes), and what is sought (Erfragtes) with data attributes like `demand`, `counter_demand`, and `stake`. It also specifies representations for tension, disclosure events (opening and losing tension), and discourse acts (seven types including Pursue, Concede, Clarify, Converge, Counter, HoldOpen, and OpenNew).",
+          "line_num": 53
+        },
+        {
+          "title": "关键决策记录",
+          "node_id": "0005",
+          "summary": "关键决策包括：采用 Rust + CPU 架构并按阶段评估是否引入 Triton/CUTLASS；保持 demand/counter_demand/stake 的三层映射；以事件溯源方式派生状态；实施 lineage_hash、Jaccard 和 owner-demand 组合的防复活检测；使用 MiniMax 执行提取与结晶；通过 serde_json::to_vec() 与 .body(bytes) 避免 Windows 中文乱码；故意让规则提取器失败以证明 LLM 方案必要性；将 emotion_redirect 与 safety_derail 等 anti-patterns 视为一流测试数据。",
+          "line_num": 65
+        },
+        {
+          "title": "气味追问链 (case-016)",
+          "node_id": "0006",
+          "summary": "## 气味追问链 (case-016)\n\n9轮对话，核心场景：女儿问妈妈为什么家里有消毒水味道。\n\n- Turns 1-2: 规则提取器可捕获（问号标记）\n- Turns 3-9: 规则提取器失败，需要LLM推理矛盾\n- 2个anti-patterns: 情绪转向(emotion_redirect)、安全脱轨(safety_derail)\n- 每轮标注: demand(所问) + counter_demand(所问及) + stake(所以问)",
+          "line_num": 76
+        },
+        {
+          "title": "下一步",
+          "node_id": "0007",
+          "summary": "## 下一步\n\n1. **多轮上下文**: 传递对话历史给LLM提取器，改善跨轮张力检测\n2. **Phase 1: SituatedConvergence**: 接入hist-mat v6.0 + 专家人设作为情境源\n3. **盲评**: 第一个里程碑 — 人类无法区分系统输出与人类回复\n4. **审计增强**: Failed时触发re-crystallization循环\n5. **Phase 2+**: GPU加速(如果FieldDynamics成为瓶颈)",
+          "line_num": 85
+        }
+      ]
+    }
+  ]
+}

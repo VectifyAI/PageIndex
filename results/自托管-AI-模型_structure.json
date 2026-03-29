@@ -1,0 +1,78 @@
+{
+  "doc_name": "自托管 AI 模型",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\SillyTavern 官方文档\\本地LLM指南\\自托管 AI 模型.md",
+  "structure": [
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-use-a-self-hosted-model/#hardware-requirements-and-orientation)硬件要求和方向",
+      "node_id": "0000",
+      "prefix_summary": "This partial document provides an overview of the hardware requirements and considerations for running self-hosted large language models (LLMs). It emphasizes that while powerful GPUs with large VRAM are ideal for running unmodified LLMs, various techniques and optimizations can make it feasible to run these models on more modest hardware. Key points include:\n\n1. **Availability of LLMs**: Thousands of free LLMs are available for download, similar to the abundance of image generation models like Stable Diffusion.\n\n2. **VRAM Requirements**: Running unmodified LLMs requires substantial VRAM, often more than what typical consumer GPUs possess.\n\n3. **Quantization Techniques**: Methods like GPTQ or AWQ can compress models to reduce VRAM requirements, albeit with some performance trade-offs. This makes it possible to run larger models on gaming GPUs like the 3080.\n\n4. **GGUF Format**: This model format and quantization method allows running LLMs on CPUs and RAM, making it accessible for users without powerful GPUs. While slower than GPU-based execution, it maintains model capabilities. GGUF also offers an option to offload parts of the model to the GPU for faster processing.\n\n5. **Model Sizes**: LLMs are categorized by their parameter counts (e.g., 7B, 13B, 30B, 70B), with larger models generally offering better performance but requiring more VRAM/RAM.\n\n6. **Quantization Levels**: Different quantization levels (e.g., 8-bit, 5-bit, 4-bit) affect model performance and hardware requirements. Lower bit rates reduce performance but lower hardware demands.\n\n7. **Context Size**: The duration of a conversation without model state deletion affects VRAM/RAM usage. Smaller context sizes can be used to reduce resource requirements.\n\n8. **NVIDIA GPU Driver Behavior**: Recent NVIDIA drivers allow using regular RAM when VRAM is insufficient, though this impacts performance. This behavior can be disabled.\n\n9. **Performance Factors**: The specific model series, type, size, and quantization method all influence the hardware requirements and performance of running LLMs.",
+      "line_num": 9,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-use-a-self-hosted-model/#model-size-calculator)模型尺寸计算器",
+          "node_id": "0001",
+          "summary": "#### [#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-use-a-self-hosted-model/#model-size-calculator)模型尺寸计算器\n\n您可以使用 [Nyx 的模型大小计算器](https://huggingface.co/spaces/NyxKrage/LLM-Model-VRAM-Calculator)来确定您需要多少 RAM/VRAM。\n\n请记住，您希望运行可以容纳内存的最大、量化程度最低的模型，即不导致[磁盘交换](https://serverfault.com/a/48487)。",
+          "line_num": 31
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-use-a-self-hosted-model/#downloading-an-llm)下载 LLM",
+      "node_id": "0002",
+      "prefix_summary": "The partial document provides a guide on downloading a Large Language Model (LLM) for local use, emphasizing the use of HuggingFace as the primary source. It highlights TheBloke's HuggingFace account as a valuable resource for accessing GGUF formatted models and obtaining links to original model pages for alternative formats. The document advises users to carefully select the necessary files for their chosen model format: for GGUF, only the .gguf file is needed, while for .safetensors, all related files (including tokenizer and configs) are required. It also mentions the Mixtral MOE 8x7B as a top-performing model as of January 2024, recommending it for users with at least 32GB of RAM, and suggests Kunoichi-DPO-v2-7B as an alternative for those with less RAM.",
+      "line_num": 37,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-use-a-self-hosted-model/#walkthrough-for-downloading-kunoichi-dpo-v2-7b)Kunoichi-DPO-v2-7B 下载演练",
+          "node_id": "0003",
+          "summary": "The partial document provides a walkthrough for downloading the Kunoichi-DPO-v2-7B model, which is a high-quality model based on Mistral 7B that requires only 7GB of RAM and outperforms its weight class. It emphasizes that Kunoichi uses Alpaca prompts. The steps include navigating to the model's Hugging Face repository, selecting the \"Files and versions\" tab to view various quantization options, choosing the \"kunoichi-dpo-v2-7b.Q6_K.gguf\" file for 6-bit quantization, and initiating the download by clicking the \"Download\" button.",
+          "line_num": 49
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-use-a-self-hosted-model/#how-to-identify-the-type-of-model)如何识别模型的类型",
+          "node_id": "0004",
+          "summary": "### 如何识别模型的类型\n\n该部分文档主要介绍了如何通过文件类型和命名规则来识别不同类型的AI模型：\n\n1. **文件扩展名识别**：\n   - `.gguf` 结尾的文件是 GGUF CPU 模型。\n   - `.safetensors` 结尾的文件可以是未量化、HF 量化、GPTQ 或 AWQ 的模型。\n   - `pytorch-***.bin` 结尾的文件是较旧的模型文件格式，允许在加载模型时执行任意 Python 脚本，存在安全隐患，建议优先选择 `.safetensors` 格式。\n\n2. **配置文件识别**：\n   - 如果存在 `config.json` 文件，可以通过其中的 `quant_method` 参数来识别量化方法，例如 `q4` 表示 4 位量化，`q5` 表示 5 位量化等。\n\n3. **上下文大小识别**：\n   - 文件名中包含类似 `-16k` 的数字，表示模型的上下文大小，即模型在忘记对话开始前可以处理的对话长度。更大的上下文大小需要更多的显存（VRAM）。",
+          "line_num": 59
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-use-a-self-hosted-model/#installing-an-llm-server-oobabooga-or-koboldai)安装 LLM 服务器：Oobabooga 或 KoboldAI",
+      "node_id": "0005",
+      "prefix_summary": "This partial document provides instructions for setting up a local LLM (Large Language Model) server using either Oobabooga or KoboldAI as an intermediary tool between SillyTavern and the model. The server is necessary to load the model and expose its capabilities as a local HTTP Web API, enabling communication similar to how SillyTavern interacts with paid web services like OpenAI GPT or Claude. The guide specifically uses Oobabooga for demonstration but notes that KoboldAI or other compatible tools can be used interchangeably.",
+      "line_num": 75,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-use-a-self-hosted-model/#installing-oobabooga)安装 Oobabooga",
+          "node_id": "0006",
+          "summary": "This partial document provides a step-by-step guide for installing Oobabooga, a self-hosted language model interface. The main points covered are:\n\n1. **Cloning or Downloading the Repository**: Instructions to clone the Oobabooga repository using Git or download it as a ZIP file and extract it.\n\n2. **Running the Installation Script**: Guidance on executing the installation by running the appropriate script (`start_windows.bat` for Windows or the equivalent for other operating systems).\n\n3. **Selecting GPU Type**: Directions to choose the GPU type when prompted, even if planning to use CPU, to enable future GPU slicing optimizations. If no suitable GPU is available, selecting \"None\" is recommended.\n\n4. **Waiting for Installation to Complete**: Emphasizing the need to wait until the installation process finishes.\n\n5. **Adding the Language Model**: Instructions to place the `kunoichi-dpo-v2-7b.Q6_K.gguf` model file into the `models` directory.\n\n6. **Configuring Command-Line Flags**: Directions to modify the `CMD_FLAGS.txt` file by deleting existing content and adding the `--api` flag to enable the API.\n\n7. **Restarting Oobabooga**: Instructions to restart the application to apply changes.\n\n8. **Verifying Installation**: Guidance to access `http://127.0.0.1:5000/docs` to verify the installation by checking if the FastAPI page loads. If it doesn't, the installation likely failed.",
+          "line_num": 81
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-use-a-self-hosted-model/#loading-our-model-in-oobabooga)在 Oobabooga 中加载我们的模型",
+          "node_id": "0007",
+          "summary": "The partial document provides a step-by-step guide on how to load a specific language model, Kunoichi DPO v2, in the Oobabooga interface. It starts by directing users to open a local server URL in their browser. Then, it instructs users to navigate to the \"Models\" tab and select the Kunoichi DPO v2 model from a dropdown menu, which should automatically choose the llama.cpp loader. Additionally, the document mentions an optional step involving \"GPU offloading,\" suggesting setting the n-gpu-layers parameter to optimize VRAM usage based on the model's size and architecture. Finally, it concludes by instructing users to click the \"Load\" button to initiate the loading process.",
+          "line_num": 101
+        },
+        {
+          "title": "[#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-use-a-self-hosted-model/#configuring-sillytavern-to-talk-to-oobabooga)配置 SillyTavern 与 Oobabooga 对话",
+          "node_id": "0008",
+          "summary": "The partial document provides a step-by-step guide on configuring SillyTavern to communicate with the Oobabooga platform. It outlines the process of setting up the API connection, selecting the appropriate API settings, specifying the server URL, and verifying the connection by interacting with a character model named kunoichi-dpo-v2-7b.Q6_K.gguf. The guide emphasizes testing the setup to ensure effective communication.",
+          "line_num": 113
+        }
+      ]
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-use-a-self-hosted-model/#conclusion)结论",
+      "node_id": "0009",
+      "summary": "## [#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-use-a-self-hosted-model/#conclusion)结论\n\n恭喜你，你现在应该有一个工作的本地LLM。",
+      "line_num": 127
+    },
+    {
+      "title": "[#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-use-a-self-hosted-model/#part-2-configuring-sillytavern-to-get-better-outputs-from-the-llm)第 2 部分：配置 SillyTavern 以从 LLM 获得更好的输出",
+      "node_id": "0010",
+      "summary": "## [#](https://docs.sillytavern.app/usage/local-llm-guide/how-to-use-a-self-hosted-model/#part-2-configuring-sillytavern-to-get-better-outputs-from-the-llm)第 2 部分：配置 SillyTavern 以从 LLM 获得更好的输出\n\n所以你和机器人聊天，这有点糟糕。也许这是一个糟糕的模型。也许你无法运行更好的模型，这已经足够好了。但也许你可以修复她.",
+      "line_num": 131
+    }
+  ]
+}

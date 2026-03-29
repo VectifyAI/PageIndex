@@ -1,0 +1,64 @@
+{
+  "doc_name": "08-动态记忆",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\ClaudeLog-干货\\08-动态记忆.md",
+  "structure": [
+    {
+      "title": "动态记忆 (Dynamic Memory)",
+      "node_id": "0000",
+      "prefix_summary": "# 动态记忆 (Dynamic Memory)\n\n> 原文：[claudelog.com/mechanics/dynamic-memory](https://claudelog.com/mechanics/dynamic-memory)",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "是什么",
+          "node_id": "0001",
+          "summary": "## 是什么\n\nDynamic Memory 允许 Claude Code 在交互 session 中**临时修改自己的 CLAUDE.md**，执行特定上下文的任务，然后还原修改。",
+          "line_num": 5
+        },
+        {
+          "title": "设置方法",
+          "node_id": "0002",
+          "prefix_summary": "## 设置方法",
+          "line_num": 9,
+          "nodes": [
+            {
+              "title": "备份",
+              "node_id": "0003",
+              "summary": "### 备份\n- 用 git 版本控制（stash 或 commit 后再改）\n- 或复制到 `CLAUDE.md.backup`",
+              "line_num": 11
+            },
+            {
+              "title": "修改技巧",
+              "node_id": "0004",
+              "summary": "### 修改技巧\n- 使用 Quick Memory 的 `#` 命令进行临时变更\n- 让 Claude 重新读取修改后的 CLAUDE.md\n- 开新 session 来加载变更\n- 用显式文件读取命令",
+              "line_num": 15
+            },
+            {
+              "title": "进阶：Spawn 子实例",
+              "node_id": "0005",
+              "summary": "### 进阶：Spawn 子实例\n\n在不同目录中 spawn 独立的 Claude 实例，每个有自己的 CLAUDE.md。好处：\n- 更干净的上下文分离\n- 防止上一个 session 的上下文渗透到新的专门任务中",
+              "line_num": 21
+            }
+          ]
+        },
+        {
+          "title": "关键注意事项",
+          "node_id": "0006",
+          "summary": "## 关键注意事项\n\n> \"Claude 实例会自动**向上爬目录树**，读取沿途遇到的所有 CLAUDE.md 文件。\"\n\n因此：\n- 保持上层目录的 CLAUDE.md 轻量且通用\n- 项目特定的规则放在项目目录的 CLAUDE.md 中\n- 严格的上下文隔离 = 不在上层目录放特定规则",
+          "line_num": 27
+        },
+        {
+          "title": "最佳实践",
+          "node_id": "0007",
+          "summary": "## 最佳实践\n\n- 维护一个 CLAUDE.md 模板库，针对不同任务类型\n- 用 spawn 子实例处理并行任务，减少上下文污染\n- 每个子实例处理一个专门领域",
+          "line_num": 36
+        },
+        {
+          "title": "我的理解",
+          "node_id": "0008",
+          "summary": "## 我的理解\n\nDynamic Memory 的思路是把 CLAUDE.md 当作**运行时可热加载的配置文件**，而不是静态文档。\n\n类比 Linux：\n- CLAUDE.md = `/etc/profile`（启动时加载）\n- Dynamic Memory = `source ~/.custom_env`（运行时加载特定环境）\n- Spawn 子实例 = 在不同 chroot 环境中运行不同进程\n\n这种方式的风险：忘记还原 CLAUDE.md → 下次 session 加载到被污染的配置。**一定要有版本控制兜底。**",
+          "line_num": 42
+        }
+      ]
+    }
+  ]
+}

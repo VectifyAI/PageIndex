@@ -1,0 +1,50 @@
+{
+  "doc_name": "Agent-Instructions",
+  "source_path": "E:/knowledge/Knowledge\\05-Protocols\\Agent-Instructions.md",
+  "structure": [
+    {
+      "title": "Agent Instructions — AI元指令",
+      "node_id": "0000",
+      "prefix_summary": "# Agent Instructions — AI元指令\n\n> 所有AI Agent在处理本vault相关项目时，遵循以下约束。",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "核心原则",
+          "node_id": "0001",
+          "summary": "## 核心原则\n\n1. **NoPUA** — 信任驱动，不用恐惧。参见 [[NoPUA]]\n2. **结果导向** — 不预设框架，赚了强化亏了修正\n3. **约束即设计** — 2核2G服务器、200MB Docker = 设计起点\n4. **先查后问** — 6套记忆系统先查完再问用户",
+          "line_num": 5
+        },
+        {
+          "title": "记忆查询顺序",
+          "node_id": "0002",
+          "summary": "## 记忆查询顺序\n\n```\n改代码前 → GitNexus (代码图谱)\n上次怎么做 → OpenViking (RAG) → auto-memory\n当前进度 → OMC notepad\n长期知识 → Obsidian vault (本vault)\n```",
+          "line_num": 12
+        },
+        {
+          "title": "模型路由",
+          "node_id": "0003",
+          "summary": "## 模型路由\n\n| 任务 | 模型 |\n|------|------|\n| 探索/简单 | haiku |\n| 标准实现 | sonnet |\n| 架构/深度 | opus |\n| 中文/低成本 | Doubao/DeepSeek |\n| 第二意见 | Codex |\n| 第三视角 | Gemini |",
+          "line_num": 21
+        },
+        {
+          "title": "交付要求",
+          "node_id": "0004",
+          "summary": "## 交付要求\n\n- [ ] 改完代码必须跑build/test\n- [ ] 用证据说话，不用嘴说\"搞定了\"\n- [ ] 同类问题排查（修一个查一片）\n- [ ] 经验写入Obsidian vault对应页面",
+          "line_num": 32
+        },
+        {
+          "title": "敏感信息",
+          "node_id": "0005",
+          "summary": "## 敏感信息\n\n- **禁止在vault中存明文密码/API Key**\n- 引用密钥用环境变量名或\"见.env\"\n- SSH密钥路径可以写，内容不写",
+          "line_num": 39
+        },
+        {
+          "title": "项目上下文加载",
+          "node_id": "0006",
+          "summary": "## 项目上下文加载\n\n通过MCP读取vault时，优先读：\n1. `00-Index/Home.md` — 全局导航\n2. `01-Projects/项目全景.md` — repo索引\n3. 对应项目的具体页面\n\n#protocol #agent #rules",
+          "line_num": 45
+        }
+      ]
+    }
+  ]
+}

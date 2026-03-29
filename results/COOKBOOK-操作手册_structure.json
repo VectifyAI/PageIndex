@@ -1,0 +1,50 @@
+{
+  "doc_name": "COOKBOOK-操作手册",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\Sprachwelt\\COOKBOOK-操作手册.md",
+  "structure": [
+    {
+      "title": "Sprachwelt 操作手册",
+      "node_id": "0000",
+      "prefix_summary": "# Sprachwelt 操作手册\n\n> 面向所有 AI agent。具体步骤，照着做就行。",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "1. 加一条提取规则",
+          "node_id": "0001",
+          "summary": "The document instructs how to extend the tension extractor by appending a new rule to `RuleExtractor::extract` in `crates/tension/src/extractor.rs`, providing the template Rust code for inserting a tension definition with specified fields and lineage/hash generation. It also mandates accompanying tests—at least three—to confirm the rule is triggered by Chinese text, by English text, and not triggered by neutral input like “今天天气不错,” with verification via `cargo test -p sprachwelt-tension`.",
+          "line_num": 5
+        },
+        {
+          "title": "2. 加一个 Golden Case",
+          "node_id": "0002",
+          "summary": "Instructions for adding a new Golden Case entry in `data/golden_cases/case-NNN.json`, detailing the required JSON structure for turns, tensions, anti-patterns, and Heidegger layers, plus notes on enabling LLM extraction and implementing validation tests with possible mock fixtures, followed by running `cargo test --workspace`.",
+          "line_num": 40
+        },
+        {
+          "title": "3. 加一种话语行为（慎重，需要改多处）",
+          "node_id": "0003",
+          "summary": "Section 3 outlines the procedure for adding a new speech act to the system. The change spans four crates: extending the `DiscourseAct` enum in `crates/core/src/lib.rs`, updating the planner’s selection logic in `crates/acts/src/lib.rs`, adding coverage checks in `crates/audit/src/lib.rs`, and wiring bidirectional event mapping in the A5 match within `crates/pipeline/src/main.rs`. For each new act, the document stresses answering three specific questions: how it affects dramatic tension (Intensified/PartiallyResolved/Resolved/none), what frontier state and input features trigger it, and what Chinese/English lexical markers signal it.",
+          "line_num": 87
+        },
+        {
+          "title": "4. 修改 LLM 提取 prompt",
+          "node_id": "0004",
+          "summary": "## 4. 修改 LLM 提取 prompt\n\n**Rust 版 (生产):** `crates/tension/src/extractor.rs` → `EXTRACTION_SYSTEM_PROMPT`\n**Python 版 (设计参考):** `python/extractors/contradiction_prompt.py`\n\n两个版本必须保持语义一致。改完后用 case-016 验证：\n```bash\ncargo run -p sprachwelt-pipeline -- --input \"凌晨四点，地面竟然是湿的\" --llm\n```",
+          "line_num": 101
+        },
+        {
+          "title": "5. 运行完整管线（带 LLM）",
+          "node_id": "0005",
+          "summary": "## 5. 运行完整管线（带 LLM）\n\n```bash\n# 设置 API key\nexport MINIMAX_API_KEY=\"your-key\"\n\n# 单轮\ncargo run -p sprachwelt-pipeline -- --input \"为什么家里有消毒水的味道？\" --llm\n\n# 输出: JSON { plan, frontier, text, audit_result, field_state }\n```",
+          "line_num": 111
+        },
+        {
+          "title": "6. 调试测试失败",
+          "node_id": "0006",
+          "summary": "The document outlines a debugging reference for failing tests across various crates in the system. It lists each crate with the number of tests and the functionality areas covered, such as serialization and lineage hashing in `core`, FSM transitions and anti-resurrection in `ledger`, multiple rule and LLM parsing checks in the `tension` extractor, and additive dynamics, anti-hotspot measures, and terrain tension in the `dynamics` module. It also includes speech act selection and forecasting in `acts`, audit coverage metrics in `audit`, and end-to-end pipeline behavior including decay and lifecycle handling in `pipeline`. The document highlights common failure causes per crate, such as checking FSM logic or anti-resurrection thresholds for `ledger`, verifying regex rule correctness for the extractor, ensuring proper frontier re-projection order for the pipeline, and confirming default configuration values for dynamics.",
+          "line_num": 123
+        }
+      ]
+    }
+  ]
+}

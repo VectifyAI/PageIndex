@@ -1,0 +1,90 @@
+{
+  "doc_name": "2026-03-23-T0-bug-修复计划",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\Sprachwelt\\2026-03-23-T0-bug-修复计划.md",
+  "structure": [
+    {
+      "title": "T0 Bug 修复计划：中文分词",
+      "node_id": "0000",
+      "prefix_summary": "# T0 Bug 修复计划：中文分词\n\n> 不是分析文档。是具体的修复步骤和验收标准。",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "问题一句话",
+          "node_id": "0001",
+          "summary": "## 问题一句话\n\n`word_jaccard()` 用 `split_whitespace()` 分词，中文没有空格 → 防复活、场动力学、审计对中文全部失效。",
+          "line_num": 11
+        },
+        {
+          "title": "修复方案：character bigram Jaccard",
+          "node_id": "0002",
+          "prefix_summary": "## 修复方案：character bigram Jaccard\n\nPhase 0 不引入 jieba 依赖，用 character bigram（字符二元组）做中文路径。",
+          "line_num": 15,
+          "nodes": [
+            {
+              "title": "步骤",
+              "node_id": "0003",
+              "prefix_summary": "### 步骤",
+              "line_num": 19,
+              "nodes": [
+                {
+                  "title": "Step 1: 加中文检测函数",
+                  "node_id": "0004",
+                  "summary": "#### Step 1: 加中文检测函数\n\n**文件:** `crates/tension/src/dynamics.rs`\n\n```rust\n/// 检测字符串是否包含中文字符\nfn contains_chinese(s: &str) -> bool {\n    s.chars().any(|c| matches!(c, '\\u{4e00}'..='\\u{9fff}' | '\\u{3400}'..='\\u{4dbf}'))\n}\n```",
+                  "line_num": 21
+                },
+                {
+                  "title": "Step 2: 加 char bigram Jaccard",
+                  "node_id": "0005",
+                  "summary": "Defines a Rust function `char_bigram_jaccard` that computes Jaccard similarity between two strings using character bigrams: it builds sets of adjacent character pairs, handles the empty case, and returns the ratio of intersection to union of the bigram sets.",
+                  "line_num": 32
+                },
+                {
+                  "title": "Step 3: 改 word_jaccard 为双路径",
+                  "node_id": "0006",
+                  "summary": "#### Step 3: 改 word_jaccard 为双路径\n\n```rust\nfn text_similarity(a: &str, b: &str) -> f64 {\n    if contains_chinese(a) || contains_chinese(b) {\n        char_bigram_jaccard(a, b)\n    } else {\n        word_jaccard(a, b)  // 原有英文路径\n    }\n}\n```\n\n全局替换 `word_jaccard` 调用为 `text_similarity`。",
+                  "line_num": 50
+                },
+                {
+                  "title": "Step 4: 改 ActAuditor 的 closure/converge 检测",
+                  "node_id": "0007",
+                  "summary": "Step 4 enhances the ActAuditor’s closure/converge detection logic in `crates/audit/src/lib.rs`: the `check_closure_covered` function now identifies Chinese text by checking consecutive non-whitespace characters and counts overlaps of bigram windows with the lowercased target text, requiring at least three matches to consider the demand covered; non-Chinese cases keep existing behavior. Similar updates are intended for `check_act_covered` (Converge) and `OpenNew`, aligning them with the localized detection mechanism.",
+                  "line_num": 64
+                },
+                {
+                  "title": "Step 5: 加测试（至少 8 个）",
+                  "node_id": "0008",
+                  "summary": "Describes a “Step 5” section focused on adding at least eight tests that verify Chinese-language handling, including bigram Jaccard similarity (identical, similar, disjoint cases), preventing resurrection via similar wording, additive reinforcement behavior for similar demands, audit closure checks based on keywords, convergence checks for demand frontiers, and ensuring mixed Chinese-English inputs follow the Chinese path.",
+                  "line_num": 90
+                },
+                {
+                  "title": "Step 6: 验证",
+                  "node_id": "0009",
+                  "summary": "#### Step 6: 验证\n\n```bash\ncargo test --workspace  # 基线 122 + 新测试 ≥ 130\n```\n\n确认所有原有英文测试不受影响。",
+                  "line_num": 103
+                }
+              ]
+            },
+            {
+              "title": "验收标准",
+              "node_id": "0010",
+              "summary": "### 验收标准\n\n- [ ] `text_similarity(\"为什么有消毒水味\", \"为什么有消毒液味\") > 0.7`\n- [ ] 中文张力防复活测试通过（相似中文 demand 被 blocked）\n- [ ] 中文场动力学增强测试通过（相似中文 demand 触发 reinforcement）\n- [ ] 中文审计 closure/converge 测试通过\n- [ ] 所有原有 122 测试不受影响\n- [ ] 测试总数 ≥ 130",
+              "line_num": 111
+            },
+            {
+              "title": "预计影响范围",
+              "node_id": "0011",
+              "summary": "### 预计影响范围\n\n| 文件 | 改动 |\n|------|------|\n| `crates/tension/src/dynamics.rs` | 加 contains_chinese, char_bigram_jaccard, text_similarity；替换 word_jaccard 调用 |\n| `crates/audit/src/lib.rs` | check_closure_covered, check_act_covered(Converge/OpenNew) 加中文路径 |\n| `crates/ledger/src/lib.rs` | is_resurrection() 中的 combined_similarity 调用改为 text_similarity |",
+              "line_num": 120
+            },
+            {
+              "title": "不改的",
+              "node_id": "0012",
+              "summary": "### 不改的\n\n- RuleExtractor（已用 contains()，对中文有效）\n- LLM Extractor（LLM 本身处理中文）\n- Crystallizer（LLM 生成）\n- FSM / event stream（语言无关）",
+              "line_num": 128
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

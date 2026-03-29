@@ -1,0 +1,50 @@
+{
+  "doc_name": "05-计划模式",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\ClaudeLog-干货\\05-计划模式.md",
+  "structure": [
+    {
+      "title": "计划模式 (Plan Mode)",
+      "node_id": "0000",
+      "prefix_summary": "# 计划模式 (Plan Mode)\n\n> 原文：[claudelog.com/mechanics/plan-mode](https://claudelog.com/mechanics/plan-mode)",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "概述",
+          "node_id": "0001",
+          "summary": "## 概述\n\nPlan Mode 把**研究和执行分离**。Claude 在你明确批准前不会做任何修改。适用于需要深思熟虑的复杂任务。",
+          "line_num": 5
+        },
+        {
+          "title": "激活方式",
+          "node_id": "0002",
+          "summary": "## 激活方式\n\n- `Shift+Tab` 按两次\n- `/plan` 命令（v2.1.0+）\n- 退出：再按 `Shift+Tab`",
+          "line_num": 9
+        },
+        {
+          "title": "Opus 计划模式增强（Opus 4.6）",
+          "node_id": "0003",
+          "summary": "## Opus 计划模式增强（Opus 4.6）\n\n1. **澄清提问** — Claude 先问清歧义需求\n2. **生成 plan.md** — 结构化任务分解，含依赖关系\n3. **审查与编辑** — 你可以在执行前修改计划\n4. **执行** — Sonnet 4.6 按批准的计划系统性执行\n5. **1M 上下文窗口** — 计划阶段可分析整个大型代码库\n\n通过 `/model` 命令的选项 4 访问。",
+          "line_num": 15
+        },
+        {
+          "title": "工具可用性",
+          "node_id": "0004",
+          "summary": "## 工具可用性\n\n**可用（只读）：** Read, LS, Glob, Grep, Task, TodoRead/TodoWrite, WebFetch, WebSearch, NotebookRead\n\n**受限（修改类）：** Edit, MultiEdit, Write, Bash, NotebookEdit, 状态修改类 MCP",
+          "line_num": 25
+        },
+        {
+          "title": "配置",
+          "node_id": "0005",
+          "summary": "## 配置\n\n- 计划存储目录：`settings.json` 中的 `plansDirectory`（v2.1.9+）\n- 子 agent 系统：可恢复已有 agent，智能选择模型\n- Explore 子 agent：Haiku 驱动的高效代码库搜索专家",
+          "line_num": 31
+        },
+        {
+          "title": "我的理解",
+          "node_id": "0006",
+          "summary": "## 我的理解\n\nPlan Mode 的核心价值是 **\"三思而后行\"的制度化**。\n\n没有 Plan Mode 时，Claude 收到指令就开干——这在简单任务上很好，但在复杂重构或架构变更时是灾难。Plan Mode 强制插入一个 review 环节：\n\n```\n用户指令 → [Plan Mode: 研究 → 生成计划 → 用户审批] → 执行\n```\n\n而不是：\n\n```\n用户指令 → 直接执行（可能理解错了，改了不该改的文件）\n```\n\n这和 `git commit --dry-run` 是同一个思路：先看看会发生什么，再决定要不要真的做。",
+          "line_num": 37
+        }
+      ]
+    }
+  ]
+}

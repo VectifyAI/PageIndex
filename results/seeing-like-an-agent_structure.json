@@ -1,0 +1,90 @@
+{
+  "doc_name": "seeing-like-an-agent",
+  "source_path": "E:/knowledge/Knowledge\\engineering\\seeing-like-an-agent.md",
+  "structure": [
+    {
+      "title": "Lessons from Building Claude Code: Seeing like an Agent",
+      "node_id": "0000",
+      "prefix_summary": "# Lessons from Building Claude Code: Seeing like an Agent\n\n> **Author**: Thariq (@trq212), Anthropic Claude Code 团队\n> **Date**: 2026-02-27\n> **Source**: https://x.com/trq212/status/2027463795355095314\n> **Tags**: #claude-code #agent-design #tool-design #elicitation #anthropic",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "TL;DR",
+          "node_id": "0001",
+          "summary": "## TL;DR\n\nAgent 的 action space 设计是艺术也是科学。工具要匹配模型能力，不要给 50 个专用工具也不要只给 1 个万能工具。渐进式信息披露（progressive disclosure）优于全量灌入。\n\n---",
+          "line_num": 8
+        },
+        {
+          "title": "核心框架：Action Space 设计",
+          "node_id": "0002",
+          "summary": "## 核心框架：Action Space 设计\n\n构建 agent 系统最难的是设计正确的 action space。选什么工具取决于模型实际能力 — 就像解数学题，你自己的能力决定你该用计算器还是铅笔。\n\n**原则**：不是给模型越多工具越好，而是给它**刚好能发挥能力的工具**。\n\n---",
+          "line_num": 14
+        },
+        {
+          "title": "AskUserQuestion 工具的迭代",
+          "node_id": "0003",
+          "prefix_summary": "## AskUserQuestion 工具的迭代\n\n团队经历了三次迭代：",
+          "line_num": 22,
+          "nodes": [
+            {
+              "title": "尝试 1：在现有工具里加 question 参数",
+              "node_id": "0004",
+              "summary": "### 尝试 1：在现有工具里加 question 参数\n→ 模型搞混了，不知道什么时候该问什么时候该执行",
+              "line_num": 26
+            },
+            {
+              "title": "尝试 2：修改输出格式指令",
+              "node_id": "0005",
+              "summary": "### 尝试 2：修改输出格式指令\n→ 格式不可靠，模型经常不按格式来",
+              "line_num": 29
+            },
+            {
+              "title": "尝试 3：创建独立的 AskUserQuestion tool ✅",
+              "node_id": "0006",
+              "summary": "### 尝试 3：创建独立的 AskUserQuestion tool ✅\n→ 最有效。Claude 理解何时调用、如何调用\n\n关键设计：\n- Claude 可以在任何时候调用（特别是 plan mode 时提示调用）\n- 调用后弹 modal 给用户看问题\n- **阻塞 agent loop** 直到用户回答\n- 可以要求结构化输出，确保给出多个选项\n\n**教训**：与其修改现有工具的行为，不如创建一个专门的工具让模型清晰地理解意图。\n\n---",
+              "line_num": 32
+            }
+          ]
+        },
+        {
+          "title": "从 Todos 到 Tasks：适应模型进化",
+          "node_id": "0007",
+          "summary": "## 从 Todos 到 Tasks：适应模型进化\n\n随着 Claude 能力增长，之前的约束变成了限制：\n\n> \"被发送 todo list 的提醒让 Claude 认为它必须严格遵守列表，而不是修改它。\"\n\n**TodoWrite → Task Tool**：\n- 旧的 TodoWrite 是单 agent 的待办清单\n- 新的 Task Tool 支持跨 agent 协调\n- Agent 可以创建、更新、完成任务\n- 子 agent 可以看到父 agent 分配的任务\n\n**教训**：工具设计要跟着模型能力演进。昨天的好设计可能是今天的瓶颈。\n\n---",
+          "line_num": 45
+        },
+        {
+          "title": "Progressive Disclosure（渐进式披露）",
+          "node_id": "0008",
+          "prefix_summary": "## Progressive Disclosure（渐进式披露）\n\n不要把所有东西塞进 system prompt：",
+          "line_num": 61,
+          "nodes": [
+            {
+              "title": "旧方式",
+              "node_id": "0009",
+              "summary": "### 旧方式\n```\nSystem prompt 里塞：代码规范 + API 文档 + 架构指南 + ...\n→ context pollution，中间内容被忽略\n```",
+              "line_num": 65
+            },
+            {
+              "title": "新方式：让 agent 自己探索发现",
+              "node_id": "0010",
+              "summary": "### 新方式：让 agent 自己探索发现\n- **Grep tool**：让 Claude 搜代码库找相关上下文\n- **Guide subagent**：专门查文档的子 agent，Claude 不确定时派它去查\n\n> \"允许 agent 通过探索逐步发现相关上下文\" — 而不是一次性灌入\n\n**教训**：progressive disclosure 比全量灌入更有效。给 agent 探索工具，让它按需获取信息。\n\n---",
+              "line_num": 71
+            }
+          ]
+        },
+        {
+          "title": "核心收获",
+          "node_id": "0011",
+          "summary": "## 核心收获\n\n1. **工具设计是迭代的** — 没有第一版就完美的 tool schema\n2. **独立工具 > 参数扩展** — 新意图用新工具，别在旧工具上加参数\n3. **跟着模型能力演进** — 定期审视工具是否还匹配模型能力\n4. **Progressive disclosure** — 给探索工具而非全量上下文\n5. **观察 agent 行为** — 设计工具是科学也是艺术，需要持续观察调整\n\n---",
+          "line_num": 81
+        },
+        {
+          "title": "系列文章",
+          "node_id": "0012",
+          "summary": "## 系列文章\n\n1. [Prompt Caching Is Everything](prompt-caching-is-everything.md) (2026-02-19)\n2. **Seeing like an Agent** (本文, 2026-02-27)\n3. [How We Use Skills](how-we-use-skills.md) (2026-03-12)",
+          "line_num": 91
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "doc_name": "12-上下文检视",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\ClaudeLog-干货\\12-上下文检视.md",
+  "structure": [
+    {
+      "title": "上下文检视 (Context Inspection)",
+      "node_id": "0000",
+      "prefix_summary": "# 上下文检视 (Context Inspection)\n\n> 原文：[claudelog.com/mechanics/context-inspection](https://claudelog.com/mechanics/context-inspection)",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "核心功能",
+          "node_id": "0001",
+          "summary": "## 核心功能\n\n`/context` 命令（v1.0.86+）显示各系统组件的 token 使用量：\n\n- 系统 prompt\n- 内置工具\n- MCP 集成\n- 记忆文件\n- 自定义 agent\n- 对话历史\n\n显示 token 计数和剩余上下文窗口百分比。",
+          "line_num": 5
+        },
+        {
+          "title": "MCP 服务器优化工作流",
+          "node_id": "0002",
+          "summary": "## MCP 服务器优化工作流\n\n1. 运行 `/context`\n2. 找出占用空间但未使用的 MCP 服务器\n3. 通过 `@server-name disable` 禁用\n4. 验证节省的空间\n5. 需要时重新启用\n\n腾出的 MCP 空间可用于：更长的对话历史、更大的代码分析、更复杂的推理、更多的 agent 定义。",
+          "line_num": 18
+        },
+        {
+          "title": "分析循环",
+          "node_id": "0003",
+          "summary": "## 分析循环\n\n可以让 Claude 分析你的上下文使用情况，建议优化——创建一个**优化反馈循环**，在性能下降前发现瓶颈。",
+          "line_num": 28
+        },
+        {
+          "title": "我的理解",
+          "node_id": "0004",
+          "summary": "## 我的理解\n\n`/context` 是 Claude Code 的 `htop` — 让你看到\"内存\"（上下文窗口）被什么东西占满了。\n\n实际经验：\n- MCP 工具定义可能吃掉 10-20% 的上下文窗口，即使你根本没用它们\n- 很多人不知道自己装了多少 MCP，直到跑 `/context` 才发现\n- **定期清理不用的 MCP 和工具，比扩大上下文窗口更有效**\n\n这也是为什么配置 `disallowedTools` 有时候反而提升性能——减少工具定义的 token 开销。",
+          "line_num": 32
+        }
+      ]
+    }
+  ]
+}

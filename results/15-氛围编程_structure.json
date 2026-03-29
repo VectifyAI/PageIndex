@@ -1,0 +1,44 @@
+{
+  "doc_name": "15-氛围编程",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\ClaudeLog-干货\\15-氛围编程.md",
+  "structure": [
+    {
+      "title": "氛围编程 (Vibe Coding)",
+      "node_id": "0000",
+      "prefix_summary": "# 氛围编程 (Vibe Coding)\n\n> 原文：[claudelog.com/mechanics/vibe-coding](https://claudelog.com/mechanics/vibe-coding)",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "定义",
+          "node_id": "0001",
+          "summary": "## 定义\n\n> \"Vibe coding 是一种开发策略：完全脱离底层代码，专注于代码的**结果**。\"\n\n由 Andrej Karpathy 于 2025 年 2 月提出。",
+          "line_num": 5
+        },
+        {
+          "title": "不该 Vibe Code 的场景",
+          "node_id": "0002",
+          "summary": "## 不该 Vibe Code 的场景\n\n1. **新功能和功能探索** — 探索 API 和跨领域方案需要深入文档研究，vibe coding 会绕过这些\n2. **非重复的核心模块** — 往心智模型里引入无法解释的\"黑箱\"，增加调试难度\n3. **设计相关工作** — 缺乏人类的有意识审美选择，输出会很 generic",
+          "line_num": 11
+        },
+        {
+          "title": "适合 Vibe Code 的场景",
+          "node_id": "0003",
+          "summary": "## 适合 Vibe Code 的场景\n\n1. **Bash 脚本** — 快速反馈循环，Claude 对 shell API 知识丰富\n2. **低风险产品** — 一次性项目、静态内容、离线系统\n3. **排列任务** — 构建大量示例集，用 git diff 审查抓错误",
+          "line_num": 17
+        },
+        {
+          "title": "必备前提",
+          "node_id": "0004",
+          "summary": "## 必备前提\n\n- **Plan Mode + Ultrathink** — 必须激活，让 Claude 多轮深入规划\n- **领域专长** — 你的广泛知识帮助引导 Claude 找到高效 API；不熟的领域（如 CSS blend-mode）可能被忽略\n- **版本控制纪律** — 在里程碑处做战术性 commit；在 Claude Code 外部增量 stage 进度，防止 Claude 贪心行为和未验证的修改",
+          "line_num": 23
+        },
+        {
+          "title": "我的理解",
+          "node_id": "0005",
+          "summary": "The document discusses the concept of \"vibe coding,\" which, despite its poor reputation, can be the most efficient approach in certain scenarios. The main point is that the acceptability of vibe coding depends on the level of tolerance for errors. For projects with high error tolerance, such as one-time scripts, demos, or experiments, vibe coding is appropriate. Conversely, for projects with low error tolerance, like production code, core logic, or financial systems, vibe coding should be avoided. The document also presents vibe coding as an extreme form of \"AI writes, human reviews,\" where the human describes the desired outcome and reviews the AI-generated code. This approach requires strong judgment to assess the output, emphasizing that without domain knowledge, vibe coding becomes a gamble.",
+          "line_num": 29
+        }
+      ]
+    }
+  ]
+}

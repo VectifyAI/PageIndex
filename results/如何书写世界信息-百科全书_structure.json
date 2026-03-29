@@ -1,0 +1,136 @@
+{
+  "doc_name": "如何书写世界信息 百科全书",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\如何书写世界信息 百科全书.md",
+  "structure": [
+    {
+      "title": "**这不是教你如何书写字符的指南。**",
+      "node_id": "0000",
+      "summary": "The partial document clarifies the distinction between \"World Information\" (WI) and \"Legend Book\" (LB) in the context of character creation and AI role-playing. It explains that WI refers to files containing global environment details applicable to all characters, while LB contains specific character lore and is linked to individual characters. The document acknowledges the common misuse of these terms on the internet and emphasizes that, for the purpose of the discussion, both WI and LB will be referred to as \"World Information\" unless specified otherwise. It also directs readers to the Pygmalion Wiki for guidance on creating new characters and understanding PLists and Ali:Chat.",
+      "line_num": 51
+    },
+    {
+      "title": "**使用的字符**",
+      "node_id": "0001",
+      "summary": "## **使用的字符**\n\n  要遵循本指南，您可以[在此处](https://github.com/bdashore3/AI-Art-Guide/tree/default/world-guide-assets/characters/Shizuru) 找到一个示例世界信息和一个带有嵌入式知识书的简单 PList 角色。请确保在出现提示时导入嵌入的传说书，或单击 SillyTavern 中角色卡面板内的地球图标。\n\n不要使用 PList-base 文件夹中的字符，除非您正在学习该部分。",
+      "line_num": 64
+    },
+    {
+      "title": "**SillyTavern 设置**",
+      "node_id": "0002",
+      "summary": "## **SillyTavern 设置**\n\n  下图显示了 World Info 的各种配置选项（使用编辑器）：\n\n这是一张显示角色的 Lorebook 选择的图像（可以通过角色的选项下拉列表访问）：`Link to World Info`",
+      "line_num": 70
+    },
+    {
+      "title": "**基本**",
+      "node_id": "0003",
+      "prefix_summary": "## **基本**\n\n  首先，您需要了解一个称为键/值对的概念。每个键对应一个唯一的值。多个键可以指向单个值。当提示中提到该键时，该值将注入其中。\n\n现在理解了这个概念，让我们来看看制作键值对的各种方法。有两种总体类型：\n\n- 环境 - Simple PList\n\n- 传说 - PList + Ali：Chat 的组合\n\n此结构基于 PList + Ali：Chat 字符。如果您有不同格式的字符，请以该格式编写值！例如，纯文本字符应具有纯文本值（但是，这并不总是正确的。有关详细信息，请查看高级部分）。",
+      "line_num": 76,
+      "nodes": [
+        {
+          "title": "**环境**",
+          "node_id": "0004",
+          "summary": "### **环境**\n\n该部分主要讨论了如何构建一个包含区域和对象的环境描述，例如地点、建筑物、地标和房屋等。重点在于使用简单的 PList 格式来描述一个地区的所有特征，并以法兰迪亚的一个小镇莫斯福德为例进行说明。文档建议使用强关联的别名来简化描述，避免冗长的 PList 条目，并提供了具体的示例和格式建议，如使用逗号分隔的关键词列表来表示地点的特征。",
+          "line_num": 88
+        },
+        {
+          "title": "**博学**",
+          "node_id": "0005",
+          "summary": "The partial document explains how to structure and organize knowledge entries for characters in a system using PList and Ali:Chat. It emphasizes that PList should contain general descriptions, while Ali:Chat should provide character-specific perspectives or reactions. An exception is made for global objects, where Ali:Chat is only necessary if the object is deemed very important. The document provides an example using the character Shizuru and the global object \"slime\" to illustrate this structure. It also suggests using the same approach for alternate costumes and keys, ensuring consistency by using the same keys for both PList and Ali:Chat entries and adding more keys as needed.",
+          "line_num": 100
+        },
+        {
+          "title": "**放置**",
+          "node_id": "0006",
+          "summary": "### **描述**\n\n该文档主要讨论了世界信息编辑器中的“放置”选项及其在不同提示位置的应用。文档详细介绍了以下几个关键点：\n\n1. **放置选项**：\n   - `Before character`：在角色描述之前注入世界信息。\n   - `After character`：在角色描述之后注入世界信息。\n   - `Author's note top`：在作者注释的顶部注入信息。\n   - `Author's note bottom`：在作者注释的底部注入信息。\n   - `At depth`：在上下文的特定深度注入信息，深度越低，信息越重要。\n\n2. **位置的重要性**：\n   - 位置的选择基于信息在提示中的重要性。\n   - 深度选项被认为是最有用的，因为它允许将条目放置在任何位置，从而灵活控制信息的优先级。\n\n3. **实际应用示例**：\n   - 文档以 Shizuru 和 Farlandia 的世界信息为例，说明了如何在特定深度（深度为5）放置 PLists，并在角色描述之后放置 Ali：Chats。\n\n4. **建议**：\n   - 建议不要过分强调所有信息的重要性，而是应关注与角色对话中最关键的部分。\n   - 例如，城市描述可以放在角色描述之前，因为它在对话中不会突出显示，但角色对其有所了解。",
+          "line_num": 121
+        },
+        {
+          "title": "**扫描深度**",
+          "node_id": "0007",
+          "summary": "### **扫描深度**\n\n这决定了要扫描世界信息的聊天消息的数量。通常，除非您希望扫描更多邮件进行注入，否则应将其保留为默认值。我使用.`24`",
+          "line_num": 145
+        },
+        {
+          "title": "**上下文百分比**",
+          "node_id": "0008",
+          "summary": "### **上下文百分比**\n\n世界信息最多可以占用的上下文百分比。除非您希望为世界信息上下文注入提供更高的最大预算，否则请将其保留为默认值。我使用.`25%45%`",
+          "line_num": 149
+        },
+        {
+          "title": "**代币预算**",
+          "node_id": "0009",
+          "summary": "### **代币预算**\n\n如果您不喜欢使用百分比，这允许您将最大代币金额设置为世界信息的预算。确保将上下文百分比设置为并从那里移动预算。`100%`\n\n你是冒险家吗？\n\n设置高扫描深度和上下文百分比/预算！冒险模式需要更加强调世界信息，因此需要更多的预算和扫描。我使用扫描深度和预算（您可以随着模型的上下文大小的增加而增加这些值）。`151800`",
+          "line_num": 153
+        },
+        {
+          "title": "**禁用选择器**",
+          "node_id": "0010",
+          "summary": "### **禁用选择器**\n\n条目可以标记为 、 或 。在 SillyTavern 中，它们在选择下拉列表中表示为绿色、黄色和红色。以下是每种颜色所代表的含义：`constantconditionaldisabled`\n\n- 绿色：常数\n\n- 黄色：有条件（依赖于密钥激活）。这是默认选项。\n\n- 红色：禁用",
+          "line_num": 161
+        },
+        {
+          "title": "**差异化**",
+          "node_id": "0011",
+          "summary": "### **差异化**\n\n该部分文档主要讨论了在处理特定角色相关的世界信息条目时，如何通过主键和辅助键的组合来实现差异化触发条件。主要内容包括：\n\n1. **主键和辅助键的组合条件**：\n   - 文档介绍了两种条件选项：`AND` 和 `ANDNOT`。`AND` 条件要求提示中同时包含主键和辅助键才能触发世界信息的注入，而 `ANDNOT` 则表示辅助键的存在不会触发注入。\n   - 文档以 `Shizuru's house` 为例，展示了如何使用 `ANDNOTANDNOTAND` 条件来定义条目。\n\n2. **示例说明**：\n   - 提供了 `Shizuru's house` 的具体值和键的设置，包括主要键（如 `house, home`）和次要键（如 `your, yours, she, her, our, ours`）。\n   - 解释了包含主键和辅助键的句子如何触发关键字，例如 `Let's go to your homehomeyour`。\n\n3. **角色名称的处理**：\n   - 建议如果要根据角色名称触发条目，应将角色名称添加到辅助键中。\n   - 提到如果启用了 `ShizuruAlways add character's name to prompt`，则包含角色名称的提示会触发相应的条目，但这种方式可能会与传说书等其他内容冲突，因此建议仅在特定情况下使用。",
+          "line_num": 171
+        }
+      ]
+    },
+    {
+      "title": "**替换 作者注**",
+      "node_id": "0012",
+      "summary": "This partial document explains a new method for organizing character information using \"Legend Books\" in the context of a role-playing or storytelling platform. It highlights the benefits of embedding character PList (property list) data within Legend Books, allowing for the inclusion of an \"Author's Note\" at specific depths. The document outlines the steps to create and set up a Legend Book, including creating a new entry for the character PList, marking it as \"Constant,\" setting the appropriate depth, and associating it with the character card. It also emphasizes the ease of use for end-users by recommending the inclusion of genre, tags, and scenario information at depth 1. The document encourages adopting this method for better organization and user experience.",
+      "line_num": 189
+    },
+    {
+      "title": "**高级概念**",
+      "node_id": "0013",
+      "prefix_summary": "## **高级概念**\n\n这些概念是...高深。如果您掌握了基础知识，请随时继续。\n\n随着新功能的创建和更多想法的分享，此部分将进行更新。请留意！\n\n如果您感到困惑，请在 Discord 中提问！我不咬人。",
+      "line_num": 215,
+      "nodes": [
+        {
+          "title": "**递归扫描**",
+          "node_id": "0014",
+          "summary": "### **递归扫描**\n\n递归扫描是一种通过重复应用条件来遍历和分类信息的方法。在文档中，它被描述为一种循环形式，适用于以键和子键形式组织的数据结构。例如，在构建一个虚构世界（如 Farlandia）的怪物分类系统时，递归扫描可以用于创建详细的分类树。\n\n主要内容包括：\n\n1. **递归的定义和用途**：\n   - 递归是一种“如果满足条件，请再做一次”的过程，类似于循环。\n   - 在信息组织中，递归通过键和子键的形式实现。\n\n2. **具体示例**：\n   - 以 Farlandia 的怪物分类为例，展示了如何使用递归扫描来组织和注入上下文信息。\n   - 例如，提及“slimes”会同时注入相关的上下文信息，如“enemy”、“slimeball”等。\n\n3. **递归的工作原理**：\n   - 递归从父对中搜索单词，并查找匹配的子项。\n   - 例如，从“monsters”到“slimes”，再到具体的“slime”属性。\n\n4. **递归的应用**：\n   - 可以用于创建复杂的知识树，进一步定义和扩展虚拟世界。\n   - 例如，构建详细的怪物分类系统。\n\n5. **递归的限制**：\n   - 有时需要避免某些条目的递归，例如替代服装或特定建筑物。\n   - 在 SillyTavern 中，可以通过启用“Non-Recursable”选项来控制递归行为。",
+          "line_num": 223
+        },
+        {
+          "title": "**递归可伸缩性**",
+          "node_id": "0015",
+          "summary": "### **递归可伸缩性**\n\n该文档主要讨论了在创建世界信息（WI）时，如何实现递归可伸缩性以提高可扩展性。主要内容包括：\n\n1. **可扩展性的重要性**：在创建世界信息时，可扩展性至关重要，尤其是在处理大量数据（如怪物类别）时，避免用完WI预算是关键。\n\n2. **递归算法的应用**：文档描述了一种递归算法，用于处理怪物类别。该算法通过递归地创建树结构，将所有怪物提取到上下文中。具体来说，PList（怪物的小碎片）总是被注入和递归，而Ali：Chat条目只有在特定怪物的密钥在上下文中说明时才会被拉取。\n\n3. **Ali：Chat lorebook条目的处理**：为了实现上述算法，需要在Ali：Chat lorebook条目上启用`Non-Recursable`属性。\n\n4. **通用属性的处理**：如果多个怪物与角色有特定的共同感受（例如，Shizuru将slimes和dragons视为敌人），则需要扩展算法。文档建议创建一个通用的Ali：Chat条目，记录角色对多个物品的感受，并确保它是可递归的。\n\n总结来说，文档详细介绍了如何通过递归算法和特定设置（如`Non-Recursable`属性）来处理和优化大量世界信息数据，以提高系统的可扩展性和效率。",
+          "line_num": 241
+        },
+        {
+          "title": "**PList基地世界**",
+          "node_id": "0016",
+          "summary": "### **PList基地世界** 文档描述：\n\n该文档主要介绍了如何通过创建一个名为 \"PList基地世界\" 的基础世界来管理和聚合多个 PList 信息，以减少支架泄漏的可能性。以下是文档的主要步骤和要点：\n\n1. **创建新世界并添加条目**：\n   - 创建一个新世界，并添加两个条目：一个包含字符 \"a\"，另一个包含字符 \".\"。这两个字符作为 PList 的方括号边框 \"[]\"。\n\n2. **设置插入顺序**：\n   - 将第一个条目的插入顺序设置为 \"2998\"，第二个条目的插入顺序也设置为 \"2998\"。这确保了任何插入在这两个条目之间的内容都将被嵌套在 PList 中。\n\n3. **标记条目并选择展示位置**：\n   - 将这两个条目标记为 \"Constant\" 并选择相同的展示位置或深度，以确保它们处于相同的位置，避免出现奇怪的回应。\n\n4. **处理其他放置**：\n   - 重复上述步骤，处理任何其他需要放置的条目。\n\n5. **全局信息处理**：\n   - 在全局信息中选择 \"PList基地世界\" 后，从所有关联世界的 PList 条目中删除，并在每个条目的末尾添加 \"[];\"。\n\n6. **设置 Ali：Chat 条目**：\n   - 将每个 Ali：Chat 条目的插入顺序设置为 \"1\" 或 \"999\"，确保这些示例对话位于大型 PList 之前或之后。\n\n7. **模板和示例**：\n   - 提供了一个构造的 WI PList 提示符的示例，并链接到一个 JSON 模板，方便用户快速入门。用户可以禁用不需要的条目，并在全局世界信息中选择该模板。\n\n8. **改良的静鹤示例**：\n   - 提供了一个改良的 Shizuru 角色和世界的示例链接，展示了如何将角色用于 PList 基地。\n\n该文档旨在帮助用户有效地管理和组织 PList 信息，避免泄漏问题，并通过具体的步骤和示例指导用户进行操作。",
+          "line_num": 255
+        },
+        {
+          "title": "**Lorebook 堆叠**",
+          "node_id": "0017",
+          "summary": "### **Lorebook 堆叠**\n\n该文档主要讨论了在角色创作中使用“堆叠”方法的概念和应用，特别是在构建基于同一核心角色的不同变体时。以下是主要要点：\n\n1. **角色变体**：文档以角色“Shizuru”为例，展示了如何基于一个基本角色创建不同的变体。例如，一个变体是“与用户一起坠入另一个世界的武士”，另一个是“与用户一起坠入另一个世界的江户时代公主”。\n\n2. **核心传说书**：为了有效地管理这些变体，建议创建一个“核心”传说书，其中包含所有变体共有的基本信息。在这个例子中，核心传说书将包含武士Shizuru的条目。\n\n3. **扩展传说书**：在核心传说书的基础上，可以为每个变体创建单独的扩展传说书。这些扩展传说书可以独立于核心传说书进行更新，确保每个变体的独特性得到保留。\n\n4. **在SillyTavern中添加扩展/辅助传说书**：文档还简要介绍了如何在SillyTavern平台上添加扩展或辅助传说书，具体操作是在角色的传说书选择页面中找到`.Auxillary lorebooks`选项。\n\n这种方法的优势在于它允许创作者在保持角色核心一致性的同时，灵活地扩展和更新不同变体的细节。",
+          "line_num": 289
+        },
+        {
+          "title": "**字符过滤器**",
+          "node_id": "0018",
+          "summary": "### **字符过滤器**\n\n该文档主要介绍了SillyTavern中用于控制世界信息条目触发角色的功能，具体包括以下要点：\n\n1. **角色筛选功能 (`Filter to Character(s)`)**：\n   - 允许用户指定只有特定角色才能触发某个世界信息条目。\n   - 例如，用户可以设置只有角色“Jamie”知道“晴空塔”的信息，而其他角色则不知道。\n\n2. **角色排除功能 (`Character Exclusion`)**：\n   - 允许用户指定某些角色不触发特定的世界信息条目。\n   - 例如，用户可以设置角色“Bill”不触发“晴空塔”的信息，而其他角色则可以触发。\n\n3. **应用场景**：\n   - 该功能特别适用于传说书的创建，尤其是在使用堆叠的传说书时。\n   - 可以防止核心角色的信息泄漏到其他角色中，例如个性列表（PList）。",
+          "line_num": 303
+        },
+        {
+          "title": "**混合格式**",
+          "node_id": "0019",
+          "summary": "The partial document discusses strategies for integrating world information with different formats in AI systems. It emphasizes placing formatted world information before context to prevent the AI from misinterpreting it as dialogue or actions. It suggests two approaches: mixing formats by positioning formatted world information earlier in the context, and using PList-based world information to wrap plain text within brackets. The document concludes by recommending reformatting foreign world information for optimal integration.",
+          "line_num": 315
+        }
+      ]
+    },
+    {
+      "title": "**结论**",
+      "node_id": "0020",
+      "summary": "## **结论**\n\n世界信息和传说书是非常强大的资源，可以自定义您的角色并扩展整个宇宙，供 AI 从中获取。同时保存永久代币！",
+      "line_num": 327
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "doc_name": "项目全景",
+  "source_path": "E:/knowledge/Knowledge\\01-Projects\\项目全景.md",
+  "structure": [
+    {
+      "title": "项目全景 — 自有项目索引",
+      "node_id": "0000",
+      "prefix_summary": "# 项目全景 — 自有项目索引\n\n> 只列自研项目，不列fork。按域分组。",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "核心基础设施",
+          "node_id": "0001",
+          "summary": "该部分文档列出核心基础设施项目及其状态，涵盖从自研编码引擎、分布式AI编码集群、API密钥管理与路由、多Hub路由系统，到经济数据采集引擎以及公开的MCP技能复用器和AI原生服务器控制层等，展示各项目进展和功能。",
+          "line_num": 5
+        },
+        {
+          "title": "Agent生态",
+          "node_id": "0002",
+          "summary": "该部分文件列出了“Agent生态”下的一系列项目及其状态、仓库信息和用途。内容涵盖多Agent编排层、OpenClaw启动器及加固工具、16MB Rust Agent、信任驱动的AI技能、零token范围执行、防人格漂移、PowerShell AI终端及轻量助手，以及相关Skill构建工具等。",
+          "line_num": 17
+        },
+        {
+          "title": "量化交易",
+          "node_id": "0003",
+          "summary": "## 量化交易\n\n| 项目 | Repo | 状态 | 描述 |\n|------|------|------|------|\n| [[quant-terminal]] | 2233admin/quant-terminal | 私有 | A股+OKX量化终端 |\n| [[hist-mat]] | Gitea:claudeQWQ/hist-mat | v6.0 | 唯物主义引擎 |\n| [[AI自循环系统]] | 规划中 | 规划 | 结果导向自进化 |",
+          "line_num": 32
+        },
+        {
+          "title": "工具/基建",
+          "node_id": "0004",
+          "summary": "The document outlines several tool and infrastructure projects managed under the 2233admin organization. Each entry names the project, its repository, status (public/private), and a brief description. Highlights include WinForge (Rust-based Windows optimization in issue stage), ai-infra (private infrastructure retrospection), cli-toolkit (public terminal toolset), dev-bootstrap (one-click development environment), claw-proxy (private Rust-based proxy routing), claude-knowledge (private knowledge board with 124 issues), claw-rice (public Claude+OpenClaw configuration pack), and knowledge-graph-engine (public knowledge graph engine).",
+          "line_num": 40
+        },
+        {
+          "title": "研究/内容",
+          "node_id": "0005",
+          "summary": "## 研究/内容\n\n| 项目 | Repo | 状态 | 描述 |\n|------|------|------|------|\n| ai-prompts-library | 2233admin/ai-prompts-library | 公开 | prompt库 |\n| prompt-repeater-v2 | 2233admin/prompt-repeater-v2 | 公开 | prompt重复实验 |\n| geo-kit | 2233admin/geo-kit | 私有 | GEO优化工具 |\n| gemini-chat-wrapper | 2233admin/gemini-chat-wrapper | 公开 | Gemini封装 |",
+          "line_num": 53
+        },
+        {
+          "title": "CicadaRelay Org",
+          "node_id": "0006",
+          "summary": "## CicadaRelay Org\n\n| 项目 | 描述 |\n|------|------|\n| free-llm-hub | 免费AI网关一键启动 |\n| claw-api-hub | 统一API控制中心 |",
+          "line_num": 62
+        },
+        {
+          "title": "统计",
+          "node_id": "0007",
+          "summary": "## 统计\n- **2233admin**: 30个自有repo (11 private, 19 public)\n- **CicadaRelay**: 7个repo\n- **Gitea**: hist-mat + claude-memory\n\n---\n\n```dataview\nTABLE status, description\nFROM \"01-Projects\"\nSORT status ASC\n```\n\n#index #projects #github",
+          "line_num": 69
+        }
+      ]
+    }
+  ]
+}

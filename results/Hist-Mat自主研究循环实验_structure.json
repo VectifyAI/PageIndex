@@ -1,0 +1,136 @@
+{
+  "doc_name": "Hist-Mat自主研究循环实验",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\Hist-Mat自主研究循环实验.md",
+  "structure": [
+    {
+      "title": "Hist-Mat 自主研究循环实验",
+      "node_id": "0000",
+      "prefix_summary": "# Hist-Mat 自主研究循环实验\n\n**日期**: 2026-03-21\n**项目**: `D:/projects/apex/research`\n**状态**: ✅ 循环完成，最优策略已导出\n\n---",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "一句话总结",
+          "node_id": "0001",
+          "summary": "## 一句话总结\n\nKarpathy 式自主研究循环：LLM 自动生成假设 → 构建 prompt 变体 → 评估打分 → 保留/丢弃，6 轮实验 18 分钟内从 baseline 77.47 提升到 **95.50**（+23%）。",
+          "line_num": 9
+        },
+        {
+          "title": "研究目标",
+          "node_id": "0002",
+          "summary": "## 研究目标\n\n优化 LLM 对复杂金融事件（恒大违约、SVB 倒闭、油价暴跌等）的分析质量。通过自动化 prompt 策略搜索，找到最优的增强框架。",
+          "line_num": 13
+        },
+        {
+          "title": "评估框架",
+          "node_id": "0003",
+          "prefix_summary": "## 评估框架",
+          "line_num": 17,
+          "nodes": [
+            {
+              "title": "测试案例（5 个历史事件）",
+              "node_id": "0004",
+              "summary": "### 测试案例（5 个历史事件）\n\n| 案例 | 领域 |\n|------|------|\n| 恒大债务违约 2021 | 房地产/金融 |\n| 硅谷银行倒闭 2023 | 银行/利率 |\n| 中国人口下降 | 人口/经济 |\n| 教育双减政策 | 政策/产业 |\n| 负油价 2020 | 大宗商品/极端事件 |",
+              "line_num": 19
+            },
+            {
+              "title": "评分维度（7 维度加权）",
+              "node_id": "0005",
+              "summary": "### 评分维度（7 维度加权）\n\n- **E1-E3**（解释准确性）：事件本质识别、因果链、矛盾分析\n- **A1-A3**（分析结构）：基本矛盾、具体对立、脱影化为具体立场\n- **B1-B3**（逻辑严谨）：条件路径、触发条件、确定性判断\n- **C**（调整项）：创新加分 / 套话扣分\n- 最终分数 0-100",
+              "line_num": 29
+            },
+            {
+              "title": "防偏设计",
+              "node_id": "0006",
+              "summary": "### 防偏设计\n\n- 基准输出缓存，避免重复 LLM 调用（节省 ~40% API 成本）\n- 评判时随机化 甲/乙 位置，防止位置偏差\n- 每轮用 2 个案例快速评估，平衡速度与置信度",
+              "line_num": 37
+            }
+          ]
+        },
+        {
+          "title": "实验结果",
+          "node_id": "0007",
+          "prefix_summary": "## 实验结果",
+          "line_num": 43,
+          "nodes": [
+            {
+              "title": "单线程模式（live_run_1）",
+              "node_id": "0008",
+              "summary": "This partial document describes an experiment conducted in a single-threaded mode named \"live_run_1,\" evaluating different strategies for improving a baseline score. The baseline strategy, \"辩证法（无增强）,\" achieved a score of 77.47. The experiments tested various enhancements and modifications to this baseline:\n\n1. **Experiment 1** applied \"辩证法增强,\" resulting in a slight score increase to 79.43.\n2. **Experiment 2** combined \"辩证法\" with a temperature of 0.4 and 2-shot learning, significantly boosting the score to 95.50.\n3. **Experiment 3** used \"多视角分析,\" but the run crashed, resulting in a score of 0.00.\n4. **Experiment 4** employed \"具体性聚焦,\" achieving a score of 82.63, but was ultimately discarded due to a lower score compared to Experiment 2.\n5. **Experiment 5** attempted \"具体性变体 2,\" but also crashed, resulting in a score of 0.00.\n\nThe document highlights that Experiment 2 was the most successful, significantly outperforming the baseline and other experiments, while Experiments 3 and 5 failed due to crashes.",
+              "line_num": 45
+            },
+            {
+              "title": "批量并行模式（batch_test）",
+              "node_id": "0009",
+              "summary": "### 批量并行模式（batch_test）\n\n| 轮次 | 策略 | 分数 | Delta | 状态 |\n|------|------|------|-------|------|\n| baseline | 初始策略 | 79.14 | — | 基准 |\n| batch 1 best | 辩证法增强 | 89.46 | +10.32 | ✅ keep |\n| batch 2 best | 辩证法 + 放松温度 | **90.91** | +1.45 | ✅ keep |\n\n- 每 batch 4 个并行假设，共 8 实验，0 crash\n- ThreadPoolExecutor 并行评估，比串行快 2-4x",
+              "line_num": 56
+            }
+          ]
+        },
+        {
+          "title": "关键发现",
+          "node_id": "0010",
+          "prefix_summary": "## 关键发现",
+          "line_num": 67,
+          "nodes": [
+            {
+              "title": "1. Hist-Mat 框架有效性（ablation 验证）",
+              "node_id": "0011",
+              "summary": "### 1. Hist-Mat 框架有效性（ablation 验证）\n\n恒大案例对照：\n- **Baseline LLM**：final_score = 35.32（描述政策机制和市场反馈）\n- **Hist-Mat 注入**：final_score = 80.87（揭示资本积累逻辑与金融稳定的根本矛盾）\n- **提升 127%**\n\n差异本质：Baseline 描述\"怎么发生的\"，Hist-Mat 解释\"为什么必然发生\"。",
+              "line_num": 69
+            },
+            {
+              "title": "2. 参数调优是杠杆",
+              "node_id": "0012",
+              "summary": "### 2. 参数调优是杠杆\n\n| 参数 | 变化 | 效果 |\n|------|------|------|\n| temperature | 0.3 → 0.4 | 减少过度确定性回答 |\n| few-shot | 1 → 2 | 提供多样推理范式 |\n| 增强框架 | 无 → 辩证法 | 基础提升 +2 分 |\n| 三者组合 | — | **突破性提升 +18 分** |\n\n单独调增强框架只提升 2 分，但与参数调优组合产生协同效应。",
+              "line_num": 78
+            },
+            {
+              "title": "3. 失败策略的教训",
+              "node_id": "0013",
+              "summary": "### 3. 失败策略的教训\n\n- **多视角分析**（4 利益相关方视角）：judge 无法解析输出 → 0 分\n- **具体性聚焦**：82.63 分，不如辩证法\n- 金融场景更适合\"正-反-合\"推理，而非视角三角测量",
+              "line_num": 89
+            }
+          ]
+        },
+        {
+          "title": "基础设施",
+          "node_id": "0014",
+          "prefix_summary": "## 基础设施",
+          "line_num": 95,
+          "nodes": [
+            {
+              "title": "研究循环架构",
+              "node_id": "0015",
+              "summary": "### 研究循环架构\n\n```\nloop.py (编排器)\n  ↓ 加载 programs/histmat.md (研究规范)\n  ↓ 加载 strategies/histmat_baseline.json (当前最优)\n  ↓\n  每轮循环:\n    1. LLM 生成假设 (为什么某种修改会提升)\n    2. 构建策略变体 JSON\n    3. subprocess 调用 eval_histmat.py 评估\n    4. 比较分数，keep/discard\n    5. 更新 best_strategy.json\n  ↓\n  导出 results.tsv + best_strategy.json\n```",
+              "line_num": 97
+            },
+            {
+              "title": "并行评估桥接",
+              "node_id": "0016",
+              "summary": "### 并行评估桥接\n\n```\neval_histmat_parallel.py\n  ↓ asyncio.gather 并发评估所有案例\n  ↓ 轮询 APEX 多 provider（Doubao/MiniMax/Claude）\n  ↓ 每案例: baseline + variant + judge 三步流水线\n  ↓ 输出单一 float (平均 final_score)\n```",
+              "line_num": 114
+            },
+            {
+              "title": "可用增强策略",
+              "node_id": "0017",
+              "summary": "### 可用增强策略\n\n| 策略 | 原理 |\n|------|------|\n| chain_of_thought | 逐步推理 |\n| historical_analogy | 历史类比匹配 |\n| dialectical | 正-反-合辩证 |\n| multi_perspective | 4 利益方视角 |\n| none | 裸 LLM 基准 |",
+              "line_num": 124
+            }
+          ]
+        },
+        {
+          "title": "代码位置",
+          "node_id": "0018",
+          "summary": "## 代码位置\n\n- 研究循环: `research/loop.py`\n- 评估桥接: `research/eval_histmat.py`\n- 并行评估: `research/eval_histmat_parallel.py`\n- 多 provider 客户端: `research/multi_provider.py`\n- 研究规范: `research/programs/histmat.md`\n- 基准策略: `research/strategies/histmat_baseline.json`\n- 结果: `research/results/live_run_1/`, `research/results/batch_test/`",
+          "line_num": 134
+        },
+        {
+          "title": "下一步",
+          "node_id": "0019",
+          "summary": "## 下一步\n\n- [ ] 扩展到 5 案例全量评估（当前用 2 案例快速迭代）\n- [ ] 尝试 chain_of_thought + dialectical 组合\n- [ ] 接入更多 provider（DeepSeek/智谱）降低评估成本\n- [ ] 将最优策略部署为 APEX 默认 prompt 模板",
+          "line_num": 144
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "doc_name": "千年虫事件",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\赤島Akashima\\世界书\\近代\\千年虫事件.md",
+  "structure": [
+    {
+      "title": "简述",
+      "node_id": "0000",
+      "prefix_summary": "##   简述\n\n千年虫事件，也称为“Y2K问题”或“千年虫危机”，是指在1999年到2000年之交，人们普遍担忧计算机系统中的一个广泛存在的软件缺陷可能引发全球性的技术和经济崩溃。这个问题源于早期计算机系统设计时为了节省宝贵的存储空间，通常只使用两位数字来表示年份（如“99”代表1999年）。这种做法导致计算机系统可能将2000年解读为1900年，从而影响日期相关的运算和逻辑判断。",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "影响范围",
+          "node_id": "0001",
+          "summary": "### 影响范围\n\n  千年虫问题影响广泛，涉及金融系统、航空控制系统、能源设施和其他关键的基础设施。如果未能正确处理，可能导致数据丢失、服务中断甚至安全事故。",
+          "line_num": 11
+        },
+        {
+          "title": "应对措施",
+          "node_id": "0002",
+          "summary": "### 应对措施\n\n  为了避免潜在的灾难，全球范围内的政府和企业投入巨额资金进行计算机系统的审查和升级。这包括对软件进行修改，使之能正确处理四位数年份。这一努力被称为“Y2K合规性”测试和更新。",
+          "line_num": 15
+        },
+        {
+          "title": "结果",
+          "node_id": "0003",
+          "summary": "### 结果\n\n  到了2000年1月1日，由于之前的广泛准备和修复工作，预测的大规模问题并未出现。大多数系统成功过渡到了新的千年，只发生了一些小的、孤立的故障，这些大都被迅速解决。",
+          "line_num": 19
+        },
+        {
+          "title": "长远影响",
+          "node_id": "0004",
+          "summary": "The partial document discusses the long-term impacts of the Y2K event on the global information technology industry. It highlights how the event led to the standardization of software and systems, as well as the continuous investment and updates in IT infrastructure. The document also emphasizes that the Y2K crisis served as a reminder of the potential risks associated with technological dependence, thereby increasing awareness and preparedness for future technological challenges. Despite being effectively managed, the Y2K event remains a significant case study illustrating the intertwined effects of technology, society, and economics, and it demonstrated how the global community could unite to address common technological challenges.",
+          "line_num": 23
+        }
+      ]
+    }
+  ]
+}

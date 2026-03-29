@@ -1,0 +1,20 @@
+{
+  "doc_name": "Android（Termux）安装",
+  "source_path": "E:/knowledge/Knowledge\\飞书Wiki\\学习 知识库\\Cyber 老婆 CN Wiki\\SillyTavern 官方文档\\安装\\Android（Termux）安装.md",
+  "structure": [
+    {
+      "title": "[#](https://docs.sillytavern.app/installation/android-(termux)%2F%23common-errors)常见错误",
+      "node_id": "0000",
+      "prefix_summary": "## [#](https://docs.sillytavern.app/installation/android-(termux)%2F%23common-errors)常见错误",
+      "line_num": 13,
+      "nodes": [
+        {
+          "title": "[#](https://docs.sillytavern.app/installation/android-(termux)%2F%23unsupported-platform-android-arm-letime-web)不支持的平台： android arm LEtime-web",
+          "node_id": "0001",
+          "summary": "### [#](https://docs.sillytavern.app/installation/android-(termux)%2F%23unsupported-platform-android-arm-letime-web)不支持的平台： android arm LEtime-web\n\n32 位 Android 需要无法与 npm 一起安装的外部依赖项。\n\n使用以下命令进行安装：\n\n`pkg install esbuild`\n\n然后运行指南中的步骤。",
+          "line_num": 15
+        }
+      ]
+    }
+  ]
+}

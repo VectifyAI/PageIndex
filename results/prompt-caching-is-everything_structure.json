@@ -1,0 +1,94 @@
+{
+  "doc_name": "prompt-caching-is-everything",
+  "source_path": "E:/knowledge/Knowledge\\engineering\\prompt-caching-is-everything.md",
+  "structure": [
+    {
+      "title": "Lessons from Building Claude Code: Prompt Caching Is Everything",
+      "node_id": "0000",
+      "prefix_summary": "# Lessons from Building Claude Code: Prompt Caching Is Everything\n\n> **Author**: Thariq (@trq212), Anthropic Claude Code 团队\n> **Date**: 2026-02-19\n> **Source**: https://x.com/trq212/status/2024574133011673516\n> **Tags**: #claude-code #prompt-caching #agent-architecture #anthropic",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "TL;DR",
+          "node_id": "0001",
+          "summary": "## TL;DR\n\nAgent 系统必须围绕 prompt caching 的前缀匹配机制来设计。前缀中任何位置改动，后面全部缓存失效。静态放前、动态放后，别在对话中途换 tools/model。\n\n---",
+          "line_num": 8
+        },
+        {
+          "title": "核心机制",
+          "node_id": "0002",
+          "summary": "## 核心机制\n\nPrompt caching 是**前缀匹配** — API 从请求开头到每个 `cache_control` 断点缓存内容。命中缓存的 token 成本降 90%，延迟大幅降低。\n\n---",
+          "line_num": 14
+        },
+        {
+          "title": "7 条设计原则",
+          "node_id": "0003",
+          "prefix_summary": "## 7 条设计原则",
+          "line_num": 20,
+          "nodes": [
+            {
+              "title": "1. System Prompt 分层排序",
+              "node_id": "0004",
+              "summary": "### 1. System Prompt 分层排序\n\n按缓存命中范围从大到小：\n\n```\n静态 system prompt + tools    ← 全局缓存（所有 session 共享）\nCLAUDE.md                     ← 项目级缓存（同项目共享）\nSession context               ← 会话级缓存\nConversation messages          ← 最动态，放最后\n```\n\n**陷阱**：\n- 时间戳变化（每分钟更新的 \"current time\"）\n- Tool 顺序不确定（Map/Set 迭代顺序）\n- Tool 参数动态更新",
+              "line_num": 22
+            },
+            {
+              "title": "2. 用 System Message 更新，别改 System Prompt",
+              "node_id": "0005",
+              "summary": "### 2. 用 System Message 更新，别改 System Prompt\n\n信息过时了（时间变了、文件更新了）→ 在下一轮对话发 system message。前缀不变，缓存不破。",
+              "line_num": 38
+            },
+            {
+              "title": "3. 对话中途别换模型",
+              "node_id": "0006",
+              "summary": "### 3. 对话中途别换模型\n\n缓存是 **per-model** 的。场景：\n\n> 100k token 对话用 Opus，想切 Haiku 省钱\n> → Haiku 从零重建缓存，100k token 全价重算\n> → 比继续用 Opus 还贵\n\n**正确做法**：用 subagent — 大模型把精简任务交给小模型作为新对话。",
+              "line_num": 42
+            },
+            {
+              "title": "4. 对话中途别加减 Tools",
+              "node_id": "0007",
+              "summary": "### 4. 对话中途别加减 Tools\n\nTools 是 cached prefix 的一部分。加一个工具、减一个工具 → 整个对话缓存全废。",
+              "line_num": 52
+            },
+            {
+              "title": "5. Plan Mode — 围绕缓存设计",
+              "node_id": "0008",
+              "summary": "### 5. Plan Mode — 围绕缓存设计\n\n❌ 进 plan mode 换一套 tools\n✅ 保留所有 tools + 加 `EnterPlanMode` / `ExitPlanMode` 作为可调用 tool\n\n用 system message 告诉模型 plan mode 限制。模型自主进出，缓存不破。",
+              "line_num": 56
+            },
+            {
+              "title": "6. Tool Search — 延迟加载替代移除",
+              "node_id": "0009",
+              "summary": "### 6. Tool Search — 延迟加载替代移除\n\n几十个 tools 不全塞进去：\n- 发轻量 stub（`defer_loading: true`）— 只有名字，没有完整 schema\n- 模型需要时通过 `ToolSearch` 按需拉取完整 schema\n- 前缀稳定，缓存不破\n\n这就是 Claude Code 中 deferred tools + ToolSearch 机制的由来。",
+              "line_num": 63
+            },
+            {
+              "title": "7. Compaction（上下文压缩）要对齐前缀",
+              "node_id": "0010",
+              "summary": "### 7. Compaction（上下文压缩）要对齐前缀\n\n对话超长需要压缩，naive 做法：\n\n> 开新 API 调用，不同参数 → 丢失所有父级缓存 → 全价重算\n\n**Cache-safe forking**：\n1. 新调用用**完全相同**的 system prompt + tools + user context\n2. 父对话消息 prepend\n3. 压缩指令作为新 user message append\n4. API 识别匹配前缀 → 复用缓存 → 只收压缩指令的费用\n5. 预留 \"compaction buffer\" 给压缩消息和输出 token\n\n---",
+              "line_num": 72
+            }
+          ]
+        },
+        {
+          "title": "实践清单",
+          "node_id": "0011",
+          "summary": "## 实践清单\n\n- [ ] 检查 system prompt 中是否有动态内容混在静态内容前面\n- [ ] 确认 tool 定义顺序是确定性的（别用 Map 迭代）\n- [ ] 时间/状态更新走 system message 不走 system prompt 修改\n- [ ] 对话中不切模型，需要时用 subagent\n- [ ] 大量 tools 用延迟加载 stub\n- [ ] 监控 cache hit rate，把 cache break 当 incident 处理\n- [ ] compaction/fork 复用完全相同的前缀参数\n\n---",
+          "line_num": 87
+        },
+        {
+          "title": "对自建 Agent 系统的启示",
+          "node_id": "0012",
+          "summary": "## 对自建 Agent 系统的启示\n\n| Claude Code 做法 | 可借鉴 |\n|---|---|\n| 静态前动态后 | agent prompt 模板固定部分置顶 |\n| 别换 tools | skill 注入用 message 不改 tool 列表 |\n| 延迟加载 | 大量 MCP tool 用 stub + 按需 |\n| 切模型用 subagent | 多模型编排用独立对话 |\n| compaction 对齐前缀 | 长 session 压缩时复用相同参数 |\n| 监控 cache hit rate | 加指标告警 |\n\n---",
+          "line_num": 99
+        },
+        {
+          "title": "系列文章",
+          "node_id": "0013",
+          "summary": "## 系列文章\n\n- **Prompt Caching Is Everything** (本文, 2026-02-19)\n- **Seeing like an Agent** (2026-02-28) — https://x.com/trq212/status/2027463795355095314\n- **How We Use Skills** (2026-03-12) — https://x.com/trq212/status/2033949937936085378",
+          "line_num": 112
+        }
+      ]
+    }
+  ]
+}

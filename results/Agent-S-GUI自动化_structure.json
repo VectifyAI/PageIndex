@@ -1,0 +1,50 @@
+{
+  "doc_name": "Agent-S-GUI自动化",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\Agent-S-GUI自动化.md",
+  "structure": [
+    {
+      "title": "Agent-S — GUI 自动化 Agent",
+      "node_id": "0000",
+      "prefix_summary": "# Agent-S — GUI 自动化 Agent\n\n> 像人一样操作电脑，截图→视觉理解→鼠标键盘→循环",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "核心数据",
+          "node_id": "0001",
+          "summary": "## 核心数据\n\n- **来源**: simular-ai/Agent-S\n- **benchmark**: OSWorld 72.6%，超过人类基线\n- **跨平台**: Windows/macOS/Linux + Android\n- **架构**: GPT-5 推理 + UI-TARS-7B 视觉定位（双模型）\n- **安装**: `pip install gui-agents`",
+          "line_num": 11
+        },
+        {
+          "title": "与我的交易系统对接",
+          "node_id": "0002",
+          "summary": "## 与我的交易系统对接\n\n这是 AI 自循环系统执行层的关键缺失件。\n\n| 当前问题 | Agent-S 解决方案 |\n|---------|----------------|\n| 同花顺/通达信只能手动或有限 API | GUI Agent 直接操作界面下单 |\n| C宅 Curry 远程桌面需要人盯 | Agent-S + Curry = 无人值守 GUI 交易 |\n| qmt API 不稳定 | 不依赖 API，直接操作 GUI |\n| 多终端切换繁琐 | Agent-S 可以同时操作多个窗口 |",
+          "line_num": 19
+        },
+        {
+          "title": "部署构想",
+          "node_id": "0003",
+          "summary": "## 部署构想\n\n```\nAI 自循环决策层\n    ↓ 交易指令\nAgent-S (C宅 Curry, RTX 5080)\n    ↓ GUI 操作\n同花顺/通达信/东方财富 客户端\n    ↓ 交易所\nA 股市场\n```",
+          "line_num": 30
+        },
+        {
+          "title": "风险",
+          "node_id": "0004",
+          "summary": "## 风险\n\n- ⚠️ GUI 操作有延迟，不适合高频\n- ⚠️ 界面改版需要重新适配\n- ⚠️ \"runs Python code controlling your computer\" — 安全风险\n- ⚠️ 需要 NeMo Guardrails 做安全护栏",
+          "line_num": 42
+        },
+        {
+          "title": "落地优先级",
+          "node_id": "0005",
+          "summary": "## 落地优先级\n\n1. C宅 Curry 安装 Agent-S\n2. 同花顺客户端 GUI 操作 PoC\n3. 接入 quant-terminal 决策层\n4. 加 Guardrails 安全限制（止损/仓位上限）\n5. paper trading 验证→实盘",
+          "line_num": 49
+        },
+        {
+          "title": "关联",
+          "node_id": "0006",
+          "summary": "## 关联\n\n- [[AI自循环系统]] — 执行层升级\n- [[quant-terminal]] — 决策源\n- [[Agent记忆系统全景]] — memU 记住操作历史",
+          "line_num": 57
+        }
+      ]
+    }
+  ]
+}

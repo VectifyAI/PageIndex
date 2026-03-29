@@ -1,0 +1,130 @@
+{
+  "doc_name": "王德峰-1844手稿存在论解读-精读笔记",
+  "source_path": "E:/knowledge/Knowledge\\04-Research\\王德峰-1844手稿存在论解读-精读笔记.md",
+  "structure": [
+    {
+      "title": "王德峰：马克思《1844年经济学哲学手稿》的存在论解读 — 精读笔记",
+      "node_id": "0000",
+      "prefix_summary": "# 王德峰：马克思《1844年经济学哲学手稿》的存在论解读 — 精读笔记\n\n> 核心文本：「马克思劳动异化理论：先验的人本主义思辨，还是哲学革命的发动？」\n> 辅助：「海德格尔与马克思：在历史之思中相遇」、B站《马克思的哲学革命》(ss6838)\n> 看板：#125(王全集) #140(1844手稿)\n\n---",
+      "line_num": 7,
+      "nodes": [
+        {
+          "title": "核心立场（一句话）",
+          "node_id": "0001",
+          "summary": "## 核心立场（一句话）\n\n**马克思在1844手稿中发动的不是人本主义思辨，而是存在论革命。\"异化劳动\"不是从预设的\"人的类本质\"出发的先验演绎，而是对资本主义条件下人的感性存在之历史性扭曲的揭示。这一革命与海德格尔\"遗忘存在\"在本体论上指向同一事件。**\n\n---",
+          "line_num": 15
+        },
+        {
+          "title": "一、手稿结构（三个笔记本，非四个）",
+          "node_id": "0002",
+          "summary": "The partial document provides an overview of the structure of three notebooks, not four as previously thought, and outlines the main content and Wang Defeng's interpretive approach for each. The first notebook focuses on wages, profits, and rent, leading to the concepts of alienated labor and private property, with the interpretation highlighting the inherent contradictions in national economics and how alienated labor is the true foundation of private property. The second notebook delves into the relationships of private property, with the interpretation suggesting that alienated labor serves as an intermediate link to social power relations. The third notebook covers themes of communism and critiques of Hegelian dialectics, emphasizing a philosophical consciousness of ontological revolution that transcends both Hegel and Feuerbach.",
+          "line_num": 21
+        },
+        {
+          "title": "二、异化劳动四规定（存在论重释）",
+          "node_id": "0003",
+          "prefix_summary": "## 异化劳动四规定（存在论重释）\n\n### 主要内容概述：\n\n1. **产品异化（E1）**：\n   - **内容**：劳动产品成为与劳动者对立的敌对力量。\n   - **王德峰重释**：对象性存在本身发生扭曲，劳动者创造的对象世界反过来否定其感性生命。\n\n2. **过程异化（E2）**：\n   - **内容**：劳动者在劳动过程中否定自身。\n   - **王德峰重释**：感性活动（gegenständliche Tätigkeit）的存在论结构遭到破坏。\n\n3. **类本质异化（E3）**：\n   - **内容**：劳动者丧失自由自觉的活动能力。\n   - **王德峰重释**：最具深度的是，类本质是劳动的产物而非前提，异化劳动阻断了这一生成过程。\n\n4. **人际异化（E4）**：\n   - **内容**：人与人之间的关系被物化。\n   - **王德峰重释**：这种现象已经隐含了“资本关系”的萌芽。",
+          "line_num": 31,
+          "nodes": [
+            {
+              "title": "异化劳动与私有财产：因果颠倒",
+              "node_id": "0004",
+              "summary": "### 异化劳动与私有财产：因果颠倒\n\n马克思：私有财产\"表现为\"异化劳动的根据，但确切地说是其**后果**。\n\n王德峰：国民经济学倒果为因。异化劳动是更根本的存在论事件，私有财产是制度层面的结晶。二者互相强化 = 资本主义再生产的存在论结构。\n\n---",
+              "line_num": 40
+            }
+          ]
+        },
+        {
+          "title": "三、对象化 vs 异化（精确区分）",
+          "node_id": "0005",
+          "prefix_summary": "## 描述\n\n### 主要内容概述\n\n该部分文档主要探讨了“对象化”与“异化”这两个概念之间的精确区分，并澄清了传统解读中的误解。以下是文档的主要要点：\n\n1. **概念定义与含义**：\n   - **对象化（Vergegenständlichung）**：指本质力量在劳动产品中的凝结，具有双向规定的特点，适用于一切社会形态。\n   - **外化（Entäußerung）**：指本质力量的外在实现，是单向的，主要适用于劳动的内在环节。\n   - **异化（Entfremdung）**：指对象化产物反成为敌对支配力量，这一现象特指在资本主义特定条件下的情况。\n\n2. **关键区分**：\n   - 文档强调“对象化”与“异化”不是等同的概念。传统解读受黑格尔影响，常常将二者混为一谈，这是一个根本性的误读。\n\n3. **适用范围**：\n   - 对象化适用于一切社会形态，而异化则特指资本主义条件下的特定现象。\n\n### 核心观点\n\n文档的核心观点在于澄清“对象化”与“异化”之间的本质区别，指出传统解读的误区，并强调这两个概念在不同的社会形态和劳动过程中具有不同的适用性和含义。",
+          "line_num": 48,
+          "nodes": [
+            {
+              "title": "\"对象性的本质力量的主体性\"",
+              "node_id": "0006",
+              "summary": "### \"对象性的本质力量的主体性\"\n\ndie Subjektivität gegenständlicher Wesenskräfte：\n- 人是对象性存在物——必须以外在对象为生命活动对象\n- 本质力量本身是对象性的——必须在对象中实现\n- 但具有主体性——主动改造对象而非被动\n- **类本质不是劳动的前提，是劳动的产物**\n\n---",
+              "line_num": 58
+            }
+          ]
+        },
+        {
+          "title": "四、感性意识：超越费尔巴哈",
+          "node_id": "0007",
+          "prefix_summary": "## 四、感性意识：超越费尔巴哈",
+          "line_num": 68,
+          "nodes": [
+            {
+              "title": "费尔巴哈的贡献与局限",
+              "node_id": "0008",
+              "summary": "### 费尔巴哈的贡献与局限\n\n- **贡献**：用\"感性直观\"打破黑格尔思辨唯心主义\n- **局限**：感性是**直观的**（被动接受），人是静态\"类存在物\"",
+              "line_num": 70
+            },
+            {
+              "title": "马克思的超越",
+              "node_id": "0009",
+              "summary": "### 马克思的超越\n\nThe document discusses Marx's critique of previous materialism and his concept of \"sensuousness\" (Sinnlichkeit). It highlights that unlike earlier materialists like Feuerbach, who viewed sensuousness as passive reception, Marx saw it as an \"object-oriented activity\" (gegenständliche Tätigkeit) and a dynamic process of transforming the world. The document emphasizes that sensuous consciousness is not a lower form of rational consciousness but rather an inherent understanding of existence derived from direct life activities. Marx elevated \"sensuousness\" from an epistemological concept to an ontological category, signifying a fundamental shift in understanding human interaction with the world.",
+              "line_num": 75
+            },
+            {
+              "title": "与海德格尔类比",
+              "node_id": "0010",
+              "summary": "### 与海德格尔类比\n\n| 海德格尔 | 马克思 |\n|---------|--------|\n| 人与世界原初关系 ≠ 主体认识客体 | 人与世界原初关系 ≠ 意识反映物质 |\n| = 此在寓于世界之中 | = **感性的人的活动** |\n| 在世存在先于认识世界 | 感性活动先于认识 |\n\n---",
+              "line_num": 85
+            }
+          ]
+        },
+        {
+          "title": "五、王德峰 vs 张一兵：断裂还是连续？",
+          "node_id": "0011",
+          "prefix_summary": "## 五、王德峰 vs 张一兵：断裂还是连续？",
+          "line_num": 95,
+          "nodes": [
+            {
+              "title": "张一兵（阿尔都塞路线）",
+              "node_id": "0012",
+              "summary": "### 张一兵（阿尔都塞路线）\n\n- 1845年是分水岭，1844手稿 = 人本主义话语构境\n- 马克思主义科学建立在**否弃手稿人本主义框架**之上\n- 存在两种异化理论：早期人本主义 vs 后期科学",
+              "line_num": 97
+            },
+            {
+              "title": "王德峰反驳",
+              "node_id": "0013",
+              "summary": "这篇文档主要讨论了王德峰对马克思《1844年经济学哲学手稿》的解读与张一兵的解读之间的差异和辩论。王德峰反驳了张一兵的观点，认为手稿并非人本主义，而是哲学革命的发动。他指出，马克思在扬弃费尔巴哈的过程中，并没有预设一个“本真人的本质”，而是认为“类本质”是劳动的产物。王德峰还强调，手稿与《资本论》之间不存在认识论断裂，而是同一存在论革命的连续展开。文档通过表格对比了张一兵和王德峰在多个维度上的不同观点，包括手稿性质、“类本质”的理解、手稿与《资本论》的关系以及他们各自依赖的理论资源。",
+              "line_num": 103
+            }
+          ]
+        },
+        {
+          "title": "六、\"遗忘存在\" = \"劳动异化\"",
+          "node_id": "0014",
+          "summary": "The partial document compares Heidegger's concept of \"forgetting of being\" with Marx's concept of \"alienation of labor.\" It highlights the similarities in their frameworks: Heidegger's \"concealment mechanism\" where beings obscure being is analogous to Marx's idea that labor products obscure labor (sensuous activity). Both thinkers identify extreme forms of this concealment: Heidegger's \"enframing\" where everything becomes a calculable standing-reserve, and Marx's \"capital logic\" where everything becomes abstract labor. The document also outlines their differing approaches to overcoming this: Heidegger seeks the \"clearing of being,\" while Marx advocates for the \"abolition of alienation\" through communism. The document concludes by asserting that Marx's critique is more thorough, as it identifies the \"forgetting of being\" not as a problem of thought, but as a problem of \"social being,\" with capitalism being a systemic concealment of being.",
+          "line_num": 120
+        },
+        {
+          "title": "七、理论线索：1844 → 资本论",
+          "node_id": "0015",
+          "summary": "这份文档主要探讨了马克思从1844年到《资本论》出版期间的思想发展历程和核心概念演变。文档以时间为序，列出了马克思在不同年份的重要著作及其核心概念和理论推进：\n\n1. **1844年手稿**：提出\"异化劳动\"概念，揭示私有财产的存在论根据。\n2. **1845年提纲**：引入\"感性活动/实践\"概念，标志着方法论的自觉。\n3. **1845-46年德意志意识形态**：提出\"社会存在决定意识\"理论，将异化理论发展为分工和所有制的历史分析。\n4. **1857-58年大纲**：探讨\"资本的自我增殖\"，将异化理论经济学形式化。\n5. **1867年资本论**：深入分析\"剩余价值\"和\"商品拜物教\"，完整展开异化的资本逻辑。\n\n文档还强调了异化劳动、抽象劳动和剩余价值之间的关键线索，指出商品二重性反映了劳动二重性，抽象劳动是异化劳动在经济学范畴中的表达，而商品拜物教则是异化劳动在意识层面的必然表现，被视为马克思版的\"遗忘存在\"。最后，文档引用王德峰的观点，将《资本论》中对国民经济学的分析称为\"现象学还原\"。",
+          "line_num": 132
+        },
+        {
+          "title": "八、概念索引",
+          "node_id": "0016",
+          "summary": "The partial document provides a glossary of key philosophical concepts, primarily focusing on Marxist theory. It defines and distinguishes terms such as \"objectification,\" \"externalization,\" and \"alienation,\" explaining their meanings in German and providing a brief description of each. The document emphasizes the historical and practical aspects of these concepts, particularly in relation to labor and human activity. It also introduces the concept of \"sensuous activity\" as a fundamental category of existence, highlighting the relationship between humans and the world. Additionally, the document discusses \"species-being\" as a historical product of labor, rather than a pre-existing condition.",
+          "line_num": 150
+        },
+        {
+          "title": "Sources",
+          "node_id": "0017",
+          "summary": "This partial document provides a list of resources and references related to Marxist philosophy and its intersection with other philosophical traditions. The sources include discussions on Marx's theory of alienation, the philosophical relationship between Heidegger and Marx, detailed lecture transcripts and study notes on \"Das Kapital\" by Wang Defeng, insights into Marx's \"Theses on Feuerbach,\" and Zhang Yibing's work \"Returning to Marx,\" which likely explores a deeper understanding of Marx's original texts and their contemporary relevance. These resources collectively offer a comprehensive exploration of Marxist thought, its evolution, and its application in various philosophical contexts.",
+          "line_num": 164
+        },
+        {
+          "title": "待补充",
+          "node_id": "0018",
+          "summary": "## 待补充\n\n- [ ] B站课程第1-3讲关键段落\n- [ ] 与吴晓明立场异同\n- [ ] 王德峰对黑格尔\"主奴辩证法\"中劳动概念的解读\n- [ ] 与卢卡奇《历史与阶级意识》\"物化\"概念的关系\n\n#research #philosophy #marxism #1844-manuscript #alienation #existential-ontology",
+          "line_num": 173
+        }
+      ]
+    }
+  ]
+}

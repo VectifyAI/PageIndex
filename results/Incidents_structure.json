@@ -1,0 +1,46 @@
+{
+  "doc_name": "Incidents",
+  "source_path": "E:/knowledge/Knowledge\\02-Infrastructure\\Incidents.md",
+  "structure": [
+    {
+      "title": "Incident Log — 事故记录",
+      "node_id": "0000",
+      "prefix_summary": "# Incident Log — 事故记录\n\n> 系统挂了的历史。不记录就会重蹈覆辙。",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "格式",
+          "node_id": "0001",
+          "summary": "## 格式\n\n```\n### YYYY-MM-DD | 严重度(P0-P3) | 标题\n- **影响**:\n- **原因**:\n- **修复**:\n- **预防**:\n```",
+          "line_num": 5
+        },
+        {
+          "title": "记录",
+          "node_id": "0002",
+          "prefix_summary": "## 记录",
+          "line_num": 15,
+          "nodes": [
+            {
+              "title": "2026-03-13 | P2 | WireGuard mesh停用",
+              "node_id": "0003",
+              "summary": "### 2026-03-13 | P2 | WireGuard mesh停用\n- **影响**: 节点间WG隧道不通，改用NetBird\n- **原因**: 对称NAT导致握手成功但数据不通\n- **修复**: 切换到NetBird mesh\n- **预防**: 始终保留SSH隧道备用",
+              "line_num": 17
+            },
+            {
+              "title": "2026-03-16 | P3 | akshare东财API从澳洲断连",
+              "node_id": "0004",
+              "summary": "### 2026-03-16 | P3 | akshare东财API从澳洲断连\n- **影响**: 无法通过akshare拉A股实时行情\n- **原因**: 东财API对海外IP不稳定/限流\n- **修复**: 改用pytdx直连通达信服务器\n- **预防**: 数据层走SUPER代理或pytdx备用",
+              "line_num": 23
+            },
+            {
+              "title": "2026-03-16 | P3 | DuckDB单进程锁",
+              "node_id": "0005",
+              "summary": "### 2026-03-16 | P3 | DuckDB单进程锁\n- **影响**: 扫描器运行时其他进程无法读DuckDB\n- **原因**: DuckDB设计为单写入进程\n- **修复**: 杀掉扫描器进程释放锁\n- **预防**: 考虑扫描器完成后释放锁再做后续分析，或用WAL模式\n\n#infrastructure #incidents #postmortem",
+              "line_num": 29
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

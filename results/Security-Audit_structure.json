@@ -1,0 +1,38 @@
+{
+  "doc_name": "Security-Audit",
+  "source_path": "E:/knowledge/Knowledge\\05-Protocols\\Security-Audit.md",
+  "structure": [
+    {
+      "title": "Security Audit — 安全审计",
+      "node_id": "0000",
+      "prefix_summary": "# Security Audit — 安全审计\n\n> 敏感信息和权限边界追踪",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "Vault安全规则",
+          "node_id": "0001",
+          "summary": "## Vault安全规则\n\n1. **禁止明文密码/API Key** — 用环境变量引用\n2. **LiveSync/Remotely Save** — 确保同步目标是私有的\n3. **.gitignore** — 如果vault进git，排除插件配置",
+          "line_num": 5
+        },
+        {
+          "title": "敏感信息检查清单",
+          "node_id": "0002",
+          "summary": "## 敏感信息检查清单\n\n| 位置 | 风险项 | 状态 |\n|------|--------|------|\n| 02-Infra/集群运维.md | SSH IP地址 | ⚠️ 内部可接受 |\n| 02-Infra/Costs.md | 无密钥 | ✅ |\n| .obsidian/plugins/local-rest-api | API Token | ⚠️ 不进git |\n| 03-Trading/ | 无真实账户信息 | ✅ |",
+          "line_num": 11
+        },
+        {
+          "title": "NoPUA部署范围",
+          "node_id": "0003",
+          "summary": "## NoPUA部署范围\n\n| 节点 | 部署 | 权限 |\n|------|------|------|\n| 本地 Claude Code | ~/.claude/plugins/nopua/ | 全部skill+agent |\n| 本地 Codex CLI | ~/.codex/agents/nopua.md | skill only |\n| 本地 Gemini CLI | ~/.gemini/skills/nopua/ | skill only |",
+          "line_num": 20
+        },
+        {
+          "title": "定期审查",
+          "node_id": "0004",
+          "summary": "## 定期审查\n- [ ] 每月检查vault中是否有泄露的密钥\n- [ ] 检查LiveSync同步目标安全性\n- [ ] 检查MCP Server暴露范围\n\n#protocol #security",
+          "line_num": 28
+        }
+      ]
+    }
+  ]
+}
