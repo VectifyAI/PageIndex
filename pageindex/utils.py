@@ -1,7 +1,7 @@
-import litellm
+import tiktoken
+import openai
 import logging
 import os
-import textwrap
 from datetime import datetime
 import time
 import json
@@ -17,69 +17,98 @@ import yaml
 from pathlib import Path
 from types import SimpleNamespace as config
 
-# Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
-if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
-    os.environ["OPENAI_API_KEY"] = os.getenv("CHATGPT_API_KEY")
-
-litellm.drop_params = True
+CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
 
 def count_tokens(text, model=None):
     if not text:
         return 0
-    return litellm.token_counter(model=model, text=text)
+    try:
+        enc = tiktoken.encoding_for_model(model)
+    except KeyError:
+        enc = tiktoken.get_encoding("cl100k_base")
+    tokens = enc.encode(text)
+    return len(tokens)
 
-
-def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
-    if model:
-        model = model.removeprefix("litellm/")
+def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
     max_retries = 10
-    messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
+    client = openai.OpenAI(api_key=api_key)
     for i in range(max_retries):
         try:
-            response = litellm.completion(
+            if chat_history:
+                messages = chat_history
+                messages.append({"role": "user", "content": prompt})
+            else:
+                messages = [{"role": "user", "content": prompt}]
+            
+            response = client.chat.completions.create(
                 model=model,
                 messages=messages,
                 temperature=0,
             )
-            content = response.choices[0].message.content
-            if return_finish_reason:
-                finish_reason = "max_output_reached" if response.choices[0].finish_reason == "length" else "finished"
-                return content, finish_reason
-            return content
+            if response.choices[0].finish_reason == "length":
+                return response.choices[0].message.content, "max_output_reached"
+            else:
+                return response.choices[0].message.content, "finished"
+
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
-                time.sleep(1)
+                time.sleep(1)  # Wait for 1秒 before retrying
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
-                if return_finish_reason:
-                    return "", "error"
-                return ""
+                return "", "error"
 
 
 
-async def llm_acompletion(model, prompt):
-    if model:
-        model = model.removeprefix("litellm/")
+def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
     max_retries = 10
-    messages = [{"role": "user", "content": prompt}]
+    client = openai.OpenAI(api_key=api_key)
     for i in range(max_retries):
         try:
-            response = await litellm.acompletion(
+            if chat_history:
+                messages = chat_history
+                messages.append({"role": "user", "content": prompt})
+            else:
+                messages = [{"role": "user", "content": prompt}]
+            
+            response = client.chat.completions.create(
                 model=model,
                 messages=messages,
                 temperature=0,
             )
+   
             return response.choices[0].message.content
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
-                await asyncio.sleep(1)
+                time.sleep(1)  # Wait for 1秒 before retrying
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
-                return ""
+                return "Error"
+            
+
+async def ChatGPT_API_async(model, prompt, api_key=CHATGPT_API_KEY):
+    max_retries = 10
+    messages = [{"role": "user", "content": prompt}]
+    for i in range(max_retries):
+        try:
+            async with openai.AsyncOpenAI(api_key=api_key) as client:
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=0,
+                )
+                return response.choices[0].message.content
+        except Exception as e:
+            print('************* Retrying *************')
+            logging.error(f"Error: {e}")
+            if i < max_retries - 1:
+                await asyncio.sleep(1)  # Wait for 1s before retrying
+            else:
+                logging.error('Max retries reached for prompt: ' + prompt)
+                return "Error"  
             
             
 def get_json_content(response):
@@ -384,14 +413,15 @@ def add_preface_if_needed(data):
 
 
 
-def get_page_tokens(pdf_path, model=None, pdf_parser="PyPDF2"):
+def get_page_tokens(pdf_path, model="gpt-4o-2024-11-20", pdf_parser="PyPDF2"):
+    enc = tiktoken.encoding_for_model(model)
     if pdf_parser == "PyPDF2":
         pdf_reader = PyPDF2.PdfReader(pdf_path)
         page_list = []
         for page_num in range(len(pdf_reader.pages)):
             page = pdf_reader.pages[page_num]
             page_text = page.extract_text()
-            token_length = litellm.token_counter(model=model, text=page_text)
+            token_length = len(enc.encode(page_text))
             page_list.append((page_text, token_length))
         return page_list
     elif pdf_parser == "PyMuPDF":
@@ -403,7 +433,7 @@ def get_page_tokens(pdf_path, model=None, pdf_parser="PyPDF2"):
         page_list = []
         for page in doc:
             page_text = page.get_text()
-            token_length = litellm.token_counter(model=model, text=page_text)
+            token_length = len(enc.encode(page_text))
             page_list.append((page_text, token_length))
         return page_list
     else:
@@ -506,7 +536,7 @@ def remove_structure_text(data):
 def check_token_limit(structure, limit=110000):
     list = structure_to_list(structure)
     for node in list:
-        num_tokens = count_tokens(node['text'], model=None)
+        num_tokens = count_tokens(node['text'], model='gpt-4o')
         if num_tokens > limit:
             print(f"Node ID: {node['node_id']} has {num_tokens} tokens")
             print("Start Index:", node['start_index'])
@@ -582,7 +612,7 @@ async def generate_node_summary(node, model=None):
     
     Directly return the description, do not include any other text.
     """
-    response = await llm_acompletion(model, prompt)
+    response = await ChatGPT_API_async(model, prompt)
     return response
 
 
@@ -627,7 +657,7 @@ def generate_doc_description(structure, model=None):
     
     Directly return the description, do not include any other text.
     """
-    response = llm_completion(model, prompt)
+    response = ChatGPT_API(model, prompt)
     return response
 
 
@@ -683,28 +713,3 @@ class ConfigLoader:
         self._validate_keys(user_dict)
         merged = {**self._default_dict, **user_dict}
         return config(**merged)
-
-def create_node_mapping(tree):
-    """Create a flat dict mapping node_id to node for quick lookup."""
-    mapping = {}
-    def _traverse(nodes):
-        for node in nodes:
-            if node.get('node_id'):
-                mapping[node['node_id']] = node
-            if node.get('nodes'):
-                _traverse(node['nodes'])
-    _traverse(tree)
-    return mapping
-
-def print_tree(tree, indent=0):
-    for node in tree:
-        summary = node.get('summary') or node.get('prefix_summary', '')
-        summary_str = f"  —  {summary[:60]}..." if summary else ""
-        print('  ' * indent + f"[{node.get('node_id', '?')}] {node.get('title', '')}{summary_str}")
-        if node.get('nodes'):
-            print_tree(node['nodes'], indent + 1)
-
-def print_wrapped(text, width=100):
-    for line in text.splitlines():
-        print(textwrap.fill(line, width=width))
-

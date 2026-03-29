@@ -1,10 +1,10 @@
-model: "gpt-4o-2024-11-20"
-# model: "anthropic/claude-sonnet-4-6"
-retrieve_model: "gpt-5.4"  # defaults to `model` if not set
-toc_check_page_num: 20
-max_page_num_each_node: 10
-max_token_num_each_node: 20000
-if_add_node_id: "yes"
-if_add_node_summary: "yes"
-if_add_doc_description: "no"
-if_add_node_text: "no"
+[38;2;127;132;156m   1[0m [38;2;205;214;244mmodel: "MiniMax-M2.7-highspeed"[0m
+[38;2;127;132;156m   2[0m [38;2;205;214;244m# model: "anthropic/claude-sonnet-4-6"[0m
+[38;2;127;132;156m   3[0m [38;2;205;214;244mretrieve_model: "MiniMax-M2.7-highspeed"  # defaults to `model` if not set[0m
+[38;2;127;132;156m   4[0m [38;2;205;214;244mtoc_check_page_num: 20[0m
+[38;2;127;132;156m   5[0m [38;2;205;214;244mmax_page_num_each_node: 10[0m
+[38;2;127;132;156m   6[0m [38;2;205;214;244mmax_token_num_each_node: 20000[0m
+[38;2;127;132;156m   7[0m [38;2;205;214;244mif_add_node_id: "yes"[0m
+[38;2;127;132;156m   8[0m [38;2;205;214;244mif_add_node_summary: "yes"[0m
+[38;2;127;132;156m   9[0m [38;2;205;214;244mif_add_doc_description: "no"[0m
+[38;2;127;132;156m  10[0m [38;2;205;214;244mif_add_node_text: "no"[0m
