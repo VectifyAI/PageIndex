@@ -124,10 +124,10 @@ def extract_json(content):
             return json.loads(json_content)
         except:
             logging.error("Failed to parse JSON even after cleanup")
-            return {}
+            return []
     except Exception as e:
         logging.error(f"Unexpected error while extracting JSON: {e}")
-        return {}
+        return []
 
 def write_node_id(data, node_id=0):
     if isinstance(data, dict):

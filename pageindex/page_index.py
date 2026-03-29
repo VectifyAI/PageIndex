@@ -584,8 +584,14 @@ def process_no_toc(page_list, start_index=1, model=None, logger=None):
     logger.info(f'len(group_texts): {len(group_texts)}')
 
     toc_with_page_number= generate_toc_init(group_texts[0], model)
+    if not isinstance(toc_with_page_number, list):
+        logger.warning(f'generate_toc_init returned {type(toc_with_page_number).__name__} instead of list, resetting to empty list')
+        toc_with_page_number = []
     for group_text in group_texts[1:]:
-        toc_with_page_number_additional = generate_toc_continue(toc_with_page_number, group_text, model)    
+        toc_with_page_number_additional = generate_toc_continue(toc_with_page_number, group_text, model)
+        if not isinstance(toc_with_page_number_additional, list):
+            logger.warning(f'generate_toc_continue returned {type(toc_with_page_number_additional).__name__} instead of list, skipping')
+            continue
         toc_with_page_number.extend(toc_with_page_number_additional)
     logger.info(f'generate_toc: {toc_with_page_number}')
 
@@ -967,7 +973,7 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
     else:
         toc_with_page_number = process_no_toc(page_list, start_index=start_index, model=opt.model, logger=logger)
             
-    toc_with_page_number = [item for item in toc_with_page_number if item.get('physical_index') is not None] 
+    toc_with_page_number = [item for item in toc_with_page_number if isinstance(item, dict) and item.get('physical_index') is not None]
     
     toc_with_page_number = validate_and_truncate_physical_indices(
         toc_with_page_number, 
