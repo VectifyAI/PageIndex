@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from unittest.mock import patch
+
 from pageindex.code_indexer import CodeIndexer, LANG_MAP
 from pageindex.code_searcher import CodeSearcher
 
@@ -271,3 +273,158 @@ async def test_max_files():
     # index pageindex itself
     index = await indexer.index_directory(str(Path(__file__).parent.parent))
     assert index.total_files <= 2
+
+
+@pytest.mark.asyncio
+async def test_ts_static_method_call_graph(tmp_path):
+    """Static methods called as ClassName.method() must appear in call graph."""
+    ts_static = '''
+export class MathHelper {
+    static compute(n: number): number {
+        return n * 2;
+    }
+}
+
+export class Runner {
+    run(): void {
+        const result = MathHelper.compute(10);
+        console.log(result);
+    }
+}
+'''
+    (tmp_path / "static.ts").write_text(ts_static)
+    indexer = CodeIndexer()
+    index = await indexer.index_directory(str(tmp_path), repo_name="ts-static-test")
+
+    names = {s.name for fi in index.files for s in fi.symbols}
+    assert "compute" in names
+    assert "run" in names
+
+    # run() calls compute — should appear in call graph
+    run_key = "static.ts:run"
+    assert run_key in index.call_graph, f"run not in call_graph. Keys: {list(index.call_graph.keys())}"
+    callee_names = [c.split(":")[-1] for c in index.call_graph[run_key]]
+    assert "compute" in callee_names, f"Expected compute in callees: {callee_names}"
+
+
+@pytest.mark.asyncio
+async def test_ts_super_method_call(tmp_path):
+    """super.method() calls in subclass must be tracked in call graph."""
+    ts_inherit = '''
+export class Base {
+    init(): void {
+        console.log("base init");
+    }
+}
+
+export class Child extends Base {
+    init(): void {
+        super.init();
+        console.log("child init");
+    }
+}
+'''
+    (tmp_path / "inherit.ts").write_text(ts_inherit)
+    indexer = CodeIndexer()
+    index = await indexer.index_directory(str(tmp_path), repo_name="ts-super-test")
+
+    # Child.init() should have dependency on Base.init()
+    child_file = index.files[0]
+    child_init = next((s for s in child_file.symbols if s.name == "init" and s.line_range[0] > 5), None)
+    assert child_init is not None, "Child.init() not found"
+    assert "init" in child_init.dependencies, f"super.init() not in dependencies: {child_init.dependencies}"
+
+
+@pytest.mark.asyncio
+async def test_ts_promise_chain_callback(tmp_path):
+    """Function calls inside .then()/.catch() callbacks must be tracked."""
+    ts_promise = '''
+export class Fetcher {
+    process(data: string): string {
+        return data.trim();
+    }
+
+    fetch(url: string): void {
+        fetch(url)
+            .then((response) => {
+                const text = this.process(response.text());
+                return text;
+            })
+            .catch((err) => {
+                this.handleError(err);
+            });
+    }
+
+    handleError(err: Error): void {
+        console.error(err);
+    }
+}
+'''
+    (tmp_path / "fetcher.ts").write_text(ts_promise)
+    indexer = CodeIndexer()
+    index = await indexer.index_directory(str(tmp_path), repo_name="ts-promise-test")
+
+    names = {s.name for fi in index.files for s in fi.symbols}
+    assert "fetch" in names
+    assert "process" in names
+
+    fetch_sym = next((s for fi in index.files for s in fi.symbols if s.name == "fetch"), None)
+    assert fetch_sym is not None
+    # process or handleError should be in dependencies (called inside callbacks)
+    assert "process" in fetch_sym.dependencies or "handleError" in fetch_sym.dependencies, \
+        f"Expected process/handleError in deps: {fetch_sym.dependencies}"
+
+
+@pytest.mark.asyncio
+async def test_ts_arrow_function_callback(tmp_path):
+    """Calls inside arrow function arguments to HOFs (map, forEach) must be tracked."""
+    ts_arrow_hof = '''
+export class Processor {
+    transform(item: string): string {
+        return item.toUpperCase();
+    }
+
+    processAll(items: string[]): string[] {
+        return items.map((item) => this.transform(item));
+    }
+}
+'''
+    (tmp_path / "processor.ts").write_text(ts_arrow_hof)
+    indexer = CodeIndexer()
+    index = await indexer.index_directory(str(tmp_path), repo_name="ts-arrow-test")
+
+    names = {s.name for fi in index.files for s in fi.symbols}
+    assert "processAll" in names
+    assert "transform" in names
+
+    process_all = next((s for fi in index.files for s in fi.symbols if s.name == "processAll"), None)
+    assert process_all is not None
+    assert "transform" in process_all.dependencies, \
+        f"Expected transform in deps: {process_all.dependencies}"
+
+
+@pytest.mark.asyncio
+async def test_relevance_search_with_fallback(sample_repo, tmp_path):
+    """Fallback chain: first model raises exception, second model succeeds."""
+    indexer = CodeIndexer()
+    index = await indexer.index_directory(str(sample_repo), repo_name="fallback-test")
+    out = tmp_path / "results" / "fallback-test_code_index.json"
+    out.parent.mkdir(exist_ok=True)
+    indexer.save_index(index, str(out))
+
+    searcher = CodeSearcher(results_dir=str(out.parent))
+
+    call_count = {"n": 0}
+
+    def mock_api(model, prompt, api_key=None):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise ConnectionError("primary model unavailable")
+        # Second call (fallback model) succeeds
+        return "[0]"
+
+    with patch("pageindex.code_searcher.ChatGPT_API", side_effect=mock_api):
+        result = await searcher.search("engine run", mode="relevance")
+
+    assert call_count["n"] >= 2, "Fallback was not attempted"
+    assert "Code search" in result

@@ -1,6 +1,6 @@
 {
   "repo_name": "mcp-test-repo",
-  "repo_path": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\pytest-of-Administrator\\pytest-16\\repo0",
+  "repo_path": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\pytest-of-Administrator\\pytest-20\\repo0",
   "language_composition": {
     "typescript": 1,
     "python": 1
@@ -81,7 +81,7 @@
         "symbol_count": 4,
         "complexity_avg": 1.25
       },
-      "indexed_at": 1774826019.1542192,
+      "indexed_at": 1774826637.8687806,
       "content_hash": "474f57abf998"
     },
     {
@@ -164,7 +164,7 @@
         "symbol_count": 4,
         "complexity_avg": 1.25
       },
-      "indexed_at": 1774826019.1542192,
+      "indexed_at": 1774826637.8687806,
       "content_hash": "217d37dcc1ef"
     }
   ],
@@ -182,6 +182,6 @@
   },
   "total_files": 2,
   "total_symbols": 8,
-  "indexed_at": 1774826019.1542192,
+  "indexed_at": 1774826637.8687806,
   "metadata": {}
 }

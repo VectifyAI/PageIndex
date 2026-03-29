@@ -312,6 +312,20 @@ class CodeIndexer:
                 name_node = child.child_by_field_name("name")
                 if name_node:
                     name = self._node_text(name_node)
+                    # Collect superclass name for super() resolution
+                    superclass = None
+                    heritage = child.child_by_field_name("heritage")
+                    if not heritage:
+                        # tree-sitter TS uses class_heritage as a named child
+                        for c in child.children:
+                            if c.type == "class_heritage":
+                                heritage = c
+                                break
+                    if heritage:
+                        for c in heritage.children:
+                            if c.type == "identifier":
+                                superclass = self._node_text(c)
+                                break
                     symbols.append(Symbol(
                         name=name, type="class",
                         line_range=(child.start_point[0] + 1, child.end_point[0] + 1),
@@ -416,11 +430,38 @@ class CodeIndexer:
             func_node = node.child_by_field_name("function")
             if func_node:
                 text = self._node_text(func_node)
-                # Get last identifier (e.g., "self.foo" → "foo", "module.bar" → "bar")
+                # Get last identifier (e.g., "self.foo" → "foo", "ClassName.foo" → "foo")
                 parts = text.split(".")
                 name = parts[-1] if parts else text
-                if name and not name.startswith("_") and name not in ("print", "len", "str", "int", "float", "list", "dict", "set", "tuple", "range", "enumerate", "zip", "map", "filter", "sorted", "isinstance", "hasattr", "getattr", "setattr", "super", "type", "open"):
+                _BUILTIN_SKIP = {
+                    "print", "len", "str", "int", "float", "list", "dict", "set", "tuple",
+                    "range", "enumerate", "zip", "map", "filter", "sorted", "isinstance",
+                    "hasattr", "getattr", "setattr", "super", "type", "open",
+                    "then", "catch", "finally", "resolve", "reject", "all", "race",
+                    "log", "warn", "error", "info", "debug",
+                }
+                if name and not name.startswith("_") and name not in _BUILTIN_SKIP:
                     calls.add(name)
+
+                # Handle super.method() — extract method name
+                if func_node.type == "member_expression":
+                    obj = func_node.child_by_field_name("object")
+                    prop = func_node.child_by_field_name("property")
+                    if obj and prop and self._node_text(obj) == "super":
+                        method_name = self._node_text(prop)
+                        if method_name and not method_name.startswith("_"):
+                            calls.add(method_name)
+
+            # Scan callback arguments for inline function calls (Promise chains, HOFs)
+            args_node = node.child_by_field_name("arguments")
+            if args_node:
+                for arg in args_node.children:
+                    if arg.type in ("arrow_function", "function_expression", "function"):
+                        # Recursively extract calls inside the callback body
+                        body = arg.child_by_field_name("body")
+                        if body:
+                            self._walk_calls(body, source, calls)
+
         for child in node.children:
             self._walk_calls(child, source, calls)
 

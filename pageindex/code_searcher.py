@@ -11,8 +11,9 @@ from typing import Dict, List, Optional, Tuple
 from .utils import ChatGPT_API
 
 RESULTS_DIR = Path(__file__).parent.parent / "results"
-# Override via PAGEINDEX_MODEL env var. Default: deepseek-v3.2 via relay (cheap, reliable).
+# Primary model via PAGEINDEX_MODEL; fallback chain tried in order on failure.
 MODEL = os.getenv("PAGEINDEX_MODEL", "deepseek-v3.2")
+_FALLBACK_MODELS = ["deepseek-v3.2", "qwen3-coder", "doubao-seed-2.0"]
 API_KEY = os.getenv("CHATGPT_API_KEY")
 
 
@@ -157,12 +158,26 @@ Symbols:
 
 Return ONLY a JSON array of indices of the top {top_k} most relevant symbols (e.g. [2, 0, 5]). No explanation."""
 
-        try:
-            response = ChatGPT_API(MODEL, prompt, api_key=API_KEY)
-            indices = json.loads(response.strip())
-            if not isinstance(indices, list):
-                raise ValueError
-        except Exception:
+        # Build fallback chain: primary model first, then defaults (dedup preserving order)
+        seen = set()
+        model_chain = []
+        for m in [MODEL] + _FALLBACK_MODELS:
+            if m not in seen:
+                seen.add(m)
+                model_chain.append(m)
+
+        indices = None
+        for model in model_chain:
+            try:
+                response = ChatGPT_API(model, prompt, api_key=API_KEY)
+                parsed = json.loads(response.strip())
+                if isinstance(parsed, list):
+                    indices = parsed
+                    break
+            except Exception:
+                continue
+
+        if indices is None:
             indices = list(range(min(top_k, len(candidates))))
 
         lines = [f"## Code search: {query}\n"]
