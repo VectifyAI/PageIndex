@@ -18,7 +18,7 @@
 <h4 align="center">
   <a href="https://vectify.ai">🏠 Homepage</a>&nbsp; • &nbsp;
   <a href="https://chat.pageindex.ai">🖥️ Chat Platform</a>&nbsp; • &nbsp;
-  <a href="https://pageindex.ai/mcp">🔌 MCP</a>&nbsp; • &nbsp;
+  <a href="https://pageindex.ai/developer">🔌 MCP</a>&nbsp; • &nbsp;
   <a href="https://docs.pageindex.ai">📚 Docs</a>&nbsp; • &nbsp;
   <a href="https://discord.com/invite/VuXuf29EUj">💬 Discord</a>&nbsp; • &nbsp;
   <a href="https://ii2abc2jejf.typeform.com/to/tK3AXl8T">✉️ Contact</a>&nbsp;
@@ -31,7 +31,7 @@
 <summary><h2>📢 Updates</h2></summary>
 
 - 🔥 [**Agentic Vectorless RAG**](https://github.com/VectifyAI/PageIndex/blob/main/examples/agentic_vectorless_rag_demo.py): A simple *agentic, vectorless RAG* [example](https://github.com/VectifyAI/PageIndex/blob/main/examples/agentic_vectorless_rag_demo.py) with self-hosted PageIndex, using OpenAI Agents SDK.
-- [PageIndex Chat](https://chat.pageindex.ai): A Human-like document analysis agent [platform](https://chat.pageindex.ai) for professional long documents. Also available via [MCP](https://pageindex.ai/mcp) or [API](https://docs.pageindex.ai/quickstart).
+- [PageIndex Chat](https://chat.pageindex.ai): A Human-like document analysis agent [platform](https://chat.pageindex.ai) for professional long documents. Also available via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer).
 - [PageIndex Framework](https://pageindex.ai/blog/pageindex-intro): The PageIndex framework — an *agentic, in-context tree index* that enables LLMs to perform *reasoning-based, human-like retrieval* over long documents.
 
  <!-- **🧪 Cookbooks:**
@@ -72,11 +72,11 @@ PageIndex powers a reasoning-based RAG system that achieved **state-of-the-art**
 
 To learn more, please see a detailed introduction of the [PageIndex framework](https://pageindex.ai/blog/pageindex-intro). Check out this GitHub repo for open-source code, and the [cookbooks](https://docs.pageindex.ai/cookbook), [tutorials](https://docs.pageindex.ai/tutorials), and [blog](https://pageindex.ai/blog) for additional usage guides and examples.
 
-The PageIndex service is available as a ChatGPT-style [chat platform](https://chat.pageindex.ai), or can be integrated via [MCP](https://pageindex.ai/mcp) or [API](https://docs.pageindex.ai/quickstart).
+The PageIndex service is available as a ChatGPT-style [chat platform](https://chat.pageindex.ai), or can be integrated via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer).
 
 ### 🛠️ Deployment Options
 - Self-host — run locally with this open-source repo.
-- Cloud Service — try instantly with our [Chat Platform](https://chat.pageindex.ai/), or integrate with [MCP](https://pageindex.ai/mcp) or [API](https://docs.pageindex.ai/quickstart).
+- Cloud Service — try instantly with our [Chat Platform](https://chat.pageindex.ai/), or integrate via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer).
 - _Enterprise_ — private or on-prem deployment. [Contact us](https://ii2abc2jejf.typeform.com/to/tK3AXl8T) or [book a demo](https://calendly.com/pageindex/meet) for more details.
 
 ### 🧪 Quick Hands-on
@@ -135,7 +135,7 @@ Below is an example PageIndex tree structure. Also see more example [documents](
 ...
 ```
 
-You can generate the PageIndex tree structure with this open-source repo, or use our [API](https://docs.pageindex.ai/quickstart).
+You can generate the PageIndex tree structure with this open-source repo, or use our [API](https://pageindex.ai/developer).
 
 ---
 
@@ -241,7 +241,7 @@ Explore the full [benchmark results](https://github.com/VectifyAI/Mafin2.5-Finan
 * 🧪 [Cookbooks](https://docs.pageindex.ai/cookbook/vectorless-rag-pageindex): hands-on, runnable examples and advanced use cases.
 * 📖 [Tutorials](https://docs.pageindex.ai/doc-search): practical guides and strategies, including *Document Search* and *Tree Search*.
 * 📝 [Blog](https://pageindex.ai/blog): technical articles, research insights, and product updates.
-* 🔌 [MCP setup](https://pageindex.ai/mcp#quick-setup) & [API docs](https://docs.pageindex.ai/quickstart): integration details and configuration options.
+* 🔧 [Developer](https://pageindex.ai/developer): MCP setup, API docs, and integration guides.
 
 ---
 
