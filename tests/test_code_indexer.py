@@ -199,6 +199,73 @@ async def test_language_filter(sample_repo):
 
 
 @pytest.mark.asyncio
+async def test_python_async_symbol_extraction(tmp_path):
+    """Async functions and complex type annotations must not corrupt symbol names."""
+    async_py = '''
+from typing import Optional, Dict, List
+
+class AsyncWorker:
+    async def fetch(self, url: str, timeout: int = 30) -> Optional[Dict]:
+        pass
+
+    async def process_batch(self, items: List[str]) -> List[Dict]:
+        for item in items:
+            r = await self.fetch(item)
+        return []
+
+async def run_all(workers: List[AsyncWorker]) -> None:
+    pass
+'''
+    (tmp_path / "worker.py").write_text(async_py)
+    indexer = CodeIndexer()
+    index = await indexer.index_directory(str(tmp_path), language_filter="python")
+    py_file = index.files[0]
+    names = {s.name for s in py_file.symbols}
+    assert "AsyncWorker" in names
+    assert "fetch" in names
+    assert "process_batch" in names
+    assert "run_all" in names
+    # All names must be valid Python identifiers (no corruption)
+    for sym in py_file.symbols:
+        assert sym.name and sym.name.isidentifier(), f"Corrupt symbol name: {sym.name!r}"
+
+
+@pytest.mark.asyncio
+async def test_ts_class_method_call_graph(tmp_path):
+    """TS class methods should appear in call graph when they call this.otherMethod()."""
+    ts_with_method_calls = '''
+export class Service {
+    async run(): Promise<void> {
+        const result = this.compute(42);
+        this.log(result);
+    }
+
+    compute(n: number): number {
+        return n * 2;
+    }
+
+    log(msg: any): void {
+        console.log(msg);
+    }
+}
+'''
+    (tmp_path / "service.ts").write_text(ts_with_method_calls)
+    indexer = CodeIndexer()
+    index = await indexer.index_directory(str(tmp_path), repo_name="ts-method-test")
+
+    names = {s.name for fi in index.files for s in fi.symbols}
+    assert "run" in names
+    assert "compute" in names
+    assert "log" in names
+
+    # run() calls compute and log — should appear in call graph
+    run_key = "service.ts:run"
+    assert run_key in index.call_graph, f"run not in call_graph. Keys: {list(index.call_graph.keys())}"
+    callee_names = [c.split(":")[-1] for c in index.call_graph[run_key]]
+    assert "compute" in callee_names or "log" in callee_names, f"Expected compute/log in callees: {callee_names}"
+
+
+@pytest.mark.asyncio
 async def test_max_files():
     indexer = CodeIndexer(max_files=2)
     # index pageindex itself

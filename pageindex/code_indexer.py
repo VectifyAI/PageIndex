@@ -298,10 +298,14 @@ class CodeIndexer:
             break
         return None
 
-    def _extract_ts_symbols(self, node, source: str, symbols: List[Symbol]):
+    def _extract_ts_symbols(self, node, source: str, symbols: List[Symbol], in_class: bool = False):
         for child in node.children:
-            if child.type in ("function_declaration", "method_definition"):
-                sym = self._ts_function(child, source)
+            if child.type == "function_declaration":
+                sym = self._ts_function(child, source, "function")
+                if sym:
+                    symbols.append(sym)
+            elif child.type == "method_definition":
+                sym = self._ts_function(child, source, "method")
                 if sym:
                     symbols.append(sym)
             elif child.type == "class_declaration":
@@ -315,9 +319,9 @@ class CodeIndexer:
                     ))
                     body = child.child_by_field_name("body")
                     if body:
-                        self._extract_ts_symbols(body, source, symbols)
+                        self._extract_ts_symbols(body, source, symbols, in_class=True)
             elif child.type in ("export_statement", "export_default_declaration"):
-                self._extract_ts_symbols(child, source, symbols)
+                self._extract_ts_symbols(child, source, symbols, in_class)
             elif child.type == "lexical_declaration":
                 # const/let/var
                 for decl in child.children:
@@ -337,18 +341,19 @@ class CodeIndexer:
                                     signature=self._node_text(child)[:120],
                                 ))
 
-    def _ts_function(self, node, source: str) -> Optional[Symbol]:
+    def _ts_function(self, node, source: str, sym_type: str = "function") -> Optional[Symbol]:
         name_node = node.child_by_field_name("name")
         if not name_node:
             return None
         name = self._node_text(name_node)
         params_node = node.child_by_field_name("parameters")
         params = self._node_text(params_node) if params_node else "()"
-        sig = f"function {name}{params}"
+        prefix = "function" if sym_type == "function" else "method"
+        sig = f"{prefix} {name}{params}"
         line_range = (node.start_point[0] + 1, node.end_point[0] + 1)
         deps = self._extract_call_names(node, source)
         complexity = self._estimate_complexity(node, source)
-        return Symbol(name=name, type="function", line_range=line_range,
+        return Symbol(name=name, type=sym_type, line_range=line_range,
                       signature=sig[:200], dependencies=deps, complexity=complexity)
 
     def _ts_arrow_function(self, name: str, decl_node, arrow_node, source: str) -> Optional[Symbol]:

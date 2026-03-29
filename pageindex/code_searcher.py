@@ -11,7 +11,8 @@ from typing import Dict, List, Optional, Tuple
 from .utils import ChatGPT_API
 
 RESULTS_DIR = Path(__file__).parent.parent / "results"
-MODEL = os.getenv("PAGEINDEX_MODEL", "MiniMax-M2.7-highspeed")
+# Override via PAGEINDEX_MODEL env var. Default: deepseek-v3.2 via relay (cheap, reliable).
+MODEL = os.getenv("PAGEINDEX_MODEL", "deepseek-v3.2")
 API_KEY = os.getenv("CHATGPT_API_KEY")
 
 

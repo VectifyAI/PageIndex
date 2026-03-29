@@ -1,0 +1,187 @@
+{
+  "repo_name": "mcp-test-repo",
+  "repo_path": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\pytest-of-Administrator\\pytest-16\\repo0",
+  "language_composition": {
+    "typescript": 1,
+    "python": 1
+  },
+  "files": [
+    {
+      "repo_name": "mcp-test-repo",
+      "file_path": "calc.ts",
+      "language": "typescript",
+      "symbols": [
+        {
+          "name": "Calculator",
+          "type": "class",
+          "line_range": [
+            2,
+            9
+          ],
+          "signature": "class Calculator",
+          "docstring": null,
+          "dependencies": [],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "add",
+          "type": "method",
+          "line_range": [
+            3,
+            5
+          ],
+          "signature": "method add(a: number, b: number)",
+          "docstring": null,
+          "dependencies": [
+            "validate"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "validate",
+          "type": "method",
+          "line_range": [
+            6,
+            8
+          ],
+          "signature": "method validate(n: number)",
+          "docstring": null,
+          "dependencies": [
+            "isNaN"
+          ],
+          "callers": [
+            "calc.ts:add"
+          ],
+          "summary": null,
+          "complexity": 2
+        },
+        {
+          "name": "multiply",
+          "type": "function",
+          "line_range": [
+            11,
+            13
+          ],
+          "signature": "function multiply(x: number, y: number)",
+          "docstring": null,
+          "dependencies": [],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        }
+      ],
+      "imports": [],
+      "metrics": {
+        "total_lines": 14,
+        "code_lines": 11,
+        "symbol_count": 4,
+        "complexity_avg": 1.25
+      },
+      "indexed_at": 1774826019.1542192,
+      "content_hash": "474f57abf998"
+    },
+    {
+      "repo_name": "mcp-test-repo",
+      "file_path": "processor.py",
+      "language": "python",
+      "symbols": [
+        {
+          "name": "Processor",
+          "type": "class",
+          "line_range": [
+            2,
+            7
+          ],
+          "signature": "class Processor",
+          "docstring": null,
+          "dependencies": [],
+          "callers": [
+            "processor.py:main"
+          ],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "run",
+          "type": "method",
+          "line_range": [
+            3,
+            4
+          ],
+          "signature": "def run(self, items)",
+          "docstring": null,
+          "dependencies": [
+            "process"
+          ],
+          "callers": [
+            "processor.py:main"
+          ],
+          "summary": null,
+          "complexity": 2
+        },
+        {
+          "name": "process",
+          "type": "method",
+          "line_range": [
+            6,
+            7
+          ],
+          "signature": "def process(self, item)",
+          "docstring": null,
+          "dependencies": [],
+          "callers": [
+            "processor.py:run"
+          ],
+          "summary": null,
+          "complexity": 1
+        },
+        {
+          "name": "main",
+          "type": "function",
+          "line_range": [
+            9,
+            11
+          ],
+          "signature": "def main()",
+          "docstring": null,
+          "dependencies": [
+            "Processor",
+            "run"
+          ],
+          "callers": [],
+          "summary": null,
+          "complexity": 1
+        }
+      ],
+      "imports": [],
+      "metrics": {
+        "total_lines": 12,
+        "code_lines": 8,
+        "symbol_count": 4,
+        "complexity_avg": 1.25
+      },
+      "indexed_at": 1774826019.1542192,
+      "content_hash": "217d37dcc1ef"
+    }
+  ],
+  "call_graph": {
+    "calc.ts:add": [
+      "calc.ts:validate"
+    ],
+    "processor.py:run": [
+      "processor.py:process"
+    ],
+    "processor.py:main": [
+      "processor.py:Processor",
+      "processor.py:run"
+    ]
+  },
+  "total_files": 2,
+  "total_symbols": 8,
+  "indexed_at": 1774826019.1542192,
+  "metadata": {}
+}
