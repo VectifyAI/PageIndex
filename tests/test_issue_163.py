@@ -81,11 +81,11 @@ class TestExtractTocContentRetryLoop:
 
     @patch("pageindex.page_index.check_if_toc_transformation_is_complete")
     @patch("pageindex.page_index.llm_completion")
-    def test_max_retries_returns_best_effort(self, mock_llm, mock_check):
+    def test_max_retries_raises_exception(self, mock_llm, mock_check):
         mock_llm.return_value = ("chunk", "max_output_reached")
         mock_check.return_value = "no"
-        result = extract_toc_content("raw content", model="test")
-        assert "chunk" in result
+        with pytest.raises(Exception, match="Failed to complete table of contents extraction"):
+            extract_toc_content("raw content", model="test")
         assert mock_llm.call_count == 6
 
     @patch("pageindex.page_index.check_if_toc_transformation_is_complete")

@@ -186,7 +186,7 @@ def extract_toc_content(content, model=None):
         if if_complete == "yes" and finish_reason == "finished":
             break
     else:
-        logging.warning('extract_toc_content: max retries reached, returning best effort result')
+        raise Exception('Failed to complete table of contents extraction after maximum retries')
     
     return response
 
@@ -297,11 +297,12 @@ def toc_transformer(toc_content, model=None):
     ]
     continue_prompt = "Please continue the table of contents JSON structure from where you left off. Directly output only the remaining part."
 
+    position = last_complete.rfind('}')
+    if position != -1:
+        last_complete = last_complete[:position+2]
+
     max_attempts = 5
     for attempt in range(max_attempts):
-        position = last_complete.rfind('}')
-        if position != -1:
-            last_complete = last_complete[:position+2]
 
         new_complete, finish_reason = llm_completion(model=model, prompt=continue_prompt, chat_history=chat_history, return_finish_reason=True)
 
@@ -316,7 +317,7 @@ def toc_transformer(toc_content, model=None):
         if if_complete == "yes" and finish_reason == "finished":
             break
     else:
-        logging.warning('toc_transformer: max retries reached, returning best effort result')
+        raise Exception('Failed to complete TOC transformation after maximum retries')
 
     last_complete = extract_json(last_complete)
 
@@ -741,7 +742,10 @@ async def single_toc_item_index_fixer(section_title, content, model=None):
     prompt = toc_extractor_prompt + '\nSection Title:\n' + str(section_title) + '\nDocument pages:\n' + content
     response = await llm_acompletion(model=model, prompt=prompt)
     json_content = extract_json(response)    
-    return convert_physical_index_to_int(json_content.get('physical_index'))
+    physical_index = json_content.get('physical_index')
+    if physical_index is None:
+        return None
+    return convert_physical_index_to_int(physical_index)
 
 
 
