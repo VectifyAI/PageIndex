@@ -114,7 +114,8 @@ def toc_detector_single_page(content, model=None):
     }}
 
     Directly return the final JSON structure. Do not output anything else.
-    Please note: abstract,summary, notation list, figure list, table list, etc. are not table of contents."""
+    Please note: abstract, summary, notation list, figure list, table list, etc. are not table of contents.
+    Also note: a page containing actual document content (e.g. policy text, regulations, descriptions, rules) with numbered sections is NOT a table of contents, even if the sections are numbered. A true table of contents only lists section titles as references to content found elsewhere in the document, typically accompanied by page numbers or dotted leaders."""
 
     response = llm_completion(model=model, prompt=prompt)
     # print('response', response)
