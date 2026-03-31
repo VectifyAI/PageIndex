@@ -1,0 +1,19 @@
+[project]
+name = "pageindex"
+version = "0.1.0"
+description = "Vectorless, Reasoning-based RAG - transform PDF documents into semantic tree structures for LLMs"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = [
+    "litellm==1.82.0",
+    "pymupdf==1.26.4",
+    "pypdf2==3.0.1",
+    "python-dotenv==1.1.0",
+    "pyyaml==6.0.2",
+]
+
+[project.optional-dependencies]
+agents = [
+    "openai-agents",
+]

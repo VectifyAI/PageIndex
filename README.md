@@ -145,6 +145,14 @@ You can follow these steps to generate a PageIndex tree from a PDF document.
 
 ### 1. Install dependencies
 
+Using [uv](https://docs.astral.sh/uv/) (recommended):
+
+```bash
+uv sync
+```
+
+Or using pip:
+
 ```bash
 pip3 install --upgrade -r requirements.txt
 ```
