@@ -240,64 +240,65 @@ def clean_tree_for_output(tree_nodes):
     return cleaned_nodes
 
 
-async def md_to_tree(md_path, if_thinning=False, min_token_threshold=None, if_add_node_summary='no', summary_token_threshold=None, model=None, if_add_doc_description='no', if_add_node_text='no', if_add_node_id='yes'):
-    with open(md_path, 'r', encoding='utf-8') as f:
-        markdown_content = f.read()
-    line_count = markdown_content.count('\n') + 1
+async def md_to_tree(md_path, if_thinning=False, min_token_threshold=None, if_add_node_summary='no', summary_token_threshold=None, model=None, llm_kwargs=None, if_add_doc_description='no', if_add_node_text='no', if_add_node_id='yes'):
+    with llm_kwargs_scope(llm_kwargs):
+        with open(md_path, 'r', encoding='utf-8') as f:
+            markdown_content = f.read()
+        line_count = markdown_content.count('\n') + 1
 
-    print(f"Extracting nodes from markdown...")
-    node_list, markdown_lines = extract_nodes_from_markdown(markdown_content)
+        print(f"Extracting nodes from markdown...")
+        node_list, markdown_lines = extract_nodes_from_markdown(markdown_content)
 
-    print(f"Extracting text content from nodes...")
-    nodes_with_content = extract_node_text_content(node_list, markdown_lines)
-    
-    if if_thinning:
-        nodes_with_content = update_node_list_with_text_token_count(nodes_with_content, model=model)
-        print(f"Thinning nodes...")
-        nodes_with_content = tree_thinning_for_index(nodes_with_content, min_token_threshold, model=model)
-    
-    print(f"Building tree from nodes...")
-    tree_structure = build_tree_from_nodes(nodes_with_content)
-
-    if if_add_node_id == 'yes':
-        write_node_id(tree_structure)
-
-    print(f"Formatting tree structure...")
-    
-    if if_add_node_summary == 'yes':
-        # Always include text for summary generation
-        tree_structure = format_structure(tree_structure, order = ['title', 'node_id', 'line_num', 'summary', 'prefix_summary', 'text', 'nodes'])
+        print(f"Extracting text content from nodes...")
+        nodes_with_content = extract_node_text_content(node_list, markdown_lines)
         
-        print(f"Generating summaries for each node...")
-        tree_structure = await generate_summaries_for_structure_md(tree_structure, summary_token_threshold=summary_token_threshold, model=model)
+        if if_thinning:
+            nodes_with_content = update_node_list_with_text_token_count(nodes_with_content, model=model)
+            print(f"Thinning nodes...")
+            nodes_with_content = tree_thinning_for_index(nodes_with_content, min_token_threshold, model=model)
         
-        if if_add_node_text == 'no':
-            # Remove text after summary generation if not requested
-            tree_structure = format_structure(tree_structure, order = ['title', 'node_id', 'line_num', 'summary', 'prefix_summary', 'nodes'])
+        print(f"Building tree from nodes...")
+        tree_structure = build_tree_from_nodes(nodes_with_content)
+
+        if if_add_node_id == 'yes':
+            write_node_id(tree_structure)
+
+        print(f"Formatting tree structure...")
         
-        if if_add_doc_description == 'yes':
-            print(f"Generating document description...")
-            # Create a clean structure without unnecessary fields for description generation
-            clean_structure = create_clean_structure_for_description(tree_structure)
-            doc_description = generate_doc_description(clean_structure, model=model)
-            return {
-                'doc_name': os.path.splitext(os.path.basename(md_path))[0],
-                'doc_description': doc_description,
-                'line_count': line_count,
-                'structure': tree_structure,
-            }
-    else:
-        # No summaries needed, format based on text preference
-        if if_add_node_text == 'yes':
+        if if_add_node_summary == 'yes':
+            # Always include text for summary generation
             tree_structure = format_structure(tree_structure, order = ['title', 'node_id', 'line_num', 'summary', 'prefix_summary', 'text', 'nodes'])
+            
+            print(f"Generating summaries for each node...")
+            tree_structure = await generate_summaries_for_structure_md(tree_structure, summary_token_threshold=summary_token_threshold, model=model)
+            
+            if if_add_node_text == 'no':
+                # Remove text after summary generation if not requested
+                tree_structure = format_structure(tree_structure, order = ['title', 'node_id', 'line_num', 'summary', 'prefix_summary', 'nodes'])
+            
+            if if_add_doc_description == 'yes':
+                print(f"Generating document description...")
+                # Create a clean structure without unnecessary fields for description generation
+                clean_structure = create_clean_structure_for_description(tree_structure)
+                doc_description = generate_doc_description(clean_structure, model=model)
+                return {
+                    'doc_name': os.path.splitext(os.path.basename(md_path))[0],
+                    'doc_description': doc_description,
+                    'line_count': line_count,
+                    'structure': tree_structure,
+                }
         else:
-            tree_structure = format_structure(tree_structure, order = ['title', 'node_id', 'line_num', 'summary', 'prefix_summary', 'nodes'])
-    
-    return {
-        'doc_name': os.path.splitext(os.path.basename(md_path))[0],
-        'line_count': line_count,
-        'structure': tree_structure,
-    }
+            # No summaries needed, format based on text preference
+            if if_add_node_text == 'yes':
+                tree_structure = format_structure(tree_structure, order = ['title', 'node_id', 'line_num', 'summary', 'prefix_summary', 'text', 'nodes'])
+            else:
+                tree_structure = format_structure(tree_structure, order = ['title', 'node_id', 'line_num', 'summary', 'prefix_summary', 'nodes'])
+        
+        return {
+            'doc_name': os.path.splitext(os.path.basename(md_path))[0],
+            'line_count': line_count,
+            'structure': tree_structure,
+        }
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 model: "gpt-4o-2024-11-20"
+llm_kwargs: {}
 # model: "anthropic/claude-sonnet-4-6"
 retrieve_model: "gpt-5.4"  # defaults to `model` if not set
 toc_check_page_num: 20

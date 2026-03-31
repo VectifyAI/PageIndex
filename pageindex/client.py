@@ -32,7 +32,7 @@ class PageIndexClient:
 
     For agent-based QA, see examples/agentic_vectorless_rag_demo.py.
     """
-    def __init__(self, api_key: str = None, model: str = None, retrieve_model: str = None, workspace: str = None):
+    def __init__(self, api_key: str = None, model: str = None, retrieve_model: str = None, workspace: str = None, llm_kwargs: dict | None = None):
         if api_key:
             os.environ["OPENAI_API_KEY"] = api_key
         elif not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
@@ -43,14 +43,18 @@ class PageIndexClient:
             overrides["model"] = model
         if retrieve_model:
             overrides["retrieve_model"] = retrieve_model
+        if llm_kwargs is not None:
+            overrides["llm_kwargs"] = llm_kwargs
         opt = ConfigLoader().load(overrides or None)
         self.model = opt.model
         self.retrieve_model = _normalize_retrieve_model(opt.retrieve_model or self.model)
+        self.llm_kwargs = opt.llm_kwargs
         if self.workspace:
             self.workspace.mkdir(parents=True, exist_ok=True)
         self.documents = {}
         if self.workspace:
             self._load_workspace()
+        
 
     def index(self, file_path: str, mode: str = "auto") -> str:
         """Index a document. Returns a document_id."""
@@ -71,6 +75,7 @@ class PageIndexClient:
             result = page_index(
                 doc=file_path,
                 model=self.model,
+                llm_kwargs=self.llm_kwargs,
                 if_add_node_summary='yes',
                 if_add_node_text='yes',
                 if_add_node_id='yes',
@@ -102,6 +107,7 @@ class PageIndexClient:
                 if_add_node_summary='yes',
                 summary_token_threshold=200,
                 model=self.model,
+                llm_kwargs=self.llm_kwargs,
                 if_add_doc_description='yes',
                 if_add_node_text='yes',
                 if_add_node_id='yes'

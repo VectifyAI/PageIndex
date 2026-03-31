@@ -10,6 +10,8 @@ import copy
 import asyncio
 import pymupdf
 from io import BytesIO
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dotenv import load_dotenv
 load_dotenv()
 import logging
@@ -22,6 +24,20 @@ if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
     os.environ["OPENAI_API_KEY"] = os.getenv("CHATGPT_API_KEY")
 
 litellm.drop_params = True
+_DEFAULT_LLM_KWARGS = ContextVar("default_llm_kwargs", default={})
+
+
+@contextmanager
+def llm_kwargs_scope(llm_kwargs=None):
+    token = _DEFAULT_LLM_KWARGS.set(dict(llm_kwargs or {}))
+    try:
+        yield
+    finally:
+        _DEFAULT_LLM_KWARGS.reset(token)
+
+
+def _merge_llm_kwargs(llm_kwargs=None):
+    return dict(_DEFAULT_LLM_KWARGS.get() if llm_kwargs is None else llm_kwargs)
 
 def count_tokens(text, model=None):
     if not text:
@@ -29,10 +45,11 @@ def count_tokens(text, model=None):
     return litellm.token_counter(model=model, text=text)
 
 
-def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
+def llm_completion(model, prompt, chat_history=None, return_finish_reason=False, llm_kwargs=None):
     if model:
         model = model.removeprefix("litellm/")
     max_retries = 10
+    llm_kwargs = _merge_llm_kwargs(llm_kwargs)
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
     for i in range(max_retries):
         try:
@@ -40,6 +57,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
                 model=model,
                 messages=messages,
                 temperature=0,
+                **llm_kwargs
             )
             content = response.choices[0].message.content
             if return_finish_reason:
@@ -59,10 +77,11 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
 
 
 
-async def llm_acompletion(model, prompt):
+async def llm_acompletion(model, prompt, llm_kwargs=None):
     if model:
         model = model.removeprefix("litellm/")
     max_retries = 10
+    llm_kwargs = _merge_llm_kwargs(llm_kwargs)
     messages = [{"role": "user", "content": prompt}]
     for i in range(max_retries):
         try:
@@ -70,6 +89,7 @@ async def llm_acompletion(model, prompt):
                 model=model,
                 messages=messages,
                 temperature=0,
+                **llm_kwargs
             )
             return response.choices[0].message.content
         except Exception as e:
@@ -707,4 +727,3 @@ def print_tree(tree, indent=0):
 def print_wrapped(text, width=100):
     for line in text.splitlines():
         print(textwrap.fill(line, width=width))
-
