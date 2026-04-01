@@ -1,0 +1,9 @@
+{
+  "12345678-abcd-4321-abcd-123456789abc": {
+    "type": "pdf",
+    "doc_name": "attention-residuals.pdf",
+    "doc_description": "This document introduces \"Attention Residuals\" (AttnRes) and its scalable variant \"Block AttnRes,\" novel mechanisms for replacing fixed residual accumulation in neural networks with learned, input-dependent depth-wise attention, addressing limitations of standard residual connections while optimizing memory, computation, and scalability for large-scale training and inference.",
+    "page_count": 21,
+    "path": "../documents/attention-residuals.pdf"
+  }
+}

@@ -1,0 +1,64 @@
+# Backfills duplicate detection for historical issues using Claude Code.
+# Triggered manually via workflow_dispatch.
+name: Backfill Duplicate Detection
+
+on:
+  workflow_dispatch:
+    inputs:
+      days_back:
+        description: 'How many days back to look for issues (default: 30)'
+        required: false
+        default: '30'
+        type: number
+
+permissions:
+  contents: read
+  issues: write
+  actions: write
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch issues and run dedupe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          DAYS_BACK: ${{ inputs.days_back || '30' }}
+        run: |
+          if ! [[ "$DAYS_BACK" =~ ^[0-9]+$ ]]; then
+            echo "Error: days_back must be a number"
+            exit 1
+          fi
+
+          SINCE=$(date -u -d "$DAYS_BACK days ago" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-${DAYS_BACK}d +%Y-%m-%dT%H:%M:%SZ)
+          echo "Fetching open issues since $SINCE"
+
+          # Get open issues via gh api --paginate, filter out PRs and already-labeled ones
+          ISSUES=$(gh api --paginate "repos/$REPO/issues?state=open&per_page=100" \
+            --jq "[.[] | select(.pull_request == null) | select(.created_at >= \"$SINCE\") | select([.labels[].name] | index(\"duplicate\") | not)] | .[].number" | xargs)
+
+          if [ -z "$ISSUES" ]; then
+            echo "No issues to process"
+            exit 0
+          fi
+
+          BATCH_SIZE=10
+          COUNT=0
+          echo "Issues to process: $ISSUES"
+          for NUMBER in $ISSUES; do
+            echo "Triggering dedupe for issue #$NUMBER"
+            gh workflow run issue-dedupe.yml --repo "$REPO" -f issue_number="$NUMBER"
+            COUNT=$((COUNT + 1))
+            if [ $((COUNT % BATCH_SIZE)) -eq 0 ]; then
+              echo "Pausing 60s after $COUNT issues..."
+              sleep 60
+            else
+              sleep 5
+            fi
+          done
+
+          echo "Backfill triggered for $COUNT issues"

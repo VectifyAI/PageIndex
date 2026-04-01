@@ -1,7 +1,7 @@
-import tiktoken
-import openai
+import litellm
 import logging
 import os
+import textwrap
 from datetime import datetime
 import time
 import json
@@ -18,144 +18,70 @@ from pathlib import Path
 from types import SimpleNamespace as config
 from contextlib import asynccontextmanager
 
-CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
-BASE_URL = os.getenv("BASE_URL")
+# Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
+if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
+    os.environ["OPENAI_API_KEY"] = os.getenv("CHATGPT_API_KEY")
 
-@asynccontextmanager
-async def get_async_openai_client(api_key=CHATGPT_API_KEY):
-    """Asynchronous context manager to manage the lifecycle of the OpenAI client."""
-    client = openai.AsyncOpenAI(api_key=api_key, base_url=BASE_URL)
-    try:
-        yield client
-    finally:
-        try:
-            await client.aclose()
-        except Exception:
-            pass
+litellm.drop_params = True
 
-def get_appropriate_tokenizer(model):
-    """
-    Get the appropriate tokenizer for the model.
-    The logic is to prioritize tiktoken and use sentencepiece_approx as a final fallback.
-    """
-    try:
-        # First, try to get the specific tokenizer for the model using tiktoken.
-        enc = tiktoken.encoding_for_model(model)
-        return {
-            'type': 'tiktoken',
-            'encoder': enc
-        }
-    except KeyError:
-        # If the model is not found, tiktoken raises a KeyError.
-        # print(f"Warning: Model '{model}' not found in tiktoken. Using cl100k_base as fallback.")
-        try:
-            # Fallback to a generic tiktoken encoder.
-            enc = tiktoken.get_encoding("cl100k_base")
-            return {
-                'type': 'tiktoken_fallback',
-                'encoder': enc
-            }
-        except Exception as e:
-            # This is unlikely to happen, but as a last resort.
-            print(f"Warning: tiktoken fallback failed: {e}. Using SentencePiece approximation as final fallback.")
-            return {
-                'type': 'sentencepiece_approx',
-                'encoder': None
-            }
+def count_tokens(text, model=None):
+    if not text:
+        return 0
+    return litellm.token_counter(model=model, text=text)
 
-def count_tokens(text, model):
-    """Count the number of tokens in the text, using the appropriate tokenizer for the model."""
-    tokenizer_info = get_appropriate_tokenizer(model)
-         
-    if tokenizer_info['type'] in ['tiktoken', 'tiktoken_fallback']:
-        # Use tiktoken encoder to return the token count directly
-        enc = tokenizer_info['encoder']
-        return len(enc.encode(text))
-    
-    else:
-        # Default fallback to character count
-        return max(len(text) // 4, 1)  # Rough estimation: 1 token per 4 characters
 
-def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
+    if model:
+        model = model.removeprefix("litellm/")
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key, base_url=BASE_URL)
+    messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
     for i in range(max_retries):
         try:
-            if chat_history:
-                messages = chat_history
-                messages.append({"role": "user", "content": prompt})
-            else:
-                messages = [{"role": "user", "content": prompt}]
-            
-            response = client.chat.completions.create(
+            response = litellm.completion(
                 model=model,
                 messages=messages,
                 temperature=0,
             )
-            if response.choices[0].finish_reason == "length":
-                return response.choices[0].message.content, "max_output_reached"
-            else:
-                return response.choices[0].message.content, "finished"
-
+            content = response.choices[0].message.content
+            if return_finish_reason:
+                finish_reason = "max_output_reached" if response.choices[0].finish_reason == "length" else "finished"
+                return content, finish_reason
+            return content
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
-                time.sleep(1)  # Wait for 1秒 before retrying
+                time.sleep(1)
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
-                return "Error"
+                if return_finish_reason:
+                    return "", "error"
+                return ""
 
 
 
-def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+async def llm_acompletion(model, prompt):
+    if model:
+        model = model.removeprefix("litellm/")
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key, base_url=BASE_URL)
+    messages = [{"role": "user", "content": prompt}]
     for i in range(max_retries):
         try:
-            if chat_history:
-                messages = chat_history
-                messages.append({"role": "user", "content": prompt})
-            else:
-                messages = [{"role": "user", "content": prompt}]
-            
-            response = client.chat.completions.create(
+            response = await litellm.acompletion(
                 model=model,
                 messages=messages,
                 temperature=0,
             )
-   
             return response.choices[0].message.content
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
-                time.sleep(1)  # Wait for 1秒 before retrying
+                await asyncio.sleep(1)
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
-                return "Error"
+                return ""
             
-
-async def ChatGPT_API_async(model, prompt, api_key=CHATGPT_API_KEY):
-    max_retries = 10
-    async with get_async_openai_client(api_key) as client:
-        for i in range(max_retries):
-            try:
-                messages = [{"role": "user", "content": prompt}]
-                response = await client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    temperature=0,
-                )
-                return response.choices[0].message.content
-            except Exception as e:
-                print('************* Retrying *************')
-                logging.error(f"Error: {e}")
-                if i < max_retries - 1:
-                    await asyncio.sleep(1)  # Wait for 1秒 before retrying
-                else:
-                    logging.error('Max retries reached for prompt: ' + prompt)
-                    return "Error"
             
 def get_json_content(response):
     start_idx = response.find("```json")
@@ -459,15 +385,14 @@ def add_preface_if_needed(data):
 
 
 
-def get_page_tokens(pdf_path, model="gpt-4o-2024-11-20", pdf_parser="PyPDF2"):
-    """Get the text and token count for each page of the PDF."""
+def get_page_tokens(pdf_path, model=None, pdf_parser="PyPDF2"):
     if pdf_parser == "PyPDF2":
         pdf_reader = PyPDF2.PdfReader(pdf_path)
         page_list = []
         for page_num in range(len(pdf_reader.pages)):
             page = pdf_reader.pages[page_num]
             page_text = page.extract_text()
-            token_length = count_tokens(page_text, model)
+            token_length = litellm.token_counter(model=model, text=page_text)
             page_list.append((page_text, token_length))
         return page_list
         
@@ -480,7 +405,7 @@ def get_page_tokens(pdf_path, model="gpt-4o-2024-11-20", pdf_parser="PyPDF2"):
         page_list = []
         for page in doc:
             page_text = page.get_text()
-            token_length = count_tokens(page_text, model)
+            token_length = litellm.token_counter(model=model, text=page_text)
             page_list.append((page_text, token_length))
         return page_list
     else:
@@ -540,6 +465,34 @@ def clean_structure_post(data):
             clean_structure_post(section)
     return data
 
+def remove_fields(data, fields=['text']):
+    if isinstance(data, dict):
+        return {k: remove_fields(v, fields)
+            for k, v in data.items() if k not in fields}
+    elif isinstance(data, list):
+        return [remove_fields(item, fields) for item in data]
+    return data
+
+def print_toc(tree, indent=0):
+    for node in tree:
+        print('  ' * indent + node['title'])
+        if node.get('nodes'):
+            print_toc(node['nodes'], indent + 1)
+
+def print_json(data, max_len=40, indent=2):
+    def simplify_data(obj):
+        if isinstance(obj, dict):
+            return {k: simplify_data(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [simplify_data(item) for item in obj]
+        elif isinstance(obj, str) and len(obj) > max_len:
+            return obj[:max_len] + '...'
+        else:
+            return obj
+    
+    simplified = simplify_data(data)
+    print(json.dumps(simplified, indent=indent, ensure_ascii=False))
+
 
 def remove_structure_text(data):
     if isinstance(data, dict):
@@ -555,7 +508,7 @@ def remove_structure_text(data):
 def check_token_limit(structure, limit=110000):
     list = structure_to_list(structure)
     for node in list:
-        num_tokens = count_tokens(node['text'], model='gpt-4o')
+        num_tokens = count_tokens(node['text'], model=None)
         if num_tokens > limit:
             print(f"Node ID: {node['node_id']} has {num_tokens} tokens")
             print("Start Index:", node['start_index'])
@@ -631,7 +584,7 @@ async def generate_node_summary(node, model=None):
     
     Directly return the description, do not include any other text.
     """
-    response = await ChatGPT_API_async(model, prompt)
+    response = await llm_acompletion(model, prompt)
     return response
 
 
@@ -645,6 +598,29 @@ async def generate_summaries_for_structure(structure, model=None):
     return structure
 
 
+def create_clean_structure_for_description(structure):
+    """
+    Create a clean structure for document description generation,
+    excluding unnecessary fields like 'text'.
+    """
+    if isinstance(structure, dict):
+        clean_node = {}
+        # Only include essential fields for description
+        for key in ['title', 'node_id', 'summary', 'prefix_summary']:
+            if key in structure:
+                clean_node[key] = structure[key]
+        
+        # Recursively process child nodes
+        if 'nodes' in structure and structure['nodes']:
+            clean_node['nodes'] = create_clean_structure_for_description(structure['nodes'])
+        
+        return clean_node
+    elif isinstance(structure, list):
+        return [create_clean_structure_for_description(item) for item in structure]
+    else:
+        return structure
+
+
 def generate_doc_description(structure, model=None):
     prompt = f"""Your are an expert in generating descriptions for a document.
     You are given a structure of a document. Your task is to generate a one-sentence description for the document, which makes it easy to distinguish the document from other documents.
@@ -653,8 +629,28 @@ def generate_doc_description(structure, model=None):
     
     Directly return the description, do not include any other text.
     """
-    response = ChatGPT_API(model, prompt)
+    response = llm_completion(model, prompt)
     return response
+
+
+def reorder_dict(data, key_order):
+    if not key_order:
+        return data
+    return {key: data[key] for key in key_order if key in data}
+
+
+def format_structure(structure, order=None):
+    if not order:
+        return structure
+    if isinstance(structure, dict):
+        if 'nodes' in structure:
+            structure['nodes'] = format_structure(structure['nodes'], order)
+        if not structure.get('nodes'):
+            structure.pop('nodes', None)
+        structure = reorder_dict(structure, order)
+    elif isinstance(structure, list):
+        structure = [format_structure(item, order) for item in structure]
+    return structure
 
 
 class ConfigLoader:
@@ -689,3 +685,28 @@ class ConfigLoader:
         self._validate_keys(user_dict)
         merged = {**self._default_dict, **user_dict}
         return config(**merged)
+
+def create_node_mapping(tree):
+    """Create a flat dict mapping node_id to node for quick lookup."""
+    mapping = {}
+    def _traverse(nodes):
+        for node in nodes:
+            if node.get('node_id'):
+                mapping[node['node_id']] = node
+            if node.get('nodes'):
+                _traverse(node['nodes'])
+    _traverse(tree)
+    return mapping
+
+def print_tree(tree, indent=0):
+    for node in tree:
+        summary = node.get('summary') or node.get('prefix_summary', '')
+        summary_str = f"  —  {summary[:60]}..." if summary else ""
+        print('  ' * indent + f"[{node.get('node_id', '?')}] {node.get('title', '')}{summary_str}")
+        if node.get('nodes'):
+            print_tree(node['nodes'], indent + 1)
+
+def print_wrapped(text, width=100):
+    for line in text.splitlines():
+        print(textwrap.fill(line, width=width))
+

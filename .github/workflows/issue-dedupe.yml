@@ -1,0 +1,57 @@
+# Detects duplicate issues using Claude Code with the /dedupe command.
+# Triggered automatically when a new issue is opened, or manually for a single issue.
+name: Issue Duplicate Detection
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Issue number to check for duplicates'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: dedupe-${{ github.event.issue.number || inputs.issue_number }}
+  cancel-in-progress: true
+
+jobs:
+  detect-duplicate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Skip pull-requests that surface as issues and bot-opened issues
+    if: >
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event.issue.pull_request == null &&
+       !endsWith(github.actor, '[bot]') &&
+       github.actor != 'github-actions')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine issue number
+        id: issue
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_NUMBER: ${{ inputs.issue_number }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "number=$INPUT_NUMBER" >> "$GITHUB_OUTPUT"
+          else
+            echo "number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          prompt: "/dedupe ${{ github.repository }}/issues/${{ steps.issue.outputs.number }}"
+          anthropic_api_key: ${{ secrets.AUTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          allowed_bots: "github-actions"
+          allowed_non_write_users: "*"
