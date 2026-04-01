@@ -28,7 +28,6 @@ import requests
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agents import Agent, Runner, function_tool, set_tracing_disabled
-from agents.model_settings import ModelSettings
 from agents.stream_events import RawResponsesStreamEvent, RunItemStreamEvent
 from openai.types.responses import ResponseTextDeltaEvent, ResponseReasoningSummaryTextDeltaEvent
 

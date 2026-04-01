@@ -1,12 +1,34 @@
-import os
-import json
+import asyncio
 import copy
+import json
 import math
+import os
 import random
 import re
-from .utils import *
-import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from io import BytesIO
+
+from .utils import (
+    ConfigLoader,
+    JsonLogger,
+    add_node_text,
+    add_preface_if_needed,
+    convert_page_to_int,
+    convert_physical_index_to_int,
+    count_tokens,
+    create_clean_structure_for_description,
+    extract_json,
+    format_structure,
+    generate_doc_description,
+    generate_summaries_for_structure,
+    get_json_content,
+    get_page_tokens,
+    get_pdf_name,
+    llm_acompletion,
+    llm_completion,
+    post_processing,
+    remove_structure_text,
+    write_node_id,
+)
 
 
 ################### check title in page #########################################################
@@ -123,15 +145,15 @@ def toc_detector_single_page(content, model=None):
 
 
 def check_if_toc_extraction_is_complete(content, toc, model=None):
-    prompt = f"""
+    prompt = """
     You are given a partial document  and a  table of contents.
     Your job is to check if the  table of contents is complete, which it contains all the main sections in the partial document.
 
     Reply format:
-    {{
+    {
         "thinking": <why do you think the table of contents is complete or not>
         "completed": "yes" or "no"
-    }}
+    }
     Directly return the final JSON structure. Do not output anything else."""
 
     prompt = prompt + '\n Document:\n' + content + '\n Table of contents:\n' + toc
@@ -141,15 +163,15 @@ def check_if_toc_extraction_is_complete(content, toc, model=None):
 
 
 def check_if_toc_transformation_is_complete(content, toc, model=None):
-    prompt = f"""
+    prompt = """
     You are given a raw table of contents and a  table of contents.
     Your job is to check if the  table of contents is complete.
 
     Reply format:
-    {{
+    {
         "thinking": <why do you think the cleaned table of contents is complete or not>
         "completed": "yes" or "no"
-    }}
+    }
     Directly return the final JSON structure. Do not output anything else."""
 
     prompt = prompt + '\n Raw Table of contents:\n' + content + '\n Cleaned Table of contents:\n' + toc
@@ -175,7 +197,7 @@ def extract_toc_content(content, model=None):
         {"role": "user", "content": prompt}, 
         {"role": "assistant", "content": response},    
     ]
-    prompt = f"""please continue the generation of table of contents , directly output the remaining part of the structure"""
+    prompt = """please continue the generation of table of contents , directly output the remaining part of the structure"""
     new_response, finish_reason = llm_completion(model=model, prompt=prompt, chat_history=chat_history, return_finish_reason=True)
     response = response + new_response
     if_complete = check_if_toc_transformation_is_complete(content, response, model)
@@ -192,7 +214,7 @@ def extract_toc_content(content, model=None):
             {"role": "user", "content": prompt},
             {"role": "assistant", "content": response},
         ]
-        prompt = f"""please continue the generation of table of contents , directly output the remaining part of the structure"""
+        prompt = """please continue the generation of table of contents , directly output the remaining part of the structure"""
         new_response, finish_reason = llm_completion(model=model, prompt=prompt, chat_history=chat_history, return_finish_reason=True)
         response = response + new_response
         if_complete = check_if_toc_transformation_is_complete(content, response, model)
