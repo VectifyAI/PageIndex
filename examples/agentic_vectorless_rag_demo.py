@@ -82,7 +82,6 @@ def query_agent(client: PageIndexClient, doc_id: str, prompt: str, verbose: bool
         instructions=AGENT_SYSTEM_PROMPT,
         tools=[get_document, get_document_structure, get_page_content],
         model=client.retrieve_model,
-        # model_settings=ModelSettings(reasoning={"effort": "low", "summary": "auto"}),  # Uncomment to enable reasoning
     )
 
     async def _run():

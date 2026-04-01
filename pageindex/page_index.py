@@ -208,7 +208,7 @@ def extract_toc_content(content, model=None):
     while not (if_complete == "yes" and finish_reason == "finished"):
         attempt += 1
         if attempt > max_attempts:
-            raise Exception('Failed to complete table of contents after maximum retries')
+            raise RuntimeError('Failed to complete table of contents after maximum retries')
 
         chat_history = [
             {"role": "user", "content": prompt},
@@ -327,7 +327,7 @@ def toc_transformer(toc_content, model=None):
     while not (if_complete == "yes" and finish_reason == "finished"):
         attempt += 1
         if attempt > max_attempts:
-            raise Exception('Failed to complete toc transformation after maximum retries')
+            raise RuntimeError('Failed to complete toc transformation after maximum retries')
         position = last_complete.rfind('}')
         if position != -1:
             last_complete = last_complete[:position+2]
@@ -390,7 +390,7 @@ def find_toc_pages(start_page_index, page_list, opt, logger=None):
 def remove_page_number(data):
     if isinstance(data, dict):
         data.pop('page_number', None)  
-        for key in list(data.keys()):
+        for key in data.keys():
             if 'nodes' in key:
                 remove_page_number(data[key])
     elif isinstance(data, list):
@@ -558,7 +558,7 @@ def generate_toc_continue(toc_content, part, model=None):
     if finish_reason == 'finished':
         return extract_json(response)
     else:
-        raise Exception(f'finish reason: {finish_reason}')
+        raise RuntimeError(f'finish reason: {finish_reason}')
     
 ### add verify completeness
 def generate_toc_init(part, model=None):
@@ -593,7 +593,7 @@ def generate_toc_init(part, model=None):
     if finish_reason == 'finished':
          return extract_json(response)
     else:
-        raise Exception(f'finish reason: {finish_reason}')
+        raise RuntimeError(f'finish reason: {finish_reason}')
 
 def process_no_toc(page_list, start_index=1, model=None, logger=None):
     page_contents=[]
@@ -616,7 +616,7 @@ def process_no_toc(page_list, start_index=1, model=None, logger=None):
 
     return toc_with_page_number
 
-def process_toc_no_page_numbers(toc_content, toc_page_list, page_list,  start_index=1, model=None, logger=None):
+def process_toc_no_page_numbers(toc_content, _toc_page_list, page_list, start_index=1, model=None, logger=None):
     page_contents=[]
     token_lengths=[]
     toc_content = toc_transformer(toc_content, model)
@@ -865,7 +865,6 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
     for item, result in zip(incorrect_results, results):
         if isinstance(result, Exception):
             print(f"Processing item {item} generated an exception: {result}")
-            continue
     results = [result for result in results if not isinstance(result, Exception)]
 
     # Update the toc_with_page_number with the fixed indices and check for any invalid results
@@ -919,7 +918,7 @@ async def fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorr
 
 
 ################### verify toc #########################################################
-async def verify_toc(page_list, list_result, start_index=1, N=None, model=None):
+async def verify_toc(page_list, list_result, start_index=1, n=None, model=None):
     print('start verify_toc')
     # Find the last non-None physical_index
     last_physical_index = None
@@ -927,19 +926,19 @@ async def verify_toc(page_list, list_result, start_index=1, N=None, model=None):
         if item.get('physical_index') is not None:
             last_physical_index = item['physical_index']
             break
-    
+
     # Early return if we don't have valid physical indices
     if last_physical_index is None or last_physical_index < len(page_list)/2:
         return 0, []
-    
+
     # Determine which items to check
-    if N is None:
+    if n is None:
         print('check all items')
         sample_indices = range(0, len(list_result))
     else:
-        N = min(N, len(list_result))
-        print(f'check {N} items')
-        sample_indices = random.sample(range(0, len(list_result)), N)
+        n = min(n, len(list_result))
+        print(f'check {n} items')
+        sample_indices = random.sample(range(0, len(list_result)), n)
 
     # Prepare items with their list indices
     indexed_sample_list = []
@@ -1005,7 +1004,7 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
         'accuracy': accuracy,
         'incorrect_results': incorrect_results
     })
-    if accuracy == 1.0 and len(incorrect_results) == 0:
+    if accuracy >= 1.0 and len(incorrect_results) == 0:
         return toc_with_page_number
     if accuracy > 0.6 and len(incorrect_results) > 0:
         toc_with_page_number, incorrect_results = await fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorrect_results,start_index=start_index, max_attempts=3, model=opt.model, logger=logger)
@@ -1016,7 +1015,7 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
         elif mode == 'process_toc_no_page_numbers':
             return await meta_processor(page_list, mode='process_no_toc', start_index=start_index, opt=opt, logger=logger)
         else:
-            raise Exception('Processing failed')
+            raise RuntimeError('Processing failed')
         
  
 async def process_large_node_recursively(node, page_list, opt=None, logger=None):
@@ -1048,7 +1047,7 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None)
     
     return node
 
-async def tree_parser(page_list, opt, doc=None, logger=None):
+async def tree_parser(page_list, opt, _doc=None, logger=None):
     check_toc_result = check_toc(page_list, opt)
     logger.info(check_toc_result)
 
@@ -1102,7 +1101,7 @@ def page_index_main(doc, opt=None):
     logger.info({'total_token': sum([page[1] for page in page_list])})
 
     async def page_index_builder():
-        structure = await tree_parser(page_list, opt, doc=doc, logger=logger)
+        structure = await tree_parser(page_list, opt, _doc=doc, logger=logger)
         if opt.if_add_node_id == 'yes':
             write_node_id(structure)    
         if opt.if_add_node_text == 'yes':

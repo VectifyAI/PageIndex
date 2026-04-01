@@ -1,7 +1,9 @@
 import asyncio
 import json
-import re
 import os
+import re
+from pathlib import Path
+
 try:
     from .utils import (
         count_tokens,
@@ -261,8 +263,7 @@ def clean_tree_for_output(tree_nodes):
 
 
 async def md_to_tree(md_path, if_thinning=False, min_token_threshold=None, if_add_node_summary='no', summary_token_threshold=None, model=None, if_add_doc_description='no', if_add_node_text='no', if_add_node_id='yes'):
-    with open(md_path, 'r', encoding='utf-8') as f:
-        markdown_content = f.read()
+    markdown_content = await asyncio.to_thread(Path(md_path).read_text, encoding='utf-8')
     line_count = markdown_content.count('\n') + 1
 
     print("Extracting nodes from markdown...")
