@@ -1080,7 +1080,16 @@ def page_index_main(doc, opt=None):
     logger.info({'total_token': sum([page[1] for page in page_list])})
 
     async def page_index_builder():
-        structure = await tree_parser(page_list, opt, doc=doc, logger=logger)
+        outline_structure = get_pdf_outline_tree(doc)
+        if outline_structure:
+            logger.info({
+                'outline_first': True,
+                'outline_node_count': len(structure_to_list(outline_structure))
+            })
+            structure = outline_structure
+        else:
+            logger.info({'outline_first': False})
+            structure = await tree_parser(page_list, opt, doc=doc, logger=logger)
         if opt.if_add_node_id == 'yes':
             write_node_id(structure)    
         if opt.if_add_node_text == 'yes':
