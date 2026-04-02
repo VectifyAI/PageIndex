@@ -708,3 +708,95 @@ def print_wrapped(text, width=100):
     for line in text.splitlines():
         print(textwrap.fill(line, width=width))
 
+
+def _outline_destination_title(dest) -> str:
+    title = getattr(dest, "title", None)
+    if title is None and hasattr(dest, "get"):
+        title = dest.get("/Title")
+    return (title or "").replace("\r", "").strip()
+
+
+def _outline_destination_page(reader, dest) -> int | None:
+    try:
+        page = reader.get_destination_page_number(dest) + 1
+        return page if page > 0 else None
+    except Exception:
+        return None
+
+
+def _parse_pdf_outline_items(reader, items):
+    nodes = []
+    i = 0
+    while i < len(items):
+        item = items[i]
+        if isinstance(item, list):
+            i += 1
+            continue
+
+        node = {
+            "title": _outline_destination_title(item),
+            "start_index": _outline_destination_page(reader, item),
+            "nodes": [],
+        }
+
+        if i + 1 < len(items) and isinstance(items[i + 1], list):
+            node["nodes"] = _parse_pdf_outline_items(reader, items[i + 1])
+            if node["start_index"] is None:
+                for child in node["nodes"]:
+                    if child.get("start_index") is not None:
+                        node["start_index"] = child["start_index"]
+                        break
+            i += 1
+
+        nodes.append(node)
+        i += 1
+    return nodes
+
+
+def _assign_outline_end_indexes(nodes, fallback_end: int) -> None:
+    for idx, node in enumerate(nodes):
+        next_start = None
+        for sibling in nodes[idx + 1:]:
+            if sibling.get("start_index") is not None:
+                next_start = sibling["start_index"]
+                break
+
+        candidate_end = (next_start - 1) if next_start else fallback_end
+        if node.get("start_index") is not None and candidate_end < node["start_index"]:
+            candidate_end = node["start_index"]
+
+        if node["nodes"]:
+            _assign_outline_end_indexes(node["nodes"], candidate_end)
+            child_ends = [child.get("end_index") for child in node["nodes"] if child.get("end_index") is not None]
+            node["end_index"] = max(child_ends) if child_ends else candidate_end
+        else:
+            node["end_index"] = candidate_end
+
+
+def get_pdf_outline_tree(pdf_path):
+    """
+    Build a tree from embedded PDF outline/bookmarks when present.
+    Returns [] when outline is unavailable or unusable.
+    """
+    try:
+        reader = PyPDF2.PdfReader(pdf_path)
+        outline = reader.outline
+        if not isinstance(outline, list) or len(outline) == 0:
+            return []
+
+        tree = _parse_pdf_outline_items(reader, outline)
+        tree = [node for node in tree if node.get("title")]
+        if not tree:
+            return []
+
+        _assign_outline_end_indexes(tree, len(reader.pages))
+
+        flat_nodes = structure_to_list(tree)
+        valid_nodes = [node for node in flat_nodes if node.get("start_index") is not None]
+        # Sparse outlines are not good enough to replace the normal parser.
+        if len(valid_nodes) < 5:
+            return []
+
+        return tree
+    except Exception:
+        return []
