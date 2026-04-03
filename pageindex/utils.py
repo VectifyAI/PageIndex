@@ -1,6 +1,7 @@
 import litellm
 import logging
 import os
+import re
 import textwrap
 from datetime import datetime
 import time
@@ -113,18 +114,15 @@ def extract_json(content):
         json_content = json_content.replace('\n', ' ').replace('\r', ' ')  # Remove newlines
         json_content = ' '.join(json_content.split())  # Normalize whitespace
 
+        # Remove any trailing commas before closing brackets/braces (handles whitespace variants)
+        json_content = re.sub(r',\s*([}\]])', r'\1', json_content)
+
         # Attempt to parse and return the JSON object
         return json.loads(json_content)
     except json.JSONDecodeError as e:
         logging.error(f"Failed to extract JSON: {e}")
-        # Try to clean up the content further if initial parsing fails
-        try:
-            # Remove any trailing commas before closing brackets/braces
-            json_content = json_content.replace(',]', ']').replace(',}', '}')
-            return json.loads(json_content)
-        except:
-            logging.error("Failed to parse JSON even after cleanup")
-            return {}
+        logging.error("Failed to parse JSON even after cleanup")
+        return {}
     except Exception as e:
         logging.error(f"Unexpected error while extracting JSON: {e}")
         return {}
