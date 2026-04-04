@@ -34,4 +34,4 @@ jobs:
           REPO_OWNER: ${{ github.repository_owner }}
           REPO_NAME: ${{ github.event.repository.name }}
           DRY_RUN: ${{ inputs.dry_run || 'false' }}
-        run: node scripts/autoclose-labeled-issues.js
+        run: node .github/scripts/autoclose-labeled-issues.js
