@@ -414,6 +414,15 @@ def calculate_page_offset(pairs):
     return most_common
 
 def add_page_offset_to_toc_json(data, offset):
+    """Apply a page offset to convert TOC page numbers to physical indices.
+
+    When ``offset`` is ``None`` (e.g. because no matching title/page pairs
+    were found in the document), the function returns ``data`` unchanged
+    rather than crashing with a ``TypeError``.  Callers should handle the
+    resulting items-without-``physical_index`` through ``process_none_page_numbers``.
+    """
+    if offset is None:
+        return data
     for i in range(len(data)):
         if data[i].get('page') is not None and isinstance(data[i]['page'], int):
             data[i]['physical_index'] = data[i]['page'] + offset
@@ -654,18 +663,22 @@ def process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_che
 
 ##check if needed to process none page numbers
 def process_none_page_numbers(toc_items, page_list, start_index=1, model=None):
+    end_index = len(page_list) + start_index - 1
     for i, item in enumerate(toc_items):
         if "physical_index" not in item:
             # logger.info(f"fix item: {item}")
             # Find previous physical_index
-            prev_physical_index = 0  # Default if no previous item exists
+            prev_physical_index = start_index  # Default: start of document
             for j in range(i - 1, -1, -1):
                 if toc_items[j].get('physical_index') is not None:
                     prev_physical_index = toc_items[j]['physical_index']
                     break
             
-            # Find next physical_index
-            next_physical_index = -1  # Default if no next item exists
+            # Find next physical_index.
+            # Default is end_index (last page of document) so that the last
+            # TOC item — which has no successor — still gets a valid search
+            # window instead of an empty range(prev, 0).
+            next_physical_index = end_index
             for j in range(i + 1, len(toc_items)):
                 if toc_items[j].get('physical_index') is not None:
                     next_physical_index = toc_items[j]['physical_index']
