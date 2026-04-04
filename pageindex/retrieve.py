@@ -80,8 +80,29 @@ def _get_md_page_content(doc_info: dict, page_nums: list[int]) -> list[dict]:
 
 # ── Tool functions ────────────────────────────────────────────────────────────
 
-def get_document(documents: dict, doc_id: str) -> str:
-    """Return JSON with document metadata: doc_id, doc_name, doc_description, type, status, page_count (PDF) or line_count (Markdown)."""
+def get_document(documents: dict, doc_id) -> str:
+    """Return JSON with document metadata. doc_id can be a string or a list of strings."""
+    if isinstance(doc_id, list):
+        results = {}
+        for d_id in doc_id:
+            doc_info = documents.get(d_id)
+            if not doc_info:
+                results[d_id] = {'error': f'Document {d_id} not found'}
+                continue
+            res = {
+                'doc_id': d_id,
+                'doc_name': doc_info.get('doc_name', ''),
+                'doc_description': doc_info.get('doc_description', ''),
+                'type': doc_info.get('type', ''),
+                'status': 'completed',
+            }
+            if doc_info.get('type') == 'pdf':
+                res['page_count'] = _count_pages(doc_info)
+            else:
+                res['line_count'] = _count_pages(doc_info)
+            results[d_id] = res
+        return json.dumps(results, ensure_ascii=False)
+
     doc_info = documents.get(doc_id)
     if not doc_info:
         return json.dumps({'error': f'Document {doc_id} not found'})
@@ -99,8 +120,19 @@ def get_document(documents: dict, doc_id: str) -> str:
     return json.dumps(result)
 
 
-def get_document_structure(documents: dict, doc_id: str) -> str:
-    """Return tree structure JSON with text fields removed (saves tokens)."""
+def get_document_structure(documents: dict, doc_id) -> str:
+    """Return tree structure JSON with text fields removed. doc_id can be a string or a list of strings."""
+    if isinstance(doc_id, list):
+        results = {}
+        for d_id in doc_id:
+            doc_info = documents.get(d_id)
+            if not doc_info:
+                results[d_id] = {'error': f'Document {d_id} not found'}
+                continue
+            structure = doc_info.get('structure', [])
+            results[d_id] = remove_fields(structure, fields=['text'])
+        return json.dumps(results, ensure_ascii=False)
+
     doc_info = documents.get(doc_id)
     if not doc_info:
         return json.dumps({'error': f'Document {doc_id} not found'})
@@ -109,16 +141,29 @@ def get_document_structure(documents: dict, doc_id: str) -> str:
     return json.dumps(structure_no_text, ensure_ascii=False)
 
 
-def get_page_content(documents: dict, doc_id: str, pages: str) -> str:
+def get_page_content(documents: dict, doc_id, pages: str) -> str:
     """
-    Retrieve page content for a document.
-
-    pages format: '5-7', '3,8', or '12'
-    For PDF: pages are physical page numbers (1-indexed).
-    For Markdown: pages are line numbers corresponding to node headers.
-
-    Returns JSON list of {'page': int, 'content': str}.
+    Retrieve page content for document(s). doc_id can be a string or a list of strings.
+    ... (rest of originally provided docstring)
     """
+    if isinstance(doc_id, list):
+        results = {}
+        for d_id in doc_id:
+            doc_info = documents.get(d_id)
+            if not doc_info:
+                results[d_id] = {'error': f'Document {d_id} not found'}
+                continue
+            try:
+                page_nums = _parse_pages(pages)
+                if doc_info.get('type') == 'pdf':
+                    content = _get_pdf_page_content(doc_info, page_nums)
+                else:
+                    content = _get_md_page_content(doc_info, page_nums)
+                results[d_id] = content
+            except Exception as e:
+                results[d_id] = {'error': f'Failed to read page content for {d_id}: {e}'}
+        return json.dumps(results, ensure_ascii=False)
+
     doc_info = documents.get(doc_id)
     if not doc_info:
         return json.dumps({'error': f'Document {doc_id} not found'})

@@ -119,14 +119,14 @@ class PageIndexClient:
         if loaded:
             print(f"Loaded {loaded} document(s) from workspace.")
 
-    def get_document(self, doc_id: str) -> str:
-        """Return document metadata JSON."""
+    def get_document(self, doc_id) -> str:
+        """Return document metadata JSON. doc_id can be a string or a list of strings."""
         return get_document(self.documents, doc_id)
 
-    def get_document_structure(self, doc_id: str) -> str:
-        """Return document tree structure JSON (without text fields)."""
+    def get_document_structure(self, doc_id) -> str:
+        """Return document tree structure JSON (without text fields). doc_id can be a string or a list of strings."""
         return get_document_structure(self.documents, doc_id)
 
-    def get_page_content(self, doc_id: str, pages: str) -> str:
-        """Return page content for the given pages string (e.g. '5-7', '3,8', '12')."""
+    def get_page_content(self, doc_id, pages: str) -> str:
+        """Return page content for the given pages string (e.g. '5-7', '3,8', '12'). doc_id can be a string or a list of strings."""
         return get_page_content(self.documents, doc_id, pages)
