@@ -119,7 +119,7 @@ def toc_detector_single_page(content, model=None):
     response = llm_completion(model=model, prompt=prompt)
     # print('response', response)
     json_content = extract_json(response)    
-    return json_content['toc_detected']
+    return json_content.get('toc_detected', 'no')
 
 
 def check_if_toc_extraction_is_complete(content, toc, model=None):
@@ -137,7 +137,7 @@ def check_if_toc_extraction_is_complete(content, toc, model=None):
     prompt = prompt + '\n Document:\n' + content + '\n Table of contents:\n' + toc
     response = llm_completion(model=model, prompt=prompt)
     json_content = extract_json(response)
-    return json_content['completed']
+    return json_content.get('completed', 'no')
 
 
 def check_if_toc_transformation_is_complete(content, toc, model=None):
@@ -155,7 +155,7 @@ def check_if_toc_transformation_is_complete(content, toc, model=None):
     prompt = prompt + '\n Raw Table of contents:\n' + content + '\n Cleaned Table of contents:\n' + toc
     response = llm_completion(model=model, prompt=prompt)
     json_content = extract_json(response)
-    return json_content['completed']
+    return json_content.get('completed', 'no')
 
 def extract_toc_content(content, model=None):
     prompt = f"""
@@ -217,7 +217,7 @@ def detect_page_index(toc_content, model=None):
 
     response = llm_completion(model=model, prompt=prompt)
     json_content = extract_json(response)
-    return json_content['page_index_given_in_toc']
+    return json_content.get('page_index_given_in_toc', 'no')
 
 def toc_extractor(page_list, toc_page_list, model):
     def transform_dots_to_colon(text):
@@ -296,7 +296,7 @@ def toc_transformer(toc_content, model=None):
     if_complete = check_if_toc_transformation_is_complete(toc_content, last_complete, model)
     if if_complete == "yes" and finish_reason == "finished":
         last_complete = extract_json(last_complete)
-        cleaned_response=convert_page_to_int(last_complete['table_of_contents'])
+        cleaned_response=convert_page_to_int(last_complete.get('table_of_contents', []) if isinstance(last_complete, dict) else [])
         return cleaned_response
     
     last_complete = get_json_content(last_complete)
@@ -323,7 +323,7 @@ def toc_transformer(toc_content, model=None):
 
         new_complete, finish_reason = llm_completion(model=model, prompt=prompt, return_finish_reason=True)
 
-        if new_complete.startswith('```json'):
+        if new_complete is not None and isinstance(new_complete, str) and new_complete.startswith('```json'):
             new_complete =  get_json_content(new_complete)
             last_complete = last_complete+new_complete
 
@@ -332,7 +332,7 @@ def toc_transformer(toc_content, model=None):
 
     last_complete = extract_json(last_complete)
 
-    cleaned_response=convert_page_to_int(last_complete['table_of_contents'])
+    cleaned_response=convert_page_to_int(last_complete.get('table_of_contents', []) if isinstance(last_complete, dict) else [])
     return cleaned_response
     
 
@@ -414,6 +414,15 @@ def calculate_page_offset(pairs):
     return most_common
 
 def add_page_offset_to_toc_json(data, offset):
+    """Apply a page offset to convert TOC page numbers to physical indices.
+
+    When ``offset`` is ``None`` (e.g. because no matching title/page pairs
+    were found in the document), the function returns ``data`` unchanged
+    rather than crashing with a ``TypeError``.  Callers should handle the
+    resulting items-without-``physical_index`` through ``process_none_page_numbers``.
+    """
+    if offset is None:
+        return data
     for i in range(len(data)):
         if data[i].get('page') is not None and isinstance(data[i]['page'], int):
             data[i]['physical_index'] = data[i]['page'] + offset
@@ -584,9 +593,12 @@ def process_no_toc(page_list, start_index=1, model=None, logger=None):
     logger.info(f'len(group_texts): {len(group_texts)}')
 
     toc_with_page_number= generate_toc_init(group_texts[0], model)
+    if not isinstance(toc_with_page_number, list):
+        toc_with_page_number = []
     for group_text in group_texts[1:]:
-        toc_with_page_number_additional = generate_toc_continue(toc_with_page_number, group_text, model)    
-        toc_with_page_number.extend(toc_with_page_number_additional)
+        toc_with_page_number_additional = generate_toc_continue(toc_with_page_number, group_text, model)
+        if isinstance(toc_with_page_number_additional, list):
+            toc_with_page_number.extend(toc_with_page_number_additional)
     logger.info(f'generate_toc: {toc_with_page_number}')
 
     toc_with_page_number = convert_physical_index_to_int(toc_with_page_number)
@@ -654,18 +666,22 @@ def process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_che
 
 ##check if needed to process none page numbers
 def process_none_page_numbers(toc_items, page_list, start_index=1, model=None):
+    end_index = len(page_list) + start_index - 1
     for i, item in enumerate(toc_items):
         if "physical_index" not in item:
             # logger.info(f"fix item: {item}")
             # Find previous physical_index
-            prev_physical_index = 0  # Default if no previous item exists
+            prev_physical_index = start_index  # Default: start of document
             for j in range(i - 1, -1, -1):
                 if toc_items[j].get('physical_index') is not None:
                     prev_physical_index = toc_items[j]['physical_index']
                     break
             
-            # Find next physical_index
-            next_physical_index = -1  # Default if no next item exists
+            # Find next physical_index.
+            # Default is end_index (last page of document) so that the last
+            # TOC item — which has no successor — still gets a valid search
+            # window instead of an empty range(prev, 0).
+            next_physical_index = end_index
             for j in range(i + 1, len(toc_items)):
                 if toc_items[j].get('physical_index') is not None:
                     next_physical_index = toc_items[j]['physical_index']
@@ -753,7 +769,7 @@ async def single_toc_item_index_fixer(section_title, content, model=None):
     prompt = toc_extractor_prompt + '\nSection Title:\n' + str(section_title) + '\nDocument pages:\n' + content
     response = await llm_acompletion(model=model, prompt=prompt)
     json_content = extract_json(response)    
-    return convert_physical_index_to_int(json_content['physical_index'])
+    return convert_physical_index_to_int(json_content.get('physical_index'))
 
 
 
@@ -967,7 +983,7 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
     else:
         toc_with_page_number = process_no_toc(page_list, start_index=start_index, model=opt.model, logger=logger)
             
-    toc_with_page_number = [item for item in toc_with_page_number if item.get('physical_index') is not None] 
+    toc_with_page_number = [item for item in toc_with_page_number if isinstance(item, dict) and item.get('physical_index') is not None]
     
     toc_with_page_number = validate_and_truncate_physical_indices(
         toc_with_page_number, 
