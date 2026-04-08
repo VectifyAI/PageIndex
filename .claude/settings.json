@@ -1,4 +1,14 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash",
+      "Edit",
+      "Write",
+      "Read",
+      "Glob",
+      "Grep"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {
