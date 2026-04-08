@@ -1,7 +1,8 @@
 import argparse
-import os
 import json
-from pageindex import *
+import os
+
+from pageindex import page_index_main
 from pageindex.page_index_md import md_to_tree
 from pageindex.utils import ConfigLoader
 
