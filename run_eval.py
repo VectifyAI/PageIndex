@@ -18,13 +18,19 @@ COMPOSITE_WEIGHTS = {
 }
 
 
-def load_sources(batch_input_path):
-    """Load English source texts keyed by custom_id from a batch input file."""
+def load_sources(source_path):
+    """Load English source texts keyed by custom_id.
+
+    Supports batch input JSONL (body.input) or eval source JSONL (source field).
+    """
     sources = {}
-    with open(batch_input_path, encoding="utf-8") as f:
+    with open(source_path, encoding="utf-8") as f:
         for line in f:
             d = json.loads(line)
-            sources[d["custom_id"]] = d["body"]["input"]
+            if "body" in d:
+                sources[d["custom_id"]] = d["body"]["input"]
+            else:
+                sources[d["custom_id"]] = d.get("source", "")
     return sources
 
 
