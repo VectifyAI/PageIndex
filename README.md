@@ -141,23 +141,68 @@ You can generate the PageIndex tree structure with this open-source repo, or use
 
 # ⚙️ Package Usage
 
-You can follow these steps to generate a PageIndex tree from a PDF document.
+You can install and use PageIndex either as a Python package (class API) or via CLI.
 
-### 1. Install dependencies
+### 1. Install
+
+From source:
 
 ```bash
-pip3 install --upgrade -r requirements.txt
+pip3 install .
+```
+
+For development (editable install):
+
+```bash
+pip3 install -e .
 ```
 
 ### 2. Set your LLM API key
 
-Create a `.env` file in the root directory with your LLM API key, with multi-LLM support via [LiteLLM](https://docs.litellm.ai/docs/providers):
+Create a `.env` file in your working directory with your LLM API key, with multi-LLM support via [LiteLLM](https://docs.litellm.ai/docs/providers):
 
 ```bash
 OPENAI_API_KEY=your_openai_key_here
 ```
 
-### 3. Generate PageIndex structure for your PDF
+### 3. Use the class API (recommended for integration)
+
+```python
+from pageindex import PageIndex, PageIndexConfig
+
+config = PageIndexConfig(
+    pdf_path="/path/to/your/document.pdf",
+    model="gpt-4o-2024-11-20",   # optional
+    add_node_summary=True,       # optional
+    add_doc_description=True,    # optional
+    add_node_text=False,         # optional
+    add_node_id=True,            # optional
+    output_dir="./results"       # optional
+)
+
+# Get result in memory
+result = PageIndex(config).run()
+
+# Or run and save as JSON
+output_file = PageIndex(config).run_and_save()
+print(output_file)
+```
+
+Markdown input is also supported:
+
+```python
+from pageindex import PageIndex, PageIndexConfig
+
+config = PageIndexConfig(
+    md_path="/path/to/your/document.md",
+    if_thinning=False,            # optional
+    thinning_threshold=5000,      # optional
+    summary_token_threshold=200,  # optional
+)
+result = PageIndex(config).run()
+```
+
+### 4. Use the CLI
 
 ```bash
 python3 run_pageindex.py --pdf_path /path/to/your/document.pdf
