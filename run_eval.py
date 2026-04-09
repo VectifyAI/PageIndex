@@ -5,9 +5,10 @@ import json
 import os
 
 import pandas as pd
+import vertexai
 from google.oauth2 import service_account
-from google.cloud.aiplatform_v1.types import evaluation_service as gapic_types
-from google.cloud.aiplatform_v1.services.evaluation_service import EvaluationServiceClient
+from vertexai.evaluation import EvalTask
+from vertexai.evaluation.metrics import pointwise_metric
 
 COMPOSITE_WEIGHTS = {
     "metricx_norm": 0.50,
@@ -99,19 +100,16 @@ def load_glossary(glossary_path):
 def compute_terminology_recall(source, response, glossary):
     """Compute recall of glossary terms: how many expected Hebrew terms appear in the response."""
     source_lower = source.lower()
-    # Sort glossary terms by length (longest first) to avoid partial matches
     sorted_terms = sorted(glossary.items(), key=lambda x: len(x[0]), reverse=True)
 
     expected = 0
     matched = 0
-    matched_terms_list = []
 
     for en_term, he_term in sorted_terms:
         if en_term.lower() in source_lower:
             expected += 1
             if he_term in response:
                 matched += 1
-                matched_terms_list.append(en_term)
 
     recall = matched / expected if expected > 0 else 1.0
     return recall, matched, expected
@@ -125,52 +123,6 @@ def normalize_metricx(score):
 def composite_score(row):
     """Compute weighted composite score from normalized metrics."""
     return sum(row[metric] * weight for metric, weight in COMPOSITE_WEIGHTS.items())
-
-
-def evaluate_vertex_metrics(client, location, sources, predictions, references):
-    """Evaluate COMET, MetricX, and BLEU using Vertex AI direct API calls."""
-    comet_scores = []
-    metricx_scores = []
-    bleu_scores = []
-
-    total = len(sources)
-    for i, (src, pred, ref) in enumerate(zip(sources, predictions, references)):
-        if (i + 1) % 20 == 0 or i == 0:
-            print(f"  Processing {i + 1}/{total}...")
-
-        # COMET (version 2 = COMET_22_SRC_REF)
-        req = gapic_types.EvaluateInstancesRequest(
-            location=location,
-            comet_input=gapic_types.CometInput(
-                metric_spec=gapic_types.CometSpec(
-                    version=2, source_language="en", target_language="he"),
-                instance=gapic_types.CometInstance(
-                    prediction=pred, reference=ref, source=src)))
-        resp = client.evaluate_instances(request=req)
-        comet_scores.append(resp.comet_result.score)
-
-        # MetricX (version 3 = METRICX_24_SRC_REF)
-        req = gapic_types.EvaluateInstancesRequest(
-            location=location,
-            metricx_input=gapic_types.MetricxInput(
-                metric_spec=gapic_types.MetricxSpec(
-                    version=3, source_language="en", target_language="he"),
-                instance=gapic_types.MetricxInstance(
-                    prediction=pred, reference=ref, source=src)))
-        resp = client.evaluate_instances(request=req)
-        metricx_scores.append(resp.metricx_result.score)
-
-        # BLEU
-        req = gapic_types.EvaluateInstancesRequest(
-            location=location,
-            bleu_input=gapic_types.BleuInput(
-                metric_spec=gapic_types.BleuSpec(),
-                instances=[gapic_types.BleuInstance(
-                    prediction=pred, reference=ref)]))
-        resp = client.evaluate_instances(request=req)
-        bleu_scores.append(resp.bleu_results.bleu_metric_values[0].score)
-
-    return comet_scores, metricx_scores, bleu_scores
 
 
 def main():
@@ -210,22 +162,34 @@ def main():
         "reference": [references[cid] for cid in common_ids],
     })
 
-    # Vertex AI evaluation via direct API
-    print("Initializing Vertex AI evaluation client...")
+    # Vertex AI evaluation via SDK
+    print("Initializing Vertex AI...")
     credentials = None
     if args.gcp_credentials:
         credentials = service_account.Credentials.from_service_account_file(args.gcp_credentials)
-    client = EvaluationServiceClient(credentials=credentials)
-    location = f"projects/{args.gcp_project}/locations/{args.gcp_location}"
+    vertexai.init(project=args.gcp_project, location=args.gcp_location, credentials=credentials)
 
-    print(f"Running COMET (COMET_22_SRC_REF), MetricX (METRICX_24_SRC_REF), BLEU on {len(df)} entries...")
-    comet_scores, metricx_scores, bleu_scores = evaluate_vertex_metrics(
-        client, location,
-        df["source"].tolist(), df["response"].tolist(), df["reference"].tolist(),
+    comet_metric = pointwise_metric.Comet(
+        source_language="en", target_language="he",
     )
-    df["comet"] = comet_scores
-    df["metricx"] = metricx_scores
-    df["bleu"] = bleu_scores
+    metricx_metric = pointwise_metric.MetricX(
+        source_language="en", target_language="he",
+        version="METRICX_24_SRC_REF",
+    )
+
+    print(f"Running COMET, MetricX (METRICX_24_SRC_REF), BLEU on {len(df)} entries...")
+    eval_df = df[["source", "response", "reference"]].copy()
+    eval_task = EvalTask(
+        dataset=eval_df,
+        metrics=["bleu", comet_metric, metricx_metric],
+    )
+    result = eval_task.evaluate()
+
+    # Merge per-row scores
+    metrics_df = result.metrics_table
+    df["comet"] = metrics_df["comet/score"].values
+    df["metricx"] = metrics_df["metricx/score"].values
+    df["bleu"] = metrics_df["bleu/score"].values
 
     # Terminology recall
     print("Computing terminology recall...")
