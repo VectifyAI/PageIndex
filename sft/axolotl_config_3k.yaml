@@ -1,0 +1,65 @@
+base_model: openai/gpt-oss-120b
+model_quantization_config: Mxfp4Config
+model_quantization_config_kwargs:
+  dequantize: true
+
+plugins:
+  - axolotl.integrations.cut_cross_entropy.CutCrossEntropyPlugin
+
+experimental_skip_move_to_device: true
+
+datasets:
+  - path: /workspace/data/steiner_3k_train.jsonl
+    type: chat_template
+    field_messages: messages
+    message_field_role: role
+    message_field_content: content
+
+chat_template: tokenizer_default
+
+eval_dataset:
+  - path: /workspace/data/steiner_val.jsonl
+    type: chat_template
+    field_messages: messages
+    message_field_role: role
+    message_field_content: content
+
+dataset_prepared_path: /workspace/prepared
+output_dir: /workspace/output/steiner-3k
+
+sequence_len: 4096
+sample_packing: true
+
+adapter: lora
+lora_r: 8
+lora_alpha: 16
+lora_dropout: 0.0
+lora_target_linear: true
+
+gradient_accumulation_steps: 4
+micro_batch_size: 4
+num_epochs: 1
+
+optimizer: adamw_torch_8bit
+lr_scheduler: constant_with_warmup
+learning_rate: 2e-4
+warmup_ratio: 0.1
+
+bf16: true
+tf32: true
+
+flash_attention: true
+gradient_checkpointing: true
+activation_offloading: true
+
+eval_steps: 50
+logging_steps: 1
+saves_per_epoch: 1
+save_total_limit: 2
+
+early_stopping_patience: 3
+metric_for_best_model: eval_loss
+
+special_tokens:
+eot_tokens:
+  - "<|end|>"
