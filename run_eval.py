@@ -167,12 +167,14 @@ def main():
     vertexai.init(project=args.gcp_project, location=args.gcp_location, credentials=credentials)
 
     print("Running Vertex AI evaluation (COMET, BLEU, MetricX)...")
+    # MetricX auto-selects METRICX_24_SRC_REF mode when "reference" column is present
     eval_df = df[["source", "response", "reference"]].copy()
     eval_task = EvalTask(
         dataset=eval_df,
         metrics=["comet", "metricx", "bleu"],
     )
     result = eval_task.evaluate()
+    print("MetricX mode: SRC_REF (reference-based, auto-detected from reference column)")
 
     # Merge per-row scores
     metrics_df = result.metrics_table
