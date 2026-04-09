@@ -35,7 +35,6 @@ def create_batch_file(input_path, output_path, model, instructions):
                     "instructions": instructions,
                     "input": d["body"]["input"],
                     "reasoning": {"effort": "low"},
-                    "temperature": 0,
                     "max_output_tokens": 16000,
                 },
             }
