@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 
-from PageIndex import PageIndex, PageIndexConfig
+from pageindex import PageIndex, PageIndexConfig
 
 
 class TestPageIndexValidationParity(unittest.TestCase):

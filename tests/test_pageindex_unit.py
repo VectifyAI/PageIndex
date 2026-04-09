@@ -5,7 +5,7 @@ import types
 import unittest
 from unittest import mock
 
-from PageIndex import PageIndex, PageIndexConfig
+from pageindex import PageIndex, PageIndexConfig
 
 
 class DummyOpt:
