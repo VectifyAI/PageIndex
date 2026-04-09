@@ -3,12 +3,11 @@
 import argparse
 import json
 import os
-import re
 
 import pandas as pd
-import vertexai
 from google.oauth2 import service_account
-from vertexai.evaluation import EvalTask
+from google.cloud.aiplatform_v1.types import evaluation_service as gapic_types
+from google.cloud.aiplatform_v1.services.evaluation_service import EvaluationServiceClient
 
 COMPOSITE_WEIGHTS = {
     "metricx_norm": 0.50,
@@ -128,12 +127,58 @@ def composite_score(row):
     return sum(row[metric] * weight for metric, weight in COMPOSITE_WEIGHTS.items())
 
 
+def evaluate_vertex_metrics(client, location, sources, predictions, references):
+    """Evaluate COMET, MetricX, and BLEU using Vertex AI direct API calls."""
+    comet_scores = []
+    metricx_scores = []
+    bleu_scores = []
+
+    total = len(sources)
+    for i, (src, pred, ref) in enumerate(zip(sources, predictions, references)):
+        if (i + 1) % 20 == 0 or i == 0:
+            print(f"  Processing {i + 1}/{total}...")
+
+        # COMET (version 2 = COMET_22_SRC_REF)
+        req = gapic_types.EvaluateInstancesRequest(
+            location=location,
+            comet_input=gapic_types.CometInput(
+                metric_spec=gapic_types.CometSpec(
+                    version=2, source_language="en", target_language="he"),
+                instance=gapic_types.CometInstance(
+                    prediction=pred, reference=ref, source=src)))
+        resp = client.evaluate_instances(request=req)
+        comet_scores.append(resp.comet_result.score)
+
+        # MetricX (version 3 = METRICX_24_SRC_REF)
+        req = gapic_types.EvaluateInstancesRequest(
+            location=location,
+            metricx_input=gapic_types.MetricxInput(
+                metric_spec=gapic_types.MetricxSpec(
+                    version=3, source_language="en", target_language="he"),
+                instance=gapic_types.MetricxInstance(
+                    prediction=pred, reference=ref, source=src)))
+        resp = client.evaluate_instances(request=req)
+        metricx_scores.append(resp.metricx_result.score)
+
+        # BLEU
+        req = gapic_types.EvaluateInstancesRequest(
+            location=location,
+            bleu_input=gapic_types.BleuInput(
+                metric_spec=gapic_types.BleuSpec(),
+                instances=[gapic_types.BleuInstance(
+                    prediction=pred, reference=ref)]))
+        resp = client.evaluate_instances(request=req)
+        bleu_scores.append(resp.bleu_results.bleu_metric_values[0].score)
+
+    return comet_scores, metricx_scores, bleu_scores
+
+
 def main():
     parser = argparse.ArgumentParser(description="Evaluate translation quality")
     parser.add_argument("--batch-output", required=True, help="Batch output JSONL from OpenAI")
     parser.add_argument("--reference", required=True, help="Reference translations file")
     parser.add_argument("--glossary", default="glossary.json", help="Glossary JSON file")
-    parser.add_argument("--source-batch", required=True, help="Original batch input JSONL (for source texts)")
+    parser.add_argument("--source-batch", required=True, help="Source texts file (batch input or eval_source JSONL)")
     parser.add_argument("--gcp-project", default=os.getenv("GCP_PROJECT"), help="GCP project ID")
     parser.add_argument("--gcp-location", default=os.getenv("GCP_LOCATION", "us-central1"), help="GCP location")
     parser.add_argument("--gcp-credentials", default=os.getenv("GOOGLE_APPLICATION_CREDENTIALS"), help="Service account JSON path")
@@ -165,30 +210,22 @@ def main():
         "reference": [references[cid] for cid in common_ids],
     })
 
-    # Vertex AI evaluation
-    print("Initializing Vertex AI...")
+    # Vertex AI evaluation via direct API
+    print("Initializing Vertex AI evaluation client...")
     credentials = None
     if args.gcp_credentials:
         credentials = service_account.Credentials.from_service_account_file(args.gcp_credentials)
-    vertexai.init(project=args.gcp_project, location=args.gcp_location, credentials=credentials)
+    client = EvaluationServiceClient(credentials=credentials)
+    location = f"projects/{args.gcp_project}/locations/{args.gcp_location}"
 
-    print("Running Vertex AI evaluation (COMET, BLEU, MetricX)...")
-    # MetricX auto-selects METRICX_24_SRC_REF mode when "reference" column is present
-    eval_df = df[["source", "response", "reference"]].copy()
-    eval_task = EvalTask(
-        dataset=eval_df,
-        metrics=["comet", "metricx", "bleu"],
+    print(f"Running COMET (COMET_22_SRC_REF), MetricX (METRICX_24_SRC_REF), BLEU on {len(df)} entries...")
+    comet_scores, metricx_scores, bleu_scores = evaluate_vertex_metrics(
+        client, location,
+        df["source"].tolist(), df["response"].tolist(), df["reference"].tolist(),
     )
-    result = eval_task.evaluate()
-    print("MetricX mode: SRC_REF (reference-based, auto-detected from reference column)")
-
-    # Merge per-row scores
-    metrics_df = result.metrics_table
-    for col in ["comet", "metricx", "bleu"]:
-        if col in metrics_df.columns:
-            df[col] = metrics_df[col].values
-        elif f"{col}/score" in metrics_df.columns:
-            df[col] = metrics_df[f"{col}/score"].values
+    df["comet"] = comet_scores
+    df["metricx"] = metricx_scores
+    df["bleu"] = bleu_scores
 
     # Terminology recall
     print("Computing terminology recall...")
@@ -217,7 +254,7 @@ def main():
 
     # Summary
     print("\n=== Summary Metrics ===")
-    print(f"  COMET (0-1, higher=better):           {df['comet'].mean():.4f}")
+    print(f"  COMET (0-1, higher=better):            {df['comet'].mean():.4f}")
     print(f"  BLEU (0-1, higher=better):             {df['bleu'].mean():.4f}")
     print(f"  MetricX (0-25, lower=better):          {df['metricx'].mean():.4f}")
     print(f"  MetricX normalized (0-1, higher=better):{df['metricx_norm'].mean():.4f}")
