@@ -115,7 +115,7 @@ async def execute(base, token, kernel_id, code, timeout=600, label=""):
     return "".join(output)
 
 
-def upload_file(base, token, kernel_id, local, remote, label):
+async def upload_file(base, token, kernel_id, local, remote, label):
     with open(local, "rb") as f:
         b64 = base64.b64encode(f.read()).decode()
     code = (
@@ -124,7 +124,7 @@ def upload_file(base, token, kernel_id, local, remote, label):
         f"with open('{remote}', 'wb') as f: f.write(base64.b64decode('{b64}'))\n"
         f"print(f'{{os.path.getsize(\"{remote}\")}} bytes')"
     )
-    asyncio.run(execute(base, token, kernel_id, code, timeout=120, label=label))
+    await execute(base, token, kernel_id, code, timeout=120, label=label)
 
 
 async def benchmark_existing_pod(pod_id, token, label):
@@ -153,10 +153,10 @@ async def benchmark_existing_pod(pod_id, token, label):
 
     # Upload data + config
     print(f"[{label}] Uploading files...", flush=True)
-    upload_file(base, token, kernel_id,
+    await upload_file(base, token, kernel_id,
         f"{PROJECT_DIR}/steiner_3k_train.jsonl",
         "/workspace/data/steiner_3k_train.jsonl", label)
-    upload_file(base, token, kernel_id,
+    await upload_file(base, token, kernel_id,
         f"{PROJECT_DIR}/steiner_val.jsonl",
         "/workspace/data/steiner_val.jsonl", label)
 
