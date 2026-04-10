@@ -116,34 +116,48 @@ async def execute(base, token, kernel_id, code, timeout=600, label=""):
 
 
 async def upload_file(base, token, kernel_id, local, remote, label):
-    """Upload a file via Jupyter's HTTP contents API (handles large files)."""
-    with open(local, "rb") as f:
-        content_b64 = base64.b64encode(f.read()).decode()
+    """Upload a file by streaming chunks via the kernel websocket.
 
-    # Jupyter contents API expects path relative to the notebook server root
-    # Server root is usually /workspace; strip if present
-    rel_path = remote.lstrip("/")
-    if rel_path.startswith("workspace/"):
-        rel_path = rel_path[len("workspace/"):]
-
-    # First ensure parent dir exists via kernel exec (small message)
+    The Jupyter contents API uses a server-relative path that doesn't always
+    line up with absolute paths on the filesystem. Streaming through the kernel
+    avoids that issue and lets us write to any absolute path we want.
+    """
     parent = os.path.dirname(remote)
     if parent:
-        mkdir_code = f"import os; os.makedirs('{parent}', exist_ok=True); print('mkdir ok')"
-        await execute(base, token, kernel_id, mkdir_code, timeout=30, label=label)
+        await execute(
+            base, token, kernel_id,
+            f"import os; os.makedirs('{parent}', exist_ok=True); print('mkdir ok')",
+            timeout=30, label=label,
+        )
 
-    url = f"{base}/api/contents/{rel_path}"
-    headers = {"Authorization": f"Token {token}", "Content-Type": "application/json"}
-    payload = {
-        "type": "file",
-        "format": "base64",
-        "content": content_b64,
-    }
-    r = requests.put(url, headers=headers, json=payload, timeout=300)
-    if r.status_code not in (200, 201):
-        print(f"[{label}] Upload failed {r.status_code}: {r.text[:200]}", flush=True)
-        return False
-    print(f"[{label}] Uploaded {os.path.basename(local)} ({len(content_b64)} b64 bytes)", flush=True)
+    # Open the remote file once (truncate), then append base64 chunks
+    await execute(
+        base, token, kernel_id,
+        f"_f = open('{remote}', 'wb'); print('opened')",
+        timeout=30, label=label,
+    )
+
+    CHUNK_SIZE = 512 * 1024  # 512KB raw -> ~700KB base64 per WS message
+    with open(local, "rb") as f:
+        total = 0
+        while True:
+            chunk = f.read(CHUNK_SIZE)
+            if not chunk:
+                break
+            b64 = base64.b64encode(chunk).decode()
+            await execute(
+                base, token, kernel_id,
+                f"import base64; _f.write(base64.b64decode('{b64}')); print('w')",
+                timeout=60, label=label,
+            )
+            total += len(chunk)
+
+    await execute(
+        base, token, kernel_id,
+        f"_f.close(); import os; print(f'wrote {{os.path.getsize(\"{remote}\")}} bytes')",
+        timeout=30, label=label,
+    )
+    print(f"[{label}] Uploaded {os.path.basename(local)} ({total} bytes)", flush=True)
     return True
 
 
@@ -252,7 +266,7 @@ print(f'Download time: {time.time()-t0:.1f}s')
 
 async def main():
     pods = [
-        ("kpkz9k79r9mgtd", "az6jtrapnm31s1vk6fsb", "H100_SXM"),
+        ("kpkz9k79r9mgtd", "az6jtrapnm31s1vk6fsb", "RTX_PRO_6000"),
     ]
 
     # Run all benchmarks in parallel
