@@ -116,15 +116,35 @@ async def execute(base, token, kernel_id, code, timeout=600, label=""):
 
 
 async def upload_file(base, token, kernel_id, local, remote, label):
+    """Upload a file via Jupyter's HTTP contents API (handles large files)."""
     with open(local, "rb") as f:
-        b64 = base64.b64encode(f.read()).decode()
-    code = (
-        f"import base64, os\n"
-        f"os.makedirs(os.path.dirname('{remote}'), exist_ok=True)\n"
-        f"with open('{remote}', 'wb') as f: f.write(base64.b64decode('{b64}'))\n"
-        f"print(f'{{os.path.getsize(\"{remote}\")}} bytes')"
-    )
-    await execute(base, token, kernel_id, code, timeout=120, label=label)
+        content_b64 = base64.b64encode(f.read()).decode()
+
+    # Jupyter contents API expects path relative to the notebook server root
+    # Server root is usually /workspace; strip if present
+    rel_path = remote.lstrip("/")
+    if rel_path.startswith("workspace/"):
+        rel_path = rel_path[len("workspace/"):]
+
+    # First ensure parent dir exists via kernel exec (small message)
+    parent = os.path.dirname(remote)
+    if parent:
+        mkdir_code = f"import os; os.makedirs('{parent}', exist_ok=True); print('mkdir ok')"
+        await execute(base, token, kernel_id, mkdir_code, timeout=30, label=label)
+
+    url = f"{base}/api/contents/{rel_path}"
+    headers = {"Authorization": f"Token {token}", "Content-Type": "application/json"}
+    payload = {
+        "type": "file",
+        "format": "base64",
+        "content": content_b64,
+    }
+    r = requests.put(url, headers=headers, json=payload, timeout=300)
+    if r.status_code not in (200, 201):
+        print(f"[{label}] Upload failed {r.status_code}: {r.text[:200]}", flush=True)
+        return False
+    print(f"[{label}] Uploaded {os.path.basename(local)} ({len(content_b64)} b64 bytes)", flush=True)
+    return True
 
 
 async def benchmark_existing_pod(pod_id, token, label):
