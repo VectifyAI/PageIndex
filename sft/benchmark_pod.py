@@ -208,25 +208,23 @@ async def benchmark_existing_pod(pod_id, token, label):
     print(f"[{label}] Installing axolotl...", flush=True)
     install_start = time.time()
     await execute(base, token, kernel_id,
-        "!pip install -q axolotl[flash-attn] 2>&1 | tail -3 && echo INSTALL_DONE",
-        timeout=900, label=label)
+        "!pip install --root-user-action=ignore axolotl 2>&1 | tail -20 && which accelerate && which axolotl && echo INSTALL_DONE",
+        timeout=1800, label=label)
     install_time = time.time() - install_start
     print(f"[{label}] Axolotl install: {install_time:.0f}s", flush=True)
 
     # Pre-download model so we can time it separately from training
     print(f"[{label}] Downloading model openai/gpt-oss-120b...", flush=True)
     model_dl_start = time.time()
-    await execute(base, token, kernel_id,
-        """!python -c "
-from huggingface_hub import snapshot_download
-import time
-t0 = time.time()
-path = snapshot_download('openai/gpt-oss-120b', allow_patterns=['*.safetensors','*.json','*.txt','tokenizer*'])
-print(f'Model downloaded to {path}')
-print(f'Download time: {time.time()-t0:.1f}s')
-"
-""",
-        timeout=3600, label=label)
+    download_code = (
+        "from huggingface_hub import snapshot_download\n"
+        "import time\n"
+        "t0 = time.time()\n"
+        "path = snapshot_download('openai/gpt-oss-120b', allow_patterns=['*.safetensors','*.json','*.txt','tokenizer*'])\n"
+        "print('Model path:', path)\n"
+        "print('Download time:', round(time.time()-t0, 1), 's')\n"
+    )
+    await execute(base, token, kernel_id, download_code, timeout=3600, label=label)
     model_dl_time = time.time() - model_dl_start
     print(f"[{label}] Model download: {model_dl_time:.0f}s", flush=True)
 
