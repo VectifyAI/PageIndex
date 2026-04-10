@@ -252,7 +252,7 @@ print(f'Download time: {time.time()-t0:.1f}s')
 
 async def main():
     pods = [
-        ("t1w29bt005w36j", "uosnsmge86qpnv7m78tp", "H100_SXM"),
+        ("kpkz9k79r9mgtd", "az6jtrapnm31s1vk6fsb", "H100_SXM"),
     ]
 
     # Run all benchmarks in parallel
