@@ -137,9 +137,7 @@ async def benchmark_existing_pod(pod_id, token, label):
     cost = pod.get("costPerHr", 0)
     print(f"[{label}] Cost: ${cost}/hr", flush=True)
 
-    if not wait_for_pod(pod_id):
-        return {"label": label, "error": "pod_not_ready"}
-
+    # Skip pod uptime check (sometimes inaccurate); jump straight to Jupyter check
     base = wait_for_jupyter(pod_id, token)
     if not base:
         return {"label": label, "error": "jupyter_not_ready"}
@@ -176,12 +174,29 @@ async def benchmark_existing_pod(pod_id, token, label):
     print(f"[{label}] Installing axolotl...", flush=True)
     install_start = time.time()
     await execute(base, token, kernel_id,
-        "!pip install -q axolotl[flash-attn] 2>&1 | tail -3",
+        "!pip install -q axolotl[flash-attn] 2>&1 | tail -3 && echo INSTALL_DONE",
         timeout=900, label=label)
     install_time = time.time() - install_start
-    print(f"[{label}] Install: {install_time:.0f}s", flush=True)
+    print(f"[{label}] Axolotl install: {install_time:.0f}s", flush=True)
 
-    # Run training
+    # Pre-download model so we can time it separately from training
+    print(f"[{label}] Downloading model openai/gpt-oss-120b...", flush=True)
+    model_dl_start = time.time()
+    await execute(base, token, kernel_id,
+        """!python -c "
+from huggingface_hub import snapshot_download
+import time
+t0 = time.time()
+path = snapshot_download('openai/gpt-oss-120b', allow_patterns=['*.safetensors','*.json','*.txt','tokenizer*'])
+print(f'Model downloaded to {path}')
+print(f'Download time: {time.time()-t0:.1f}s')
+"
+""",
+        timeout=3600, label=label)
+    model_dl_time = time.time() - model_dl_start
+    print(f"[{label}] Model download: {model_dl_time:.0f}s", flush=True)
+
+    # Run training (model is now cached)
     print(f"[{label}] Running {MAX_STEPS}-step training...", flush=True)
     train_start = time.time()
     train_output = await execute(base, token, kernel_id,
@@ -194,7 +209,8 @@ async def benchmark_existing_pod(pod_id, token, label):
         "label": label,
         "pod_id": pod_id,
         "cost_per_hr": cost,
-        "install_time_s": install_time,
+        "axolotl_install_s": install_time,
+        "model_download_s": model_dl_time,
         "train_time_s": train_time,
         "total_time_s": time.time() - start,
         "estimated_cost": ((time.time() - start) / 3600) * cost,
