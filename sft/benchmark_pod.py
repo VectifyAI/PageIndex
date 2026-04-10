@@ -205,11 +205,17 @@ async def benchmark_existing_pod(pod_id, token, label):
         timeout=15, label=label)
 
     # Install axolotl
+    # Workaround: pre-install cryptography with --ignore-installed because the
+    # base image's debian-packaged cryptography has no RECORD file and pip can't
+    # uninstall it.
     print(f"[{label}] Installing axolotl...", flush=True)
     install_start = time.time()
-    await execute(base, token, kernel_id,
-        "!pip install --root-user-action=ignore axolotl 2>&1 | tail -20 && which accelerate && which axolotl && echo INSTALL_DONE",
-        timeout=1800, label=label)
+    install_cmd = (
+        "!pip install --quiet --root-user-action=ignore --ignore-installed cryptography "
+        "&& pip install --quiet --root-user-action=ignore axolotl "
+        "2>&1 | tail -10 && which accelerate && which axolotl && echo INSTALL_DONE"
+    )
+    await execute(base, token, kernel_id, install_cmd, timeout=1800, label=label)
     install_time = time.time() - install_start
     print(f"[{label}] Axolotl install: {install_time:.0f}s", flush=True)
 
