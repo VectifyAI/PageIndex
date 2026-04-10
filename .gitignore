@@ -8,6 +8,7 @@ chroma-embeddings.parquet
 .DS_Store
 .env*
 gcp-sa-key.json
+sft/benchmark_results.json
 notebook
 SDK/*
 log/*
