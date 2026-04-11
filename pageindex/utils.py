@@ -23,6 +23,30 @@ if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
 
 litellm.drop_params = True
 
+_GLOBAL_API_BASE = None
+
+def setup_litellm(model: str, api_base: str = None):
+    """
+    Configure LiteLLM and set necessary environment variables for local/custom endpoints.
+    """
+    if not api_base:
+        return
+
+    global _GLOBAL_API_BASE
+    _GLOBAL_API_BASE = api_base
+
+    # Normalize model name for LiteLLM if needed
+    if model:
+        model = model.removeprefix("litellm/")
+
+    if model and model.startswith("ollama/"):
+        os.environ["OLLAMA_API_BASE"] = api_base
+        logging.info(f"Setting OLLAMA_API_BASE to {api_base}")
+    else:
+        # Default to OpenAI-compatible base URL (works for LM Studio, LocalAI, vLLM, etc.)
+        os.environ["OPENAI_API_BASE"] = api_base
+        logging.info(f"Setting OPENAI_API_BASE (and global api_base) to {api_base}")
+
 def count_tokens(text, model=None):
     if not text:
         return 0
@@ -40,6 +64,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
                 model=model,
                 messages=messages,
                 temperature=0,
+                api_base=_GLOBAL_API_BASE,
             )
             content = response.choices[0].message.content
             if return_finish_reason:
@@ -70,6 +95,7 @@ async def llm_acompletion(model, prompt):
                 model=model,
                 messages=messages,
                 temperature=0,
+                api_base=_GLOBAL_API_BASE,
             )
             return response.choices[0].message.content
         except Exception as e:
@@ -682,7 +708,19 @@ class ConfigLoader:
 
         self._validate_keys(user_dict)
         merged = {**self._default_dict, **user_dict}
-        return config(**merged)
+        loaded_config = config(**merged)
+        
+        # Automatically setup LiteLLM environment if api_base is provided
+        if hasattr(loaded_config, 'api_base') and loaded_config.api_base:
+            setup_litellm(loaded_config.model, loaded_config.api_base)
+            
+            # For OpenAI-compatible local servers (like LM Studio), litellm requires the 'openai/' prefix
+            # if the model name doesn't already have a recognized provider prefix.
+            if not loaded_config.model.startswith(("ollama/", "openai/", "anthropic/", "bedrock/", "gemini/")):
+                loaded_config.model = f"openai/{loaded_config.model}"
+                logging.info(f"Using local OpenAI-compatible provider. Normalized model to: {loaded_config.model}")
+            
+        return loaded_config
 
 def create_node_mapping(tree):
     """Create a flat dict mapping node_id to node for quick lookup."""

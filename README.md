@@ -157,7 +157,23 @@ Create a `.env` file in the root directory with your LLM API key, with multi-LLM
 OPENAI_API_KEY=your_openai_key_here
 ```
 
-### 3. Generate PageIndex structure for your PDF
+### 3. Local LLM Support (Optional)
+
+PageIndex supports local LLMs via LM Studio, Ollama, etc. You can specify a custom `api_base` in your `.env` or pass it as an argument.
+
+**Example for LM Studio:**
+```bash
+# In .env
+# OPENAI_API_BASE=http://localhost:1234/v1
+```
+
+**Example for Ollama:**
+```bash
+# In .env
+# OLLAMA_API_BASE=http://localhost:11434
+```
+
+### 4. Generate PageIndex structure for your PDF
 
 ```bash
 python3 run_pageindex.py --pdf_path /path/to/your/document.pdf
@@ -176,6 +192,7 @@ You can customize the processing with additional optional arguments:
 --if-add-node-id        Add node ID (yes/no, default: yes)
 --if-add-node-summary   Add node summary (yes/no, default: yes)
 --if-add-doc-description Add doc description (yes/no, default: yes)
+--api-base              Custom API endpoint (e.g., http://localhost:1234/v1)
 ```
 </details>
 
