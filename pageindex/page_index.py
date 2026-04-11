@@ -1063,6 +1063,17 @@ async def tree_parser(page_list, opt, doc=None, logger=None):
     return toc_tree
 
 
+def _save_checkpoint(data, path):
+    if not path:
+        return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp_path = path + '.tmp'
+    with open(tmp_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    os.replace(tmp_path, path)
+    print(f'Checkpoint saved: {path}')
+
+
 def page_index_main(doc, opt=None):
     logger = JsonLogger(doc)
     
@@ -1080,30 +1091,52 @@ def page_index_main(doc, opt=None):
     logger.info({'total_token': sum([page[1] for page in page_list])})
 
     async def page_index_builder():
-        structure = await tree_parser(page_list, opt, doc=doc, logger=logger)
+        checkpoint_dir = getattr(opt, 'checkpoint_dir', None)
+        resume = getattr(opt, 'resume', 'no') == 'yes'
+        doc_name = get_pdf_name(doc)
+
+        tree_ckpt = os.path.join(checkpoint_dir, doc_name + '_tree.json') if checkpoint_dir else None
+        summary_ckpt = os.path.join(checkpoint_dir, doc_name + '_summary.json') if checkpoint_dir else None
+
+        if resume and checkpoint_dir and summary_ckpt and os.path.isfile(summary_ckpt):
+            print(f'Resuming from summary checkpoint: {summary_ckpt}')
+            with open(summary_ckpt, 'r', encoding='utf-8') as f:
+                structure = json.load(f)
+        elif resume and checkpoint_dir and tree_ckpt and os.path.isfile(tree_ckpt):
+            print(f'Resuming from tree checkpoint: {tree_ckpt}')
+            with open(tree_ckpt, 'r', encoding='utf-8') as f:
+                structure = json.load(f)
+        else:
+            if resume and checkpoint_dir:
+                raise FileNotFoundError(
+                    f"No checkpoint found in {checkpoint_dir} for '{doc_name}'. "
+                    f"Expected: {tree_ckpt}")
+            structure = await tree_parser(page_list, opt, doc=doc, logger=logger)
+            _save_checkpoint(structure, tree_ckpt)
+
         if opt.if_add_node_id == 'yes':
-            write_node_id(structure)    
+            write_node_id(structure)
         if opt.if_add_node_text == 'yes':
             add_node_text(structure, page_list)
         if opt.if_add_node_summary == 'yes':
             if opt.if_add_node_text == 'no':
                 add_node_text(structure, page_list)
             await generate_summaries_for_structure(structure, model=opt.model)
+            _save_checkpoint(structure, summary_ckpt)
             if opt.if_add_node_text == 'no':
                 remove_structure_text(structure)
             if opt.if_add_doc_description == 'yes':
-                # Create a clean structure without unnecessary fields for description generation
                 clean_structure = create_clean_structure_for_description(structure)
                 doc_description = generate_doc_description(clean_structure, model=opt.model)
                 structure = format_structure(structure, order=['title', 'node_id', 'start_index', 'end_index', 'summary', 'text', 'nodes'])
                 return {
-                    'doc_name': get_pdf_name(doc),
+                    'doc_name': doc_name,
                     'doc_description': doc_description,
                     'structure': structure,
                 }
         structure = format_structure(structure, order=['title', 'node_id', 'start_index', 'end_index', 'summary', 'text', 'nodes'])
         return {
-            'doc_name': get_pdf_name(doc),
+            'doc_name': doc_name,
             'structure': structure,
         }
 
@@ -1111,7 +1144,8 @@ def page_index_main(doc, opt=None):
 
 
 def page_index(doc, model=None, toc_check_page_num=None, max_page_num_each_node=None, max_token_num_each_node=None,
-               if_add_node_id=None, if_add_node_summary=None, if_add_doc_description=None, if_add_node_text=None):
+               if_add_node_id=None, if_add_node_summary=None, if_add_doc_description=None, if_add_node_text=None,
+               checkpoint_dir=None, resume=None):
     
     user_opt = {
         arg: value for arg, value in locals().items()

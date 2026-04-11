@@ -28,7 +28,16 @@ if __name__ == "__main__":
                       help='Whether to add doc description to the doc')
     parser.add_argument('--if-add-node-text', type=str, default=None,
                       help='Whether to add text to the node')
-                      
+
+    parser.add_argument('--checkpoint-dir', type=str, default=None,
+                      help='Directory to save/load tree structure checkpoints. '
+                           'When set, intermediate results are saved after expensive LLM calls '
+                           'so processing can be resumed later with --resume, '
+                           'or the checkpoint can be manually edited for correction.')
+    parser.add_argument('--resume', action='store_true', default=False,
+                      help='Resume from a previously saved checkpoint instead of re-running '
+                           'expensive LLM calls (requires --checkpoint-dir)')
+
     # Markdown specific arguments
     parser.add_argument('--if-thinning', type=str, default='no',
                       help='Whether to apply tree thinning for markdown (markdown only)')
@@ -44,13 +53,16 @@ if __name__ == "__main__":
     if args.pdf_path and args.md_path:
         raise ValueError("Only one of --pdf_path or --md_path can be specified")
     
+    if args.resume and not args.checkpoint_dir:
+        raise ValueError("--resume requires --checkpoint-dir to be set")
+
     if args.pdf_path:
         # Validate PDF file
         if not args.pdf_path.lower().endswith('.pdf'):
             raise ValueError("PDF file must have .pdf extension")
         if not os.path.isfile(args.pdf_path):
             raise ValueError(f"PDF file not found: {args.pdf_path}")
-            
+
         # Process PDF file
         user_opt = {
             'model': args.model,
@@ -61,6 +73,8 @@ if __name__ == "__main__":
             'if_add_node_summary': args.if_add_node_summary,
             'if_add_doc_description': args.if_add_doc_description,
             'if_add_node_text': args.if_add_node_text,
+            'checkpoint_dir': args.checkpoint_dir,
+            'resume': 'yes' if args.resume else None,
         }
         opt = ConfigLoader().load({k: v for k, v in user_opt.items() if v is not None})
 
@@ -117,7 +131,9 @@ if __name__ == "__main__":
             model=opt.model,
             if_add_doc_description=opt.if_add_doc_description,
             if_add_node_text=opt.if_add_node_text,
-            if_add_node_id=opt.if_add_node_id
+            if_add_node_id=opt.if_add_node_id,
+            checkpoint_dir=args.checkpoint_dir,
+            resume=args.resume,
         ))
         
         print('Parsing done, saving to file...')

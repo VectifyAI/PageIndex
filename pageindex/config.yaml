@@ -8,3 +8,5 @@ if_add_node_id: "yes"
 if_add_node_summary: "yes"
 if_add_doc_description: "no"
 if_add_node_text: "no"
+checkpoint_dir: null
+resume: "no"
