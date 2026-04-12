@@ -12,6 +12,9 @@ if __name__ == "__main__":
     parser.add_argument('--md_path', type=str, help='Path to the Markdown file')
 
     parser.add_argument('--model', type=str, default=None, help='Model to use (overrides config.yaml)')
+    parser.add_argument('--base_url', type=str, default=None,
+                      help='Custom API base URL for OpenAI-compatible providers (e.g., http://localhost:11434 for Ollama). '
+                           'Sets the OPENAI_API_BASE environment variable.')
 
     parser.add_argument('--toc-check-pages', type=int, default=None,
                       help='Number of pages to check for table of contents (PDF only)')
@@ -37,7 +40,11 @@ if __name__ == "__main__":
     parser.add_argument('--summary-token-threshold', type=int, default=200,
                       help='Token threshold for generating summaries (markdown only)')
     args = parser.parse_args()
-    
+
+    # Apply base_url before any LLM calls
+    if args.base_url:
+        os.environ["OPENAI_API_BASE"] = args.base_url
+
     # Validate that exactly one file type is specified
     if not args.pdf_path and not args.md_path:
         raise ValueError("Either --pdf_path or --md_path must be specified")

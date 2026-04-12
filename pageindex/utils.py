@@ -34,12 +34,14 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
         model = model.removeprefix("litellm/")
     max_retries = 10
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
+    api_base = os.getenv("OPENAI_API_BASE")
     for i in range(max_retries):
         try:
             response = litellm.completion(
                 model=model,
                 messages=messages,
                 temperature=0,
+                **({"api_base": api_base} if api_base else {}),
             )
             content = response.choices[0].message.content
             if return_finish_reason:
@@ -64,12 +66,14 @@ async def llm_acompletion(model, prompt):
         model = model.removeprefix("litellm/")
     max_retries = 10
     messages = [{"role": "user", "content": prompt}]
+    api_base = os.getenv("OPENAI_API_BASE")
     for i in range(max_retries):
         try:
             response = await litellm.acompletion(
                 model=model,
                 messages=messages,
                 temperature=0,
+                **({"api_base": api_base} if api_base else {}),
             )
             return response.choices[0].message.content
         except Exception as e:
