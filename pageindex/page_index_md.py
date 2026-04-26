@@ -30,25 +30,39 @@ async def generate_summaries_for_structure_md(structure, summary_token_threshold
 
 
 def extract_nodes_from_markdown(markdown_content):
-    header_pattern = r'^(#{1,6})\s+(.+)$'
-    code_block_pattern = r'^```'
+    # Strip optional trailing closing hashes from ATX headers (e.g. "## Title ##" -> "Title")
+    header_pattern = r'^(#{1,6})\s+(.+?)(?:\s+#+\s*)?$'
+    # Match fenced code blocks: backticks (3+) or tildes (3+)
+    code_block_pattern = r'^(`{3,}|~{3,})'
     node_list = []
-    
+
     lines = markdown_content.split('\n')
     in_code_block = False
-    
+    fence_char = None   # fence character: '`' or '~'
+    fence_len = 0       # minimum fence length needed to close the block
+
     for line_num, line in enumerate(lines, 1):
         stripped_line = line.strip()
-        
-        # Check for code block delimiters (triple backticks)
-        if re.match(code_block_pattern, stripped_line):
-            in_code_block = not in_code_block
+
+        # Check for code block delimiters (3+ backticks or tildes)
+        fence_match = re.match(code_block_pattern, stripped_line)
+        if fence_match:
+            marker = fence_match.group(1)
+            if not in_code_block:
+                in_code_block = True
+                fence_char = marker[0]
+                fence_len = len(marker)
+            elif marker[0] == fence_char and len(marker) >= fence_len:
+                # Close only when same fence character with at least the opening length
+                in_code_block = False
+                fence_char = None
+                fence_len = 0
             continue
-        
+
         # Skip empty lines
         if not stripped_line:
             continue
-        
+
         # Only look for headers when not inside a code block
         if not in_code_block:
             match = re.match(header_pattern, stripped_line)
@@ -250,7 +264,18 @@ async def md_to_tree(md_path, if_thinning=False, min_token_threshold=None, if_ad
 
     print(f"Extracting text content from nodes...")
     nodes_with_content = extract_node_text_content(node_list, markdown_lines)
-    
+
+    # Handle headerless documents: treat the entire content as a single node
+    if not nodes_with_content:
+        doc_name = os.path.splitext(os.path.basename(md_path))[0]
+        full_text = '\n'.join(markdown_lines).strip()
+        nodes_with_content = [{
+            'title': doc_name,
+            'line_num': 1,
+            'level': 1,
+            'text': full_text,
+        }]
+
     if if_thinning:
         nodes_with_content = update_node_list_with_text_token_count(nodes_with_content, model=model)
         print(f"Thinning nodes...")
