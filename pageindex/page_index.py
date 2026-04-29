@@ -10,6 +10,38 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 ################### check title in page #########################################################
+async def unified_title_check(title, page_text, model=None):
+    prompt = f"""
+    You will be given a section title and the text of a page.
+    Your job is to answer two questions with fuzzy matching.
+
+    Rules:
+    - Ignore spacing differences.
+    - Ignore common page headers, footers, and repeated boilerplate.
+    - Treat minor punctuation differences leniently.
+    - Decide whether the title appears anywhere in the page text.
+    - Decide whether the title starts at the very beginning of the page text content.
+
+    The given section title is {title}.
+    The given page_text is {page_text}.
+    
+    Reply format:
+    {{
+        "thinking": <step-by-step reasoning>,
+        "appears_on_page": "yes or no",
+        "starts_at_beginning": "yes or no"
+    }}
+    Directly return the final JSON structure. Do not output anything else."""
+
+    response = await llm_acompletion(model=model, prompt=prompt)
+    response = extract_json(response)
+    return {
+        "thinking": response.get("thinking", ""),
+        "appears_on_page": response.get("appears_on_page", "no"),
+        "starts_at_beginning": response.get("starts_at_beginning", "no"),
+    }
+
+
 async def check_title_appearance(item, page_list, start_index=1, model=None):
     title = item["title"]
     if "physical_index" not in item or item["physical_index"] is None:
@@ -18,65 +50,30 @@ async def check_title_appearance(item, page_list, start_index=1, model=None):
             "answer": "no",
             "title": title,
             "page_number": None,
+            "is_valid": False,
+            "appear_start": "no",
         }
 
     page_number = item["physical_index"]
     page_text = page_list[page_number - start_index][0]
-
-    prompt = f"""
-    Your job is to check if the given section appears or starts in the given page_text.
-
-    Note: do fuzzy matching, ignore any space inconsistency in the page_text.
-
-    The given section title is {title}.
-    The given page_text is {page_text}.
-    
-    Reply format:
-    {{
-        
-        "thinking": <why do you think the section appears or starts in the page_text>
-        "answer": "yes or no" (yes if the section appears or starts in the page_text, no otherwise)
-    }}
-    Directly return the final JSON structure. Do not output anything else."""
-
-    response = await llm_acompletion(model=model, prompt=prompt)
-    response = extract_json(response)
-    if "answer" in response:
-        answer = response["answer"]
-    else:
-        answer = "no"
+    response = await unified_title_check(title, page_text, model=model)
+    answer = response["appears_on_page"]
+    appear_start = response["starts_at_beginning"]
     return {
         "list_index": item["list_index"],
         "answer": answer,
         "title": title,
         "page_number": page_number,
+        "is_valid": answer == "yes",
+        "appear_start": appear_start,
     }
 
 
 async def check_title_appearance_in_start(title, page_text, model=None, logger=None):
-    prompt = f"""
-    You will be given the current section title and the current page_text.
-    Your job is to check if the current section starts in the beginning of the given page_text.
-    If there are other contents before the current section title, then the current section does not start in the beginning of the given page_text.
-    If the current section title is the first content in the given page_text, then the current section starts in the beginning of the given page_text.
-
-    Note: do fuzzy matching, ignore any space inconsistency in the page_text.
-
-    The given section title is {title}.
-    The given page_text is {page_text}.
-    
-    reply format:
-    {{
-        "thinking": <why do you think the section appears or starts in the page_text>
-        "start_begin": "yes or no" (yes if the section starts in the beginning of the page_text, no otherwise)
-    }}
-    Directly return the final JSON structure. Do not output anything else."""
-
-    response = await llm_acompletion(model=model, prompt=prompt)
-    response = extract_json(response)
+    response = await unified_title_check(title, page_text, model=model)
     if logger:
         logger.info(f"Response: {response}")
-    return response.get("start_begin", "no")
+    return response.get("starts_at_beginning", "no")
 
 
 async def check_title_appearance_in_start_concurrent(
@@ -85,32 +82,9 @@ async def check_title_appearance_in_start_concurrent(
     if logger:
         logger.info("Checking title appearance in start concurrently")
 
-    # skip items without physical_index
+    # Use the cached result from verification/repair. No LLM calls here.
     for item in structure:
-        if item.get("physical_index") is None:
-            item["appear_start"] = "no"
-
-    # only for items with valid physical_index
-    tasks = []
-    valid_items = []
-    for item in structure:
-        if item.get("physical_index") is not None:
-            page_text = page_list[item["physical_index"] - 1][0]
-            tasks.append(
-                check_title_appearance_in_start(
-                    item["title"], page_text, model=model, logger=logger
-                )
-            )
-            valid_items.append(item)
-
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    for item, result in zip(valid_items, results):
-        if isinstance(result, Exception):
-            if logger:
-                logger.error(f"Error checking start for {item['title']}: {result}")
-            item["appear_start"] = "no"
-        else:
-            item["appear_start"] = result
+        item["appear_start"] = "yes" if item.get("appear_start") == "yes" else "no"
 
     return structure
 
@@ -944,18 +918,31 @@ async def fix_incorrect_toc(
             incorrect_item["title"], content_range, model
         )
 
-        # Check if the result is correct
         check_item = incorrect_item.copy()
         check_item["physical_index"] = physical_index_int
-        check_result = await check_title_appearance(
-            check_item, page_list, start_index, model
-        )
+
+        if physical_index_int is None:
+            check_item["is_valid"] = False
+            check_item["appear_start"] = "no"
+        else:
+            page_list_idx = physical_index_int - start_index
+            if 0 <= page_list_idx < len(page_list):
+                page_text = page_list[page_list_idx][0]
+                check_result = await unified_title_check(
+                    check_item["title"], page_text, model=model
+                )
+                check_item["is_valid"] = check_result["appears_on_page"] == "yes"
+                check_item["appear_start"] = check_result["starts_at_beginning"]
+            else:
+                check_item["is_valid"] = False
+                check_item["appear_start"] = "no"
 
         return {
             "list_index": list_index,
             "title": incorrect_item["title"],
             "physical_index": physical_index_int,
-            "is_valid": check_result["answer"] == "yes",
+            "is_valid": check_item["is_valid"],
+            "appear_start": check_item["appear_start"],
         }
 
     # Process incorrect items concurrently
@@ -977,6 +964,8 @@ async def fix_incorrect_toc(
                 toc_with_page_number[list_idx]["physical_index"] = result[
                     "physical_index"
                 ]
+                toc_with_page_number[list_idx]["appear_start"] = result["appear_start"]
+                toc_with_page_number[list_idx]["is_valid"] = result["is_valid"]
             else:
                 # Index is out of bounds, treat as invalid
                 invalid_results.append(
@@ -984,6 +973,7 @@ async def fix_incorrect_toc(
                         "list_index": result["list_index"],
                         "title": result["title"],
                         "physical_index": result["physical_index"],
+                        "appear_start": result["appear_start"],
                     }
                 )
         else:
@@ -992,6 +982,7 @@ async def fix_incorrect_toc(
                     "list_index": result["list_index"],
                     "title": result["title"],
                     "physical_index": result["physical_index"],
+                    "appear_start": result["appear_start"],
                 }
             )
 
@@ -1064,11 +1055,17 @@ async def verify_toc(page_list, list_result, start_index=1, N=None, model=None):
             indexed_sample_list.append(item_with_index)
 
     # Run checks concurrently
-    tasks = [
-        check_title_appearance(item, page_list, start_index, model)
-        for item in indexed_sample_list
-    ]
-    results = await asyncio.gather(*tasks)
+    async def verify_indexed_item(item):
+        page_text = page_list[item["physical_index"] - start_index][0]
+        unified_result = await unified_title_check(item["title"], page_text, model)
+        item["is_valid"] = unified_result["appears_on_page"] == "yes"
+        item["appear_start"] = unified_result["starts_at_beginning"]
+        item["answer"] = unified_result["appears_on_page"]
+        return item
+
+    results = await asyncio.gather(
+        *(verify_indexed_item(item) for item in indexed_sample_list)
+    )
 
     # Process results
     correct_count = 0

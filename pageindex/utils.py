@@ -2,6 +2,7 @@ import litellm
 import logging
 import os
 import textwrap
+import inspect
 from datetime import datetime
 import time
 import json
@@ -102,6 +103,73 @@ def _get_caller_stack_trace(max_frames=8):
     return "\n".join(lines)
 
 
+def _safe_serialize_for_trace(value, max_chars=4000):
+    try:
+        if isinstance(value, str):
+            text = value
+        else:
+            text = json.dumps(value, ensure_ascii=False, default=str)
+    except Exception:
+        text = repr(value)
+
+    if len(text) > max_chars:
+        return text[:max_chars] + f"\n... [truncated {len(text) - max_chars} chars]"
+    return text
+
+
+def _get_caller_locals(max_frames=1):
+    internal_names = {
+        "llm_completion",
+        "llm_acompletion",
+        "_write_llm_trace_file",
+        "_get_caller_stack_trace",
+        "_get_caller_locals",
+        "_format_messages",
+        "_get_llm_trace_state",
+    }
+
+    frame = inspect.currentframe()
+    external_frames = []
+
+    while frame:
+        frame = frame.f_back
+        if not frame:
+            break
+        code = frame.f_code
+        filename = code.co_filename
+        func_name = code.co_name
+        if "pageindex" not in filename and not filename.endswith("run_pageindex.py"):
+            continue
+        if filename.endswith("utils.py") and func_name in internal_names:
+            continue
+        external_frames.append(frame)
+        if len(external_frames) >= max_frames:
+            break
+
+    if not external_frames:
+        return "No caller locals available"
+
+    rendered_blocks = []
+    for caller_frame in external_frames:
+        func_name = caller_frame.f_code.co_name
+        filename = caller_frame.f_code.co_filename
+        line_no = caller_frame.f_lineno
+        rendered_blocks.append(f"Function: {func_name} ({filename}:{line_no})")
+
+        locals_lines = []
+        for key, value in caller_frame.f_locals.items():
+            if key.startswith("__"):
+                continue
+            locals_lines.append(f"- {key}: {_safe_serialize_for_trace(value)}")
+
+        if locals_lines:
+            rendered_blocks.append("Locals:\n" + "\n".join(locals_lines))
+        else:
+            rendered_blocks.append("Locals: <none>")
+
+    return "\n\n".join(rendered_blocks)
+
+
 def _write_llm_trace_file(messages, response, model, is_async, retries=0, error=None):
     state = _get_llm_trace_state()
     if not state:
@@ -113,6 +181,7 @@ def _write_llm_trace_file(messages, response, model, is_async, retries=0, error=
 
     trace_path = Path(state["run_dir"]) / f"{call_id:04d}.txt"
     caller_stack = _get_caller_stack_trace()
+    caller_locals = _get_caller_locals(max_frames=1)
     response_text = "" if response is None else str(response)
 
     content = (
@@ -123,13 +192,13 @@ def _write_llm_trace_file(messages, response, model, is_async, retries=0, error=
         f"Retries: {retries}\n"
         f"#### CALLER STACK TRACE ####\n"
         f"{caller_stack}\n\n"
+        f"#### CALLER LOCALS ####\n"
+        f"{caller_locals}\n\n"
         f"### SENT TO LLM ###\n"
         f"{_format_messages(messages)}\n\n"
         f"### RESPONSE FROM LLM ###\n"
         f"{response_text}\n"
-    ).replace(
-        "\n", "\n"
-    )  # Replace \n with actual line breaks
+    )
 
     if error:
         content += f"\n### ERROR ###\n{error}\n"
