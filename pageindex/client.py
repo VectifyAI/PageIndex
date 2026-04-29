@@ -42,6 +42,8 @@ class PageIndexClient:
         # Or use LocalClient / CloudClient for explicit mode selection
     """
 
+    BASE_URL = "https://api.pageindex.ai"
+
     def __init__(self, api_key: str | None = None, model: str = None,
                  retrieve_model: str = None, storage_path: str = None,
                  storage=None, index_config: IndexConfig | dict = None):
@@ -54,7 +56,7 @@ class PageIndexClient:
         from .backend.cloud import CloudBackend
         from .cloud_api import LegacyCloudAPI
         self._backend = CloudBackend(api_key=api_key)
-        self._legacy_cloud_api = LegacyCloudAPI(api_key=api_key)
+        self._legacy_cloud_api = LegacyCloudAPI(api_key=api_key, base_url=self.BASE_URL)
 
     def _init_local(self, model: str = None, retrieve_model: str = None,
                     storage_path: str = None, storage=None,

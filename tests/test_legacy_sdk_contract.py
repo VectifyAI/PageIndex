@@ -56,6 +56,24 @@ def test_legacy_methods_exist():
         assert callable(getattr(client, method_name))
 
 
+def test_legacy_base_url_can_be_overridden_from_client(monkeypatch):
+    calls = []
+
+    def fake_request(method, url, headers=None, **kwargs):
+        calls.append({"method": method, "url": url, "headers": headers})
+        return FakeResponse(payload={"id": "doc-1"})
+
+    monkeypatch.setattr("pageindex.cloud_api.requests.request", fake_request)
+    monkeypatch.setattr(PageIndexClient, "BASE_URL", "https://staging.pageindex.test")
+
+    result = PageIndexClient("pi-test").get_document("doc-1")
+
+    assert result == {"id": "doc-1"}
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["url"] == "https://staging.pageindex.test/doc/doc-1/metadata/"
+    assert calls[0]["headers"] == {"api_key": "pi-test"}
+
+
 def test_submit_document_uses_legacy_endpoint(monkeypatch, tmp_path):
     calls = []
 
@@ -66,7 +84,7 @@ def test_submit_document_uses_legacy_endpoint(monkeypatch, tmp_path):
             "headers": headers,
             "data": data,
             "files": files,
-            "timeout": kwargs.get("timeout"),
+            "kwargs": kwargs,
         })
         return FakeResponse(payload={"doc_id": "doc-1"})
 
@@ -85,7 +103,7 @@ def test_submit_document_uses_legacy_endpoint(monkeypatch, tmp_path):
     assert calls[0]["method"] == "POST"
     assert calls[0]["url"] == "https://api.pageindex.ai/doc/"
     assert calls[0]["headers"] == {"api_key": "pi-test"}
-    assert calls[0]["timeout"] == 30
+    assert "timeout" not in calls[0]["kwargs"]
     assert calls[0]["data"]["if_retrieval"] is True
     assert calls[0]["data"]["mode"] == "mcp"
     assert calls[0]["data"]["beta_headers"] == '["block_reference"]'
@@ -181,7 +199,7 @@ def test_chat_completions_stream_parses_text_chunks(monkeypatch):
     ]
 
     def fake_request(method, url, **kwargs):
-        calls.append({"method": method, "url": url, "timeout": kwargs.get("timeout")})
+        calls.append({"method": method, "url": url, "kwargs": kwargs})
         return FakeResponse(lines=lines)
 
     monkeypatch.setattr("pageindex.cloud_api.requests.request", fake_request)
@@ -192,7 +210,7 @@ def test_chat_completions_stream_parses_text_chunks(monkeypatch):
     ))
 
     assert chunks == ["hel", "lo"]
-    assert calls[0]["timeout"] == (30, None)
+    assert "timeout" not in calls[0]["kwargs"]
 
 
 def test_chat_completions_stream_metadata_returns_raw_chunks(monkeypatch):

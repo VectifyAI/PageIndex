@@ -12,21 +12,19 @@ class LegacyCloudAPI:
     """Compatibility layer for the pageindex 0.2.x cloud SDK API."""
 
     BASE_URL = "https://api.pageindex.ai"
-    REQUEST_TIMEOUT = 30
-    STREAM_TIMEOUT = (30, None)
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, base_url: str | None = None):
         self.api_key = api_key
+        self.base_url = base_url or self.BASE_URL
 
     def _headers(self) -> dict[str, str]:
         return {"api_key": self.api_key}
 
     def _request(self, method: str, path: str, error_prefix: str, **kwargs) -> requests.Response:
-        kwargs.setdefault("timeout", self.REQUEST_TIMEOUT)
         try:
             response = requests.request(
                 method,
-                f"{self.BASE_URL}{path}",
+                f"{self.base_url}{path}",
                 headers=self._headers(),
                 **kwargs,
             )
@@ -138,7 +136,6 @@ class LegacyCloudAPI:
             "Failed to get chat completion",
             json=payload,
             stream=stream,
-            timeout=self.STREAM_TIMEOUT if stream else self.REQUEST_TIMEOUT,
         )
 
         if stream:
