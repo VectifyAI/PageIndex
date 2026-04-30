@@ -1,6 +1,14 @@
 .ipynb_checkpoints
 __pycache__
 .DS_Store
+venv/
+files
+index
+temp/*
+chroma-collections.parquet
+chroma-embeddings.parquet
 .env*
 .venv/
 logs/
+test/
+
