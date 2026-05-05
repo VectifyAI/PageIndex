@@ -30,7 +30,8 @@
 <details open>
 <summary><h2>📢 Updates</h2></summary>
 
-- 🔥 [**Agentic Vectorless RAG**](https://github.com/VectifyAI/PageIndex/blob/main/examples/agentic_vectorless_rag_demo.py) — A simple *agentic, vectorless RAG* [example](https://github.com/VectifyAI/PageIndex/blob/main/examples/agentic_vectorless_rag_demo.py) with self-hosted PageIndex, using OpenAI Agents SDK.
+- 🔥 [**Agentic Vectorless RAG**](https://github.com/VectifyAI/PageIndex/blob/main/examples/agentic_vectorless_rag_demo.py) with PageIndex — A simple *agentic, vectorless RAG* [example](https://github.com/VectifyAI/PageIndex/blob/main/examples/agentic_vectorless_rag_demo.py) with self-hosted PageIndex, using OpenAI Agents SDK.
+- [**Scale PageIndex to Millions of Documents**](https://pageindex.ai/blog/pageindex-filesystem) — The *PageIndex File System* is a file-level tree layer that lets PageIndex reason over an entire corpus, not just a single document, enabling massive-scale document search.
 - [PageIndex Chat](https://chat.pageindex.ai) — Human-like document analysis agent [platform](https://chat.pageindex.ai) for professional long documents. Also available via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer).
 - [PageIndex Framework](https://pageindex.ai/blog/pageindex-intro) — Deep dive into PageIndex: an *agentic, in-context tree index* that enables LLMs to perform *reasoning-based, human-like retrieval* over long documents.
 
@@ -75,8 +76,8 @@ To learn more, please see a detailed introduction to the [PageIndex framework](h
 The PageIndex service is available as a ChatGPT-style [chat platform](https://chat.pageindex.ai), or can be integrated via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer).
 
 ### 🛠️ Deployment Options
-- Self-host — run locally with this open-source repo.
-- Cloud Service — try instantly with our [Chat Platform](https://chat.pageindex.ai/), or integrate via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer).
+- Self-host — run locally with this open-source repo (using standard PDF parsing).
+- Cloud Service — production-grade pipeline with enhanced OCR, tree building, and retrieval for best results. Try instantly with our [Chat Platform](https://chat.pageindex.ai/), or integrate via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer).
 - _Enterprise_ — private or on-prem deployment. [Contact us](https://ii2abc2jejf.typeform.com/to/tK3AXl8T) or [book a demo](https://calendly.com/pageindex/meet) for more details.
 
 ### 🧪 Quick Hands-on
@@ -135,11 +136,13 @@ Below is an example PageIndex tree structure. Also see more example [documents](
 ...
 ```
 
-You can generate the PageIndex tree structure with this open-source repo, or use our [API](https://pageindex.ai/developer).
+You can generate the PageIndex tree structure with this open-source repo; or use our [API](https://pageindex.ai/developer) for higher-quality results powered by our enhanced OCR and tree building pipeline.
 
 ---
 
 # ⚙️ Package Usage
+
+> **Note:** This open-source package uses standard Python PDF parsing. For use cases with complex PDFs, our [Cloud Service](https://pageindex.ai/developer) provides significantly better results with enhanced OCR, tree building, and retrieval. Available via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer).
 
 You can follow these steps to generate a PageIndex tree from a PDF document.
 
