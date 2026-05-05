@@ -32,10 +32,19 @@ litellm.drop_params = True
 _LLM_TRACE_LOCAL = threading.local()
 
 
+def _llm_debug_enabled():
+    value = os.getenv("LLM_DEBUG", "")
+    return value.lower() not in {"", "0", "false", "no", "off"}
+
+
 def init_llm_trace_run(doc):
     """
     Initialize per-run LLM trace logging and return the run directory.
     """
+    if not _llm_debug_enabled():
+        clear_llm_trace_run()
+        return None
+
     doc_name = get_pdf_name(doc)
     run_title = sanitize_filename(Path(doc_name).stem) or "Untitled"
     run_root = Path("logs") / "llm_calls"
