@@ -142,7 +142,7 @@ You can generate the PageIndex tree structure with this open-source repo; or use
 
 # ⚙️ Package Usage
 
-> **Note:** This open-source package uses standard Python PDF parsing. For use cases with complex PDFs, our [Cloud Service](https://pageindex.ai/developer) provides significantly better results with enhanced OCR, tree building, and retrieval. Available via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer).
+> **Note:** This package uses standard PDF parsing. For use cases with complex PDFs, our [Cloud Service](https://pageindex.ai/developer) (via MCP and API) offers enhanced OCR, tree building, and retrieval.
 
 You can follow these steps to generate a PageIndex tree from a PDF document.
 
