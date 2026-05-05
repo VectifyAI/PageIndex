@@ -5,5 +5,19 @@
     "doc_description": "This document introduces \"Attention Residuals\" (AttnRes) and its scalable variant \"Block AttnRes,\" novel mechanisms for replacing fixed residual accumulation in neural networks with learned, input-dependent depth-wise attention, addressing limitations of standard residual connections while optimizing memory, computation, and scalability for large-scale training and inference.",
     "page_count": 21,
     "path": "../documents/attention-residuals.pdf"
+  },
+  "c42f5ead-f7db-45a8-9eca-c7329fbdec56": {
+    "type": "pdf",
+    "doc_name": "hpe_manual.pdf",
+    "doc_description": "This document is a comprehensive user manual for the SERVA HPETM BlueHorizon Flatbed Electrophoresis System, detailing safety guidelines, installation, operation, maintenance, troubleshooting, and example applications for various electrophoresis techniques such as SDS PAGE, IEF, and 2D PAGE.",
+    "path": "/Users/timaltendorf/Documents/summetix/PageIndex/examples/documents/hpe_manual.pdf",
+    "page_count": 26
+  },
+  "346aeafa-4277-4ac9-8d2b-6f9f9b9b6a23": {
+    "type": "pdf",
+    "doc_name": "abb_manual.pdf",
+    "doc_description": "This document is a comprehensive installation and operation manual for the ACF5000 multi-component FTIR emission monitoring system, detailing safety instructions, system components, installation procedures, commissioning, maintenance, and shutdown protocols, with a strong emphasis on compliance with safety standards and proper handling of hazardous gases and equipment.",
+    "path": "/Users/timaltendorf/Documents/summetix/PageIndex/examples/documents/abb_manual.pdf",
+    "page_count": 68
   }
 }
