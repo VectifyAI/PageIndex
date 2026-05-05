@@ -30,8 +30,8 @@
 <details open>
 <summary><h2>📢 Updates</h2></summary>
 
-- 🔥 [**Agentic Vectorless RAG**](https://github.com/VectifyAI/PageIndex/blob/main/examples/agentic_vectorless_rag_demo.py) with PageIndex — A simple *agentic, vectorless RAG* [example](https://github.com/VectifyAI/PageIndex/blob/main/examples/agentic_vectorless_rag_demo.py) with self-hosted PageIndex, using OpenAI Agents SDK.
-- [**Scale PageIndex to Millions of Documents**](https://pageindex.ai/blog/pageindex-filesystem) — The *PageIndex File System* is a file-level tree layer that lets PageIndex reason over an entire corpus, not just a single document, enabling massive-scale document search.
+- 🔥 [**Agentic Vectorless RAG**](https://github.com/VectifyAI/PageIndex/blob/main/examples/agentic_vectorless_rag_demo.py) — A simple *agentic, vectorless RAG* [example](https://github.com/VectifyAI/PageIndex/blob/main/examples/agentic_vectorless_rag_demo.py) with self-hosted PageIndex, using OpenAI Agents SDK.
+- [**Scale PageIndex to Millions of Documents**](https://pageindex.ai/blog/pageindex-filesystem) — *PageIndex File System* is a file-level tree layer that lets PageIndex reason over an entire corpus, not just a single document, enabling massive-scale document search.
 - [PageIndex Chat](https://chat.pageindex.ai) — Human-like document analysis agent [platform](https://chat.pageindex.ai) for professional long documents. Also available via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer).
 - [PageIndex Framework](https://pageindex.ai/blog/pageindex-intro) — Deep dive into PageIndex: an *agentic, in-context tree index* that enables LLMs to perform *reasoning-based, human-like retrieval* over long documents.
 
