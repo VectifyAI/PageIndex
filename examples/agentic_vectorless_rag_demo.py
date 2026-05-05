@@ -44,7 +44,7 @@ import pageindex.utils as utils
 # PDF_URL = "https://library.e.abb.com/public/c82ebba1dc5e4d8eadadb3b199e1953d/41_23-820-EN_A.pdf"
 
 _EXAMPLES_DIR = Path(__file__).parent
-PDF_PATH = _EXAMPLES_DIR / "documents" / "hpe_manual.pdf"
+PDF_PATH = _EXAMPLES_DIR / "documents" / "abb_manual.pdf"
 WORKSPACE = _EXAMPLES_DIR / "workspace"
 STRUCTURE_MODE_TOP_LEVEL = "top_level"
 STRUCTURE_MODE_CHILDREN = "children"

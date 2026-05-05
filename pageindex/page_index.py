@@ -1233,37 +1233,53 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None)
 
 
 async def tree_parser(page_list, opt, doc=None, logger=None):
-    check_toc_result = check_toc(page_list, opt)
-    logger.info(check_toc_result)
+    fast_toc = extract_embedded_toc(doc)
 
-    if (
-        check_toc_result.get("toc_content")
-        and check_toc_result["toc_content"].strip()
-        and check_toc_result["page_index_given_in_toc"] == "yes"
-    ):
-        toc_with_page_number = await meta_processor(
-            page_list,
-            mode="process_toc_with_page_numbers",
-            start_index=1,
-            toc_content=check_toc_result["toc_content"],
-            toc_page_list=check_toc_result["toc_page_list"],
-            opt=opt,
-            logger=logger,
-        )
+    if fast_toc:
+        if logger:
+            logger.info(fast_toc)
+
+        toc_with_page_number = add_preface_if_needed(fast_toc)
+        valid_toc_items = [
+            item
+            for item in toc_with_page_number
+            if item.get("physical_index") is not None
+            and item.get("physical_index") <= len(page_list)
+        ]
     else:
-        toc_with_page_number = await meta_processor(
-            page_list, mode="process_no_toc", start_index=1, opt=opt, logger=logger
+        check_toc_result = check_toc(page_list, opt)
+        logger.info(check_toc_result)
+
+        if (
+            check_toc_result.get("toc_content")
+            and check_toc_result["toc_content"].strip()
+            and check_toc_result["page_index_given_in_toc"] == "yes"
+        ):
+            toc_with_page_number = await meta_processor(
+                page_list,
+                mode="process_toc_with_page_numbers",
+                start_index=1,
+                toc_content=check_toc_result["toc_content"],
+                toc_page_list=check_toc_result["toc_page_list"],
+                opt=opt,
+                logger=logger,
+            )
+        else:
+            toc_with_page_number = await meta_processor(
+                page_list, mode="process_no_toc", start_index=1, opt=opt, logger=logger
+            )
+
+        toc_with_page_number = add_preface_if_needed(toc_with_page_number)
+        toc_with_page_number = await check_title_appearance_in_start_concurrent(
+            toc_with_page_number, page_list, model=opt.model, logger=logger
         )
 
-    toc_with_page_number = add_preface_if_needed(toc_with_page_number)
-    toc_with_page_number = await check_title_appearance_in_start_concurrent(
-        toc_with_page_number, page_list, model=opt.model, logger=logger
-    )
-
-    # Filter out items with None physical_index before post_processings
-    valid_toc_items = [
-        item for item in toc_with_page_number if item.get("physical_index") is not None
-    ]
+        # Filter out items with None physical_index before post_processings
+        valid_toc_items = [
+            item
+            for item in toc_with_page_number
+            if item.get("physical_index") is not None
+        ]
 
     toc_tree = post_processing(valid_toc_items, len(page_list))
     tasks = [

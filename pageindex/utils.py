@@ -3,6 +3,7 @@ import logging
 import os
 import textwrap
 import inspect
+import re
 from datetime import datetime
 import time
 import json
@@ -622,6 +623,68 @@ def add_preface_if_needed(data):
         }
         data.insert(0, preface_node)
     return data
+
+
+def extract_embedded_toc(doc_path):
+    if isinstance(doc_path, BytesIO):
+        doc_path.seek(0)
+        doc = pymupdf.open(stream=doc_path, filetype="pdf")
+    elif (
+        isinstance(doc_path, str)
+        and os.path.isfile(doc_path)
+        and doc_path.lower().endswith(".pdf")
+    ):
+        doc = pymupdf.open(doc_path)
+    else:
+        return None
+
+    try:
+        outline_root = getattr(doc, "outline", None)
+        if outline_root is None:
+            return None
+
+        toc_items = []
+
+        def walk_outline(node, structure_stack):
+            current = node
+            current_stack = structure_stack[:]
+
+            while current is not None:
+                dest = getattr(current, "dest", None)
+                page_idx = getattr(dest, "page", None) if dest is not None else None
+                if page_idx is not None and 0 <= page_idx < len(doc):
+                    page_height = doc[page_idx].rect.height
+                    to_point = getattr(dest, "to", None)
+                    y_coord = (
+                        getattr(to_point, "y", None) if to_point is not None else None
+                    )
+                    appear_start = (
+                        "yes"
+                        if y_coord is not None and y_coord <= (page_height * 0.20)
+                        else "no"
+                    )
+                    toc_items.append(
+                        {
+                            "structure": ".".join(
+                                str(level) for level in current_stack
+                            ),
+                            "title": getattr(current, "title", ""),
+                            "physical_index": page_idx + 1,
+                            "appear_start": appear_start,
+                        }
+                    )
+
+                if getattr(current, "down", None) is not None:
+                    walk_outline(current.down, current_stack + [1])
+
+                current = current.next
+                if current is not None and current_stack:
+                    current_stack = current_stack[:-1] + [current_stack[-1] + 1]
+
+        walk_outline(outline_root, [1])
+        return toc_items if toc_items else None
+    finally:
+        doc.close()
 
 
 def get_page_tokens(pdf_path, model=None, pdf_parser="PyPDF2"):
