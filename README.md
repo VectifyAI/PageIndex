@@ -105,7 +105,7 @@ The PageIndex service is available as a ChatGPT-style [chat platform](https://ch
 
 # 🌲 PageIndex Tree Structure
 
-PageIndex can transform lengthy PDF documents into a semantic **tree structure**, similar to a _"table of contents"_ but optimized for use with Large Language Models (LLMs). It's ideal for: financial reports, regulatory filings, academic textbooks, legal or technical manuals, and any document that exceeds LLM context limits.
+PageIndex can transform lengthy PDF documents into a semantic **tree structure**, similar to a _“table of contents”_ but optimized for use with Large Language Models (LLMs). It's ideal for: financial reports, regulatory filings, academic textbooks, legal or technical manuals, and any document that exceeds LLM context limits.
 
 Below is an example PageIndex tree structure. Also see more example [documents](https://github.com/VectifyAI/PageIndex/tree/main/examples/documents) and generated [tree structures](https://github.com/VectifyAI/PageIndex/tree/main/examples/documents/results).
 
@@ -155,7 +155,7 @@ pip3 install --upgrade -r requirements.txt
 
 ### 2. Set your LLM API key
 
-Create a `.env` file in the root directory with your LLM API key, with multi-LLM support via [LiteLLM](https://docs.litellm.ai/docs/providers):
+Create a `.env` file in the root directory with your LLM API key. Multi-LLM is supported via [LiteLLM](https://docs.litellm.ai/docs/providers):
 
 ```bash
 OPENAI_API_KEY=your_openai_key_here
@@ -192,7 +192,7 @@ We also provide markdown support for PageIndex. You can use the `--md_path` flag
 python3 run_pageindex.py --md_path /path/to/your/document.md
 ```
 
-> Note: in this mode, we use "#" to determine node headings and their levels. For example, "##" is level 2, "###" is level 3, etc. Make sure your markdown file is formatted correctly. If your Markdown file was converted from a PDF or HTML, we don't recommend using this mode, since most existing conversion tools cannot preserve the original hierarchy. Instead, use our [PageIndex OCR](https://pageindex.ai/blog/ocr), which is designed to preserve the original hierarchy, to convert the PDF to a markdown file and then use this mode.
+> Note: in this mode, we use "#" to determine node headings and their levels. For example, "##" is level 2, "###" is level 3, etc. Make sure your markdown file is formatted correctly. If your Markdown file was converted from a PDF or HTML, we don't recommend using this mode, since most existing conversion tools cannot preserve the original hierarchy. Instead, use our [PageIndex OCR](https://pageindex.ai/blog/ocr), which is designed to preserve it, to convert the PDF to a markdown file and then use this mode.
 </details>
 
 ## Agentic Vectorless RAG: An Example
