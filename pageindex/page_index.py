@@ -854,8 +854,9 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
             list_idx = result['list_index']
             if 0 <= list_idx < len(toc_with_page_number):
                 toc_with_page_number[list_idx]['physical_index'] = result['physical_index']
-            else:
+            else:  # pragma: no cover
                 # Index is out of bounds, treat as invalid
+                # Defensive guard: process_and_check_item returns invalid before this for out-of-range indices.
                 invalid_results.append({
                     'list_index': result['list_index'],
                     'title': result['title'],

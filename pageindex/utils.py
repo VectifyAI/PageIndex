@@ -2,6 +2,7 @@ import litellm
 import logging
 import os
 import textwrap
+import re
 from datetime import datetime
 import time
 import json
@@ -707,4 +708,3 @@ def print_tree(tree, indent=0):
 def print_wrapped(text, width=100):
     for line in text.splitlines():
         print(textwrap.fill(line, width=width))
-
