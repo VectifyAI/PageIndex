@@ -103,9 +103,14 @@ async def check_title_appearance_in_start_concurrent(structure, page_list, model
 
 def toc_detector_single_page(content, model=None):
     prompt = f"""
-    Your job is to detect if there is a table of content provided in the given text.
+    Your job is to detect if there is a table of content provided in the given single-page text.
 
     Given text: {content}
+
+    Guidance for single-page documents:
+    - Text with actual document content, including policies, rules, regulations, memos, or numbered sections, is not a table of contents just because it is structured.
+    - A true table of contents primarily lists references to content elsewhere in the document, usually as navigation entries for later sections or pages.
+    - If the given page contains the content itself instead of references to other content, answer "no".
 
     return the following JSON format:
     {{
