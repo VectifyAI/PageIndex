@@ -172,19 +172,34 @@ async def check_title_appearance_in_start_concurrent(structure, page_list, model
 
 def toc_detector_single_page(content, model=None):
     prompt = _SYSTEM_HARDENING + f"""
-    Your job is to detect if there is a table of content provided in the given text.
+    Your job is to detect whether the given text is a table of contents.
+
+    A table of contents is a directory: a list of references that point to content
+    located ELSEWHERE in the document (typically section titles paired with page
+    or section numbers). The entries are pointers; the actual content they refer
+    to is on other pages.
+
+    Pages that contain the document's substantive content with numbered sections —
+    such as policies, regulations, rules, statutes, contracts, ordinances, or
+    articles — are NOT tables of contents, even when their visual structure
+    (numbered headings, indented sub-items) resembles one. If each numbered item
+    is followed on this same page by its own substantive body text, the page is
+    content, not a TOC.
+
+    When the input is a single self-contained page that reads as the document
+    itself rather than a directory pointing elsewhere, answer "no".
 
     Given text:
     {_secure_doc_text(content)}
 
     return the following JSON format:
     {{
-        "thinking": <why do you think there is a table of content in the given text>
+        "thinking": <why do you think there is a table of contents in the given text>
         "toc_detected": "<yes or no>",
     }}
 
     Directly return the final JSON structure. Do not output anything else.
-    Please note: abstract,summary, notation list, figure list, table list, etc. are not table of contents."""
+    Please note: abstract, summary, notation list, figure list, table list, etc. are not tables of contents."""
 
     response = llm_completion(model=model, prompt=prompt)
     json_content = extract_json(response)    
@@ -856,6 +871,16 @@ def check_toc(page_list, opt=None):
     if len(toc_page_list) == 0:
         print('no toc found')
         return {'toc_content': None, 'toc_page_list': [], 'page_index_given_in_toc': 'no'}
+    # A real table of contents points to content located beyond it. If
+    # find_toc_pages classified every available page (typically: a single-page
+    # document where toc_detector_single_page misfired on numbered policy /
+    # rule / statute content), then start_page_index = toc_page_list[-1] + 1
+    # would be >= len(page_list) and process_toc_with_page_numbers would build
+    # main_content="" and silently drop the entire document. Fall back to the
+    # no-toc path so the page itself is processed as content.
+    if toc_page_list[-1] + 1 >= len(page_list):
+        print('toc covers the entire document (likely misclassification); falling back to no-toc')
+        return {'toc_content': None, 'toc_page_list': [], 'page_index_given_in_toc': 'no'}
     else:
         print('toc found')
         toc_json = toc_extractor(page_list, toc_page_list, opt.model)
@@ -865,17 +890,17 @@ def check_toc(page_list, opt=None):
             return {'toc_content': toc_json['toc_content'], 'toc_page_list': toc_page_list, 'page_index_given_in_toc': 'yes'}
         else:
             current_start_index = toc_page_list[-1] + 1
-            
-            while (toc_json['page_index_given_in_toc'] == 'no' and 
-                   current_start_index < len(page_list) and 
+
+            while (toc_json['page_index_given_in_toc'] == 'no' and
+                   current_start_index < len(page_list) and
                    current_start_index < opt.toc_check_page_num):
-                
+
                 additional_toc_pages = find_toc_pages(
                     start_page_index=current_start_index,
                     page_list=page_list,
                     opt=opt
                 )
-                
+
                 if len(additional_toc_pages) == 0:
                     break
 
