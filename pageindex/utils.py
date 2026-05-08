@@ -50,7 +50,8 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
-                time.sleep(1)
+                wait = min(2 ** i, 60)  # exponential backoff, capped at 60s
+                time.sleep(wait)
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
                 if return_finish_reason:
@@ -76,7 +77,8 @@ async def llm_acompletion(model, prompt):
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
-                await asyncio.sleep(1)
+                wait = min(2 ** i, 60)  # exponential backoff, capped at 60s
+                await asyncio.sleep(wait)
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
                 return ""
@@ -172,7 +174,7 @@ def structure_to_list(structure):
     
 def get_leaf_nodes(structure):
     if isinstance(structure, dict):
-        if not structure['nodes']:
+        if not structure.get('nodes'):
             structure_node = copy.deepcopy(structure)
             structure_node.pop('nodes', None)
             return [structure_node]
@@ -284,23 +286,17 @@ class JsonLogger:
     def __init__(self, file_path):
         # Extract PDF name for logger name
         pdf_name = get_pdf_name(file_path)
-            
+
         current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.filename = f"{pdf_name}_{current_time}.json"
+        # Use .jsonl extension to reflect the newline-delimited format
+        self.filename = f"{pdf_name}_{current_time}.jsonl"
         os.makedirs("./logs", exist_ok=True)
-        # Initialize empty list to store all messages
-        self.log_data = []
 
     def log(self, level, message, **kwargs):
-        if isinstance(message, dict):
-            self.log_data.append(message)
-        else:
-            self.log_data.append({'message': message})
-        # Add new message to the log data
-        
-        # Write entire log data to file
-        with open(self._filepath(), "w") as f:
-            json.dump(self.log_data, f, indent=2)
+        entry = message if isinstance(message, dict) else {'message': message}
+        # Append a single JSON line — O(1) regardless of how many entries exist
+        with open(self._filepath(), "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     def info(self, message, **kwargs):
         self.log("INFO", message, **kwargs)

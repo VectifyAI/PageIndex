@@ -106,7 +106,7 @@ if __name__ == "__main__":
         }
         
         # Load config with defaults from config.yaml
-        opt = config_loader.load(user_opt)
+        opt = config_loader.load({k: v for k, v in user_opt.items() if v is not None})
         
         toc_with_page_number = asyncio.run(md_to_tree(
             md_path=args.md_path,

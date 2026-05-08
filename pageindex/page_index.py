@@ -118,8 +118,8 @@ def toc_detector_single_page(content, model=None):
 
     response = llm_completion(model=model, prompt=prompt)
     # print('response', response)
-    json_content = extract_json(response)    
-    return json_content['toc_detected']
+    json_content = extract_json(response)
+    return json_content.get('toc_detected', 'no')
 
 
 def check_if_toc_extraction_is_complete(content, toc, model=None):
@@ -137,7 +137,7 @@ def check_if_toc_extraction_is_complete(content, toc, model=None):
     prompt = prompt + '\n Document:\n' + content + '\n Table of contents:\n' + toc
     response = llm_completion(model=model, prompt=prompt)
     json_content = extract_json(response)
-    return json_content['completed']
+    return json_content.get('completed', 'no')
 
 
 def check_if_toc_transformation_is_complete(content, toc, model=None):
@@ -155,7 +155,7 @@ def check_if_toc_transformation_is_complete(content, toc, model=None):
     prompt = prompt + '\n Raw Table of contents:\n' + content + '\n Cleaned Table of contents:\n' + toc
     response = llm_completion(model=model, prompt=prompt)
     json_content = extract_json(response)
-    return json_content['completed']
+    return json_content.get('completed', 'no')
 
 def extract_toc_content(content, model=None):
     prompt = f"""
@@ -217,7 +217,7 @@ def detect_page_index(toc_content, model=None):
 
     response = llm_completion(model=model, prompt=prompt)
     json_content = extract_json(response)
-    return json_content['page_index_given_in_toc']
+    return json_content.get('page_index_given_in_toc', 'no')
 
 def toc_extractor(page_list, toc_page_list, model):
     def transform_dots_to_colon(text):
@@ -324,8 +324,8 @@ def toc_transformer(toc_content, model=None):
         new_complete, finish_reason = llm_completion(model=model, prompt=prompt, return_finish_reason=True)
 
         if new_complete.startswith('```json'):
-            new_complete =  get_json_content(new_complete)
-            last_complete = last_complete+new_complete
+            new_complete = get_json_content(new_complete)
+        last_complete = last_complete + new_complete
 
         if_complete = check_if_toc_transformation_is_complete(toc_content, last_complete, model)
         
@@ -683,8 +683,9 @@ def process_none_page_numbers(toc_items, page_list, start_index=1, model=None):
 
             item_copy = copy.deepcopy(item)
             del item_copy['page']
-            result = add_page_number_to_toc(page_contents, item_copy, model)
-            if isinstance(result[0]['physical_index'], str) and result[0]['physical_index'].startswith('<physical_index'):
+            page_contents_text = ''.join(page_contents)
+            result = add_page_number_to_toc(page_contents_text, [item_copy], model)
+            if result and isinstance(result[0].get('physical_index'), str) and result[0]['physical_index'].startswith('<physical_index'):
                 item['physical_index'] = int(result[0]['physical_index'].split('_')[-1].rstrip('>').strip())
                 del item['page']
     
