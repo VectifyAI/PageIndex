@@ -5,6 +5,20 @@ from pageindex import *
 from pageindex.page_index_md import md_to_tree
 from pageindex.utils import ConfigLoader
 
+def resolve_output_path(input_path, output_dir_arg, output_file_arg):
+    if output_file_arg:
+        output_file = os.path.abspath(os.path.expandvars(os.path.expanduser(output_file_arg)))
+        parent = os.path.dirname(output_file)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+    else:
+        out_dir = os.path.abspath(os.path.expandvars(os.path.expanduser(output_dir_arg))) if output_dir_arg else './results'
+        os.makedirs(out_dir, exist_ok=True)
+        doc_name = os.path.splitext(os.path.basename(input_path))[0]
+        output_file = os.path.join(out_dir, f'{doc_name}_structure.json')
+    return output_file
+
+
 if __name__ == "__main__":
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Process PDF or Markdown document and generate structure')
@@ -76,16 +90,7 @@ if __name__ == "__main__":
         print('Parsing done, saving to file...')
         
         # Save results
-        pdf_name = os.path.splitext(os.path.basename(args.pdf_path))[0]
-        if args.output_file:
-            output_file = args.output_file
-            parent = os.path.dirname(os.path.abspath(output_file))
-            if parent:
-                os.makedirs(parent, exist_ok=True)
-        else:
-            output_dir = args.output_dir if args.output_dir else './results'
-            os.makedirs(output_dir, exist_ok=True)
-            output_file = os.path.join(output_dir, f'{pdf_name}_structure.json')
+        output_file = resolve_output_path(args.pdf_path, args.output_dir, args.output_file)
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(toc_with_page_number, f, indent=2)
         
@@ -135,17 +140,7 @@ if __name__ == "__main__":
         print('Parsing done, saving to file...')
         
         # Save results
-        md_name = os.path.splitext(os.path.basename(args.md_path))[0]
-        if args.output_file:
-            output_file = args.output_file
-            parent = os.path.dirname(os.path.abspath(output_file))
-            if parent:
-                os.makedirs(parent, exist_ok=True)
-        else:
-            output_dir = args.output_dir if args.output_dir else './results'
-            os.makedirs(output_dir, exist_ok=True)
-            output_file = os.path.join(output_dir, f'{md_name}_structure.json')
-        
+        output_file = resolve_output_path(args.md_path, args.output_dir, args.output_file)
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(toc_with_page_number, f, indent=2, ensure_ascii=False)
         

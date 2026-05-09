@@ -181,7 +181,7 @@ You can customize the processing with additional optional arguments:
 --if-add-node-summary   Add node summary (yes/no, default: yes)
 --if-add-doc-description Add doc description (yes/no, default: yes)
 --output-dir            Directory to write the output JSON (default: ./results)
---output-file           Full output file path, e.g. /tmp/my_doc.json
+--output-file           Full output file path, e.g. ~/results/my_doc.json (mutually exclusive with --output-dir)
 ```
 </details>
 
