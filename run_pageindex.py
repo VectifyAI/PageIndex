@@ -29,6 +29,13 @@ if __name__ == "__main__":
     parser.add_argument('--if-add-node-text', type=str, default=None,
                       help='Whether to add text to the node')
                       
+    # Output path arguments (mutually exclusive)
+    output_group = parser.add_mutually_exclusive_group()
+    output_group.add_argument('--output-dir', type=str, default=None,
+                              help='Directory to write the output JSON (default: ./results)')
+    output_group.add_argument('--output-file', type=str, default=None,
+                              help='Full output file path, e.g. /tmp/my_doc.json')
+
     # Markdown specific arguments
     parser.add_argument('--if-thinning', type=str, default='no',
                       help='Whether to apply tree thinning for markdown (markdown only)')
@@ -69,11 +76,16 @@ if __name__ == "__main__":
         print('Parsing done, saving to file...')
         
         # Save results
-        pdf_name = os.path.splitext(os.path.basename(args.pdf_path))[0]    
-        output_dir = './results'
-        output_file = f'{output_dir}/{pdf_name}_structure.json'
-        os.makedirs(output_dir, exist_ok=True)
-        
+        pdf_name = os.path.splitext(os.path.basename(args.pdf_path))[0]
+        if args.output_file:
+            output_file = args.output_file
+            parent = os.path.dirname(os.path.abspath(output_file))
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+        else:
+            output_dir = args.output_dir if args.output_dir else './results'
+            os.makedirs(output_dir, exist_ok=True)
+            output_file = os.path.join(output_dir, f'{pdf_name}_structure.json')
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(toc_with_page_number, f, indent=2)
         
@@ -123,10 +135,16 @@ if __name__ == "__main__":
         print('Parsing done, saving to file...')
         
         # Save results
-        md_name = os.path.splitext(os.path.basename(args.md_path))[0]    
-        output_dir = './results'
-        output_file = f'{output_dir}/{md_name}_structure.json'
-        os.makedirs(output_dir, exist_ok=True)
+        md_name = os.path.splitext(os.path.basename(args.md_path))[0]
+        if args.output_file:
+            output_file = args.output_file
+            parent = os.path.dirname(os.path.abspath(output_file))
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+        else:
+            output_dir = args.output_dir if args.output_dir else './results'
+            os.makedirs(output_dir, exist_ok=True)
+            output_file = os.path.join(output_dir, f'{md_name}_structure.json')
         
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(toc_with_page_number, f, indent=2, ensure_ascii=False)
