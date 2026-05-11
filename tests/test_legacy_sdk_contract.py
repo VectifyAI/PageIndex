@@ -12,12 +12,16 @@ class FakeResponse:
         self._payload = payload or {}
         self.text = text
         self._lines = lines or []
+        self.closed = False
 
     def json(self):
         return self._payload
 
     def iter_lines(self):
         return iter(self._lines)
+
+    def close(self):
+        self.closed = True
 
 
 class StreamingErrorResponse(FakeResponse):
@@ -278,3 +282,44 @@ def test_list_documents_validates_legacy_pagination():
         client.list_documents(limit=0)
     with pytest.raises(ValueError, match="offset must be non-negative"):
         client.list_documents(offset=-1)
+
+
+def test_chat_completions_stream_closes_response_after_done(monkeypatch):
+    fake = FakeResponse(lines=[
+        b'data: {"choices":[{"delta":{"content":"hi"}}]}',
+        b"data: [DONE]",
+    ])
+    monkeypatch.setattr("pageindex.cloud_api.requests.request",
+                       lambda *a, **kw: fake)
+
+    list(PageIndexClient("pi-test").chat_completions(
+        [{"role": "user", "content": "x"}], stream=True,
+    ))
+    assert fake.closed is True
+
+
+def test_chat_completions_stream_closes_response_on_early_abandon(monkeypatch):
+    fake = FakeResponse(lines=[
+        b'data: {"choices":[{"delta":{"content":"a"}}]}',
+        b'data: {"choices":[{"delta":{"content":"b"}}]}',
+        b"data: [DONE]",
+    ])
+    monkeypatch.setattr("pageindex.cloud_api.requests.request",
+                       lambda *a, **kw: fake)
+
+    gen = PageIndexClient("pi-test").chat_completions(
+        [{"role": "user", "content": "x"}], stream=True,
+    )
+    next(gen)
+    gen.close()
+    assert fake.closed is True
+
+
+def test_empty_api_key_warns_and_falls_back_to_local(caplog, tmp_path, monkeypatch):
+    import logging
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    with caplog.at_level(logging.WARNING, logger="pageindex.client"):
+        client = PageIndexClient(api_key="", storage_path=str(tmp_path))
+
+    assert any("empty api_key" in r.message for r in caplog.records)
+    assert client._legacy_cloud_api is None

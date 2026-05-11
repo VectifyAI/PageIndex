@@ -47,7 +47,14 @@ class PageIndexClient:
     def __init__(self, api_key: str | None = None, model: str = None,
                  retrieve_model: str = None, storage_path: str = None,
                  storage=None, index_config: IndexConfig | dict = None):
-        if api_key is not None and api_key != "":
+        if api_key == "":
+            import logging
+            logging.getLogger(__name__).warning(
+                "PageIndexClient received an empty api_key; falling back to local mode. "
+                "Pass api_key=None to silence this warning, or provide a real key for cloud mode."
+            )
+            api_key = None
+        if api_key is not None:
             self._init_cloud(api_key)
         else:
             self._init_local(model, retrieve_model, storage_path, storage, index_config)

@@ -168,6 +168,8 @@ class LegacyCloudAPI:
                     yield content
         except requests.RequestException as e:
             raise PageIndexAPIError(f"Failed to stream chat completion: {e}") from e
+        finally:
+            response.close()
 
     def _stream_chat_response_raw(self, response: requests.Response) -> Iterator[dict[str, Any]]:
         try:
@@ -187,6 +189,8 @@ class LegacyCloudAPI:
                     continue
         except requests.RequestException as e:
             raise PageIndexAPIError(f"Failed to stream chat completion: {e}") from e
+        finally:
+            response.close()
 
     def get_document(self, doc_id: str) -> dict[str, Any]:
         response = self._request(
