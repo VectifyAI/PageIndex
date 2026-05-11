@@ -143,7 +143,7 @@ You can generate the PageIndex tree structure with this open-source repo; or use
 
 # ⚙️ Package Usage
 
-> **Note:** This package uses standard PDF parsing. For use cases with complex PDFs, our [Cloud Service](https://pageindex.ai/developer) (via MCP and API) offers enhanced OCR, tree building, and retrieval.
+> **Note:** This package uses standard PDF parsing. For use cases with complex PDFs, our [cloud service](https://pageindex.ai/developer) (via MCP and API) offers enhanced OCR, tree building, and retrieval.
 
 You can follow these steps to generate a PageIndex tree from a PDF document.
 
@@ -197,7 +197,7 @@ python3 run_pageindex.py --md_path /path/to/your/document.md
 
 ## Agentic Vectorless RAG: An Example
 
-For a simple, end-to-end _**agentic vectorless RAG**_ example using PageIndex with OpenAI Agents SDK, see [`examples/agentic_vectorless_rag_demo.py`](examples/agentic_vectorless_rag_demo.py).
+For a simple, end-to-end _**agentic vectorless RAG**_ example using self-hosted PageIndex (with OpenAI Agents SDK), see [`examples/agentic_vectorless_rag_demo.py`](examples/agentic_vectorless_rag_demo.py).
 
 ```bash
 # Install optional dependency
