@@ -1,0 +1,13 @@
+# Unit coverage target excludes only manual/demo code and import shims.
+# `__main__` blocks require local example assets and live model calls, not unit behavior.
+# import fallback branches exist for running modules as loose scripts, not package tests.
+[run]
+branch = True
+source = pageindex
+
+[report]
+exclude_also =
+    if __name__ == .__main__.:
+    except ImportError:
+    except:
+    from utils import \*

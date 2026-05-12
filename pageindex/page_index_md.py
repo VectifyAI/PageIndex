@@ -150,7 +150,8 @@ def tree_thinning_for_index(node_list, min_node_token=None, model=None):
     nodes_to_remove = set()
     
     for i in range(len(result_list) - 1, -1, -1):
-        if i in nodes_to_remove:
+        # Defensive guard: reverse traversal never revisits indices removed by a later parent.
+        if i in nodes_to_remove:  # pragma: no cover
             continue
             
         current_node = result_list[i]
