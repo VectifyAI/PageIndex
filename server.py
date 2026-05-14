@@ -91,10 +91,7 @@ def query_document(
     messages = [
         {
             "role": "user",
-            "content": f"Document structure:
-{structure}
-
-Question: {req.question}",
+            "content": f"Document structure:\n{structure}\n\nQuestion: {req.question}",
         }
     ]
 
