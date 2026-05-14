@@ -1,7 +1,7 @@
 import os
 import tempfile
 import anthropic
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Header, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -17,6 +17,7 @@ app.add_middleware(
 )
 
 WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", "./workspace")
+API_SECRET = os.environ.get("API_SECRET", "")
 os.makedirs(WORKSPACE_DIR, exist_ok=True)
 
 pi_client = PageIndexClient(
@@ -27,13 +28,22 @@ pi_client = PageIndexClient(
 anthropic_client = anthropic.Anthropic()
 
 
+def verify_secret(x_api_secret: str = Header(default="")):
+    if API_SECRET and x_api_secret != API_SECRET:
+        raise HTTPException(status_code=401, detail="Invalid API secret.")
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
 
 @app.post("/index")
-async def index_document(file: UploadFile = File(...)):
+async def index_document(
+    file: UploadFile = File(...),
+    x_api_secret: str = Header(default=""),
+):
+    verify_secret(x_api_secret)
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
 
@@ -54,7 +64,11 @@ class QueryRequest(BaseModel):
 
 
 @app.post("/query")
-def query_document(req: QueryRequest):
+def query_document(
+    req: QueryRequest,
+    x_api_secret: str = Header(default=""),
+):
+    verify_secret(x_api_secret)
     structure = pi_client.get_document_structure(req.doc_id)
 
     tools = [
@@ -77,7 +91,10 @@ def query_document(req: QueryRequest):
     messages = [
         {
             "role": "user",
-            "content": f"Document structure:\n{structure}\n\nQuestion: {req.question}",
+            "content": f"Document structure:
+{structure}
+
+Question: {req.question}",
         }
     ]
 
