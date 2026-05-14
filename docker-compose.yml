@@ -1,0 +1,16 @@
+services:
+  pageindex:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - WORKSPACE_DIR=/data/workspace
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
+      - API_SECRET=${API_SECRET:-}
+    volumes:
+      - pageindex_data:/data/workspace
+
+volumes:
+  pageindex_data:
