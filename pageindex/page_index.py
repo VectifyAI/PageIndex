@@ -536,7 +536,11 @@ def generate_toc_continue(toc_content, part, model=None):
     if finish_reason == 'finished':
         return extract_json(response)
     else:
-        raise Exception(f'finish reason: {finish_reason}')
+        # On error or truncation, skip this group rather than aborting the
+        # entire indexing job.  A partial tree is far more useful than a crash,
+        # especially when working with large documents or rate-limited APIs.
+        logging.warning(f'generate_toc_continue: skipping group (finish_reason={finish_reason})')
+        return []
     
 ### add verify completeness
 def generate_toc_init(part, model=None):
@@ -994,7 +998,12 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
         elif mode == 'process_toc_no_page_numbers':
             return await meta_processor(page_list, mode='process_no_toc', start_index=start_index, opt=opt, logger=logger)
         else:
-            raise Exception('Processing failed')
+            # Return the best partial tree we have rather than crashing.
+            # This can happen with difficult document sections (e.g. dense
+            # amendment logs) where repeated retries still fall short of the
+            # accuracy threshold.  Callers get a usable, if incomplete, index.
+            logging.warning(f'meta_processor: accuracy {accuracy:.2%} below threshold, returning partial tree')
+            return toc_with_page_number
         
  
 async def process_large_node_recursively(node, page_list, opt=None, logger=None):
