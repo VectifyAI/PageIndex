@@ -56,16 +56,17 @@ def _get_pdf_page_content(doc_info: dict, page_nums: list[int]) -> list[dict]:
 def _get_md_page_content(doc_info: dict, page_nums: list[int]) -> list[dict]:
     """
     For Markdown documents, 'pages' are line numbers.
-    Find nodes whose line_num falls within [min(page_nums), max(page_nums)] and return their text.
+    Return text for nodes whose line_num matches one of the requested numbers.
+    Mirrors the PDF branch: '3,8' returns lines 3 and 8, not lines 3..8.
     """
-    min_line, max_line = min(page_nums), max(page_nums)
+    wanted = set(page_nums)
     results = []
     seen = set()
 
     def _traverse(nodes):
         for node in nodes:
             ln = node.get('line_num')
-            if ln and min_line <= ln <= max_line and ln not in seen:
+            if ln in wanted and ln not in seen:
                 seen.add(ln)
                 results.append({'page': ln, 'content': node.get('text', '')})
             if node.get('nodes'):
