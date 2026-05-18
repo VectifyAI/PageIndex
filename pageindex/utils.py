@@ -16,6 +16,7 @@ import logging
 import yaml
 from pathlib import Path
 from types import SimpleNamespace as config
+import re
 
 # Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
 if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
