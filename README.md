@@ -173,13 +173,17 @@ python3 run_pageindex.py --pdf_path /path/to/your/document.pdf
 You can customize the processing with additional optional arguments:
 
 ```
---model                 LLM model to use (default: gpt-4o-2024-11-20)
---toc-check-pages       Pages to check for table of contents (default: 20)
---max-pages-per-node    Max pages per node (default: 10)
---max-tokens-per-node   Max tokens per node (default: 20000)
---if-add-node-id        Add node ID (yes/no, default: yes)
---if-add-node-summary   Add node summary (yes/no, default: yes)
+--model                  LLM model to use (default: gpt-4o-2024-11-20)
+--toc-check-pages        Pages to check for table of contents (default: 20)
+--max-pages-per-node     Max pages per node (default: 10)
+--max-tokens-per-node    Max tokens per node (default: 20000)
+--if-add-node-id         Add node ID (yes/no, default: yes)
+--if-add-node-summary    Add node summary (yes/no, default: yes)
 --if-add-doc-description Add doc description (yes/no, default: yes)
+--if-add-node-text       Include node text in the output (yes/no, default: from config.yaml)
+--if-thinning            Enable markdown tree thinning before export (yes/no, default: no)
+--thinning-threshold     Minimum token threshold for thinning (default: 5000)
+--summary-token-threshold Token threshold for generating summaries (default: 200)
 ```
 </details>
 
