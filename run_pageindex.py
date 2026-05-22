@@ -11,6 +11,10 @@ if __name__ == "__main__":
     parser.add_argument('--pdf_path', type=str, help='Path to the PDF file')
     parser.add_argument('--md_path', type=str, help='Path to the Markdown file')
 
+    parser.add_argument('--output-dir', type=str, default='./results',
+                        help='Output directory for results (default: ./results)')
+    parser.add_argument('--output-file', type=str, default=None,
+                        help='Output file path (overrides default naming)')
     parser.add_argument('--model', type=str, default=None, help='Model to use (overrides config.yaml)')
 
     parser.add_argument('--toc-check-pages', type=int, default=None,
@@ -67,11 +71,15 @@ if __name__ == "__main__":
         # Process the PDF
         toc_with_page_number = page_index_main(args.pdf_path, opt)
         print('Parsing done, saving to file...')
-        
-        # Save results
-        pdf_name = os.path.splitext(os.path.basename(args.pdf_path))[0]    
-        output_dir = './results'
-        output_file = f'{output_dir}/{pdf_name}_structure.json'
+
+        # Determine output path
+        if args.output_file:
+            output_file = args.output_file
+            output_dir = os.path.dirname(output_file) or './results'
+        else:
+            pdf_name = os.path.splitext(os.path.basename(args.pdf_path))[0]
+            output_dir = args.output_dir
+            output_file = f'{output_dir}/{pdf_name}_structure.json'
         os.makedirs(output_dir, exist_ok=True)
         
         with open(output_file, 'w', encoding='utf-8') as f:
@@ -121,11 +129,15 @@ if __name__ == "__main__":
         ))
         
         print('Parsing done, saving to file...')
-        
-        # Save results
-        md_name = os.path.splitext(os.path.basename(args.md_path))[0]    
-        output_dir = './results'
-        output_file = f'{output_dir}/{md_name}_structure.json'
+
+        # Determine output path
+        if args.output_file:
+            output_file = args.output_file
+            output_dir = os.path.dirname(output_file) or './results'
+        else:
+            md_name = os.path.splitext(os.path.basename(args.md_path))[0]
+            output_dir = args.output_dir
+            output_file = f'{output_dir}/{md_name}_structure.json'
         os.makedirs(output_dir, exist_ok=True)
         
         with open(output_file, 'w', encoding='utf-8') as f:
