@@ -293,4 +293,23 @@ PageIndex Blog, Sep 2025.
 
 ---
 
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+## Contributing
+
+Contributions are welcome. Please ensure `bun run typecheck` and `bun run build` pass before submitting a PR.
+
+## Testing
+
+```sh
+bun run typecheck
+bun run build
+```
+
+There are no end-to-end tests yet. Until tests are added, typecheck + build are the verification surface.
+
+---
+
 © 2026 [Vectify AI](https://vectify.ai)
