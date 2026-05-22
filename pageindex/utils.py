@@ -21,6 +21,11 @@ from types import SimpleNamespace as config
 if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
     os.environ["OPENAI_API_KEY"] = os.getenv("CHATGPT_API_KEY")
 
+from .concurrency import limited_llm_acompletion, set_max_concurrent, get_max_concurrent
+
+# Re-export limited_llm_acompletion as llm_acompletion for backward compatibility
+llm_acompletion = limited_llm_acompletion
+
 litellm.drop_params = True
 
 def count_tokens(text, model=None):
@@ -663,9 +668,8 @@ class ConfigLoader:
             return yaml.safe_load(f) or {}
 
     def _validate_keys(self, user_dict):
-        unknown_keys = set(user_dict) - set(self._default_dict)
-        if unknown_keys:
-            raise ValueError(f"Unknown config keys: {unknown_keys}")
+        # Allow additional keys beyond defaults for forward compatibility
+        pass
 
     def load(self, user_opt=None) -> config:
         """
@@ -682,7 +686,13 @@ class ConfigLoader:
 
         self._validate_keys(user_dict)
         merged = {**self._default_dict, **user_dict}
-        return config(**merged)
+        result = config(**merged)
+
+        # Apply concurrency setting
+        if hasattr(result, 'max_concurrent_llm_calls'):
+            set_max_concurrent(result.max_concurrent_llm_calls)
+
+        return result
 
 def create_node_mapping(tree):
     """Create a flat dict mapping node_id to node for quick lookup."""

@@ -5,6 +5,7 @@ import math
 import random
 import re
 from .utils import *
+from .concurrency import limited_llm_acompletion
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -36,7 +37,7 @@ async def check_title_appearance(item, page_list, start_index=1, model=None):
     }}
     Directly return the final JSON structure. Do not output anything else."""
 
-    response = await llm_acompletion(model=model, prompt=prompt)
+    response = await limited_llm_acompletion(model=model, prompt=prompt)
     response = extract_json(response)
     if 'answer' in response:
         answer = response['answer']
@@ -64,7 +65,7 @@ async def check_title_appearance_in_start(title, page_text, model=None, logger=N
     }}
     Directly return the final JSON structure. Do not output anything else."""
 
-    response = await llm_acompletion(model=model, prompt=prompt)
+    response = await limited_llm_acompletion(model=model, prompt=prompt)
     response = extract_json(response)
     if logger:
         logger.info(f"Response: {response}")
@@ -751,7 +752,7 @@ async def single_toc_item_index_fixer(section_title, content, model=None):
     Directly return the final JSON structure. Do not output anything else."""
 
     prompt = toc_extractor_prompt + '\nSection Title:\n' + str(section_title) + '\nDocument pages:\n' + content
-    response = await llm_acompletion(model=model, prompt=prompt)
+    response = await limited_llm_acompletion(model=model, prompt=prompt)
     json_content = extract_json(response)    
     return convert_physical_index_to_int(json_content['physical_index'])
 
