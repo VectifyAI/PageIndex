@@ -101,6 +101,27 @@ The PageIndex service is available as a ChatGPT-style [chat platform](https://ch
   </a>
 </div>
 
+### 🚀 Quickstart
+
+Get started with PageIndex in three steps:
+
+**1. Install dependencies:**
+```bash
+pip3 install --upgrade -r requirements.txt
+```
+
+**2. Set your LLM API key:**
+```bash
+echo "OPENAI_API_KEY=your_openai_key_here" > .env
+```
+
+**3. Generate a tree index from your PDF:**
+```bash
+python3 run_pageindex.py --pdf_path /path/to/your/document.pdf
+```
+
+This outputs a structured tree index with node IDs, page ranges, and summaries. See the [tree structure section](#-pageindex-tree-structure) for example output.
+
 ---
 
 # 🌲 PageIndex Tree Structure
