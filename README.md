@@ -120,6 +120,8 @@ echo "OPENAI_API_KEY=your_openai_key_here" > .env
 python3 run_pageindex.py --pdf_path /path/to/your/document.pdf
 ```
 
+> **Note:** Ensure you have Python 3.8+ installed. For best results, use a PDF with clear text (not scanned images).
+
 This outputs a structured tree index with node IDs, page ranges, and summaries. See the [tree structure section](#-pageindex-tree-structure) for example output.
 
 ---
