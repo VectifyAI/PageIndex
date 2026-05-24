@@ -224,6 +224,57 @@ To address this, we introduced PageIndex OCR — the first long-context OCR mode
 
 ---
 
+# 🛠️ Development Guide
+
+Contributions are welcome! To set up a local development environment:
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/VectifyAI/PageIndex.git
+cd PageIndex
+```
+
+### 2. Create a feature branch
+
+```bash
+git checkout -b docs/add-development-guide
+```
+
+### 3. Install dependencies
+
+```bash
+pip3 install --upgrade -r requirements.txt
+```
+
+### 4. Set up environment variables
+
+Create a `.env` file in the root directory:
+
+```bash
+OPENAI_API_KEY=your_openai_key_here
+```
+
+### 5. Run tests (if available)
+
+```bash
+pytest tests/
+```
+
+### 6. Make your changes and commit
+
+```bash
+git add .
+git commit -m "your descriptive commit message"
+git push origin docs/add-development-guide
+```
+
+### 7. Open a pull request
+
+Submit a PR against the `main` branch of `VectifyAI/PageIndex`.
+
+---
+
 # 📈 Case Study: PageIndex Leads Finance QA Benchmark
 
 [Mafin 2.5](https://vectify.ai/mafin) is a reasoning-based RAG system for financial document analysis, powered by **PageIndex**. It achieved a state-of-the-art [**98.7% accuracy**](https://vectify.ai/blog/Mafin2.5) on the [FinanceBench](https://arxiv.org/abs/2311.11944) benchmark, significantly outperforming traditional vector-based RAG systems.
