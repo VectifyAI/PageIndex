@@ -1,0 +1,53 @@
+name: Dependency Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-check:
+    name: Dependency Vulnerability Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Run Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: low
+          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC
+
+  dependency-graph:
+    name: Dependency Graph Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Generate dependency summary
+        run: |
+          echo "## Dependency Summary" >> $GITHUB_STEP_SUMMARY
+          echo "Checking dependency files..." >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "package.json" ]; then
+            echo "### npm dependencies" >> $GITHUB_STEP_SUMMARY
+            npm list --depth=0 --json 2>/dev/null | jq -r '.dependencies | to_entries[] | "- \(.key)@\(.value.version)"' >> $GITHUB_STEP_SUMMARY || echo "No npm dependencies" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -f "requirements.txt" ]; then
+            echo "### Python dependencies" >> $GITHUB_STEP_SUMMARY
+            cat requirements.txt >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -f "pyproject.toml" ]; then
+            echo "### Python project dependencies" >> $GITHUB_STEP_SUMMARY
+            grep -A 50 '\[tool.poetry.dependencies\]' pyproject.toml 2>/dev/null || echo "No poetry dependencies" >> $GITHUB_STEP_SUMMARY
+          fi
