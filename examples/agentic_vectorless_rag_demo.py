@@ -12,7 +12,7 @@ Agent tools:
   - get_page_content()       — retrieve text content of specific pages
 
 Steps:
-  1 — Index a PDF and view its tree structure index
+  1 — Index a PDF/md and view its tree structure index
   2 — View document metadata
   3 — Ask a question (agent reasons over the index and auto-calls tools)
 
@@ -44,9 +44,16 @@ WORKSPACE = _EXAMPLES_DIR / "workspace"
 AGENT_SYSTEM_PROMPT = """
 You are PageIndex, a document QA assistant.
 TOOL USE:
-- Call get_document() first to confirm status and page/line count.
-- Call get_document_structure() to identify relevant page ranges.
-- Call get_page_content(pages="5-7") with tight ranges; never fetch the whole document.
+- Call get_document() first to confirm status, type (pdf/md), and
+page/line count.
+- Call get_document_structure() to identify relevant sections.
+- Call get_page_content(pages=...) to fetch content:
+- For PDF documents: use page number ranges like "5-7" or "3,8"
+- For Markdown documents: use ONLY the exact line_num values from the
+structure,
+separated by commas. Example: "3,53,69". Do NOT use ranges.
+Each line_num represents a complete section node — you will receive
+the full content of that section.
 - Before each tool call, output one short sentence explaining the reason.
 Answer based only on tool output. Be concise.
 """
@@ -72,9 +79,12 @@ def query_agent(client: PageIndexClient, doc_id: str, prompt: str, verbose: bool
     @function_tool
     def get_page_content(pages: str) -> str:
         """
-        Get the text content of specific pages or line numbers.
-        Use tight ranges: e.g. '5-7' for pages 5 to 7, '3,8' for pages 3 and 8, '12' for page 12.
-        For Markdown documents, use line numbers from the structure's line_num field.
+        Get the text content of specific pages (PDF) or sections (Markdown).
+        For PDF: use page ranges, e.g. '5-7', '3,8', '12'.
+        For Markdown: use EXACT line_num values from get_document_structure(),
+        comma-separated. e.g. '3,53,69'. Each line_num returns the FULL text
+        of that section node. Do NOT guess or interpolate line numbers —
+        only use values that appear in the structure.
         """
         return client.get_page_content(doc_id, pages)
 
