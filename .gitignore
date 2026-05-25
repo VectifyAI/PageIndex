@@ -4,3 +4,4 @@ __pycache__
 .env*
 .venv/
 logs/
+examples/pifs_workspace/
