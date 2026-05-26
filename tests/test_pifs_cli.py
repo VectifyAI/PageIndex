@@ -146,3 +146,33 @@ def test_cli_chat_runs_one_question_and_exits(monkeypatch, capsys, tmp_path):
     assert filesystem.workspace == workspace
     assert question == "Summarize the workspace"
     assert kwargs["model"] == "test-model"
+    assert kwargs["stream_mode"] == "all"
+
+
+def test_cli_chat_stream_mode_can_be_overridden(monkeypatch, tmp_path):
+    from pageindex.filesystem import cli
+
+    workspace = tmp_path / "workspace"
+    inputs = iter(["Summarize the workspace", "exit"])
+    agent_calls = []
+
+    def fake_run_pifs_agent(filesystem, question, **kwargs):
+        agent_calls.append((filesystem, question, kwargs))
+        return f"answer:{question}"
+
+    monkeypatch.setattr(cli, "PageIndexFileSystem", FakeFileSystem)
+    monkeypatch.setattr(cli, "run_pifs_agent", fake_run_pifs_agent)
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
+
+    status = cli.main(
+        [
+            "chat",
+            "--workspace",
+            str(workspace),
+            "--stream-mode",
+            "tools",
+        ]
+    )
+
+    assert status == 0
+    assert agent_calls[0][2]["stream_mode"] == "tools"

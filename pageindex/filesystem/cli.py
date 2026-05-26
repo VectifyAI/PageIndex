@@ -61,13 +61,14 @@ def _add_agent_arguments(
     parser: argparse.ArgumentParser,
     *,
     workspace_default: str | None,
+    default_stream_mode: str,
 ) -> None:
     parser.add_argument("--workspace", default=workspace_default)
     parser.add_argument("--env-file", default=None)
     parser.add_argument("--model", default=_agent_model_default())
     parser.add_argument(
         "--stream-mode",
-        default="off",
+        default=default_stream_mode,
         choices=AGENT_STREAM_MODE_CHOICES,
     )
     parser.add_argument("--max-turns", type=int, default=20)
@@ -89,12 +90,17 @@ def _parse_agent_command(
     argv: list[str],
     *,
     workspace_default: str | None,
+    default_stream_mode: str,
 ) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog=f"pifs {command_name}",
         description=f"PageIndex FileSystem {command_name}",
     )
-    _add_agent_arguments(parser, workspace_default=workspace_default)
+    _add_agent_arguments(
+        parser,
+        workspace_default=workspace_default,
+        default_stream_mode=default_stream_mode,
+    )
     if command_name == "ask":
         parser.add_argument("question", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
@@ -122,7 +128,12 @@ def _agent_kwargs(args: argparse.Namespace) -> dict[str, object]:
 
 
 def _run_ask(argv: list[str], *, workspace_default: str | None) -> int:
-    args = _parse_agent_command("ask", argv, workspace_default=workspace_default)
+    args = _parse_agent_command(
+        "ask",
+        argv,
+        workspace_default=workspace_default,
+        default_stream_mode="off",
+    )
     question_tokens = [token for token in args.question if token != "--"]
     question = " ".join(question_tokens).strip()
     if not question:
@@ -134,7 +145,12 @@ def _run_ask(argv: list[str], *, workspace_default: str | None) -> int:
 
 
 def _run_chat(argv: list[str], *, workspace_default: str | None) -> int:
-    args = _parse_agent_command("chat", argv, workspace_default=workspace_default)
+    args = _parse_agent_command(
+        "chat",
+        argv,
+        workspace_default=workspace_default,
+        default_stream_mode="all",
+    )
     filesystem = _filesystem_from_workspace(args.workspace)
     while True:
         try:
