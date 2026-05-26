@@ -12,3 +12,6 @@ dependencies = [
     "pyyaml==6.0.2",
     "sqlite-vec>=0.1.9",
 ]
+
+[project.scripts]
+pifs = "pageindex.filesystem.cli:main"

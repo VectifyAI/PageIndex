@@ -6,8 +6,126 @@ import shlex
 import sys
 from pathlib import Path
 
+from .agent import REASONING_EFFORT_CHOICES, REASONING_SUMMARY_CHOICES, run_pifs_agent
 from .commands import PIFSCommandError, PIFSCommandExecutor
 from .core import PageIndexFileSystem
+
+
+AGENT_STREAM_MODE_CHOICES = ("off", "tools", "model", "all")
+DEFAULT_AGENT_MODEL = "gpt-5.4-mini"
+EXIT_COMMANDS = {"exit", "quit", ":q"}
+
+
+def _agent_model_default() -> str:
+    return (
+        os.environ.get("PIFS_AGENT_MODEL")
+        or os.environ.get("PIFS_MODEL")
+        or DEFAULT_AGENT_MODEL
+    )
+
+
+def _add_agent_arguments(
+    parser: argparse.ArgumentParser,
+    *,
+    workspace_default: str | None,
+) -> None:
+    parser.add_argument("--workspace", default=workspace_default)
+    parser.add_argument("--model", default=_agent_model_default())
+    parser.add_argument(
+        "--stream-mode",
+        default="off",
+        choices=AGENT_STREAM_MODE_CHOICES,
+    )
+    parser.add_argument("--max-turns", type=int, default=20)
+    parser.add_argument("--max-seconds", type=float, default=60)
+    parser.add_argument(
+        "--reasoning-effort",
+        choices=REASONING_EFFORT_CHOICES,
+        default=None,
+    )
+    parser.add_argument(
+        "--reasoning-summary",
+        choices=REASONING_SUMMARY_CHOICES,
+        default=None,
+    )
+
+
+def _parse_agent_command(
+    command_name: str,
+    argv: list[str],
+    *,
+    workspace_default: str | None,
+) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog=f"pifs {command_name}",
+        description=f"PageIndex FileSystem {command_name}",
+    )
+    _add_agent_arguments(parser, workspace_default=workspace_default)
+    if command_name == "ask":
+        parser.add_argument("question", nargs=argparse.REMAINDER)
+    args = parser.parse_args(argv)
+    if not args.workspace:
+        parser.error("--workspace is required unless PIFS_WORKSPACE is set")
+    return args
+
+
+def _filesystem_from_workspace(workspace: str) -> PageIndexFileSystem:
+    return PageIndexFileSystem(Path(workspace).expanduser())
+
+
+def _agent_kwargs(args: argparse.Namespace) -> dict[str, object]:
+    return {
+        "model": args.model,
+        "stream_mode": args.stream_mode,
+        "max_turns": args.max_turns,
+        "max_seconds": args.max_seconds,
+        "reasoning_effort": args.reasoning_effort,
+        "reasoning_summary": args.reasoning_summary,
+    }
+
+
+def _run_ask(argv: list[str], *, workspace_default: str | None) -> int:
+    args = _parse_agent_command("ask", argv, workspace_default=workspace_default)
+    question_tokens = [token for token in args.question if token != "--"]
+    question = " ".join(question_tokens).strip()
+    if not question:
+        raise ValueError("ask requires a question")
+
+    filesystem = _filesystem_from_workspace(args.workspace)
+    print(run_pifs_agent(filesystem, question, **_agent_kwargs(args)))
+    return 0
+
+
+def _run_chat(argv: list[str], *, workspace_default: str | None) -> int:
+    args = _parse_agent_command("chat", argv, workspace_default=workspace_default)
+    filesystem = _filesystem_from_workspace(args.workspace)
+    while True:
+        try:
+            question = input("pifs> ").strip()
+        except EOFError:
+            break
+        except KeyboardInterrupt:
+            print()
+            break
+        if not question:
+            continue
+        if question.lower() in EXIT_COMMANDS:
+            break
+        print(run_pifs_agent(filesystem, question, **_agent_kwargs(args)))
+    return 0
+
+
+def _run_passthrough(
+    command_tokens: list[str],
+    *,
+    workspace: str,
+    json_output: bool,
+) -> int:
+    filesystem = _filesystem_from_workspace(workspace)
+    executor = PIFSCommandExecutor(filesystem, json_output=json_output)
+    command = " ".join(shlex.quote(token) for token in command_tokens)
+    print(executor.execute(command))
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -20,20 +138,28 @@ def main(argv: list[str] | None = None) -> int:
 
     command_tokens = [token for token in args.command if token != "--"]
     json_output = args.json_output
-    if "--json" in command_tokens:
-        command_tokens = [token for token in command_tokens if token != "--json"]
-        json_output = True
 
-    if not args.workspace:
-        parser.error("--workspace is required unless PIFS_WORKSPACE is set")
     if not command_tokens:
         parser.error("a filesystem command is required")
 
-    filesystem = PageIndexFileSystem(Path(args.workspace).expanduser())
-    executor = PIFSCommandExecutor(filesystem, json_output=json_output)
     try:
-        command = " ".join(shlex.quote(token) for token in command_tokens)
-        print(executor.execute(command))
+        command_name = command_tokens[0]
+        command_args = command_tokens[1:]
+        if command_name == "ask":
+            return _run_ask(command_args, workspace_default=args.workspace)
+        if command_name == "chat":
+            return _run_chat(command_args, workspace_default=args.workspace)
+
+        if "--json" in command_tokens:
+            command_tokens = [token for token in command_tokens if token != "--json"]
+            json_output = True
+        if not args.workspace:
+            parser.error("--workspace is required unless PIFS_WORKSPACE is set")
+        return _run_passthrough(
+            command_tokens,
+            workspace=args.workspace,
+            json_output=json_output,
+        )
     except PIFSCommandError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
