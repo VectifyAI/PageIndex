@@ -1204,7 +1204,7 @@ class PIFSCommandExecutor:
             return f"# no matches for: {data.get('query', '')}"
         lines: list[str] = []
         for item in data.get("data", []):
-            lines.append(str(item.get("path") or "-"))
+            lines.append(f"path: {item.get('path') or '-'}")
             lines.append(f"summary: {self._one_line_value(item.get('summary') or '')}")
             if "entity" in item:
                 lines.append(f"entity: {self._one_line_value(item.get('entity') or '')}")

@@ -87,7 +87,7 @@ def test_semantic_search_scope_keeps_ordinary_folders_out_of_source_type_filters
 
     executor.json_output = False
     rendered = executor.execute('search-summary "Federal Reserve annual report" /documents')
-    assert "/documents/report.pdf" in rendered
+    assert "path: /documents/report.pdf" in rendered
     assert "summary: Federal Reserve annual report summary" in rendered
     assert "line_text: 1: Federal Reserve supervision and regulation annual report." in rendered
     assert "id=dsid_report" not in rendered
@@ -150,6 +150,7 @@ def test_entity_relation_search_return_minimal_fields_with_summary(tmp_path):
 
     executor.json_output = False
     rendered = executor.execute('search-entity "Federal Reserve" /documents')
+    assert "path: /documents/market-note.pdf" in rendered
     assert "summary: Risk and compliance summary" in rendered
     assert "entity: Federal Reserve; Disney" in rendered
     assert "file_ref=" not in rendered
