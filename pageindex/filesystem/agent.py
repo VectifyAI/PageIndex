@@ -585,10 +585,11 @@ class PIFSAgentSession:
 
         try:
             asyncio.get_running_loop()
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                return pool.submit(asyncio.run, _run()).result()
         except RuntimeError:
             return asyncio.run(_run())
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, _run()).result()
 
     def _run_bash(self, command: str) -> str:
         started = time.time()
