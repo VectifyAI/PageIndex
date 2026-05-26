@@ -22,18 +22,53 @@ class SummaryBackend:
         ]
 
 
+class ChannelBackend:
+    def __init__(self, document_id, channels=("summary", "entity", "relation")):
+        self.document_id = document_id
+        self.channels = channels
+
+    def available_channels(self):
+        return self.channels
+
+    def search_channel(self, channel, query, *, limit=10, filters=None):
+        return [
+            SimpleNamespace(
+                document_id=self.document_id,
+                snippet=f"{channel} candidate: {query}",
+            )
+        ]
+
+
 def test_semantic_search_scope_keeps_ordinary_folders_out_of_source_type_filters(tmp_path):
     from pageindex.filesystem import PIFSCommandExecutor, PageIndexFileSystem
+    from pageindex.filesystem.metadata_generation import MetadataGenerationResult
 
-    filesystem = PageIndexFileSystem(workspace=tmp_path / "workspace")
+    class SummaryGenerator:
+        def generate(self, document, *, fields):
+            return MetadataGenerationResult(
+                values={"summary": "Federal Reserve annual report summary"}
+            )
+
+    filesystem = PageIndexFileSystem(
+        workspace=tmp_path / "workspace",
+        metadata_generator=SummaryGenerator(),
+    )
     filesystem.register_file(
         storage_uri="file:///tmp/report.pdf",
         source_path="examples/documents/report.pdf",
         folder_path="/documents",
         external_id="dsid_report",
-        title="Annual report",
+        title="report.pdf",
         metadata={"source_type": "examples-documents"},
         content="Federal Reserve supervision and regulation annual report.",
+        metadata_policy={
+            "fields": {
+                "summary": True,
+                "doc_type": False,
+                "domain": False,
+                "topic": False,
+            }
+        },
     )
     backend = SummaryBackend("dsid_report")
     filesystem.semantic_retrieval_backend = backend
@@ -44,7 +79,80 @@ def test_semantic_search_scope_keeps_ordinary_folders_out_of_source_type_filters
     )
 
     assert backend.calls[0][2] == {}
-    assert result["data"]["data"][0]["external_id"] == "dsid_report"
+    assert result["data"]["data"][0] == {
+        "path": "/documents/report.pdf",
+        "summary": "Federal Reserve annual report summary",
+        "line_text": "1: Federal Reserve supervision and regulation annual report.",
+    }
+
+    executor.json_output = False
+    rendered = executor.execute('search-summary "Federal Reserve annual report" /documents')
+    assert "/documents/report.pdf" in rendered
+    assert "summary: Federal Reserve annual report summary" in rendered
+    assert "line_text: 1: Federal Reserve supervision and regulation annual report." in rendered
+    assert "id=dsid_report" not in rendered
+    assert "file_ref=" not in rendered
+
+
+def test_entity_relation_search_return_minimal_fields_with_summary(tmp_path):
+    from pageindex.filesystem import PIFSCommandExecutor, PageIndexFileSystem
+    from pageindex.filesystem.metadata_generation import MetadataGenerationResult
+
+    class MetadataGenerator:
+        def generate(self, document, *, fields):
+            values = {
+                "summary": "Risk and compliance summary",
+                "entity": "Federal Reserve; Disney",
+                "relation": "Federal Reserve affects Disney valuation",
+            }
+            return MetadataGenerationResult(values={field: values[field] for field in fields})
+
+    filesystem = PageIndexFileSystem(
+        workspace=tmp_path / "workspace",
+        metadata_generator=MetadataGenerator(),
+    )
+    filesystem.register_file(
+        storage_uri="file:///tmp/market-note.pdf",
+        source_path="examples/documents/market-note.pdf",
+        folder_path="/documents",
+        external_id="dsid_market_note",
+        title="market-note.pdf",
+        content="Federal Reserve policy affects Disney valuation.",
+        metadata_policy={
+            "fields": {
+                "summary": True,
+                "doc_type": False,
+                "domain": False,
+                "topic": False,
+                "entity": True,
+                "relation": True,
+            }
+        },
+    )
+    filesystem.semantic_retrieval_backend = ChannelBackend("dsid_market_note")
+    executor = PIFSCommandExecutor(filesystem, json_output=True)
+
+    entity = json.loads(executor.execute('search-entity "Federal Reserve" /documents'))
+    assert entity["data"]["data"][0] == {
+        "path": "/documents/market-note.pdf",
+        "summary": "Risk and compliance summary",
+        "line_text": "1: Federal Reserve policy affects Disney valuation.",
+        "entity": "Federal Reserve; Disney",
+    }
+
+    relation = json.loads(executor.execute('search-relation "Disney valuation" /documents'))
+    assert relation["data"]["data"][0] == {
+        "path": "/documents/market-note.pdf",
+        "summary": "Risk and compliance summary",
+        "line_text": "1: Federal Reserve policy affects Disney valuation.",
+        "relation": "Federal Reserve affects Disney valuation",
+    }
+
+    executor.json_output = False
+    rendered = executor.execute('search-entity "Federal Reserve" /documents')
+    assert "summary: Risk and compliance summary" in rendered
+    assert "entity: Federal Reserve; Disney" in rendered
+    assert "file_ref=" not in rendered
 
 
 def test_semantic_search_rejects_unquoted_multi_word_query(tmp_path):

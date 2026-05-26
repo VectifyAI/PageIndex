@@ -786,7 +786,7 @@ class PIFSCommandExecutor:
             "query": query,
             "scope": normalized,
             "retrieval": f"{channel}_vector",
-            "data": self._grep_file_hits_from_results(results, query),
+            "data": self._semantic_channel_hits_from_results(channel, results, query),
         }
 
     def _semantic_recursive_grep(
@@ -1072,7 +1072,7 @@ class PIFSCommandExecutor:
         if command_name in {"grep", "semantic-grep"}:
             return self._render_grep(data)
         if command_name in {"search-summary", "search-entity", "search-relation"}:
-            return self._render_grep(data)
+            return self._render_semantic_search(data)
         if command_name == "find":
             return self._render_find(data)
         if command_name == "stat":
@@ -1194,6 +1194,26 @@ class PIFSCommandExecutor:
                 for item in data.get("data", [])
             )
         return str(data)
+
+    def _render_semantic_search(self, data: Any) -> str:
+        if not isinstance(data, dict):
+            return str(data)
+        if data.get("mode") != "files":
+            return self._render_grep(data)
+        if not data.get("data", []):
+            return f"# no matches for: {data.get('query', '')}"
+        lines: list[str] = []
+        for item in data.get("data", []):
+            lines.append(str(item.get("path") or "-"))
+            lines.append(f"summary: {self._one_line_value(item.get('summary') or '')}")
+            if "entity" in item:
+                lines.append(f"entity: {self._one_line_value(item.get('entity') or '')}")
+            if "relation" in item:
+                lines.append(f"relation: {self._one_line_value(item.get('relation') or '')}")
+            line_text = self._one_line_value(item.get("line_text") or "")
+            lines.append(f"line_text: {line_text or '-'}")
+            lines.append("")
+        return "\n".join(lines).rstrip()
 
     def _render_find(self, data: Any) -> str:
         if not isinstance(data, list):
@@ -1420,6 +1440,37 @@ class PIFSCommandExecutor:
             )
             if limit is not None and len(hits) >= limit:
                 break
+        return hits
+
+    def _semantic_channel_hits_from_results(
+        self,
+        channel: str,
+        results: list[Any],
+        query: str,
+    ) -> list[dict[str, Any]]:
+        hits = []
+        for result in results:
+            metadata = result.metadata or {}
+            line, text = self._first_matching_line(result.file_ref, query)
+            line_text = ""
+            if text:
+                line_text = f"{line}: {self._compact_text(text, max_chars=220)}"
+            hit = {
+                "path": self._file_target_path(
+                    {
+                        "file_ref": result.file_ref,
+                        "title": result.title,
+                        "folder_paths": result.folder_paths,
+                        "source_path": result.source_path,
+                        "external_id": result.external_id,
+                    }
+                ),
+                "summary": metadata.get("summary") or "",
+                "line_text": line_text,
+            }
+            if channel in {"entity", "relation"}:
+                hit[channel] = metadata.get(channel) or ""
+            hits.append(hit)
         return hits
 
     def _rank_child_folders_from_source(
