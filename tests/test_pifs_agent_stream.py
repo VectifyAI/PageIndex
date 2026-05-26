@@ -215,6 +215,9 @@ class PIFSAgentStreamTest(unittest.TestCase):
         self.assertIn("current PageIndex FileSystem\nworkspace", AGENT_SYSTEM_PROMPT)
         self.assertIn("unrelated to the current workspace", AGENT_SYSTEM_PROMPT)
         self.assertIn("do not answer it as\na general-purpose assistant", AGENT_SYSTEM_PROMPT)
+        self.assertIn("workspace-related topic question", AGENT_SYSTEM_PROMPT)
+        self.assertIn("clarify only after a reasonable search", AGENT_SYSTEM_PROMPT)
+        self.assertIn("search for candidate documents before asking", AGENT_TOOL_POLICY)
 
 
 if __name__ == "__main__":

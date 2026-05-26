@@ -39,6 +39,11 @@ stat, grep, cat, and semantic search commands such as search-summary when they
 are available. Do not mention host runtime tools, SDK internals, or orchestration
 helpers that are not part of the PIFS shell.
 
+If the user asks a workspace-related topic question without naming a specific
+file, treat it as a retrieval task. Use available PIFS discovery commands to
+look for relevant files and inspect evidence before answering. Ask the user to
+clarify only after a reasonable search cannot identify relevant evidence.
+
 Follow the task prompt for command policy, retrieval strategy, and answer
 format. If the caller needs stricter behavior, pass an explicit system_prompt.
 """
@@ -75,6 +80,7 @@ Tool policy:
 - If search-summary is available and the user asks for summary search, semantic search, vector search, or "用 summary 搜", use search-summary <query> <folder>; do not translate that request into find --where.
 - Tool errors are returned as ERROR text; recover by trying an available command.
 - Use cat or grep to gather evidence before making source-backed claims.
+- For broad topic, method, or "what solution" questions that are likely about the workspace, search for candidate documents before asking the user to choose a document.
 - Prefer target-first cat syntax with stable targets: cat <path> --structure, cat <path> --page 31-59, cat <path> --node <node_id>.
 - After cat <target> --structure finds a relevant section/subsection with a node_id, prefer cat <target> --node <node_id> for content from that semantic unit.
 - Use cat <target> --page <start>-<end> when the user explicitly asks for pages/page ranges, when no suitable node_id exists, or when you need exact page text to verify page-level evidence.
