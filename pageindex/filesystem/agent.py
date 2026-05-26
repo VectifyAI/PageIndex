@@ -36,7 +36,8 @@ commands described in the workspace context. grep -R is lexical evidence search;
 semantic search commands return candidate documents and do not guarantee literal
 text matches. Errors are returned as text prefixed with ERROR. Do not call
 commands that are not listed as available. When evidence is required, inspect it
-with cat or grep before answering.
+with cat or grep before answering. Prefer shell-like target-first cat syntax:
+cat <ref> --structure, cat <ref> --page 31-59, and cat <ref> --node 0009.
 """
 
 AGENT_TOOL_POLICY = """
@@ -48,6 +49,8 @@ Tool policy:
 - Semantic search commands are candidate-discovery tools and do not guarantee literal text matches.
 - Tool errors are returned as ERROR text; recover by trying an available command.
 - Use cat or grep to gather evidence before making source-backed claims.
+- Prefer target-first cat syntax: cat <ref> --structure, cat <ref> --page 31-59, cat <ref> --node <node_id>.
+- Do not call cat --page <ref> <start> <end>; if you need a page span, use cat <ref> --page <start>-<end>.
 """
 
 STREAM_MODE_ALIASES = {

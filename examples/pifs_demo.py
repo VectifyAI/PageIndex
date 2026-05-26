@@ -5,7 +5,7 @@ This mirrors examples/agentic_vectorless_rag_demo.py, but exposes a corpus
 through the PageIndex FileSystem shell instead of direct PageIndex document
 tools. The agent receives one read-only bash-like PIFS tool and must retrieve
 evidence through commands such as ls, tree, find, grep, search-summary,
-cat --structure, cat --page, and cat --node.
+cat <ref> --structure, cat <ref> --page, and cat <ref> --node.
 
 The demo uses PDFs under examples/documents. When a matching
 examples/documents/results/*_structure.json file exists, it is loaded into the
@@ -71,12 +71,12 @@ Retrieval strategy:
 - Use grep -R only for lexical evidence; do not treat semantic candidates as
   literal matches.
 - Run one evidence command at a time. Do not chain large commands like
-  cat --structure, grep, and cat --page in one bash call.
-- For PDFs, use cat --structure <ref> to inspect the PageIndex tree, then
-  cat --page <range> <ref> for evidence, for example:
-  cat --page 31-35 ref_1
-- For page-range questions, use cat --structure to identify the full section
-  range. Then run cat --page on the smallest useful evidence range, usually the
+  cat <ref> --structure, grep, and cat <ref> --page in one bash call.
+- For PDFs, use cat <ref> --structure to inspect the PageIndex tree, then
+  cat <ref> --page <range> for evidence, for example:
+  cat ref_1 --page 31-35
+- For page-range questions, use cat <ref> --structure to identify the full section
+  range. Then run cat <ref> --page on the smallest useful evidence range, usually the
   section start page or first 1-2 pages, before the final answer. Do not print
   a broad multi-page section unless the user asks to read the whole section.
 - Do not use cat --all on PDFs.
@@ -646,7 +646,7 @@ def run_smoke_commands(
         verbose=verbose,
     )
 
-    command = f"cat --structure {first_ref}"
+    command = f"cat {first_ref} --structure"
     structure_payload = execute_json_command(json_executor, command)
     structure_data = structure_payload.get("data") or {}
     structure = structure_data.get("structure") or []
@@ -664,7 +664,7 @@ def run_smoke_commands(
     )
 
     evidence_range = opening_page_range_for_node(supervision_node) or "1-2"
-    command = f"cat --page {evidence_range} {first_ref}"
+    command = f"cat {first_ref} --page {evidence_range}"
     page = execute_json_command(json_executor, command)
     page_text = str((page.get("data") or {}).get("text") or "")
     show_capability(

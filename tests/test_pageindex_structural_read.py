@@ -67,9 +67,9 @@ def test_pageindex_structure_options_report_failed_register_build(monkeypatch):
         )
         executor = PIFSCommandExecutor(filesystem, json_output=True)
 
-        structure = json.loads(executor.execute("cat --structure dsid_structural_missing"))
-        node = json.loads(executor.execute("cat --node 0001 dsid_structural_missing"))
-        pages = json.loads(executor.execute("cat --page 1-2 dsid_structural_missing"))
+        structure = json.loads(executor.execute("cat dsid_structural_missing --structure"))
+        node = json.loads(executor.execute("cat dsid_structural_missing --node 0001"))
+        pages = json.loads(executor.execute("cat dsid_structural_missing --page 1-2"))
         stat = json.loads(executor.execute("stat dsid_structural_missing"))
 
         assert structure["data"]["mode"] == "structure"
@@ -282,6 +282,7 @@ def test_register_pdf_markdown_cache_miss_invokes_pageindex_client_index(monkeyp
 def test_cat_structure_page_reuses_pageindex_client_cache_without_indexing(monkeypatch):
     from pageindex import PageIndexClient
     from pageindex.filesystem import PIFSCommandExecutor, PageIndexFileSystem
+    from pageindex.filesystem.commands import PIFSCommandError
 
     with tempfile.TemporaryDirectory() as tmp:
         source = Path(tmp) / "report.pdf"
@@ -333,8 +334,8 @@ def test_cat_structure_page_reuses_pageindex_client_cache_without_indexing(monke
         )
         executor = PIFSCommandExecutor(filesystem, json_output=True)
 
-        structure = json.loads(executor.execute("cat --structure dsid_structural_cached"))
-        pages = json.loads(executor.execute("cat --page 1-2 dsid_structural_cached"))
+        structure = json.loads(executor.execute("cat dsid_structural_cached --structure"))
+        pages = json.loads(executor.execute("cat dsid_structural_cached --page 1-2"))
         stat = json.loads(executor.execute("stat dsid_structural_cached"))
 
         assert structure["data"]["available"] is True
@@ -345,6 +346,10 @@ def test_cat_structure_page_reuses_pageindex_client_cache_without_indexing(monke
 
         assert pages["data"]["available"] is True
         assert pages["data"]["text"] == "Page one text\n\nPage two text"
+        with pytest.raises(PIFSCommandError, match="target-first"):
+            executor.execute("cat --page 1-2 dsid_structural_cached")
+        with pytest.raises(PIFSCommandError, match="one file target"):
+            executor.execute("cat dsid_structural_cached --page 1 2")
 
         assert stat["data"]["pageindex_doc_id"] == "doc_cached_pdf"
         assert stat["data"]["pageindex_tree_status"] == "built"
@@ -387,7 +392,7 @@ def test_cat_node_reads_pageindex_client_structure_without_custom_pifs_artifact(
         )
         executor = PIFSCommandExecutor(filesystem, json_output=True)
 
-        node = json.loads(executor.execute("cat --node 0001 dsid_md_cached"))
+        node = json.loads(executor.execute("cat dsid_md_cached --node 0001"))
 
         assert node["data"]["available"] is True
         assert node["data"]["pageindex_doc_id"] == "doc_cached_md"
@@ -453,7 +458,7 @@ def test_tree_does_not_read_file_internal_pageindex_structure():
         with pytest.raises(PIFSCommandError):
             executor.execute("tree dsid_tree_is_folder_only")
 
-        structure = json.loads(executor.execute("cat --structure dsid_tree_is_folder_only"))
+        structure = json.loads(executor.execute("cat dsid_tree_is_folder_only --structure"))
         assert structure["data"]["structure"][0]["title"] == "Introduction"
 
 
@@ -494,19 +499,19 @@ def test_cat_all_is_limited_to_text_files():
         )
         executor = PIFSCommandExecutor(filesystem, json_output=True)
 
-        text = json.loads(executor.execute("cat --all dsid_text_file"))
+        text = json.loads(executor.execute("cat dsid_text_file --all"))
         assert text["data"]["text"] == "plain text body"
 
         with pytest.raises(PIFSCommandError, match="only supported for txt/text files"):
-            executor.execute("cat --all dsid_pdf_file")
+            executor.execute("cat dsid_pdf_file --all")
         with pytest.raises(ValueError, match="not supported for PDF/Markdown"):
             filesystem.open("dsid_pdf_file")
         with pytest.raises(PIFSCommandError, match="only supported for txt/text files"):
-            executor.execute("cat --all dsid_md_file")
+            executor.execute("cat dsid_md_file --all")
         with pytest.raises(ValueError, match="not supported for PDF/Markdown"):
             filesystem.open("dsid_md_file")
         with pytest.raises(PIFSCommandError, match="only supported for txt/text files"):
-            executor.execute("cat --all dsid_json_file")
+            executor.execute("cat dsid_json_file --all")
         assert filesystem.open("dsid_json_file").text == '{"body":"json"}'
         for command in (
             "head dsid_pdf_file",
@@ -536,9 +541,9 @@ def test_pageindex_structure_commands_are_limited_to_pdf_and_markdown():
         executor = PIFSCommandExecutor(filesystem, json_output=True)
 
         for command in (
-            "cat --structure dsid_text_only",
-            "cat --page 1 dsid_text_only",
-            "cat --node 0001 dsid_text_only",
+            "cat dsid_text_only --structure",
+            "cat dsid_text_only --page 1",
+            "cat dsid_text_only --node 0001",
         ):
             with pytest.raises(PIFSCommandError, match="only supported for PDF/Markdown"):
                 executor.execute(command)
@@ -581,10 +586,10 @@ def test_existing_pageindex_status_allows_legacy_record_without_format_suffix():
         )
         executor = PIFSCommandExecutor(filesystem, json_output=True)
 
-        structure = json.loads(executor.execute("cat --structure dsid_legacy_pageindex"))
+        structure = json.loads(executor.execute("cat dsid_legacy_pageindex --structure"))
         assert structure["data"]["structure"][0]["title"] == "Uploaded"
         with pytest.raises(PIFSCommandError, match="only supported for txt/text files"):
-            executor.execute("cat --all dsid_legacy_pageindex")
+            executor.execute("cat dsid_legacy_pageindex --all")
 
 
 def test_read_commands_do_not_link_pageindex_cache_when_pointer_is_missing(monkeypatch):
@@ -624,7 +629,7 @@ def test_read_commands_do_not_link_pageindex_cache_when_pointer_is_missing(monke
         )
         executor = PIFSCommandExecutor(filesystem, json_output=True)
 
-        structure = json.loads(executor.execute("cat --structure dsid_late_cache"))
+        structure = json.loads(executor.execute("cat dsid_late_cache --structure"))
         stat = json.loads(executor.execute("stat dsid_late_cache"))
 
         assert structure["data"]["available"] is False

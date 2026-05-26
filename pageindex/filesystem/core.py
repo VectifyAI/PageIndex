@@ -677,7 +677,8 @@ class PageIndexFileSystem:
         raise ValueError(
             f"{command} is only supported for txt/text files; "
             f"got source_path={entry.source_path!r}, content_type={entry.content_type!r}. "
-            "Use cat --structure, cat --page, or cat --node for PDF/Markdown PageIndex files."
+            "Use cat <ref> --structure, cat <ref> --page, or cat <ref> --node "
+            "for PDF/Markdown PageIndex files."
         )
 
     def _require_pageindex_document_file(self, entry: Any, command: str) -> None:
@@ -686,7 +687,7 @@ class PageIndexFileSystem:
         raise ValueError(
             f"{command} is only supported for PDF/Markdown PageIndex files; "
             f"got source_path={entry.source_path!r}, content_type={entry.content_type!r}. "
-            "Use cat --all for txt/text files."
+            "Use cat <ref> --all for txt/text files."
         )
 
     @classmethod

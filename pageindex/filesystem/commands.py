@@ -90,8 +90,8 @@ class PIFSCommandExecutor:
             "- ls/tree: folder browsing",
             "- find --where: exact/canonical metadata DSL filtering",
             "- grep -R: recursive lexical/FTS search only; semantic vector prefilter is disabled",
-            "- cat --structure/--node/--page: cached PageIndex reads for PDF/Markdown files",
-            "- cat --all: full text artifact reads for txt/text files",
+            "- cat <ref> --structure/--node/--page: cached PageIndex reads for PDF/Markdown files",
+            "- cat <ref> --all: full text artifact reads for txt/text files",
         ]
         if "entity" in semantic_channels:
             lines.append("- find --name: entity semantic candidate discovery alias")
@@ -405,12 +405,17 @@ class PIFSCommandExecutor:
     def _cmd_cat(self, args: list[str]) -> Any:
         if not args:
             raise PIFSCommandError("cat requires a file target")
-        target = None
+        target = args[0]
+        if target.startswith("-"):
+            raise PIFSCommandError(
+                "cat syntax is target-first: cat <ref> --structure, "
+                "cat <ref> --page 31-59, or cat <ref> --node 0009"
+            )
         location = "all"
         structural_mode: str | None = None
         node_id: str | None = None
         page_range: str | None = None
-        i = 0
+        i = 1
         while i < len(args):
             arg = args[i]
             if arg == "--range":
@@ -437,16 +442,22 @@ class PIFSCommandExecutor:
             elif arg.startswith("-"):
                 raise PIFSCommandError(f"Unsupported cat option: {arg}")
             else:
-                target = arg
+                raise PIFSCommandError(
+                    "cat accepts one file target. Use: cat <ref> --page <page-or-range>, "
+                    "for example: cat ref_1 --page 31-59"
+                )
             i += 1
-        if not target:
-            raise PIFSCommandError("cat requires a file target")
         if structural_mode == "structure":
             return self.filesystem.pageindex_structure(target)
         if structural_mode == "node":
             return self.filesystem.pageindex_node(target, str(node_id))
         if structural_mode == "page":
-            return self.filesystem.pageindex_pages(target, str(page_range))
+            if not page_range or not re.fullmatch(r"\d+(?:-\d+)?", page_range):
+                raise PIFSCommandError(
+                    "cat --page requires one page selector like 31 or 31-59. "
+                    "Use: cat <ref> --page <page-or-range>"
+                )
+            return self.filesystem.pageindex_pages(target, page_range)
         return self.filesystem.cat_text_artifact(target, location)
 
     def _cmd_stat(self, args: list[str]) -> Any:
