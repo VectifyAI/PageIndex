@@ -149,6 +149,28 @@ def test_cli_chat_runs_one_question_and_exits(monkeypatch, capsys, tmp_path):
     assert kwargs["stream_mode"] == "all"
 
 
+def test_cli_chat_sanitizes_control_input(monkeypatch, capsys, tmp_path):
+    from pageindex.filesystem import cli
+
+    workspace = tmp_path / "workspace"
+    inputs = iter(["\x12", "he\x7fllo\x1b[A", "exit"])
+    agent_calls = []
+
+    def fake_run_pifs_agent(filesystem, question, **kwargs):
+        agent_calls.append(question)
+        return f"answer:{question}"
+
+    monkeypatch.setattr(cli, "PageIndexFileSystem", FakeFileSystem)
+    monkeypatch.setattr(cli, "run_pifs_agent", fake_run_pifs_agent)
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
+
+    status = cli.main(["chat", "--workspace", str(workspace), "--stream-mode", "off"])
+
+    assert status == 0
+    assert agent_calls == ["hllo"]
+    assert capsys.readouterr().out == "answer:hllo\n"
+
+
 def test_cli_ask_does_not_reprint_streamed_agent_output(monkeypatch, capsys, tmp_path):
     from pageindex.filesystem import cli
 

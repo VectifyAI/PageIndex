@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
+import re
 import shlex
 import sys
 from pathlib import Path
+from typing import Iterator, TextIO
 
 from .agent import REASONING_EFFORT_CHOICES, REASONING_SUMMARY_CHOICES, run_pifs_agent
 from .commands import PIFSCommandError, PIFSCommandExecutor
@@ -14,6 +17,7 @@ from .core import PageIndexFileSystem
 AGENT_STREAM_MODE_CHOICES = ("off", "tools", "model", "all")
 DEFAULT_AGENT_MODEL = "gpt-5.4-mini"
 EXIT_COMMANDS = {"exit", "quit", ":q"}
+ANSI_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|.)")
 
 
 def _load_env_file(path: str | None = None, *, workspace: str | None = None) -> Path | None:
@@ -127,6 +131,48 @@ def _agent_kwargs(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _sanitize_chat_question(raw: str) -> str:
+    text = ANSI_ESCAPE_RE.sub("", raw)
+    chars: list[str] = []
+    for char in text:
+        if char in {"\b", "\x7f"}:
+            if chars:
+                chars.pop()
+            continue
+        if char in {"\r", "\n"}:
+            continue
+        if ord(char) < 32 or ord(char) == 127:
+            continue
+        chars.append(char)
+    return "".join(chars).strip()
+
+
+@contextlib.contextmanager
+def _suppress_tty_input_echo(stdin: TextIO | None = None) -> Iterator[None]:
+    stream = sys.stdin if stdin is None else stdin
+    if not hasattr(stream, "isatty") or not stream.isatty():
+        yield
+        return
+    try:
+        import termios
+
+        fd = stream.fileno()
+        original = termios.tcgetattr(fd)
+        muted = original[:]
+        muted[3] = muted[3] & ~termios.ECHO
+        termios.tcsetattr(fd, termios.TCSADRAIN, muted)
+    except Exception:
+        yield
+        return
+    try:
+        yield
+    finally:
+        with contextlib.suppress(Exception):
+            termios.tcflush(fd, termios.TCIFLUSH)
+        with contextlib.suppress(Exception):
+            termios.tcsetattr(fd, termios.TCSADRAIN, original)
+
+
 def _run_ask(argv: list[str], *, workspace_default: str | None) -> int:
     args = _parse_agent_command(
         "ask",
@@ -156,7 +202,7 @@ def _run_chat(argv: list[str], *, workspace_default: str | None) -> int:
     filesystem = _filesystem_from_workspace(args.workspace)
     while True:
         try:
-            question = input("pifs> ").strip()
+            question = _sanitize_chat_question(input("pifs> "))
         except EOFError:
             break
         except KeyboardInterrupt:
@@ -166,7 +212,8 @@ def _run_chat(argv: list[str], *, workspace_default: str | None) -> int:
             continue
         if question.lower() in EXIT_COMMANDS:
             break
-        answer = run_pifs_agent(filesystem, question, **_agent_kwargs(args))
+        with _suppress_tty_input_echo():
+            answer = run_pifs_agent(filesystem, question, **_agent_kwargs(args))
         if args.stream_mode == "off":
             print(answer)
     return 0
