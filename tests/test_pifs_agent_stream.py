@@ -6,6 +6,8 @@ from types import SimpleNamespace
 from pydantic import BaseModel, ConfigDict
 
 from pageindex.filesystem.agent import (
+    AGENT_TOOL_POLICY,
+    BASH_TOOL_DESCRIPTION,
     PIFSAgentStreamObserver,
     build_agent_model_settings,
     normalize_agent_stream_mode,
@@ -179,6 +181,11 @@ class PIFSAgentStreamTest(unittest.TestCase):
         )
 
         self.assertEqual(output, '{"answer":"done","document_ids":["dsid_1"]}')
+
+    def test_prompt_tells_agent_when_to_choose_node_or_page(self):
+        self.assertIn("prefer cat <target> --node <node_id>", AGENT_TOOL_POLICY)
+        self.assertIn("page-level evidence", AGENT_TOOL_POLICY)
+        self.assertIn("prefer\ncat <path> --node <node_id>", BASH_TOOL_DESCRIPTION)
 
 
 if __name__ == "__main__":

@@ -39,7 +39,9 @@ commands that are not listed as available. When evidence is required, inspect it
 with cat or grep before answering. Prefer shell-like target-first cat syntax
 with stable targets: cat <path> --structure, cat <path> --page 31-59, and
 cat <path> --node 0009. You may also use file_ref or document_id when a path is
-ambiguous.
+ambiguous. After structure identifies a relevant section node, prefer
+cat <path> --node <node_id>; use cat <path> --page <range> when the user asks
+for page-level evidence, no suitable node exists, or exact page text is needed.
 """
 
 AGENT_TOOL_POLICY = """
@@ -54,6 +56,9 @@ Tool policy:
 - Tool errors are returned as ERROR text; recover by trying an available command.
 - Use cat or grep to gather evidence before making source-backed claims.
 - Prefer target-first cat syntax with stable targets: cat <path> --structure, cat <path> --page 31-59, cat <path> --node <node_id>.
+- After cat <target> --structure finds a relevant section/subsection with a node_id, prefer cat <target> --node <node_id> for content from that semantic unit.
+- Use cat <target> --page <start>-<end> when the user explicitly asks for pages/page ranges, when no suitable node_id exists, or when you need exact page text to verify page-level evidence.
+- Avoid fetching a broad page span after a matching node is available unless page-level citation or verification is required.
 - Do not call cat --page <target> <start> <end>; if you need a page span, use cat <target> --page <start>-<end>.
 """
 
