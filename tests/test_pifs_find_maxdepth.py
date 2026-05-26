@@ -98,6 +98,41 @@ def test_stable_path_targets_work_without_session_refs(tmp_path):
     assert "Root document fixture text" in text
 
 
+def test_stat_shell_output_includes_generated_metadata(tmp_path):
+    from pageindex.filesystem import PIFSCommandExecutor, PageIndexFileSystem
+
+    source = tmp_path / "source.txt"
+    source.write_text("fixture text", encoding="utf-8")
+    filesystem = PageIndexFileSystem(workspace=tmp_path / "workspace")
+    filesystem.register_file(
+        storage_uri=source.as_uri(),
+        source_path="docs/source.txt",
+        folder_path="/documents",
+        external_id="doc_generated",
+        title="Generated metadata document",
+        content=source.read_text(encoding="utf-8"),
+        metadata={"department": "ops"},
+        derived_metadata={"summary": "Generated summary for retrieval."},
+        metadata_generation_policy={
+            "fields": {
+                "summary": True,
+                "doc_type": False,
+                "domain": False,
+                "topic": False,
+            }
+        },
+    )
+    executor = PIFSCommandExecutor(filesystem, json_output=False)
+
+    stat = executor.execute("stat /documents/'Generated metadata document'")
+
+    assert "metadata:" in stat
+    assert "  department: ops" in stat
+    assert "generated_metadata:" in stat
+    assert "  summary: Generated summary for retrieval." in stat
+    assert "metadata_generation_status: generated" in stat
+
+
 def test_find_maxdepth_zero_type_directory_returns_start_folder(tmp_path):
     executor = _register_find_fixture(tmp_path)
 

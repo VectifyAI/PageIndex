@@ -858,6 +858,19 @@ class PIFSCommandExecutor:
                 lines.append(f"  {key}: {self._compact_value(value)}")
             if len(metadata) > self.MAX_STAT_METADATA_FIELDS:
                 lines.append(f"  ... {len(metadata) - self.MAX_STAT_METADATA_FIELDS} more fields")
+        derived_metadata = data.get("derived_metadata") or {}
+        if derived_metadata:
+            lines.append("generated_metadata:")
+            derived_items = sorted(derived_metadata.items())[: self.MAX_STAT_METADATA_FIELDS]
+            for key, value in derived_items:
+                lines.append(f"  {key}: {self._compact_value(value)}")
+            if len(derived_metadata) > self.MAX_STAT_METADATA_FIELDS:
+                lines.append(
+                    f"  ... {len(derived_metadata) - self.MAX_STAT_METADATA_FIELDS} more fields"
+                )
+        generation = data.get("metadata_generation") or {}
+        if generation:
+            lines.append(f"metadata_generation_status: {generation.get('status', '-')}")
         return "\n".join(lines)
 
     def _file_row_text(self, item: dict[str, Any]) -> str:
