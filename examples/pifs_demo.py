@@ -7,9 +7,10 @@ tools. The agent receives one read-only bash-like PIFS tool and must retrieve
 evidence through commands such as ls, tree, find, grep, search-summary,
 cat <path> --structure, cat <path> --page, and cat <path> --node.
 
-The demo uses PDFs under examples/documents. When a matching
+The demo registers supported files under examples/documents. When a matching
 examples/documents/results/*_structure.json file exists, it is loaded into the
-PIFS workspace's PageIndexClient cache so register() does not rebuild the tree.
+PIFS workspace's PageIndexClient cache. Files without a cache exercise the
+normal PageIndexClient.index() path during register().
 
 Requirements:
   pip install openai-agents
@@ -168,22 +169,20 @@ def require_runtime_environment(*, metadata_provider: str, embedding_provider: s
         )
 
 
-def discover_cached_documents(documents_dir: Path) -> list[Path]:
-    results_dir = documents_dir / "results"
-    paths: list[Path] = []
-    for structure_path in sorted(results_dir.glob("*_structure.json")):
-        stem = structure_path.name.removesuffix("_structure.json")
-        for suffix in (".pdf", ".md", ".markdown"):
-            candidate = documents_dir / f"{stem}{suffix}"
-            if candidate.exists():
-                paths.append(candidate)
-                break
-    return paths
+SUPPORTED_DOCUMENT_SUFFIXES = {".pdf", ".md", ".markdown", ".txt", ".text"}
+
+
+def discover_documents(documents_dir: Path) -> list[Path]:
+    return sorted(
+        path
+        for path in documents_dir.iterdir()
+        if path.is_file() and path.suffix.lower() in SUPPORTED_DOCUMENT_SUFFIXES
+    )
 
 
 def resolve_requested_documents(documents_dir: Path, requested: list[str]) -> list[Path]:
     if not requested:
-        return discover_cached_documents(documents_dir)
+        return discover_documents(documents_dir)
     paths: list[Path] = []
     for item in requested:
         path = Path(item).expanduser()
