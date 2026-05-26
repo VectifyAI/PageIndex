@@ -1,6 +1,7 @@
+from importlib import import_module
+
 from .commands import PIFSCommandExecutor
 from .core import PageIndexFileSystem
-from .hybrid_projection import HybridProjectionSearchBackend
 from .metadata_generation import (
     MetadataGenerationBackend,
     MetadataGenerationError,
@@ -8,14 +9,16 @@ from .metadata_generation import (
     MetadataGenerationResult,
     MetadataGenerator,
 )
-from .projection_indexing import SummaryProjectionIndexer
-from .semantic_index import (
-    RebuildableSemanticIndex,
-    SemanticIndexRecord,
-    SemanticSearchResult,
-    SQLiteVecSemanticIndex,
-)
 from .types import OpenResult, SearchResult
+
+_LAZY_EXPORTS = {
+    "HybridProjectionSearchBackend": (".hybrid_projection", "HybridProjectionSearchBackend"),
+    "RebuildableSemanticIndex": (".semantic_index", "RebuildableSemanticIndex"),
+    "SemanticIndexRecord": (".semantic_index", "SemanticIndexRecord"),
+    "SemanticSearchResult": (".semantic_index", "SemanticSearchResult"),
+    "SQLiteVecSemanticIndex": (".semantic_index", "SQLiteVecSemanticIndex"),
+    "SummaryProjectionIndexer": (".projection_indexing", "SummaryProjectionIndexer"),
+}
 
 __all__ = [
     "OpenResult",
@@ -34,3 +37,16 @@ __all__ = [
     "SummaryProjectionIndexer",
     "SQLiteVecSemanticIndex",
 ]
+
+
+def __getattr__(name: str):
+    if name in _LAZY_EXPORTS:
+        module_name, attribute_name = _LAZY_EXPORTS[name]
+        value = getattr(import_module(module_name, __name__), attribute_name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

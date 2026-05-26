@@ -3,10 +3,9 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 from urllib.parse import unquote, urlparse
 
-from ..client import PageIndexClient
 from .metadata import MetadataQueryEngine
 from .metadata_generation import (
     MetadataGenerationBackend,
@@ -15,7 +14,6 @@ from .metadata_generation import (
     MetadataGenerationResult,
     MetadataGenerator,
 )
-from .projection_indexing import SummaryProjectionIndexer
 from .semantic_folder_policy import (
     SEMANTIC_FOLDER_BASE_FIELDS,
     SEMANTIC_FOLDER_ROOT,
@@ -38,6 +36,10 @@ from .structural_read import (
     strip_pageindex_text_fields,
 )
 from .types import OpenResult, SearchResult
+
+if TYPE_CHECKING:
+    from ..client import PageIndexClient
+    from .projection_indexing import SummaryProjectionIndexer
 
 DEFAULT_METADATA_GENERATION_FIELDS = {
     "summary": True,
@@ -215,6 +217,8 @@ class PageIndexFileSystem:
                 max_text_chars=self.metadata_max_text_chars,
             )
         if self.summary_projection_index and self.summary_projection_indexer is None:
+            from .projection_indexing import SummaryProjectionIndexer
+
             self.summary_projection_indexer = SummaryProjectionIndexer.from_provider(
                 self.summary_projection_index_dir,
                 embedding_provider=self.summary_projection_embedding_provider,
@@ -836,6 +840,8 @@ class PageIndexFileSystem:
         return self.workspace / "artifacts" / "pageindex_client"
 
     def _pageindex_client(self) -> PageIndexClient:
+        from ..client import PageIndexClient
+
         return PageIndexClient(workspace=str(self.pageindex_client_workspace))
 
     def _pageindex_client_doc_for_entry(self, entry: Any) -> tuple[PageIndexClient, str | None]:
