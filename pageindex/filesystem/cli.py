@@ -140,7 +140,9 @@ def _run_ask(argv: list[str], *, workspace_default: str | None) -> int:
         raise ValueError("ask requires a question")
 
     filesystem = _filesystem_from_workspace(args.workspace)
-    print(run_pifs_agent(filesystem, question, **_agent_kwargs(args)))
+    answer = run_pifs_agent(filesystem, question, **_agent_kwargs(args))
+    if args.stream_mode == "off":
+        print(answer)
     return 0
 
 
@@ -164,7 +166,9 @@ def _run_chat(argv: list[str], *, workspace_default: str | None) -> int:
             continue
         if question.lower() in EXIT_COMMANDS:
             break
-        print(run_pifs_agent(filesystem, question, **_agent_kwargs(args)))
+        answer = run_pifs_agent(filesystem, question, **_agent_kwargs(args))
+        if args.stream_mode == "off":
+            print(answer)
     return 0
 
 

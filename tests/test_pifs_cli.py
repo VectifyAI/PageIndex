@@ -58,7 +58,7 @@ def test_cli_ask_invokes_agent_with_question(monkeypatch, capsys, tmp_path):
             "--model",
             "test-model",
             "--stream-mode",
-            "tools",
+            "off",
             "--max-turns",
             "7",
             "--max-seconds",
@@ -80,7 +80,7 @@ def test_cli_ask_invokes_agent_with_question(monkeypatch, capsys, tmp_path):
     assert question == "What is inside?"
     assert kwargs == {
         "model": "test-model",
-        "stream_mode": "tools",
+        "stream_mode": "off",
         "max_turns": 7,
         "max_seconds": 3.5,
         "reasoning_effort": "low",
@@ -140,13 +140,42 @@ def test_cli_chat_runs_one_question_and_exits(monkeypatch, capsys, tmp_path):
     status = cli.main(["chat", "--workspace", str(workspace), "--model", "test-model"])
 
     assert status == 0
-    assert capsys.readouterr().out == "answer:Summarize the workspace\n"
+    assert capsys.readouterr().out == ""
     assert len(agent_calls) == 1
     filesystem, question, kwargs = agent_calls[0]
     assert filesystem.workspace == workspace
     assert question == "Summarize the workspace"
     assert kwargs["model"] == "test-model"
     assert kwargs["stream_mode"] == "all"
+
+
+def test_cli_ask_does_not_reprint_streamed_agent_output(monkeypatch, capsys, tmp_path):
+    from pageindex.filesystem import cli
+
+    workspace = tmp_path / "workspace"
+
+    def fake_run_pifs_agent(filesystem, question, **kwargs):
+        print("streamed answer")
+        return "returned answer"
+
+    monkeypatch.setattr(cli, "PageIndexFileSystem", FakeFileSystem)
+    monkeypatch.setattr(cli, "run_pifs_agent", fake_run_pifs_agent)
+
+    status = cli.main(
+        [
+            "ask",
+            "--workspace",
+            str(workspace),
+            "--stream-mode",
+            "all",
+            "What",
+            "is",
+            "inside?",
+        ]
+    )
+
+    assert status == 0
+    assert capsys.readouterr().out == "streamed answer\n"
 
 
 def test_cli_chat_stream_mode_can_be_overridden(monkeypatch, tmp_path):
