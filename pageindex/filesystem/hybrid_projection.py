@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -331,17 +330,22 @@ class EmbeddingCache:
         return [cached[text_hash] for text_hash in hashes]
 
 
-class OpenAIEmbeddingClient:
-    def __init__(self, model: str, *, dimensions: int, timeout: float):
-        from openai import OpenAI
-
+class EmbeddingClient:
+    def __init__(self, *, provider: str, model: str, dimensions: int, timeout: float):
+        self.provider = provider.lower()
         self.model = model
         self.dimensions = dimensions
-        self.client = OpenAI(
-            api_key=os.environ.get("OPENAI_API_KEY"),
-            base_url=os.environ.get("OPENAI_BASE_URL") or None,
-            timeout=timeout,
-        )
+        if self.provider != "openai":
+            raise ValueError(f"unknown embedding provider: {provider}")
+        from openai import OpenAI
+
+        api_key = os.environ.get("PIFS_EMBEDDING_API_KEY") or os.environ.get("OPENAI_API_KEY")
+        base_url = os.environ.get("PIFS_EMBEDDING_BASE_URL") or os.environ.get("OPENAI_BASE_URL")
+        if not api_key:
+            raise ValueError(
+                "PIFS_EMBEDDING_API_KEY or OPENAI_API_KEY is required for PIFS embeddings"
+            )
+        self.client = OpenAI(api_key=api_key, base_url=base_url or None, timeout=timeout)
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         kwargs: dict[str, Any] = {"model": self.model, "input": texts}
@@ -351,32 +355,13 @@ class OpenAIEmbeddingClient:
         return [list(item.embedding) for item in sorted(response.data, key=lambda item: item.index)]
 
 
-class HashEmbeddingClient:
-    def __init__(self, dimensions: int = 256):
-        self.dimensions = dimensions
-
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        return [self._embed_one(text) for text in texts]
-
-    def _embed_one(self, text: str) -> list[float]:
-        vector = [0.0] * self.dimensions
-        for term in keyword_terms(text)[:256]:
-            digest = hashlib.blake2b(term.encode("utf-8"), digest_size=8).digest()
-            bucket = int.from_bytes(digest[:4], "little") % self.dimensions
-            sign = 1.0 if digest[4] % 2 == 0 else -1.0
-            vector[bucket] += sign
-        norm = sum(value * value for value in vector) ** 0.5
-        if norm:
-            vector = [value / norm for value in vector]
-        return vector
-
-
 def make_embedder(provider: str, model: str, *, dimensions: int, timeout: float) -> Any:
-    if provider == "openai":
-        return OpenAIEmbeddingClient(model, dimensions=dimensions, timeout=timeout)
-    if provider == "hash":
-        return HashEmbeddingClient(dimensions=dimensions if dimensions > 0 else 256)
-    raise ValueError(f"unknown embedding provider: {provider}")
+    return EmbeddingClient(
+        provider=provider,
+        model=model,
+        dimensions=dimensions,
+        timeout=timeout,
+    )
 
 
 def query_text_for_channel(channel: str, query: str, projection: QueryProjection) -> str:

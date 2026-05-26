@@ -9,11 +9,11 @@ from urllib.parse import unquote, urlparse
 from ..client import PageIndexClient
 from .metadata import MetadataQueryEngine
 from .metadata_generation import (
+    MetadataGenerationBackend,
     MetadataGenerationError,
     MetadataGenerationInput,
     MetadataGenerationResult,
     MetadataGenerator,
-    OpenAIMetadataGenerator,
 )
 from .projection_indexing import SummaryProjectionIndexer
 from .semantic_folder_policy import (
@@ -91,7 +91,11 @@ class PageIndexFileSystem:
         workspace: Union[str, Path],
         *,
         semantic_retrieval_backend: Any | None = None,
-        metadata_generator: MetadataGenerator | None = None,
+        metadata_generator: MetadataGenerationBackend | None = None,
+        metadata_provider: str = "openai",
+        metadata_model: str | None = None,
+        metadata_base_url: str | None = None,
+        metadata_max_text_chars: int = 24000,
         summary_projection_indexer: SummaryProjectionIndexer | None = None,
         summary_projection_index: bool = True,
         summary_projection_index_dir: Union[str, Path, None] = None,
@@ -105,6 +109,10 @@ class PageIndexFileSystem:
         self.metadata = MetadataQueryEngine(self.store)
         self.semantic_retrieval_backend = semantic_retrieval_backend
         self.metadata_generator = metadata_generator
+        self.metadata_provider = metadata_provider
+        self.metadata_model = metadata_model
+        self.metadata_base_url = metadata_base_url
+        self.metadata_max_text_chars = metadata_max_text_chars
         self.summary_projection_indexer = summary_projection_indexer
         self.summary_projection_index = summary_projection_index
         self.summary_projection_index_dir = (
@@ -199,7 +207,12 @@ class PageIndexFileSystem:
 
     def _ensure_register_completion_defaults(self) -> None:
         if self.metadata_generator is None:
-            self.metadata_generator = OpenAIMetadataGenerator()
+            self.metadata_generator = MetadataGenerator(
+                provider=self.metadata_provider,
+                model=self.metadata_model,
+                base_url=self.metadata_base_url,
+                max_text_chars=self.metadata_max_text_chars,
+            )
         if self.summary_projection_index and self.summary_projection_indexer is None:
             self.summary_projection_indexer = SummaryProjectionIndexer.from_provider(
                 self.summary_projection_index_dir,

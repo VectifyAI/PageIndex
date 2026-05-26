@@ -32,7 +32,7 @@ class MetadataGenerationResult:
     failures: dict[str, str] = field(default_factory=dict)
 
 
-class MetadataGenerator(Protocol):
+class MetadataGenerationBackend(Protocol):
     def generate(
         self,
         request: MetadataGenerationInput,
@@ -42,23 +42,31 @@ class MetadataGenerator(Protocol):
         ...
 
 
-class OpenAIMetadataGenerator:
+class MetadataGenerator:
     """Default product generator for retrieval metadata.
 
     This intentionally lives under pageindex.filesystem instead of benchmark
     paths. It uses registered text today; callers can pass PageIndex-extracted
     text through the same MetadataGenerationInput without changing the API.
+    Provider selection is an instance parameter rather than a provider-specific
+    public class name.
     """
 
     def __init__(
         self,
         *,
+        provider: str | None = None,
         model: str | None = None,
         base_url: str | None = None,
         max_text_chars: int = 24000,
     ):
+        self.provider = (provider or os.environ.get("PIFS_METADATA_PROVIDER", "openai")).lower()
         self.model = model or os.environ.get("PIFS_METADATA_MODEL", "gpt-5-nano")
-        self.base_url = base_url if base_url is not None else os.environ.get("OPENAI_BASE_URL")
+        self.base_url = (
+            base_url
+            if base_url is not None
+            else os.environ.get("PIFS_METADATA_BASE_URL") or os.environ.get("OPENAI_BASE_URL")
+        )
         self.max_text_chars = max_text_chars
 
     def generate(
@@ -67,9 +75,21 @@ class OpenAIMetadataGenerator:
         *,
         fields: list[str],
     ) -> MetadataGenerationResult:
-        api_key = os.environ.get("OPENAI_API_KEY")
+        if self.provider != "openai":
+            raise MetadataGenerationError(f"unsupported metadata provider: {self.provider}")
+        return self._generate_openai(request, fields=fields)
+
+    def _generate_openai(
+        self,
+        request: MetadataGenerationInput,
+        *,
+        fields: list[str],
+    ) -> MetadataGenerationResult:
+        api_key = os.environ.get("PIFS_METADATA_API_KEY") or os.environ.get("OPENAI_API_KEY")
         if not api_key:
-            raise MetadataGenerationError("OPENAI_API_KEY is required for PIFS metadata generation")
+            raise MetadataGenerationError(
+                "PIFS_METADATA_API_KEY or OPENAI_API_KEY is required for PIFS metadata generation"
+            )
 
         from openai import OpenAI
 
@@ -122,7 +142,7 @@ class OpenAIMetadataGenerator:
                 properties[field] = {"type": "string"}
             else:
                 raise MetadataGenerationError(
-                    f"OpenAIMetadataGenerator does not support generated metadata field: {field}"
+                    f"MetadataGenerator does not support generated metadata field: {field}"
                 )
         return {
             "type": "json_schema",

@@ -39,7 +39,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "true")
 
 from pageindex import PageIndexClient
-from pageindex.filesystem import OpenAIMetadataGenerator, PageIndexFileSystem, PIFSCommandExecutor
+from pageindex.filesystem import MetadataGenerator, PageIndexFileSystem, PIFSCommandExecutor
 from pageindex.filesystem.agent import run_pifs_agent
 
 
@@ -47,6 +47,12 @@ EXAMPLES_DIR = Path(__file__).parent
 DOCUMENTS_DIR = EXAMPLES_DIR / "documents"
 WORKSPACE = EXAMPLES_DIR / "pifs_workspace"
 DEFAULT_MODEL = os.environ.get("PIFS_DEMO_MODEL", "gpt-5.4-mini")
+DEFAULT_METADATA_PROVIDER = os.environ.get("PIFS_DEMO_METADATA_PROVIDER") or os.environ.get(
+    "PIFS_METADATA_PROVIDER", "openai"
+)
+DEFAULT_EMBEDDING_PROVIDER = os.environ.get("PIFS_DEMO_EMBEDDING_PROVIDER") or os.environ.get(
+    "PIFS_EMBEDDING_PROVIDER", "openai"
+)
 DEFAULT_QUESTION = (
     "Use the PIFS workspace to find the Federal Reserve annual report. "
     "Which section covers supervision and regulation, and what page range "
@@ -111,9 +117,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--question", default=DEFAULT_QUESTION)
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument(
+        "--metadata-provider",
+        default=DEFAULT_METADATA_PROVIDER,
+        help="Provider used for register-time metadata generation.",
+    )
+    parser.add_argument(
         "--metadata-model",
         default=os.environ.get("PIFS_METADATA_MODEL", "gpt-5-nano"),
-        help="OpenAI or OpenAI-compatible model used for register-time metadata.",
+        help="Model used for register-time metadata generation.",
     )
     parser.add_argument("--stream-mode", default="all", choices=["off", "tools", "model", "all"])
     parser.add_argument("--verbose", action="store_true")
@@ -122,22 +133,39 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reasoning-effort", default=None)
     parser.add_argument("--reasoning-summary", default="auto")
     parser.add_argument(
+        "--embedding-provider",
+        default=DEFAULT_EMBEDDING_PROVIDER,
+        help="Provider used for register-time summary projection embeddings.",
+    )
+    parser.add_argument(
         "--embedding-model",
         default=os.environ.get("PIFS_DEMO_EMBEDDING_MODEL", "text-embedding-3-small"),
-        help="OpenAI embedding model used for register-time summary projection.",
+        help="Embedding model used for register-time summary projection.",
     )
     parser.add_argument("--embedding-dimensions", type=int, default=256)
     return parser.parse_args()
 
 
-def require_openai_environment() -> None:
-    if os.environ.get("OPENAI_API_KEY"):
-        return
-    raise RuntimeError(
-        "OPENAI_API_KEY is required for this demo: register() generates real "
-        "PIFS metadata and the agent uses the OpenAI Agents SDK. Source your "
-        ".env or export OPENAI_API_KEY before running."
-    )
+def require_runtime_environment(*, metadata_provider: str, embedding_provider: str) -> None:
+    metadata_provider = metadata_provider.lower()
+    embedding_provider = embedding_provider.lower()
+    missing: list[str] = []
+    if not os.environ.get("OPENAI_API_KEY"):
+        missing.append("OPENAI_API_KEY for the OpenAI Agents SDK demo agent")
+    if metadata_provider == "openai" and not (
+        os.environ.get("PIFS_METADATA_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    ):
+        missing.append("PIFS_METADATA_API_KEY or OPENAI_API_KEY for metadata generation")
+    if embedding_provider == "openai" and not (
+        os.environ.get("PIFS_EMBEDDING_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    ):
+        missing.append("PIFS_EMBEDDING_API_KEY or OPENAI_API_KEY for summary embeddings")
+    if missing:
+        raise RuntimeError(
+            "Missing required environment variable(s): "
+            + "; ".join(missing)
+            + ". Source your .env or export the required key before running."
+        )
 
 
 def discover_cached_documents(documents_dir: Path) -> list[Path]:
@@ -294,6 +322,7 @@ def backfill_registered_metadata_values(filesystem: PageIndexFileSystem, file_re
 def configure_summary_projection_backend(
     filesystem: PageIndexFileSystem,
     *,
+    embedding_provider: str,
     embedding_model: str,
     embedding_dimensions: int,
 ) -> None:
@@ -301,7 +330,7 @@ def configure_summary_projection_backend(
         return
     filesystem.configure_hybrid_projection_retrieval(
         filesystem.summary_projection_index_dir,
-        embedding_provider="openai",
+        embedding_provider=embedding_provider,
         embedding_model=embedding_model,
         embedding_dimensions=embedding_dimensions,
     )
@@ -690,7 +719,10 @@ def run_smoke_commands(
 
 def main() -> None:
     args = parse_args()
-    require_openai_environment()
+    require_runtime_environment(
+        metadata_provider=args.metadata_provider,
+        embedding_provider=args.embedding_provider,
+    )
     workspace = args.workspace.expanduser()
     documents_dir = args.documents_dir.expanduser()
     if args.reset and workspace.exists():
@@ -705,8 +737,11 @@ def main() -> None:
 
     filesystem = PageIndexFileSystem(
         workspace,
-        metadata_generator=OpenAIMetadataGenerator(model=args.metadata_model),
-        summary_projection_embedding_provider="openai",
+        metadata_generator=MetadataGenerator(
+            provider=args.metadata_provider,
+            model=args.metadata_model,
+        ),
+        summary_projection_embedding_provider=args.embedding_provider,
         summary_projection_embedding_model=args.embedding_model,
         summary_projection_embedding_dimensions=args.embedding_dimensions,
     )
@@ -718,6 +753,7 @@ def main() -> None:
     registered = register_documents(filesystem, documents, documents_dir=documents_dir)
     configure_summary_projection_backend(
         filesystem,
+        embedding_provider=args.embedding_provider,
         embedding_model=args.embedding_model,
         embedding_dimensions=args.embedding_dimensions,
     )

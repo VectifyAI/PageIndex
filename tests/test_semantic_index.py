@@ -1,6 +1,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -87,3 +89,10 @@ def test_summary_projection_indexes_unified_metadata_summary(tmp_path):
     assert hits[0].external_id == "doc_a"
     assert hits[0].metadata["summary"] == "Unified metadata summary."
     assert hits[0].metadata["department"] == "ops"
+
+
+def test_hash_embedding_provider_is_not_available():
+    from pageindex.filesystem.hybrid_projection import make_embedder
+
+    with pytest.raises(ValueError, match="unknown embedding provider: hash"):
+        make_embedder("hash", "unused", dimensions=256, timeout=1)
