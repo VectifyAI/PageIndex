@@ -1059,21 +1059,61 @@ class SQLiteFileSystemStore:
         ).fetchone()
         if row:
             return row["file_ref"]
-        row = conn.execute(
-            """
-            SELECT f.file_ref
-            FROM files f
-            JOIN file_folders ff ON ff.file_ref = f.file_ref
-            JOIN folders pf ON pf.folder_id = ff.folder_id
-            WHERE (pf.path || '/' || f.title) = ?
-               OR (pf.path || '/' || f.source_path) = ?
-            LIMIT 1
-            """,
-            (target, target),
-        ).fetchone()
-        if row:
-            return row["file_ref"]
+        virtual_file_ref = self._resolve_virtual_file_ref(conn, target)
+        if virtual_file_ref:
+            return virtual_file_ref
         raise KeyError(f"Unknown file target: {target}")
+
+    def _resolve_virtual_file_ref(self, conn: sqlite3.Connection, target: str) -> str | None:
+        virtual_target = normalize_path(target)
+        rows = conn.execute(
+            """
+            WITH virtual_matches AS (
+                SELECT
+                    f.file_ref,
+                    f.external_id,
+                    f.title,
+                    f.source_path,
+                    pf.path AS folder_path,
+                    (CASE WHEN pf.path = '/' THEN '/' ELSE pf.path || '/' END)
+                        || ltrim(f.title, '/') AS title_virtual_path,
+                    (CASE WHEN pf.path = '/' THEN '/' ELSE pf.path || '/' END)
+                        || ltrim(f.source_path, '/') AS source_virtual_path
+                FROM files f
+                JOIN file_folders ff ON ff.file_ref = f.file_ref
+                JOIN folders pf ON pf.folder_id = ff.folder_id
+                WHERE f.deleted_at IS NULL
+            )
+            SELECT
+                file_ref,
+                external_id,
+                title,
+                source_path,
+                MIN(folder_path) AS folder_path
+            FROM virtual_matches
+            WHERE title_virtual_path = ?
+               OR source_virtual_path = ?
+            GROUP BY file_ref, external_id, title, source_path
+            ORDER BY file_ref
+            LIMIT 2
+            """,
+            (virtual_target, virtual_target),
+        ).fetchall()
+        if not rows:
+            return None
+        if len(rows) > 1:
+            matches = "; ".join(self._virtual_match_summary(row) for row in rows)
+            raise KeyError(f"Ambiguous file target: {target}. Matches: {matches}")
+        return rows[0]["file_ref"]
+
+    @staticmethod
+    def _virtual_match_summary(row: sqlite3.Row) -> str:
+        external_id = row["external_id"] or "-"
+        return (
+            f"file_ref={row['file_ref']} external_id={external_id} "
+            f"folder={row['folder_path']} title={row['title']!r} "
+            f"source_path={row['source_path']!r}"
+        )
 
     def ensure_folder(
         self,
