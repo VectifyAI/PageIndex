@@ -555,7 +555,7 @@ class SQLiteFileSystemStore:
                             WHERE child_folder.parent_id = fo.folder_id
                         ) AS children_count
                     FROM folders fo
-                    WHERE fo.path != ? AND (fo.path LIKE ?)
+                    WHERE fo.path != ? AND (fo.path LIKE ? ESCAPE '\\')
                       {folder_depth_clause}
                     ORDER BY fo.path
                     LIMIT ?
@@ -702,15 +702,12 @@ class SQLiteFileSystemStore:
                         WHERE f.deleted_at IS NULL
                           AND (
                               matched_folder.folder_id = fo.folder_id
-                              OR matched_folder.path LIKE CASE
-                                  WHEN fo.path = '/' THEN '/%'
-                                  ELSE fo.path || '/%'
-                              END
+                              OR matched_folder.path LIKE {self._descendant_like_sql_expr("fo.path")} ESCAPE '\\'
                           )
                           {metadata_clause}
                     ) AS matched_files
                 FROM folders fo
-                WHERE fo.path != ? AND fo.path LIKE ?
+                WHERE fo.path != ? AND fo.path LIKE ? ESCAPE '\\'
                   {folder_depth_clause}
             )
             WHERE matched_files > 0
@@ -909,10 +906,10 @@ class SQLiteFileSystemStore:
                     SELECT 1 FROM metadata_values mv
                     WHERE mv.file_ref = f.file_ref
                       AND mv.field_id = ?
-                      AND lower(mv.value_text) LIKE '%' || lower(?) || '%'
+                      AND lower(mv.value_text) LIKE lower(?) ESCAPE '\\'
                 )
                 """,
-                [field_id, self._metadata_compare_text(expected)],
+                [field_id, self._contains_like(self._metadata_compare_text(expected))],
             )
         if operator in {"$gt", "$gte", "$lt", "$lte"}:
             comparator = {
@@ -1353,7 +1350,7 @@ class SQLiteFileSystemStore:
                     JOIN file_folders ff ON ff.file_ref = f.file_ref
                     JOIN folders fo ON fo.folder_id = ff.folder_id
                     WHERE f.deleted_at IS NULL
-                      AND (fo.path = ? OR fo.path LIKE ?)
+                      AND (fo.path = ? OR fo.path LIKE ? ESCAPE '\\')
                     """,
                     (path, self._descendant_like(path)),
                 ).fetchone()
@@ -1389,7 +1386,7 @@ class SQLiteFileSystemStore:
                 SELECT path
                 FROM folders
                 WHERE path != ?
-                  AND path LIKE ?
+                  AND path LIKE ? ESCAPE '\\'
                   AND (
                     CASE
                       WHEN TRIM(path, '/') = '' THEN 0
@@ -1407,7 +1404,7 @@ class SQLiteFileSystemStore:
                 JOIN file_folders ff ON ff.file_ref = f.file_ref
                 JOIN folders fo ON fo.folder_id = ff.folder_id
                 WHERE f.deleted_at IS NULL
-                  AND (fo.path = ? OR fo.path LIKE ?)
+                  AND (fo.path = ? OR fo.path LIKE ? ESCAPE '\\')
                 LIMIT ?
                 """,
                 (path, self._descendant_like(path), file_limit + 1),
@@ -1486,7 +1483,7 @@ class SQLiteFileSystemStore:
         """
         params: list[Any]
         if recursive:
-            sql += " AND (pf.path = ? OR pf.path LIKE ?)"
+            sql += " AND (pf.path = ? OR pf.path LIKE ? ESCAPE '\\')"
             params = [path, self._descendant_like(path)]
             if max_depth is not None:
                 if max_depth <= 0:
@@ -1539,10 +1536,7 @@ class SQLiteFileSystemStore:
                             WHERE scope_ff.file_ref = f.file_ref
                               AND (
                                 scope_folder.folder_id = base_folder.folder_id
-                                OR scope_folder.path LIKE CASE
-                                    WHEN base_folder.path = '/' THEN '/%'
-                                    ELSE base_folder.path || '/%'
-                                END
+                                OR scope_folder.path LIKE {self._descendant_like_sql_expr("base_folder.path")} ESCAPE '\\'
                               )
                               {depth_clause}
                         )
@@ -1567,7 +1561,7 @@ class SQLiteFileSystemStore:
         if recursive and max_depth == 0:
             return "0", []
         path_clause = (
-            "(scope_folder.path = ? OR scope_folder.path LIKE ?)"
+            "(scope_folder.path = ? OR scope_folder.path LIKE ? ESCAPE '\\')"
             if recursive
             else "scope_folder.path = ?"
         )
@@ -1610,9 +1604,33 @@ class SQLiteFileSystemStore:
             (path,),
         ).fetchone()
 
+    @classmethod
+    def _descendant_like(cls, path: str) -> str:
+        return "/%" if path == "/" else f"{cls._like_escape(path)}/%"
+
     @staticmethod
-    def _descendant_like(path: str) -> str:
-        return "/%" if path == "/" else f"{path}/%"
+    def _descendant_like_sql_expr(path_expr: str) -> str:
+        escaped_expr = SQLiteFileSystemStore._like_escape_sql_expr(path_expr)
+        return f"CASE WHEN {path_expr} = '/' THEN '/%' ELSE {escaped_expr} || '/%' END"
+
+    @staticmethod
+    def _contains_like(value: str) -> str:
+        return f"%{SQLiteFileSystemStore._like_escape(value)}%"
+
+    @staticmethod
+    def _like_escape(value: str) -> str:
+        return (
+            value.replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
+
+    @staticmethod
+    def _like_escape_sql_expr(value_expr: str) -> str:
+        return (
+            f"replace(replace(replace({value_expr}, '\\', '\\\\'), "
+            "'%', '\\%'), '_', '\\_')"
+        )
 
     @staticmethod
     def _folder_depth(path: str) -> int:
