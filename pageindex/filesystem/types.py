@@ -22,8 +22,7 @@ class SearchResult:
     pageNum: Optional[int] = None
     createdAt: Optional[str] = None
     folderId: Optional[str] = None
-    derived_metadata: dict[str, Any] = field(default_factory=dict)
-    metadata_generation: dict[str, Any] = field(default_factory=dict)
+    metadata_status: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -63,8 +62,7 @@ class FileEntry:
     pageindex_tree_status: str
     metadata: dict[str, Any]
     folder_path: str
-    derived_metadata: dict[str, Any] = field(default_factory=dict)
-    metadata_generation: dict[str, Any] = field(default_factory=dict)
+    metadata_status: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -68,7 +68,7 @@ class SummaryProjectionIndexer:
         )
 
     def upsert_summary(self, record: dict[str, Any]) -> dict[str, Any]:
-        summary = str((record.get("derived_metadata") or {}).get("summary") or "").strip()
+        summary = str((record.get("metadata") or {}).get("summary") or "").strip()
         if not summary:
             return {"status": "skipped", "reason": "missing_summary"}
         vector = self.embedding_cache.embed_texts(
@@ -79,7 +79,6 @@ class SummaryProjectionIndexer:
             batch_size=1,
         )[0]
         metadata = dict(record.get("metadata") or {})
-        metadata.update(record.get("derived_metadata") or {})
         count = self.index.upsert_many(
             [
                 SemanticIndexRecord(

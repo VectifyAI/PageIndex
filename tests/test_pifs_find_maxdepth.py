@@ -98,12 +98,23 @@ def test_stable_path_targets_work_without_session_refs(tmp_path):
     assert "Root document fixture text" in text
 
 
-def test_stat_shell_output_includes_generated_metadata(tmp_path):
+def test_stat_shell_output_includes_unified_metadata_status(tmp_path):
     from pageindex.filesystem import PIFSCommandExecutor, PageIndexFileSystem
+    from pageindex.filesystem.metadata_generation import MetadataGenerationResult
 
     source = tmp_path / "source.txt"
     source.write_text("fixture text", encoding="utf-8")
-    filesystem = PageIndexFileSystem(workspace=tmp_path / "workspace")
+
+    class SummaryGenerator:
+        def generate(self, document, *, fields):
+            return MetadataGenerationResult(
+                values={field: "Generated summary for retrieval." for field in fields}
+            )
+
+    filesystem = PageIndexFileSystem(
+        workspace=tmp_path / "workspace",
+        metadata_generator=SummaryGenerator(),
+    )
     filesystem.register_file(
         storage_uri=source.as_uri(),
         source_path="docs/source.txt",
@@ -112,8 +123,7 @@ def test_stat_shell_output_includes_generated_metadata(tmp_path):
         title="Generated metadata document",
         content=source.read_text(encoding="utf-8"),
         metadata={"department": "ops"},
-        derived_metadata={"summary": "Generated summary for retrieval."},
-        metadata_generation_policy={
+        metadata_policy={
             "fields": {
                 "summary": True,
                 "doc_type": False,
@@ -128,9 +138,126 @@ def test_stat_shell_output_includes_generated_metadata(tmp_path):
 
     assert "metadata:" in stat
     assert "  department: ops" in stat
-    assert "generated_metadata:" in stat
     assert "  summary: Generated summary for retrieval." in stat
-    assert "metadata_generation_status: generated" in stat
+    assert "metadata_status: generated" in stat
+
+
+def test_register_rejects_pifs_owned_metadata_fields(tmp_path):
+    from pageindex.filesystem import PageIndexFileSystem
+
+    source = tmp_path / "source.txt"
+    source.write_text("fixture text", encoding="utf-8")
+    filesystem = PageIndexFileSystem(workspace=tmp_path / "workspace")
+
+    with pytest.raises(ValueError, match="PIFS-owned generated field"):
+        filesystem.register_file(
+            storage_uri=source.as_uri(),
+            source_path="docs/source.txt",
+            folder_path="/documents",
+            external_id="doc_conflict",
+            title="Conflict document",
+            content=source.read_text(encoding="utf-8"),
+            metadata={"summary": "caller summary"},
+        )
+
+
+def test_batch_metadata_status_generates_into_unified_metadata(tmp_path):
+    from pageindex.filesystem import PageIndexFileSystem
+    from pageindex.filesystem.metadata_generation import MetadataGenerationResult
+
+    source = tmp_path / "source.txt"
+    source.write_text("fixture text", encoding="utf-8")
+
+    class SummaryGenerator:
+        def generate(self, document, *, fields):
+            return MetadataGenerationResult(values={"summary": "Batch generated summary."})
+
+    filesystem = PageIndexFileSystem(
+        workspace=tmp_path / "workspace",
+        metadata_generator=SummaryGenerator(),
+    )
+    file_ref = filesystem.register_file(
+        storage_uri=source.as_uri(),
+        source_path="docs/source.txt",
+        folder_path="/documents",
+        external_id="doc_batch",
+        title="Batch document",
+        content=source.read_text(encoding="utf-8"),
+        metadata={"department": "ops"},
+        metadata_policy={
+            "batch": True,
+            "fields": {
+                "summary": True,
+                "doc_type": False,
+                "domain": False,
+                "topic": False,
+            },
+        },
+    )
+
+    before = filesystem.store.get_file(file_ref)
+    assert "summary" not in before.metadata
+    assert before.metadata_status["fields"]["summary"]["status"] == "pending_submit"
+
+    result = filesystem.batch_generate()
+    after = filesystem.store.get_file(file_ref)
+
+    assert result["generated"] == 1
+    assert after.metadata["summary"] == "Batch generated summary."
+    assert after.metadata["department"] == "ops"
+    assert after.metadata_status["fields"]["summary"]["status"] == "generated"
+
+
+def test_v4_metadata_columns_migrate_to_unified_metadata_status(tmp_path):
+    from pageindex.filesystem import PageIndexFileSystem
+
+    source = tmp_path / "source.txt"
+    source.write_text("fixture text", encoding="utf-8")
+    workspace = tmp_path / "workspace"
+    filesystem = PageIndexFileSystem(workspace=workspace)
+    file_ref = filesystem.register_file(
+        storage_uri=source.as_uri(),
+        source_path="docs/source.txt",
+        folder_path="/documents",
+        external_id="doc_migrate",
+        title="Migrated document",
+        content=source.read_text(encoding="utf-8"),
+        metadata={"department": "ops"},
+    )
+
+    with filesystem.store.connect() as conn:
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN derived_metadata_json TEXT NOT NULL DEFAULT '{}'"
+        )
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN metadata_generation_json TEXT NOT NULL DEFAULT '{}'"
+        )
+        conn.execute(
+            """
+            UPDATE files
+            SET metadata_json = ?,
+                derived_metadata_json = ?,
+                metadata_generation_json = ?,
+                metadata_status_json = '{}'
+            WHERE file_ref = ?
+            """,
+            (
+                '{"department":"ops","summary":"raw summary"}',
+                '{"summary":"generated summary"}',
+                '{"status":"generated","fields":{"summary":{"requested":true,"status":"generated"}}}',
+                file_ref,
+            ),
+        )
+        conn.execute("PRAGMA user_version = 4")
+
+    migrated = PageIndexFileSystem(workspace=workspace)
+    entry = migrated.store.get_file(file_ref)
+
+    assert entry.metadata["department"] == "ops"
+    assert entry.metadata["summary"] == "generated summary"
+    assert entry.metadata_status["status"] == "generated"
+    assert entry.metadata_status["fields"]["summary"]["owner"] == "pifs"
+    assert entry.metadata_status["fields"]["summary"]["source"] == "llm"
 
 
 def test_find_maxdepth_zero_type_directory_returns_start_folder(tmp_path):

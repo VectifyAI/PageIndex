@@ -9,7 +9,7 @@ from typing import Any, Iterable, Optional
 
 from .types import FileEntry, MetadataField
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 class SQLiteFileSystemStore:
@@ -47,6 +47,10 @@ class SQLiteFileSystemStore:
                 version = 3
             if version < 4:
                 self._migrate_to_v4(conn)
+                conn.execute("PRAGMA user_version = 4")
+                version = 4
+            if version < 5:
+                self._migrate_to_v5(conn)
                 conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _migrate_to_v1(self, conn: sqlite3.Connection) -> None:
@@ -68,8 +72,7 @@ class SQLiteFileSystemStore:
                 pageindex_doc_id TEXT,
                 pageindex_tree_status TEXT NOT NULL DEFAULT 'not_built',
                 metadata_json TEXT NOT NULL DEFAULT '{}',
-                derived_metadata_json TEXT NOT NULL DEFAULT '{}',
-                metadata_generation_json TEXT NOT NULL DEFAULT '{}',
+                metadata_status_json TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 deleted_at TEXT
@@ -228,10 +231,58 @@ class SQLiteFileSystemStore:
         if "files" not in self._tables(conn):
             return
         columns = self._columns(conn, "files")
-        if "derived_metadata_json" not in columns:
-            conn.execute("ALTER TABLE files ADD COLUMN derived_metadata_json TEXT NOT NULL DEFAULT '{}'")
-        if "metadata_generation_json" not in columns:
-            conn.execute("ALTER TABLE files ADD COLUMN metadata_generation_json TEXT NOT NULL DEFAULT '{}'")
+        if "metadata_status_json" not in columns:
+            conn.execute("ALTER TABLE files ADD COLUMN metadata_status_json TEXT NOT NULL DEFAULT '{}'")
+        self._backfill_metadata_values(conn)
+
+    def _migrate_to_v5(self, conn: sqlite3.Connection) -> None:
+        if "files" not in self._tables(conn):
+            return
+        columns = self._columns(conn, "files")
+        if "metadata_status_json" not in columns:
+            conn.execute("ALTER TABLE files ADD COLUMN metadata_status_json TEXT NOT NULL DEFAULT '{}'")
+            columns = self._columns(conn, "files")
+        derived_select = (
+            "derived_metadata_json"
+            if "derived_metadata_json" in columns
+            else "'{}' AS derived_metadata_json"
+        )
+        legacy_status_select = (
+            "metadata_generation_json"
+            if "metadata_generation_json" in columns
+            else "'{}' AS metadata_generation_json"
+        )
+        rows = conn.execute(
+            f"""
+            SELECT file_ref, metadata_json, metadata_status_json, {derived_select}, {legacy_status_select}
+            FROM files
+            WHERE deleted_at IS NULL
+            """
+        ).fetchall()
+        for row in rows:
+            metadata = self._json_object(row["metadata_json"])
+            legacy_generated_values = self._json_object(row["derived_metadata_json"])
+            metadata_status = self._json_object(row["metadata_status_json"])
+            legacy_status = self._json_object(row["metadata_generation_json"])
+            if not metadata_status and legacy_status:
+                metadata_status = legacy_status
+            metadata_status = self._normalize_metadata_status(metadata_status)
+            if legacy_generated_values:
+                metadata.update(legacy_generated_values)
+            conn.execute(
+                """
+                UPDATE files
+                SET metadata_json = ?,
+                    metadata_status_json = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE file_ref = ? AND deleted_at IS NULL
+                """,
+                (
+                    json.dumps(metadata, ensure_ascii=False),
+                    json.dumps(metadata_status, ensure_ascii=False),
+                    row["file_ref"],
+                ),
+            )
         self._backfill_metadata_values(conn)
 
     def _migrate_legacy_tables(self, conn: sqlite3.Connection) -> None:
@@ -271,42 +322,60 @@ class SQLiteFileSystemStore:
     def _backfill_metadata_values(self, conn: sqlite3.Connection) -> None:
         if "files" not in self._tables(conn):
             return
-        columns = self._columns(conn, "files")
-        derived_select = (
-            "derived_metadata_json"
-            if "derived_metadata_json" in columns
-            else "'{}' AS derived_metadata_json"
-        )
-        generation_select = (
-            "metadata_generation_json"
-            if "metadata_generation_json" in columns
-            else "'{}' AS metadata_generation_json"
-        )
         rows = conn.execute(
-            f"""
-            SELECT file_ref, metadata_json, {derived_select}, {generation_select}
+            """
+            SELECT file_ref, metadata_json
             FROM files
             WHERE deleted_at IS NULL
             """
         ).fetchall()
         for row in rows:
-            try:
-                metadata = json.loads(row["metadata_json"] or "{}")
-            except json.JSONDecodeError:
-                metadata = {}
-            try:
-                derived_metadata = json.loads(row["derived_metadata_json"] or "{}")
-            except json.JSONDecodeError:
-                derived_metadata = {}
-            try:
-                metadata_generation = json.loads(row["metadata_generation_json"] or "{}")
-            except json.JSONDecodeError:
-                metadata_generation = {}
             self.replace_metadata_values(
                 conn,
                 row["file_ref"],
-                self.indexed_metadata_values(metadata, derived_metadata, metadata_generation),
+                self.indexed_metadata_values(self._json_object(row["metadata_json"])),
             )
+
+    @staticmethod
+    def _json_object(value: Any) -> dict[str, Any]:
+        try:
+            parsed = json.loads(value or "{}") if isinstance(value, str) else value
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    @staticmethod
+    def _normalize_metadata_status(metadata_status: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(metadata_status)
+        fields = normalized.get("fields")
+        if isinstance(fields, dict):
+            normalized["fields"] = {
+                name: (
+                    {
+                        **state,
+                        "owner": state.get("owner", "pifs"),
+                        "source": state.get("source", "llm"),
+                    }
+                    if isinstance(state, dict)
+                    else state
+                )
+                for name, state in fields.items()
+            }
+        projection_indexes = normalized.get("projection_indexes")
+        if isinstance(projection_indexes, dict):
+            normalized["projection_indexes"] = {
+                name: (
+                    {
+                        **state,
+                        "owner": state.get("owner", "pifs"),
+                        "source": state.get("source", "index"),
+                    }
+                    if isinstance(state, dict)
+                    else state
+                )
+                for name, state in projection_indexes.items()
+            }
+        return normalized
 
     @staticmethod
     def _tables(conn: sqlite3.Connection) -> set[str]:
@@ -421,8 +490,7 @@ class SQLiteFileSystemStore:
             "pageindex_doc_id",
             "pageindex_tree_status",
             "metadata_json",
-            "derived_metadata_json",
-            "metadata_generation_json",
+            "metadata_status_json",
         ]
         if include_folder_path:
             columns.append("folder_path")
@@ -450,8 +518,7 @@ class SQLiteFileSystemStore:
             record.get("pageindex_doc_id"),
             record.get("pageindex_tree_status", "not_built"),
             record["metadata_json"],
-            record.get("derived_metadata_json", "{}"),
-            record.get("metadata_generation_json", "{}"),
+            record.get("metadata_status_json", "{}"),
         ]
         if include_folder_path:
             values.append(record["folder_path"])
@@ -560,8 +627,7 @@ class SQLiteFileSystemStore:
             "pageindex_doc_id",
             "pageindex_tree_status",
             "metadata_json",
-            "derived_metadata_json",
-            "metadata_generation_json",
+            "metadata_status_json",
             "deleted_at",
             "updated_at",
         ]
@@ -580,8 +646,7 @@ class SQLiteFileSystemStore:
             record.get("pageindex_doc_id"),
             record.get("pageindex_tree_status", "not_built"),
             record["metadata_json"],
-            record.get("derived_metadata_json", "{}"),
-            record.get("metadata_generation_json", "{}"),
+            record.get("metadata_status_json", "{}"),
             None,
             current_timestamp,
         ]
@@ -999,8 +1064,7 @@ class SQLiteFileSystemStore:
             "f.descriptor",
             "f.pageindex_tree_status",
             "f.metadata_json",
-            "f.derived_metadata_json",
-            "f.metadata_generation_json",
+            "f.metadata_status_json",
             "f.created_at",
             """
             (
@@ -1182,7 +1246,7 @@ class SQLiteFileSystemStore:
             raise KeyError(f"Unknown file_ref: {file_ref}")
         return self._file_entry(row)
 
-    def list_pending_metadata_generation(self, *, limit: int | None = None) -> list[FileEntry]:
+    def list_pending_metadata_status(self, *, limit: int | None = None) -> list[FileEntry]:
         sql = """
             SELECT
                 f.file_ref,
@@ -1199,16 +1263,15 @@ class SQLiteFileSystemStore:
                 f.pageindex_doc_id,
                 f.pageindex_tree_status,
                 f.metadata_json,
-                f.derived_metadata_json,
-                f.metadata_generation_json,
+                f.metadata_status_json,
                 COALESCE(primary_folder.path, '/') AS folder_path
             FROM files f
             LEFT JOIN file_folders ff ON ff.file_ref = f.file_ref
             LEFT JOIN folders primary_folder ON primary_folder.folder_id = ff.folder_id
             WHERE f.deleted_at IS NULL
               AND (
-                f.metadata_generation_json LIKE '%pending_generate%'
-                OR f.metadata_generation_json LIKE '%pending_submit%'
+                f.metadata_status_json LIKE '%pending_generate%'
+                OR f.metadata_status_json LIKE '%pending_submit%'
               )
             GROUP BY f.file_ref
             ORDER BY f.created_at, f.file_ref
@@ -1221,39 +1284,36 @@ class SQLiteFileSystemStore:
             rows = conn.execute(sql, params).fetchall()
         return [self._file_entry(row) for row in rows]
 
-    def update_file_metadata_generation(
+    def update_file_metadata_status(
         self,
         file_ref: str,
         *,
-        derived_metadata: dict[str, Any],
-        metadata_generation: dict[str, Any],
+        metadata: dict[str, Any],
+        metadata_status: dict[str, Any],
     ) -> None:
         with self.connect() as conn:
             row = self._file_entry_row(conn, file_ref)
             if row is None:
                 raise KeyError(f"Unknown file_ref: {file_ref}")
-            metadata = json.loads(row["metadata_json"] or "{}")
-            metadata_text_value = metadata_text(
-                self._merge_metadata_values(metadata, derived_metadata)
-            )
+            metadata_text_value = metadata_text(metadata)
             conn.execute(
                 """
                 UPDATE files
-                SET derived_metadata_json = ?,
-                    metadata_generation_json = ?,
+                SET metadata_json = ?,
+                    metadata_status_json = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE file_ref = ? AND deleted_at IS NULL
                 """,
                 (
-                    json.dumps(derived_metadata, ensure_ascii=False),
-                    json.dumps(metadata_generation, ensure_ascii=False),
+                    json.dumps(metadata, ensure_ascii=False),
+                    json.dumps(metadata_status, ensure_ascii=False),
                     file_ref,
                 ),
             )
             self.replace_metadata_values(
                 conn,
                 file_ref,
-                self.indexed_metadata_values(metadata, derived_metadata, metadata_generation),
+                self.indexed_metadata_values(metadata),
             )
             conn.execute(
                 """
@@ -1631,8 +1691,7 @@ class SQLiteFileSystemStore:
                 f.pageindex_doc_id,
                 f.pageindex_tree_status,
                 f.metadata_json,
-                f.derived_metadata_json,
-                f.metadata_generation_json,
+                f.metadata_status_json,
                 COALESCE(
                     (
                         SELECT display_folder.path
@@ -1668,8 +1727,7 @@ class SQLiteFileSystemStore:
                 f.source_path,
                 f.pageindex_tree_status,
                 f.metadata_json,
-                f.derived_metadata_json,
-                f.metadata_generation_json,
+                f.metadata_status_json,
                 f.created_at,
                 MIN(pf.folder_id) AS folder_id,
                 MIN(pf.path) AS folder_path
@@ -1860,9 +1918,8 @@ class SQLiteFileSystemStore:
             "source_path": row["source_path"],
             "folder_path": row["folder_path"],
             "metadata": json.loads(row["metadata_json"] or "{}"),
-            "derived_metadata": json.loads(cls._row_value(row, "derived_metadata_json", "{}") or "{}"),
-            "metadata_generation": json.loads(
-                cls._row_value(row, "metadata_generation_json", "{}") or "{}"
+            "metadata_status": json.loads(
+                cls._row_value(row, "metadata_status_json", "{}") or "{}"
             ),
         }
 
@@ -1885,9 +1942,8 @@ class SQLiteFileSystemStore:
             "snippet": row["snippet"] or row["title"],
             "folder_path": row["folder_path"],
             "metadata": json.loads(row["metadata_json"] or "{}"),
-            "derived_metadata": json.loads(cls._row_value(row, "derived_metadata_json", "{}") or "{}"),
-            "metadata_generation": json.loads(
-                cls._row_value(row, "metadata_generation_json", "{}") or "{}"
+            "metadata_status": json.loads(
+                cls._row_value(row, "metadata_status_json", "{}") or "{}"
             ),
         }
 
@@ -1913,11 +1969,8 @@ class SQLiteFileSystemStore:
             pageindex_tree_status=row["pageindex_tree_status"],
             metadata=json.loads(row["metadata_json"] or "{}"),
             folder_path=row["folder_path"],
-            derived_metadata=json.loads(
-                SQLiteFileSystemStore._row_value(row, "derived_metadata_json", "{}") or "{}"
-            ),
-            metadata_generation=json.loads(
-                SQLiteFileSystemStore._row_value(row, "metadata_generation_json", "{}") or "{}"
+            metadata_status=json.loads(
+                SQLiteFileSystemStore._row_value(row, "metadata_status_json", "{}") or "{}"
             ),
         )
 
@@ -1944,8 +1997,7 @@ class SQLiteFileSystemStore:
             "pageindex_doc_id": entry.pageindex_doc_id,
             "pageindex_tree_status": entry.pageindex_tree_status,
             "metadata": entry.metadata,
-            "derived_metadata": entry.derived_metadata,
-            "metadata_generation": entry.metadata_generation,
+            "metadata_status": entry.metadata_status,
             "folder_path": entry.folder_path,
         }
 
@@ -2041,57 +2093,9 @@ class SQLiteFileSystemStore:
             return json.dumps(value, ensure_ascii=False, sort_keys=True)
         return "" if value is None else str(value)
 
-    @classmethod
-    def _merge_metadata_values(
-        cls,
-        metadata: dict[str, Any],
-        derived_metadata: dict[str, Any],
-    ) -> dict[str, Any]:
-        merged = dict(metadata)
-        for name, value in derived_metadata.items():
-            if name not in merged:
-                merged[name] = value
-                continue
-            if merged[name] == value:
-                continue
-            merged[name] = cls._merge_metadata_value(merged[name], value)
-        return merged
-
     @staticmethod
-    def _merge_metadata_value(raw_value: Any, derived_value: Any) -> Any:
-        values = raw_value if isinstance(raw_value, list) else [raw_value]
-        derived_values = derived_value if isinstance(derived_value, list) else [derived_value]
-        merged = list(values)
-        for item in derived_values:
-            if item not in merged:
-                merged.append(item)
-        return merged
-
-    @classmethod
-    def indexed_metadata_values(
-        cls,
-        metadata: dict[str, Any],
-        derived_metadata: dict[str, Any],
-        metadata_generation: dict[str, Any] | None,
-    ) -> dict[str, Any]:
-        generated_fields = set(derived_metadata)
-        if isinstance(metadata_generation, dict):
-            policy = metadata_generation.get("policy", {})
-            if isinstance(policy, dict):
-                fields = policy.get("fields", {})
-                if isinstance(fields, dict):
-                    generated_fields.update(
-                        str(name)
-                        for name in fields
-                    )
-
-        indexed = {
-            name: value
-            for name, value in metadata.items()
-            if name not in generated_fields
-        }
-        indexed.update(derived_metadata)
-        return indexed
+    def indexed_metadata_values(metadata: dict[str, Any]) -> dict[str, Any]:
+        return dict(metadata)
 
     @staticmethod
     def _valid_field_name(name: str) -> bool:

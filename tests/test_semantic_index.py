@@ -51,3 +51,39 @@ def test_sqlite_vec_semantic_index_round_trip(tmp_path):
         filters={"source_type": "slack"},
     )
     assert [item.external_id for item in filtered] == ["doc_b"]
+
+
+def test_summary_projection_indexes_unified_metadata_summary(tmp_path):
+    from pageindex.filesystem.projection_indexing import SummaryProjectionIndexer
+
+    class FakeEmbedder:
+        def embed(self, texts):
+            return [[1.0, 0.0, 0.0] for _ in texts]
+
+    indexer = SummaryProjectionIndexer(
+        tmp_path / "projection",
+        embedder=FakeEmbedder(),
+        embedding_provider="test",
+        embedding_model="fake",
+        embedding_dimensions=3,
+    )
+
+    result = indexer.upsert_summary(
+        {
+            "file_ref": "file_a",
+            "external_id": "doc_a",
+            "source_type": "documents",
+            "source_path": "docs/a.pdf",
+            "title": "A",
+            "metadata": {
+                "summary": "Unified metadata summary.",
+                "department": "ops",
+            },
+        }
+    )
+
+    assert result["status"] == "ready"
+    hits = indexer.index.search([1.0, 0.0, 0.0], limit=1)
+    assert hits[0].external_id == "doc_a"
+    assert hits[0].metadata["summary"] == "Unified metadata summary."
+    assert hits[0].metadata["department"] == "ops"

@@ -287,7 +287,6 @@ def register_demo_metadata_schema(filesystem: PageIndexFileSystem) -> None:
 def backfill_registered_metadata_values(filesystem: PageIndexFileSystem, file_ref: str) -> None:
     entry = filesystem.store.get_file(file_ref)
     indexed_metadata = dict(entry.metadata or {})
-    indexed_metadata.update(entry.derived_metadata or {})
     with filesystem.store.connect() as conn:
         filesystem.store.replace_metadata_values(conn, file_ref, indexed_metadata)
 
@@ -314,12 +313,12 @@ def has_ready_register_outputs(filesystem: PageIndexFileSystem, external_id: str
         entry = filesystem.store.get_file(file_ref)
     except KeyError:
         return False
-    generation = entry.metadata_generation or {}
-    fields = generation.get("fields") or {}
+    status = entry.metadata_status or {}
+    fields = status.get("fields") or {}
     required = ("summary", "doc_type", "domain", "topic")
     if any(fields.get(field, {}).get("status") != "generated" for field in required):
         return False
-    summary_projection = (generation.get("projection_indexes") or {}).get("summary") or {}
+    summary_projection = (status.get("projection_indexes") or {}).get("summary") or {}
     return summary_projection.get("status") == "ready"
 
 
@@ -394,17 +393,17 @@ def register_documents(
         entry = filesystem.store.get_file(file_ref)
         field_status = {
             field: state.get("status")
-            for field, state in (entry.metadata_generation.get("fields") or {}).items()
+            for field, state in (entry.metadata_status.get("fields") or {}).items()
         }
         summary_projection = (
-            entry.metadata_generation.get("projection_indexes", {}).get("summary", {})
+            entry.metadata_status.get("projection_indexes", {}).get("summary", {})
         )
         log_progress(
             f"PIFS register: done file_ref={file_ref} ({register_seconds:.2f}s)",
             indent=1,
         )
         log_progress(
-            f"metadata: {entry.metadata_generation.get('status', 'unknown')} fields={field_status}",
+            f"metadata: {entry.metadata_status.get('status', 'unknown')} fields={field_status}",
             indent=1,
         )
         log_progress(
@@ -418,7 +417,7 @@ def register_documents(
                 "file_ref": file_ref,
                 "external_id": external_id,
                 "path": str(document_path),
-                "status": entry.metadata_generation.get("status", "unknown"),
+                "status": entry.metadata_status.get("status", "unknown"),
                 "pageindex_tree_status": entry.pageindex_tree_status,
                 "pageindex_doc_id": entry.pageindex_doc_id,
             }
@@ -642,7 +641,7 @@ def run_smoke_commands(
         command=command,
         result=(
             f"{stat_data.get('title')} | tree={stat_data.get('pageindex_tree_status')} | "
-            f"metadata_status={(stat_data.get('metadata_generation') or {}).get('status')}"
+            f"metadata_status={(stat_data.get('metadata_status') or {}).get('status')}"
         ),
         raw=shell_executor.execute(command) if verbose else "",
         verbose=verbose,
