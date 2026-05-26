@@ -89,6 +89,7 @@ class PIFSCommandExecutor:
             "- mode: read-only inspection",
             "- ls/tree: folder browsing",
             "- find --where: exact/canonical metadata DSL filtering",
+            "- find <folder> -maxdepth N -type f|d: bounded folder traversal for find",
             "- grep -R: recursive lexical/FTS search only; semantic vector prefilter is disabled",
             "- cat <ref> --structure/--node/--page: cached PageIndex reads for PDF/Markdown files",
             "- cat <ref> --all: full text artifact reads for txt/text files",
@@ -230,6 +231,7 @@ class PIFSCommandExecutor:
         relation = None
         limit = 10
         file_type = None
+        max_depth = None
         i = 0
         while i < len(args):
             arg = args[i]
@@ -248,6 +250,9 @@ class PIFSCommandExecutor:
             elif arg == "-type":
                 i += 1
                 file_type = args[i]
+            elif arg == "-maxdepth":
+                i += 1
+                max_depth = self._parse_find_maxdepth(args[i] if i < len(args) else None)
             elif arg.startswith("-"):
                 raise PIFSCommandError(f"Unsupported find option: {arg}")
             else:
@@ -259,8 +264,26 @@ class PIFSCommandExecutor:
             raise PIFSCommandError("find supports only one of --name or --relation")
         if file_type == "d":
             if where:
-                return self.filesystem.find_folders(path, metadata_filter=where, limit=limit)
-            return self.filesystem.browse(path, recursive=True, limit=limit)["folders"]
+                return self.filesystem.find_folders(
+                    path,
+                    metadata_filter=where,
+                    limit=limit,
+                    max_depth=max_depth,
+                )
+            folders = self.filesystem.browse(
+                path,
+                recursive=True,
+                limit=limit,
+                max_depth=max_depth,
+            )["folders"]
+            if max_depth is not None and limit != 0:
+                return [self.filesystem.folder_info(path), *folders][:limit]
+            return folders
+        scope = {"folder_path": path, "recursive": True}
+        if max_depth is not None:
+            if max_depth == 0:
+                return []
+            scope["max_depth"] = max_depth
         if relation:
             if not self.filesystem.has_semantic_channel("relation"):
                 raise PIFSCommandError(
@@ -269,7 +292,7 @@ class PIFSCommandExecutor:
             return self.filesystem.search_semantic_channel(
                 "relation",
                 self._semantic_retrieval_query(relation),
-                scope={"folder_path": path, "recursive": True},
+                scope=scope,
                 metadata_filter=where,
                 limit=limit,
             )
@@ -277,13 +300,13 @@ class PIFSCommandExecutor:
             return self.filesystem.search_semantic_channel(
                 "entity",
                 self._semantic_retrieval_query(name),
-                scope={"folder_path": path, "recursive": True},
+                scope=scope,
                 metadata_filter=where,
                 limit=limit,
             )
         return self.filesystem.search(
             query=name,
-            scope={"folder_path": path, "recursive": True},
+            scope=scope,
             metadata_filter=where,
             limit=limit,
             semantic=False,
@@ -1464,6 +1487,18 @@ class PIFSCommandExecutor:
             raise PIFSCommandError(f"{label} must be an integer") from exc
         if parsed < 0:
             raise PIFSCommandError(f"{label} must be non-negative")
+        return parsed
+
+    @staticmethod
+    def _parse_find_maxdepth(value: str | None) -> int:
+        if value is None:
+            raise PIFSCommandError("find -maxdepth requires an integer >= 0")
+        try:
+            parsed = int(value)
+        except ValueError as exc:
+            raise PIFSCommandError("find -maxdepth requires an integer >= 0") from exc
+        if parsed < 0:
+            raise PIFSCommandError("find -maxdepth requires an integer >= 0")
         return parsed
 
     @staticmethod

@@ -731,15 +731,33 @@ class SQLiteFileSystemStore:
             for row in rows
         ]
 
-    def list_folder(self, path: str = "/", recursive: bool = False, limit: int = 100) -> dict[str, Any]:
+    def list_folder(
+        self,
+        path: str = "/",
+        recursive: bool = False,
+        limit: int = 100,
+        max_depth: int | None = None,
+    ) -> dict[str, Any]:
         path = normalize_path(path)
+        if max_depth is not None and max_depth < 0:
+            raise ValueError("max_depth must be non-negative")
         with self.connect() as conn:
             folder = self._folder_by_path(conn, path)
             if folder is None:
                 raise KeyError(f"Unknown folder path: {path}")
             if recursive:
+                folder_depth_clause = ""
+                folder_depth_params: list[Any] = []
+                if max_depth is not None:
+                    if max_depth == 0:
+                        folder_depth_clause = "AND 0"
+                    else:
+                        folder_depth_clause = (
+                            f"AND ({self._folder_depth_sql('fo.path')} - ?) <= ?"
+                        )
+                        folder_depth_params = [self._folder_depth(path), max_depth]
                 folder_rows = conn.execute(
-                    """
+                    f"""
                     SELECT
                         fo.folder_id,
                         fo.parent_id,
@@ -765,12 +783,19 @@ class SQLiteFileSystemStore:
                         ) AS children_count
                     FROM folders fo
                     WHERE fo.path != ? AND (fo.path LIKE ?)
+                      {folder_depth_clause}
                     ORDER BY fo.path
                     LIMIT ?
                     """,
-                    (path, self._descendant_like(path), limit),
+                    (path, self._descendant_like(path), *folder_depth_params, limit),
                 ).fetchall()
-                file_rows = self._file_rows_for_scope(conn, path, True, limit)
+                file_rows = self._file_rows_for_scope(
+                    conn,
+                    path,
+                    True,
+                    limit,
+                    max_depth=max_depth,
+                )
             else:
                 folder_rows = conn.execute(
                     """
@@ -810,16 +835,64 @@ class SQLiteFileSystemStore:
             "files": [self._file_summary(row) for row in file_rows],
         }
 
+    def folder_info(self, path: str = "/") -> dict[str, Any]:
+        path = normalize_path(path)
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    fo.folder_id,
+                    fo.parent_id,
+                    fo.name,
+                    fo.path,
+                    fo.description,
+                    fo.kind,
+                    fo.metadata_json,
+                    fo.created_at,
+                    fo.updated_at,
+                    (
+                        SELECT COUNT(DISTINCT child_ff.file_ref)
+                        FROM file_folders child_ff
+                        JOIN files child_file
+                          ON child_file.file_ref = child_ff.file_ref
+                         AND child_file.deleted_at IS NULL
+                        WHERE child_ff.folder_id = fo.folder_id
+                    ) AS file_count,
+                    (
+                        SELECT COUNT(*)
+                        FROM folders child_folder
+                        WHERE child_folder.parent_id = fo.folder_id
+                    ) AS children_count
+                FROM folders fo
+                WHERE fo.path = ?
+                """,
+                (path,),
+            ).fetchone()
+        if row is None:
+            raise KeyError(f"Unknown folder path: {path}")
+        return self._folder_row_to_dict(row)
+
     def find_folders(
         self,
         path: str = "/",
         *,
         metadata_filter: Optional[dict[str, Any]] = None,
         limit: int = 100,
+        max_depth: int | None = None,
     ) -> list[dict[str, Any]]:
         path = normalize_path(path)
+        if max_depth is not None and max_depth < 0:
+            raise ValueError("max_depth must be non-negative")
         metadata_sql, metadata_params = self._metadata_filter_sql(metadata_filter)
         metadata_clause = f"AND {' AND '.join(metadata_sql)}" if metadata_sql else ""
+        folder_depth_clause = ""
+        folder_depth_params: list[Any] = []
+        if max_depth is not None:
+            if max_depth == 0:
+                folder_depth_clause = "AND 0"
+            else:
+                folder_depth_clause = f"AND ({self._folder_depth_sql('fo.path')} - ?) <= ?"
+                folder_depth_params = [self._folder_depth(path), max_depth]
         sql = f"""
             SELECT *
             FROM (
@@ -865,12 +938,19 @@ class SQLiteFileSystemStore:
                     ) AS matched_files
                 FROM folders fo
                 WHERE fo.path != ? AND fo.path LIKE ?
+                  {folder_depth_clause}
             )
             WHERE matched_files > 0
             ORDER BY path
             LIMIT ?
         """
-        params = [*metadata_params, path, self._descendant_like(path), limit]
+        params = [
+            *metadata_params,
+            path,
+            self._descendant_like(path),
+            *folder_depth_params,
+            limit,
+        ]
         with self.connect() as conn:
             folder = self._folder_by_path(conn, path)
             if folder is None:
@@ -1577,6 +1657,7 @@ class SQLiteFileSystemStore:
         path: str,
         recursive: bool,
         limit: int,
+        max_depth: int | None = None,
     ) -> list[sqlite3.Row]:
         sql = """
             SELECT
@@ -1601,6 +1682,12 @@ class SQLiteFileSystemStore:
         if recursive:
             sql += " AND (pf.path = ? OR pf.path LIKE ?)"
             params = [path, self._descendant_like(path)]
+            if max_depth is not None:
+                if max_depth <= 0:
+                    sql += " AND 0"
+                else:
+                    sql += f" AND ({self._folder_depth_sql('pf.path')} - ?) <= ?"
+                    params.extend([self._folder_depth(path), max_depth - 1])
         else:
             sql += " AND pf.path = ?"
             params = [path]
@@ -1612,14 +1699,30 @@ class SQLiteFileSystemStore:
         if not scope:
             return "", []
         recursive = scope.get("recursive", True)
+        max_depth = scope.get("max_depth")
+        if max_depth is not None:
+            max_depth = int(max_depth)
+            if max_depth < 0:
+                raise ValueError("max_depth must be non-negative")
         folder_id = scope.get("folder_id")
         if folder_id:
             if folder_id == "root":
                 folder_path = "/"
             else:
                 if recursive:
+                    if max_depth == 0:
+                        return "0", []
+                    depth_clause = ""
+                    depth_params: list[Any] = []
+                    if max_depth is not None:
+                        depth_clause = (
+                            "AND "
+                            f"({self._folder_depth_sql('scope_folder.path')} - "
+                            f"{self._folder_depth_sql('base_folder.path')}) <= ?"
+                        )
+                        depth_params = [max_depth - 1]
                     return (
-                        """
+                        f"""
                         EXISTS (
                             SELECT 1
                             FROM file_folders scope_ff
@@ -1635,9 +1738,10 @@ class SQLiteFileSystemStore:
                                     ELSE base_folder.path || '/%'
                                 END
                               )
+                              {depth_clause}
                         )
                         """,
-                        [folder_id],
+                        [folder_id, *depth_params],
                     )
                 return (
                     """
@@ -1654,12 +1758,18 @@ class SQLiteFileSystemStore:
             folder_path = normalize_path(scope.get("folder_path") or scope.get("path"))
         else:
             return "", []
+        if recursive and max_depth == 0:
+            return "0", []
         path_clause = (
             "(scope_folder.path = ? OR scope_folder.path LIKE ?)"
             if recursive
             else "scope_folder.path = ?"
         )
         params = [folder_path, self._descendant_like(folder_path)] if recursive else [folder_path]
+        depth_clause = ""
+        if recursive and max_depth is not None:
+            depth_clause = f"AND ({self._folder_depth_sql('scope_folder.path')} - ?) <= ?"
+            params.extend([self._folder_depth(folder_path), max_depth - 1])
         return (
             f"""
             EXISTS (
@@ -1669,6 +1779,7 @@ class SQLiteFileSystemStore:
                   ON scope_folder.folder_id = scope_ff.folder_id
                 WHERE scope_ff.file_ref = f.file_ref
                   AND {path_clause}
+                  {depth_clause}
             )
             """,
             params,
@@ -1701,6 +1812,16 @@ class SQLiteFileSystemStore:
     def _folder_depth(path: str) -> int:
         stripped = normalize_path(path).strip("/")
         return 0 if not stripped else len(stripped.split("/"))
+
+    @staticmethod
+    def _folder_depth_sql(path_expr: str) -> str:
+        return (
+            "(CASE "
+            f"WHEN TRIM({path_expr}, '/') = '' THEN 0 "
+            f"ELSE LENGTH(TRIM({path_expr}, '/')) "
+            f"- LENGTH(REPLACE(TRIM({path_expr}, '/'), '/', '')) + 1 "
+            "END)"
+        )
 
     @classmethod
     def _folder_row_to_dict(cls, row: sqlite3.Row) -> dict[str, Any]:

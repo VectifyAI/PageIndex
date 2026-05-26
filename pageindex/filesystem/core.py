@@ -238,17 +238,32 @@ class PageIndexFileSystem:
         path: str = "/",
         recursive: bool = False,
         limit: int = 100,
+        max_depth: int | None = None,
     ) -> dict[str, list[dict[str, Any]]]:
-        return self.store.list_folder(path, recursive=recursive, limit=limit)
+        return self.store.list_folder(
+            path,
+            recursive=recursive,
+            limit=limit,
+            max_depth=max_depth,
+        )
+
+    def folder_info(self, path: str = "/") -> dict[str, Any]:
+        return self.store.folder_info(path)
 
     def find_folders(
         self,
         path: str = "/",
         metadata_filter: Optional[dict[str, Any] | str] = None,
         limit: int = 100,
+        max_depth: int | None = None,
     ) -> list[dict[str, Any]]:
         parsed_filter = self.metadata.parse_filter(metadata_filter)
-        return self.store.find_folders(path, metadata_filter=parsed_filter, limit=limit)
+        return self.store.find_folders(
+            path,
+            metadata_filter=parsed_filter,
+            limit=limit,
+            max_depth=max_depth,
+        )
 
     def create_folder(
         self,
@@ -484,6 +499,7 @@ class PageIndexFileSystem:
                 "grep_recursive": True,
                 "grep_recursive_semantic_prefilter": False,
                 "grep_recursive_guard": "bounded broad-folder notice",
+                "find_maxdepth": True,
             },
             "semantic": {
                 "backend_configured": self.semantic_retrieval_backend is not None,
