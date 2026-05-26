@@ -42,8 +42,10 @@ Run a command in the PageIndex FileSystem virtual shell. This is not a real
 operating-system shell. By default the tool is read-only: use ls, tree, find,
 grep, cat, stat, head, tail, sed, and any dynamically available semantic search
 commands described in the workspace context. grep -R is lexical evidence search;
-semantic search commands return candidate documents and do not guarantee literal
-text matches. Errors are returned as text prefixed with ERROR. Do not call
+semantic search commands such as search-summary return candidate documents and
+do not guarantee literal text matches. Use search-summary when the user asks for
+summary search, semantic search, or vector search and the command is listed as
+available. Errors are returned as text prefixed with ERROR. Do not call
 commands that are not listed as available. When evidence is required, inspect it
 with cat or grep before answering. Prefer shell-like target-first cat syntax
 with stable targets: cat <path> --structure, cat <path> --page 31-59, and
@@ -64,6 +66,7 @@ Tool policy:
 - Use --where only with metadata fields shown by stat --schema.
 - grep -R performs lexical evidence search.
 - Semantic search commands are candidate-discovery tools and do not guarantee literal text matches.
+- If search-summary is available and the user asks for summary search, semantic search, vector search, or "用 summary 搜", use search-summary <query> <folder>; do not translate that request into find --where.
 - Tool errors are returned as ERROR text; recover by trying an available command.
 - Use cat or grep to gather evidence before making source-backed claims.
 - Prefer target-first cat syntax with stable targets: cat <path> --structure, cat <path> --page 31-59, cat <path> --node <node_id>.

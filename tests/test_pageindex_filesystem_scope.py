@@ -58,3 +58,60 @@ def test_semantic_search_scope_filters_explicit_source_type_facets():
         {"folder_path": "/documents"}
     ) == {}
 
+
+def test_existing_summary_projection_index_configures_retrieval_backend(tmp_path, monkeypatch):
+    from pageindex.filesystem import PageIndexFileSystem
+    from pageindex.filesystem.semantic_index import SemanticIndexRecord, SQLiteVecSemanticIndex
+
+    workspace = tmp_path / "workspace"
+    index_dir = workspace / "artifacts" / "projection_indexes"
+    summary_index = SQLiteVecSemanticIndex(index_dir / "summary_only_vector.sqlite")
+    summary_index.reset(
+        dimension=3,
+        metadata={
+            "channel": "summary",
+            "embedding_provider": "openai",
+            "embedding_model": "test-embedding",
+            "embedding_dimensions": 3,
+        },
+    )
+    summary_index.upsert_many(
+        [
+            SemanticIndexRecord(
+                file_ref="file_a",
+                external_id="doc_a",
+                source_type="documents",
+                source_path="documents/a.pdf",
+                title="A",
+                text="summary",
+                vector=[1.0, 0.0, 0.0],
+            )
+        ]
+    )
+    filesystem = PageIndexFileSystem(workspace)
+    calls = []
+
+    def fake_configure(index_dir_arg, **kwargs):
+        calls.append((index_dir_arg, kwargs))
+        filesystem.semantic_retrieval_backend = SummaryBackend("doc_a")
+        return filesystem.semantic_retrieval_backend
+
+    monkeypatch.setattr(
+        filesystem,
+        "configure_hybrid_projection_retrieval",
+        fake_configure,
+    )
+
+    assert filesystem.configure_existing_projection_retrieval() is True
+    assert calls == [
+        (
+            filesystem.summary_projection_index_dir,
+            {
+                "embedding_provider": "openai",
+                "embedding_model": "test-embedding",
+                "embedding_dimensions": 3,
+                "embedding_timeout": 60,
+            },
+        )
+    ]
+    assert filesystem.semantic_retrieval_channels() == ("summary",)

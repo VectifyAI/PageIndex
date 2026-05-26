@@ -5,6 +5,24 @@ from pathlib import Path
 class FakeFileSystem:
     def __init__(self, workspace):
         self.workspace = Path(workspace)
+        self.projection_retrieval_configured = False
+
+    def configure_existing_projection_retrieval(self):
+        self.projection_retrieval_configured = True
+        return True
+
+
+def test_cli_workspace_configures_existing_projection_retrieval(monkeypatch, tmp_path):
+    from pageindex.filesystem import cli
+
+    workspace = tmp_path / "workspace"
+
+    monkeypatch.setattr(cli, "PageIndexFileSystem", FakeFileSystem)
+
+    filesystem = cli._filesystem_from_workspace(str(workspace))
+
+    assert filesystem.workspace == workspace
+    assert filesystem.projection_retrieval_configured is True
 
 
 def test_cli_passthrough_invokes_pifs_command_executor(monkeypatch, capsys, tmp_path):

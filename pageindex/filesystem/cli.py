@@ -122,7 +122,10 @@ def _parse_agent_command(
 
 
 def _filesystem_from_workspace(workspace: str) -> PageIndexFileSystem:
-    return PageIndexFileSystem(Path(workspace).expanduser())
+    filesystem = PageIndexFileSystem(Path(workspace).expanduser())
+    with contextlib.suppress(Exception):
+        filesystem.configure_existing_projection_retrieval()
+    return filesystem
 
 
 def _agent_kwargs(args: argparse.Namespace) -> dict[str, object]:

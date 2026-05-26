@@ -218,6 +218,64 @@ class PageIndexFileSystem:
                 embedding_timeout=self.summary_projection_embedding_timeout,
             )
 
+    def configure_existing_projection_retrieval(self) -> bool:
+        """Attach semantic retrieval to already-built projection indexes.
+
+        Register-time generation owns building the index files. Opening an
+        existing workspace should still expose the corresponding read commands,
+        such as search-summary, without forcing a re-register step.
+        """
+        if self.semantic_retrieval_backend is not None:
+            return bool(self.semantic_retrieval_channels())
+        index_config = self._existing_projection_index_config()
+        if index_config is None:
+            return False
+        metadata = dict(index_config.get("metadata") or {})
+        embedding_provider = str(
+            metadata.get("embedding_provider")
+            or self.summary_projection_embedding_provider
+        )
+        embedding_model = str(
+            metadata.get("embedding_model")
+            or self.summary_projection_embedding_model
+        )
+        embedding_dimensions = int(
+            metadata.get("embedding_dimensions")
+            or index_config.get("dimension")
+            or self.summary_projection_embedding_dimensions
+        )
+        self.configure_hybrid_projection_retrieval(
+            self.summary_projection_index_dir,
+            embedding_provider=embedding_provider,
+            embedding_model=embedding_model,
+            embedding_dimensions=embedding_dimensions,
+            embedding_timeout=self.summary_projection_embedding_timeout,
+        )
+        return bool(self.semantic_retrieval_channels())
+
+    def _existing_projection_index_config(self) -> dict[str, Any] | None:
+        from .hybrid_projection import INDEX_BY_CHANNEL
+        from .semantic_index import SQLiteVecSemanticIndex
+
+        for channel in SEMANTIC_RETRIEVAL_CHANNELS:
+            index_name = INDEX_BY_CHANNEL.get(channel)
+            if not index_name:
+                continue
+            index_path = self.summary_projection_index_dir / f"{index_name}.sqlite"
+            if not index_path.exists():
+                continue
+            try:
+                info = SQLiteVecSemanticIndex(index_path).info()
+            except Exception:
+                continue
+            if int(info.get("document_count") or 0) <= 0:
+                continue
+            metadata = dict(info.get("metadata") or {})
+            if metadata.get("channel") and metadata.get("channel") != channel:
+                continue
+            return info
+        return None
+
     @staticmethod
     def _register_uses_deferred_metadata(policy: Any) -> bool:
         if not isinstance(policy, dict):

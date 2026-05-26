@@ -204,6 +204,11 @@ class PIFSAgentStreamTest(unittest.TestCase):
         self.assertIn("do not infer metadata presence or absence", AGENT_TOOL_POLICY)
         self.assertIn("questions about metadata fields", BASH_TOOL_DESCRIPTION)
 
+    def test_prompt_routes_summary_search_to_search_summary(self):
+        self.assertIn("search-summary when the user asks for", BASH_TOOL_DESCRIPTION)
+        self.assertIn("use search-summary <query> <folder>", AGENT_TOOL_POLICY)
+        self.assertIn("do not translate that request into find --where", AGENT_TOOL_POLICY)
+
     def test_system_prompt_sets_workspace_identity_and_scope(self):
         self.assertIn("PageIndex FileSystem Demo Agent", AGENT_SYSTEM_PROMPT)
         self.assertIn("VectifyAI Team", AGENT_SYSTEM_PROMPT)
