@@ -817,15 +817,19 @@ class PIFSCommandExecutor:
         if data and isinstance(data[0], dict) and "path" in data[0] and "file_ref" not in data[0]:
             return "\n".join(
                 (
-                    f"{item['path']}/ matched_files={item['matched_files']} "
+                    f"{self._folder_row_path(item['path'])} matched_files={item['matched_files']} "
                     f"files={item.get('file_count', 0)}"
                     if item.get("matched_files")
-                    else f"{item['path']}/ folders={item.get('children_count', 0)} "
+                    else f"{self._folder_row_path(item['path'])} folders={item.get('children_count', 0)} "
                     f"files={item.get('file_count', 0)}"
                 )
                 for item in data
             )
         return "\n".join(self._file_row_text(item) for item in data)
+
+    def _folder_row_path(self, path: str) -> str:
+        normalized = self._normalize_folder_path(path)
+        return "/" if normalized == "/" else f"{normalized}/"
 
     def _render_stat(self, data: Any) -> str:
         if not isinstance(data, dict):

@@ -106,6 +106,17 @@ def test_find_maxdepth_zero_type_directory_returns_start_folder(tmp_path):
     assert [row["path"] for row in rows] == ["/documents"]
 
 
+def test_find_directory_output_renders_root_without_double_slash(tmp_path):
+    executor = _register_find_fixture(tmp_path)
+    executor.json_output = False
+
+    output = executor.execute("find / -maxdepth 1 -type d")
+
+    assert output.splitlines()[0] == "/ folders=1 files=0"
+    assert "//" not in output
+    assert "/documents/ folders=1 files=1" in output
+
+
 def test_find_maxdepth_combines_with_where_and_limit(tmp_path):
     executor = _register_find_fixture(tmp_path)
 
