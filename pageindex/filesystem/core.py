@@ -102,7 +102,6 @@ class PageIndexFileSystem:
         self.workspace = Path(workspace).expanduser()
         self.store = SQLiteFileSystemStore(self.workspace)
         self.metadata = MetadataQueryEngine(self.store)
-        self._references: dict[str, str] = {}
         self.semantic_retrieval_backend = semantic_retrieval_backend
         self.metadata_generator = metadata_generator
         self.summary_projection_indexer = summary_projection_indexer
@@ -388,7 +387,6 @@ class PageIndexFileSystem:
         results = []
         scope_path = self._scope_folder_path(scope)
         for row in rows:
-            reference_id = self._reference_for(row["file_ref"])
             folder_paths = [
                 folder["path"]
                 for folder in self.store.folder_memberships(row["file_ref"])
@@ -396,7 +394,7 @@ class PageIndexFileSystem:
             folder_path = self._preferred_folder_path(folder_paths, scope_path, row["folder_path"])
             results.append(
                 SearchResult(
-                    reference_id=reference_id,
+                    reference_id=row["external_id"] or row["file_ref"],
                     file_ref=row["file_ref"],
                     external_id=row["external_id"],
                     title=row["title"],
@@ -693,8 +691,9 @@ class PageIndexFileSystem:
         raise ValueError(
             f"{command} is only supported for txt/text files; "
             f"got source_path={entry.source_path!r}, content_type={entry.content_type!r}. "
-            "Use cat <ref> --structure, cat <ref> --page, or cat <ref> --node "
-            "for PDF/Markdown PageIndex files."
+            "Use cat <path|file_ref|document_id> --structure, "
+            "cat <path|file_ref|document_id> --page, or "
+            "cat <path|file_ref|document_id> --node for PDF/Markdown PageIndex files."
         )
 
     def _require_pageindex_document_file(self, entry: Any, command: str) -> None:
@@ -703,7 +702,7 @@ class PageIndexFileSystem:
         raise ValueError(
             f"{command} is only supported for PDF/Markdown PageIndex files; "
             f"got source_path={entry.source_path!r}, content_type={entry.content_type!r}. "
-            "Use cat <ref> --all for txt/text files."
+            "Use cat <path|file_ref|document_id> --all for txt/text files."
         )
 
     @classmethod
@@ -1254,8 +1253,6 @@ class PageIndexFileSystem:
         return result
 
     def _resolve_reference(self, reference_id: str) -> str:
-        if reference_id in self._references:
-            return self._references[reference_id]
         return self.store.resolve_file_ref(reference_id)
 
     def _should_use_semantic_retrieval(
@@ -1315,7 +1312,6 @@ class PageIndexFileSystem:
                 continue
             seen.add(file_ref)
             entry = self.store.get_file(file_ref)
-            reference_id = self._reference_for(file_ref)
             folder_paths = [
                 folder["path"]
                 for folder in self.store.folder_memberships(file_ref)
@@ -1323,7 +1319,7 @@ class PageIndexFileSystem:
             folder_path = self._preferred_folder_path(folder_paths, scope_path, entry.folder_path)
             results.append(
                 SearchResult(
-                    reference_id=reference_id,
+                    reference_id=entry.external_id or file_ref,
                     file_ref=file_ref,
                     external_id=entry.external_id,
                     title=entry.title,
@@ -1347,14 +1343,6 @@ class PageIndexFileSystem:
             if len(results) >= limit:
                 break
         return results
-
-    def _reference_for(self, file_ref: str) -> str:
-        for reference_id, existing in self._references.items():
-            if existing == file_ref:
-                return reference_id
-        reference_id = f"ref_{len(self._references) + 1}"
-        self._references[reference_id] = file_ref
-        return reference_id
 
     @staticmethod
     def _build_descriptor(title: str, metadata: dict[str, Any]) -> str:

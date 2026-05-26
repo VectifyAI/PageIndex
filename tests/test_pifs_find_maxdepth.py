@@ -75,6 +75,29 @@ def test_find_maxdepth_one_returns_direct_files_only(tmp_path):
     assert [row["external_id"] for row in rows] == ["doc_root"]
 
 
+def test_find_output_is_path_first_without_session_refs(tmp_path):
+    executor = _register_find_fixture(tmp_path)
+    executor.json_output = False
+
+    output = executor.execute("find /documents -maxdepth 1 -type f")
+
+    assert output.startswith("/documents/Root document id=doc_root file_ref=file_")
+    assert "ref_1" not in output
+    assert "title=Root document" in output
+
+
+def test_stable_path_targets_work_without_session_refs(tmp_path):
+    executor = _register_find_fixture(tmp_path)
+    executor.json_output = False
+
+    stat = executor.execute("stat '/documents/Root document'")
+    text = executor.execute("cat '/documents/Root document' --all")
+
+    assert "target: /documents/Root document" in stat
+    assert "document_id: doc_root" in stat
+    assert "Root document fixture text" in text
+
+
 def test_find_maxdepth_zero_type_directory_returns_start_folder(tmp_path):
     executor = _register_find_fixture(tmp_path)
 

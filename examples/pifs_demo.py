@@ -5,7 +5,7 @@ This mirrors examples/agentic_vectorless_rag_demo.py, but exposes a corpus
 through the PageIndex FileSystem shell instead of direct PageIndex document
 tools. The agent receives one read-only bash-like PIFS tool and must retrieve
 evidence through commands such as ls, tree, find, grep, search-summary,
-cat <ref> --structure, cat <ref> --page, and cat <ref> --node.
+cat <path> --structure, cat <path> --page, and cat <path> --node.
 
 The demo uses PDFs under examples/documents. When a matching
 examples/documents/results/*_structure.json file exists, it is loaded into the
@@ -61,8 +61,8 @@ shell. The workspace contains registered example PDFs.
 
 Retrieval strategy:
 - Start with ls or tree to understand the workspace.
-- Use refs exactly as listed, such as ref_1, or use a concrete file path from
-  ls output. Do not invent paths like /documents/ref_1.
+- Use concrete PIFS paths from ls/find output, such as /documents/report.pdf,
+  or stable file_ref/document ids. Do not invent temporary ref_N aliases.
 - Folder paths such as /documents are positional command targets; do not put
   folder paths inside --where.
 - Use search-summary when available to find likely documents.
@@ -73,12 +73,12 @@ Retrieval strategy:
 - Use grep -R only for lexical evidence; do not treat semantic candidates as
   literal matches.
 - Run one evidence command at a time. Do not chain large commands like
-  cat <ref> --structure, grep, and cat <ref> --page in one bash call.
-- For PDFs, use cat <ref> --structure to inspect the PageIndex tree, then
-  cat <ref> --page <range> for evidence, for example:
-  cat ref_1 --page 31-35
-- For page-range questions, use cat <ref> --structure to identify the full section
-  range. Then run cat <ref> --page on the smallest useful evidence range, usually the
+  cat <path> --structure, grep, and cat <path> --page in one bash call.
+- For PDFs, use cat <path> --structure to inspect the PageIndex tree, then
+  cat <path> --page <range> for evidence, for example:
+  cat /documents/2023-annual-report.pdf --page 31-35
+- For page-range questions, use cat <path> --structure to identify the full section
+  range. Then run cat <path> --page on the smallest useful evidence range, usually the
   section start page or first 1-2 pages, before the final answer. Do not print
   a broad multi-page section unless the user asks to read the whole section.
 - Do not use cat --all on PDFs.
@@ -630,11 +630,11 @@ def run_smoke_commands(
         verbose=verbose,
     )
 
-    first_ref = registered[0]["file_ref"] if registered else None
-    if not first_ref:
+    first_target = f"/documents/{Path(str(registered[0]['path'])).name}" if registered else None
+    if not first_target:
         return
 
-    command = f"stat {first_ref}"
+    command = f"stat {first_target}"
     stat = execute_json_command(json_executor, command)
     stat_data = stat.get("data") or {}
     show_capability(
@@ -648,7 +648,7 @@ def run_smoke_commands(
         verbose=verbose,
     )
 
-    command = f"cat {first_ref} --structure"
+    command = f"cat {first_target} --structure"
     structure_payload = execute_json_command(json_executor, command)
     structure_data = structure_payload.get("data") or {}
     structure = structure_data.get("structure") or []
@@ -666,7 +666,7 @@ def run_smoke_commands(
     )
 
     evidence_range = opening_page_range_for_node(supervision_node) or "1-2"
-    command = f"cat {first_ref} --page {evidence_range}"
+    command = f"cat {first_target} --page {evidence_range}"
     page = execute_json_command(json_executor, command)
     page_text = str((page.get("data") or {}).get("text") or "")
     show_capability(

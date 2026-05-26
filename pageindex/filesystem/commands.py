@@ -92,8 +92,8 @@ class PIFSCommandExecutor:
             "- find --where: exact/canonical metadata DSL filtering using stat --schema fields only",
             "- find <folder> -maxdepth N -type f|d: bounded folder traversal for find",
             "- grep -R: recursive lexical/FTS search only; semantic vector prefilter is disabled",
-            "- cat <ref> --structure/--node/--page: cached PageIndex reads for PDF/Markdown files",
-            "- cat <ref> --all: full text artifact reads for txt/text files",
+            "- cat <path|file_ref|document_id> --structure/--node/--page: cached PageIndex reads for PDF/Markdown files",
+            "- cat <path|file_ref|document_id> --all: full text artifact reads for txt/text files",
         ]
         if "entity" in semantic_channels:
             lines.append("- find --name: entity semantic candidate discovery alias")
@@ -115,7 +115,7 @@ class PIFSCommandExecutor:
             )
         if not semantic.get("commands"):
             lines.append("- semantic vector commands: none available in this workspace")
-        lines.append("- grep <query> <ref>, cat, stat: evidence inspection")
+        lines.append("- grep <query> <path|file_ref|document_id>, cat, stat: evidence inspection")
         return "\n".join(lines)
 
     def execute(self, command: str) -> str:
@@ -432,8 +432,9 @@ class PIFSCommandExecutor:
         target = args[0]
         if target.startswith("-"):
             raise PIFSCommandError(
-                "cat syntax is target-first: cat <ref> --structure, "
-                "cat <ref> --page 31-59, or cat <ref> --node 0009"
+                "cat syntax is target-first: cat <path|file_ref|document_id> --structure, "
+                "cat <path|file_ref|document_id> --page 31-59, or "
+                "cat <path|file_ref|document_id> --node 0009"
             )
         location = "all"
         structural_mode: str | None = None
@@ -467,8 +468,8 @@ class PIFSCommandExecutor:
                 raise PIFSCommandError(f"Unsupported cat option: {arg}")
             else:
                 raise PIFSCommandError(
-                    "cat accepts one file target. Use: cat <ref> --page <page-or-range>, "
-                    "for example: cat ref_1 --page 31-59"
+                    "cat accepts one file target. Use: cat <path|file_ref|document_id> --page <page-or-range>, "
+                    "for example: cat /documents/report.pdf --page 31-59"
                 )
             i += 1
         if structural_mode == "structure":
@@ -479,7 +480,7 @@ class PIFSCommandExecutor:
             if not page_range or not re.fullmatch(r"\d+(?:-\d+)?", page_range):
                 raise PIFSCommandError(
                     "cat --page requires one page selector like 31 or 31-59. "
-                    "Use: cat <ref> --page <page-or-range>"
+                    "Use: cat <path|file_ref|document_id> --page <page-or-range>"
                 )
             return self.filesystem.pageindex_pages(target, page_range)
         return self.filesystem.cat_text_artifact(target, location)
@@ -804,7 +805,7 @@ class PIFSCommandExecutor:
             )
         if mode == "matches":
             return "\n".join(
-                f"{item['reference_id']}:{item['line']}: "
+                f"{self._file_target_path(item)}:{item['line']}: "
                 f"{self._compact_text(item['text'], max_chars=220)}"
                 for item in data.get("data", [])
             )
@@ -835,7 +836,7 @@ class PIFSCommandExecutor:
                 lines.append(f"{name}: {field.get('type', 'string')}")
             return "\n".join(lines)
         lines = [
-            f"ref: {data.get('target') or data.get('file_ref')}",
+            f"target: {data.get('target') or data.get('file_ref')}",
             f"file_ref: {data.get('file_ref')}",
             f"document_id: {data.get('external_id') or data.get('document_id') or '-'}",
             f"source_path: {data.get('source_path') or '-'}",
@@ -857,22 +858,36 @@ class PIFSCommandExecutor:
 
     def _file_row_text(self, item: dict[str, Any]) -> str:
         file_ref = item.get("file_ref")
-        ref = item.get("reference_id") or (self.filesystem._reference_for(file_ref) if file_ref else "-")
         doc_id = item.get("external_id") or item.get("document_id") or "-"
         title = self._compact_text(item.get("title") or item.get("name") or "", max_chars=80)
         source_path = item.get("source_path") or "-"
         folder_paths = item.get("folder_paths") or self._folder_paths_for_file(file_ref)
         folders = f" folders={','.join(folder_paths)}" if folder_paths else ""
-        return f"{ref} {doc_id} {title} {source_path}{folders}".strip()
+        target = self._file_target_path(item)
+        return f"{target} id={doc_id} file_ref={file_ref or '-'} title={title} source={source_path}{folders}".strip()
 
     def _grep_file_hit_text(self, item: dict[str, Any]) -> str:
         doc_id = item.get("external_id") or "-"
-        source_path = item.get("source_path") or "-"
         line = item.get("line") or 1
+        target = self._file_target_path(item)
         return (
-            f"{item['reference_id']} {doc_id} {source_path}:{line}: "
+            f"{target}:{line}: id={doc_id} "
             f"{self._compact_text(item.get('text') or '', max_chars=180)}"
         )
+
+    def _file_target_path(self, item: dict[str, Any]) -> str:
+        file_ref = item.get("file_ref")
+        title = str(item.get("title") or item.get("name") or "").strip()
+        folder_paths = item.get("folder_paths") or []
+        folder_path = item.get("folder_path")
+        if not folder_paths and folder_path:
+            folder_paths = [folder_path]
+        if not folder_paths:
+            folder_paths = self._folder_paths_for_file(file_ref)
+        if folder_paths and title:
+            folder = str(folder_paths[0] or "/").rstrip("/")
+            return f"{folder}/{title}" if folder else f"/{title}"
+        return str(item.get("source_path") or item.get("external_id") or file_ref or "-")
 
     def _semantic_retrieval_query(self, query: str) -> str:
         query = str(query or "").strip()
@@ -1040,11 +1055,10 @@ class PIFSCommandExecutor:
                 continue
             if direct_only and self._folder_path_for_source_path(file_row["source_path"]) != folder_path:
                 continue
-            reference_id = self.filesystem._reference_for(file_row["file_ref"])
             line_number, text = self._first_matching_source_line(path, query)
             hits.append(
                 {
-                    "reference_id": reference_id,
+                    "reference_id": file_row["external_id"] or file_row["file_ref"],
                     "file_ref": file_row["file_ref"],
                     "external_id": file_row["external_id"],
                     "title": file_row["title"],
@@ -1060,17 +1074,18 @@ class PIFSCommandExecutor:
 
     def _grep_file_matches(self, target: str, query: str, *, limit: int) -> list[dict[str, Any]]:
         file_ref = self.filesystem._resolve_reference(target)
-        reference_id = self.filesystem._reference_for(file_ref)
         entry = self.filesystem.store.get_file(file_ref)
         matches = []
         for line_number, line in enumerate(self.filesystem.store.read_text(file_ref).splitlines(), 1):
             if self._line_matches(line, query):
                 matches.append(
                     {
-                        "reference_id": reference_id,
+                        "reference_id": entry.external_id or file_ref,
                         "file_ref": file_ref,
                         "external_id": entry.external_id,
+                        "title": entry.title,
                         "source_path": entry.source_path,
+                        "folder_paths": self._folder_paths_for_file(file_ref),
                         "line": line_number,
                         "text": self._compact_text(line, max_chars=220),
                     }
