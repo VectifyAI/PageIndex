@@ -202,6 +202,8 @@ class PIFSAgentStreamTest(unittest.TestCase):
         self.assertIn("prefer cat <target> --node <node_id>", AGENT_TOOL_POLICY)
         self.assertIn("page-level evidence", AGENT_TOOL_POLICY)
         self.assertIn("prefer\ncat <path> --node <node_id>", BASH_TOOL_DESCRIPTION)
+        self.assertIn("stop if the evidence is sufficient", AGENT_TOOL_POLICY)
+        self.assertIn("continue with another chunk before answering", BASH_TOOL_DESCRIPTION)
 
     def test_prompt_requires_stat_for_metadata_questions(self):
         self.assertIn("stat --schema and stat <target>", AGENT_TOOL_POLICY)

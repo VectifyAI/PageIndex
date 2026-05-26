@@ -54,9 +54,9 @@ class PIFSCommandExecutor:
     MAX_GREP_LIMIT = 20
     MAX_SEMANTIC_LIMIT = 20
     MAX_TEXT_LINES = 100
-    MAX_PAGE_SPAN = 3
+    MAX_PAGE_SPAN = 5
     MAX_STRUCTURE_NODES = 25
-    MAX_NODE_IDS = 5
+    MAX_NODE_IDS = 10
     MAX_NODE_TEXT_LINES = 100
     MAX_NODE_TEXT_CHARS = 12_000
     MAX_STAT_FIELD_TARGETS = 20
@@ -107,8 +107,8 @@ class PIFSCommandExecutor:
             "- find <folder> -maxdepth N -type f|d: bounded folder traversal for find",
             "- grep -R: recursive lexical/FTS search only; semantic vector prefilter is disabled",
             "- cat <path|file_ref|document_id> --structure: cached PageIndex node list, paginated at 25 nodes",
-            "- cat <path|file_ref|document_id> --page: cached PageIndex page reads, limited to 3 pages",
-            "- cat <path|file_ref|document_id> --node: cached PageIndex node reads, limited to 5 node ids",
+            "- cat <path|file_ref|document_id> --page: cached PageIndex page reads, limited to 5 pages",
+            "- cat <path|file_ref|document_id> --node: cached PageIndex node reads, limited to 10 node ids",
             "- cat <path|file_ref|document_id> --all: text artifact reads for txt/text files, paginated at 100 lines",
             "- stat --field <metadata_field> <target...>: one metadata field across up to 20 documents",
         ]
@@ -2003,8 +2003,10 @@ class PIFSCommandExecutor:
         if value > max_value:
             raise PIFSCommandError(
                 f"{label} supports at most {max_value}; requested {value}. "
-                "Use a smaller value. If you are unsure where to inspect, "
-                "use cat <target> --structure first."
+                "Split it into a smaller call. If the evidence is sufficient, "
+                "stop; if not, continue with additional chunks before "
+                "answering. If you are unsure where to inspect, use cat <target> "
+                "--structure first."
             )
         return value
 

@@ -74,8 +74,10 @@ ambiguous. After structure identifies a relevant section node, prefer
 cat <path> --node <node_id>; use cat <path> --page <range> when the user asks
 for page-level evidence, no suitable node exists, or exact page text is needed.
 cat <path> --structure is paginated; request more with --offset if needed. Page
-reads are limited to three pages at once, node reads to at most five node ids,
-and text cat --all returns only the first page of text lines.
+reads are limited to five pages at once, node reads to at most ten node ids,
+and text cat --all returns only the first page of text lines. If a cat limit
+error requires a smaller call, stop when the evidence is sufficient; otherwise
+continue with another chunk before answering.
 For questions about metadata fields, available summaries, or whether metadata
 was provided, inspect stat --schema and stat <target> before making claims.
 Do not use stat as a general content/topic discovery step. For document Q&A,
@@ -101,8 +103,9 @@ Tool policy:
 - Use stat only for metadata/schema/status questions or to resolve ambiguous target identity. Do not run stat merely to understand what a document says.
 - Prefer target-first cat syntax with stable targets: cat <path> --structure, cat <path> --page 31-59, cat <path> --node <node_id>.
 - cat <target> --structure returns at most 25 nodes; use --offset and --limit for more structure pages.
-- cat <target> --page accepts at most 3 pages at once. If a larger range is needed, first inspect cat <target> --structure and then read a smaller page range or node.
-- cat <target> --node accepts at most 5 node ids at once. Prefer one relevant node when possible.
+- cat <target> --page accepts at most 5 pages at once. If a larger range is needed, first inspect cat <target> --structure and then read a smaller page range or node.
+- cat <target> --node accepts at most 10 node ids at once. Prefer relevant nodes from structure when possible.
+- When recovering from cat page/node/text limit errors, stop if the evidence is sufficient; if it is not sufficient, make another smaller call before answering.
 - cat <target> --all returns at most 100 text lines; use cat <target> --range <start>-<end> for the next page.
 - After cat <target> --structure finds a relevant section/subsection with a node_id, prefer cat <target> --node <node_id> for content from that semantic unit.
 - Use cat <target> --page <start>-<end> when the user explicitly asks for pages/page ranges, when no suitable node_id exists, or when you need exact page text to verify page-level evidence.

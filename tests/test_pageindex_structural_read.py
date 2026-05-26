@@ -474,22 +474,48 @@ def test_cat_structure_page_node_and_text_outputs_are_hard_limited():
         assert len(second_structure["data"]["structure"]) == 5
         assert second_structure["data"]["structure"][0]["node_id"] == "0026"
 
-        pages = json.loads(executor.execute("cat dsid_limited_pdf --page 1-3"))
-        assert pages["data"]["text"] == "Page 1 text\n\nPage 2 text\n\nPage 3 text"
-        assert pages["data"]["page_pagination"]["limit"] == 3
-        with pytest.raises(PIFSCommandError, match="at most 3"):
-            executor.execute("cat dsid_limited_pdf --page 1-4")
+        pages = json.loads(executor.execute("cat dsid_limited_pdf --page 1-5"))
+        assert pages["data"]["text"] == (
+            "Page 1 text\n\nPage 2 text\n\nPage 3 text\n\nPage 4 text\n\nPage 5 text"
+        )
+        assert pages["data"]["page_pagination"]["limit"] == 5
+        with pytest.raises(PIFSCommandError, match="at most 5"):
+            executor.execute("cat dsid_limited_pdf --page 1-6")
+        with pytest.raises(PIFSCommandError, match="evidence is sufficient"):
+            executor.execute("cat dsid_limited_pdf --page 1-6")
 
         nodes = json.loads(
-            executor.execute("cat dsid_limited_pdf --node 0001 0002 0003 0004 0005")
+            executor.execute(
+                "cat dsid_limited_pdf --node 0001 0002 0003 0004 0005 "
+                "0006 0007 0008 0009 0010"
+            )
         )
-        assert nodes["data"]["node_ids"] == ["0001", "0002", "0003", "0004", "0005"]
+        assert nodes["data"]["node_ids"] == [
+            "0001",
+            "0002",
+            "0003",
+            "0004",
+            "0005",
+            "0006",
+            "0007",
+            "0008",
+            "0009",
+            "0010",
+        ]
         comma_nodes = json.loads(
             executor.execute("cat dsid_limited_pdf --node 0001,0002")
         )
         assert comma_nodes["data"]["node_ids"] == ["0001", "0002"]
-        with pytest.raises(PIFSCommandError, match="at most 5"):
-            executor.execute("cat dsid_limited_pdf --node 0001 0002 0003 0004 0005 0006")
+        with pytest.raises(PIFSCommandError, match="at most 10"):
+            executor.execute(
+                "cat dsid_limited_pdf --node 0001 0002 0003 0004 0005 "
+                "0006 0007 0008 0009 0010 0011"
+            )
+        with pytest.raises(PIFSCommandError, match="continue with additional chunks"):
+            executor.execute(
+                "cat dsid_limited_pdf --node 0001 0002 0003 0004 0005 "
+                "0006 0007 0008 0009 0010 0011"
+            )
 
         with pytest.raises(PIFSCommandError, match="cat accepts one file target"):
             executor.execute("cat dsid_limited_pdf 0001")
