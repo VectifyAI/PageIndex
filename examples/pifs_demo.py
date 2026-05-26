@@ -63,6 +63,8 @@ Retrieval strategy:
 - Start with ls or tree to understand the workspace.
 - Use refs exactly as listed, such as ref_1, or use a concrete file path from
   ls output. Do not invent paths like /documents/ref_1.
+- Folder paths such as /documents are positional command targets; do not put
+  folder paths inside --where.
 - Use search-summary when available to find likely documents.
   Quote multi-word queries and include a path, for example:
   search-summary "Federal Reserve supervision regulation" /documents

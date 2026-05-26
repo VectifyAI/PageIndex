@@ -45,6 +45,8 @@ Tool policy:
 - The bash tool is a PageIndex virtual shell, not an operating-system shell.
 - The default agent tool surface is read-only.
 - Use only commands listed in the workspace capabilities.
+- Folder paths such as /documents are positional command targets; never put folder paths in --where.
+- Use --where only with metadata fields shown by stat --schema.
 - grep -R performs lexical evidence search.
 - Semantic search commands are candidate-discovery tools and do not guarantee literal text matches.
 - Tool errors are returned as ERROR text; recover by trying an available command.

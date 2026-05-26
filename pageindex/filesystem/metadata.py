@@ -15,6 +15,7 @@ class MetadataQueryEngine:
     FIELD_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
     OPERATORS = {"$eq", "$ne", "$in", "$gt", "$gte", "$lt", "$lte", "$contains"}
     LOGICAL_OPERATORS = {"$and", "$or"}
+    FOLDER_SCOPE_FIELD_HINTS = {"path", "folder", "folders", "folder_path", "folder_paths"}
     MAX_DEPTH = 5
 
     def __init__(self, store: Any):
@@ -121,6 +122,12 @@ class MetadataQueryEngine:
     def validate_field(self, field: str) -> None:
         self.validate_field_name(field)
         if not self.store.metadata_field_exists(field):
+            if field in self.FOLDER_SCOPE_FIELD_HINTS:
+                raise MetadataQueryError(
+                    f"Unknown metadata field: {field}. Folder paths are positional PIFS paths, "
+                    "not metadata fields; use `ls /documents` or `find /documents -type f`. "
+                    "Use --where only with fields from `stat --schema`."
+                )
             raise MetadataQueryError(f"Unknown metadata field: {field}")
 
     def validate_field_name(self, field: str) -> None:

@@ -115,3 +115,17 @@ def test_find_maxdepth_is_advertised_to_agents(tmp_path):
 
     assert "-maxdepth N -type f|d" in executor.describe_available_command_surfaces()
     assert executor.command_capabilities()["retrieval"]["lexical"]["find_maxdepth"] is True
+
+
+def test_where_path_error_points_to_folder_scope(tmp_path):
+    from pageindex.filesystem.commands import PIFSCommandError
+
+    executor = _register_find_fixture(tmp_path)
+
+    with pytest.raises(PIFSCommandError) as exc_info:
+        executor.execute("""find --where '{"path":"/documents"}'""")
+
+    message = str(exc_info.value)
+    assert "Folder paths are positional PIFS paths" in message
+    assert "find /documents -type f" in message
+    assert "stat --schema" in message
