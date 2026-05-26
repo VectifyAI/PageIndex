@@ -110,15 +110,20 @@ class SummaryProjectionIndexer:
             )
             return
         try:
-            if self.index.dimension() != self.embedding_dimensions:
-                self.index.reset(
-                    dimension=self.embedding_dimensions,
-                    metadata=self._index_metadata(),
-                )
-        except Exception:
-            self.index.reset(
-                dimension=self.embedding_dimensions,
-                metadata=self._index_metadata(),
+            existing_dimension = self.index.dimension()
+        except Exception as exc:
+            raise RuntimeError(
+                "could not validate existing summary projection index config; "
+                f"refusing to reset {self.index.db_path}. Move the existing index "
+                "aside or rebuild it intentionally before changing embedding config."
+            ) from exc
+        if existing_dimension != self.embedding_dimensions:
+            raise RuntimeError(
+                "summary projection index dimension mismatch: "
+                f"{self.index.db_path} was built with dimension {existing_dimension}, "
+                f"but configured embedding_dimensions is {self.embedding_dimensions}. "
+                "Use the matching embedding config, or rebuild the projection index "
+                "at a new path after preserving the existing data."
             )
 
     def _index_metadata(self) -> dict[str, Any]:

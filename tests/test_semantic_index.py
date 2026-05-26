@@ -91,6 +91,53 @@ def test_summary_projection_indexes_unified_metadata_summary(tmp_path):
     assert hits[0].metadata["department"] == "ops"
 
 
+def test_summary_projection_dimension_mismatch_preserves_existing_index(tmp_path):
+    from pageindex.filesystem.projection_indexing import SummaryProjectionIndexer
+
+    class FakeEmbedder:
+        def embed(self, texts):
+            return [[1.0, 0.0, 0.0, 0.0] for _ in texts]
+
+    index_dir = tmp_path / "projection"
+    index = SQLiteVecSemanticIndex(index_dir / "summary_only_vector.sqlite")
+    index.reset(
+        dimension=3,
+        metadata={
+            "channel": "summary",
+            "embedding_provider": "test",
+            "embedding_model": "fake",
+            "embedding_dimensions": 3,
+        },
+    )
+    index.upsert_many(
+        [
+            SemanticIndexRecord(
+                file_ref="file_a",
+                external_id="doc_a",
+                source_type="documents",
+                source_path="docs/a.pdf",
+                title="A",
+                text="summary",
+                vector=[1.0, 0.0, 0.0],
+            )
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="summary projection index dimension mismatch"):
+        SummaryProjectionIndexer(
+            index_dir,
+            embedder=FakeEmbedder(),
+            embedding_provider="test",
+            embedding_model="fake",
+            embedding_dimensions=4,
+        )
+
+    preserved = SQLiteVecSemanticIndex(index.db_path)
+    assert preserved.info()["dimension"] == 3
+    assert preserved.info()["document_count"] == 1
+    assert preserved.search([1.0, 0.0, 0.0], limit=1)[0].external_id == "doc_a"
+
+
 def test_hash_embedding_provider_is_not_available():
     from pageindex.filesystem.hybrid_projection import make_embedder
 
