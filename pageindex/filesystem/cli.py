@@ -9,7 +9,12 @@ import sys
 from pathlib import Path
 from typing import Iterator, TextIO
 
-from .agent import REASONING_EFFORT_CHOICES, REASONING_SUMMARY_CHOICES, run_pifs_agent
+from .agent import (
+    PIFSAgentSession,
+    REASONING_EFFORT_CHOICES,
+    REASONING_SUMMARY_CHOICES,
+    run_pifs_agent,
+)
 from .commands import PIFSCommandError, PIFSCommandExecutor
 from .core import PageIndexFileSystem
 
@@ -200,6 +205,7 @@ def _run_chat(argv: list[str], *, workspace_default: str | None) -> int:
         default_stream_mode="all",
     )
     filesystem = _filesystem_from_workspace(args.workspace)
+    session = PIFSAgentSession(filesystem, **_agent_kwargs(args))
     while True:
         try:
             question = _sanitize_chat_question(input("pifs> "))
@@ -213,7 +219,7 @@ def _run_chat(argv: list[str], *, workspace_default: str | None) -> int:
         if question.lower() in EXIT_COMMANDS:
             break
         with _suppress_tty_input_echo():
-            answer = run_pifs_agent(filesystem, question, **_agent_kwargs(args))
+            answer = session.run(question)
         if args.stream_mode == "off":
             print(answer)
     return 0

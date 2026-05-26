@@ -92,6 +92,16 @@ class PIFSAgentStreamTest(unittest.TestCase):
         self.assertIn("more lines omitted from preview", printed)
         self.assertNotIn("line 49", printed)
 
+    def test_request_started_prints_immediate_stream_feedback(self):
+        output = io.StringIO()
+        observer = PIFSAgentStreamObserver("all", output=output)
+
+        observer.emit_request_started()
+
+        printed = output.getvalue()
+        self.assertIn("[llm request started]", printed)
+        self.assertIn("waiting for first model token or PIFS tool call", printed)
+
     def test_raw_reasoning_is_not_logged_by_default_but_summary_is(self):
         output = io.StringIO()
         stream_log = []

@@ -127,26 +127,32 @@ def test_cli_chat_runs_one_question_and_exits(monkeypatch, capsys, tmp_path):
 
     workspace = tmp_path / "workspace"
     inputs = iter(["", "Summarize the workspace", "exit"])
-    agent_calls = []
+    session_instances = []
+    session_questions = []
 
-    def fake_run_pifs_agent(filesystem, question, **kwargs):
-        agent_calls.append((filesystem, question, kwargs))
-        return f"answer:{question}"
+    class FakeSession:
+        def __init__(self, filesystem, **kwargs):
+            self.filesystem = filesystem
+            self.kwargs = kwargs
+            session_instances.append(self)
+
+        def run(self, question):
+            session_questions.append((self, question))
+            return f"answer:{question}"
 
     monkeypatch.setattr(cli, "PageIndexFileSystem", FakeFileSystem)
-    monkeypatch.setattr(cli, "run_pifs_agent", fake_run_pifs_agent)
+    monkeypatch.setattr(cli, "PIFSAgentSession", FakeSession)
     monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
 
     status = cli.main(["chat", "--workspace", str(workspace), "--model", "test-model"])
 
     assert status == 0
     assert capsys.readouterr().out == ""
-    assert len(agent_calls) == 1
-    filesystem, question, kwargs = agent_calls[0]
-    assert filesystem.workspace == workspace
-    assert question == "Summarize the workspace"
-    assert kwargs["model"] == "test-model"
-    assert kwargs["stream_mode"] == "all"
+    assert len(session_instances) == 1
+    assert session_instances[0].filesystem.workspace == workspace
+    assert session_questions == [(session_instances[0], "Summarize the workspace")]
+    assert session_instances[0].kwargs["model"] == "test-model"
+    assert session_instances[0].kwargs["stream_mode"] == "all"
 
 
 def test_cli_chat_sanitizes_control_input(monkeypatch, capsys, tmp_path):
@@ -156,12 +162,16 @@ def test_cli_chat_sanitizes_control_input(monkeypatch, capsys, tmp_path):
     inputs = iter(["\x12", "he\x7fllo\x1b[A", "exit"])
     agent_calls = []
 
-    def fake_run_pifs_agent(filesystem, question, **kwargs):
-        agent_calls.append(question)
-        return f"answer:{question}"
+    class FakeSession:
+        def __init__(self, filesystem, **kwargs):
+            pass
+
+        def run(self, question):
+            agent_calls.append(question)
+            return f"answer:{question}"
 
     monkeypatch.setattr(cli, "PageIndexFileSystem", FakeFileSystem)
-    monkeypatch.setattr(cli, "run_pifs_agent", fake_run_pifs_agent)
+    monkeypatch.setattr(cli, "PIFSAgentSession", FakeSession)
     monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
 
     status = cli.main(["chat", "--workspace", str(workspace), "--stream-mode", "off"])
@@ -205,14 +215,17 @@ def test_cli_chat_stream_mode_can_be_overridden(monkeypatch, tmp_path):
 
     workspace = tmp_path / "workspace"
     inputs = iter(["Summarize the workspace", "exit"])
-    agent_calls = []
+    session_kwargs = []
 
-    def fake_run_pifs_agent(filesystem, question, **kwargs):
-        agent_calls.append((filesystem, question, kwargs))
-        return f"answer:{question}"
+    class FakeSession:
+        def __init__(self, filesystem, **kwargs):
+            session_kwargs.append(kwargs)
+
+        def run(self, question):
+            return f"answer:{question}"
 
     monkeypatch.setattr(cli, "PageIndexFileSystem", FakeFileSystem)
-    monkeypatch.setattr(cli, "run_pifs_agent", fake_run_pifs_agent)
+    monkeypatch.setattr(cli, "PIFSAgentSession", FakeSession)
     monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
 
     status = cli.main(
@@ -226,4 +239,32 @@ def test_cli_chat_stream_mode_can_be_overridden(monkeypatch, tmp_path):
     )
 
     assert status == 0
-    assert agent_calls[0][2]["stream_mode"] == "tools"
+    assert session_kwargs[0]["stream_mode"] == "tools"
+
+
+def test_cli_chat_reuses_one_agent_session_for_multiple_questions(monkeypatch, capsys, tmp_path):
+    from pageindex.filesystem import cli
+
+    workspace = tmp_path / "workspace"
+    inputs = iter(["first", "second", "exit"])
+    sessions = []
+
+    class FakeSession:
+        def __init__(self, filesystem, **kwargs):
+            self.questions = []
+            sessions.append(self)
+
+        def run(self, question):
+            self.questions.append(question)
+            return f"answer:{question}"
+
+    monkeypatch.setattr(cli, "PageIndexFileSystem", FakeFileSystem)
+    monkeypatch.setattr(cli, "PIFSAgentSession", FakeSession)
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
+
+    status = cli.main(["chat", "--workspace", str(workspace), "--stream-mode", "off"])
+
+    assert status == 0
+    assert len(sessions) == 1
+    assert sessions[0].questions == ["first", "second"]
+    assert capsys.readouterr().out == "answer:first\nanswer:second\n"
