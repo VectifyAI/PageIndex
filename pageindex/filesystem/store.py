@@ -160,7 +160,6 @@ class SQLiteFileSystemStore:
         if not records:
             return
         with self.connect() as conn:
-            conn.execute("PRAGMA synchronous = OFF")
             conn.execute("PRAGMA temp_store = MEMORY")
             folder_cache: dict[tuple[str, str], str] = {}
             file_rows = []
