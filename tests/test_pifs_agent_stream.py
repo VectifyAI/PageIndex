@@ -79,6 +79,17 @@ class PIFSAgentStreamTest(unittest.TestCase):
         self.assertEqual(stream_log[1]["kind"], "tool_result")
         self.assertEqual(stream_log[2], {"kind": "tool_args", "text": '{"command":"ls /"}'})
 
+    def test_empty_tool_command_is_not_printed_or_logged(self):
+        output = io.StringIO()
+        stream_log = []
+        observer = PIFSAgentStreamObserver("tools", stream_log=stream_log, output=output)
+
+        observer.emit_tool_call("")
+        observer.emit_tool_call("   ")
+
+        self.assertEqual(output.getvalue(), "")
+        self.assertEqual(stream_log, [])
+
     def test_tool_result_preview_compacts_large_outputs(self):
         output = io.StringIO()
         observer = PIFSAgentStreamObserver("tools", output=output)
@@ -187,6 +198,11 @@ class PIFSAgentStreamTest(unittest.TestCase):
         self.assertIn("prefer cat <target> --node <node_id>", AGENT_TOOL_POLICY)
         self.assertIn("page-level evidence", AGENT_TOOL_POLICY)
         self.assertIn("prefer\ncat <path> --node <node_id>", BASH_TOOL_DESCRIPTION)
+
+    def test_prompt_requires_stat_for_metadata_questions(self):
+        self.assertIn("stat --schema and stat <target>", AGENT_TOOL_POLICY)
+        self.assertIn("do not infer metadata presence or absence", AGENT_TOOL_POLICY)
+        self.assertIn("questions about metadata fields", BASH_TOOL_DESCRIPTION)
 
     def test_system_prompt_sets_workspace_identity_and_scope(self):
         self.assertIn("PageIndex FileSystem Demo Agent", AGENT_SYSTEM_PROMPT)

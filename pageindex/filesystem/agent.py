@@ -51,6 +51,8 @@ cat <path> --node 0009. You may also use file_ref or document_id when a path is
 ambiguous. After structure identifies a relevant section node, prefer
 cat <path> --node <node_id>; use cat <path> --page <range> when the user asks
 for page-level evidence, no suitable node exists, or exact page text is needed.
+For questions about metadata fields, available summaries, or whether metadata
+was provided, inspect stat --schema and stat <target> before making claims.
 """
 
 AGENT_TOOL_POLICY = """
@@ -69,6 +71,8 @@ Tool policy:
 - Use cat <target> --page <start>-<end> when the user explicitly asks for pages/page ranges, when no suitable node_id exists, or when you need exact page text to verify page-level evidence.
 - Avoid fetching a broad page span after a matching node is available unless page-level citation or verification is required.
 - Do not call cat --page <target> <start> <end>; if you need a page span, use cat <target> --page <start>-<end>.
+- For metadata or summary-field questions, run stat --schema and stat <target> for relevant files before answering; do not infer metadata presence or absence from ls/find output alone.
+- Distinguish default/register metadata from caller-provided custom metadata when the evidence supports it.
 """
 
 STREAM_MODE_ALIASES = {
@@ -361,6 +365,8 @@ class PIFSAgentStreamObserver:
         print(text, end="", file=self.output, flush=True)
 
     def emit_tool_call(self, command: str, *, force: bool = False) -> None:
+        if not command.strip():
+            return
         if self.stream_log is not None:
             self.stream_log.append({"kind": "tool_call", "command": command})
         if not (force or self.wants_tool_stream):
