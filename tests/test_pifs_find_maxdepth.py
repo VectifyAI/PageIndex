@@ -208,58 +208,6 @@ def test_batch_metadata_status_generates_into_unified_metadata(tmp_path):
     assert after.metadata_status["fields"]["summary"]["status"] == "generated"
 
 
-def test_v4_metadata_columns_migrate_to_unified_metadata_status(tmp_path):
-    from pageindex.filesystem import PageIndexFileSystem
-
-    source = tmp_path / "source.txt"
-    source.write_text("fixture text", encoding="utf-8")
-    workspace = tmp_path / "workspace"
-    filesystem = PageIndexFileSystem(workspace=workspace)
-    file_ref = filesystem.register_file(
-        storage_uri=source.as_uri(),
-        source_path="docs/source.txt",
-        folder_path="/documents",
-        external_id="doc_migrate",
-        title="Migrated document",
-        content=source.read_text(encoding="utf-8"),
-        metadata={"department": "ops"},
-    )
-
-    with filesystem.store.connect() as conn:
-        conn.execute(
-            "ALTER TABLE files ADD COLUMN derived_metadata_json TEXT NOT NULL DEFAULT '{}'"
-        )
-        conn.execute(
-            "ALTER TABLE files ADD COLUMN metadata_generation_json TEXT NOT NULL DEFAULT '{}'"
-        )
-        conn.execute(
-            """
-            UPDATE files
-            SET metadata_json = ?,
-                derived_metadata_json = ?,
-                metadata_generation_json = ?,
-                metadata_status_json = '{}'
-            WHERE file_ref = ?
-            """,
-            (
-                '{"department":"ops","summary":"raw summary"}',
-                '{"summary":"generated summary"}',
-                '{"status":"generated","fields":{"summary":{"requested":true,"status":"generated"}}}',
-                file_ref,
-            ),
-        )
-        conn.execute("PRAGMA user_version = 4")
-
-    migrated = PageIndexFileSystem(workspace=workspace)
-    entry = migrated.store.get_file(file_ref)
-
-    assert entry.metadata["department"] == "ops"
-    assert entry.metadata["summary"] == "generated summary"
-    assert entry.metadata_status["status"] == "generated"
-    assert entry.metadata_status["fields"]["summary"]["owner"] == "pifs"
-    assert entry.metadata_status["fields"]["summary"]["source"] == "llm"
-
-
 def test_find_maxdepth_zero_type_directory_returns_start_folder(tmp_path):
     executor = _register_find_fixture(tmp_path)
 
