@@ -87,6 +87,40 @@ def test_semantic_search_scope_filters_explicit_source_type_facets():
     ) == {}
 
 
+def test_grep_source_file_requires_terms_on_same_line(tmp_path):
+    from pageindex.filesystem import PIFSCommandExecutor, PageIndexFileSystem
+
+    source_dir = tmp_path / "source" / "documents"
+    source_dir.mkdir(parents=True)
+    source = source_dir / "split.json"
+    source.write_text(
+        '{\n  "first": "alpha evidence lives here",\n'
+        '  "second": "omega evidence lives there"\n}\n',
+        encoding="utf-8",
+    )
+    filesystem = PageIndexFileSystem(workspace=tmp_path / "workspace")
+    filesystem.register_file(
+        storage_uri=str(source),
+        source_path="documents/split.json",
+        folder_path="/documents",
+        external_id="doc_split_terms",
+        title="Split source terms",
+        content="registered artifact without the searched tokens",
+    )
+    executor = PIFSCommandExecutor(filesystem, json_output=True)
+
+    result = json.loads(executor.execute('grep -R "alpha omega" /documents'))
+
+    assert result["data"]["mode"] == "files"
+    assert result["data"]["data"] == []
+
+    matched = json.loads(executor.execute('grep -R "alpha evidence" /documents'))
+
+    assert matched["data"]["data"][0]["external_id"] == "doc_split_terms"
+    assert matched["data"]["data"][0]["line"] == 2
+    assert "alpha evidence" in matched["data"]["data"][0]["text"]
+
+
 def test_existing_summary_projection_index_configures_retrieval_backend(tmp_path, monkeypatch):
     from pageindex.filesystem import PageIndexFileSystem
     from pageindex.filesystem.semantic_index import SemanticIndexRecord, SQLiteVecSemanticIndex

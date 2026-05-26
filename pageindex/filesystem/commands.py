@@ -1466,6 +1466,8 @@ class PIFSCommandExecutor:
             if direct_only and self._folder_path_for_source_path(file_row["source_path"]) != folder_path:
                 continue
             line_number, text = self._first_matching_source_line(path, query)
+            if line_number is None:
+                continue
             hits.append(
                 {
                     "file_ref": file_row["file_ref"],
@@ -1560,15 +1562,15 @@ class PIFSCommandExecutor:
                     break
         return filtered
 
-    def _first_matching_source_line(self, path: Path, query: str) -> tuple[int, str]:
+    def _first_matching_source_line(self, path: Path, query: str) -> tuple[int | None, str]:
         try:
             lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
         except OSError:
-            return 1, ""
+            return None, ""
         for line_number, line in enumerate(lines, 1):
             if self._line_matches(line, query):
                 return line_number, self._compact_text(line, max_chars=220)
-        return 1, self._compact_text(lines[0], max_chars=220) if lines else ""
+        return None, ""
 
     def _source_root(self) -> Path | None:
         with self.filesystem.store.connect() as conn:
