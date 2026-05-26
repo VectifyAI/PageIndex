@@ -207,10 +207,14 @@ class PIFSAgentStreamTest(unittest.TestCase):
         self.assertIn("stat --schema and stat <target>", AGENT_TOOL_POLICY)
         self.assertIn("do not infer metadata presence or absence", AGENT_TOOL_POLICY)
         self.assertIn("questions about metadata fields", BASH_TOOL_DESCRIPTION)
+        self.assertIn("Use stat only for metadata/schema/status questions", AGENT_TOOL_POLICY)
+        self.assertIn("Do not run stat merely to understand what a document says", AGENT_TOOL_POLICY)
+        self.assertIn("Do not use stat as a general content/topic discovery step", BASH_TOOL_DESCRIPTION)
 
     def test_prompt_routes_summary_search_to_search_summary(self):
         self.assertIn("search-summary when the user asks for", BASH_TOOL_DESCRIPTION)
-        self.assertIn("use search-summary <query> <folder>", AGENT_TOOL_POLICY)
+        self.assertIn('use search-summary "<query>" <folder>', AGENT_TOOL_POLICY)
+        self.assertIn('search-summary "Federal Reserve" /documents', BASH_TOOL_DESCRIPTION)
         self.assertIn("do not translate that request into find --where", AGENT_TOOL_POLICY)
 
     def test_system_prompt_sets_workspace_identity_and_scope(self):
@@ -222,6 +226,8 @@ class PIFSAgentStreamTest(unittest.TestCase):
         self.assertIn("workspace-related topic question", AGENT_SYSTEM_PROMPT)
         self.assertIn("clarify only after a reasonable search", AGENT_SYSTEM_PROMPT)
         self.assertIn("search for candidate documents before asking", AGENT_TOOL_POLICY)
+        self.assertIn("Do not conclude that no relevant document exists from one failed grep", AGENT_SYSTEM_PROMPT)
+        self.assertIn("A single failed grep is not enough evidence", AGENT_TOOL_POLICY)
 
     def test_threaded_runtime_error_is_not_retried_on_fresh_loop(self):
         session = object.__new__(PIFSAgentSession)

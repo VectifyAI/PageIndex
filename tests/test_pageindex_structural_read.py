@@ -341,8 +341,10 @@ def test_cat_structure_page_reuses_pageindex_client_cache_without_indexing(monke
         assert structure["data"]["available"] is True
         assert structure["data"]["pageindex_doc_id"] == "doc_cached_pdf"
         assert structure["data"]["structure"][0]["title"] == "Introduction"
+        assert structure["data"]["structure"][1]["title"] == "Findings"
+        assert structure["data"]["structure_pagination"]["limit"] == 25
         assert "text" not in structure["data"]["structure"][0]
-        assert "text" not in structure["data"]["structure"][0]["nodes"][0]
+        assert "text" not in structure["data"]["structure"][1]
 
         assert pages["data"]["available"] is True
         assert pages["data"]["text"] == "Page one text\n\nPage two text"
@@ -399,6 +401,92 @@ def test_cat_node_reads_pageindex_client_structure_without_custom_pifs_artifact(
         assert node["data"]["node"]["title"] == "Notes"
         assert node["data"]["text"] == "# Notes\n\nBody"
         assert "text" not in node["data"]["node"]
+
+
+def test_cat_structure_page_node_and_text_outputs_are_hard_limited():
+    from pageindex.filesystem import PIFSCommandExecutor, PageIndexFileSystem
+    from pageindex.filesystem.commands import PIFSCommandError
+
+    with tempfile.TemporaryDirectory() as tmp:
+        source = Path(tmp) / "report.pdf"
+        source.write_bytes(b"%PDF-1.4\n% test fixture\n")
+        filesystem = PageIndexFileSystem(workspace=Path(tmp) / "workspace")
+        structure_nodes = [
+            {
+                "title": f"Section {index}",
+                "node_id": f"{index:04d}",
+                "start_index": index,
+                "end_index": index,
+                "text": f"node {index} text",
+                "nodes": [],
+            }
+            for index in range(1, 31)
+        ]
+        write_pageindex_client_doc(
+            filesystem.pageindex_client_workspace,
+            "doc_limited_pdf",
+            {
+                "id": "doc_limited_pdf",
+                "type": "pdf",
+                "path": str(source.resolve()),
+                "doc_name": "report.pdf",
+                "doc_description": "",
+                "page_count": 10,
+                "structure": structure_nodes,
+                "pages": [
+                    {"page": index, "content": f"Page {index} text"}
+                    for index in range(1, 11)
+                ],
+            },
+        )
+        filesystem.register_file(
+            storage_uri=source.as_uri(),
+            source_path="docs/report.pdf",
+            external_id="dsid_limited_pdf",
+            title="Limited structural report",
+            content="text artifact remains available for grep",
+        )
+        text_content = "\n".join(f"line {index}" for index in range(1, 106))
+        filesystem.register_file(
+            storage_uri="file:///tmp/long.txt",
+            source_path="docs/long.txt",
+            external_id="dsid_long_text",
+            title="Long text",
+            content=text_content,
+        )
+        executor = PIFSCommandExecutor(filesystem, json_output=True)
+
+        first_structure = json.loads(executor.execute("cat dsid_limited_pdf --structure"))
+        assert len(first_structure["data"]["structure"]) == 25
+        assert first_structure["data"]["structure_pagination"]["has_more"] is True
+        assert first_structure["data"]["structure_pagination"]["next_offset"] == 25
+
+        second_structure = json.loads(
+            executor.execute("cat dsid_limited_pdf --structure --offset 25")
+        )
+        assert len(second_structure["data"]["structure"]) == 5
+        assert second_structure["data"]["structure"][0]["node_id"] == "0026"
+
+        pages = json.loads(executor.execute("cat dsid_limited_pdf --page 1-3"))
+        assert pages["data"]["text"] == "Page 1 text\n\nPage 2 text\n\nPage 3 text"
+        assert pages["data"]["page_pagination"]["limit"] == 3
+        with pytest.raises(PIFSCommandError, match="at most 3"):
+            executor.execute("cat dsid_limited_pdf --page 1-4")
+
+        nodes = json.loads(
+            executor.execute("cat dsid_limited_pdf --node 0001,0002,0003,0004,0005")
+        )
+        assert nodes["data"]["node_ids"] == ["0001", "0002", "0003", "0004", "0005"]
+        with pytest.raises(PIFSCommandError, match="at most 5"):
+            executor.execute("cat dsid_limited_pdf --node 0001,0002,0003,0004,0005,0006")
+
+        text = json.loads(executor.execute("cat dsid_long_text --all"))
+        assert "line 100" in text["data"]["text"]
+        assert "line 101" not in text["data"]["text"]
+        assert text["data"]["pagination"]["has_more"] is True
+        assert text["data"]["pagination"]["next_range"] == "101-105"
+        with pytest.raises(PIFSCommandError, match="at most 100"):
+            executor.execute("cat dsid_long_text --range 1-101")
 
 
 def test_tree_folder_behavior_is_preserved():

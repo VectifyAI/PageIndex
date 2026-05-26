@@ -32,6 +32,7 @@ from .store import (
     normalize_path,
 )
 from .structural_read import (
+    flatten_pageindex_structure_nodes,
     first_node_location,
     find_pageindex_node,
     strip_pageindex_text_fields,
@@ -621,7 +622,13 @@ class PageIndexFileSystem:
         start, end = self._parse_line_range(location)
         return self._open_lines(file_ref, start, end)
 
-    def pageindex_structure(self, target: str) -> dict[str, Any]:
+    def pageindex_structure(
+        self,
+        target: str,
+        *,
+        offset: int = 0,
+        limit: int = 25,
+    ) -> dict[str, Any]:
         file_ref = self._resolve_target(target)
         entry = self.store.get_file(file_ref)
         self._require_pageindex_document_file(entry, "cat --structure")
@@ -642,6 +649,12 @@ class PageIndexFileSystem:
                 entry,
                 message=str(structure["error"]),
             )
+        node_rows = flatten_pageindex_structure_nodes(structure)
+        offset = max(0, offset)
+        limit = max(0, limit)
+        window = node_rows[offset : offset + limit] if limit else []
+        next_offset = offset + len(window)
+        has_more = next_offset < len(node_rows)
         return {
             "mode": "structure",
             "file_ref": file_ref,
@@ -650,7 +663,15 @@ class PageIndexFileSystem:
             "status": entry.pageindex_tree_status,
             "available": True,
             "pageindex_doc_id": doc_id,
-            "structure": strip_pageindex_text_fields(structure),
+            "structure": window,
+            "structure_pagination": {
+                "offset": offset,
+                "limit": limit,
+                "returned_nodes": len(window),
+                "total_nodes": len(node_rows),
+                "has_more": has_more,
+                "next_offset": next_offset if has_more else None,
+            },
         }
 
     def pageindex_node(self, target: str, node_id: str) -> dict[str, Any]:

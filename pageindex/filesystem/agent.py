@@ -43,6 +43,10 @@ If the user asks a workspace-related topic question without naming a specific
 file, treat it as a retrieval task. Use available PIFS discovery commands to
 look for relevant files and inspect evidence before answering. Ask the user to
 clarify only after a reasonable search cannot identify relevant evidence.
+Do not conclude that no relevant document exists from one failed grep. If grep
+returns no matches for a workspace topic, verify with available semantic
+candidate discovery such as search-summary, or inspect likely document
+structure, before saying that the workspace lacks evidence.
 
 Follow the task prompt for command policy, retrieval strategy, and answer
 format. If the caller needs stricter behavior, pass an explicit system_prompt.
@@ -53,10 +57,15 @@ Run a command in the PageIndex FileSystem virtual shell. This is not a real
 operating-system shell. By default the tool is read-only: use ls, tree, find,
 grep, cat, stat, head, tail, sed, and any dynamically available semantic search
 commands described in the workspace context. grep -R is lexical evidence search;
+grep does not support regex alternation such as "a|b"; run multiple grep
+commands or use search-summary for semantic candidate discovery instead.
 semantic search commands such as search-summary return candidate documents and
 do not guarantee literal text matches. Use search-summary when the user asks for
 summary search, semantic search, or vector search and the command is listed as
-available. Errors are returned as text prefixed with ERROR. Do not call
+available. Quote multi-word semantic queries, for example:
+search-summary "Federal Reserve" /documents. Do not write
+search-summary Federal Reserve /documents. Errors are returned as text prefixed
+with ERROR. Do not call
 commands that are not listed as available. When evidence is required, inspect it
 with cat or grep before answering. Prefer shell-like target-first cat syntax
 with stable targets: cat <path> --structure, cat <path> --page 31-59, and
@@ -64,8 +73,14 @@ cat <path> --node 0009. You may also use file_ref or document_id when a path is
 ambiguous. After structure identifies a relevant section node, prefer
 cat <path> --node <node_id>; use cat <path> --page <range> when the user asks
 for page-level evidence, no suitable node exists, or exact page text is needed.
+cat <path> --structure is paginated; request more with --offset if needed. Page
+reads are limited to three pages at once, node reads to at most five node ids,
+and text cat --all returns only the first page of text lines.
 For questions about metadata fields, available summaries, or whether metadata
 was provided, inspect stat --schema and stat <target> before making claims.
+Do not use stat as a general content/topic discovery step. For document Q&A,
+prefer search-summary/find/grep for candidates, then cat --structure and
+cat --node or cat --page for evidence.
 """
 
 AGENT_TOOL_POLICY = """
@@ -76,12 +91,19 @@ Tool policy:
 - Folder paths such as /documents are positional command targets; never put folder paths in --where.
 - Use --where only with metadata fields shown by stat --schema.
 - grep -R performs lexical evidence search.
+- grep does not support regex alternation such as "a|b"; run separate grep commands or use search-summary for semantic candidate discovery.
 - Semantic search commands are candidate-discovery tools and do not guarantee literal text matches.
-- If search-summary is available and the user asks for summary search, semantic search, vector search, or "用 summary 搜", use search-summary <query> <folder>; do not translate that request into find --where.
+- A single failed grep is not enough evidence to say there is no relevant document. If grep returns no matches for a workspace-topic question, verify with search-summary or another available semantic/vector candidate command, or inspect likely document structure, before answering no-evidence.
+- If search-summary is available and the user asks for summary search, semantic search, vector search, or "用 summary 搜", use search-summary "<query>" <folder>; quote multi-word queries, for example search-summary "Federal Reserve" /documents; do not translate that request into find --where.
 - Tool errors are returned as ERROR text; recover by trying an available command.
 - Use cat or grep to gather evidence before making source-backed claims.
 - For broad topic, method, or "what solution" questions that are likely about the workspace, search for candidate documents before asking the user to choose a document.
+- Use stat only for metadata/schema/status questions or to resolve ambiguous target identity. Do not run stat merely to understand what a document says.
 - Prefer target-first cat syntax with stable targets: cat <path> --structure, cat <path> --page 31-59, cat <path> --node <node_id>.
+- cat <target> --structure returns at most 25 nodes; use --offset and --limit for more structure pages.
+- cat <target> --page accepts at most 3 pages at once. If a larger range is needed, first inspect cat <target> --structure and then read a smaller page range or node.
+- cat <target> --node accepts at most 5 node ids at once. Prefer one relevant node when possible.
+- cat <target> --all returns at most 100 text lines; use cat <target> --range <start>-<end> for the next page.
 - After cat <target> --structure finds a relevant section/subsection with a node_id, prefer cat <target> --node <node_id> for content from that semantic unit.
 - Use cat <target> --page <start>-<end> when the user explicitly asks for pages/page ranges, when no suitable node_id exists, or when you need exact page text to verify page-level evidence.
 - Avoid fetching a broad page span after a matching node is available unless page-level citation or verification is required.

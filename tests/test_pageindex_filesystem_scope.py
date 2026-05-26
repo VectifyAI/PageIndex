@@ -1,6 +1,8 @@
 import json
 from types import SimpleNamespace
 
+import pytest
+
 
 class SummaryBackend:
     def __init__(self, document_id):
@@ -43,6 +45,32 @@ def test_semantic_search_scope_keeps_ordinary_folders_out_of_source_type_filters
 
     assert backend.calls[0][2] == {}
     assert result["data"]["data"][0]["external_id"] == "dsid_report"
+
+
+def test_semantic_search_rejects_unquoted_multi_word_query(tmp_path):
+    from pageindex.filesystem import PIFSCommandExecutor, PageIndexFileSystem
+    from pageindex.filesystem.commands import PIFSCommandError
+
+    filesystem = PageIndexFileSystem(workspace=tmp_path / "workspace")
+    filesystem.register_file(
+        storage_uri="file:///tmp/report.pdf",
+        source_path="examples/documents/report.pdf",
+        folder_path="/documents",
+        external_id="dsid_report",
+        title="Annual report",
+        content="Federal Reserve supervision and regulation annual report.",
+    )
+    filesystem.semantic_retrieval_backend = SummaryBackend("dsid_report")
+    executor = PIFSCommandExecutor(filesystem, json_output=True)
+
+    with pytest.raises(PIFSCommandError, match="Quote multi-word queries"):
+        executor.execute("search-summary Federal Reserve /documents")
+
+    with pytest.raises(PIFSCommandError, match="quote it"):
+        executor.execute("search-summary Federal Reserve")
+
+    with pytest.raises(PIFSCommandError, match="does not support regex alternation"):
+        executor.execute('search-summary "Federal|Reserve" /documents')
 
 
 def test_semantic_search_scope_filters_explicit_source_type_facets():

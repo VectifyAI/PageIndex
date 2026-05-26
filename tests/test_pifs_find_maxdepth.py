@@ -98,6 +98,37 @@ def test_stable_path_targets_work_without_session_refs(tmp_path):
     assert "Root document fixture text" in text
 
 
+def test_shell_limits_reject_context_expanding_counts(tmp_path):
+    from pageindex.filesystem.commands import PIFSCommandError
+
+    executor = _register_find_fixture(tmp_path)
+
+    for command, limit in (
+        ("find /documents --limit 51", 50),
+        ("grep --limit 21 Root /documents", 20),
+        ("ls /documents --limit 101", 100),
+        ("tree /documents --limit 201", 200),
+        ("head -n 101 /documents/Root\\ document", 100),
+        ("tail -n 101 /documents/Root\\ document", 100),
+        ("sed -n 1,101p /documents/Root\\ document", 100),
+    ):
+        with pytest.raises(PIFSCommandError, match=f"at most {limit}"):
+            executor.execute(command)
+
+
+def test_grep_rejects_regex_alternation_patterns(tmp_path):
+    from pageindex.filesystem.commands import PIFSCommandError
+
+    executor = _register_find_fixture(tmp_path)
+    executor.json_output = False
+
+    with pytest.raises(PIFSCommandError, match="does not support regex alternation"):
+        executor.execute('grep -R "Root|Child" /documents')
+
+    with pytest.raises(PIFSCommandError, match="multiple grep commands"):
+        executor.execute('find /documents -type f | grep "Root|Child"')
+
+
 def test_stat_shell_output_includes_unified_metadata_status(tmp_path):
     from pageindex.filesystem import PIFSCommandExecutor, PageIndexFileSystem
     from pageindex.filesystem.metadata_generation import MetadataGenerationResult
@@ -140,6 +171,99 @@ def test_stat_shell_output_includes_unified_metadata_status(tmp_path):
     assert "  department: ops" in stat
     assert "  summary: Generated summary for retrieval." in stat
     assert "metadata_status: generated" in stat
+
+
+def test_stat_field_reads_one_metadata_field_across_multiple_targets(tmp_path):
+    from pageindex.filesystem import PIFSCommandExecutor, PageIndexFileSystem
+    from pageindex.filesystem.commands import PIFSCommandError
+    from pageindex.filesystem.metadata_generation import MetadataGenerationResult
+
+    class SummaryGenerator:
+        def generate(self, document, *, fields):
+            return MetadataGenerationResult(
+                values={
+                    field: (
+                        f"Summary for {document.title}\n"
+                        + "full summary token " * 80
+                    )
+                    for field in fields
+                }
+            )
+
+    filesystem = PageIndexFileSystem(
+        workspace=tmp_path / "workspace",
+        metadata_generator=SummaryGenerator(),
+    )
+    for index in range(1, 3):
+        source = tmp_path / f"source{index}.txt"
+        source.write_text(f"fixture text {index}", encoding="utf-8")
+        filesystem.register_file(
+            storage_uri=source.as_uri(),
+            source_path=f"docs/source{index}.txt",
+            folder_path="/documents",
+            external_id=f"doc_summary_{index}",
+            title=f"Summary document {index}",
+            content=source.read_text(encoding="utf-8"),
+            metadata_policy={
+                "fields": {
+                    "summary": True,
+                    "doc_type": False,
+                    "domain": False,
+                    "topic": False,
+                }
+            },
+        )
+    executor = PIFSCommandExecutor(filesystem, json_output=False)
+
+    output = executor.execute(
+        "stat --field summary /documents/'Summary document 1' /documents/'Summary document 2'"
+    )
+
+    assert "/documents/Summary document 1:" in output
+    assert "summary: Summary for Summary document 1" in output
+    assert "full summary token" in output
+    assert "[truncated]" not in output
+    assert "/documents/Summary document 2:" in output
+    assert "summary: Summary for Summary document 2" in output
+
+    data = json.loads(
+        PIFSCommandExecutor(filesystem, json_output=True).execute(
+            "stat --field summary /documents/'Summary document 1' /documents/'Summary document 2'"
+        )
+    )["data"]
+    assert data["mode"] == "field_values"
+    assert data["target_count"] == 2
+    assert data["data"][0]["field"] == "summary"
+    assert data["data"][0]["value"].startswith("Summary for Summary document 1\n")
+    assert data["data"][0]["value"].count("full summary token") == 80
+
+    with pytest.raises(PIFSCommandError, match="Unknown metadata field"):
+        executor.execute("stat --field missing_field /documents/'Summary document 1'")
+
+
+def test_stat_field_rejects_more_than_twenty_targets(tmp_path):
+    from pageindex.filesystem import PIFSCommandExecutor, PageIndexFileSystem
+    from pageindex.filesystem.commands import PIFSCommandError
+
+    filesystem = PageIndexFileSystem(workspace=tmp_path / "workspace")
+    targets = []
+    for index in range(21):
+        source = tmp_path / f"source{index}.txt"
+        source.write_text(f"fixture text {index}", encoding="utf-8")
+        filesystem.register_file(
+            storage_uri=source.as_uri(),
+            source_path=f"docs/source{index}.txt",
+            folder_path="/documents",
+            external_id=f"doc_{index}",
+            title=f"Document {index}",
+            content=source.read_text(encoding="utf-8"),
+            metadata={"department": "ops"},
+        )
+        targets.append(f"/documents/'Document {index}'")
+    executor = PIFSCommandExecutor(filesystem, json_output=False)
+
+    with pytest.raises(PIFSCommandError, match="at most 20"):
+        executor.execute("stat --field department " + " ".join(targets))
 
 
 def test_register_rejects_pifs_owned_metadata_fields(tmp_path):
