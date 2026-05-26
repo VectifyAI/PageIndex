@@ -354,12 +354,6 @@ class PIFSAgentStreamObserver:
         self._start_section("tool_call", "[llm -> pifs command]")
         print(command, file=self.output, flush=True)
 
-    def emit_request_started(self) -> None:
-        if not (self.wants_model_stream or self.wants_tool_stream):
-            return
-        self._start_section("request_started", "[llm request started]")
-        print("waiting for first model token or PIFS tool call...", file=self.output, flush=True)
-
     def emit_tool_result(
         self,
         *,
@@ -525,7 +519,6 @@ class PIFSAgentSession:
             self.normalized_stream_mode,
             stream_log=self.agent_log,
         )
-        self.observer.emit_request_started()
 
         async def _run_streamed() -> str:
             from agents import Runner
