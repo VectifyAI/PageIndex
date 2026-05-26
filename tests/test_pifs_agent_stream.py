@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict
 
 from pageindex.filesystem.agent import (
     AGENT_TOOL_POLICY,
+    AGENT_SYSTEM_PROMPT,
     BASH_TOOL_DESCRIPTION,
     PIFSAgentStreamObserver,
     build_agent_model_settings,
@@ -186,6 +187,13 @@ class PIFSAgentStreamTest(unittest.TestCase):
         self.assertIn("prefer cat <target> --node <node_id>", AGENT_TOOL_POLICY)
         self.assertIn("page-level evidence", AGENT_TOOL_POLICY)
         self.assertIn("prefer\ncat <path> --node <node_id>", BASH_TOOL_DESCRIPTION)
+
+    def test_system_prompt_sets_workspace_identity_and_scope(self):
+        self.assertIn("PageIndex FileSystem Demo Agent", AGENT_SYSTEM_PROMPT)
+        self.assertIn("VectifyAI Team", AGENT_SYSTEM_PROMPT)
+        self.assertIn("current PageIndex FileSystem\nworkspace", AGENT_SYSTEM_PROMPT)
+        self.assertIn("unrelated to the current workspace", AGENT_SYSTEM_PROMPT)
+        self.assertIn("do not answer it as\na general-purpose assistant", AGENT_SYSTEM_PROMPT)
 
 
 if __name__ == "__main__":
