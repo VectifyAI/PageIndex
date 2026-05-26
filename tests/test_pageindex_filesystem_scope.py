@@ -115,3 +115,68 @@ def test_existing_summary_projection_index_configures_retrieval_backend(tmp_path
         )
     ]
     assert filesystem.semantic_retrieval_channels() == ("summary",)
+
+
+def test_default_semantic_search_uses_summary_projection_when_only_summary_available(tmp_path):
+    from pageindex.filesystem import PageIndexFileSystem
+    from pageindex.filesystem.hybrid_projection import HybridProjectionSearchBackend
+    from pageindex.filesystem.metadata_generation import MetadataGenerationResult
+    from pageindex.filesystem.projection_indexing import SummaryProjectionIndexer
+
+    class FixedEmbedder:
+        def embed(self, texts):
+            return [[1.0, 0.0, 0.0] for _ in texts]
+
+    class SummaryGenerator:
+        def generate(self, document, *, fields):
+            return MetadataGenerationResult(
+                values={"summary": "vendor renewal risk matrix"}
+            )
+
+    source = tmp_path / "source.txt"
+    source.write_text("ordinary fixture body", encoding="utf-8")
+    index_dir = tmp_path / "workspace" / "artifacts" / "projection_indexes"
+    indexer = SummaryProjectionIndexer(
+        index_dir,
+        embedder=FixedEmbedder(),
+        embedding_provider="test",
+        embedding_model="fake",
+        embedding_dimensions=3,
+    )
+    backend = HybridProjectionSearchBackend(
+        index_dir,
+        embedder=FixedEmbedder(),
+        embedding_provider="test",
+        embedding_model="fake",
+        embedding_dimensions=3,
+    )
+    filesystem = PageIndexFileSystem(
+        workspace=tmp_path / "workspace",
+        metadata_generator=SummaryGenerator(),
+        summary_projection_indexer=indexer,
+        semantic_retrieval_backend=backend,
+    )
+    filesystem.register_file(
+        storage_uri=source.as_uri(),
+        source_path="docs/source.txt",
+        folder_path="/documents",
+        external_id="doc_summary_only",
+        title="Operations note",
+        content=source.read_text(encoding="utf-8"),
+        metadata={"department": "ops"},
+        metadata_policy={
+            "fields": {
+                "summary": True,
+                "doc_type": False,
+                "domain": False,
+                "topic": False,
+            }
+        },
+    )
+
+    assert filesystem.search("purchase order exposure", semantic=False) == []
+
+    results = filesystem.search("purchase order exposure", semantic=True)
+
+    assert [result.external_id for result in results] == ["doc_summary_only"]
+    assert results[0].snippet == "summary_vector rank=1"

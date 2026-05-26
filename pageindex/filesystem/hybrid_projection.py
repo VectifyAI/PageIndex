@@ -130,6 +130,8 @@ class HybridProjectionSearchBackend:
             if self._channel_document_count(channel) > 0
         )
         if not channels:
+            if self._channel_document_count("summary") > 0:
+                return self.search_channel("summary", query, limit=limit, filters=filters)
             return []
         channel_hits = self._search_channels(
             query=query,
