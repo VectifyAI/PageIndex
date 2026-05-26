@@ -858,21 +858,47 @@ class PageIndexFileSystem:
         storage_uri: str,
         source_path: str,
         content_type: str,
-    ) -> tuple[str | None, str]:
+    ) -> tuple[str | None, str, dict[str, Any] | None]:
         if self._source_format(source_path, content_type) not in {"pdf", "markdown"}:
-            return None, "not_built"
+            return None, "not_built", None
         client = self._pageindex_client()
         source = self._canonical_source_path(storage_uri=storage_uri, source_path=source_path)
         cached_doc_id = self._find_cached_pageindex_doc_id(client, source)
         if cached_doc_id:
-            return cached_doc_id, "built"
+            return cached_doc_id, "built", None
         if source is None:
-            return None, "failed"
+            return None, "failed", self._pageindex_tree_failure_record(
+                source="PageIndexFileSystem.registration",
+                error_type="UnresolvableSourcePath",
+                message=(
+                    "PageIndex source path must resolve to a local file path for "
+                    "PDF/Markdown registration."
+                ),
+            )
         try:
             doc_id = client.index(source)
-            return doc_id, "built"
-        except Exception:
-            return None, "failed"
+            return doc_id, "built", None
+        except Exception as exc:
+            return None, "failed", self._pageindex_tree_failure_record(
+                source="PageIndexClient.index",
+                error_type=exc.__class__.__name__,
+                message=str(exc) or exc.__class__.__name__,
+            )
+
+    @staticmethod
+    def _pageindex_tree_failure_record(
+        *,
+        source: str,
+        error_type: str,
+        message: str,
+    ) -> dict[str, Any]:
+        return {
+            "status": "failed",
+            "owner": "pageindex",
+            "source": source,
+            "error_type": error_type,
+            "message": message,
+        }
 
     def _find_cached_pageindex_doc_id(
         self,
@@ -938,7 +964,11 @@ class PageIndexFileSystem:
         external_id = file.get("external_id")
         content = file.get("content") or ""
         content_type = file.get("content_type") or "text/plain"
-        pageindex_doc_id, pageindex_tree_status = self._registration_pageindex_pointer(
+        (
+            pageindex_doc_id,
+            pageindex_tree_status,
+            pageindex_tree_failure,
+        ) = self._registration_pageindex_pointer(
             storage_uri=storage_uri,
             source_path=raw_source_path,
             content_type=content_type,
@@ -961,6 +991,7 @@ class PageIndexFileSystem:
             metadata=metadata,
             status=file.get("metadata_status"),
         )
+        self._attach_pageindex_tree_failure(metadata_status, pageindex_tree_failure)
         indexed_metadata = SQLiteFileSystemStore.indexed_metadata_values(metadata)
         searchable_metadata = dict(metadata)
         folder_path = normalize_path(file.get("folder_path") or "/")
@@ -1115,6 +1146,10 @@ class PageIndexFileSystem:
             metadata_policy,
             metadata=entry.metadata,
             status=entry.metadata_status.get("status"),
+        )
+        self._attach_pageindex_tree_failure(
+            metadata_status,
+            entry.metadata_status.get("pageindex_tree"),
         )
         return {
             "file_ref": entry.file_ref,
@@ -1317,8 +1352,9 @@ class PageIndexFileSystem:
             source_path=entry.source_path,
         )
 
-    @staticmethod
+    @classmethod
     def _structural_unavailable(
+        cls,
         mode: str,
         entry: Any,
         *,
@@ -1326,6 +1362,9 @@ class PageIndexFileSystem:
         node_id: str | None = None,
         pages: str | None = None,
     ) -> dict[str, Any]:
+        pageindex_tree_error = cls._pageindex_tree_failure_message(entry.metadata_status)
+        if pageindex_tree_error and entry.pageindex_tree_status == "failed":
+            message = f"PageIndex tree build failed: {pageindex_tree_error}"
         result = {
             "mode": mode,
             "file_ref": entry.file_ref,
@@ -1335,11 +1374,36 @@ class PageIndexFileSystem:
             "available": False,
             "message": message,
         }
+        if pageindex_tree_error:
+            result["pageindex_tree_error"] = pageindex_tree_error
         if node_id is not None:
             result["node_id"] = node_id
         if pages is not None:
             result["pages"] = pages
         return result
+
+    @staticmethod
+    def _attach_pageindex_tree_failure(
+        metadata_status: dict[str, Any],
+        pageindex_tree_failure: Any,
+    ) -> None:
+        if isinstance(pageindex_tree_failure, dict) and pageindex_tree_failure:
+            metadata_status["pageindex_tree"] = dict(pageindex_tree_failure)
+
+    @staticmethod
+    def _pageindex_tree_failure_message(metadata_status: Any) -> str | None:
+        if not isinstance(metadata_status, dict):
+            return None
+        pageindex_tree = metadata_status.get("pageindex_tree")
+        if not isinstance(pageindex_tree, dict):
+            return None
+        if pageindex_tree.get("status") != "failed":
+            return None
+        message = str(pageindex_tree.get("message") or "").strip()
+        error_type = str(pageindex_tree.get("error_type") or "").strip()
+        if error_type and message:
+            return f"{error_type}: {message}"
+        return message or error_type or None
 
     def _resolve_target(self, target: str) -> str:
         return self.store.resolve_file_ref(target)

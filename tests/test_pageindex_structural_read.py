@@ -55,7 +55,7 @@ def test_pageindex_structure_options_report_failed_register_build(monkeypatch):
         filesystem = PageIndexFileSystem(workspace=Path(tmp) / "workspace")
 
         def fail_index(*args, **kwargs):
-            raise RuntimeError("index failed")
+            raise RuntimeError("index failed: extractor unavailable")
 
         monkeypatch.setattr(PageIndexClient, "index", fail_index)
         filesystem.register_file(
@@ -75,8 +75,15 @@ def test_pageindex_structure_options_report_failed_register_build(monkeypatch):
         assert structure["data"]["mode"] == "structure"
         assert structure["data"]["available"] is False
         assert structure["data"]["status"] == "failed"
-        assert "PageIndexClient workspace" in structure["data"]["message"]
+        assert "RuntimeError: index failed: extractor unavailable" in structure["data"]["message"]
         assert stat["data"]["pageindex_tree_status"] == "failed"
+        assert stat["data"]["metadata_status"]["pageindex_tree"] == {
+            "status": "failed",
+            "owner": "pageindex",
+            "source": "PageIndexClient.index",
+            "error_type": "RuntimeError",
+            "message": "index failed: extractor unavailable",
+        }
 
         assert node["data"]["mode"] == "node"
         assert node["data"]["available"] is False

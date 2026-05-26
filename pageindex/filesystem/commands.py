@@ -1258,6 +1258,15 @@ class PIFSCommandExecutor:
         metadata_status = data.get("metadata_status") or {}
         if metadata_status:
             lines.append(f"metadata_status: {metadata_status.get('status', '-')}")
+            pageindex_tree = metadata_status.get("pageindex_tree") or {}
+            if isinstance(pageindex_tree, dict) and pageindex_tree:
+                lines.append(f"pageindex_tree_status: {pageindex_tree.get('status', '-')}")
+                message = str(pageindex_tree.get("message") or "").strip()
+                error_type = str(pageindex_tree.get("error_type") or "").strip()
+                if error_type and message:
+                    lines.append(f"pageindex_tree_error: {error_type}: {message}")
+                elif message or error_type:
+                    lines.append(f"pageindex_tree_error: {message or error_type}")
             summary_projection = (
                 metadata_status.get("projection_indexes", {}).get("summary", {})
             )
