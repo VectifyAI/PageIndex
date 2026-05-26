@@ -989,7 +989,6 @@ class PIFSCommandExecutor:
                 continue
             hits.append(
                 {
-                    "reference_id": result.reference_id,
                     "file_ref": result.file_ref,
                     "external_id": result.external_id,
                     "title": result.title,
@@ -1058,7 +1057,6 @@ class PIFSCommandExecutor:
             line_number, text = self._first_matching_source_line(path, query)
             hits.append(
                 {
-                    "reference_id": file_row["external_id"] or file_row["file_ref"],
                     "file_ref": file_row["file_ref"],
                     "external_id": file_row["external_id"],
                     "title": file_row["title"],
@@ -1073,14 +1071,13 @@ class PIFSCommandExecutor:
         return hits
 
     def _grep_file_matches(self, target: str, query: str, *, limit: int) -> list[dict[str, Any]]:
-        file_ref = self.filesystem._resolve_reference(target)
+        file_ref = self.filesystem._resolve_target(target)
         entry = self.filesystem.store.get_file(file_ref)
         matches = []
         for line_number, line in enumerate(self.filesystem.store.read_text(file_ref).splitlines(), 1):
             if self._line_matches(line, query):
                 matches.append(
                     {
-                        "reference_id": entry.external_id or file_ref,
                         "file_ref": file_ref,
                         "external_id": entry.external_id,
                         "title": entry.title,

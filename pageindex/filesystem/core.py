@@ -394,7 +394,6 @@ class PageIndexFileSystem:
             folder_path = self._preferred_folder_path(folder_paths, scope_path, row["folder_path"])
             results.append(
                 SearchResult(
-                    reference_id=row["external_id"] or row["file_ref"],
                     file_ref=row["file_ref"],
                     external_id=row["external_id"],
                     title=row["title"],
@@ -509,11 +508,11 @@ class PageIndexFileSystem:
 
     def find(
         self,
-        reference_id: str,
+        target: str,
         patterns: Union[str, list[str]],
         limit: int = 20,
     ) -> list[OpenResult]:
-        file_ref = self._resolve_reference(reference_id)
+        file_ref = self._resolve_target(target)
         patterns = [patterns] if isinstance(patterns, str) else list(patterns)
         lowered_patterns = [pattern.lower() for pattern in patterns if pattern]
         if not lowered_patterns:
@@ -526,13 +525,13 @@ class PageIndexFileSystem:
             if any(pattern in haystack for pattern in lowered_patterns):
                 start = max(1, i - 1)
                 end = min(len(lines), i + 1)
-                matches.append(self._open_lines(reference_id, file_ref, start, end))
+                matches.append(self._open_lines(file_ref, start, end))
                 if len(matches) >= limit:
                     break
         return matches
 
-    def open(self, reference_id: str, location: str = "all") -> OpenResult:
-        file_ref = self._resolve_reference(reference_id)
+    def open(self, target: str, location: str = "all") -> OpenResult:
+        file_ref = self._resolve_target(target)
         entry = self.store.get_file(file_ref)
         if self._file_format(entry) in {"pdf", "markdown", "pageindex"}:
             raise ValueError(
@@ -540,21 +539,21 @@ class PageIndexFileSystem:
                 "use pageindex_structure(), pageindex_pages(), or pageindex_node()."
             )
         if str(location).strip().lower() in {"all", "full", "*"}:
-            return self._open_all(reference_id, file_ref)
+            return self._open_all(file_ref)
         start, end = self._parse_line_range(location)
-        return self._open_lines(reference_id, file_ref, start, end)
+        return self._open_lines(file_ref, start, end)
 
-    def cat_text_artifact(self, reference_id: str, location: str = "all") -> OpenResult:
-        file_ref = self._resolve_reference(reference_id)
+    def cat_text_artifact(self, target: str, location: str = "all") -> OpenResult:
+        file_ref = self._resolve_target(target)
         entry = self.store.get_file(file_ref)
         self._require_text_artifact_file(entry, "cat --all")
         if str(location).strip().lower() in {"all", "full", "*"}:
-            return self._open_all(reference_id, file_ref)
+            return self._open_all(file_ref)
         start, end = self._parse_line_range(location)
-        return self._open_lines(reference_id, file_ref, start, end)
+        return self._open_lines(file_ref, start, end)
 
-    def pageindex_structure(self, reference_id: str) -> dict[str, Any]:
-        file_ref = self._resolve_reference(reference_id)
+    def pageindex_structure(self, target: str) -> dict[str, Any]:
+        file_ref = self._resolve_target(target)
         entry = self.store.get_file(file_ref)
         self._require_pageindex_document_file(entry, "cat --structure")
         client, doc_id = self._pageindex_client_doc_for_entry(entry)
@@ -585,8 +584,8 @@ class PageIndexFileSystem:
             "structure": strip_pageindex_text_fields(structure),
         }
 
-    def pageindex_node(self, reference_id: str, node_id: str) -> dict[str, Any]:
-        file_ref = self._resolve_reference(reference_id)
+    def pageindex_node(self, target: str, node_id: str) -> dict[str, Any]:
+        file_ref = self._resolve_target(target)
         entry = self.store.get_file(file_ref)
         self._require_pageindex_document_file(entry, "cat --node")
         client, doc_id = self._pageindex_client_doc_for_entry(entry)
@@ -637,8 +636,8 @@ class PageIndexFileSystem:
             "text": text,
         }
 
-    def pageindex_pages(self, reference_id: str, pages: str) -> dict[str, Any]:
-        file_ref = self._resolve_reference(reference_id)
+    def pageindex_pages(self, target: str, pages: str) -> dict[str, Any]:
+        file_ref = self._resolve_target(target)
         entry = self.store.get_file(file_ref)
         self._require_pageindex_document_file(entry, "cat --page")
         client, doc_id = self._pageindex_client_doc_for_entry(entry)
@@ -682,7 +681,7 @@ class PageIndexFileSystem:
         }
 
     def _stat(self, target: str) -> dict[str, Any]:
-        file_ref = self._resolve_reference(target)
+        file_ref = self._resolve_target(target)
         return self.store.file_info(file_ref)
 
     def _require_text_artifact_file(self, entry: Any, command: str) -> None:
@@ -1196,14 +1195,13 @@ class PageIndexFileSystem:
             self._merge_metadata_values(record["metadata"], record["derived_metadata"])
         )
 
-    def _open_lines(self, reference_id: str, file_ref: str, start: int, end: int) -> OpenResult:
+    def _open_lines(self, file_ref: str, start: int, end: int) -> OpenResult:
         entry = self.store.get_file(file_ref)
         lines = self.store.read_text(file_ref).splitlines()
         start = max(1, start)
         end = min(max(start, end), len(lines))
         text = "\n".join(lines[start - 1:end])
         return OpenResult(
-            reference_id=reference_id,
             file_ref=file_ref,
             start_line=start,
             end_line=end,
@@ -1213,12 +1211,11 @@ class PageIndexFileSystem:
             source_path=entry.source_path,
         )
 
-    def _open_all(self, reference_id: str, file_ref: str) -> OpenResult:
+    def _open_all(self, file_ref: str) -> OpenResult:
         entry = self.store.get_file(file_ref)
         text = self.store.read_text(file_ref)
         line_count = len(text.splitlines())
         return OpenResult(
-            reference_id=reference_id,
             file_ref=file_ref,
             start_line=1,
             end_line=line_count,
@@ -1252,8 +1249,8 @@ class PageIndexFileSystem:
             result["pages"] = pages
         return result
 
-    def _resolve_reference(self, reference_id: str) -> str:
-        return self.store.resolve_file_ref(reference_id)
+    def _resolve_target(self, target: str) -> str:
+        return self.store.resolve_file_ref(target)
 
     def _should_use_semantic_retrieval(
         self,
@@ -1319,7 +1316,6 @@ class PageIndexFileSystem:
             folder_path = self._preferred_folder_path(folder_paths, scope_path, entry.folder_path)
             results.append(
                 SearchResult(
-                    reference_id=entry.external_id or file_ref,
                     file_ref=file_ref,
                     external_id=entry.external_id,
                     title=entry.title,

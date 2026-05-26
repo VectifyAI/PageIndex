@@ -6,7 +6,6 @@ from typing import Any, Optional
 
 @dataclass(frozen=True)
 class SearchResult:
-    reference_id: str
     file_ref: str
     external_id: Optional[str]
     title: str
@@ -29,7 +28,6 @@ class SearchResult:
 
 @dataclass(frozen=True)
 class OpenResult:
-    reference_id: str
     file_ref: str
     start_line: int
     end_line: int
