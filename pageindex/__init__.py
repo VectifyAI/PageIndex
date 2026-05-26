@@ -1,3 +1,7 @@
+import os
+
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "true")
+
 try:
     from .page_index import *
     from .page_index_md import md_to_tree

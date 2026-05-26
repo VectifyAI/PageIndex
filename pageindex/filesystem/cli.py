@@ -16,6 +16,39 @@ DEFAULT_AGENT_MODEL = "gpt-5.4-mini"
 EXIT_COMMANDS = {"exit", "quit", ":q"}
 
 
+def _load_env_file(path: str | None = None, *, workspace: str | None = None) -> Path | None:
+    from dotenv import load_dotenv
+
+    if path:
+        env_path = Path(path).expanduser()
+        if not env_path.exists():
+            raise FileNotFoundError(f"env file not found: {env_path}")
+        load_dotenv(env_path, override=True)
+        return env_path
+
+    env_override = os.environ.get("PIFS_ENV_FILE")
+    if env_override:
+        return _load_env_file(env_override)
+
+    starts = [Path.cwd()]
+    if workspace:
+        starts.append(Path(workspace).expanduser())
+    seen: set[Path] = set()
+    for start in starts:
+        current = start.resolve() if start.exists() else start.resolve(strict=False)
+        if current.is_file():
+            current = current.parent
+        for parent in (current, *current.parents):
+            candidate = parent / ".env"
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            if candidate.exists():
+                load_dotenv(candidate, override=False)
+                return candidate
+    return None
+
+
 def _agent_model_default() -> str:
     return (
         os.environ.get("PIFS_AGENT_MODEL")
@@ -30,6 +63,7 @@ def _add_agent_arguments(
     workspace_default: str | None,
 ) -> None:
     parser.add_argument("--workspace", default=workspace_default)
+    parser.add_argument("--env-file", default=None)
     parser.add_argument("--model", default=_agent_model_default())
     parser.add_argument(
         "--stream-mode",
@@ -64,6 +98,9 @@ def _parse_agent_command(
     if command_name == "ask":
         parser.add_argument("question", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
+    _load_env_file(args.env_file, workspace=args.workspace)
+    if not args.workspace:
+        args.workspace = os.environ.get("PIFS_WORKSPACE")
     if not args.workspace:
         parser.error("--workspace is required unless PIFS_WORKSPACE is set")
     return args
@@ -130,11 +167,16 @@ def _run_passthrough(
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    _load_env_file()
     parser = argparse.ArgumentParser(description="PageIndex FileSystem CLI")
     parser.add_argument("--workspace", default=os.environ.get("PIFS_WORKSPACE"))
+    parser.add_argument("--env-file", default=None)
     parser.add_argument("--json", action="store_true", dest="json_output")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
+    _load_env_file(args.env_file, workspace=args.workspace)
+    if not args.workspace:
+        args.workspace = os.environ.get("PIFS_WORKSPACE")
 
     command_tokens = [token for token in args.command if token != "--"]
     json_output = args.json_output

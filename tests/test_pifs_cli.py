@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 
@@ -85,6 +86,40 @@ def test_cli_ask_invokes_agent_with_question(monkeypatch, capsys, tmp_path):
         "reasoning_effort": "low",
         "reasoning_summary": "concise",
     }
+
+
+def test_cli_ask_loads_env_file_before_running_agent(monkeypatch, capsys, tmp_path):
+    from pageindex.filesystem import cli
+
+    workspace = tmp_path / "workspace"
+    env_file = tmp_path / ".env"
+    env_file.write_text("OPENAI_API_KEY=from-dotenv\n", encoding="utf-8")
+    agent_keys = []
+
+    def fake_run_pifs_agent(filesystem, question, **kwargs):
+        agent_keys.append(os.environ.get("OPENAI_API_KEY"))
+        return "agent answer"
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(cli, "PageIndexFileSystem", FakeFileSystem)
+    monkeypatch.setattr(cli, "run_pifs_agent", fake_run_pifs_agent)
+
+    status = cli.main(
+        [
+            "ask",
+            "--workspace",
+            str(workspace),
+            "--env-file",
+            str(env_file),
+            "What",
+            "is",
+            "inside?",
+        ]
+    )
+
+    assert status == 0
+    assert capsys.readouterr().out == "agent answer\n"
+    assert agent_keys == ["from-dotenv"]
 
 
 def test_cli_chat_runs_one_question_and_exits(monkeypatch, capsys, tmp_path):
