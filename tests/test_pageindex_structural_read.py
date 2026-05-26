@@ -481,11 +481,18 @@ def test_cat_structure_page_node_and_text_outputs_are_hard_limited():
             executor.execute("cat dsid_limited_pdf --page 1-4")
 
         nodes = json.loads(
-            executor.execute("cat dsid_limited_pdf --node 0001,0002,0003,0004,0005")
+            executor.execute("cat dsid_limited_pdf --node 0001 0002 0003 0004 0005")
         )
         assert nodes["data"]["node_ids"] == ["0001", "0002", "0003", "0004", "0005"]
+        comma_nodes = json.loads(
+            executor.execute("cat dsid_limited_pdf --node 0001,0002")
+        )
+        assert comma_nodes["data"]["node_ids"] == ["0001", "0002"]
         with pytest.raises(PIFSCommandError, match="at most 5"):
-            executor.execute("cat dsid_limited_pdf --node 0001,0002,0003,0004,0005,0006")
+            executor.execute("cat dsid_limited_pdf --node 0001 0002 0003 0004 0005 0006")
+
+        with pytest.raises(PIFSCommandError, match="cat accepts one file target"):
+            executor.execute("cat dsid_limited_pdf 0001")
 
         text = json.loads(executor.execute("cat dsid_long_text --all"))
         assert "line 100" in text["data"]["text"]

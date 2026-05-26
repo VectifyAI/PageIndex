@@ -517,7 +517,10 @@ class PIFSCommandExecutor:
                 if i >= len(args):
                     raise PIFSCommandError("cat --node requires a node id")
                 structural_mode = "node"
-                node_ids.extend(self._parse_node_ids(args[i]))
+                while i < len(args) and not args[i].startswith("-"):
+                    node_ids.extend(self._parse_node_ids(args[i]))
+                    i += 1
+                i -= 1
             elif arg == "--page":
                 i += 1
                 if i >= len(args):
@@ -528,8 +531,10 @@ class PIFSCommandExecutor:
                 raise PIFSCommandError(f"Unsupported cat option: {arg}")
             else:
                 raise PIFSCommandError(
-                    "cat accepts one file target. Use: cat <path|file_ref|document_id> --page <page-or-range>, "
-                    "for example: cat /documents/report.pdf --page 31-59"
+                    "cat accepts one file target. Use target-first syntax: "
+                    "cat <path|file_ref|document_id> --structure, "
+                    "cat <path|file_ref|document_id> --node 0002 0004, or "
+                    "cat <path|file_ref|document_id> --page 31-33"
                 )
             i += 1
         if structural_mode == "structure":
