@@ -2,7 +2,6 @@ from fastapi import FastAPI
 
 from api.routers import api_router
 
-
 def create_app() -> FastAPI:
     app = FastAPI(
         title="PageIndex API",
