@@ -19,7 +19,6 @@ from pageindex.utils import (
     count_tokens,
     create_clean_structure_for_description,
     format_structure,
-    generate_doc_description,
     generate_summaries_for_structure,
     post_processing,
     remove_structure_text,
@@ -82,8 +81,6 @@ def markdown_to_page_list(content: str, tokens_per_page: int, model: str) -> lis
 
     return pages
 
-
-# ── Pipeline (sync wrapper so it can be offloaded via asyncio.to_thread) ──────
 
 async def _build_tree(page_list: list[tuple[str, int]], opt) -> tuple[list, str]:
     """Run the full PDF pipeline on virtual markdown pages.
