@@ -618,8 +618,7 @@ def create_clean_structure_for_description(structure):
     else:
         return structure
 
-
-def generate_doc_description(structure, model=None):
+def get_generate_doc_description_prompt(structure, model=None):
     prompt = f"""Your are an expert in generating descriptions for a document.
     You are given a structure of a document. Your task is to generate a one-sentence description for the document, which makes it easy to distinguish the document from other documents.
         
@@ -627,9 +626,17 @@ def generate_doc_description(structure, model=None):
     
     Directly return the description, do not include any other text.
     """
+    return prompt
+
+def generate_doc_description(structure, model=None):
+    prompt = get_generate_doc_description_prompt(structure, model)
     response = llm_completion(model, prompt)
     return response
 
+async def agenerate_doc_description(structure, model=None):
+    prompt = get_generate_doc_description_prompt(structure, model)
+    response = await llm_acompletion(model, prompt)
+    return response
 
 def reorder_dict(data, key_order):
     if not key_order:

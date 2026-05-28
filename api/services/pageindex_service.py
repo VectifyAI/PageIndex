@@ -15,6 +15,7 @@ from pageindex.utils import (
     ConfigLoader,
     JsonLogger,
     add_node_text,
+    agenerate_doc_description,
     count_tokens,
     create_clean_structure_for_description,
     format_structure,
@@ -126,7 +127,7 @@ async def _build_tree(page_list: list[tuple[str, int]], opt) -> tuple[list, str]
         # when summaries are also enabled (nested inside the summary block).
         if opt.if_add_doc_description == "yes":
             clean = create_clean_structure_for_description(tree)
-            description = generate_doc_description(clean, model=opt.model)
+            description = await agenerate_doc_description(clean, model=opt.model)
 
     tree = format_structure(
         tree,
