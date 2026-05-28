@@ -59,7 +59,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
 
 
 
-async def llm_acompletion(model, prompt):
+async def llm_acompletion(model, prompt, return_finish_reason=False):
     if model:
         model = model.removeprefix("litellm/")
     max_retries = 10
@@ -71,7 +71,11 @@ async def llm_acompletion(model, prompt):
                 messages=messages,
                 temperature=0,
             )
-            return response.choices[0].message.content
+            content = response.choices[0].message.content
+            if return_finish_reason:
+                finish_reason = "max_output_reached" if response.choices[0].finish_reason == "length" else "finished"
+                return content, finish_reason
+            return content
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
@@ -79,6 +83,8 @@ async def llm_acompletion(model, prompt):
                 await asyncio.sleep(1)
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
+                if return_finish_reason:
+                    return "", "error"
                 return ""
             
             

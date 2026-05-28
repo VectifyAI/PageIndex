@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import re
 
@@ -13,7 +14,6 @@ from pageindex.page_index import (
 )
 from pageindex.utils import (
     ConfigLoader,
-    JsonLogger,
     add_node_text,
     agenerate_doc_description,
     count_tokens,
@@ -25,7 +25,7 @@ from pageindex.utils import (
     write_node_id,
 )
 
-
+logger = logging.getLogger(__name__)
 # ── S3 helpers ────────────────────────────────────────────────────────────────
 
 async def read_markdown_from_s3(key: str, s3_session, bucket: str) -> str:
@@ -91,7 +91,6 @@ async def _build_tree(page_list: list[tuple[str, int]], opt) -> tuple[list, str]
     summaries/description. Wrapped in asyncio.run() so it can be called from
     asyncio.to_thread() without touching the server's event loop.
     """
-    logger = JsonLogger("markdown_api")
     logger.info({"total_page_number": len(page_list)})
     logger.info({"total_token": sum(t for _, t in page_list)})
 

@@ -504,7 +504,7 @@ def remove_first_physical_index_section(text):
     return text
 
 ### add verify completeness
-def generate_toc_continue(toc_content, part, model=None):
+async def generate_toc_continue(toc_content, part, model=None):
     print('start generate_toc_continue')
     prompt = """
     You are an expert in extracting hierarchical tree structure.
@@ -532,14 +532,14 @@ def generate_toc_continue(toc_content, part, model=None):
     Directly return the additional part of the final JSON structure. Do not output anything else."""
 
     prompt = prompt + '\nGiven text\n:' + part + '\nPrevious tree structure\n:' + json.dumps(toc_content, indent=2)
-    response, finish_reason = llm_completion(model=model, prompt=prompt, return_finish_reason=True)
+    response, finish_reason = await llm_acompletion(model=model, prompt=prompt, return_finish_reason=True)
     if finish_reason == 'finished':
         return extract_json(response)
     else:
         raise Exception(f'finish reason: {finish_reason}')
     
 ### add verify completeness
-def generate_toc_init(part, model=None):
+async def generate_toc_init(part, model=None):
     print('start generate_toc_init')
     prompt = """
     You are an expert in extracting hierarchical tree structure, your task is to generate the tree structure of the document.
@@ -566,14 +566,14 @@ def generate_toc_init(part, model=None):
     Directly return the final JSON structure. Do not output anything else."""
 
     prompt = prompt + '\nGiven text\n:' + part
-    response, finish_reason = llm_completion(model=model, prompt=prompt, return_finish_reason=True)
+    response, finish_reason = await llm_acompletion(model=model, prompt=prompt, return_finish_reason=True)
 
     if finish_reason == 'finished':
          return extract_json(response)
     else:
         raise Exception(f'finish reason: {finish_reason}')
 
-def process_no_toc(page_list, start_index=1, model=None, logger=None):
+async def process_no_toc(page_list, start_index=1, model=None, logger=None):
     page_contents=[]
     token_lengths=[]
     for page_index in range(start_index, start_index+len(page_list)):
@@ -583,9 +583,9 @@ def process_no_toc(page_list, start_index=1, model=None, logger=None):
     group_texts = page_list_to_group_text(page_contents, token_lengths)
     logger.info(f'len(group_texts): {len(group_texts)}')
 
-    toc_with_page_number= generate_toc_init(group_texts[0], model)
+    toc_with_page_number= await generate_toc_init(group_texts[0], model)
     for group_text in group_texts[1:]:
-        toc_with_page_number_additional = generate_toc_continue(toc_with_page_number, group_text, model)    
+        toc_with_page_number_additional = await generate_toc_continue(toc_with_page_number, group_text, model)    
         toc_with_page_number.extend(toc_with_page_number_additional)
     logger.info(f'generate_toc: {toc_with_page_number}')
 
@@ -965,7 +965,7 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
     elif mode == 'process_toc_no_page_numbers':
         toc_with_page_number = process_toc_no_page_numbers(toc_content, toc_page_list, page_list, model=opt.model, logger=logger)
     else:
-        toc_with_page_number = process_no_toc(page_list, start_index=start_index, model=opt.model, logger=logger)
+        toc_with_page_number = await process_no_toc(page_list, start_index=start_index, model=opt.model, logger=logger)
             
     toc_with_page_number = [item for item in toc_with_page_number if item.get('physical_index') is not None] 
     
