@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import re
 
@@ -13,19 +14,18 @@ from pageindex.page_index import (
 )
 from pageindex.utils import (
     ConfigLoader,
-    JsonLogger,
     add_node_text,
+    agenerate_doc_description,
     count_tokens,
     create_clean_structure_for_description,
     format_structure,
-    generate_doc_description,
     generate_summaries_for_structure,
     post_processing,
     remove_structure_text,
     write_node_id,
 )
 
-
+logger = logging.getLogger(__name__)
 # ── S3 helpers ────────────────────────────────────────────────────────────────
 
 async def read_markdown_from_s3(key: str, s3_session, bucket: str) -> str:
@@ -82,9 +82,7 @@ def markdown_to_page_list(content: str, tokens_per_page: int, model: str) -> lis
     return pages
 
 
-# ── Pipeline (sync wrapper so it can be offloaded via asyncio.to_thread) ──────
-
-def _build_tree(page_list: list[tuple[str, int]], opt) -> tuple[list, str]:
+async def _build_tree(page_list: list[tuple[str, int]], opt) -> tuple[list, str]:
     """Run the full PDF pipeline on virtual markdown pages.
 
     Calls meta_processor(mode='process_no_toc') directly — skipping check_toc()
@@ -93,49 +91,45 @@ def _build_tree(page_list: list[tuple[str, int]], opt) -> tuple[list, str]:
     summaries/description. Wrapped in asyncio.run() so it can be called from
     asyncio.to_thread() without touching the server's event loop.
     """
-    logger = JsonLogger("markdown_api")
     logger.info({"total_page_number": len(page_list)})
     logger.info({"total_token": sum(t for _, t in page_list)})
 
-    async def _run():
-        # Directly enter process_no_toc — no TOC scanning for markdown
-        flat_toc = await meta_processor(
-            page_list, mode="process_no_toc", start_index=1, opt=opt, logger=logger
-        )
+    # Directly enter process_no_toc — no TOC scanning for markdown
+    flat_toc = await meta_processor(
+        page_list, mode="process_no_toc", start_index=1, opt=opt, logger=logger
+    )
 
-        flat_toc = add_preface_if_needed(flat_toc)
-        flat_toc = await check_title_appearance_in_start_concurrent(
-            flat_toc, page_list, model=opt.model, logger=logger
-        )
-        valid_items = [item for item in flat_toc if item.get("physical_index") is not None]
+    flat_toc = add_preface_if_needed(flat_toc)
+    flat_toc = await check_title_appearance_in_start_concurrent(
+        flat_toc, page_list, model=opt.model, logger=logger
+    )
+    valid_items = [item for item in flat_toc if item.get("physical_index") is not None]
 
-        tree = post_processing(valid_items, len(page_list))
-        await asyncio.gather(
-            *[process_large_node_recursively(node, page_list, opt, logger=logger) for node in tree]
-        )
+    tree = post_processing(valid_items, len(page_list))
+    await asyncio.gather(
+        *[process_large_node_recursively(node, page_list, opt, logger=logger) for node in tree]
+    )
 
-        if opt.if_add_node_id == "yes":
-            write_node_id(tree)
-        if opt.if_add_node_text == "yes" or opt.if_add_node_summary == "yes":
-            add_node_text(tree, page_list)
-        description = ""
-        if opt.if_add_node_summary == "yes":
-            await generate_summaries_for_structure(tree, model=opt.model)
-            if opt.if_add_node_text == "no":
-                remove_structure_text(tree)
-            # Matches original page_index_builder(): description is only generated
-            # when summaries are also enabled (nested inside the summary block).
-            if opt.if_add_doc_description == "yes":
-                clean = create_clean_structure_for_description(tree)
-                description = generate_doc_description(clean, model=opt.model)
+    if opt.if_add_node_id == "yes":
+        write_node_id(tree)
+    if opt.if_add_node_text == "yes" or opt.if_add_node_summary == "yes":
+        add_node_text(tree, page_list)
+    description = ""
+    if opt.if_add_node_summary == "yes":
+        await generate_summaries_for_structure(tree, model=opt.model)
+        if opt.if_add_node_text == "no":
+            remove_structure_text(tree)
+        # Matches original page_index_builder(): description is only generated
+        # when summaries are also enabled (nested inside the summary block).
+        if opt.if_add_doc_description == "yes":
+            clean = create_clean_structure_for_description(tree)
+            description = await agenerate_doc_description(clean, model=opt.model)
 
-        tree = format_structure(
-            tree,
-            order=["title", "node_id", "start_index", "end_index", "summary", "text", "nodes"],
-        )
-        return tree, description
-
-    return asyncio.run(_run())
+    tree = format_structure(
+        tree,
+        order=["title", "node_id", "start_index", "end_index", "summary", "text", "nodes"],
+    )
+    return tree, description
 
 
 # ── Public orchestrator ───────────────────────────────────────────────────────
@@ -178,7 +172,7 @@ async def process_markdown(payload, s3_session, bucket: str) -> dict:
     opt = ConfigLoader().load(_build_config_overrides(payload))
     page_list = markdown_to_page_list(content, payload.tokens_per_page, opt.model)
 
-    tree, description = await asyncio.to_thread(_build_tree, page_list, opt)
+    tree, description = await _build_tree(page_list, opt)
 
     output = {
         "doc_description": description,

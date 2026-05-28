@@ -59,7 +59,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
 
 
 
-async def llm_acompletion(model, prompt):
+async def llm_acompletion(model, prompt, return_finish_reason=False):
     if model:
         model = model.removeprefix("litellm/")
     max_retries = 10
@@ -71,7 +71,11 @@ async def llm_acompletion(model, prompt):
                 messages=messages,
                 temperature=0,
             )
-            return response.choices[0].message.content
+            content = response.choices[0].message.content
+            if return_finish_reason:
+                finish_reason = "max_output_reached" if response.choices[0].finish_reason == "length" else "finished"
+                return content, finish_reason
+            return content
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
@@ -79,6 +83,8 @@ async def llm_acompletion(model, prompt):
                 await asyncio.sleep(1)
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
+                if return_finish_reason:
+                    return "", "error"
                 return ""
             
             
@@ -618,8 +624,7 @@ def create_clean_structure_for_description(structure):
     else:
         return structure
 
-
-def generate_doc_description(structure, model=None):
+def get_generate_doc_description_prompt(structure, model=None):
     prompt = f"""Your are an expert in generating descriptions for a document.
     You are given a structure of a document. Your task is to generate a one-sentence description for the document, which makes it easy to distinguish the document from other documents.
         
@@ -627,9 +632,17 @@ def generate_doc_description(structure, model=None):
     
     Directly return the description, do not include any other text.
     """
+    return prompt
+
+def generate_doc_description(structure, model=None):
+    prompt = get_generate_doc_description_prompt(structure, model)
     response = llm_completion(model, prompt)
     return response
 
+async def agenerate_doc_description(structure, model=None):
+    prompt = get_generate_doc_description_prompt(structure, model)
+    response = await llm_acompletion(model, prompt)
+    return response
 
 def reorder_dict(data, key_order):
     if not key_order:
