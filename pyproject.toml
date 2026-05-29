@@ -1,0 +1,13 @@
+[project]
+name = "pageindex"
+version = "0.1.0"
+description = "Vectorless, Reasoning-based RAG"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "litellm==1.86.2",
+    "pymupdf==1.26.4",
+    "pypdf2==3.0.1",
+    "python-dotenv==1.2.2",
+    "pyyaml==6.0.2",
+]
