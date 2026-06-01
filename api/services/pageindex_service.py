@@ -26,22 +26,57 @@ from pageindex.utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ── Typed exceptions ──────────────────────────────────────────────────────────
+
+class S3KeyNotFoundError(Exception):
+    """Raised when the requested S3 key does not exist."""
+
+class S3ReadError(Exception):
+    """Raised when S3 read fails for any reason other than key-not-found."""
+
+class S3WriteError(Exception):
+    """Raised when writing the output JSON to S3 fails."""
+
+class EmptyDocumentError(Exception):
+    """Raised when the S3 object is empty or contains no processable content."""
+
+
 # ── S3 helpers ────────────────────────────────────────────────────────────────
 
 async def read_markdown_from_s3(key: str, s3_session, bucket: str) -> str:
-    async with s3_session.client("s3") as s3:
-        resp = await s3.get_object(Bucket=bucket, Key=key)
-        return (await resp["Body"].read()).decode("utf-8")
+    try:
+        async with s3_session.client("s3") as s3:
+            resp = await s3.get_object(Bucket=bucket, Key=key)
+            content = (await resp["Body"].read()).decode("utf-8")
+    except Exception as e:
+        response = getattr(e, "response", None)
+        error_code = (
+            response.get("Error", {}).get("Code")
+            if isinstance(response, dict)
+            else getattr(e, "error_code", None)
+        )
+        if error_code in ("NoSuchKey", "404"):
+            raise S3KeyNotFoundError(f"S3 key not found: s3://{bucket}/{key}") from e
+        raise S3ReadError(f"Failed to read s3://{bucket}/{key}: {e}") from e
+
+    if not content.strip():
+        raise EmptyDocumentError(f"S3 object is empty: s3://{bucket}/{key}")
+    return content
 
 
 async def upload_tree_to_s3(key: str, data: dict, s3_session, bucket: str) -> None:
-    async with s3_session.client("s3") as s3:
-        await s3.put_object(
-            Bucket=bucket,
-            Key=key,
-            Body=json.dumps(data, indent=2, ensure_ascii=False),
-            ContentType="application/json",
-        )
+    try:
+        async with s3_session.client("s3") as s3:
+            await s3.put_object(
+                Bucket=bucket,
+                Key=key,
+                Body=json.dumps(data, indent=2, ensure_ascii=False),
+                ContentType="application/json",
+            )
+    except Exception as e:
+        raise S3WriteError(f"Failed to write output to s3://{bucket}/{key}: {e}") from e
 
 
 # ── Markdown → page_list ──────────────────────────────────────────────────────
