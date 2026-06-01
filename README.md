@@ -68,7 +68,7 @@ Compared to traditional vector-based RAG, **PageIndex** features:
 - **Context-Aware Retrieval**: Retrieval depends on your full context (e.g., conversation history and domain knowledge), and easily incorporates new context.
 - **Human-like Retrieval**: Simulates how human experts navigate and extract knowledge from complex documents.
 
-PageIndex powers a reasoning-based RAG system that achieved **state-of-the-art** [98.7% accuracy](https://github.com/VectifyAI/Mafin2.5-FinanceBench) on FinanceBench, vastly outperforming vector-based RAG on professional documents (see our [blog post](https://vectify.ai/blog/Mafin2.5)).
+PageIndex powers a reasoning-based RAG system that achieved **state-of-the-art** [98.7% accuracy](https://github.com/VectifyAI/Mafin2.5-FinanceBench) on FinanceBench, vastly outperforming vector-based RAG solutions on professional document analysis ([blog post](https://vectify.ai/blog/Mafin2.5)).
 
 ### 📍 Explore PageIndex
 
