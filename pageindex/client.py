@@ -8,9 +8,24 @@ from pathlib import Path
 import PyPDF2
 
 from .page_index import page_index
-from .page_index_md import md_to_tree
+from .page_index_md import (
+    md_to_tree,
+    extract_nodes_from_markdown,
+    extract_node_text_content,
+    get_node_summary,
+    build_tree_from_nodes,
+)
 from .retrieve import get_document, get_document_structure, get_page_content
-from .utils import ConfigLoader, remove_fields
+from .utils import (
+    ConfigLoader,
+    remove_fields,
+    hash_text,
+    compute_section_hashes,
+    find_ancestors,
+    structure_to_list,
+    write_node_id,
+    format_structure,
+)
 
 META_INDEX = "_meta.json"
 
@@ -112,6 +127,10 @@ class PageIndexClient:
                     result = pool.submit(asyncio.run, coro).result()
             except RuntimeError:
                 result = asyncio.run(coro)
+            # Compute hashes from the raw file to enable incremental update().
+            _md_content = open(file_path, encoding='utf-8').read()
+            _node_list, _md_lines = extract_nodes_from_markdown(_md_content)
+            _flat_nodes = extract_node_text_content(_node_list, _md_lines)
             self.documents[doc_id] = {
                 'id': doc_id,
                 'type': 'md',
@@ -120,6 +139,8 @@ class PageIndexClient:
                 'doc_description': result.get('doc_description', ''),
                 'line_count': result.get('line_count', 0),
                 'structure': result['structure'],
+                'file_hash': hash_text(_md_content),
+                'section_hashes': compute_section_hashes(_flat_nodes),
             }
         else:
             raise ValueError(f"Unsupported file format for: {file_path}")
@@ -216,6 +237,108 @@ class PageIndexClient:
         doc['structure'] = full.get('structure', [])
         if full.get('pages'):
             doc['pages'] = full['pages']
+        if full.get('section_hashes'):
+            doc['section_hashes'] = full['section_hashes']
+        if full.get('file_hash'):
+            doc['file_hash'] = full['file_hash']
+
+    def update(self, doc_id: str) -> dict:
+        """Incrementally update an indexed MD document.
+
+        Re-summarizes only sections whose own text changed (plus their
+        ancestors, whose roll-up may be affected); unchanged sections reuse
+        their cached summary. Returns a status dict describing the change set.
+        """
+        self._ensure_doc_loaded(doc_id)
+        doc = self.documents.get(doc_id)
+        if not doc:
+            raise ValueError(f"Unknown doc_id: {doc_id}")
+        if doc.get('type') != 'md':
+            raise ValueError("update() only supports MD documents")
+
+        file_path = doc['path']
+        content = open(file_path, encoding='utf-8').read()
+
+        # Gate 1: file-level hash — skip entirely if nothing changed.
+        new_file_hash = hash_text(content)
+        if new_file_hash == doc.get('file_hash'):
+            return {"status": "unchanged"}
+
+        # Gate 2: section-level diff.
+        node_list, md_lines = extract_nodes_from_markdown(content)
+        new_nodes = extract_node_text_content(node_list, md_lines)
+        new_hashes = compute_section_hashes(new_nodes)
+        old_hashes = doc.get('section_hashes') or {}
+
+        new_keys = set(new_hashes)
+        old_keys = set(old_hashes)
+        added = new_keys - old_keys
+        deleted = old_keys - new_keys
+        changed = {p for p in new_keys & old_keys if new_hashes[p] != old_hashes[p]}
+
+        # Dirty sections plus the ancestors of each (roll-up summaries).
+        dirty = changed | added
+        to_summarize = set(dirty)
+        for path in dirty:
+            to_summarize.update(find_ancestors(path))
+
+        # Reuse cached summaries for clean sections.
+        old_structure_flat = structure_to_list(doc.get('structure', []))
+        old_summary_map = {
+            n.get('title_path', n.get('title')): n.get('summary') or n.get('prefix_summary', '')
+            for n in old_structure_flat
+        }
+
+        async def _identity(val):
+            return val
+
+        async def _regenerate():
+            tasks = {}
+            for path, node in {n['title_path']: n for n in new_nodes}.items():
+                if path in to_summarize:
+                    tasks[path] = get_node_summary(node, summary_token_threshold=200, model=self.model)
+                else:
+                    tasks[path] = _identity(old_summary_map.get(path, ''))
+            return {path: await coro for path, coro in tasks.items()}
+
+        try:
+            asyncio.get_running_loop()
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                summaries = pool.submit(asyncio.run, _regenerate()).result()
+        except RuntimeError:
+            summaries = asyncio.run(_regenerate())
+
+        for node in new_nodes:
+            node['summary'] = summaries.get(node['title_path'], '')
+
+        # Rebuild the tree with fresh node ids.
+        new_structure = build_tree_from_nodes(new_nodes)
+        write_node_id(new_structure)
+        new_structure = format_structure(
+            new_structure,
+            order=['title', 'node_id', 'line_num', 'summary', 'prefix_summary', 'text', 'nodes'],
+        )
+
+        doc['structure'] = new_structure
+        doc['file_hash'] = new_file_hash
+        doc['section_hashes'] = new_hashes
+        doc['line_count'] = content.count('\n') + 1
+
+        if self.workspace:
+            tmp = self.workspace / f"{doc_id}.tmp"
+            save_doc = dict(doc)
+            save_doc['structure'] = new_structure
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(save_doc, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, self.workspace / f"{doc_id}.json")
+            self._save_meta(doc_id, self._make_meta_entry(doc))
+
+        return {
+            "status": "updated",
+            "updated": sorted(changed),
+            "added": sorted(added),
+            "deleted": sorted(deleted),
+        }
 
     def get_document(self, doc_id: str) -> str:
         """Return document metadata JSON."""
