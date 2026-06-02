@@ -75,7 +75,9 @@ class PageIndexClient:
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
 
-        doc_id = str(uuid.uuid4())
+        # Re-indexing the same file path reuses its doc_id (overwrites in place)
+        # instead of creating a duplicate document/JSON.
+        doc_id = self.get_doc_id_by_path(file_path) or str(uuid.uuid4())
         ext = os.path.splitext(file_path)[1].lower()
 
         is_pdf = ext == '.pdf'
@@ -225,6 +227,14 @@ class PageIndexClient:
             if doc.get('path') and not os.path.isabs(doc['path']):
                 doc['path'] = str((self.workspace / doc['path']).resolve())
             self.documents[doc_id] = doc
+
+    def get_doc_id_by_path(self, file_path: str) -> str | None:
+        """Return the doc_id already indexed for this file path, or None."""
+        file_path = os.path.abspath(os.path.expanduser(file_path))
+        return next(
+            (did for did, d in self.documents.items() if d.get('path') == file_path),
+            None,
+        )
 
     def _ensure_doc_loaded(self, doc_id: str):
         """Load full document JSON on demand (structure, pages, etc.)."""
