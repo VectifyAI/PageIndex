@@ -149,8 +149,22 @@ You can follow these steps to generate a PageIndex tree from a PDF document.
 
 ### 1. Install dependencies
 
+Install the package (along with its pinned dependencies) from the repository root:
+
 ```bash
-pip3 install --upgrade -r requirements.txt
+pip3 install --upgrade .
+```
+
+Or install it directly from GitHub to use it in another project:
+
+```bash
+pip3 install "git+https://github.com/VectifyAI/PageIndex.git"
+```
+
+To run the agentic vectorless RAG example, install the optional extras:
+
+```bash
+pip3 install --upgrade ".[examples]"
 ```
 
 ### 2. Set your LLM API key
@@ -164,8 +178,10 @@ OPENAI_API_KEY=your_openai_key_here
 ### 3. Generate PageIndex structure for your PDF
 
 ```bash
-python3 run_pageindex.py --pdf_path /path/to/your/document.pdf
+pageindex --pdf_path /path/to/your/document.pdf
 ```
+
+> The `pageindex` command is installed with the package. You can also run it without installing via `python3 run_pageindex.py --pdf_path /path/to/your/document.pdf`.
 
 <details>
 <summary>Optional parameters</summary>
@@ -189,7 +205,7 @@ You can customize the processing with additional optional arguments:
 We also provide markdown support for PageIndex. You can use the `--md_path` flag to generate a tree structure for a markdown file.
 
 ```bash
-python3 run_pageindex.py --md_path /path/to/your/document.md
+pageindex --md_path /path/to/your/document.md
 ```
 
 > Note: in this mode, we use "#" to determine node headings and their levels. For example, "##" is level 2, "###" is level 3, etc. Make sure your markdown file is formatted correctly. If your Markdown file was converted from a PDF or HTML, we don't recommend using this mode, since most existing conversion tools cannot preserve the original hierarchy. Instead, use our [PageIndex OCR](https://pageindex.ai/blog/ocr), which is designed to preserve it, to convert the PDF to a markdown file and then use this mode.
