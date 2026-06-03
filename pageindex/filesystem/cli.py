@@ -293,36 +293,6 @@ def _run_add(argv: list[str], *, workspace: str) -> int:
     return 0
 
 
-def _run_semantic_folder(argv: list[str], *, workspace: str) -> int:
-    parser = argparse.ArgumentParser(
-        prog="pifs semantic-folder",
-        description="Build PIFS Semantic Folders",
-    )
-    subparsers = parser.add_subparsers(dest="semantic_folder_command", required=True)
-    build_parser = subparsers.add_parser("build")
-    build_parser.add_argument("source_scope", nargs="?", default="/")
-    args = parser.parse_args(argv)
-
-    if args.semantic_folder_command == "build":
-        filesystem = _filesystem_from_workspace(workspace)
-        result = filesystem.build_semantic_folder(args.source_scope)
-        print(f"source: {result['source']}")
-        print(f"mount: {result['mount']}")
-        print(f"template: {result['template']}")
-        print(f"files: {result['files']}")
-        print(f"memberships: {result['memberships']}")
-        print(f"skipped: {result['skipped']}")
-        print(
-            "metadata: "
-            f"cached={result['metadata_cached']} "
-            f"generating={result['metadata_generating']} "
-            f"failed={result['metadata_failed']}"
-        )
-        print(f"planning: {result['planning']}")
-        return 0
-    raise ValueError(f"unknown semantic-folder command: {args.semantic_folder_command}")
-
-
 def _run_set(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="pifs set",
@@ -374,10 +344,6 @@ def main(argv: list[str] | None = None) -> int:
             if not args.workspace:
                 parser.error("--workspace is required unless PIFS_WORKSPACE is set or `pifs set workspace <path>` has been run")
             return _run_add(command_args, workspace=args.workspace)
-        if command_name == "semantic-folder":
-            if not args.workspace:
-                parser.error("--workspace is required unless PIFS_WORKSPACE is set or `pifs set workspace <path>` has been run")
-            return _run_semantic_folder(command_args, workspace=args.workspace)
 
         if "--json" in command_tokens:
             command_tokens = [token for token in command_tokens if token != "--json"]
