@@ -36,6 +36,8 @@ if __name__ == "__main__":
                       help='Minimum token threshold for thinning (markdown only)')
     parser.add_argument('--summary-token-threshold', type=int, default=200,
                       help='Token threshold for generating summaries (markdown only)')
+    parser.add_argument('--output-dir',type=str,default='./results',
+                        help='Directory to save output JSON')
     args = parser.parse_args()
     
     # Validate that exactly one file type is specified
@@ -70,8 +72,8 @@ if __name__ == "__main__":
         
         # Save results
         pdf_name = os.path.splitext(os.path.basename(args.pdf_path))[0]    
-        output_dir = './results'
-        output_file = f'{output_dir}/{pdf_name}_structure.json'
+        output_dir = args.output_dir
+        output_file = os.path.join(output_dir, f'{pdf_name}_structure.json')
         os.makedirs(output_dir, exist_ok=True)
         
         with open(output_file, 'w', encoding='utf-8') as f:
@@ -124,8 +126,8 @@ if __name__ == "__main__":
         
         # Save results
         md_name = os.path.splitext(os.path.basename(args.md_path))[0]    
-        output_dir = './results'
-        output_file = f'{output_dir}/{md_name}_structure.json'
+        output_dir = args.output_dir
+        output_file = os.path.join(output_dir, f'{pdf_name}_structure.json')
         os.makedirs(output_dir, exist_ok=True)
         
         with open(output_file, 'w', encoding='utf-8') as f:
