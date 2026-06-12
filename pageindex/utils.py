@@ -96,6 +96,44 @@ def get_json_content(response):
     return json_content
          
 
+def _extract_balanced_json(text):
+    """Find and parse the first balanced {...} or [...] object in text.
+
+    Robustness fallback for models (e.g. DeepSeek) that occasionally wrap the
+    JSON in prose or code fences instead of returning it bare. Returns the
+    parsed object, or None if nothing parseable is found.
+    """
+    for open_ch, close_ch in (('{', '}'), ('[', ']')):
+        start = text.find(open_ch)
+        if start == -1:
+            continue
+        depth = 0
+        in_str = False
+        esc = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == '\\':
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == open_ch:
+                depth += 1
+            elif ch == close_ch:
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(text[start:i + 1])
+                    except json.JSONDecodeError:
+                        break
+    return None
+
+
 def extract_json(content):
     try:
         # First, try to extract JSON enclosed within ```json and ```
@@ -122,7 +160,12 @@ def extract_json(content):
             # Remove any trailing commas before closing brackets/braces
             json_content = json_content.replace(',]', ']').replace(',}', '}')
             return json.loads(json_content)
-        except:
+        except json.JSONDecodeError:
+            # Last resort: pull the first balanced JSON object out of the raw
+            # response (handles models that add prose/fences around the JSON).
+            obj = _extract_balanced_json(content)
+            if obj is not None:
+                return obj
             logging.error("Failed to parse JSON even after cleanup")
             return {}
     except Exception as e:
