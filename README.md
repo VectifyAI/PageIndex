@@ -150,7 +150,24 @@ You can follow these steps to generate a PageIndex tree from a PDF document.
 ### 1. Install dependencies
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip3 install --upgrade -r requirements.txt
+```
+
+On Windows PowerShell:
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install --upgrade -r requirements.txt
+```
+
+If PowerShell blocks `Activate.ps1`, allow scripts for the current user and retry:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+.\.venv\Scripts\Activate.ps1
 ```
 
 ### 2. Set your LLM API key
@@ -160,6 +177,18 @@ Create a `.env` file in the root directory with your LLM API key. Multi-LLM is s
 ```bash
 OPENAI_API_KEY=your_openai_key_here
 ```
+
+For non-OpenAI providers, set the provider-specific key required by LiteLLM and pass the matching model name:
+
+```bash
+DASHSCOPE_API_KEY=your_dashscope_key_here
+```
+
+```bash
+python3 run_pageindex.py --pdf_path /path/to/your/document.pdf --model dashscope/qwen-plus
+```
+
+Use the model prefix and environment variable documented by your LiteLLM provider, such as `anthropic/...`, `gemini/...`, `deepseek/...`, or `dashscope/...`.
 
 ### 3. Generate PageIndex structure for your PDF
 
