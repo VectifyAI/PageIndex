@@ -119,7 +119,9 @@ def toc_detector_single_page(content, model=None):
     response = llm_completion(model=model, prompt=prompt)
     # print('response', response)
     json_content = extract_json(response)    
-    return json_content['toc_detected']
+    if not isinstance(json_content, dict):
+        return 'no'
+    return json_content.get('toc_detected', 'no')
 
 
 def check_if_toc_extraction_is_complete(content, toc, model=None):
@@ -137,7 +139,9 @@ def check_if_toc_extraction_is_complete(content, toc, model=None):
     prompt = prompt + '\n Document:\n' + content + '\n Table of contents:\n' + toc
     response = llm_completion(model=model, prompt=prompt)
     json_content = extract_json(response)
-    return json_content['completed']
+    if not isinstance(json_content, dict):
+        return 'no'
+    return json_content.get('completed', 'no')
 
 
 def check_if_toc_transformation_is_complete(content, toc, model=None):
@@ -155,7 +159,9 @@ def check_if_toc_transformation_is_complete(content, toc, model=None):
     prompt = prompt + '\n Raw Table of contents:\n' + content + '\n Cleaned Table of contents:\n' + toc
     response = llm_completion(model=model, prompt=prompt)
     json_content = extract_json(response)
-    return json_content['completed']
+    if not isinstance(json_content, dict):
+        return 'no'
+    return json_content.get('completed', 'no')
 
 def extract_toc_content(content, model=None):
     prompt = f"""
@@ -217,7 +223,9 @@ def detect_page_index(toc_content, model=None):
 
     response = llm_completion(model=model, prompt=prompt)
     json_content = extract_json(response)
-    return json_content['page_index_given_in_toc']
+    if not isinstance(json_content, dict):
+        return 'no'
+    return json_content.get('page_index_given_in_toc', 'no')
 
 def toc_extractor(page_list, toc_page_list, model):
     def transform_dots_to_colon(text):
@@ -414,6 +422,8 @@ def calculate_page_offset(pairs):
     return most_common
 
 def add_page_offset_to_toc_json(data, offset):
+    if offset is None:
+        return data
     for i in range(len(data)):
         if data[i].get('page') is not None and isinstance(data[i]['page'], int):
             data[i]['physical_index'] = data[i]['page'] + offset
@@ -503,6 +513,22 @@ def remove_first_physical_index_section(text):
         return text.replace(match.group(0), '', 1)
     return text
 
+
+def _as_toc_list(value):
+    """Normalize model-produced TOC JSON to a list of section dictionaries."""
+
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    if isinstance(value, dict):
+        if isinstance(value.get("toc"), list):
+            return [item for item in value["toc"] if isinstance(item, dict)]
+        if isinstance(value.get("items"), list):
+            return [item for item in value["items"] if isinstance(item, dict)]
+        if all(key in value for key in ("title", "physical_index")):
+            return [value]
+    return []
+
+
 ### add verify completeness
 def generate_toc_continue(toc_content, part, model=None):
     print('start generate_toc_continue')
@@ -534,7 +560,7 @@ def generate_toc_continue(toc_content, part, model=None):
     prompt = prompt + '\nGiven text\n:' + part + '\nPrevious tree structure\n:' + json.dumps(toc_content, indent=2)
     response, finish_reason = llm_completion(model=model, prompt=prompt, return_finish_reason=True)
     if finish_reason == 'finished':
-        return extract_json(response)
+        return _as_toc_list(extract_json(response))
     else:
         raise Exception(f'finish reason: {finish_reason}')
     
@@ -569,7 +595,7 @@ def generate_toc_init(part, model=None):
     response, finish_reason = llm_completion(model=model, prompt=prompt, return_finish_reason=True)
 
     if finish_reason == 'finished':
-         return extract_json(response)
+         return _as_toc_list(extract_json(response))
     else:
         raise Exception(f'finish reason: {finish_reason}')
 
@@ -684,8 +710,14 @@ def process_none_page_numbers(toc_items, page_list, start_index=1, model=None):
             item_copy = copy.deepcopy(item)
             del item_copy['page']
             result = add_page_number_to_toc(page_contents, item_copy, model)
-            if isinstance(result[0]['physical_index'], str) and result[0]['physical_index'].startswith('<physical_index'):
-                item['physical_index'] = int(result[0]['physical_index'].split('_')[-1].rstrip('>').strip())
+            # LLM output may be empty or omit physical_index. Leave the item
+            # unresolved so the caller can filter or fall back instead of
+            # failing the whole document.
+            if not isinstance(result, list) or not result or not isinstance(result[0], dict):
+                continue
+            physical_index = result[0].get('physical_index')
+            if isinstance(physical_index, str) and physical_index.startswith('<physical_index'):
+                item['physical_index'] = int(physical_index.split('_')[-1].rstrip('>').strip())
                 del item['page']
     
     return toc_items
@@ -753,7 +785,12 @@ async def single_toc_item_index_fixer(section_title, content, model=None):
     prompt = toc_extractor_prompt + '\nSection Title:\n' + str(section_title) + '\nDocument pages:\n' + content
     response = await llm_acompletion(model=model, prompt=prompt)
     json_content = extract_json(response)    
-    return convert_physical_index_to_int(json_content['physical_index'])
+    if not isinstance(json_content, dict):
+        return None
+    physical_index = json_content.get('physical_index')
+    if physical_index is None:
+        return None
+    return convert_physical_index_to_int(physical_index)
 
 
 
@@ -994,7 +1031,8 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
         elif mode == 'process_toc_no_page_numbers':
             return await meta_processor(page_list, mode='process_no_toc', start_index=start_index, opt=opt, logger=logger)
         else:
-            raise Exception('Processing failed')
+            logger.warning('Falling back to low-confidence no-TOC structure')
+            return toc_with_page_number
         
  
 async def process_large_node_recursively(node, page_list, opt=None, logger=None):

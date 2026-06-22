@@ -9,6 +9,7 @@ import PyPDF2
 import copy
 import asyncio
 import pymupdf
+import re
 from io import BytesIO
 from dotenv import load_dotenv
 load_dotenv()
@@ -96,38 +97,58 @@ def get_json_content(response):
     return json_content
          
 
+def _normalize_json_candidate(candidate):
+    candidate = candidate.strip()
+    candidate = re.sub(r"\bNone\b", "null", candidate)
+    candidate = re.sub(r"\bTrue\b", "true", candidate)
+    candidate = re.sub(r"\bFalse\b", "false", candidate)
+    candidate = candidate.replace(",]", "]").replace(",}", "}")
+    return candidate
+
+
+def _json_candidates(content):
+    if not content:
+        return
+
+    fenced_blocks = re.findall(r"```(?:json)?\s*(.*?)```", content, flags=re.DOTALL | re.IGNORECASE)
+    for block in fenced_blocks:
+        yield block
+
+    yield content
+
+    # Some models add explanations before or after JSON. Try decoding from each
+    # plausible JSON start and allow trailing text after the decoded object.
+    for index, char in enumerate(content):
+        if char in "{[":
+            yield content[index:]
+
+
 def extract_json(content):
-    try:
-        # First, try to extract JSON enclosed within ```json and ```
-        start_idx = content.find("```json")
-        if start_idx != -1:
-            start_idx += 7  # Adjust index to start after the delimiter
-            end_idx = content.rfind("```")
-            json_content = content[start_idx:end_idx].strip()
-        else:
-            # If no delimiters, assume entire content could be JSON
-            json_content = content.strip()
+    decoder = json.JSONDecoder()
+    last_error = None
 
-        # Clean up common issues that might cause parsing errors
-        json_content = json_content.replace('None', 'null')  # Replace Python None with JSON null
-        json_content = json_content.replace('\n', ' ').replace('\r', ' ')  # Remove newlines
-        json_content = ' '.join(json_content.split())  # Normalize whitespace
+    for candidate in _json_candidates(content):
+        json_content = _normalize_json_candidate(candidate)
+        if not json_content:
+            continue
 
-        # Attempt to parse and return the JSON object
-        return json.loads(json_content)
-    except json.JSONDecodeError as e:
-        logging.error(f"Failed to extract JSON: {e}")
-        # Try to clean up the content further if initial parsing fails
         try:
-            # Remove any trailing commas before closing brackets/braces
-            json_content = json_content.replace(',]', ']').replace(',}', '}')
             return json.loads(json_content)
-        except:
-            logging.error("Failed to parse JSON even after cleanup")
-            return {}
-    except Exception as e:
-        logging.error(f"Unexpected error while extracting JSON: {e}")
-        return {}
+        except json.JSONDecodeError as e:
+            last_error = e
+
+        try:
+            parsed, _ = decoder.raw_decode(json_content)
+            return parsed
+        except json.JSONDecodeError as e:
+            last_error = e
+
+    if last_error:
+        logging.error(f"Failed to extract JSON: {last_error}")
+        logging.error("Failed to parse JSON even after cleanup")
+    else:
+        logging.error("Failed to extract JSON: empty response")
+    return {}
 
 def write_node_id(data, node_id=0):
     if isinstance(data, dict):
@@ -707,4 +728,3 @@ def print_tree(tree, indent=0):
 def print_wrapped(text, width=100):
     for line in text.splitlines():
         print(textwrap.fill(line, width=width))
-
