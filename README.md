@@ -163,10 +163,10 @@ py -m venv .venv
 pip install --upgrade -r requirements.txt
 ```
 
-If PowerShell blocks `Activate.ps1`, allow scripts for the current user and retry:
+If PowerShell blocks `Activate.ps1`, allow scripts for the current shell session and retry:
 
 ```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\.venv\Scripts\Activate.ps1
 ```
 
