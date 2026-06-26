@@ -7,6 +7,7 @@ import re
 from .utils import *
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import asyncio
 
 
 ################### check title in page #########################################################
@@ -960,12 +961,14 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
     print(mode)
     print(f'start_index: {start_index}')
     
+    model = opt.model
+
     if mode == 'process_toc_with_page_numbers':
-        toc_with_page_number = process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_check_page_num=opt.toc_check_page_num, model=opt.model, logger=logger)
+        toc_with_page_number = process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_check_page_num=opt.toc_check_page_num, model=model, logger=logger)
     elif mode == 'process_toc_no_page_numbers':
-        toc_with_page_number = process_toc_no_page_numbers(toc_content, toc_page_list, page_list, model=opt.model, logger=logger)
+        toc_with_page_number = process_toc_no_page_numbers(toc_content, toc_page_list, page_list, model=model, logger=logger)
     else:
-        toc_with_page_number = process_no_toc(page_list, start_index=start_index, model=opt.model, logger=logger)
+        toc_with_page_number = process_no_toc(page_list, start_index=start_index, model=model, logger=logger)
             
     toc_with_page_number = [item for item in toc_with_page_number if item.get('physical_index') is not None] 
     
@@ -976,7 +979,7 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
         logger=logger
     )
     
-    accuracy, incorrect_results = await verify_toc(page_list, toc_with_page_number, start_index=start_index, model=opt.model)
+    accuracy, incorrect_results = await verify_toc(page_list, toc_with_page_number, start_index=start_index, model=model)
         
     logger.info({
         'mode': 'process_toc_with_page_numbers',
@@ -986,7 +989,7 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
     if accuracy == 1.0 and len(incorrect_results) == 0:
         return toc_with_page_number
     if accuracy > 0.6 and len(incorrect_results) > 0:
-        toc_with_page_number, incorrect_results = await fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorrect_results,start_index=start_index, max_attempts=3, model=opt.model, logger=logger)
+        toc_with_page_number, incorrect_results = await fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorrect_results,start_index=start_index, max_attempts=3, model=model, logger=logger)
         return toc_with_page_number
     else:
         if mode == 'process_toc_with_page_numbers':
@@ -1001,11 +1004,13 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None)
     node_page_list = page_list[node['start_index']-1:node['end_index']]
     token_num = sum([page[1] for page in node_page_list])
     
+    model = opt.model
+
     if node['end_index'] - node['start_index'] > opt.max_page_num_each_node and token_num >= opt.max_token_num_each_node:
         print('large node:', node['title'], 'start_index:', node['start_index'], 'end_index:', node['end_index'], 'token_num:', token_num)
 
         node_toc_tree = await meta_processor(node_page_list, mode='process_no_toc', start_index=node['start_index'], opt=opt, logger=logger)
-        node_toc_tree = await check_title_appearance_in_start_concurrent(node_toc_tree, page_list, model=opt.model, logger=logger)
+        node_toc_tree = await check_title_appearance_in_start_concurrent(node_toc_tree, page_list, model=model, logger=logger)
         
         # Filter out items with None physical_index before post_processing
         valid_node_toc_items = [item for item in node_toc_tree if item.get('physical_index') is not None]
@@ -1063,7 +1068,8 @@ async def tree_parser(page_list, opt, doc=None, logger=None):
     return toc_tree
 
 
-def page_index_main(doc, opt=None):
+async def async_page_index_main(doc, opt=None):
+    """The async version of the page_index_main function."""
     logger = JsonLogger(doc)
     
     is_valid_pdf = (
@@ -1110,15 +1116,9 @@ def page_index_main(doc, opt=None):
     return asyncio.run(page_index_builder())
 
 
-def page_index(doc, model=None, toc_check_page_num=None, max_page_num_each_node=None, max_token_num_each_node=None,
-               if_add_node_id=None, if_add_node_summary=None, if_add_doc_description=None, if_add_node_text=None):
-    
-    user_opt = {
-        arg: value for arg, value in locals().items()
-        if arg != "doc" and value is not None
-    }
-    opt = ConfigLoader().load(user_opt)
-    return page_index_main(doc, opt)
+def page_index_main(doc, opt=None):
+    """Synchronous wrapper function that runs all async operations in a single event loop."""
+    return asyncio.run(async_page_index_main(doc, opt))
 
 
 def validate_and_truncate_physical_indices(toc_with_page_number, page_list_length, start_index=1, logger=None):
@@ -1152,3 +1152,13 @@ def validate_and_truncate_physical_indices(toc_with_page_number, page_list_lengt
         print(f"Truncated {len(truncated_items)} TOC items that exceeded document length")
      
     return toc_with_page_number
+
+def page_index(doc, model=None, toc_check_page_num=None, max_page_num_each_node=None, max_token_num_each_node=None,
+               if_add_node_id=None, if_add_node_summary=None, if_add_doc_description=None, if_add_node_text=None):
+    
+    user_opt = {
+        arg: value for arg, value in locals().items()
+        if arg != "doc" and value is not None
+    }
+    opt = ConfigLoader().load(user_opt)
+    return page_index_main(doc, opt)

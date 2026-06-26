@@ -16,6 +16,7 @@ import logging
 import yaml
 from pathlib import Path
 from types import SimpleNamespace as config
+from contextlib import asynccontextmanager
 
 # Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
 if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
@@ -394,6 +395,7 @@ def get_page_tokens(pdf_path, model=None, pdf_parser="PyPDF2"):
             token_length = litellm.token_counter(model=model, text=page_text)
             page_list.append((page_text, token_length))
         return page_list
+        
     elif pdf_parser == "PyMuPDF":
         if isinstance(pdf_path, BytesIO):
             pdf_stream = pdf_path
@@ -431,7 +433,7 @@ def get_number_of_pages(pdf_path):
 
 
 def post_processing(structure, end_physical_index):
-    # First convert page_number to start_index in flat list
+    # First convert physical_index to start_index in flat list
     for i, item in enumerate(structure):
         item['start_index'] = item.get('physical_index')
         if i < len(structure) - 1:
@@ -445,7 +447,7 @@ def post_processing(structure, end_physical_index):
     if len(tree)!=0:
         return tree
     else:
-        ### remove appear_start 
+        # remove appear_start 
         for node in structure:
             node.pop('appear_start', None)
             node.pop('physical_index', None)

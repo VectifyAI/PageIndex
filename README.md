@@ -151,8 +151,14 @@ You can follow these steps to generate a PageIndex tree from a PDF document.
 
 ### 1. Install dependencies
 
+- use pip
 ```bash
 pip3 install --upgrade -r requirements.txt
+```
+- use uv (recommended)
+```bash
+pip install uv
+uv sync
 ```
 
 ### 2. Set your LLM API key
