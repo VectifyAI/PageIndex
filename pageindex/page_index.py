@@ -60,7 +60,7 @@ def _parse_physical_index(raw):
         return int(raw)
     except (TypeError, ValueError):
         return None
-       
+
 def _validate_physical_indices(toc: list, total_pages: int, start_index: int = 1) -> list:
     """Nullify any physical_index the LLM produced that falls outside the real page range."""
     max_idx = start_index + total_pages - 1
@@ -74,14 +74,13 @@ def _validate_physical_indices(toc: list, total_pages: int, start_index: int = 1
         else:
             entry["physical_index"] = val
     return toc
-    
+
 ################### check title in page #########################################################
 async def check_title_appearance(item, page_list, start_index=1, model=None):    
     title=item['title']
     if 'physical_index' not in item or item['physical_index'] is None:
-        return {'list_index': item.get('list_index'), 'answer': 'no', 'title':title, 'page_number': None}
-    
-    
+        return {'list_index': item.get('list_index'), 'answer': 'no', 'title': title, 'page_number': None}
+
     page_number = item['physical_index']
     page_text = page_list[page_number-start_index][0]
 
@@ -90,26 +89,11 @@ async def check_title_appearance(item, page_list, start_index=1, model=None):
     Your job is to check if the given section appears or starts in the given page_text.
 
     Note: do fuzzy matching, ignore any space inconsistency in the page_text.
-
     The given section title is {title}.
-    The given page_text is:
-    {_secure_doc_text(page_text)}
-    
-    Reply format:
-    {{
-        
-        "thinking": <why do you think the section appears or starts in the page_text>
-        "answer": "yes or no" (yes if the section appears or starts in the page_text, no otherwise)
-    }}
-    Directly return the final JSON structure. Do not output anything else."""
+    The given page_text is {_secure_doc_text(page_text)}."""
 
-    response = await llm_acompletion(model=model, prompt=prompt)
-    response = extract_json(response)
-    if 'answer' in response:
-        answer = response['answer']
-    else:
-        answer = 'no'
-    return {'list_index': item['list_index'], 'answer': answer, 'title': title, 'page_number': page_number}
+    result = await llm_astructured(model=model, prompt=prompt, response_model=TitleAppearance)
+    return {'list_index': item['list_index'], 'answer': result.answer, 'title': title, 'page_number': page_number}
 
 
 async def check_title_appearance_in_start(title, page_text, model=None, logger=None):    
@@ -122,21 +106,12 @@ async def check_title_appearance_in_start(title, page_text, model=None, logger=N
     Note: do fuzzy matching, ignore any space inconsistency in the page_text.
 
     The given section title is {title}.
-    The given page_text is:
-    {_secure_doc_text(page_text)}
-    
-    reply format:
-    {{
-        "thinking": <why do you think the section appears or starts in the page_text>
-        "start_begin": "yes or no" (yes if the section starts in the beginning of the page_text, no otherwise)
-    }}
-    Directly return the final JSON structure. Do not output anything else."""
+    The given page_text is {_secure_doc_text(page_text)}."""
 
-    response = await llm_acompletion(model=model, prompt=prompt)
-    response = extract_json(response)
+    result = await llm_astructured(model=model, prompt=prompt, response_model=TitleAppearanceInStart)
     if logger:
-        logger.info(f"Response: {response}")
-    return response.get("start_begin", "no")
+        logger.info(f"Response: {result}")
+    return result.start_begin
 
 
 async def check_title_appearance_in_start_concurrent(structure, page_list, model=None, logger=None):
@@ -172,67 +147,37 @@ async def check_title_appearance_in_start_concurrent(structure, page_list, model
 def toc_detector_single_page(content, model=None):
     prompt = _SYSTEM_HARDENING + f"""
     Your job is to detect if there is a table of content provided in the given text.
+    Given text: {_secure_doc_text(content)}
+    Please note: abstract, summary, notation list, figure list, table list, etc. are not table of contents."""
 
-    Given text:
-    {_secure_doc_text(content)}
-
-    return the following JSON format:
-    {{
-        "thinking": <why do you think there is a table of content in the given text>
-        "toc_detected": "<yes or no>",
-    }}
-
-    Directly return the final JSON structure. Do not output anything else.
-    Please note: abstract,summary, notation list, figure list, table list, etc. are not table of contents."""
-
-    response = llm_completion(model=model, prompt=prompt)
-    json_content = extract_json(response)    
-    return json_content.get('toc_detected', 'no')
+    result = llm_structured(model=model, prompt=prompt, response_model=TOCDetection)
+    return result.toc_detected
 
 
 def check_if_toc_extraction_is_complete(content, toc, model=None):
     prompt = f"""
-    You are given a partial document  and a  table of contents.
-    Your job is to check if the  table of contents is complete, which it contains all the main sections in the partial document.
+    You are given a partial document and a table of contents.
+    Your job is to check if the table of contents is complete, which it contains all the main sections in the partial document.
+    Document:
+    {_secure_doc_text(content)}
+    Table of contents:
+    {_secure_doc_text(str(toc))}"""
 
-    Reply format:
-    {{
-        "thinking": <why do you think the table of contents is complete or not>
-        "completed": "yes" or "no"
-    }}
-    Directly return the final JSON structure. Do not output anything else."""
-
-    prompt = (
-        prompt
-        + '\n Document:\n' + _secure_doc_text(content)
-        + '\n Table of contents:\n' + _secure_doc_text(str(toc))
-    )
-    
-    response = llm_completion(model=model, prompt=prompt)
-    json_content = extract_json(response)
-    return json_content.get('completed', 'no')
+    result = llm_structured(model=model, prompt=prompt, response_model=TOCCompletionCheck)
+    return result.completed
 
 
 def check_if_toc_transformation_is_complete(content, toc, model=None):
     prompt = f"""
-    You are given a raw table of contents and a  table of contents.
-    Your job is to check if the  table of contents is complete.
+    You are given a raw table of contents and a table of contents.
+    Your job is to check if the table of contents is complete.
+    Raw Table of contents:
+    {_secure_doc_text(content)}
+    Cleaned Table of contents:
+    {_secure_doc_text(str(toc))}"""
 
-    Reply format:
-    {{
-        "thinking": <why do you think the cleaned table of contents is complete or not>
-        "completed": "yes" or "no"
-    }}
-    Directly return the final JSON structure. Do not output anything else."""
-
-    prompt = (
-        prompt
-        + '\n Raw Table of contents:\n' + _secure_doc_text(content)
-        + '\n Cleaned Table of contents:\n' + _secure_doc_text(str(toc))
-    )
-    response = llm_completion(model=model, prompt=prompt)
-    json_content = extract_json(response)
-    return json_content.get('completed', 'no')
+    result = llm_structured(model=model, prompt=prompt, response_model=TOCCompletionCheck)
+    return result.completed
 
 def extract_toc_content(content, model=None):
     prompt = f"""
@@ -275,18 +220,10 @@ def detect_page_index(toc_content, model=None):
 
     Your job is to detect if there are page numbers/indices given within the table of contents.
 
-    Given text: {toc_content}
+    Given text: {toc_content}"""
 
-    Reply format:
-    {{
-        "thinking": <why do you think there are page numbers/indices given within the table of contents>
-        "page_index_given_in_toc": "<yes or no>"
-    }}
-    Directly return the final JSON structure. Do not output anything else."""
-
-    response = llm_completion(model=model, prompt=prompt)
-    json_content = extract_json(response)
-    return json_content.get('page_index_given_in_toc', 'no')
+    result = llm_structured(model=model, prompt=prompt, response_model=PageIndexDetection)
+    return result.page_index_given_in_toc
 
 def toc_extractor(page_list, toc_page_list, model):
     def transform_dots_to_colon(text):
@@ -332,35 +269,25 @@ def _validate_chunk_physical_indices(toc: list, content: str) -> list:
 def toc_index_extractor(toc, content, model=None):
     print('start toc_index_extractor')
     toc_extractor_prompt = """
-    You are given a table of contents in a json format and several pages of a document, your job is to add the physical_index to the table of contents in the json format.
-
+    You are given a table of contents in a json format and several pages of a document.
+    Your job is to add the physical_index to the table of contents in the json format.
     The provided pages contains tags like <physical_index_X> and <physical_index_X> to indicate the physical location of the page X.
-
-    The structure variable is the numeric system which represents the index of the hierarchy section in the table of contents. For example, the first section has structure index 1, the first subsection has structure index 1.1, the second subsection has structure index 1.2, etc.
-
-    The response should be in the following JSON format: 
-    [
-        {
-            "structure": <structure index, "x.x.x" or None> (string),
-            "title": <title of the section>,
-            "physical_index": "<physical_index_X>" (keep the format)
-        },
-        ...
-    ]
-
+    The structure variable is the numeric system which represents the index of the hierarchy section.
     Only add the physical_index to the sections that are in the provided pages.
-    If the section is not in the provided pages, do not add the physical_index to it.
-    Directly return the final JSON structure. Do not output anything else."""
+    If the section is not in the provided pages, do not add the physical_index to it."""
 
     prompt = (
-        _SYSTEM_HARDENING + toc_extractor_prompt
-        + '\nTable of contents:\n' + _secure_doc_text(str(toc))
-        + '\nDocument pages:\n' + _secure_doc_text(content)
+            _SYSTEM_HARDENING + toc_extractor_prompt
+            + '\nTable of contents:\n' + _secure_doc_text(str(toc))
+            + '\nDocument pages:\n' + _secure_doc_text(content)
     )
-    response = llm_completion(model=model, prompt=prompt)
-    json_content = extract_json(response)
-    return _validate_chunk_physical_indices(toc=json_content, content=content)
-            
+
+    result = llm_structured(model=model, prompt=prompt, response_model=TOCIndexList)
+    items = [item.model_dump() for item in result.items]
+    return _validate_chunk_physical_indices(toc=items, content=content)
+
+
+
 def toc_transformer(toc_content, model=None):
     print('start toc_transformer')
     init_prompt = """
@@ -549,40 +476,24 @@ def page_list_to_group_text(page_contents, token_lengths, max_tokens=20000, over
 
 def add_page_number_to_toc(part, structure, model=None):
     fill_prompt_seq = """
-    You are given an JSON structure of a document and a partial part of the document. Your task is to check if the title that is described in the structure is started in the partial given document.
-
-    The provided text contains tags like <physical_index_X> and <physical_index_X> to indicate the physical location of the page X. 
-
-    If the full target section starts in the partial given document, insert the given JSON structure with the "start": "yes", and "start_index": "<physical_index_X>".
-
-    If the full target section does not start in the partial given document, insert "start": "no",  "start_index": None.
-
-    The response should be in the following format. 
-        [
-            {
-                "structure": <structure index, "x.x.x" or None> (string),
-                "title": <title of the section>,
-                "start": "<yes or no>",
-                "physical_index": "<physical_index_X> (keep the format)" or None
-            },
-            ...
-        ]    
-    The given structure contains the result of the previous part, you need to fill the result of the current part, do not change the previous result.
-    Directly return the final JSON structure. Do not output anything else."""
+    You are given a JSON structure of a document and a partial part of the document.
+    Your task is to check if the title described in the structure starts in the partial given document.
+    The provided text contains tags like <physical_index_X> to indicate the physical location of pages.
+    If the full target section starts in the partial given document, insert "start": "yes" and "physical_index": "<physical_index_X>".
+    If not, insert "start": "no" and "physical_index": null.
+    The given structure contains the result of the previous part, do not change the previous result."""
 
     part_text = ''.join(part) if isinstance(part, list) else part
     prompt = (
-        _SYSTEM_HARDENING + fill_prompt_seq
-        + f"\n\nCurrent Partial Document:\n{_secure_doc_text(part_text)}"
-        + f"\n\nGiven Structure\n{_secure_doc_text(json.dumps(structure, indent=2))}\n"
+            _SYSTEM_HARDENING + fill_prompt_seq
+            + f"\n\nCurrent Partial Document:\n{_secure_doc_text(part_text)}"
+            + f"\n\nGiven Structure\n{_secure_doc_text(json.dumps(structure, indent=2))}\n"
     )
-    
-    current_json_raw = llm_completion(model=model, prompt=prompt)
-    json_result = extract_json(current_json_raw)
-    
+
+    result = llm_structured(model=model, prompt=prompt, response_model=PageNumberList)
+    json_result = [item.model_dump() for item in result.items]
     for item in json_result:
-        if 'start' in item:
-            del item['start']
+        item.pop('start', None)
     return json_result
 
 
@@ -605,73 +516,42 @@ def generate_toc_continue(toc_content, part, model=None):
     You are an expert in extracting hierarchical tree structure.
     You are given a tree structure of the previous part and the text of the current part.
     Your task is to continue the tree structure from the previous part to include the current part.
-
-    The structure variable is the numeric system which represents the index of the hierarchy section in the table of contents. For example, the first section has structure index 1, the first subsection has structure index 1.1, the second subsection has structure index 1.2, etc.
-
-    For the title, you need to extract the original title from the text, only fix the space inconsistency.
-
-    The provided text contains tags like <physical_index_X> and <physical_index_X> to indicate the start and end of page X. \
-    
-    For the physical_index, you need to extract the physical index of the start of the section from the text. Keep the <physical_index_X> format.
-
-    The response should be in the following format. 
-        [
-            {
-                "structure": <structure index, "x.x.x"> (string),
-                "title": <title of the section, keep the original title>,
-                "physical_index": "<physical_index_X> (keep the format)"
-            },
-            ...
-        ]    
-
-    Directly return the additional part of the final JSON structure. Do not output anything else."""
+    The structure variable is the numeric system which represents the index of the hierarchy section.
+    For the title, extract the original title from the text, only fix space inconsistency.
+    The provided text contains tags like <physical_index_X> to indicate the start and end of pages.
+    For the physical_index, extract the physical index of the start of the section. Keep the <physical_index_X> format.
+    Only output the additional part, not the previous structure."""
 
     prompt = (
-        _SYSTEM_HARDENING + prompt 
-        + '\nGiven text\n:' + _secure_doc_text(part)
-        + '\nPrevious tree structure\n:' + _secure_doc_text(json.dumps(toc_content, indent=2))
+            _SYSTEM_HARDENING + prompt
+            + '\nGiven text\n:' + _secure_doc_text(part)
+            + '\nPrevious tree structure\n:' + _secure_doc_text(json.dumps(toc_content, indent=2))
     )
-    
-    response, finish_reason = llm_completion(model=model, prompt=prompt, return_finish_reason=True)
-    if finish_reason == 'finished':
-        return extract_json(response)
-    else:
-        raise Exception(f'finish reason: {finish_reason}')
-    
+    result = llm_structured(model=model, prompt=prompt, response_model=TOCStructureList)
+    return [item.model_dump() for item in result.items]
+
 ### add verify completeness
 def generate_toc_init(part, model=None):
     print('start generate_toc_init')
     prompt = """
-    You are an expert in extracting hierarchical tree structure, your task is to generate the tree structure of the document.
+    You are an expert in extracting hierarchical tree structure.
+    Your task is to generate the tree structure of the document.
 
-    The structure variable is the numeric system which represents the index of the hierarchy section in the table of contents. For example, the first section has structure index 1, the first subsection has structure index 1.1, the second subsection has structure index 1.2, etc.
+    The structure variable is the numeric system which represents the index of the hierarchy section.
+    For example, the first section has structure index 1, the first subsection has structure index 1.1, etc.
 
-    For the title, you need to extract the original title from the text, only fix the space inconsistency.
+    For the title, extract the original title from the text, only fix space inconsistency.
 
-    The provided text contains tags like <physical_index_X> and <physical_index_X> to indicate the start and end of page X. 
+    The provided text contains tags like <physical_index_1>, <physical_index_2> etc. to indicate the start and end of pages.
+    For the physical_index field, you MUST copy the exact tag from the text, for example: <physical_index_1>
+    Do NOT use A1, A2, page numbers, or any other format. ONLY use the exact <physical_index_X> tag as it appears in the text.
 
-    For the physical_index, you need to extract the physical index of the start of the section from the text. Keep the <physical_index_X> format.
-
-    The response should be in the following format. 
-        [
-            {{
-                "structure": <structure index, "x.x.x"> (string),
-                "title": <title of the section, keep the original title>,
-                "physical_index": "<physical_index_X> (keep the format)"
-            }},
-            
-        ],
-
-
-    Directly return the final JSON structure. Do not output anything else."""
+    Return your answer as a JSON object with a single key 'items' containing the list."""
 
     prompt = _SYSTEM_HARDENING + prompt + '\nGiven text\n:' + _secure_doc_text(part)
-    response, finish_reason = llm_completion(model=model, prompt=prompt, return_finish_reason=True)
-
-    if finish_reason == 'finished':
-         return extract_json(response)
-    else:
-        raise Exception(f'finish reason: {finish_reason}')
+    result = llm_structured(model=model, prompt=prompt, response_model=TOCStructureList)
+    output = [item.model_dump() for item in result.items]
+    return output
 
 def process_no_toc(page_list, start_index=1, model=None, logger=None):
     page_contents=[]
@@ -683,6 +563,7 @@ def process_no_toc(page_list, start_index=1, model=None, logger=None):
     group_texts = page_list_to_group_text(page_contents, token_lengths)
     logger.info(f'len(group_texts): {len(group_texts)}')
 
+    toc_with_page_number = generate_toc_init(group_texts[0], model)
     toc_with_page_number = generate_toc_init(group_texts[0], model)
     toc_with_page_number = _validate_chunk_physical_indices(
         toc=toc_with_page_number,
@@ -701,7 +582,7 @@ def process_no_toc(page_list, start_index=1, model=None, logger=None):
             group_text,
             model
         )
-        
+
         toc_with_page_number_additional = _validate_chunk_physical_indices(
             toc=toc_with_page_number_additional,
             content=group_text
@@ -712,7 +593,7 @@ def process_no_toc(page_list, start_index=1, model=None, logger=None):
             total_pages=len(page_list),
             start_index=start_index
         )
-            
+
         toc_with_page_number.extend(toc_with_page_number_additional)
     logger.info(f'generate_toc: {toc_with_page_number}')
 
@@ -749,23 +630,23 @@ def process_toc_no_page_numbers(toc_content, toc_page_list, page_list,  start_in
         ):
             raise ValueError("LLM returned reordered or modified TOC entries.")
         valid_indices = _extract_chunk_marker_set(group_text)
-        
+
         for idx, current in enumerate(toc_with_page_number):
             update = llm_result[idx]
-            
+
             if current.get("physical_index") is not None:
                 continue
-                
+
             raw = update.get("physical_index")
             if raw is None:
                 continue
             m = _PHYSICAL_INDEX_MARKER_RE.match(str(raw).strip())
-            
+
             if not m:
                 continue
             if int(m.group(1)) not in valid_indices:
                 continue
-                
+
             current["physical_index"] = raw
     logger.info(f'add_page_number_to_toc: {toc_with_page_number}')
 
@@ -896,30 +777,18 @@ def check_toc(page_list, opt=None):
 ################### fix incorrect toc #########################################################
 async def single_toc_item_index_fixer(section_title, content, model=None):
     toc_extractor_prompt = """
-    You are given a section title and several pages of a document, your job is to find the physical index of the start page of the section in the partial document.
-
-    The provided pages contains tags like <physical_index_X> and <physical_index_X> to indicate the physical location of the page X.
-
-    Reply in a JSON format:
-    {
-        "thinking": <explain which page, started and closed by <physical_index_X>, contains the start of this section>,
-        "physical_index": "<physical_index_X>" (keep the format)
-    }
-    Directly return the final JSON structure. Do not output anything else."""
+    You are given a section title and several pages of a document.
+    Your job is to find the physical index of the start page of the section in the partial document.
+    The provided pages contains tags like <physical_index_X> to indicate the physical location of pages."""
 
     prompt = (
-        _SYSTEM_HARDENING + toc_extractor_prompt
-        + '\nSection Title:\n' + _secure_doc_text(str(section_title))
-        + '\nDocument pages:\n' + _secure_doc_text(content)
+            _SYSTEM_HARDENING + toc_extractor_prompt
+            + '\nSection Title:\n' + _secure_doc_text(str(section_title))
+            + '\nDocument pages:\n' + _secure_doc_text(content)
     )
-    
-    response = await llm_acompletion(model=model, prompt=prompt)
-    json_content = extract_json(response)    
-    physical_index = json_content.get('physical_index')
-    if physical_index is None:
-        return None
-    return convert_physical_index_to_int(physical_index)
 
+    result = await llm_astructured(model=model, prompt=prompt, response_model=PhysicalIndexResult)
+    return convert_physical_index_to_int(result.physical_index)
 
 
 async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, start_index=1, model=None, logger=None):
