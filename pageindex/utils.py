@@ -11,16 +11,18 @@ import asyncio
 import pymupdf
 from io import BytesIO
 from dotenv import load_dotenv
-load_dotenv()
 import logging
 import yaml
 from pathlib import Path
 from types import SimpleNamespace as config
 import re
 import instructor
+import re
 
-sync_instructor_client = instructor.from_litellm(litellm.completion, mode=instructor.Mode.JSON)
-async_instructor_client = instructor.from_litellm(litellm.acompletion, mode=instructor.Mode.JSON)
+load_dotenv()
+
+sync_instructor_client = instructor.from_litellm(litellm.completion, mode=instructor.Mode.MD_JSON)
+async_instructor_client = instructor.from_litellm(litellm.acompletion, mode=instructor.Mode.MD_JSON)
 
 # Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
 if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):

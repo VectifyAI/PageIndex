@@ -7,6 +7,18 @@ import re
 from .utils import *
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pageindex.schemas import (
+    TitleAppearance,
+    TitleAppearanceInStart,
+    TOCDetection,
+    TOCCompletionCheck,
+    PageIndexDetection,
+    TOCTransformation,
+    TOCIndexList,
+    PageNumberList,
+    PhysicalIndexResult,
+    TOCStructureList,
+)
 
 ######################### Hardening for prompt injection patterns ####################################################
 _INJECTION_PATTERNS = re.compile(
@@ -350,7 +362,7 @@ def toc_transformer(toc_content, model=None):
 
     cleaned_response = convert_page_to_int(last_complete.get('table_of_contents', []))
     return cleaned_response
-    
+
 
 
 
@@ -430,6 +442,12 @@ def calculate_page_offset(pairs):
     return most_common
 
 def add_page_offset_to_toc_json(data, offset):
+    if offset is None:
+        raise ValueError(
+            "Could not calculate page offset: no TOC entries could be matched "
+            "to a physical_index in the scanned front-matter window. "
+            "Check toc_index_extractor output and matching_pairs."
+        )
     for i in range(len(data)):
         if data[i].get('page') is not None and isinstance(data[i]['page'], int):
             data[i]['physical_index'] = data[i]['page'] + offset
