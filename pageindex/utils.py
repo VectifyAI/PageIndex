@@ -192,7 +192,7 @@ def structure_to_list(structure):
     
 def get_leaf_nodes(structure):
     if isinstance(structure, dict):
-        if not structure['nodes']:
+        if not structure.get('nodes'):
             structure_node = copy.deepcopy(structure)
             structure_node.pop('nodes', None)
             return [structure_node]
