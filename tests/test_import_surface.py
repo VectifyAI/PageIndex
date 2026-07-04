@@ -14,6 +14,16 @@ def test_filesystem_import_works_without_eager_optional_dependencies(monkeypatch
             if name == "pageindex" or name.startswith("pageindex."):
                 sys.modules.pop(name, None)
 
+    original_pageindex_modules = {
+        name: module
+        for name, module in sys.modules.items()
+        if name == "pageindex" or name.startswith("pageindex.")
+    }
+
+    def restore_pageindex_modules() -> None:
+        clear_pageindex_modules()
+        sys.modules.update(original_pageindex_modules)
+
     def import_without_optional_deps(name, globals=None, locals=None, fromlist=(), level=0):
         root = name.split(".", 1)[0]
         if root in blocked_roots:
@@ -32,4 +42,4 @@ def test_filesystem_import_works_without_eager_optional_dependencies(monkeypatch
             assert filesystem_module.PageIndexFileSystem is PageIndexFileSystem
             assert TopLevelPageIndexFileSystem is PageIndexFileSystem
     finally:
-        clear_pageindex_modules()
+        restore_pageindex_modules()

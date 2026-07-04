@@ -459,7 +459,7 @@ def test_cli_add_uses_workspace_and_prints_added_file(monkeypatch, capsys, tmp_p
     calls = []
 
     class FakeAddFileSystem:
-        def __init__(self, workspace):
+        def __init__(self, workspace, **_kwargs):
             self.workspace = Path(workspace)
 
         def configure_existing_projection_retrieval(self):
