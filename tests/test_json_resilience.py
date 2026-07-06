@@ -1,4 +1,4 @@
-﻿import unittest
+import unittest
 
 from pageindex.page_index import _as_toc_list, add_page_offset_to_toc_json
 from pageindex.utils import extract_json
@@ -27,6 +27,18 @@ class JsonExtractionTests(unittest.TestCase):
         self.assertIs(payload["valid"], True)
         self.assertIs(payload["done"], False)
 
+    def test_extract_json_allows_unescaped_newlines_in_strings(self):
+        payload = extract_json('{"thinking": "line1\nline2", "answer": "yes"}')
+
+        self.assertEqual(payload["thinking"], "line1\nline2")
+        self.assertEqual(payload["answer"], "yes")
+
+    def test_extract_json_preserves_python_literal_words_inside_strings(self):
+        payload = extract_json('{"title": "None of the above", "valid": True}')
+
+        self.assertEqual(payload["title"], "None of the above")
+        self.assertIs(payload["valid"], True)
+
 
 class TocFallbackTests(unittest.TestCase):
     def test_as_toc_list_accepts_plain_list(self):
@@ -36,6 +48,11 @@ class TocFallbackTests(unittest.TestCase):
 
     def test_as_toc_list_accepts_common_wrappers(self):
         payload = {"toc": [{"title": "Item 1", "physical_index": 3}]}
+
+        self.assertEqual(_as_toc_list(payload), [{"title": "Item 1", "physical_index": 3}])
+
+    def test_as_toc_list_accepts_table_of_contents_wrapper(self):
+        payload = {"table_of_contents": [{"title": "Item 1", "physical_index": 3}]}
 
         self.assertEqual(_as_toc_list(payload), [{"title": "Item 1", "physical_index": 3}])
 

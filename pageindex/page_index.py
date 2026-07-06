@@ -524,6 +524,8 @@ def _as_toc_list(value):
             return [item for item in value["toc"] if isinstance(item, dict)]
         if isinstance(value.get("items"), list):
             return [item for item in value["items"] if isinstance(item, dict)]
+        if isinstance(value.get("table_of_contents"), list):
+            return [item for item in value["table_of_contents"] if isinstance(item, dict)]
         if all(key in value for key in ("title", "physical_index")):
             return [value]
     return []

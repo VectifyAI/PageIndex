@@ -97,11 +97,58 @@ def get_json_content(response):
     return json_content
          
 
+def _replace_python_literals_outside_strings(candidate):
+    """Convert Python literals only when they appear outside JSON strings."""
+
+    replacements = {"None": "null", "True": "true", "False": "false"}
+    result = []
+    index = 0
+    in_string = False
+    escape = False
+
+    while index < len(candidate):
+        char = candidate[index]
+
+        if in_string:
+            result.append(char)
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+
+        if char == '"':
+            in_string = True
+            result.append(char)
+            index += 1
+            continue
+
+        replaced = False
+        for source, target in replacements.items():
+            if candidate.startswith(source, index):
+                before = candidate[index - 1] if index > 0 else ""
+                after_index = index + len(source)
+                after = candidate[after_index] if after_index < len(candidate) else ""
+                if not (before.isalnum() or before == "_") and not (after.isalnum() or after == "_"):
+                    result.append(target)
+                    index += len(source)
+                    replaced = True
+                    break
+        if replaced:
+            continue
+
+        result.append(char)
+        index += 1
+
+    return "".join(result)
+
+
 def _normalize_json_candidate(candidate):
     candidate = candidate.strip()
-    candidate = re.sub(r"\bNone\b", "null", candidate)
-    candidate = re.sub(r"\bTrue\b", "true", candidate)
-    candidate = re.sub(r"\bFalse\b", "false", candidate)
+    candidate = _replace_python_literals_outside_strings(candidate)
     candidate = candidate.replace(",]", "]").replace(",}", "}")
     return candidate
 
@@ -124,7 +171,7 @@ def _json_candidates(content):
 
 
 def extract_json(content):
-    decoder = json.JSONDecoder()
+    decoder = json.JSONDecoder(strict=False)
     last_error = None
 
     for candidate in _json_candidates(content):
@@ -133,7 +180,7 @@ def extract_json(content):
             continue
 
         try:
-            return json.loads(json_content)
+            return json.loads(json_content, strict=False)
         except json.JSONDecodeError as e:
             last_error = e
 
