@@ -1,4 +1,4 @@
-litellm==1.83.7
+litellm==1.84.0
 # openai-agents  # optional: required for examples/agentic_vectorless_rag_demo.py
 pymupdf==1.26.4
 PyPDF2==3.0.1

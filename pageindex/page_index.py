@@ -117,7 +117,6 @@ def toc_detector_single_page(content, model=None):
     Please note: abstract,summary, notation list, figure list, table list, etc. are not table of contents."""
 
     response = llm_completion(model=model, prompt=prompt)
-    # print('response', response)
     json_content = extract_json(response)    
     if not isinstance(json_content, dict):
         return 'no'
@@ -181,27 +180,19 @@ def extract_toc_content(content, model=None):
         {"role": "user", "content": prompt}, 
         {"role": "assistant", "content": response},    
     ]
-    prompt = f"""please continue the generation of table of contents , directly output the remaining part of the structure"""
-    new_response, finish_reason = llm_completion(model=model, prompt=prompt, chat_history=chat_history, return_finish_reason=True)
-    response = response + new_response
-    if_complete = check_if_toc_transformation_is_complete(content, response, model)
+    continue_prompt = "please continue the generation of table of contents, directly output the remaining part of the structure"
     
-    attempt = 0
     max_attempts = 5
-
-    while not (if_complete == "yes" and finish_reason == "finished"):
-        attempt += 1
-        if attempt > max_attempts:
-            raise Exception('Failed to complete table of contents after maximum retries')
-
-        chat_history = [
-            {"role": "user", "content": prompt},
-            {"role": "assistant", "content": response},
-        ]
-        prompt = f"""please continue the generation of table of contents , directly output the remaining part of the structure"""
-        new_response, finish_reason = llm_completion(model=model, prompt=prompt, chat_history=chat_history, return_finish_reason=True)
+    for attempt in range(max_attempts):
+        new_response, finish_reason = llm_completion(model=model, prompt=continue_prompt, chat_history=chat_history, return_finish_reason=True)
         response = response + new_response
+        chat_history.append({"role": "user", "content": continue_prompt})
+        chat_history.append({"role": "assistant", "content": new_response})
         if_complete = check_if_toc_transformation_is_complete(content, response, model)
+        if if_complete == "yes" and finish_reason == "finished":
+            break
+    else:
+        raise Exception('Failed to complete table of contents extraction after maximum retries')
     
     return response
 
@@ -304,43 +295,41 @@ def toc_transformer(toc_content, model=None):
     if_complete = check_if_toc_transformation_is_complete(toc_content, last_complete, model)
     if if_complete == "yes" and finish_reason == "finished":
         last_complete = extract_json(last_complete)
-        cleaned_response=convert_page_to_int(last_complete['table_of_contents'])
+        cleaned_response = convert_page_to_int(last_complete.get('table_of_contents', []))
         return cleaned_response
     
     last_complete = get_json_content(last_complete)
-    attempt = 0
+    chat_history = [
+        {"role": "user", "content": prompt},
+        {"role": "assistant", "content": last_complete},
+    ]
+    continue_prompt = "Please continue the table of contents JSON structure from where you left off. Directly output only the remaining part."
+
+    position = last_complete.rfind('}')
+    if position != -1:
+        last_complete = last_complete[:position+2]
+
     max_attempts = 5
-    while not (if_complete == "yes" and finish_reason == "finished"):
-        attempt += 1
-        if attempt > max_attempts:
-            raise Exception('Failed to complete toc transformation after maximum retries')
-        position = last_complete.rfind('}')
-        if position != -1:
-            last_complete = last_complete[:position+2]
-        prompt = f"""
-        Your task is to continue the table of contents json structure, directly output the remaining part of the json structure.
-        The response should be in the following JSON format: 
+    for attempt in range(max_attempts):
 
-        The raw table of contents json structure is:
-        {toc_content}
-
-        The incomplete transformed table of contents json structure is:
-        {last_complete}
-
-        Please continue the json structure, directly output the remaining part of the json structure."""
-
-        new_complete, finish_reason = llm_completion(model=model, prompt=prompt, return_finish_reason=True)
+        new_complete, finish_reason = llm_completion(model=model, prompt=continue_prompt, chat_history=chat_history, return_finish_reason=True)
 
         if new_complete.startswith('```json'):
-            new_complete =  get_json_content(new_complete)
-            last_complete = last_complete+new_complete
+            new_complete = get_json_content(new_complete)
+        last_complete = last_complete + new_complete
+
+        chat_history.append({"role": "user", "content": continue_prompt})
+        chat_history.append({"role": "assistant", "content": new_complete})
 
         if_complete = check_if_toc_transformation_is_complete(toc_content, last_complete, model)
-        
+        if if_complete == "yes" and finish_reason == "finished":
+            break
+    else:
+        raise Exception('Failed to complete TOC transformation after maximum retries')
 
     last_complete = extract_json(last_complete)
 
-    cleaned_response=convert_page_to_int(last_complete['table_of_contents'])
+    cleaned_response = convert_page_to_int(last_complete.get('table_of_contents', []))
     return cleaned_response
     
 
