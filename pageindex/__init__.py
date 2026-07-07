@@ -1,8 +1,16 @@
 # pageindex/__init__.py
+# Load .env explicitly, before anything else, so environment-based credentials
+# (OPENAI_API_KEY for local mode, PAGEINDEX_API_KEY that callers read via
+# os.environ for cloud mode) are populated by PageIndex itself — not left to
+# litellm's incidental dotenv loading, which would vanish if litellm changes or
+# its import is ever made lazy.
+from dotenv import load_dotenv as _load_dotenv
+_load_dotenv()
+
 # Upstream exports (backward compatibility). Import from the canonical
 # pageindex.index.* modules directly so `import pageindex` does NOT trip the
 # top-level deprecation shims (pageindex.page_index / .page_index_md / .utils).
-from .index.page_index import *
+from .index.page_index import *  # noqa: E402
 from .index.page_index_md import md_to_tree
 from .retrieve import get_document, get_document_structure, get_page_content
 
