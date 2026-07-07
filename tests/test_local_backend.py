@@ -180,3 +180,33 @@ def test_add_document_unknown_collection_fails_fast(backend, tmp_path):
     # Collection never created -> must raise before any parse/LLM work.
     with pytest.raises(CollectionNotFoundError, match="does not exist"):
         backend.add_document("ghost-collection", str(pdf))
+
+
+def test_add_document_race_returns_existing_id(backend, tmp_path, monkeypatch):
+    """If the pre-check misses but the INSERT hits UNIQUE (concurrent add),
+    add_document must clean up and return the winner's doc_id, not duplicate."""
+    import pageindex.backend.local as local_mod
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(b"%PDF-1.4 body")
+    backend.get_or_create_collection("papers")
+
+    # Pretend a winning add already stored this content under "winner-id".
+    file_hash = backend._file_hash(str(pdf))
+    backend._storage.save_document("papers", "winner-id", {
+        "doc_name": "doc", "doc_type": "pdf", "file_hash": file_hash, "structure": [],
+    })
+    # Pre-check misses (returns None) so we reach the INSERT; the post-conflict
+    # lookup then returns the winner's id.
+    calls = {"n": 0}
+    def fake_find(col, h):
+        calls["n"] += 1
+        return None if calls["n"] == 1 else "winner-id"
+    monkeypatch.setattr(backend._storage, "find_document_by_hash", fake_find)
+    # avoid real parsing/LLM: stub parser + build_index
+    monkeypatch.setattr(backend, "_resolve_parser", lambda p: type("P", (), {
+        "parse": lambda self, fp, **k: type("PD", (), {"doc_name": "doc", "nodes": []})()
+    })())
+    monkeypatch.setattr(local_mod, "build_index", lambda parsed, model=None, opt=None: {"structure": [], "doc_description": ""})
+
+    result = backend.add_document("papers", str(pdf))
+    assert result == "winner-id"

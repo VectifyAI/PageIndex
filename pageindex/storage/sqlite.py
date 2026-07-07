@@ -47,7 +47,8 @@ class SQLiteStorage:
                 doc_type TEXT NOT NULL,
                 structure JSON,
                 pages JSON,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(collection_name, file_hash)
             );
             CREATE INDEX IF NOT EXISTS idx_docs_collection ON documents(collection_name);
             CREATE INDEX IF NOT EXISTS idx_docs_hash ON documents(collection_name, file_hash);
@@ -76,8 +77,11 @@ class SQLiteStorage:
 
     def save_document(self, collection: str, doc_id: str, doc: dict) -> None:
         conn = self._get_conn()
+        # Plain INSERT (doc_id is a fresh uuid, never pre-existing). A duplicate
+        # (collection_name, file_hash) raises sqlite3.IntegrityError, which the
+        # caller uses to resolve a concurrent add-of-same-file race.
         conn.execute(
-            """INSERT OR REPLACE INTO documents
+            """INSERT INTO documents
                (doc_id, collection_name, doc_name, doc_description, file_path, file_hash, doc_type, structure, pages)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (doc_id, collection, doc.get("doc_name"), doc.get("doc_description"),

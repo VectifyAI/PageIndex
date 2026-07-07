@@ -335,3 +335,17 @@ def test_is_retrieval_ready_propagates_api_errors(monkeypatch):
     monkeypatch.setattr("pageindex.cloud_api.requests.request", fake_request)
     with pytest.raises(PageIndexAPIError):
         PageIndexClient("pi-test").is_retrieval_ready("doc-1")
+
+
+def test_legacy_urls_encode_special_char_ids(monkeypatch):
+    """doc_id / retrieval_id must be URL-encoded into the path."""
+    urls = []
+    def fake_request(method, url, headers=None, **kwargs):
+        urls.append(url)
+        return FakeResponse(payload={"ok": True})
+    monkeypatch.setattr("pageindex.cloud_api.requests.request", fake_request)
+    client = PageIndexClient("pi-test")
+    client.get_document("a/b?c")
+    client.get_retrieval("x y")
+    assert "a%2Fb%3Fc" in urls[0] and "/a/b?c/" not in urls[0]
+    assert "x%20y" in urls[1]

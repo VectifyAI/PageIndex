@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import urllib.parse
 from typing import Any, Iterator
 
 import requests
@@ -16,6 +17,11 @@ class LegacyCloudAPI:
     def __init__(self, api_key: str, base_url: str | None = None):
         self.api_key = api_key
         self.base_url = base_url or self.BASE_URL
+
+    @staticmethod
+    def _enc(value: str) -> str:
+        """URL-encode a path segment (ids may contain / ? # or spaces)."""
+        return urllib.parse.quote(str(value), safe="")
 
     def _headers(self) -> dict[str, str]:
         return {"api_key": self.api_key}
@@ -71,7 +77,7 @@ class LegacyCloudAPI:
 
         response = self._request(
             "GET",
-            f"/doc/{doc_id}/?type=ocr&format={format}",
+            f"/doc/{self._enc(doc_id)}/?type=ocr&format={format}",
             "Failed to get OCR result",
         )
         return response.json()
@@ -79,7 +85,7 @@ class LegacyCloudAPI:
     def get_tree(self, doc_id: str, node_summary: bool = False) -> dict[str, Any]:
         response = self._request(
             "GET",
-            f"/doc/{doc_id}/?type=tree&summary={node_summary}",
+            f"/doc/{self._enc(doc_id)}/?type=tree&summary={node_summary}",
             "Failed to get tree result",
         )
         return response.json()
@@ -112,7 +118,7 @@ class LegacyCloudAPI:
     def get_retrieval(self, retrieval_id: str) -> dict[str, Any]:
         response = self._request(
             "GET",
-            f"/retrieval/{retrieval_id}/",
+            f"/retrieval/{self._enc(retrieval_id)}/",
             "Failed to get retrieval result",
         )
         return response.json()
@@ -203,7 +209,7 @@ class LegacyCloudAPI:
     def get_document(self, doc_id: str) -> dict[str, Any]:
         response = self._request(
             "GET",
-            f"/doc/{doc_id}/metadata/",
+            f"/doc/{self._enc(doc_id)}/metadata/",
             "Failed to get document metadata",
         )
         return response.json()
@@ -211,7 +217,7 @@ class LegacyCloudAPI:
     def delete_document(self, doc_id: str) -> dict[str, Any]:
         response = self._request(
             "DELETE",
-            f"/doc/{doc_id}/",
+            f"/doc/{self._enc(doc_id)}/",
             "Failed to delete document",
         )
         return response.json()

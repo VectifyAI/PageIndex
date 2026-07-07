@@ -79,3 +79,16 @@ def test_close_closes_connections_created_in_other_threads(storage):
     storage.close()  # main thread closes the worker's connection too
     with pytest.raises(sqlite3.ProgrammingError):
         conns["worker"].execute("SELECT 1")
+
+
+def test_duplicate_file_hash_in_collection_raises(storage):
+    """UNIQUE(collection_name, file_hash) guards the add-same-file race."""
+    import sqlite3
+    storage.create_collection("papers")
+    doc = {"doc_name": "a", "doc_type": "pdf", "file_hash": "HASH1", "structure": []}
+    storage.save_document("papers", "doc-1", doc)
+    with pytest.raises(sqlite3.IntegrityError):
+        storage.save_document("papers", "doc-2", {**doc, "doc_name": "b"})
+    # same hash in a DIFFERENT collection is fine
+    storage.create_collection("other")
+    storage.save_document("other", "doc-3", {**doc})

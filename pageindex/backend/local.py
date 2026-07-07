@@ -2,6 +2,7 @@
 import hashlib
 import os
 import re
+import sqlite3
 import uuid
 import shutil
 from pathlib import Path
@@ -137,6 +138,17 @@ class LocalBackend:
                 "structure": clean_structure,
                 "pages": pages,
             })
+        except sqlite3.IntegrityError:
+            # Lost a concurrent add of the same content (UNIQUE collection+hash).
+            # Discard our managed files and return the winner's doc_id.
+            managed_path.unlink(missing_ok=True)
+            doc_dir = col_dir / doc_id
+            if doc_dir.exists():
+                shutil.rmtree(doc_dir)
+            existing_id = self._storage.find_document_by_hash(collection, file_hash)
+            if existing_id:
+                return existing_id
+            raise
         except Exception as e:
             managed_path.unlink(missing_ok=True)
             doc_dir = col_dir / doc_id

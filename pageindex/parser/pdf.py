@@ -48,11 +48,10 @@ class PdfParser:
         """
         images_path = Path(images_dir)
         images_path.mkdir(parents=True, exist_ok=True)
-        # Use path relative to cwd so downstream consumers can access directly
-        try:
-            rel_images_path = images_path.relative_to(Path.cwd())
-        except ValueError:
-            rel_images_path = images_path
+        # Store an absolute path so the ![image](...) reference resolves
+        # regardless of the process's cwd at query time. (cwd-relative paths
+        # break as soon as the query runs from a different directory.)
+        abs_images_path = images_path.resolve()
 
         parts: list[str] = []
         images: list[dict] = []
@@ -87,13 +86,13 @@ class PdfParser:
                 except Exception:
                     continue
 
-                rel_path = str(rel_images_path / filename)
+                img_path = str(abs_images_path / filename)
                 images.append({
-                    "path": rel_path,
+                    "path": img_path,
                     "width": width,
                     "height": height,
                 })
-                parts.append(f"![image]({rel_path})")
+                parts.append(f"![image]({img_path})")
                 img_idx += 1
 
         content = "\n".join(parts)
