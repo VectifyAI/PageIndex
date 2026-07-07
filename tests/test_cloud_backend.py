@@ -219,3 +219,32 @@ def test_query_uses_long_timeout_and_single_attempt(monkeypatch):
         backend.query("col", "q", doc_ids=["d1"])
     assert len(calls) == 1
     assert calls[0]["timeout"] == 300
+
+
+def test_query_stream_early_break_stops_background_thread(monkeypatch):
+    """Consumer breaking early must signal the SSE thread to stop, not let it
+    drain the whole stream in the background."""
+    import threading
+    import time as _real_time  # autouse fixture stubs cloud_mod.time.sleep, not this
+    backend = CloudBackend(api_key="pi-test")
+    drained_all = threading.Event()
+
+    class SlowResponse:
+        status_code = 200
+        text = ""
+        def iter_lines(self, decode_unicode=True):
+            for i in range(1000):
+                yield _sse("text", f"chunk{i} ")
+                _real_time.sleep(0.002)  # pace so the consumer reliably breaks first
+            drained_all.set()  # only reached if the thread was NOT stopped
+        def close(self):
+            pass
+
+    monkeypatch.setattr(cloud_mod.requests, "post", lambda *a, **k: SlowResponse())
+
+    async def _run():
+        async for _ in backend.query_stream("col", "q", doc_ids=["d1"]):
+            break  # consume one event, then abandon
+
+    asyncio.run(_run())
+    assert not drained_all.is_set()

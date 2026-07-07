@@ -13,7 +13,8 @@ from ..storage.protocol import StorageEngine
 from ..index.pipeline import build_index
 from ..index.utils import parse_pages, get_pdf_page_content, get_md_page_content, remove_fields
 from ..backend.protocol import AgentTools
-from ..errors import FileTypeError, DocumentNotFoundError, IndexingError, PageIndexError
+from ..errors import (FileTypeError, DocumentNotFoundError, CollectionNotFoundError,
+                      IndexingError, PageIndexError)
 
 _COLLECTION_NAME_RE = re.compile(r'^[a-zA-Z0-9_-]{1,128}$')
 
@@ -79,7 +80,16 @@ class LocalBackend:
     def add_document(self, collection: str, file_path: str) -> str:
         file_path = os.path.realpath(file_path)
         if not os.path.isfile(file_path):
-            raise FileTypeError(f"Not a regular file: {file_path}")
+            # Missing path is a file-not-found error, not an unsupported-type one.
+            raise FileNotFoundError(f"No such file: {file_path}")
+        # Fail fast before the expensive parse + LLM indexing if the collection
+        # doesn't exist — otherwise the FK constraint only trips at save time,
+        # after the LLM work (and its cost) is already spent.
+        if collection not in self._storage.list_collections():
+            raise CollectionNotFoundError(
+                f"Collection '{collection}' does not exist; "
+                f"create it first (e.g. client.collection('{collection}'))."
+            )
         parser = self._resolve_parser(file_path)
 
         # Dedup is content-only — same file is reused regardless of IndexConfig

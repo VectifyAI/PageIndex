@@ -344,6 +344,11 @@ class CloudBackend:
         # Queue carries QueryEvent, an Exception to re-raise, or None (end).
         queue: asyncio.Queue[QueryEvent | Exception | None] = asyncio.Queue()
         loop = asyncio.get_running_loop()
+        # Set when the consumer stops early (break / GeneratorExit) so the
+        # background thread stops draining the SSE stream instead of pulling
+        # it to completion in the background.
+        stop = threading.Event()
+        resp_holder: dict[str, requests.Response] = {}
 
         def _put(item: QueryEvent | Exception | None) -> None:
             try:
@@ -374,6 +379,7 @@ class CloudBackend:
                     stream=True,
                     timeout=120,
                 )
+                resp_holder["resp"] = resp
                 if resp.status_code != 200:
                     body = resp.text[:500] if resp.text else ""
                     raise CloudAPIError(
@@ -385,6 +391,8 @@ class CloudBackend:
                 current_tool_args: list[str] = []
 
                 for line in resp.iter_lines(decode_unicode=True):
+                    if stop.is_set():
+                        return  # consumer abandoned the stream
                     if not line or not line.startswith("data: "):
                         continue
                     data_str = line[6:]
@@ -439,15 +447,26 @@ class CloudBackend:
         thread = threading.Thread(target=_stream, daemon=True)
         thread.start()
 
-        while True:
-            item = await queue.get()
-            if item is None:
-                break
-            if isinstance(item, Exception):
-                raise item
-            yield item
-
-        thread.join(timeout=5)
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                if isinstance(item, Exception):
+                    raise item
+                yield item
+        finally:
+            # On early break / GeneratorExit / raised error: tell the thread to
+            # stop and force-close the response so a read blocked mid-stream
+            # unblocks instead of draining the rest in the background.
+            stop.set()
+            resp = resp_holder.get("resp")
+            if resp is not None:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
+            thread.join(timeout=5)
 
     def _get_all_doc_ids(self, collection: str) -> list[str]:
         """Get all document IDs in a collection."""

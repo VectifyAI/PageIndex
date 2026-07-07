@@ -460,12 +460,12 @@ async def call_llm(prompt, api_key, model="gpt-4.1", temperature=0):
     """
     import openai
 
-    client = openai.AsyncOpenAI(api_key=api_key)
-    response = await client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=temperature,
-    )
+    async with openai.AsyncOpenAI(api_key=api_key) as client:
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=temperature,
+        )
     return response.choices[0].message.content.strip()
 
 

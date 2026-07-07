@@ -165,3 +165,18 @@ def test_delete_collection_rejects_path_traversal(backend, tmp_path):
     with pytest.raises(PageIndexError, match="Invalid collection name"):
         backend.delete_collection("../..")
     assert canary.exists()
+
+
+def test_add_document_missing_file_raises_file_not_found(backend, tmp_path):
+    backend.get_or_create_collection("papers")
+    with pytest.raises(FileNotFoundError):
+        backend.add_document("papers", str(tmp_path / "nope.pdf"))
+
+
+def test_add_document_unknown_collection_fails_fast(backend, tmp_path):
+    from pageindex.errors import CollectionNotFoundError
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    # Collection never created -> must raise before any parse/LLM work.
+    with pytest.raises(CollectionNotFoundError, match="does not exist"):
+        backend.add_document("ghost-collection", str(pdf))

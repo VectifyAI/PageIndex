@@ -94,14 +94,16 @@ class Collection:
             raise ValueError(
                 "doc_ids cannot be empty; pass None to query the whole collection"
             )
-        if doc_ids is None and not _multidoc_acked():
+        if doc_ids is None:
+            # One list_documents call serves both the empty-collection guard
+            # (always) and the multi-doc warning (only when not acknowledged).
             docs = self._backend.list_documents(self._name)
             if not docs:
                 raise ValueError(
                     f"Cannot query collection '{self._name}': it is empty. "
                     "Add documents with col.add(...) first."
                 )
-            if len(docs) > 1:
+            if len(docs) > 1 and not _multidoc_acked():
                 warnings.warn(_MULTIDOC_WARNING, UserWarning, stacklevel=2)
         if stream:
             return QueryStream(self._backend, self._name, question, doc_ids)

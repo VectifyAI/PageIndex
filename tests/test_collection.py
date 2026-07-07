@@ -94,3 +94,26 @@ def test_query_accepts_str_doc_id(col):
 def test_query_rejects_empty_list(col):
     with pytest.raises(ValueError, match="cannot be empty"):
         col.query("what?", doc_ids=[])
+
+
+def test_empty_collection_check_runs_even_when_multidoc_acked(monkeypatch):
+    from unittest.mock import MagicMock
+    from pageindex.collection import Collection
+    monkeypatch.setenv("PAGEINDEX_EXPERIMENTAL_MULTIDOC", "1")
+    backend = MagicMock()
+    backend.list_documents.return_value = []
+    col = Collection(name="papers", backend=backend)
+    with pytest.raises(ValueError, match="empty"):
+        col.query("q")  # doc_ids=None, collection empty -> must still raise
+
+
+def test_whole_collection_query_lists_documents_once(monkeypatch):
+    from unittest.mock import MagicMock
+    from pageindex.collection import Collection
+    monkeypatch.setenv("PAGEINDEX_EXPERIMENTAL_MULTIDOC", "1")  # silence warning path
+    backend = MagicMock()
+    backend.list_documents.return_value = [{"doc_id": "d1"}, {"doc_id": "d2"}]
+    backend.query.return_value = "ans"
+    col = Collection(name="papers", backend=backend)
+    col.query("q")
+    assert backend.list_documents.call_count == 1  # single call at the collection layer

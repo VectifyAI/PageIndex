@@ -75,6 +75,7 @@ def test_print_tree_keeps_legacy_exclude_fields(capsys):
 
 def test_call_llm_keeps_legacy_async_openai_contract(monkeypatch):
     calls = []
+    closed = []
 
     class FakeCompletions:
         async def create(self, **kwargs):
@@ -88,6 +89,15 @@ def test_call_llm_keeps_legacy_async_openai_contract(monkeypatch):
             self.api_key = api_key
             self.chat = SimpleNamespace(completions=FakeCompletions())
 
+        # call_llm must open the client as an async context manager so it is
+        # closed (no leaked HTTP connection pool).
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            closed.append(True)
+            return False
+
     fake_openai = SimpleNamespace(AsyncOpenAI=FakeAsyncOpenAI)
     monkeypatch.setitem(sys.modules, "openai", fake_openai)
 
@@ -99,6 +109,7 @@ def test_call_llm_keeps_legacy_async_openai_contract(monkeypatch):
     ))
 
     assert result == "answer"
+    assert closed == [True]  # client was closed
     assert calls == [{
         "model": "gpt-test",
         "messages": [{"role": "user", "content": "hello"}],
