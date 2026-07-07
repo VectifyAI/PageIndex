@@ -49,10 +49,14 @@ class CloudBackend:
             )
             self._folder_warning_shown = True
 
-    def _request(self, method: str, path: str, **kwargs) -> dict:
+    def _request(self, method: str, path: str, retries: int = 3, **kwargs) -> dict:
+        """HTTP helper. ``retries`` caps total attempts — pass 1 for
+        non-idempotent, expensive calls (e.g. chat completions) where a
+        retry would redo the full server-side work."""
         url = f"{API_BASE}{path}"
+        kwargs.setdefault("timeout", 30)
         last_status: int | None = None
-        for attempt in range(3):
+        for attempt in range(retries):
             if attempt and "files" in kwargs:
                 # Rewind file objects before a retry — the previous attempt
                 # consumed them, and re-sending without seek(0) would upload
@@ -62,10 +66,12 @@ class CloudBackend:
                     if hasattr(fobj, "seek"):
                         fobj.seek(0)
             try:
-                resp = requests.request(method, url, headers=self._headers, timeout=30, **kwargs)
+                resp = requests.request(method, url, headers=self._headers, **kwargs)
                 if resp.status_code in (429, 500, 502, 503):
-                    logger.warning("Cloud API %s %s returned %d, retrying...", method, path, resp.status_code)
                     last_status = resp.status_code
+                    if attempt == retries - 1:
+                        break
+                    logger.warning("Cloud API %s %s returned %d, retrying...", method, path, resp.status_code)
                     time.sleep(2 ** attempt)
                     continue
                 if resp.status_code != 200:
@@ -74,7 +80,7 @@ class CloudBackend:
                                         status_code=resp.status_code)
                 return resp.json() if resp.content else {}
             except requests.RequestException as e:
-                if attempt == 2:
+                if attempt == retries - 1:
                     raise CloudAPIError(f"Cloud API request failed: {e}") from e
                 time.sleep(2 ** attempt)
         raise CloudAPIError(f"Cloud API {method} {path} failed after retries"
@@ -301,7 +307,11 @@ class CloudBackend:
                 "doc_ids cannot be empty; pass None to query the whole collection"
             )
         doc_id = doc_ids if doc_ids else self._get_all_doc_ids(collection)
-        resp = self._request("POST", "/chat/completions/", json={
+        # A non-streaming completion returns nothing until generation
+        # finishes, so it needs far more than the default 30s. retries=1:
+        # retrying this non-idempotent call would redo the full server-side
+        # retrieval + generation (and bill it) on every attempt.
+        resp = self._request("POST", "/chat/completions/", retries=1, timeout=300, json={
             "messages": [{"role": "user", "content": question}],
             "doc_id": doc_id,
             "stream": False,

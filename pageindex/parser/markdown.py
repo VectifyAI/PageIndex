@@ -17,7 +17,7 @@ class MarkdownParser:
 
         lines = content.split("\n")
         headers = self._extract_headers(lines)
-        nodes = self._build_nodes(headers, lines, model)
+        nodes = self._build_nodes(headers, lines, model, doc_title=path.stem)
 
         return ParsedDocument(doc_name=path.stem, nodes=nodes)
 
@@ -42,8 +42,37 @@ class MarkdownParser:
                     })
         return headers
 
-    def _build_nodes(self, headers: list[dict], lines: list[str], model: str | None) -> list[ContentNode]:
+    def _build_nodes(self, headers: list[dict], lines: list[str], model: str | None,
+                     doc_title: str = "Document") -> list[ContentNode]:
         nodes = []
+
+        # A file with no headings at all still has content — index it as a
+        # single node instead of producing zero nodes (which would push an
+        # empty page list into the LLM pipeline).
+        if not headers:
+            text = "\n".join(lines).strip()
+            if text:
+                nodes.append(ContentNode(
+                    content=text,
+                    tokens=count_tokens(text, model=model),
+                    title=doc_title,
+                    index=1,
+                    level=1,
+                ))
+            return nodes
+
+        # Content before the first heading (abstract, preamble) would
+        # otherwise be silently dropped and become unretrievable.
+        preamble = "\n".join(lines[: headers[0]["line_num"] - 1]).strip()
+        if preamble:
+            nodes.append(ContentNode(
+                content=preamble,
+                tokens=count_tokens(preamble, model=model),
+                title=doc_title,
+                index=1,
+                level=headers[0]["level"],
+            ))
+
         for i, header in enumerate(headers):
             start = header["line_num"] - 1
             end = headers[i + 1]["line_num"] - 1 if i + 1 < len(headers) else len(lines)

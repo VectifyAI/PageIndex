@@ -324,3 +324,14 @@ def test_empty_api_key_warns_and_falls_back_to_local(caplog, tmp_path, monkeypat
 
     assert any("empty api_key" in r.message for r in caplog.records)
     assert client._legacy_cloud_api is None
+
+
+def test_is_retrieval_ready_propagates_api_errors(monkeypatch):
+    """Regression: API failures (revoked key etc.) were swallowed as False,
+    turning `while not is_retrieval_ready(...)` into an infinite poll."""
+    def fake_request(method, url, **kwargs):
+        return FakeResponse(status_code=401, text="invalid api key")
+
+    monkeypatch.setattr("pageindex.cloud_api.requests.request", fake_request)
+    with pytest.raises(PageIndexAPIError):
+        PageIndexClient("pi-test").is_retrieval_ready("doc-1")

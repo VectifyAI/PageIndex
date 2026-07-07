@@ -202,3 +202,20 @@ def test_query_stream_connect_failure_raises_instead_of_hanging(monkeypatch):
 
     with pytest.raises(CloudAPIError, match="request failed"):
         asyncio.run(_run())
+
+
+def test_query_uses_long_timeout_and_single_attempt(monkeypatch):
+    """Non-streaming chat completion is non-idempotent and slow: it must get
+    a long timeout and must NOT be retried (each retry re-bills the query)."""
+    backend = CloudBackend(api_key="pi-test")
+    calls = []
+
+    def fake_request(method, url, headers=None, **kwargs):
+        calls.append(kwargs)
+        raise cloud_mod.requests.ConnectionError("boom")
+
+    monkeypatch.setattr(cloud_mod.requests, "request", fake_request)
+    with pytest.raises(CloudAPIError):
+        backend.query("col", "q", doc_ids=["d1"])
+    assert len(calls) == 1
+    assert calls[0]["timeout"] == 300

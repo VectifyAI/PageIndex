@@ -85,11 +85,15 @@ class LegacyCloudAPI:
         return response.json()
 
     def is_retrieval_ready(self, doc_id: str) -> bool:
-        try:
-            result = self.get_tree(doc_id)
-            return result.get("retrieval_ready", False)
-        except PageIndexAPIError:
-            return False
+        """Return whether retrieval is ready for ``doc_id``.
+
+        API failures (revoked key, network down, unknown doc) propagate as
+        PageIndexAPIError instead of reading as "not ready" — swallowing them
+        turned ``while not is_retrieval_ready(...)`` polling loops into
+        infinite loops.
+        """
+        result = self.get_tree(doc_id)
+        return result.get("retrieval_ready", False)
 
     def submit_query(self, doc_id: str, query: str, thinking: bool = False) -> dict[str, Any]:
         payload = {

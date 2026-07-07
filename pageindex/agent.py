@@ -135,7 +135,14 @@ class AgentRunner:
         self._instructions = instructions or OPEN_SYSTEM_PROMPT
 
     def run(self, question: str) -> str:
-        """Sync non-streaming query. Returns answer string."""
+        """Sync non-streaming query. Returns answer string.
+
+        Safe to call from within a running event loop (Jupyter, FastAPI
+        handlers): the agent then runs on a private loop in a worker thread,
+        mirroring pipeline._run_async — Runner.run_sync would otherwise raise
+        RuntimeError in that situation.
+        """
+        import asyncio
         from agents import Agent, Runner
         from agents.model_settings import ModelSettings
         agent = Agent(
@@ -146,5 +153,12 @@ class AgentRunner:
             model=self._model,
             model_settings=ModelSettings(parallel_tool_calls=False),
         )
-        result = Runner.run_sync(agent, question)
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            result = Runner.run_sync(agent, question)
+        else:
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                result = pool.submit(asyncio.run, Runner.run(agent, question)).result()
         return result.final_output

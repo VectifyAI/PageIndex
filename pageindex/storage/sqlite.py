@@ -16,7 +16,12 @@ class SQLiteStorage:
     def _get_conn(self) -> sqlite3.Connection:
         """Return a thread-local SQLite connection."""
         if not hasattr(self._local, "conn"):
-            conn = sqlite3.connect(str(self._db_path))
+            # Each thread gets its own connection (threading.local), so
+            # statements never race. check_same_thread=False exists solely so
+            # close() can close every tracked connection from whichever thread
+            # calls it — with the default True those closes raise
+            # ProgrammingError and the connections leak.
+            conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
             self._local.conn = conn

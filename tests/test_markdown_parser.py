@@ -53,3 +53,21 @@ def test_parse_nodes_have_index(sample_md):
     result = parser.parse(sample_md)
     for node in result.nodes:
         assert node.index is not None
+
+
+def test_preamble_before_first_header_is_kept(tmp_path):
+    md = tmp_path / "pre.md"
+    md.write_text("Abstract: important preamble text.\n\n# Chapter 1\nBody.\n")
+    result = MarkdownParser().parse(str(md))
+    assert result.nodes[0].title == "pre"
+    assert "important preamble text" in result.nodes[0].content
+    assert result.nodes[1].title == "Chapter 1"
+
+
+def test_headerless_file_yields_single_node(tmp_path):
+    md = tmp_path / "plain.md"
+    md.write_text("Just some text.\nNo headings at all.\n")
+    result = MarkdownParser().parse(str(md))
+    assert len(result.nodes) == 1
+    assert result.nodes[0].title == "plain"
+    assert "No headings at all" in result.nodes[0].content

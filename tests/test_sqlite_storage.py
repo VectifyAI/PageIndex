@@ -59,3 +59,23 @@ def test_delete_collection_cascades_documents(storage):
     storage.save_document("papers", "doc-1", {"doc_name": "test.pdf", "doc_type": "pdf", "file_path": "/tmp/test.pdf", "structure": []})
     storage.delete_collection("papers")
     assert "papers" not in storage.list_collections()
+
+
+def test_close_closes_connections_created_in_other_threads(storage):
+    """Regression: with check_same_thread=True, close() from another thread
+    raised ProgrammingError (swallowed) and leaked every worker connection."""
+    import sqlite3
+    import threading
+
+    conns = {}
+
+    def worker():
+        conns["worker"] = storage._get_conn()
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join()
+
+    storage.close()  # main thread closes the worker's connection too
+    with pytest.raises(sqlite3.ProgrammingError):
+        conns["worker"].execute("SELECT 1")
