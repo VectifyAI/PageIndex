@@ -5,6 +5,7 @@ import warnings
 from typing import AsyncIterator
 from .events import QueryEvent
 from .backend.protocol import Backend
+from .types import DocumentInfo, DocumentDetail, PageContent
 
 
 def _multidoc_acked() -> bool:
@@ -50,21 +51,48 @@ class Collection:
         return self._name
 
     def add(self, file_path: str) -> str:
+        """Index a document (PDF or Markdown) into this collection.
+
+        Returns the ``doc_id``. Re-adding byte-identical content returns the
+        existing doc_id (content-hash dedup); change ``IndexConfig`` won't
+        force a re-index — delete the doc first if you need a fresh tree.
+        """
         return self._backend.add_document(self._name, file_path)
 
-    def list_documents(self) -> list[dict]:
+    def list_documents(self) -> list[DocumentInfo]:
+        """List every document in this collection.
+
+        Each item has ``doc_id``, ``doc_name``, ``doc_description``, ``doc_type``.
+        """
         return self._backend.list_documents(self._name)
 
-    def get_document(self, doc_id: str, include_text: bool = False) -> dict:
+    def get_document(self, doc_id: str, include_text: bool = False) -> DocumentDetail:
+        """Return a document's metadata plus its tree under ``structure``.
+
+        ``include_text=True`` fills each node's text from cached pages (local
+        backend only; can be large — avoid for LLM contexts). Raises
+        ``DocumentNotFoundError`` if the doc_id is unknown.
+        """
         return self._backend.get_document(self._name, doc_id, include_text=include_text)
 
     def get_document_structure(self, doc_id: str) -> list:
+        """Return the document's hierarchical tree (a list of node dicts)."""
         return self._backend.get_document_structure(self._name, doc_id)
 
-    def get_page_content(self, doc_id: str, pages: str) -> list:
+    def get_page_content(self, doc_id: str, pages: str) -> list[PageContent]:
+        """Return content for specific pages.
+
+        ``pages`` is a range/list spec: ``"5-7"``, ``"3,8"``, or ``"12"``.
+        Each returned item has ``page`` and ``content`` (and ``images`` when
+        present). For Markdown docs, "page" numbers map to line ranges.
+        """
         return self._backend.get_page_content(self._name, doc_id, pages)
 
     def delete_document(self, doc_id: str) -> None:
+        """Delete a document and its stored files/artifacts.
+
+        Raises ``DocumentNotFoundError`` if the doc_id is unknown.
+        """
         self._backend.delete_document(self._name, doc_id)
 
     def query(self, question: str,

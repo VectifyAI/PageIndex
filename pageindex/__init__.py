@@ -10,6 +10,7 @@ from .retrieve import get_document, get_document_structure, get_page_content
 from .client import PageIndexClient, LocalClient, CloudClient
 from .config import IndexConfig, set_llm_params
 from .collection import Collection
+from .types import DocumentInfo, DocumentDetail, PageContent
 from .parser.protocol import ContentNode, ParsedDocument, DocumentParser
 from .storage.protocol import StorageEngine
 from .events import QueryEvent
@@ -30,6 +31,9 @@ __all__ = [
     "IndexConfig",
     "set_llm_params",
     "Collection",
+    "DocumentInfo",
+    "DocumentDetail",
+    "PageContent",
     "ContentNode",
     "ParsedDocument",
     "DocumentParser",

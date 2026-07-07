@@ -145,7 +145,8 @@ class PageIndexClient:
 
     def register_parser(self, parser: DocumentParser) -> None:
         """Register a custom document parser. Only available in local mode."""
-        if not hasattr(self._backend, 'register_parser'):
+        from .backend.protocol import SupportsParserRegistration
+        if not isinstance(self._backend, SupportsParserRegistration):
             from .errors import PageIndexError
             raise PageIndexError("Custom parsers are not supported in cloud mode")
         self._backend.register_parser(parser)

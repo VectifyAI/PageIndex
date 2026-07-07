@@ -1,7 +1,7 @@
 import re
 from pathlib import Path
 from .protocol import ContentNode, ParsedDocument
-from ..index.utils import count_tokens
+from ..tokens import count_tokens
 
 
 class MarkdownParser:

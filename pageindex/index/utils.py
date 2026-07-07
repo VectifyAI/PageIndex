@@ -17,14 +17,9 @@ from pprint import pprint
 from types import SimpleNamespace as config
 
 from ..config import get_llm_params
+from ..tokens import count_tokens  # re-exported for backward compat
 
 logger = logging.getLogger(__name__)
-
-
-def count_tokens(text, model=None):
-    if not text:
-        return 0
-    return litellm.token_counter(model=model, text=text)
 
 
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):

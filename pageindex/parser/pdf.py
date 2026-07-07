@@ -1,7 +1,7 @@
 import pymupdf
 from pathlib import Path
 from .protocol import ContentNode, ParsedDocument
-from ..index.utils import count_tokens
+from ..tokens import count_tokens
 
 # Minimum image dimension to keep (skip icons/artifacts)
 _MIN_IMAGE_SIZE = 32
