@@ -11,6 +11,12 @@ class SQLiteStorage:
         self._local = threading.local()
         self._connections: list[sqlite3.Connection] = []
         self._conn_lock = threading.Lock()
+        # Serializes the (fast) write operations within this process so
+        # concurrent indexing threads don't collide on WAL's single writer
+        # ("database is locked"). Reads stay concurrent; the expensive LLM
+        # indexing runs outside this lock. busy_timeout above covers the
+        # cross-process case.
+        self._write_lock = threading.Lock()
         self._init_schema()
 
     def _get_conn(self) -> sqlite3.Connection:
@@ -21,9 +27,17 @@ class SQLiteStorage:
             # close() can close every tracked connection from whichever thread
             # calls it — with the default True those closes raise
             # ProgrammingError and the connections leak.
-            conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
+            # isolation_level=None -> autocommit: a plain SELECT (e.g. the
+            # dedup hash lookup) never leaves a lingering read snapshot that a
+            # later write on the same connection would conflict with
+            # (SQLITE_BUSY_SNAPSHOT, which busy_timeout can't retry). Each
+            # statement is its own transaction, so busy_timeout can actually
+            # wait for the WAL single-writer lock under concurrency.
+            conn = sqlite3.connect(str(self._db_path), check_same_thread=False,
+                                   isolation_level=None)
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute("PRAGMA busy_timeout=10000")
             self._local.conn = conn
             with self._conn_lock:
                 self._connections.append(conn)
@@ -56,14 +70,16 @@ class SQLiteStorage:
         conn.commit()
 
     def create_collection(self, name: str) -> None:
-        conn = self._get_conn()
-        conn.execute("INSERT INTO collections (name) VALUES (?)", (name,))
-        conn.commit()
+        with self._write_lock:
+            conn = self._get_conn()
+            conn.execute("INSERT INTO collections (name) VALUES (?)", (name,))
+            conn.commit()
 
     def get_or_create_collection(self, name: str) -> None:
-        conn = self._get_conn()
-        conn.execute("INSERT OR IGNORE INTO collections (name) VALUES (?)", (name,))
-        conn.commit()
+        with self._write_lock:
+            conn = self._get_conn()
+            conn.execute("INSERT OR IGNORE INTO collections (name) VALUES (?)", (name,))
+            conn.commit()
 
     def list_collections(self) -> list[str]:
         conn = self._get_conn()
@@ -71,25 +87,27 @@ class SQLiteStorage:
         return [r[0] for r in rows]
 
     def delete_collection(self, name: str) -> None:
-        conn = self._get_conn()
-        conn.execute("DELETE FROM collections WHERE name = ?", (name,))
-        conn.commit()
+        with self._write_lock:
+            conn = self._get_conn()
+            conn.execute("DELETE FROM collections WHERE name = ?", (name,))
+            conn.commit()
 
     def save_document(self, collection: str, doc_id: str, doc: dict) -> None:
-        conn = self._get_conn()
         # Plain INSERT (doc_id is a fresh uuid, never pre-existing). A duplicate
         # (collection_name, file_hash) raises sqlite3.IntegrityError, which the
         # caller uses to resolve a concurrent add-of-same-file race.
-        conn.execute(
-            """INSERT INTO documents
-               (doc_id, collection_name, doc_name, doc_description, file_path, file_hash, doc_type, structure, pages)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (doc_id, collection, doc.get("doc_name"), doc.get("doc_description"),
-             doc.get("file_path"), doc.get("file_hash"), doc["doc_type"],
-             json.dumps(doc.get("structure", [])),
-             json.dumps(doc.get("pages")) if doc.get("pages") else None),
-        )
-        conn.commit()
+        with self._write_lock:
+            conn = self._get_conn()
+            conn.execute(
+                """INSERT INTO documents
+                   (doc_id, collection_name, doc_name, doc_description, file_path, file_hash, doc_type, structure, pages)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (doc_id, collection, doc.get("doc_name"), doc.get("doc_description"),
+                 doc.get("file_path"), doc.get("file_hash"), doc["doc_type"],
+                 json.dumps(doc.get("structure", [])),
+                 json.dumps(doc.get("pages")) if doc.get("pages") else None),
+            )
+            conn.commit()
 
     def find_document_by_hash(self, collection: str, file_hash: str) -> str | None:
         conn = self._get_conn()
@@ -140,12 +158,13 @@ class SQLiteStorage:
         return [{"doc_id": r[0], "doc_name": r[1], "doc_description": r[2] or "", "doc_type": r[3]} for r in rows]
 
     def delete_document(self, collection: str, doc_id: str) -> None:
-        conn = self._get_conn()
-        conn.execute(
-            "DELETE FROM documents WHERE doc_id = ? AND collection_name = ?",
-            (doc_id, collection),
-        )
-        conn.commit()
+        with self._write_lock:
+            conn = self._get_conn()
+            conn.execute(
+                "DELETE FROM documents WHERE doc_id = ? AND collection_name = ?",
+                (doc_id, collection),
+            )
+            conn.commit()
 
     def __enter__(self):
         return self

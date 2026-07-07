@@ -92,3 +92,30 @@ def test_duplicate_file_hash_in_collection_raises(storage):
     # same hash in a DIFFERENT collection is fine
     storage.create_collection("other")
     storage.save_document("other", "doc-3", {**doc})
+
+
+def test_concurrent_read_then_write_no_database_locked(storage):
+    """Regression: concurrent add (read hash -> write) hit 'database is locked'
+    under WAL. Fixed via autocommit + busy_timeout + write lock. All writers
+    must succeed (dedup via UNIQUE), none raise OperationalError."""
+    import sqlite3, threading, uuid, time
+    storage.create_collection("c")
+    errs = []
+
+    def worker():
+        try:
+            storage.list_collections()
+            storage.find_document_by_hash("c", "SAME")  # read snapshot
+            time.sleep(0.001)                            # widen the window
+            try:
+                storage.save_document("c", str(uuid.uuid4()),
+                    {"doc_name": "d", "doc_type": "pdf", "file_hash": "SAME", "structure": []})
+            except sqlite3.IntegrityError:
+                pass  # expected: lost the dedup race
+        except Exception as e:
+            errs.append(f"{type(e).__name__}: {e}")
+
+    threads = [threading.Thread(target=worker) for _ in range(12)]
+    [t.start() for t in threads]; [t.join() for t in threads]
+    assert not errs, f"concurrent write errored: {errs}"
+    assert len(storage.list_documents("c")) == 1  # dedup held
