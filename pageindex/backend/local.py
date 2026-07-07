@@ -143,7 +143,7 @@ class LocalBackend:
         """
         doc = self._storage.get_document(collection, doc_id)
         if not doc:
-            return {}
+            raise DocumentNotFoundError(f"Document {doc_id} not found")
         doc["structure"] = self._storage.get_document_structure(collection, doc_id)
         if include_text:
             pages = self._storage.get_pages(collection, doc_id) or []
@@ -190,7 +190,11 @@ class LocalBackend:
 
     def delete_document(self, collection: str, doc_id: str) -> None:
         doc = self._storage.get_document(collection, doc_id)
-        if doc and doc.get("file_path"):
+        if not doc:
+            # Parity with the cloud backend, which surfaces HTTP 404 as
+            # DocumentNotFoundError — a typo'd doc_id should not pass silently.
+            raise DocumentNotFoundError(f"Document {doc_id} not found")
+        if doc.get("file_path"):
             Path(doc["file_path"]).unlink(missing_ok=True)
         # Clean up images directory: files/{collection}/{doc_id}/
         doc_dir = self._files_dir / collection / doc_id

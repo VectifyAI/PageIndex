@@ -13,7 +13,7 @@ import urllib.parse
 import requests
 from typing import AsyncIterator
 
-from ..errors import CloudAPIError, PageIndexError
+from ..errors import CloudAPIError, DocumentNotFoundError, PageIndexError
 from ..events import QueryEvent
 
 logger = logging.getLogger(__name__)
@@ -32,33 +32,54 @@ class CloudBackend:
 
     # ── HTTP helpers ──────────────────────────────────────────────────────
 
+    # Folder API statuses meaning "folders are not available on this account"
+    # (403: requires Max plan; 404: endpoint not exposed). Anything else is a
+    # real error and must propagate rather than silently degrade.
+    _FOLDER_UNAVAILABLE = (403, 404)
+
     def _warn_folder_upgrade(self) -> None:
         if not self._folder_warning_shown:
-            logger.warning(
-                "Folders (collections) require a Max plan. "
+            import warnings
+            warnings.warn(
+                "Folders (collections) are not available on this plan. "
                 "All documents are stored in a single global space — collection names are ignored. "
-                "Upgrade at https://dash.pageindex.ai/subscription"
+                "Upgrade at https://dash.pageindex.ai/subscription",
+                UserWarning,
+                stacklevel=4,
             )
             self._folder_warning_shown = True
 
     def _request(self, method: str, path: str, **kwargs) -> dict:
         url = f"{API_BASE}{path}"
+        last_status: int | None = None
         for attempt in range(3):
+            if attempt and "files" in kwargs:
+                # Rewind file objects before a retry — the previous attempt
+                # consumed them, and re-sending without seek(0) would upload
+                # an empty multipart body.
+                for value in kwargs["files"].values():
+                    fobj = value[1] if isinstance(value, tuple) else value
+                    if hasattr(fobj, "seek"):
+                        fobj.seek(0)
             try:
                 resp = requests.request(method, url, headers=self._headers, timeout=30, **kwargs)
                 if resp.status_code in (429, 500, 502, 503):
                     logger.warning("Cloud API %s %s returned %d, retrying...", method, path, resp.status_code)
+                    last_status = resp.status_code
                     time.sleep(2 ** attempt)
                     continue
                 if resp.status_code != 200:
                     body = resp.text[:500] if resp.text else ""
-                    raise CloudAPIError(f"Cloud API error {resp.status_code}: {body}")
+                    raise CloudAPIError(f"Cloud API error {resp.status_code}: {body}",
+                                        status_code=resp.status_code)
                 return resp.json() if resp.content else {}
             except requests.RequestException as e:
                 if attempt == 2:
                     raise CloudAPIError(f"Cloud API request failed: {e}") from e
                 time.sleep(2 ** attempt)
-        raise CloudAPIError("Max retries exceeded")
+        raise CloudAPIError(f"Cloud API {method} {path} failed after retries"
+                            + (f" (last status {last_status})" if last_status else ""),
+                            status_code=last_status)
 
     @staticmethod
     def _validate_collection_name(name: str) -> None:
@@ -80,7 +101,7 @@ class CloudBackend:
             resp = self._request("POST", "/folder/", json={"name": name})
             self._folder_id_cache[name] = resp.get("folder", {}).get("id")
         except CloudAPIError as e:
-            if "403" in str(e):
+            if e.status_code in self._FOLDER_UNAVAILABLE:
                 self._warn_folder_upgrade()
                 self._folder_id_cache[name] = None
             else:
@@ -97,24 +118,33 @@ class CloudBackend:
             resp = self._request("POST", "/folder/", json={"name": name})
             self._folder_id_cache[name] = resp.get("folder", {}).get("id")
         except CloudAPIError as e:
-            if "403" in str(e):
+            if e.status_code in self._FOLDER_UNAVAILABLE:
                 self._warn_folder_upgrade()
                 self._folder_id_cache[name] = None
             else:
                 raise
 
     def _get_folder_id(self, name: str) -> str | None:
-        """Resolve collection name to folder ID. Returns None if folders not available."""
+        """Resolve collection name to folder ID. Returns None if folders not available.
+
+        Only "folders unavailable on this plan" (403/404) is cached as None —
+        transient errors (network, 5xx) propagate so a blip can't silently
+        drop documents into the global space forever.
+        """
         if name in self._folder_id_cache:
             return self._folder_id_cache.get(name)
         try:
             data = self._request("GET", "/folders/")
-            for folder in data.get("folders", []):
-                if folder.get("name") == name:
-                    self._folder_id_cache[name] = folder["id"]
-                    return folder["id"]
-        except CloudAPIError:
-            pass
+        except CloudAPIError as e:
+            if e.status_code in self._FOLDER_UNAVAILABLE:
+                self._warn_folder_upgrade()
+                self._folder_id_cache[name] = None
+                return None
+            raise
+        for folder in data.get("folders", []):
+            if folder.get("name") == name:
+                self._folder_id_cache[name] = folder["id"]
+                return folder["id"]
         self._folder_id_cache[name] = None
         return None
 
@@ -153,11 +183,30 @@ class CloudBackend:
 
         raise CloudAPIError(f"Document {doc_id} indexing timed out")
 
+    def _doc_request(self, doc_id: str, method: str, path: str, **kwargs) -> dict:
+        """Doc-scoped request: maps HTTP 404 to DocumentNotFoundError for
+        parity with the local backend's error taxonomy."""
+        try:
+            return self._request(method, path, **kwargs)
+        except CloudAPIError as e:
+            if e.status_code == 404:
+                raise DocumentNotFoundError(f"Document {doc_id} not found") from e
+            raise
+
     def get_document(self, collection: str, doc_id: str, include_text: bool = False) -> dict:
-        resp = self._request("GET", f"/doc/{self._enc(doc_id)}/metadata/")
+        if include_text:
+            import warnings
+            warnings.warn(
+                "include_text is not supported by the cloud backend; "
+                "returning the structure without node text. "
+                "Use get_page_content(doc_id, pages) to fetch content.",
+                UserWarning,
+                stacklevel=3,
+            )
+        resp = self._doc_request(doc_id, "GET", f"/doc/{self._enc(doc_id)}/metadata/")
         # Fetch structure in the same call via tree endpoint
-        tree_resp = self._request("GET", f"/doc/{self._enc(doc_id)}/",
-                                  params={"type": "tree", "summary": "true"})
+        tree_resp = self._doc_request(doc_id, "GET", f"/doc/{self._enc(doc_id)}/",
+                                      params={"type": "tree", "summary": "true"})
         raw_tree = tree_resp.get("tree", tree_resp.get("structure", tree_resp.get("result", [])))
         return {
             "doc_id": resp.get("id", doc_id),
@@ -169,12 +218,14 @@ class CloudBackend:
         }
 
     def get_document_structure(self, collection: str, doc_id: str) -> list:
-        resp = self._request("GET", f"/doc/{self._enc(doc_id)}/", params={"type": "tree", "summary": "true"})
+        resp = self._doc_request(doc_id, "GET", f"/doc/{self._enc(doc_id)}/",
+                                 params={"type": "tree", "summary": "true"})
         raw_tree = resp.get("tree", resp.get("structure", resp.get("result", [])))
         return self._normalize_tree(raw_tree)
 
     def get_page_content(self, collection: str, doc_id: str, pages: str) -> list:
-        resp = self._request("GET", f"/doc/{self._enc(doc_id)}/", params={"type": "ocr", "format": "page"})
+        resp = self._doc_request(doc_id, "GET", f"/doc/{self._enc(doc_id)}/",
+                                 params={"type": "ocr", "format": "page"})
         # Filter to requested pages
         from ..index.utils import parse_pages
         page_nums = set(parse_pages(pages))
@@ -210,22 +261,33 @@ class CloudBackend:
 
     def list_documents(self, collection: str) -> list[dict]:
         folder_id = self._get_folder_id(collection)
-        params = {"limit": 100}
-        if folder_id:
-            params["folder_id"] = folder_id
-        data = self._request("GET", "/docs/", params=params)
-        return [
-            {
-                "doc_id": d.get("id", ""),
-                "doc_name": d.get("name", ""),
-                "doc_description": d.get("description", ""),
-                "doc_type": "pdf",
-            }
-            for d in data.get("documents", [])
-        ]
+        # The API caps `limit` at 100; paginate with `offset` until a short
+        # page comes back so collections with >100 docs aren't silently
+        # truncated (queries over the whole collection rely on this list).
+        page_size = 100
+        offset = 0
+        docs: list[dict] = []
+        while True:
+            params = {"limit": page_size, "offset": offset}
+            if folder_id:
+                params["folder_id"] = folder_id
+            data = self._request("GET", "/docs/", params=params)
+            batch = data.get("documents", [])
+            docs.extend(
+                {
+                    "doc_id": d.get("id", ""),
+                    "doc_name": d.get("name", ""),
+                    "doc_description": d.get("description", ""),
+                    "doc_type": "pdf",
+                }
+                for d in batch
+            )
+            if len(batch) < page_size:
+                return docs
+            offset += page_size
 
     def delete_document(self, collection: str, doc_id: str) -> None:
-        self._request("DELETE", f"/doc/{self._enc(doc_id)}/")
+        self._doc_request(doc_id, "DELETE", f"/doc/{self._enc(doc_id)}/")
 
     # ── Query (uses cloud chat/completions, no LLM key needed) ────────────
 
@@ -269,32 +331,45 @@ class CloudBackend:
             )
         doc_id = doc_ids if doc_ids else self._get_all_doc_ids(collection)
         headers = self._headers
-        queue: asyncio.Queue[QueryEvent | None] = asyncio.Queue()
-        loop = asyncio.get_event_loop()
+        # Queue carries QueryEvent, an Exception to re-raise, or None (end).
+        queue: asyncio.Queue[QueryEvent | Exception | None] = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
+        def _put(item: QueryEvent | Exception | None) -> None:
+            try:
+                loop.call_soon_threadsafe(queue.put_nowait, item)
+            except RuntimeError:
+                pass  # event loop already closed; consumer is gone
 
         def _stream():
-            """Background thread: read SSE and push events to queue."""
-            resp = requests.post(
-                f"{API_BASE}/chat/completions/",
-                headers=headers,
-                json={
-                    "messages": [{"role": "user", "content": question}],
-                    "doc_id": doc_id,
-                    "stream": True,
-                    "stream_metadata": True,
-                },
-                stream=True,
-                timeout=120,
-            )
+            """Background thread: read SSE and push events to queue.
+
+            Everything — including the initial connect — runs inside try so a
+            failure can never die silently and leave the consumer awaiting a
+            sentinel that never arrives. Errors are forwarded as exceptions
+            (raised in the consumer), never disguised as answer events.
+            """
+            resp = None
+            answer_parts: list[str] = []
             try:
+                resp = requests.post(
+                    f"{API_BASE}/chat/completions/",
+                    headers=headers,
+                    json={
+                        "messages": [{"role": "user", "content": question}],
+                        "doc_id": doc_id,
+                        "stream": True,
+                        "stream_metadata": True,
+                    },
+                    stream=True,
+                    timeout=120,
+                )
                 if resp.status_code != 200:
                     body = resp.text[:500] if resp.text else ""
-                    loop.call_soon_threadsafe(
-                        queue.put_nowait,
-                        QueryEvent(type="answer_done",
-                                   data=f"Cloud streaming error {resp.status_code}: {body}"),
+                    raise CloudAPIError(
+                        f"Cloud streaming error {resp.status_code}: {body}",
+                        status_code=resp.status_code,
                     )
-                    return
 
                 current_tool_name = None
                 current_tool_args: list[str] = []
@@ -327,34 +402,40 @@ class CloudBackend:
                     elif block_type == "tool_use_stop":
                         if current_tool_name and current_tool_name not in _INTERNAL_TOOLS:
                             args_str = "".join(current_tool_args)
-                            loop.call_soon_threadsafe(
-                                queue.put_nowait,
-                                QueryEvent(type="tool_call", data={
-                                    "name": current_tool_name,
-                                    "args": args_str,
-                                }),
-                            )
+                            _put(QueryEvent(type="tool_call", data={
+                                "name": current_tool_name,
+                                "args": args_str,
+                            }))
                         current_tool_name = None
                         current_tool_args = []
 
                     elif block_type == "text" and content:
-                        loop.call_soon_threadsafe(
-                            queue.put_nowait,
-                            QueryEvent(type="answer_delta", data=content),
-                        )
+                        answer_parts.append(content)
+                        _put(QueryEvent(type="answer_delta", data=content))
 
+                # Same terminal contract as the local backend: a final
+                # answer_done event carrying the full answer text.
+                _put(QueryEvent(type="answer_done", data="".join(answer_parts)))
+
+            except requests.RequestException as e:
+                _put(CloudAPIError(f"Cloud streaming request failed: {e}"))
+            except Exception as e:
+                _put(e)
             finally:
-                resp.close()
-                loop.call_soon_threadsafe(queue.put_nowait, None)  # sentinel
+                if resp is not None:
+                    resp.close()
+                _put(None)  # sentinel
 
         thread = threading.Thread(target=_stream, daemon=True)
         thread.start()
 
         while True:
-            event = await queue.get()
-            if event is None:
+            item = await queue.get()
+            if item is None:
                 break
-            yield event
+            if isinstance(item, Exception):
+                raise item
+            yield item
 
         thread.join(timeout=5)
 

@@ -141,3 +141,17 @@ def test_normalize_doc_ids():
 def test_normalize_doc_ids_rejects_empty_list():
     with pytest.raises(ValueError, match="cannot be empty"):
         LocalBackend._normalize_doc_ids([])
+
+
+# ── error taxonomy: missing docs raise DocumentNotFoundError ─────────────────
+
+def test_get_document_missing_raises(backend):
+    backend.get_or_create_collection("papers")
+    with pytest.raises(DocumentNotFoundError, match="ghost"):
+        backend.get_document("papers", "ghost")
+
+
+def test_delete_document_missing_raises(backend):
+    backend.get_or_create_collection("papers")
+    with pytest.raises(DocumentNotFoundError, match="ghost"):
+        backend.delete_document("papers", "ghost")
