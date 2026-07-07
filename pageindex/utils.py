@@ -147,10 +147,52 @@ def _replace_python_literals_outside_strings(candidate):
     return "".join(result)
 
 
+def _remove_trailing_commas_outside_strings(candidate):
+    """Remove trailing commas before closing brackets only outside JSON strings."""
+
+    result = []
+    index = 0
+    in_string = False
+    escape = False
+
+    while index < len(candidate):
+        char = candidate[index]
+
+        if in_string:
+            result.append(char)
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+
+        if char == '"':
+            in_string = True
+            result.append(char)
+            index += 1
+            continue
+
+        if char == ",":
+            lookahead = index + 1
+            while lookahead < len(candidate) and candidate[lookahead].isspace():
+                lookahead += 1
+            if lookahead < len(candidate) and candidate[lookahead] in "]}":
+                index += 1
+                continue
+
+        result.append(char)
+        index += 1
+
+    return "".join(result)
+
+
 def _normalize_json_candidate(candidate):
     candidate = candidate.strip()
     candidate = _replace_python_literals_outside_strings(candidate)
-    candidate = candidate.replace(",]", "]").replace(",}", "}")
+    candidate = _remove_trailing_commas_outside_strings(candidate)
     return candidate
 
 

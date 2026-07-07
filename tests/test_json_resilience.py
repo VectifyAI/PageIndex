@@ -39,6 +39,22 @@ class JsonExtractionTests(unittest.TestCase):
         self.assertEqual(payload["title"], "None of the above")
         self.assertIs(payload["valid"], True)
 
+    def test_extract_json_preserves_comma_bracket_text_inside_strings(self):
+        payload = extract_json('{"note": "see items,] and more"}')
+
+        self.assertEqual(payload["note"], "see items,] and more")
+
+    def test_extract_json_preserves_comma_brace_text_inside_strings(self):
+        payload = extract_json('{"formula": "f(x,} )"}')
+
+        self.assertEqual(payload["formula"], "f(x,} )")
+
+    def test_extract_json_repairs_structural_trailing_commas(self):
+        payload = extract_json('{"items": [1, 2,], "meta": {"done": True,}}')
+
+        self.assertEqual(payload["items"], [1, 2])
+        self.assertIs(payload["meta"]["done"], True)
+
 
 class TocFallbackTests(unittest.TestCase):
     def test_as_toc_list_accepts_plain_list(self):
