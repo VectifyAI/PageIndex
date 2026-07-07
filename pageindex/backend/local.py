@@ -58,6 +58,9 @@ class LocalBackend:
         return self._storage.list_collections()
 
     def delete_collection(self, name: str) -> None:
+        # Validate before touching the filesystem — an unvalidated name like
+        # "../.." would make the rmtree below escape files_dir entirely.
+        self._validate_collection_name(name)
         self._storage.delete_collection(name)
         col_dir = self._files_dir / name
         if col_dir.exists():

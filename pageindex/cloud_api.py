@@ -21,6 +21,10 @@ class LegacyCloudAPI:
         return {"api_key": self.api_key}
 
     def _request(self, method: str, path: str, error_prefix: str, **kwargs) -> requests.Response:
+        # Always bound the request so a dead connection can't hang callers
+        # forever. Streamed responses get a longer read timeout since it
+        # applies between chunks, not to the whole response.
+        kwargs.setdefault("timeout", 120 if kwargs.get("stream") else 30)
         try:
             response = requests.request(
                 method,

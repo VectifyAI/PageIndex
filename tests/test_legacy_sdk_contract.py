@@ -107,7 +107,7 @@ def test_submit_document_uses_legacy_endpoint(monkeypatch, tmp_path):
     assert calls[0]["method"] == "POST"
     assert calls[0]["url"] == "https://api.pageindex.ai/doc/"
     assert calls[0]["headers"] == {"api_key": "pi-test"}
-    assert "timeout" not in calls[0]["kwargs"]
+    assert calls[0]["kwargs"]["timeout"] == 30
     assert calls[0]["data"]["if_retrieval"] is True
     assert calls[0]["data"]["mode"] == "mcp"
     assert calls[0]["data"]["beta_headers"] == '["block_reference"]'
@@ -214,7 +214,8 @@ def test_chat_completions_stream_parses_text_chunks(monkeypatch):
     ))
 
     assert chunks == ["hel", "lo"]
-    assert "timeout" not in calls[0]["kwargs"]
+    # Streamed requests still get a (longer, between-chunk) read timeout.
+    assert calls[0]["kwargs"]["timeout"] == 120
 
 
 def test_chat_completions_stream_metadata_returns_raw_chunks(monkeypatch):

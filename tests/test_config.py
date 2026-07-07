@@ -26,3 +26,11 @@ def test_model_copy_with_update():
     updated = config.model_copy(update={"model": "gpt-5.4"})
     assert updated.model == "gpt-5.4"
     assert updated.toc_check_page_num == 30
+
+
+def test_legacy_yes_no_strings_coerce_to_bool():
+    """Legacy page_index()/run_pageindex callers pass 'yes'/'no' strings;
+    pydantic must coerce them to the booleans the pipeline now branches on."""
+    config = IndexConfig(if_add_node_id="yes", if_add_node_summary="no")
+    assert config.if_add_node_id is True
+    assert config.if_add_node_summary is False

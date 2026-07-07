@@ -155,3 +155,13 @@ def test_delete_document_missing_raises(backend):
     backend.get_or_create_collection("papers")
     with pytest.raises(DocumentNotFoundError, match="ghost"):
         backend.delete_document("papers", "ghost")
+
+
+def test_delete_collection_rejects_path_traversal(backend, tmp_path):
+    # Regression: an unvalidated name like "../.." would rmtree outside files_dir.
+    from pageindex.errors import PageIndexError
+    canary = tmp_path / "canary.txt"
+    canary.write_text("still here")
+    with pytest.raises(PageIndexError, match="Invalid collection name"):
+        backend.delete_collection("../..")
+    assert canary.exists()
