@@ -465,7 +465,10 @@ class CloudBackend:
                 try:
                     resp.close()
                 except Exception:
-                    pass
+                    # Best-effort: the response may already be closed/invalid
+                    # during teardown; closing is just to unblock the thread.
+                    logger.debug("Ignoring error closing streaming response during cleanup",
+                                 exc_info=True)
             thread.join(timeout=5)
 
     def _get_all_doc_ids(self, collection: str) -> list[str]:
