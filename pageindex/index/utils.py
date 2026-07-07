@@ -1,11 +1,20 @@
 import litellm
 import logging
+import os
+import textwrap
 import time
 import json
 import copy
 import re
 import asyncio
 import PyPDF2
+import pymupdf
+import yaml
+from datetime import datetime
+from io import BytesIO
+from pathlib import Path
+from pprint import pprint
+from types import SimpleNamespace as config
 
 from ..config import get_llm_params
 
@@ -132,13 +141,15 @@ def write_node_id(data, node_id=0):
     return node_id
 
 
-def remove_fields(data, fields=None):
+def remove_fields(data, fields=None, max_len=None):
     fields = fields or ["text"]
     if isinstance(data, dict):
-        return {k: remove_fields(v, fields)
+        return {k: remove_fields(v, fields, max_len)
             for k, v in data.items() if k not in fields}
     elif isinstance(data, list):
-        return [remove_fields(item, fields) for item in data]
+        return [remove_fields(item, fields, max_len) for item in data]
+    elif isinstance(data, str):
+        return data[:max_len] + '...' if max_len is not None and len(data) > max_len else data
     return data
 
 
@@ -174,7 +185,9 @@ def get_nodes(structure):
 
 def get_leaf_nodes(structure):
     if isinstance(structure, dict):
-        if not structure['nodes']:
+        # .get() — clean_node deletes the 'nodes' key on leaf nodes, so direct
+        # indexing raises KeyError on a standard tree (issue #330 / #331).
+        if not structure.get('nodes'):
             structure_node = copy.deepcopy(structure)
             structure_node.pop('nodes', None)
             return [structure_node]
@@ -431,3 +444,420 @@ def get_md_page_content(structure: list, page_nums: list[int]) -> list[dict]:
     _traverse(structure)
     results.sort(key=lambda x: x['page'])
     return results
+
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Legacy 0.2.x / OSS utility API — kept here so this module is the single
+# source of truth for the indexing pipeline. Previously duplicated in the
+# top-level pageindex/utils.py (now a deprecation shim re-exporting this).
+# ─────────────────────────────────────────────────────────────────────
+
+async def call_llm(prompt, api_key, model="gpt-4.1", temperature=0):
+    """Call an LLM to generate a response to a prompt.
+
+    Kept for compatibility with the pageindex 0.2.x SDK utility API.
+    """
+    import openai
+
+    client = openai.AsyncOpenAI(api_key=api_key)
+    response = await client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=temperature,
+    )
+    return response.choices[0].message.content.strip()
+
+
+def is_leaf_node(data, node_id):
+    # Helper function to find the node by its node_id
+    def find_node(data, node_id):
+        if isinstance(data, dict):
+            if data.get('node_id') == node_id:
+                return data
+            for key in data.keys():
+                if 'nodes' in key:
+                    result = find_node(data[key], node_id)
+                    if result:
+                        return result
+        elif isinstance(data, list):
+            for item in data:
+                result = find_node(item, node_id)
+                if result:
+                    return result
+        return None
+
+    # Find the node with the given node_id
+    node = find_node(data, node_id)
+
+    # Check if the node is a leaf node
+    if node and not node.get('nodes'):
+        return True
+    return False
+
+
+def get_last_node(structure):
+    return structure[-1]
+
+
+def extract_text_from_pdf(pdf_path):
+    pdf_reader = PyPDF2.PdfReader(pdf_path)
+    ###return text not list 
+    text=""
+    for page_num in range(len(pdf_reader.pages)):
+        page = pdf_reader.pages[page_num]
+        text+=page.extract_text()
+    return text
+
+
+def get_pdf_title(pdf_path):
+    pdf_reader = PyPDF2.PdfReader(pdf_path)
+    meta = pdf_reader.metadata
+    title = meta.title if meta and meta.title else 'Untitled'
+    return title
+
+
+def get_text_of_pages(pdf_path, start_page, end_page, tag=True):
+    pdf_reader = PyPDF2.PdfReader(pdf_path)
+    text = ""
+    for page_num in range(start_page-1, end_page):
+        page = pdf_reader.pages[page_num]
+        page_text = page.extract_text()
+        if tag:
+            text += f"<start_index_{page_num+1}>\n{page_text}\n<end_index_{page_num+1}>\n"
+        else:
+            text += page_text
+    return text
+
+
+def get_first_start_page_from_text(text):
+    start_page = -1
+    start_page_match = re.search(r'<start_index_(\d+)>', text)
+    if start_page_match:
+        start_page = int(start_page_match.group(1))
+    return start_page
+
+
+def get_last_start_page_from_text(text):
+    start_page = -1
+    # Find all matches of start_index tags
+    start_page_matches = re.finditer(r'<start_index_(\d+)>', text)
+    # Convert iterator to list and get the last match if any exist
+    matches_list = list(start_page_matches)
+    if matches_list:
+        start_page = int(matches_list[-1].group(1))
+    return start_page
+
+
+def sanitize_filename(filename, replacement='-'):
+    # In Linux, only '/' and '\0' (null) are invalid in filenames.
+    # Null can't be represented in strings, so we only handle '/'.
+    return filename.replace('/', replacement)
+
+
+def get_pdf_name(pdf_path):
+    # Extract PDF name
+    if isinstance(pdf_path, str):
+        pdf_name = os.path.basename(pdf_path)
+    elif isinstance(pdf_path, BytesIO):
+        pdf_reader = PyPDF2.PdfReader(pdf_path)
+        meta = pdf_reader.metadata
+        pdf_name = meta.title if meta and meta.title else 'Untitled'
+        pdf_name = sanitize_filename(pdf_name)
+    return pdf_name
+
+
+class JsonLogger:
+    def __init__(self, file_path):
+        # Extract PDF name for logger name
+        pdf_name = get_pdf_name(file_path)
+            
+        current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.filename = f"{pdf_name}_{current_time}.json"
+        os.makedirs("./logs", exist_ok=True)
+        # Initialize empty list to store all messages
+        self.log_data = []
+
+    def log(self, level, message, **kwargs):
+        if isinstance(message, dict):
+            self.log_data.append(message)
+        else:
+            self.log_data.append({'message': message})
+        # Add new message to the log data
+        
+        # Write entire log data to file
+        with open(self._filepath(), "w") as f:
+            json.dump(self.log_data, f, indent=2)
+
+    def info(self, message, **kwargs):
+        self.log("INFO", message, **kwargs)
+
+    def error(self, message, **kwargs):
+        self.log("ERROR", message, **kwargs)
+
+    def debug(self, message, **kwargs):
+        self.log("DEBUG", message, **kwargs)
+
+    def exception(self, message, **kwargs):
+        kwargs["exception"] = True
+        self.log("ERROR", message, **kwargs)
+
+    def _filepath(self):
+        return os.path.join("logs", self.filename)
+
+
+def add_preface_if_needed(data):
+    if not isinstance(data, list) or not data:
+        return data
+
+    if data[0]['physical_index'] is not None and data[0]['physical_index'] > 1:
+        preface_node = {
+            "structure": "0",
+            "title": "Preface",
+            "physical_index": 1,
+        }
+        data.insert(0, preface_node)
+    return data
+
+
+def get_page_tokens(pdf_path, model=None, pdf_parser="PyPDF2"):
+    if pdf_parser == "PyPDF2":
+        pdf_reader = PyPDF2.PdfReader(pdf_path)
+        page_list = []
+        for page_num in range(len(pdf_reader.pages)):
+            page = pdf_reader.pages[page_num]
+            page_text = page.extract_text()
+            token_length = litellm.token_counter(model=model, text=page_text)
+            page_list.append((page_text, token_length))
+        return page_list
+    elif pdf_parser == "PyMuPDF":
+        if isinstance(pdf_path, BytesIO):
+            pdf_stream = pdf_path
+            doc = pymupdf.open(stream=pdf_stream, filetype="pdf")
+        elif isinstance(pdf_path, str) and os.path.isfile(pdf_path) and pdf_path.lower().endswith(".pdf"):
+            doc = pymupdf.open(pdf_path)
+        page_list = []
+        for page in doc:
+            page_text = page.get_text()
+            token_length = litellm.token_counter(model=model, text=page_text)
+            page_list.append((page_text, token_length))
+        return page_list
+    else:
+        raise ValueError(f"Unsupported PDF parser: {pdf_parser}")
+
+
+def get_text_of_pdf_pages(pdf_pages, start_page, end_page):
+    text = ""
+    for page_num in range(start_page-1, end_page):
+        text += pdf_pages[page_num][0]
+    return text
+
+
+def get_text_of_pdf_pages_with_labels(pdf_pages, start_page, end_page):
+    text = ""
+    for page_num in range(start_page-1, end_page):
+        text += f"<physical_index_{page_num+1}>\n{pdf_pages[page_num][0]}\n<physical_index_{page_num+1}>\n"
+    return text
+
+
+def get_number_of_pages(pdf_path):
+    pdf_reader = PyPDF2.PdfReader(pdf_path)
+    num = len(pdf_reader.pages)
+    return num
+
+
+def clean_structure_post(data):
+    if isinstance(data, dict):
+        data.pop('page_number', None)
+        data.pop('start_index', None)
+        data.pop('end_index', None)
+        if 'nodes' in data:
+            clean_structure_post(data['nodes'])
+    elif isinstance(data, list):
+        for section in data:
+            clean_structure_post(section)
+    return data
+
+
+def print_toc(tree, indent=0):
+    for node in tree:
+        print('  ' * indent + node['title'])
+        if node.get('nodes'):
+            print_toc(node['nodes'], indent + 1)
+
+
+def print_json(data, max_len=40, indent=2):
+    def simplify_data(obj):
+        if isinstance(obj, dict):
+            return {k: simplify_data(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [simplify_data(item) for item in obj]
+        elif isinstance(obj, str) and len(obj) > max_len:
+            return obj[:max_len] + '...'
+        else:
+            return obj
+    
+    simplified = simplify_data(data)
+    print(json.dumps(simplified, indent=indent, ensure_ascii=False))
+
+
+def check_token_limit(structure, limit=110000):
+    list = structure_to_list(structure)
+    for node in list:
+        num_tokens = count_tokens(node['text'], model=None)
+        if num_tokens > limit:
+            print(f"Node ID: {node['node_id']} has {num_tokens} tokens")
+            print("Start Index:", node['start_index'])
+            print("End Index:", node['end_index'])
+            print("Title:", node['title'])
+            print("\n")
+
+
+def convert_physical_index_to_int(data):
+    if isinstance(data, list):
+        for i in range(len(data)):
+            # Check if item is a dictionary and has 'physical_index' key
+            if isinstance(data[i], dict) and 'physical_index' in data[i]:
+                if isinstance(data[i]['physical_index'], str):
+                    if data[i]['physical_index'].startswith('<physical_index_'):
+                        data[i]['physical_index'] = int(data[i]['physical_index'].split('_')[-1].rstrip('>').strip())
+                    elif data[i]['physical_index'].startswith('physical_index_'):
+                        data[i]['physical_index'] = int(data[i]['physical_index'].split('_')[-1].strip())
+    elif isinstance(data, str):
+        if data.startswith('<physical_index_'):
+            data = int(data.split('_')[-1].rstrip('>').strip())
+        elif data.startswith('physical_index_'):
+            data = int(data.split('_')[-1].strip())
+        # Check data is int
+        if isinstance(data, int):
+            return data
+        else:
+            return None
+    return data
+
+
+def convert_page_to_int(data):
+    for item in data:
+        if 'page' in item and isinstance(item['page'], str):
+            try:
+                item['page'] = int(item['page'])
+            except ValueError:
+                # Keep original value if conversion fails
+                pass
+    return data
+
+
+def add_node_text_with_labels(node, pdf_pages):
+    if isinstance(node, dict):
+        start_page = node.get('start_index')
+        end_page = node.get('end_index')
+        node['text'] = get_text_of_pdf_pages_with_labels(pdf_pages, start_page, end_page)
+        if 'nodes' in node:
+            add_node_text_with_labels(node['nodes'], pdf_pages)
+    elif isinstance(node, list):
+        for index in range(len(node)):
+            add_node_text_with_labels(node[index], pdf_pages)
+    return
+
+
+class ConfigLoader:
+    """Legacy 0.2.x config helper. Defaults now come from IndexConfig — the
+    old ``config.yaml`` no longer ships. Prefer ``pageindex.IndexConfig``.
+    """
+
+    def __init__(self, default_path=None):
+        from ..config import IndexConfig
+        self._default_dict = IndexConfig().model_dump()
+
+    def _validate_keys(self, user_dict):
+        unknown_keys = set(user_dict) - set(self._default_dict)
+        if unknown_keys:
+            raise ValueError(f"Unknown config keys: {unknown_keys}")
+
+    def load(self, user_opt=None) -> config:
+        """Merge user options over IndexConfig defaults, returning a namespace."""
+        if user_opt is None:
+            user_dict = {}
+        elif isinstance(user_opt, config):
+            user_dict = vars(user_opt)
+        elif isinstance(user_opt, dict):
+            user_dict = user_opt
+        else:
+            raise TypeError("user_opt must be dict, config(SimpleNamespace) or None")
+
+        self._validate_keys(user_dict)
+        merged = {**self._default_dict, **user_dict}
+        return config(**merged)
+
+
+def create_node_mapping(tree, include_page_ranges=False, max_page=None):
+    """Create a mapping of node_id to node for quick lookup.
+
+    The optional page-range arguments are kept for compatibility with the
+    pageindex 0.2.x SDK utility API.
+    """
+    def get_all_nodes(nodes):
+        if isinstance(nodes, dict):
+            return [nodes] + [
+                child_node
+                for child in nodes.get('nodes', [])
+                for child_node in get_all_nodes(child)
+            ]
+        elif isinstance(nodes, list):
+            return [
+                child_node
+                for item in nodes
+                for child_node in get_all_nodes(item)
+            ]
+        return []
+
+    all_nodes = get_all_nodes(tree)
+
+    if not include_page_ranges:
+        return {node["node_id"]: node for node in all_nodes if node.get("node_id")}
+
+    mapping = {}
+    for i, node in enumerate(all_nodes):
+        if not node.get("node_id"):
+            continue
+        start_page = node.get("page_index", node.get("start_index"))
+        if node.get("end_index") is not None:
+            end_page = node.get("end_index")
+        elif i + 1 < len(all_nodes):
+            next_node = all_nodes[i + 1]
+            end_page = next_node.get("page_index", next_node.get("start_index"))
+        else:
+            end_page = max_page
+
+        mapping[node["node_id"]] = {
+            "node": node,
+            "start_index": start_page,
+            "end_index": end_page,
+        }
+
+    return mapping
+
+
+def print_tree(tree, exclude_fields=None, indent=None):
+    if exclude_fields is None:
+        exclude_fields = ['text', 'page_index']
+    if isinstance(exclude_fields, int):
+        indent = exclude_fields
+        exclude_fields = None
+    if indent is None and exclude_fields is not None:
+        cleaned_tree = remove_fields(copy.deepcopy(tree), exclude_fields, max_len=40)
+        pprint(cleaned_tree, sort_dicts=False, width=100)
+        return
+
+    indent = indent or 0
+    for node in tree:
+        summary = node.get('summary') or node.get('prefix_summary', '')
+        summary_str = f"  —  {summary[:60]}..." if summary else ""
+        print('  ' * indent + f"[{node.get('node_id', '?')}] {node.get('title', '')}{summary_str}")
+        if node.get('nodes'):
+            print_tree(node['nodes'], exclude_fields=exclude_fields, indent=indent + 1)
+
+
+def print_wrapped(text, width=100):
+    for line in text.splitlines():
+        print(textwrap.fill(line, width=width))

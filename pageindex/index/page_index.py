@@ -4,7 +4,7 @@ import copy
 import math
 import random
 import re
-from .legacy_utils import *
+from .utils import *
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 

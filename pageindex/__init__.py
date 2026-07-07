@@ -1,7 +1,9 @@
 # pageindex/__init__.py
-# Upstream exports (backward compatibility)
-from .page_index import *
-from .page_index_md import md_to_tree
+# Upstream exports (backward compatibility). Import from the canonical
+# pageindex.index.* modules directly so `import pageindex` does NOT trip the
+# top-level deprecation shims (pageindex.page_index / .page_index_md / .utils).
+from .index.page_index import *
+from .index.page_index_md import md_to_tree
 from .retrieve import get_document, get_document_structure, get_page_content
 
 # SDK exports

@@ -2,10 +2,7 @@ import asyncio
 import json
 import re
 import os
-try:
-    from .legacy_utils import *
-except:
-    from legacy_utils import *
+from .utils import *
 
 async def get_node_summary(node, summary_token_threshold=200, model=None):
     node_text = node.get('text')
