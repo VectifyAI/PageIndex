@@ -68,6 +68,8 @@ async def check_title_appearance_in_start(title, page_text, model=None, logger=N
     response = extract_json(response)
     if logger:
         logger.info(f"Response: {response}")
+    if not isinstance(response, dict):
+        return "no"
     return response.get("start_begin", "no")
 
 
@@ -295,6 +297,8 @@ def toc_transformer(toc_content, model=None):
     if_complete = check_if_toc_transformation_is_complete(toc_content, last_complete, model)
     if if_complete == "yes" and finish_reason == "finished":
         last_complete = extract_json(last_complete)
+        if not isinstance(last_complete, dict):
+            return []
         cleaned_response = convert_page_to_int(last_complete.get('table_of_contents', []))
         return cleaned_response
     
@@ -328,6 +332,8 @@ def toc_transformer(toc_content, model=None):
         raise Exception('Failed to complete TOC transformation after maximum retries')
 
     last_complete = extract_json(last_complete)
+    if not isinstance(last_complete, dict):
+        return []
 
     cleaned_response = convert_page_to_int(last_complete.get('table_of_contents', []))
     return cleaned_response

@@ -1,6 +1,12 @@
+import importlib
 import unittest
+from unittest.mock import patch
 
-from pageindex.page_index import _as_toc_list, add_page_offset_to_toc_json
+page_index_module = importlib.import_module("pageindex.page_index")
+_as_toc_list = page_index_module._as_toc_list
+add_page_offset_to_toc_json = page_index_module.add_page_offset_to_toc_json
+check_title_appearance_in_start = page_index_module.check_title_appearance_in_start
+toc_transformer = page_index_module.toc_transformer
 from pageindex.utils import extract_json
 
 
@@ -76,6 +82,20 @@ class TocFallbackTests(unittest.TestCase):
         payload = [{"title": "Item 1", "page": 5}]
 
         self.assertEqual(add_page_offset_to_toc_json(payload, None), payload)
+
+    def test_toc_transformer_returns_empty_list_for_non_dict_json(self):
+        with patch.object(page_index_module, "llm_completion", return_value=('[{"title": "Item 1"}]', "finished")), \
+             patch.object(page_index_module, "check_if_toc_transformation_is_complete", return_value="yes"):
+            self.assertEqual(toc_transformer("1. Item 1"), [])
+
+    def test_title_start_check_returns_no_for_non_dict_json(self):
+        async def fake_completion(model, prompt):
+            return '[{"start_begin": "yes"}]'
+
+        with patch.object(page_index_module, "llm_acompletion", side_effect=fake_completion):
+            result = __import__("asyncio").run(check_title_appearance_in_start("Item 1", "Item 1 text"))
+
+        self.assertEqual(result, "no")
 
 
 if __name__ == "__main__":
