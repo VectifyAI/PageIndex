@@ -93,13 +93,17 @@ class LegacyCloudAPI:
     def is_retrieval_ready(self, doc_id: str) -> bool:
         """Return whether retrieval is ready for ``doc_id``.
 
-        API failures (revoked key, network down, unknown doc) propagate as
-        PageIndexAPIError instead of reading as "not ready" — swallowing them
-        turned ``while not is_retrieval_ready(...)`` polling loops into
-        infinite loops.
+        Faithfully matches the 0.2.x cloud SDK: API errors are swallowed and
+        reported as "not ready" (False) so existing
+        ``while not is_retrieval_ready(...)`` polling loops behave identically.
+        Note this can loop forever on a permanent error (revoked key, deleted
+        doc) — that is the legacy contract; guard the loop yourself if needed.
         """
-        result = self.get_tree(doc_id)
-        return result.get("retrieval_ready", False)
+        try:
+            result = self.get_tree(doc_id)
+            return result.get("retrieval_ready", False)
+        except PageIndexAPIError:
+            return False
 
     def submit_query(self, doc_id: str, query: str, thinking: bool = False) -> dict[str, Any]:
         payload = {
