@@ -43,11 +43,16 @@ def _run_async(coro):
     """Run an async coroutine, handling the case where an event loop is already running."""
     import asyncio
     import concurrent.futures
+    import contextvars
     try:
         asyncio.get_running_loop()
-        # Already inside an event loop -- run in a separate thread
+        # Already inside an event loop -- run in a separate thread. Copy the
+        # current context so ContextVar-based settings (e.g. the
+        # max_concurrency_scope override set by build_index) propagate into the
+        # worker thread instead of silently falling back to the process default.
+        ctx = contextvars.copy_context()
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(asyncio.run, coro).result()
+            return pool.submit(ctx.run, asyncio.run, coro).result()
     except RuntimeError:
         return asyncio.run(coro)
 
@@ -58,48 +63,52 @@ def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
     from .utils import (write_node_id, add_node_text, remove_structure_text,
                         generate_summaries_for_structure, generate_doc_description,
                         create_clean_structure_for_description)
-    from ..config import IndexConfig
+    from ..config import IndexConfig, max_concurrency_scope
 
     if opt is None:
         opt = IndexConfig(model=model) if model else IndexConfig()
 
-    nodes = parsed.nodes
-    strategy = detect_strategy(nodes)
+    # Scope the per-index concurrency cap to THIS call only (per thread/async
+    # context), so concurrent indexing of other documents isn't affected and a
+    # one-off value never sticks as the process default.
+    with max_concurrency_scope(getattr(opt, "max_concurrency", None)):
+        nodes = parsed.nodes
+        strategy = detect_strategy(nodes)
 
-    if strategy == "level_based":
-        structure = build_tree_from_levels(nodes)
-        # For level-based, text is already in the tree nodes
-    else:
-        # Strategies 1-3: convert ContentNode list to page_list format for existing pipeline
-        page_list = [(n.content, n.tokens) for n in nodes]
-        structure = _run_async(_content_based_pipeline(page_list, opt))
+        if strategy == "level_based":
+            structure = build_tree_from_levels(nodes)
+            # For level-based, text is already in the tree nodes
+        else:
+            # Strategies 1-3: convert ContentNode list to page_list format for existing pipeline
+            page_list = [(n.content, n.tokens) for n in nodes]
+            structure = _run_async(_content_based_pipeline(page_list, opt))
 
-    # Unified enhancement
-    if opt.if_add_node_id:
-        write_node_id(structure)
+        # Unified enhancement
+        if opt.if_add_node_id:
+            write_node_id(structure)
 
-    if strategy != "level_based":
-        if opt.if_add_node_text or opt.if_add_node_summary:
-            add_node_text(structure, page_list)
+        if strategy != "level_based":
+            if opt.if_add_node_text or opt.if_add_node_summary:
+                add_node_text(structure, page_list)
 
-    if opt.if_add_node_summary:
-        _run_async(generate_summaries_for_structure(structure, model=opt.model))
+        if opt.if_add_node_summary:
+            _run_async(generate_summaries_for_structure(structure, model=opt.model))
 
-        if not opt.if_add_node_text and strategy != "level_based":
-            remove_structure_text(structure)
+            if not opt.if_add_node_text and strategy != "level_based":
+                remove_structure_text(structure)
 
-    result = {
-        "doc_name": parsed.doc_name,
-        "structure": structure,
-    }
+        result = {
+            "doc_name": parsed.doc_name,
+            "structure": structure,
+        }
 
-    if opt.if_add_doc_description:
-        clean_structure = create_clean_structure_for_description(structure)
-        result["doc_description"] = generate_doc_description(
-            clean_structure, model=opt.model
-        )
+        if opt.if_add_doc_description:
+            clean_structure = create_clean_structure_for_description(structure)
+            result["doc_description"] = generate_doc_description(
+                clean_structure, model=opt.model
+            )
 
-    return result
+        return result
 
 
 class _NullLogger:

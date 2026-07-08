@@ -14,12 +14,39 @@ from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 from pprint import pprint
-from types import SimpleNamespace as config
+# Aliased with a leading underscore so `from .utils import *` (used by the
+# page_index modules) doesn't export a name `config` that would shadow the real
+# `pageindex.config` submodule for those modules.
+from types import SimpleNamespace as _config
 
-from ..config import get_llm_params
+from ..config import get_llm_params, get_max_concurrency
 from ..tokens import count_tokens  # re-exported for backward compat
 
 logger = logging.getLogger(__name__)
+
+
+async def bounded_gather(coros, *, return_exceptions=False):
+    """``asyncio.gather`` with a cap on how many coroutines run concurrently.
+
+    Each coroutine acquires a shared semaphore before running, so no more than
+    ``get_max_concurrency()`` LLM calls are ever in flight at once. Without this
+    a many-node document schedules every node's LLM call simultaneously, opening
+    one socket per node and exhausting the process file-descriptor limit
+    (Errno 24, "Too many open files").
+
+    The semaphore is created inside the running loop, so this stays correct when
+    the caller drives each document in its own ``asyncio.run()`` loop. Order of
+    results matches input order, mirroring ``asyncio.gather``.
+    """
+    semaphore = asyncio.Semaphore(get_max_concurrency())
+
+    async def _run(coro):
+        async with semaphore:
+            return await coro
+
+    return await asyncio.gather(
+        *(_run(c) for c in coros), return_exceptions=return_exceptions
+    )
 
 
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
@@ -213,7 +240,7 @@ async def generate_node_summary(node, model=None):
 async def generate_summaries_for_structure(structure, model=None):
     nodes = structure_to_list(structure)
     tasks = [generate_node_summary(node, model=model) for node in nodes]
-    summaries = await asyncio.gather(*tasks)
+    summaries = await bounded_gather(tasks)
 
     for node, summary in zip(nodes, summaries):
         node['summary'] = summary
@@ -769,11 +796,11 @@ class ConfigLoader:
         if unknown_keys:
             raise ValueError(f"Unknown config keys: {unknown_keys}")
 
-    def load(self, user_opt=None) -> config:
+    def load(self, user_opt=None) -> _config:
         """Merge user options over IndexConfig defaults, returning a namespace."""
         if user_opt is None:
             user_dict = {}
-        elif isinstance(user_opt, config):
+        elif isinstance(user_opt, _config):
             user_dict = vars(user_opt)
         elif isinstance(user_opt, dict):
             user_dict = user_opt
@@ -782,7 +809,7 @@ class ConfigLoader:
 
         self._validate_keys(user_dict)
         merged = {**self._default_dict, **user_dict}
-        return config(**merged)
+        return _config(**merged)
 
 
 def create_node_mapping(tree, include_page_ranges=False, max_page=None):
