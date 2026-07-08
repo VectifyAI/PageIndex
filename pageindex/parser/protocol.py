@@ -24,5 +24,8 @@ class ParsedDocument:
 
 @runtime_checkable
 class DocumentParser(Protocol):
-    def supported_extensions(self) -> list[str]: ...
-    def parse(self, file_path: str, **kwargs) -> ParsedDocument: ...
+    def supported_extensions(self) -> list[str]:
+        """Return the file extensions this parser handles (e.g. ['.pdf'])."""
+
+    def parse(self, file_path: str, **kwargs) -> ParsedDocument:
+        """Parse a file into a ParsedDocument (a flat list of ContentNode)."""
