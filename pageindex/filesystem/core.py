@@ -546,6 +546,85 @@ class PageIndexFileSystem:
         has_more = len(rows) > page_size
         return rows[:page_size], has_more
 
+    def scope_files(self, scope: PIFSQueryScope, *, limit: int) -> list[dict[str, Any]]:
+        leaf_items = self._scope_file_leaf_items(scope, limit=self.scope_file_count(scope) + 1)
+        locator_leaf_by_file_ref = self._scope_locator_leaf_by_file_ref(leaf_items)
+        files = []
+        for row, leaf in leaf_items:
+            locator_leaf = locator_leaf_by_file_ref[row["file_ref"]]
+            files.append(
+                {
+                    "path": self._scope_file_locator(scope, locator_leaf),
+                    "name": locator_leaf,
+                    "type": "file",
+                    "file_ref": row["file_ref"],
+                    "document_id": row["document_id"],
+                    "title": leaf,
+                    "metadata": row["metadata"],
+                }
+            )
+        files = sorted(files, key=lambda item: (str(item["name"]).lower(), item["path"], item["file_ref"]))
+        return files[:limit]
+
+    def scope_file_locator(self, scope: PIFSQueryScope, file_ref: str, leaf: str) -> str:
+        leaf_items = self._scope_file_leaf_items(scope, limit=self.scope_file_count(scope) + 1)
+        return self._scope_file_locator(
+            scope,
+            self._scope_locator_leaf_by_file_ref(leaf_items).get(file_ref, leaf),
+        )
+
+    def _scope_file_leaf_items(self, scope: PIFSQueryScope, *, limit: int) -> list[tuple[dict[str, Any], str]]:
+        recursive = bool(scope.metadata_filter)
+        rows = self.store.search_files(
+            None,
+            scope={"folder_path": scope.folder_path, "recursive": recursive},
+            metadata_filter=scope.metadata_filter or None,
+            limit=limit,
+        )
+        items = []
+        for row in rows:
+            folder_paths = [
+                folder["path"]
+                for folder in self.store.folder_memberships(row["file_ref"])
+            ]
+            folder_path = self._preferred_folder_path(
+                folder_paths,
+                scope.folder_path,
+                row["folder_path"],
+            )
+            leaf = self.store.membership_display_name(row["file_ref"], folder_path) or row["title"]
+            items.append((row, leaf))
+        return items
+
+    @staticmethod
+    def _scope_leaf_counts(leaf_items: list[tuple[dict[str, Any], str]]) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for _, leaf in leaf_items:
+            counts[leaf] = counts.get(leaf, 0) + 1
+        return counts
+
+    @staticmethod
+    def _disambiguated_scope_leaf(leaf: str, file_ref: str, leaf_counts: dict[str, int]) -> str:
+        if leaf_counts.get(leaf, 0) <= 1:
+            return leaf
+        return f"{leaf}~{file_ref}"
+
+    @classmethod
+    def _scope_locator_leaf_by_file_ref(cls, leaf_items: list[tuple[dict[str, Any], str]]) -> dict[str, str]:
+        leaf_counts = cls._scope_leaf_counts(leaf_items)
+        used: set[str] = set()
+        locator_leaf_by_file_ref: dict[str, str] = {}
+        for row, leaf in sorted(leaf_items, key=lambda item: (item[1].lower(), item[1], item[0]["file_ref"])):
+            base = cls._disambiguated_scope_leaf(leaf, row["file_ref"], leaf_counts)
+            locator_leaf = base
+            suffix = 2
+            while locator_leaf in used:
+                locator_leaf = f"{base}~{suffix}"
+                suffix += 1
+            used.add(locator_leaf)
+            locator_leaf_by_file_ref[row["file_ref"]] = locator_leaf
+        return locator_leaf_by_file_ref
+
     def scope_stat(self, path: str) -> dict[str, Any]:
         scope = self.resolve_query_scope(path)
         data = {
@@ -652,11 +731,14 @@ class PageIndexFileSystem:
             )
             display_title = self.store.membership_display_name(file_ref, folder_path) or entry.title
             try:
-                stable_path = self._stable_file_locator(
-                    file_ref,
-                    entry,
-                    folder_path=folder_path,
-                )
+                if query_scope.metadata_filter:
+                    stable_path = self.scope_file_locator(query_scope, file_ref, display_title)
+                else:
+                    stable_path = self._stable_file_locator(
+                        file_ref,
+                        entry,
+                        folder_path=folder_path,
+                    )
             except RuntimeError:
                 continue
             seen.add(file_ref)
@@ -1656,7 +1738,54 @@ class PageIndexFileSystem:
         return message or error_type or None
 
     def _resolve_target(self, target: str) -> str:
-        return self.store.resolve_file_ref(target)
+        try:
+            return self.store.resolve_file_ref(target)
+        except KeyError:
+            if not str(target).strip().startswith("/"):
+                raise
+        normalized = normalize_path(target)
+        try:
+            return self._resolve_scope_file_locator(normalized)
+        except KeyError:
+            pass
+        try:
+            scope = self.resolve_query_scope(normalized)
+        except (KeyError, ValueError):
+            pass
+        else:
+            raise ValueError(self._scope_file_required_message(scope.path))
+        raise KeyError(f"Unknown file target: {target}")
+
+    def _resolve_scope_file_locator(self, target: str) -> str:
+        prefix, _, leaf = target.rstrip("/").rpartition("/")
+        if not leaf:
+            raise KeyError(f"Unknown file target: {target}")
+        leaf = unquote(leaf)
+        scope_path = prefix or "/"
+        scope = self.resolve_query_scope(scope_path)
+        if scope.metadata_axis is not None:
+            raise ValueError(self._scope_file_required_message(target))
+        # ponytail: scans the scoped leaf list; add an indexed leaf lookup if huge scoped collisions matter.
+        matches = [
+            item
+            for item in self.scope_files(scope, limit=self.scope_file_count(scope) + 1)
+            if item["name"] == leaf
+        ]
+        if not matches:
+            raise KeyError(f"Unknown file target: {target}")
+        if len(matches) > 1:
+            raise KeyError(
+                f"Ambiguous file target: {target}. Use tree {scope.path} or "
+                f'browse {scope.path} "<query>" to copy a disambiguated file locator.'
+            )
+        return matches[0]["file_ref"]
+
+    @staticmethod
+    def _scope_file_required_message(path: str) -> str:
+        return (
+            f"{path} is a scope, not a file locator; use tree {path} or "
+            f'browse {path} "<query>" to select a file leaf.'
+        )
 
     @staticmethod
     def _semantic_candidate_score(candidate: Any) -> float | None:
@@ -1722,6 +1851,13 @@ class PageIndexFileSystem:
                 f"{target} resolved to {resolved_file_ref}, expected {file_ref}"
             )
         return target
+
+    @staticmethod
+    def _scope_file_locator(scope: PIFSQueryScope, leaf: Any) -> str:
+        return PageIndexFileSystem._join_virtual_file_path(
+            scope.path,
+            PageIndexFileSystem.encode_scope_segment(str(leaf).strip("/")),
+        )
 
     @staticmethod
     def _build_descriptor(title: str, metadata: dict[str, Any]) -> str:
