@@ -75,21 +75,28 @@ async def check_title_appearance_in_start_concurrent(structure, page_list, model
     if logger:
         logger.info("Checking title appearance in start concurrently")
     
-    # skip items without physical_index
+    # Mark items we can't check as 'no' up front: missing physical_index, or one
+    # out of range for page_list. An out-of-range index (the LLM can emit one)
+    # would otherwise raise IndexError below — during task-list construction,
+    # outside the gather's return_exceptions protection — and abort the build.
+    def _valid_physical_index(item):
+        idx = item.get('physical_index')
+        return idx is not None and 1 <= idx <= len(page_list)
+
     for item in structure:
-        if item.get('physical_index') is None:
+        if not _valid_physical_index(item):
             item['appear_start'] = 'no'
 
-    # only for items with valid physical_index
+    # only for items with a valid, in-range physical_index
     tasks = []
     valid_items = []
     for item in structure:
-        if item.get('physical_index') is not None:
+        if _valid_physical_index(item):
             page_text = page_list[item['physical_index'] - 1][0]
             tasks.append(check_title_appearance_in_start(item['title'], page_text, model=model, logger=logger))
             valid_items.append(item)
 
-    results = await bounded_gather(tasks, return_exceptions=True)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
     for item, result in zip(valid_items, results):
         if isinstance(result, Exception):
             if logger:
@@ -832,7 +839,7 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
         process_and_check_item(item)
         for item in incorrect_results
     ]
-    results = await bounded_gather(tasks, return_exceptions=True)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
     for item, result in zip(incorrect_results, results):
         if isinstance(result, Exception):
             print(f"Processing item {item} generated an exception: {result}")
@@ -927,7 +934,7 @@ async def verify_toc(page_list, list_result, start_index=1, N=None, model=None):
         check_title_appearance(item, page_list, start_index, model)
         for item in indexed_sample_list
     ]
-    results = await bounded_gather(tasks)
+    results = await asyncio.gather(*tasks)
     
     # Process results
     correct_count = 0
@@ -1015,7 +1022,7 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None)
             process_large_node_recursively(child_node, page_list, opt, logger=logger)
             for child_node in node['nodes']
         ]
-        await bounded_gather(tasks)
+        await asyncio.gather(*tasks)
     
     return node
 
@@ -1051,7 +1058,7 @@ async def tree_parser(page_list, opt, doc=None, logger=None):
         process_large_node_recursively(node, page_list, opt, logger=logger)
         for node in toc_tree
     ]
-    await bounded_gather(tasks)
+    await asyncio.gather(*tasks)
     
     return toc_tree
 

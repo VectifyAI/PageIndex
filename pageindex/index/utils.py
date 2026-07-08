@@ -7,6 +7,8 @@ import json
 import copy
 import re
 import asyncio
+import threading
+import weakref
 import PyPDF2
 import pymupdf
 import yaml
@@ -25,28 +27,41 @@ from ..tokens import count_tokens  # re-exported for backward compat
 logger = logging.getLogger(__name__)
 
 
-async def bounded_gather(coros, *, return_exceptions=False):
-    """``asyncio.gather`` with a cap on how many coroutines run concurrently.
+# One shared semaphore per event loop, bounding concurrent in-flight LLM calls.
+# Keyed by the loop object (WeakKeyDictionary drops the entry once the loop is
+# closed and garbage-collected) so each asyncio.run() gets its own, correctly
+# loop-bound semaphore. The lock only guards the tiny get-or-create against two
+# threads (each driving its own loop) racing to insert; within a single loop
+# everything is single-threaded, so no lock is needed on the hot path.
+_LLM_SEMAPHORES: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+_LLM_SEMAPHORES_LOCK = threading.Lock()
 
-    Each coroutine acquires a shared semaphore before running, so no more than
-    ``get_max_concurrency()`` LLM calls are ever in flight at once. Without this
-    a many-node document schedules every node's LLM call simultaneously, opening
-    one socket per node and exhausting the process file-descriptor limit
-    (Errno 24, "Too many open files").
 
-    The semaphore is created inside the running loop, so this stays correct when
-    the caller drives each document in its own ``asyncio.run()`` loop. Order of
-    results matches input order, mirroring ``asyncio.gather``.
+def _llm_semaphore() -> asyncio.Semaphore:
+    """Shared per-loop cap on concurrent in-flight LLM calls.
+
+    Acquired only around the leaf ``litellm.acompletion`` call in
+    ``llm_acompletion`` — the single point every LLM request funnels through —
+    so the cap is a TRUE global bound no matter how deeply the indexing gathers
+    nest (``tree_parser`` → ``process_large_node_recursively`` → …). Bounding at
+    the leaf rather than at each gather call site is also deadlock-free: a parent
+    coroutine awaiting its children holds no slot, so children can always
+    acquire one.
+
+    Sized from ``get_max_concurrency()`` the first time it's needed in a loop, so
+    a per-index ``max_concurrency_scope`` override in effect at that moment is
+    honored. Without this bound a many-node document opens one socket per node at
+    once and exhausts the process file-descriptor limit (Errno 24).
     """
-    semaphore = asyncio.Semaphore(get_max_concurrency())
-
-    async def _run(coro):
-        async with semaphore:
-            return await coro
-
-    return await asyncio.gather(
-        *(_run(c) for c in coros), return_exceptions=return_exceptions
-    )
+    loop = asyncio.get_running_loop()
+    sem = _LLM_SEMAPHORES.get(loop)
+    if sem is None:
+        with _LLM_SEMAPHORES_LOCK:
+            sem = _LLM_SEMAPHORES.get(loop)
+            if sem is None:
+                sem = asyncio.Semaphore(get_max_concurrency())
+                _LLM_SEMAPHORES[loop] = sem
+    return sem
 
 
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
@@ -86,11 +101,14 @@ async def llm_acompletion(model, prompt):
     messages = [{"role": "user", "content": prompt}]
     for i in range(max_retries):
         try:
-            response = await litellm.acompletion(
-                model=model,
-                messages=messages,
-                **get_llm_params(),  # per-call kwargs; never the litellm global
-            )
+            # Hold a concurrency slot only around the actual network call — not
+            # across retry backoff — so the cap counts real in-flight requests.
+            async with _llm_semaphore():
+                response = await litellm.acompletion(
+                    model=model,
+                    messages=messages,
+                    **get_llm_params(),  # per-call kwargs; never the litellm global
+                )
             return response.choices[0].message.content
         except Exception as e:
             logger.warning("Retrying async LLM completion (%d/%d)", i + 1, max_retries)
@@ -240,7 +258,7 @@ async def generate_node_summary(node, model=None):
 async def generate_summaries_for_structure(structure, model=None):
     nodes = structure_to_list(structure)
     tasks = [generate_node_summary(node, model=model) for node in nodes]
-    summaries = await bounded_gather(tasks)
+    summaries = await asyncio.gather(*tasks)
 
     for node, summary in zip(nodes, summaries):
         node['summary'] = summary

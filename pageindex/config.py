@@ -5,7 +5,7 @@ import os
 from contextlib import contextmanager
 from contextvars import ContextVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class IndexConfig(BaseModel):
@@ -29,6 +29,16 @@ class IndexConfig(BaseModel):
     # default (get_max_concurrency(), overridable via PAGEINDEX_MAX_CONCURRENCY).
     # An explicit value here wins for this client.
     max_concurrency: int | None = None
+
+    @field_validator("max_concurrency", mode="before")
+    @classmethod
+    def _validate_max_concurrency_field(cls, v):
+        # Reject bool before pydantic coerces True->1 / False->0, and reject
+        # non-positive ints, so a bad value fails loudly instead of silently
+        # serializing (Semaphore(1)) or crashing (Semaphore(0)).
+        if v is not None:
+            _validate_max_concurrency(v)
+        return v
 
 
 def _env_drop_params_default() -> bool:
@@ -90,6 +100,17 @@ _MAX_CONCURRENCY_OVERRIDE: ContextVar[int | None] = ContextVar(
 )
 
 
+def _validate_max_concurrency(value) -> None:
+    """Raise ValueError unless ``value`` is a positive int.
+
+    ``bool`` is an ``int`` subclass, so it's rejected explicitly — otherwise
+    ``set_max_concurrency(True)`` would pass and become ``Semaphore(1)``,
+    silently serializing all indexing instead of failing loudly.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError("max_concurrency must be a positive integer")
+
+
 def get_max_concurrency() -> int:
     """Return the effective cap on concurrent in-flight LLM calls during indexing.
 
@@ -103,8 +124,7 @@ def get_max_concurrency() -> int:
 def set_max_concurrency(value: int) -> None:
     """Set the process-wide default cap on concurrent in-flight LLM calls."""
     global _MAX_CONCURRENCY
-    if not isinstance(value, int) or value <= 0:
-        raise ValueError("max_concurrency must be a positive integer")
+    _validate_max_concurrency(value)
     _MAX_CONCURRENCY = value
 
 
@@ -117,8 +137,8 @@ def max_concurrency_scope(value: int | None):
     indexing doesn't leak across documents and a one-off value never becomes
     the sticky new default.
     """
-    if value is not None and (not isinstance(value, int) or value <= 0):
-        raise ValueError("max_concurrency must be a positive integer")
+    if value is not None:
+        _validate_max_concurrency(value)
     token = _MAX_CONCURRENCY_OVERRIDE.set(value)
     try:
         yield

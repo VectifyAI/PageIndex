@@ -159,6 +159,10 @@ class AgentRunner:
             result = Runner.run_sync(agent, question)
         else:
             import concurrent.futures
+            import contextvars
+            # Copy the current context into the worker thread so ContextVar-based
+            # settings propagate (mirrors pipeline._run_async).
+            ctx = contextvars.copy_context()
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                result = pool.submit(asyncio.run, Runner.run(agent, question)).result()
+                result = pool.submit(ctx.run, asyncio.run, Runner.run(agent, question)).result()
         return result.final_output

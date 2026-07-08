@@ -16,7 +16,7 @@ async def get_node_summary(node, summary_token_threshold=200, model=None):
 async def generate_summaries_for_structure_md(structure, summary_token_threshold, model=None):
     nodes = structure_to_list(structure)
     tasks = [get_node_summary(node, summary_token_threshold=summary_token_threshold, model=model) for node in nodes]
-    summaries = await bounded_gather(tasks)
+    summaries = await asyncio.gather(*tasks)
     
     for node, summary in zip(nodes, summaries):
         if not node.get('nodes'):

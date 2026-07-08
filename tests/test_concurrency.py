@@ -1,6 +1,8 @@
 import asyncio
 import threading
+from types import SimpleNamespace
 
+import pydantic
 import pytest
 
 from pageindex.config import (
@@ -10,7 +12,7 @@ from pageindex.config import (
     max_concurrency_scope,
     set_max_concurrency,
 )
-from pageindex.index.utils import bounded_gather
+from pageindex.index.utils import _llm_semaphore, llm_acompletion
 
 
 @pytest.fixture(autouse=True)
@@ -21,42 +23,90 @@ def _restore_max_concurrency():
     set_max_concurrency(prev)
 
 
-def test_bounded_gather_never_exceeds_the_cap():
-    set_max_concurrency(5)
+async def _nested_llm_load(state, *, branches=5, leaves=5):
+    """Drive branches*leaves leaf calls, nested two levels deep, each holding
+    the shared per-loop LLM semaphore — the exact shape of the indexing pipeline
+    (tree_parser gather -> per-node gather -> leaf LLM call)."""
+
+    async def leaf():
+        async with _llm_semaphore():
+            state["in_flight"] += 1
+            state["peak"] = max(state["peak"], state["in_flight"])
+            await asyncio.sleep(0.01)
+            state["in_flight"] -= 1
+
+    async def branch():
+        await asyncio.gather(*(leaf() for _ in range(leaves)))
+
+    await asyncio.gather(*(branch() for _ in range(branches)))
+
+
+def test_llm_semaphore_bounds_concurrency_even_when_nested():
+    # The core fix: the cap is a TRUE global bound even when acquired from
+    # deeply nested gathers. 25 leaf calls nested two levels, cap 3 -> peak 3.
+    # A per-gather-call semaphore (the previous design) would let this reach
+    # branches*leaves and blow past the cap.
+    set_max_concurrency(3)
+    state = {"in_flight": 0, "peak": 0}
+    asyncio.run(_nested_llm_load(state, branches=5, leaves=5))
+    assert state["peak"] == 3
+
+
+def test_llm_semaphore_uses_scoped_override():
+    # A per-index max_concurrency_scope active when the loop's semaphore is first
+    # created must set its size, and must not mutate the process default.
+    set_max_concurrency(10)
     state = {"in_flight": 0, "peak": 0}
 
-    async def worker(i):
+    async def run():
+        with max_concurrency_scope(2):
+            await _nested_llm_load(state, branches=4, leaves=4)
+
+    asyncio.run(run())
+    assert state["peak"] == 2
+    assert get_max_concurrency() == 10
+
+
+def test_llm_acompletion_holds_the_shared_semaphore(monkeypatch):
+    # Prove llm_acompletion (the single chokepoint every LLM call funnels
+    # through) actually acquires the shared cap around the network call.
+    set_max_concurrency(3)
+    state = {"in_flight": 0, "peak": 0}
+
+    async def fake_acompletion(**kwargs):
         state["in_flight"] += 1
         state["peak"] = max(state["peak"], state["in_flight"])
         await asyncio.sleep(0.01)
         state["in_flight"] -= 1
-        return i
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
+        )
+
+    monkeypatch.setattr("litellm.acompletion", fake_acompletion)
 
     async def run():
-        return await bounded_gather(worker(i) for i in range(30))
+        await asyncio.gather(*(llm_acompletion("gpt-x", f"p{i}") for i in range(20)))
 
-    results = asyncio.run(run())
-
-    # Order is preserved (gather semantics) and the cap is respected: with 30
-    # tasks and 5 slots, exactly 5 run at once — never the unbounded 30 that
-    # exhausted file descriptors.
-    assert results == list(range(30))
-    assert state["peak"] == 5
+    asyncio.run(run())
+    assert state["peak"] == 3
 
 
-def test_bounded_gather_propagates_return_exceptions():
-    async def ok():
-        return "ok"
+def test_run_async_propagates_scope_into_worker_thread():
+    # When build_index runs inside an already-running loop, _run_async hops to a
+    # worker thread. The max_concurrency_scope override must ride along (copied
+    # context) and still bound the (nested) LLM load in that worker loop.
+    from pageindex.index.pipeline import _run_async
 
-    async def boom():
-        raise ValueError("boom")
+    set_max_concurrency(10)
+    state = {"in_flight": 0, "peak": 0}
 
-    async def run():
-        return await bounded_gather([ok(), boom()], return_exceptions=True)
+    async def outer():
+        # We're inside a running loop -> _run_async uses the worker thread.
+        with max_concurrency_scope(3):
+            _run_async(_nested_llm_load(state, branches=4, leaves=4))
 
-    results = asyncio.run(run())
-    assert results[0] == "ok"
-    assert isinstance(results[1], ValueError)
+    asyncio.run(outer())
+    assert state["peak"] == 3
 
 
 def test_set_get_max_concurrency_round_trip():
@@ -64,11 +114,11 @@ def test_set_get_max_concurrency_round_trip():
     assert get_max_concurrency() == 3
 
 
-def test_set_max_concurrency_rejects_non_positive():
-    with pytest.raises(ValueError):
-        set_max_concurrency(0)
-    with pytest.raises(ValueError):
-        set_max_concurrency(-1)
+def test_set_max_concurrency_rejects_invalid():
+    # bool is an int subclass -> must be rejected, not silently -> Semaphore(1).
+    for bad in (0, -1, True, False, 2.5, "3", None):
+        with pytest.raises(ValueError):
+            set_max_concurrency(bad)
 
 
 def test_env_default_parsing(monkeypatch):
@@ -88,9 +138,16 @@ def test_index_config_max_concurrency_field():
     assert IndexConfig(max_concurrency=7).max_concurrency == 7
 
 
+def test_index_config_rejects_bool_and_non_positive_max_concurrency():
+    # bool would otherwise be coerced by pydantic to 1/0; both must be rejected.
+    for bad in (True, False, 0, -1):
+        with pytest.raises(pydantic.ValidationError):
+            IndexConfig(max_concurrency=bad)
+
+
 def test_max_concurrency_scope_overrides_then_restores():
     # A per-index override applies inside the scope and, crucially, does NOT
-    # stick as the new process default afterwards (Finding A: no stickiness).
+    # stick as the new process default afterwards (no stickiness).
     set_max_concurrency(10)
     with max_concurrency_scope(3):
         assert get_max_concurrency() == 3
@@ -104,19 +161,17 @@ def test_max_concurrency_scope_none_is_a_no_op():
     assert get_max_concurrency() == 8
 
 
-def test_max_concurrency_scope_rejects_non_positive():
-    with pytest.raises(ValueError):
-        with max_concurrency_scope(0):
-            pass
-    with pytest.raises(ValueError):
-        with max_concurrency_scope(-1):
-            pass
+def test_max_concurrency_scope_rejects_invalid():
+    for bad in (0, -1, True, False):
+        with pytest.raises(ValueError):
+            with max_concurrency_scope(bad):
+                pass
 
 
 def test_max_concurrency_scope_is_isolated_across_threads():
     # A per-index override in one indexing thread must not leak into another
-    # thread indexing a different document concurrently (Finding B). The
-    # override is a ContextVar, so it's invisible outside its own context.
+    # thread indexing a different document concurrently. The override is a
+    # ContextVar, so it's invisible outside its own context.
     set_max_concurrency(10)
     seen = {}
     barrier = threading.Barrier(2)
@@ -138,60 +193,10 @@ def test_max_concurrency_scope_is_isolated_across_threads():
     assert seen["main"] == 10    # main is unaffected by the worker's scope
 
 
-def test_bounded_gather_respects_scoped_override():
-    # bounded_gather reads the cap at semaphore-creation time; a surrounding
-    # max_concurrency_scope must win and must not mutate the process default.
-    set_max_concurrency(10)
-    state = {"in_flight": 0, "peak": 0}
-
-    async def worker(i):
-        state["in_flight"] += 1
-        state["peak"] = max(state["peak"], state["in_flight"])
-        await asyncio.sleep(0.01)
-        state["in_flight"] -= 1
-        return i
-
-    async def run():
-        with max_concurrency_scope(4):
-            return await bounded_gather(worker(i) for i in range(20))
-
-    asyncio.run(run())
-    assert state["peak"] == 4
-    assert get_max_concurrency() == 10
-
-
-def test_run_async_propagates_scope_into_worker_thread():
-    # When build_index runs inside an already-running loop, _run_async hops to a
-    # worker thread. The max_concurrency_scope override must ride along (copied
-    # context) instead of silently falling back to the process default.
-    from pageindex.index.pipeline import _run_async
-
-    set_max_concurrency(10)
-    state = {"in_flight": 0, "peak": 0}
-
-    async def worker(i):
-        state["in_flight"] += 1
-        state["peak"] = max(state["peak"], state["in_flight"])
-        await asyncio.sleep(0.01)
-        state["in_flight"] -= 1
-        return i
-
-    async def inner():
-        return await bounded_gather(worker(i) for i in range(20))
-
-    async def outer():
-        # We're inside a running loop -> _run_async uses the worker thread.
-        with max_concurrency_scope(3):
-            _run_async(inner())
-
-    asyncio.run(outer())
-    assert state["peak"] == 3
-
-
 def test_utils_star_import_does_not_leak_config_name():
     # `from .utils import *` (used by the page_index modules) must not export a
     # name `config` that would shadow the real pageindex.config submodule for
-    # those modules (Finding D). The SimpleNamespace alias is now `_config`.
+    # those modules. The SimpleNamespace alias is now `_config`.
     ns = {}
     exec("from pageindex.index.utils import *", ns)
     assert "config" not in ns

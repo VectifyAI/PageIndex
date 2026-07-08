@@ -93,3 +93,22 @@ def test_null_logger_methods():
     logger.error("test error")
     logger.debug("test debug")
     logger.info({"key": "value"})
+
+
+def test_check_title_appearance_tolerates_out_of_range_physical_index():
+    """An LLM-emitted physical_index outside page_list must be marked 'no', not
+    raise IndexError (which happens during task construction, outside the
+    gather's return_exceptions protection, and would abort the whole build)."""
+    from pageindex.index.page_index import check_title_appearance_in_start_concurrent
+
+    page_list = [("only page text", 3)]  # length 1
+    structure = [
+        {"title": "A", "physical_index": 5},     # out of range -> would IndexError
+        {"title": "B", "physical_index": 0},     # 0 -> would wrap to page_list[-1]
+        {"title": "C", "physical_index": None},  # missing
+        {"title": "D"},                          # no physical_index key at all
+    ]
+    result = asyncio.run(
+        check_title_appearance_in_start_concurrent(structure, page_list)
+    )
+    assert all(item["appear_start"] == "no" for item in result)
