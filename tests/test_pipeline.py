@@ -95,6 +95,41 @@ def test_null_logger_methods():
     logger.info({"key": "value"})
 
 
+def _structure_has_text(nodes) -> bool:
+    for n in nodes:
+        if "text" in n:
+            return True
+        if n.get("nodes") and _structure_has_text(n["nodes"]):
+            return True
+    return False
+
+
+def test_level_based_strips_text_by_default():
+    """Markdown (level_based) must honor if_add_node_text=False — build_tree_from_
+    levels seeds 'text', and it used to leak into the output/storage."""
+    from pageindex.config import IndexConfig
+    nodes = [
+        ContentNode(content="# Intro\nbody one", tokens=5, title="Intro", index=1, level=1),
+        ContentNode(content="## Sub\nbody two", tokens=5, title="Sub", index=2, level=2),
+    ]
+    parsed = ParsedDocument(doc_name="d", nodes=nodes)
+    # No summary/description -> no LLM calls.
+    opt = IndexConfig(if_add_node_summary=False, if_add_doc_description=False,
+                      if_add_node_text=False)
+    result = build_index(parsed, opt=opt)
+    assert not _structure_has_text(result["structure"])
+
+
+def test_level_based_keeps_text_when_requested():
+    from pageindex.config import IndexConfig
+    nodes = [ContentNode(content="# Intro\nbody", tokens=5, title="Intro", index=1, level=1)]
+    parsed = ParsedDocument(doc_name="d", nodes=nodes)
+    opt = IndexConfig(if_add_node_summary=False, if_add_doc_description=False,
+                      if_add_node_text=True)
+    result = build_index(parsed, opt=opt)
+    assert _structure_has_text(result["structure"])
+
+
 def test_check_title_appearance_tolerates_out_of_range_physical_index():
     """An LLM-emitted physical_index outside page_list must be marked 'no', not
     raise IndexError (which happens during task construction, outside the
