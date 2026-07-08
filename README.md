@@ -238,10 +238,13 @@ You can customize the processing with additional optional arguments:
 --toc-check-pages       Pages to check for table of contents (default: 20)
 --max-pages-per-node    Max pages per node (default: 10)
 --max-tokens-per-node   Max tokens per node (default: 20000)
---if-add-node-id        Add node ID (yes/no, default: yes)
---if-add-node-summary   Add node summary (yes/no, default: yes)
---if-add-doc-description Add doc description (yes/no, default: yes)
+--if-add-node-id        Add node IDs (on by default; disable with: --if-add-node-id no)
+--if-add-node-summary   Add node summaries (on by default; disable with: --if-add-node-summary no)
+--if-add-doc-description Add a document description (on by default; disable with: --if-add-doc-description no)
+--if-add-node-text      Add raw text to nodes (off by default; enable with: --if-add-node-text)
 ```
+These flags take no value by default (a bare `--if-add-node-id` turns it on); the
+legacy `--if-add-node-id no` form still works for turning an option off.
 </details>
 
 <details>

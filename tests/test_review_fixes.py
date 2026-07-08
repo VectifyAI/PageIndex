@@ -128,3 +128,13 @@ def test_cloud_query_empty_collection_raises(monkeypatch):
     monkeypatch.setattr(backend, "_get_all_doc_ids", lambda col: [])
     with pytest.raises(ValueError, match="no documents"):
         backend.query("empty", "q")  # doc_ids=None -> resolves to []
+
+
+# ── #10: CLI bool flags still parse legacy yes/no (a bare 'no' must be False) ──
+def test_cli_bool_coerces_legacy_yes_no():
+    import run_pageindex
+
+    assert run_pageindex._cli_bool("no") is False   # legacy off-switch
+    assert run_pageindex._cli_bool("yes") is True
+    assert run_pageindex._cli_bool("false") is False
+    assert run_pageindex._cli_bool(True) is True     # bare flag -> const=True

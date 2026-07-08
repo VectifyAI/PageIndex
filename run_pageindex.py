@@ -5,6 +5,16 @@ from pageindex.index.page_index import *
 from pageindex.index.page_index_md import md_to_tree
 from pageindex.config import IndexConfig
 
+
+def _cli_bool(value):
+    """Parse a CLI boolean flag value.
+
+    A bare ``--flag`` (no value) resolves to True via ``const``; an explicit
+    value keeps the legacy yes/no style working, so ``--flag no`` turns it off.
+    """
+    return str(value).strip().lower() in ("yes", "true", "1", "y", "on")
+
+
 if __name__ == "__main__":
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Process PDF or Markdown document and generate structure')
@@ -20,14 +30,16 @@ if __name__ == "__main__":
     parser.add_argument('--max-tokens-per-node', type=int, default=None,
                       help='Maximum number of tokens per node (PDF only)')
 
-    parser.add_argument('--if-add-node-id', action='store_true', default=None,
-                      help='Add node id to the node')
-    parser.add_argument('--if-add-node-summary', action='store_true', default=None,
-                      help='Add summary to the node')
-    parser.add_argument('--if-add-doc-description', action='store_true', default=None,
-                      help='Add doc description to the doc')
-    parser.add_argument('--if-add-node-text', action='store_true', default=None,
-                      help='Add text to the node')
+    # Bare flag (e.g. --if-add-node-id) turns the option on; an explicit value
+    # keeps the legacy yes/no style, so --if-add-node-id no turns it off.
+    parser.add_argument('--if-add-node-id', nargs='?', const=True, type=_cli_bool, default=None,
+                      help='Add node IDs (on by default). Bare flag or yes/no, e.g. --if-add-node-id no')
+    parser.add_argument('--if-add-node-summary', nargs='?', const=True, type=_cli_bool, default=None,
+                      help='Add node summaries (on by default). Bare flag or yes/no')
+    parser.add_argument('--if-add-doc-description', nargs='?', const=True, type=_cli_bool, default=None,
+                      help='Add a document description (on by default). Bare flag or yes/no')
+    parser.add_argument('--if-add-node-text', nargs='?', const=True, type=_cli_bool, default=None,
+                      help='Add raw text to nodes (off by default). Bare flag or yes/no')
 
     # Markdown specific arguments
     parser.add_argument('--if-thinning', type=str, default='no',
