@@ -2,17 +2,12 @@ import argparse
 import os
 import json
 from pageindex.index.page_index import *
-from pageindex.index.page_index_md import md_to_tree
+# Reuse the canonical yes/no coercion (as _cli_bool) instead of a second copy —
+# a bare ``--flag`` (no value) resolves to True via argparse's ``const``; an
+# explicit value keeps the legacy yes/no style working, so ``--flag no`` turns
+# it off. argparse only ever passes a str here (const/default bypass type=).
+from pageindex.index.page_index_md import md_to_tree, _coerce_bool as _cli_bool
 from pageindex.config import IndexConfig
-
-
-def _cli_bool(value):
-    """Parse a CLI boolean flag value.
-
-    A bare ``--flag`` (no value) resolves to True via ``const``; an explicit
-    value keeps the legacy yes/no style working, so ``--flag no`` turns it off.
-    """
-    return str(value).strip().lower() in ("yes", "true", "1", "y", "on")
 
 
 if __name__ == "__main__":

@@ -2,9 +2,9 @@ import json
 import PyPDF2
 
 try:
-    from .index.utils import get_number_of_pages, remove_fields
+    from .index.utils import get_number_of_pages, remove_fields, get_md_page_content
 except ImportError:
-    from index.utils import get_number_of_pages, remove_fields
+    from index.utils import get_number_of_pages, remove_fields, get_md_page_content
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -54,29 +54,9 @@ def _get_pdf_page_content(doc_info: dict, page_nums: list[int]) -> list[dict]:
 
 
 def _get_md_page_content(doc_info: dict, page_nums: list[int]) -> list[dict]:
-    """
-    For Markdown documents, 'pages' are line numbers.
-    Return only the nodes whose line_num is one of ``page_nums`` (exact match),
-    not the whole [min(page_nums), max(page_nums)] range.
-    """
-    if not page_nums:
-        return []
-    wanted = set(page_nums)
-    results = []
-    seen = set()
-
-    def _traverse(nodes):
-        for node in nodes:
-            ln = node.get('line_num')
-            if ln in wanted and ln not in seen:
-                seen.add(ln)
-                results.append({'page': ln, 'content': node.get('text', '')})
-            if node.get('nodes'):
-                _traverse(node['nodes'])
-
-    _traverse(doc_info.get('structure', []))
-    results.sort(key=lambda x: x['page'])
-    return results
+    """For Markdown documents, 'pages' are line numbers. Delegates to the
+    canonical implementation so the two never drift again."""
+    return get_md_page_content(doc_info.get('structure', []), page_nums)
 
 
 # ── Tool functions ────────────────────────────────────────────────────────────

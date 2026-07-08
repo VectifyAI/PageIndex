@@ -110,13 +110,17 @@ def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
                 clean_structure, model=opt.model
             )
 
-        # 'text' may have been populated for summary/description generation, or
-        # by build_tree_from_levels for the level_based (Markdown) path. Strip it
-        # LAST, for BOTH strategies, unless explicitly requested — otherwise a
-        # default index leaks each node's full text into get_document_structure /
-        # storage, inconsistent with if_add_node_text=False, the README, and the
-        # legacy md_to_tree.
-        if not opt.if_add_node_text:
+        # 'text' is populated for level_based (Markdown, always) or for
+        # content_based when if_add_node_text/if_add_node_summary requested it.
+        # Strip it LAST, for BOTH strategies, unless explicitly requested —
+        # otherwise a default index leaks each node's full text into
+        # get_document_structure / storage, inconsistent with
+        # if_add_node_text=False, the README, and the legacy md_to_tree. Skip
+        # the walk entirely when text was never added in the first place
+        # (content_based with if_add_node_text=if_add_node_summary=False) —
+        # there's nothing to strip.
+        text_present = strategy == "level_based" or opt.if_add_node_text or opt.if_add_node_summary
+        if text_present and not opt.if_add_node_text:
             remove_structure_text(structure)
 
         return result

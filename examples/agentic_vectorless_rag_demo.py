@@ -58,6 +58,16 @@ Answer based only on tool output. Be concise.
 """
 
 
+def _normalize_model_for_agents_sdk(model: str) -> str:
+    """The OpenAI Agents SDK only recognizes 'openai/' and 'litellm/' model
+    prefixes; route any other LiteLLM-style provider path (e.g. 'anthropic/...')
+    through litellm explicitly, mirroring what PageIndex itself does internally
+    for its built-in agent."""
+    if model and "/" in model and not model.startswith(("litellm/", "openai/")):
+        return f"litellm/{model}"
+    return model
+
+
 def query_agent(col, doc_id: str, prompt: str, model: str, verbose: bool = False) -> str:
     """Run a document QA agent using the OpenAI Agents SDK.
 
@@ -90,7 +100,7 @@ def query_agent(col, doc_id: str, prompt: str, model: str, verbose: bool = False
         name="PageIndex",
         instructions=AGENT_SYSTEM_PROMPT,
         tools=[get_document, get_document_structure, get_page_content],
-        model=model,
+        model=_normalize_model_for_agents_sdk(model),
         # model_settings=ModelSettings(reasoning={"effort": "low", "summary": "auto"}),  # Uncomment to enable reasoning
     )
 

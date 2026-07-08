@@ -44,5 +44,9 @@ class FileTypeError(PageIndexError, ValueError):
 
     Also subclasses ValueError so pre-SDK ``except ValueError`` around indexing
     (0.2.x raised ValueError for an unsupported file format) still catches it.
+    Note: because of this, an ``except ValueError`` clause ahead of an
+    ``except FileTypeError`` clause in the same try block will catch it first —
+    if you need FileTypeError-specific handling, put that except before (or
+    instead of) a bare ValueError one.
     """
     pass

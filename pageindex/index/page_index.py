@@ -1112,15 +1112,24 @@ def page_index_main(doc, opt=None):
 
 def page_index(doc, model=None, toc_check_page_num=None, max_page_num_each_node=None, max_token_num_each_node=None,
                if_add_node_id=None, if_add_node_summary=None, if_add_doc_description=None, if_add_node_text=None):
-    
-    # Snapshot the call args BEFORE importing IndexConfig — otherwise the
-    # imported class would be captured by locals() and rejected by
-    # IndexConfig(extra="forbid").
-    user_opt = {
-        arg: value for arg, value in locals().items()
-        if arg != "doc" and value is not None
-    }
     from ..config import IndexConfig
+
+    # Explicit dict of the named kwargs — NOT locals(), which would also
+    # capture any local variable defined above this line (e.g. the IndexConfig
+    # import itself) and get rejected by IndexConfig(extra="forbid"). Unlike a
+    # locals() snapshot, this stays correct regardless of what gets added to
+    # the function body later.
+    user_opt = {
+        "model": model,
+        "toc_check_page_num": toc_check_page_num,
+        "max_page_num_each_node": max_page_num_each_node,
+        "max_token_num_each_node": max_token_num_each_node,
+        "if_add_node_id": if_add_node_id,
+        "if_add_node_summary": if_add_node_summary,
+        "if_add_doc_description": if_add_doc_description,
+        "if_add_node_text": if_add_node_text,
+    }
+    user_opt = {k: v for k, v in user_opt.items() if v is not None}
     opt = IndexConfig(**user_opt)
     return page_index_main(doc, opt)
 

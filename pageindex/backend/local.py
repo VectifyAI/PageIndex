@@ -12,7 +12,7 @@ from ..parser.pdf import PdfParser
 from ..parser.markdown import MarkdownParser
 from ..storage.protocol import StorageEngine
 from ..index.pipeline import build_index
-from ..index.utils import parse_pages, get_pdf_page_content, get_md_page_content, remove_fields
+from ..index.utils import parse_pages, get_pdf_page_content, remove_fields
 from ..backend.protocol import AgentTools
 from ..errors import (FileTypeError, DocumentNotFoundError, CollectionNotFoundError,
                       IndexingError, PageIndexError)
@@ -116,26 +116,23 @@ class LocalBackend:
             parsed = parser.parse(file_path, model=self._model, images_dir=images_dir)
             result = build_index(parsed, model=self._model, opt=self._index_config)
 
-            # Cache page text for fast retrieval (avoids re-reading files)
+            # Cache page text for fast retrieval (avoids re-reading files) and to
+            # reconstruct node text on demand (get_document(include_text=True),
+            # get_page_content fallback) independent of whether IndexConfig kept
+            # text in the stored structure. build_index() already applies
+            # if_add_node_text to result["structure"] for every strategy, so no
+            # extra stripping is needed here.
             pages = [{"page": n.index, "content": n.content,
                       **({"images": n.images} if n.images else {})}
                      for n in parsed.nodes if n.content]
-
-            # Strip text from structure to save storage space (PDF only;
-            # markdown needs text in structure for fallback retrieval)
-            doc_type = ext.lstrip(".")
-            if doc_type == "pdf":
-                clean_structure = remove_fields(result["structure"], fields=["text"])
-            else:
-                clean_structure = result["structure"]
 
             self._storage.save_document(collection, doc_id, {
                 "doc_name": parsed.doc_name,
                 "doc_description": result.get("doc_description", ""),
                 "file_path": str(managed_path),
                 "file_hash": file_hash,
-                "doc_type": doc_type,
-                "structure": clean_structure,
+                "doc_type": ext.lstrip("."),
+                "structure": result["structure"],
                 "pages": pages,
             })
         except sqlite3.IntegrityError:
@@ -158,6 +155,19 @@ class LocalBackend:
 
         return doc_id
 
+    def _require_document(self, collection: str, doc_id: str) -> dict:
+        """Return the document's storage row, or raise DocumentNotFoundError.
+
+        Single source of truth for "does this doc exist" — every public method
+        and agent tool below goes through this, so a missing doc always
+        surfaces the same way instead of each caller re-implementing its own
+        (and potentially inconsistent) existence check.
+        """
+        doc = self._storage.get_document(collection, doc_id)
+        if not doc:
+            raise DocumentNotFoundError(f"Document {doc_id} not found")
+        return doc
+
     def get_document(self, collection: str, doc_id: str, include_text: bool = False) -> dict:
         """Get document metadata with structure.
 
@@ -166,9 +176,7 @@ class LocalBackend:
                 from cached page content. WARNING: may be very large — do NOT
                 use in agent/LLM contexts as it can exhaust the context window.
         """
-        doc = self._storage.get_document(collection, doc_id)
-        if not doc:
-            raise DocumentNotFoundError(f"Document {doc_id} not found")
+        doc = self._require_document(collection, doc_id)
         doc["structure"] = self._storage.get_document_structure(collection, doc_id)
         if include_text:
             pages = self._storage.get_pages(collection, doc_id) or []
@@ -178,7 +186,13 @@ class LocalBackend:
 
     @staticmethod
     def _fill_node_text(nodes: list, page_map: dict) -> None:
-        """Recursively fill 'text' on structure nodes from cached page content."""
+        """Recursively fill 'text' on structure nodes from cached page content.
+
+        Two node conventions, one per indexing strategy: content_based (PDF)
+        nodes span a start_index..end_index page range; level_based (Markdown)
+        nodes map 1:1 to a single page keyed by line_num. Handling only the
+        first would silently leave Markdown nodes with no text.
+        """
         for node in nodes:
             start = node.get("start_index")
             end = node.get("end_index")
@@ -186,20 +200,17 @@ class LocalBackend:
                 node["text"] = "\n".join(
                     page_map.get(p, "") for p in range(start, end + 1)
                 )
+            elif "line_num" in node:
+                node["text"] = page_map.get(node["line_num"], "")
             if "nodes" in node:
                 LocalBackend._fill_node_text(node["nodes"], page_map)
 
     def get_document_structure(self, collection: str, doc_id: str) -> list:
-        # Parity with get_document / the cloud backend: a missing doc must raise,
-        # not masquerade as an empty structure.
-        if not self._storage.get_document(collection, doc_id):
-            raise DocumentNotFoundError(f"Document {doc_id} not found")
+        self._require_document(collection, doc_id)
         return self._storage.get_document_structure(collection, doc_id)
 
     def get_page_content(self, collection: str, doc_id: str, pages: str) -> list:
-        doc = self._storage.get_document(collection, doc_id)
-        if not doc:
-            raise DocumentNotFoundError(f"Document {doc_id} not found")
+        doc = self._require_document(collection, doc_id)
         page_nums = parse_pages(pages)
 
         # Try cached pages first (fast, no file I/O)
@@ -207,22 +218,24 @@ class LocalBackend:
         if cached_pages:
             return [p for p in cached_pages if p["page"] in page_nums]
 
-        # Fallback to reading from file
+        # Fallback: re-derive from the source file, same as the PDF path below
+        # — never from the stored structure, whose 'text' field may have been
+        # stripped (if_add_node_text=False, the default). Reachable only for a
+        # custom StorageEngine that doesn't cache pages (the built-in
+        # SQLiteStorage always does).
         if doc["doc_type"] == "pdf":
             return get_pdf_page_content(doc["file_path"], page_nums)
         else:
-            structure = self._storage.get_document_structure(collection, doc_id)
-            return get_md_page_content(structure, page_nums)
+            parser = self._resolve_parser(doc["file_path"])
+            parsed = parser.parse(doc["file_path"], model=self._model)
+            page_map = {n.index: n.content for n in parsed.nodes}
+            return [{"page": p, "content": page_map[p]} for p in page_nums if p in page_map]
 
     def list_documents(self, collection: str) -> list[dict]:
         return self._storage.list_documents(collection)
 
     def delete_document(self, collection: str, doc_id: str) -> None:
-        doc = self._storage.get_document(collection, doc_id)
-        if not doc:
-            # Parity with the cloud backend, which surfaces HTTP 404 as
-            # DocumentNotFoundError — a typo'd doc_id should not pass silently.
-            raise DocumentNotFoundError(f"Document {doc_id} not found")
+        doc = self._require_document(collection, doc_id)
         if doc.get("file_path"):
             Path(doc["file_path"]).unlink(missing_ok=True)
         # Clean up images directory: files/{collection}/{doc_id}/
@@ -259,8 +272,12 @@ class LocalBackend:
             rejection = _reject(doc_id)
             if rejection:
                 return rejection
-            doc = storage.get_document(col_name, doc_id)
-            if not doc:
+            try:
+                # _require_document (not backend.get_document) deliberately:
+                # the metadata-only row, no 'structure' — keeps this tool's
+                # output small for the agent's context window.
+                doc = backend._require_document(col_name, doc_id)
+            except DocumentNotFoundError:
                 return json.dumps({"error": f"doc_id '{doc_id}' not found."})
             return json.dumps(doc)
 
@@ -270,7 +287,9 @@ class LocalBackend:
             rejection = _reject(doc_id)
             if rejection:
                 return rejection
-            if not storage.get_document(col_name, doc_id):
+            try:
+                backend._require_document(col_name, doc_id)
+            except DocumentNotFoundError:
                 return json.dumps({"error": f"doc_id '{doc_id}' not found."})
             structure = storage.get_document_structure(col_name, doc_id)
             return json.dumps(remove_fields(structure, fields=["text"]), ensure_ascii=False)

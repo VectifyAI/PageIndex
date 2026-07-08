@@ -67,17 +67,37 @@ def test_configloader_no_longer_needs_config_yaml():
         ConfigLoader().load({"nope": 1})
 
 
-def test_md_to_tree_shim_coerces_yes_no_strings(monkeypatch):
-    """Canonical md_to_tree takes booleans; the shim must coerce legacy
-    'yes'/'no' strings so a bare 'no' doesn't read as truthy True."""
-    import pageindex.page_index_md as shim
-    captured = {}
+def test_md_to_tree_shim_is_the_canonical_function():
+    """The shim no longer wraps md_to_tree with its own coercion — the
+    canonical implementation coerces internally, so the shim is a pure
+    re-export (single source of truth, can't diverge from the canonical
+    behavior)."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        import pageindex.page_index_md as shim
+    import pageindex.index.page_index_md as canonical
+    assert shim.md_to_tree is canonical.md_to_tree
 
-    async def fake(*args, **kwargs):
-        captured.update(kwargs)
-        return {"ok": True}
 
-    monkeypatch.setattr(shim, "_md_to_tree", fake)
-    asyncio.run(shim.md_to_tree(md_path="x.md", if_add_node_summary="no", if_add_node_id="yes"))
-    assert captured["if_add_node_summary"] is False
-    assert captured["if_add_node_id"] is True
+def test_md_to_tree_coerces_legacy_yes_no_strings(tmp_path):
+    """A bare 'no' must not read as truthy True — exercised end-to-end (no
+    LLM calls needed with summary/description disabled)."""
+    from pageindex.index.page_index_md import md_to_tree
+
+    md_path = tmp_path / "doc.md"
+    md_path.write_text("# Title\nbody\n\n## Sub\nmore body\n")
+
+    result = asyncio.run(md_to_tree(
+        md_path=str(md_path),
+        if_add_node_summary="no",
+        if_add_node_id="yes",
+        if_add_doc_description="no",
+    ))
+    assert "doc_description" not in result
+
+    def _has_summary(nodes):
+        return any("summary" in n or (n.get("nodes") and _has_summary(n["nodes"]))
+                   for n in nodes)
+
+    assert not _has_summary(result["structure"])
+    assert all("node_id" in n for n in result["structure"])

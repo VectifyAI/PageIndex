@@ -162,9 +162,12 @@ class CloudBackend:
         folder_id = self._get_folder_id(name)
         if folder_id:
             self._request("DELETE", f"/folder/{self._enc(folder_id)}/")
-        # Drop the cached id so a later same-name op re-resolves instead of
-        # reusing the now-deleted folder_id.
-        self._folder_id_cache.pop(name, None)
+            # Drop the cached id so a later same-name op re-resolves instead of
+            # reusing the now-deleted folder_id. Only when it was a REAL id —
+            # if folder_id was falsy, the cache holds the "folders unavailable
+            # on this plan" None sentinel, which must survive so we don't
+            # re-issue a doomed GET /folders/ on the next call.
+            self._folder_id_cache.pop(name, None)
 
     # ── Document management ───────────────────────────────────────────────
 

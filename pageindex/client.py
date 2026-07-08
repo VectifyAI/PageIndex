@@ -122,8 +122,18 @@ class PageIndexClient:
         except Exception:
             return
 
-        # LiteLLM providers that run locally and need no API key.
-        keyless = {"ollama", "ollama_chat", "lm_studio", "hosted_vllm", "vllm"}
+        # LiteLLM providers that run locally / self-hosted and need no API key
+        # by default (litellm itself falls back to a placeholder key for these
+        # rather than erroring — see e.g. hosted_vllm's transformation.py).
+        # This list is necessarily a manual allowlist (litellm.validate_environment
+        # isn't reliable enough to derive it from); extend it as litellm adds
+        # more local-inference providers.
+        keyless = {
+            "ollama", "ollama_chat", "lm_studio", "hosted_vllm", "vllm",
+            "xinference", "llamafile", "triton", "oobabooga",
+            "openai_like", "custom_openai", "custom", "docker_model_runner",
+            "petals",
+        }
         if provider in keyless:
             return
 
