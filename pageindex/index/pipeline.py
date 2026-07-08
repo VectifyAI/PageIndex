@@ -44,17 +44,22 @@ def _run_async(coro):
     import asyncio
     import concurrent.futures
     import contextvars
+    # Only the detection is guarded — NOT the run. If the coroutine's own work
+    # raises RuntimeError, letting it fall into `except RuntimeError` here would
+    # misfire the "no running loop" branch and mask the real error behind a
+    # bogus "asyncio.run() cannot be called from a running event loop".
     try:
         asyncio.get_running_loop()
-        # Already inside an event loop -- run in a separate thread. Copy the
-        # current context so ContextVar-based settings (e.g. the
-        # max_concurrency_scope override set by build_index) propagate into the
-        # worker thread instead of silently falling back to the process default.
-        ctx = contextvars.copy_context()
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(ctx.run, asyncio.run, coro).result()
     except RuntimeError:
+        # No running loop -- drive the coroutine directly.
         return asyncio.run(coro)
+    # Already inside an event loop -- run in a separate thread so we don't nest
+    # asyncio.run. Copy the current context so ContextVar-based settings (e.g.
+    # the max_concurrency_scope override set by build_index) propagate into the
+    # worker thread; .result() re-raises the worker's real exception unchanged.
+    ctx = contextvars.copy_context()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(ctx.run, asyncio.run, coro).result()
 
 
 def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:

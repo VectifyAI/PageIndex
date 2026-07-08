@@ -679,11 +679,11 @@ def process_none_page_numbers(toc_items, page_list, start_index=1, model=None):
                     continue
 
             item_copy = copy.deepcopy(item)
-            del item_copy['page']
+            item_copy.pop('page', None)
             result = add_page_number_to_toc(page_contents, item_copy, model)
             if isinstance(result[0]['physical_index'], str) and result[0]['physical_index'].startswith('<physical_index'):
                 item['physical_index'] = int(result[0]['physical_index'].split('_')[-1].rstrip('>').strip())
-                del item['page']
+                item.pop('page', None)
     
     return toc_items
 
@@ -1113,11 +1113,14 @@ def page_index_main(doc, opt=None):
 def page_index(doc, model=None, toc_check_page_num=None, max_page_num_each_node=None, max_token_num_each_node=None,
                if_add_node_id=None, if_add_node_summary=None, if_add_doc_description=None, if_add_node_text=None):
     
-    from ..config import IndexConfig
+    # Snapshot the call args BEFORE importing IndexConfig — otherwise the
+    # imported class would be captured by locals() and rejected by
+    # IndexConfig(extra="forbid").
     user_opt = {
         arg: value for arg, value in locals().items()
         if arg != "doc" and value is not None
     }
+    from ..config import IndexConfig
     opt = IndexConfig(**user_opt)
     return page_index_main(doc, opt)
 

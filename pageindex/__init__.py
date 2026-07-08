@@ -61,4 +61,11 @@ __all__ = [
     "IndexingError",
     "CloudAPIError",
     "FileTypeError",
+    # Legacy top-level exports (pre-SDK API), kept so `from pageindex import *`
+    # still binds them.
+    "page_index",
+    "md_to_tree",
+    "get_document",
+    "get_document_structure",
+    "get_page_content",
 ]

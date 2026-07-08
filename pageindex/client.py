@@ -113,12 +113,18 @@ class PageIndexClient:
 
     @staticmethod
     def _validate_llm_provider(model: str) -> None:
-        """Validate model and check API key via litellm. Warns if key seems missing."""
+        """Validate the model string and require an API key for providers that
+        need one. Local / keyless providers (ollama, lm_studio, …) are skipped so
+        a keyless LiteLLM model isn't rejected at construction time."""
         try:
             import litellm
-            litellm.model_cost_map_url = ""
             _, provider, _, _ = litellm.get_llm_provider(model=model)
         except Exception:
+            return
+
+        # LiteLLM providers that run locally and need no API key.
+        keyless = {"ollama", "ollama_chat", "lm_studio", "hosted_vllm", "vllm"}
+        if provider in keyless:
             return
 
         key = litellm.get_api_key(llm_provider=provider, dynamic_api_key=None)

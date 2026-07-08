@@ -190,6 +190,10 @@ class LocalBackend:
                 LocalBackend._fill_node_text(node["nodes"], page_map)
 
     def get_document_structure(self, collection: str, doc_id: str) -> list:
+        # Parity with get_document / the cloud backend: a missing doc must raise,
+        # not masquerade as an empty structure.
+        if not self._storage.get_document(collection, doc_id):
+            raise DocumentNotFoundError(f"Document {doc_id} not found")
         return self._storage.get_document_structure(collection, doc_id)
 
     def get_page_content(self, collection: str, doc_id: str, pages: str) -> list:
@@ -255,7 +259,10 @@ class LocalBackend:
             rejection = _reject(doc_id)
             if rejection:
                 return rejection
-            return json.dumps(storage.get_document(col_name, doc_id))
+            doc = storage.get_document(col_name, doc_id)
+            if not doc:
+                return json.dumps({"error": f"doc_id '{doc_id}' not found."})
+            return json.dumps(doc)
 
         @function_tool
         def get_document_structure(doc_id: str) -> str:
@@ -263,6 +270,8 @@ class LocalBackend:
             rejection = _reject(doc_id)
             if rejection:
                 return rejection
+            if not storage.get_document(col_name, doc_id):
+                return json.dumps({"error": f"doc_id '{doc_id}' not found."})
             structure = storage.get_document_structure(col_name, doc_id)
             return json.dumps(remove_fields(structure, fields=["text"]), ensure_ascii=False)
 
@@ -272,7 +281,10 @@ class LocalBackend:
             rejection = _reject(doc_id)
             if rejection:
                 return rejection
-            result = backend.get_page_content(col_name, doc_id, pages)
+            try:
+                result = backend.get_page_content(col_name, doc_id, pages)
+            except DocumentNotFoundError:
+                return json.dumps({"error": f"doc_id '{doc_id}' not found."})
             return json.dumps(result, ensure_ascii=False)
 
         tools = [get_document, get_document_structure, get_page_content]

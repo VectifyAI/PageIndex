@@ -39,6 +39,10 @@ class CloudAPIError(PageIndexAPIError):
         self.status_code = status_code
 
 
-class FileTypeError(PageIndexError):
-    """Unsupported file type."""
+class FileTypeError(PageIndexError, ValueError):
+    """Unsupported file type.
+
+    Also subclasses ValueError so pre-SDK ``except ValueError`` around indexing
+    (0.2.x raised ValueError for an unsupported file format) still catches it.
+    """
     pass

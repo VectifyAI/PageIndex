@@ -162,6 +162,9 @@ class CloudBackend:
         folder_id = self._get_folder_id(name)
         if folder_id:
             self._request("DELETE", f"/folder/{self._enc(folder_id)}/")
+        # Drop the cached id so a later same-name op re-resolves instead of
+        # reusing the now-deleted folder_id.
+        self._folder_id_cache.pop(name, None)
 
     # ── Document management ───────────────────────────────────────────────
 
@@ -307,6 +310,8 @@ class CloudBackend:
                 "doc_ids cannot be empty; pass None to query the whole collection"
             )
         doc_id = doc_ids if doc_ids else self._get_all_doc_ids(collection)
+        if not doc_id:
+            raise ValueError("collection has no documents to query")
         # A non-streaming completion returns nothing until generation
         # finishes, so it needs far more than the default 30s. retries=1:
         # retrying this non-idempotent call would redo the full server-side
@@ -340,6 +345,8 @@ class CloudBackend:
                 "doc_ids cannot be empty; pass None to query the whole collection"
             )
         doc_id = doc_ids if doc_ids else self._get_all_doc_ids(collection)
+        if not doc_id:
+            raise ValueError("collection has no documents to query")
         headers = self._headers
         # Queue carries QueryEvent, an Exception to re-raise, or None (end).
         queue: asyncio.Queue[QueryEvent | Exception | None] = asyncio.Queue()
