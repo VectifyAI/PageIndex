@@ -102,7 +102,7 @@ class PIFSScopePathTest(unittest.TestCase):
             self.assertTrue(browse["success"])
             self.assertEqual(
                 [item["path"] for item in browse["data"]["documents"]],
-                ["/documents/sec-filings/aapl-2024.md"],
+                ["/documents/@year/2024/@ticker/AAPL/aapl-2024.md"],
             )
             self.assertEqual(browse["data"]["scope"]["path"], "/documents/@year/2024/@ticker/AAPL")
             self.assertEqual(browse["data"]["scope"]["folder_path"], "/documents")
@@ -111,15 +111,162 @@ class PIFSScopePathTest(unittest.TestCase):
                 {"year": "2024", "ticker": "AAPL"},
             )
 
-            stat = _payload(executor.execute("stat /documents/@year/2024/@ticker/AAPL"))
+            locator = browse["data"]["documents"][0]["path"]
+            stat = _payload(executor.execute(f"stat {locator}"))
             self.assertTrue(stat["success"])
-            self.assertEqual(stat["data"]["scope"]["folder_path"], "/documents")
-            self.assertEqual(
-                stat["data"]["scope"]["metadata_filter"],
-                {"year": "2024", "ticker": "AAPL"},
+            self.assertEqual(stat["data"]["document"]["path"], locator)
+            self.assertEqual(stat["data"]["document"]["title"], "aapl-2024.md")
+
+    def test_metadata_scope_file_locators_round_trip_to_file_commands(self):
+        from pageindex.filesystem import PIFSCommandExecutor, PageIndexFileSystem
+
+        with tempfile.TemporaryDirectory() as tmp:
+            from pathlib import Path
+
+            root = Path(tmp)
+            filesystem = PageIndexFileSystem(workspace=root / "workspace")
+            refs = {
+                "doc_3m_2018": register_markdown(
+                    filesystem,
+                    root,
+                    "doc_3m_2018",
+                    "/docs/filings",
+                    title="3M_2018_10K.md",
+                    text="cash flow evidence\nnet sales evidence",
+                    metadata={"company": "3M"},
+                ),
+                "doc_other": register_markdown(
+                    filesystem,
+                    root,
+                    "doc_other",
+                    "/docs/filings",
+                    title="Other_2018_10K.md",
+                    text="other cash flow",
+                    metadata={"company": "Other"},
+                ),
+            }
+            filesystem.semantic_retrieval_backend = BrowseBackend(
+                ["doc_3m_2018", "doc_other"],
+                file_refs_by_document_id=refs,
             )
-            self.assertEqual(stat["data"]["scope"]["file_count"], 1)
-            self.assertEqual(stat["data"]["scope"]["available_axes"], ["doc_type"])
+            executor = PIFSCommandExecutor(filesystem)
+
+            tree = _payload(executor.execute("tree /docs/@company/3M"))
+            self.assertTrue(tree["success"])
+            self.assertEqual(
+                [item["path"] for item in tree["data"]["tree"]["files"]],
+                ["/docs/@company/3M/3M_2018_10K.md"],
+            )
+
+            browse = _payload(executor.execute('browse /docs/@company/3M "cash flow"'))
+            self.assertTrue(browse["success"])
+            locator = browse["data"]["documents"][0]["path"]
+            self.assertEqual(locator, "/docs/@company/3M/3M_2018_10K.md")
+
+            stat = _payload(executor.execute(f"stat {locator}"))
+            self.assertTrue(stat["success"])
+            self.assertEqual(stat["data"]["document"]["path"], locator)
+            self.assertEqual(stat["data"]["document"]["title"], "3M_2018_10K.md")
+
+            structure = _payload(executor.execute(f"cat {locator} --structure"))
+            self.assertTrue(structure["success"])
+            self.assertEqual(structure["data"]["document"]["path"], locator)
+            self.assertTrue(structure["data"]["structure"])
+
+            grep = _payload(executor.execute(f"grep cash {locator}"))
+            self.assertTrue(grep["success"])
+            self.assertEqual(grep["data"]["document"]["path"], locator)
+            self.assertEqual(grep["data"]["matches"][0]["line"], 1)
+
+            scope_only = _payload(executor.execute("cat /docs/@company/3M --structure"))
+            self.assertFalse(scope_only["success"])
+            self.assertIn("scope, not a file locator", scope_only["error"]["message"])
+            self.assertIn("tree /docs/@company/3M", scope_only["error"]["message"])
+            self.assertIn('browse /docs/@company/3M "<query>"', scope_only["error"]["message"])
+
+    def test_tree_depth_does_not_bypass_file_pagination(self):
+        from pageindex.filesystem import PIFSCommandExecutor, PageIndexFileSystem
+
+        with tempfile.TemporaryDirectory() as tmp:
+            from pathlib import Path
+
+            root = Path(tmp)
+            filesystem = PageIndexFileSystem(workspace=root / "workspace")
+            for index in range(55):
+                register_markdown(
+                    filesystem,
+                    root,
+                    f"doc_{index:02d}",
+                    "/docs",
+                    title=f"report-{index:02d}.md",
+                    metadata={"company": "3M"},
+                )
+            executor = PIFSCommandExecutor(filesystem)
+
+            first_page = _payload(executor.execute("tree /docs/@company/3M -L 100"))
+            self.assertTrue(first_page["success"])
+            self.assertEqual(len(first_page["data"]["tree"]["files"]), 50)
+            self.assertEqual(
+                first_page["data"]["pagination"],
+                {"page": 1, "page_size": 50, "has_more": True, "next_page": 2},
+            )
+
+            second_page = _payload(executor.execute("tree /docs/@company/3M -L 100 --page 2"))
+            self.assertTrue(second_page["success"])
+            self.assertEqual(len(second_page["data"]["tree"]["files"]), 5)
+            self.assertEqual(
+                second_page["data"]["pagination"],
+                {"page": 2, "page_size": 50, "has_more": False, "next_page": None},
+            )
+
+    def test_duplicate_file_leaves_in_scope_return_disambiguated_locators(self):
+        from pageindex.filesystem import PIFSCommandExecutor, PageIndexFileSystem
+
+        with tempfile.TemporaryDirectory() as tmp:
+            from pathlib import Path
+
+            root = Path(tmp)
+            filesystem = PageIndexFileSystem(workspace=root / "workspace")
+            refs = {
+                "doc_a": register_markdown(
+                    filesystem,
+                    root,
+                    "doc_a",
+                    "/docs/a",
+                    title="report.md",
+                    metadata={"company": "3M"},
+                ),
+                "doc_b": register_markdown(
+                    filesystem,
+                    root,
+                    "doc_b",
+                    "/docs/b",
+                    title="report.md",
+                    metadata={"company": "3M"},
+                ),
+            }
+            filesystem.semantic_retrieval_backend = BrowseBackend(
+                ["doc_a", "doc_b"],
+                file_refs_by_document_id=refs,
+            )
+            executor = PIFSCommandExecutor(filesystem)
+
+            tree = _payload(executor.execute("tree /docs/@company/3M"))
+            self.assertTrue(tree["success"])
+            paths = [item["path"] for item in tree["data"]["tree"]["files"]]
+            self.assertEqual(len(paths), 2)
+            self.assertEqual(len(set(paths)), 2)
+
+            for path in paths:
+                stat = _payload(executor.execute(f"stat {path}"))
+                self.assertTrue(stat["success"])
+                self.assertEqual(stat["data"]["document"]["path"], path)
+
+            browse = _payload(executor.execute('browse /docs/@company/3M "report"'))
+            self.assertTrue(browse["success"])
+            browse_paths = [item["path"] for item in browse["data"]["documents"]]
+            self.assertEqual(len(browse_paths), 2)
+            self.assertEqual(len(set(browse_paths)), 2)
 
     def test_scope_paths_reject_duplicate_and_unknown_metadata_fields(self):
         from pageindex.filesystem import PIFSCommandExecutor, PageIndexFileSystem
@@ -235,13 +382,18 @@ class PIFSScopePathTest(unittest.TestCase):
             self.assertEqual(sec_node["path"], "/documents/sec/@year/2024")
             self.assertEqual(sec_node["file_count"], 1)
 
-            stat = _payload(executor.execute("stat /documents/sec/@year/2024"))
+            scope_stat = _payload(executor.execute("stat /documents/sec/@year/2024"))
+            self.assertFalse(scope_stat["success"])
+            self.assertIn("scope, not a file locator", scope_stat["error"]["message"])
+
+            scoped_tree = _payload(executor.execute("tree /documents/sec/@year/2024"))
+            self.assertTrue(scoped_tree["success"])
+            locator = scoped_tree["data"]["tree"]["files"][0]["path"]
+            self.assertEqual(locator, "/documents/sec/@year/2024/sec-2024.md")
+
+            stat = _payload(executor.execute(f"stat {locator}"))
             self.assertTrue(stat["success"])
-            self.assertEqual(
-                stat["data"]["scope"]["metadata_filter"],
-                {"year": "2024"},
-            )
-            self.assertEqual(stat["data"]["scope"]["file_count"], 1)
+            self.assertEqual(stat["data"]["document"]["path"], locator)
 
     def test_core_browse_semantic_files_accepts_metadata_scoped_path(self):
         from pageindex.filesystem import PageIndexFileSystem
@@ -376,11 +528,11 @@ class PIFSScopePathTest(unittest.TestCase):
             self.assertTrue(year["success"])
             self.assertEqual(
                 [item["path"] for item in vendor["data"]["documents"]],
-                ["/documents/contracts/apple-renewal.md"],
+                ["/documents/@vendor/Apple/apple-renewal.md"],
             )
             self.assertEqual(
                 [item["path"] for item in year["data"]["documents"]],
-                ["/documents/contracts/apple-renewal.md"],
+                ["/documents/@year/2024/apple-renewal.md"],
             )
             self.assertEqual(
                 vendor["data"]["scope"]["metadata_filter"],

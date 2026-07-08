@@ -131,20 +131,36 @@ class PIFSCommandExecutor:
             }
             next_steps = [f'browse {shlex.quote(scope.path)}/<value> "<query>"']
             return data, next_steps
-        if page != 1:
-            raise PIFSCommandError("tree --page is only supported by metadata axis paths like /documents/@field")
+        page_size = self.TREE_VALUE_PAGE_SIZE
+        needed = page * page_size + 1
         folders = self.filesystem.scope_folders(
             scope,
             max_depth=depth,
-            limit=self.MAX_TREE_FOLDERS,
+            limit=max(self.MAX_TREE_FOLDERS, needed),
         )
+        files = self.filesystem.scope_files(scope, limit=needed)
         axes = self.filesystem.scope_metadata_axes(scope)
+        tree, has_more = self._folder_tree(
+            scope,
+            folders,
+            files,
+            axes,
+            page=page,
+            page_size=page_size,
+        )
         data = {
-            "tree": self._folder_tree(scope, folders, axes),
+            "tree": tree,
             "total_folders": len(folders) + len(axes),
             "depth": depth,
-            "truncated": len(folders) >= self.MAX_TREE_FOLDERS,
+            "truncated": has_more or len(folders) >= self.MAX_TREE_FOLDERS,
         }
+        if has_more or page > 1:
+            data["pagination"] = {
+                "page": page,
+                "page_size": page_size,
+                "has_more": has_more,
+                "next_page": page + 1 if has_more else None,
+            }
         next_steps = [f'browse {shlex.quote(scope.path)} "<query>"']
         return data, next_steps
 
@@ -191,14 +207,14 @@ class PIFSCommandExecutor:
         if not self.filesystem.has_semantic_channel("summary"):
             raise PIFSCommandError("browse summary retrieval is not available")
         payload = self.filesystem.browse_semantic_files(
-            scope.folder_path,
+            scope.path,
             query,
             retrieval_query=query,
             recursive=effective_recursive,
             space="summary",
             page=page,
             page_size=self.BROWSE_PAGE_SIZE,
-            metadata_filter=merged_filter,
+            metadata_filter=where,
         )
         documents = [self._document_hit(row) for row in payload.get("data", [])]
         next_steps = []
@@ -240,12 +256,7 @@ class PIFSCommandExecutor:
         if len(args) != 1:
             raise PIFSCommandError("stat accepts exactly one document target")
         target = args[0]
-        try:
-            return {"document": self._document_stat(target)}, []
-        except (KeyError, ValueError):
-            if not target.startswith("/"):
-                raise
-        return {"scope": self.filesystem.scope_stat(target)}, []
+        return {"document": self._document_stat(target)}, []
 
     def _cmd_cat(self, args: list[str]) -> tuple[dict[str, Any], list[str]]:
         if not args:
@@ -300,8 +311,12 @@ class PIFSCommandExecutor:
         self,
         scope: Any,
         folders: list[dict[str, Any]],
+        files: list[dict[str, Any]],
         axes: list[dict[str, Any]],
-    ) -> dict[str, Any]:
+        *,
+        page: int,
+        page_size: int,
+    ) -> tuple[dict[str, Any], bool]:
         root_key = self._normalize_folder_path(scope.folder_path)
         root = self._scope_root(scope, file_count=self.filesystem.scope_file_count(scope))
         nodes = {
@@ -322,7 +337,7 @@ class PIFSCommandExecutor:
                 continue
             parent = folder_path.rsplit("/", 1)[0] or "/"
             nodes.get(parent, nodes[root_key])["folders"].append(node)
-        nodes[root_key]["folders"].extend(
+        axis_nodes = [
             {
                 "path": self._join_scope_path(
                     scope.path,
@@ -334,9 +349,18 @@ class PIFSCommandExecutor:
                 "folders": [],
             }
             for axis in axes
+        ]
+        child_items = (
+            [("folder", node) for node in nodes[root_key]["folders"]]
+            + [("file", file) for file in files]
+            + [("folder", node) for node in axis_nodes]
         )
-        nodes[root_key]["children_count"] = len(nodes[root_key]["folders"])
-        return nodes[root_key]
+        offset = (page - 1) * page_size
+        page_items = child_items[offset : offset + page_size]
+        nodes[root_key]["folders"] = [node for kind, node in page_items if kind == "folder"]
+        nodes[root_key]["files"] = [node for kind, node in page_items if kind == "file"]
+        nodes[root_key]["children_count"] = len(child_items)
+        return nodes[root_key], len(child_items) > offset + page_size
 
     def _document_hit(self, row: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -349,7 +373,7 @@ class PIFSCommandExecutor:
     def _document_stat(self, target: str) -> dict[str, Any]:
         info = dict(self.filesystem._stat(target))
         return {
-            "path": info.get("path"),
+            "path": target if str(target).startswith("/") else info.get("path"),
             "file_ref": info.get("file_ref"),
             "document_id": info.get("external_id") or info.get("document_id"),
             "status": info.get("pageindex_tree_status") or info.get("status"),
