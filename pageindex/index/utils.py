@@ -464,18 +464,20 @@ def get_pdf_page_content(file_path: str, page_nums: list[int]) -> list[dict]:
 def get_md_page_content(structure: list, page_nums: list[int]) -> list[dict]:
     """
     For Markdown documents, 'pages' are line numbers.
-    Find nodes whose line_num falls within [min(page_nums), max(page_nums)] and return their text.
+    Return only the nodes whose line_num is one of ``page_nums`` (exact match),
+    mirroring the PDF path. A non-contiguous spec like [5, 100] returns just
+    those two lines, not the whole [5, 100] range.
     """
     if not page_nums:
         return []
-    min_line, max_line = min(page_nums), max(page_nums)
+    wanted = set(page_nums)
     results = []
     seen = set()
 
     def _traverse(nodes):
         for node in nodes:
             ln = node.get('line_num')
-            if ln and min_line <= ln <= max_line and ln not in seen:
+            if ln in wanted and ln not in seen:
                 seen.add(ln)
                 results.append({'page': ln, 'content': node.get('text', '')})
             if node.get('nodes'):

@@ -7,6 +7,13 @@
 from dotenv import load_dotenv as _load_dotenv
 _load_dotenv()
 
+# Backward compatibility: honor CHATGPT_API_KEY as an alias for OPENAI_API_KEY
+# (kept from the pre-SDK pageindex.utils). Runs after load_dotenv so a value in
+# .env is picked up too; only fills OPENAI_API_KEY when it isn't already set.
+import os as _os
+if not _os.getenv("OPENAI_API_KEY") and _os.getenv("CHATGPT_API_KEY"):
+    _os.environ["OPENAI_API_KEY"] = _os.getenv("CHATGPT_API_KEY")
+
 # Upstream exports (backward compatibility). Import from the canonical
 # pageindex.index.* modules directly so `import pageindex` does NOT trip the
 # top-level deprecation shims (pageindex.page_index / .page_index_md / .utils).
