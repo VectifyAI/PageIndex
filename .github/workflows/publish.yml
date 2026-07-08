@@ -1,0 +1,63 @@
+name: Publish to PyPI
+
+# Release flow (the git tag IS the version — nothing to bump in the repo):
+#   1. git tag -a v0.3.0.dev2 -m "Release 0.3.0.dev2"
+#   2. git push origin v0.3.0.dev2
+#   3. This workflow derives the version from the tag, injects it into
+#      pyproject.toml, builds, publishes to PyPI via OIDC trusted publishing
+#      (no stored secret), and creates a GitHub Release with generated notes.
+#
+# The tag must be a PEP 440 version with a leading `v`:
+#   v0.3.0   v0.3.0rc1   v0.3.0.dev2
+# PyPI rejects duplicate version uploads, so each tag must be a new version.
+# `pip install pageindex` skips dev/pre releases — install one with
+# `pip install pageindex==0.3.0.dev2` or `pip install --pre pageindex`.
+#
+# One-time setup this workflow depends on:
+#   - PyPI: add a Trusted Publisher on the `pageindex` project pointing at
+#     repo VectifyAI/PageIndex, workflow `publish.yml`, environment `pypi`.
+#   - GitHub: create an Environment named `pypi` (Settings -> Environments).
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # OIDC trusted publishing to PyPI
+      contents: write   # create the GitHub Release
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332  # v4.1.7
+
+      - uses: actions/setup-python@f677139bbe7f9c59b41e40162b753c062f5d49a3  # v5.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Set version from tag and build
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade build packaging
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Publishing version: $VERSION"
+          # Fail early on a malformed tag instead of publishing a junk version.
+          python -c "from packaging.version import Version; Version('$VERSION')"
+          # The git tag is the single source of truth; overwrite the static
+          # placeholder in [tool.poetry] so the built artifacts carry $VERSION.
+          sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
+          grep '^version = ' pyproject.toml
+          python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # release/v1.14.0
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda  # v3.0.0
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: dist/*
