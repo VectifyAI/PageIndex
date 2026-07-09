@@ -230,7 +230,11 @@ class LegacyCloudAPI:
             f"/doc/{self._enc(doc_id)}/",
             "Failed to delete document",
         )
-        return response.json()
+        # A successful DELETE may come back with an empty body (the documented
+        # examples don't consume one, and REST APIs commonly return no content
+        # for deletes). Don't let json() raise JSONDecodeError on success —
+        # the document is already gone; return an empty dict.
+        return response.json() if response.content else {}
 
     def list_documents(
         self,

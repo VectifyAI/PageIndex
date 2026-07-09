@@ -1,3 +1,5 @@
+import json
+
 import pytest
 import requests
 
@@ -7,14 +9,18 @@ from pageindex.client import CloudClient
 
 
 class FakeResponse:
-    def __init__(self, status_code=200, payload=None, text="ok", lines=None):
+    def __init__(self, status_code=200, payload=None, text="ok", lines=None, content=b"{}"):
         self.status_code = status_code
         self._payload = payload or {}
         self.text = text
         self._lines = lines or []
         self.closed = False
+        # Raw body bytes; empty bytes model a no-content success (e.g. DELETE).
+        self.content = content
 
     def json(self):
+        if not self.content:
+            raise json.JSONDecodeError("Expecting value", "", 0)
         return self._payload
 
     def iter_lines(self):
@@ -257,6 +263,26 @@ def test_chat_completions_stream_errors_are_pageindex_api_error(monkeypatch):
 
     with pytest.raises(PageIndexAPIError, match="Failed to stream chat completion: stream stalled"):
         list(stream)
+
+
+def test_delete_document_tolerates_empty_success_body(monkeypatch):
+    # A successful DELETE may return 200 with no body; delete_document must not
+    # raise JSONDecodeError parsing an empty response (the doc is already gone).
+    def fake_request(method, url, **kwargs):
+        assert method == "DELETE"
+        return FakeResponse(status_code=200, content=b"")
+
+    monkeypatch.setattr("pageindex.cloud_api.requests.request", fake_request)
+    assert PageIndexClient("pi-test").delete_document("doc-1") == {}
+
+
+def test_delete_document_returns_json_body_when_present(monkeypatch):
+    # When the server does return a body, it's parsed and passed through.
+    def fake_request(method, url, **kwargs):
+        return FakeResponse(status_code=200, payload={"deleted": True}, content=b'{"deleted": true}')
+
+    monkeypatch.setattr("pageindex.cloud_api.requests.request", fake_request)
+    assert PageIndexClient("pi-test").delete_document("doc-1") == {"deleted": True}
 
 
 def test_api_errors_are_pageindex_api_error(monkeypatch):
