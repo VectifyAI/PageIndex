@@ -33,6 +33,9 @@ httpx = {extras = ["socks"], version = ">=0.28.1"}
 typing-extensions = ">=4.9.0"
 pydantic = ">=2.5.0,<3.0.0"
 
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7.0"
+
 [tool.poetry.urls]
 Repository = "https://github.com/VectifyAI/PageIndex"
 Homepage = "https://pageindex.ai"
