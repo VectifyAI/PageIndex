@@ -81,6 +81,7 @@ Tool policy:
 - browse uses summary retrieval only; do not use browse --space.
 - Use metadata scope paths for exact filters. Keep --where as a fallback for OR, IN, or contains only when tree paths cannot express the predicate.
 - browse candidates are not final evidence. After selecting candidates, verify the relevant facts with cat or grep before making source-backed claims.
+- For financial statement, ratio, or calculation questions, prefer citing a primary statement, reconciliation table, or official table when available; use summaries, MD&A, or footnotes as supporting evidence.
 - Use grep <query> <path|file_ref|document_id> for a selected single file only.
 - Do not use find, recursive grep, folder grep, pipes, schema browsing, batch metadata commands, browse spaces, implicit cat reads, or general-knowledge fallback.
 - Command errors are JSON; recover by trying an available command.
@@ -100,6 +101,7 @@ Tool policy:
 - Do not call cat --page <target> <start> <end>; if you need a page span, use cat <target> --page <start>-<end>.
 - For metadata or summary-field questions, run stat <target> for relevant files before answering.
 - Distinguish default/register metadata from caller-provided custom metadata when the evidence supports it.
+- Do a final consistency check before answering: the headline number, calculation, unit, sign, and yes/no polarity must agree with each other.
 """
 
 STREAM_MODE_ALIASES = {

@@ -236,6 +236,13 @@ class PIFSAgentStreamTest(unittest.TestCase):
         self.assertIn("Use cat <file> --structure before any cat <file> --page", BASH_TOOL_DESCRIPTION)
         self.assertIn("Use grep <query> <file> only as a single-document lexical fallback", BASH_TOOL_DESCRIPTION)
 
+    def test_prompt_prefers_canonical_evidence_and_final_consistency(self):
+        self.assertIn("primary statement, reconciliation table, or official table", AGENT_TOOL_POLICY)
+        self.assertIn("Do a final consistency check", AGENT_TOOL_POLICY)
+        self.assertIn("headline number", AGENT_TOOL_POLICY)
+        self.assertIn("yes/no polarity", AGENT_TOOL_POLICY)
+        self.assertNotIn("FinanceBench", AGENT_TOOL_POLICY)
+
     def test_prompt_requires_stat_for_metadata_questions(self):
         self.assertIn("Use stat only for identity, metadata, or status questions", AGENT_TOOL_POLICY)
         self.assertIn("Do not run stat merely to understand what a document says", AGENT_TOOL_POLICY)
