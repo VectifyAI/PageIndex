@@ -36,6 +36,10 @@ def test_create_duplicate_collection_raises_pageindex_error(storage):
 @pytest.mark.parametrize("bad_name", [
     "a/../../etc/passwd", "/etc/passwd", "a$(whoami)", ".hidden",
     "a b", "válid", "", "a" * 129,
+    # A trailing newline must be rejected: Python's $ matches just before a
+    # final \n, so a $-anchored .match() would let "papers\n" slip through
+    # (then INSERT OR IGNORE silently no-ops on the SQL CHECK).
+    "papers\n", "\npapers", "papers\n\n",
 ])
 def test_create_collection_rejects_invalid_names_at_the_python_layer(storage, bad_name):
     """SQLiteStorage must validate collection names itself — it's a public

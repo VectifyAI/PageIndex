@@ -10,11 +10,13 @@ from ..errors import CollectionAlreadyExistsError, PageIndexError
 # itself (not just relying on LocalBackend's pre-check or the schema's CHECK
 # constraint below) because it's a public StorageEngine that can be used
 # directly, bypassing LocalBackend entirely.
-_COLLECTION_NAME_RE = re.compile(r'^[a-zA-Z0-9_-]{1,128}$')
+# Matched with .fullmatch() (not .match()): a $-anchored .match() would accept a
+# trailing newline ("papers\n") because $ matches just before a final \n.
+_COLLECTION_NAME_RE = re.compile(r'[a-zA-Z0-9_-]{1,128}')
 
 
 def _validate_collection_name(name: str) -> None:
-    if not _COLLECTION_NAME_RE.match(name):
+    if not _COLLECTION_NAME_RE.fullmatch(name):
         raise PageIndexError(f"Invalid collection name: {name!r}. Must be 1-128 chars of [a-zA-Z0-9_-].")
 
 

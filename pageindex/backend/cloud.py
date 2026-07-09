@@ -89,7 +89,9 @@ class CloudBackend:
 
     @staticmethod
     def _validate_collection_name(name: str) -> None:
-        if not re.match(r'^[a-zA-Z0-9_-]{1,128}$', name):
+        # .fullmatch() (not .match()): a $-anchored .match() would accept a
+        # trailing newline ("papers\n") because $ matches just before a final \n.
+        if not re.fullmatch(r'[a-zA-Z0-9_-]{1,128}', name):
             raise PageIndexError(
                 f"Invalid collection name: {name!r}. "
                 "Must be 1-128 chars of [a-zA-Z0-9_-]."

@@ -188,6 +188,17 @@ def test_delete_collection_rejects_path_traversal(backend, tmp_path):
     assert canary.exists()
 
 
+@pytest.mark.parametrize("bad_name", ["papers\n", "\npapers", "papers\n\n"])
+def test_get_or_create_collection_rejects_trailing_newline(backend, bad_name):
+    # Regression: Python's $ matches just before a final \n, so a $-anchored
+    # .match() accepted "papers\n"; get_or_create_collection then hit the SQL
+    # CHECK via INSERT OR IGNORE, silently created no row, and handed back a
+    # Collection that failed later on add(). .fullmatch() rejects it up front.
+    from pageindex.errors import PageIndexError
+    with pytest.raises(PageIndexError, match="Invalid collection name"):
+        backend.get_or_create_collection(bad_name)
+
+
 def test_add_document_missing_file_raises_file_not_found(backend, tmp_path):
     backend.get_or_create_collection("papers")
     with pytest.raises(FileNotFoundError):

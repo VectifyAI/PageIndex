@@ -17,7 +17,9 @@ from ..backend.protocol import AgentTools
 from ..errors import (FileTypeError, DocumentNotFoundError, CollectionNotFoundError,
                       IndexingError, PageIndexError)
 
-_COLLECTION_NAME_RE = re.compile(r'^[a-zA-Z0-9_-]{1,128}$')
+# Matched with .fullmatch() (not .match()): a $-anchored .match() would accept a
+# trailing newline ("papers\n") because $ matches just before a final \n.
+_COLLECTION_NAME_RE = re.compile(r'[a-zA-Z0-9_-]{1,128}')
 
 
 class LocalBackend:
@@ -45,7 +47,7 @@ class LocalBackend:
 
     # Collection management
     def _validate_collection_name(self, name: str) -> None:
-        if not _COLLECTION_NAME_RE.match(name):
+        if not _COLLECTION_NAME_RE.fullmatch(name):
             raise PageIndexError(f"Invalid collection name: {name!r}. Must be 1-128 chars of [a-zA-Z0-9_-].")
 
     def create_collection(self, name: str) -> None:
