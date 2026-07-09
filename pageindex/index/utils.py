@@ -90,18 +90,20 @@ async def _llm_semaphore():
     # we've already given up on it.
     while not ceiling_sem.acquire(False):
         await asyncio.sleep(0.05)
+    # Only set once the permit is actually held, so a cancellation while polling
+    # for it doesn't make the finally release a permit we never acquired (which
+    # would inflate the scoped cap — the mirror of the ceiling leak fixed above).
     scoped_sem = None
     try:
         effective = get_max_concurrency()
         ceiling = _process_wide_max_concurrency()
         if effective < ceiling:
-            scoped_sem = _max_concurrency_scope_semaphore()
-            if scoped_sem is not None:
-                while not scoped_sem.acquire(False):
+            candidate = _max_concurrency_scope_semaphore()
+            if candidate is not None:
+                while not candidate.acquire(False):
                     await asyncio.sleep(0.05)
-            yield
-        else:
-            yield
+                scoped_sem = candidate
+        yield
     finally:
         if scoped_sem is not None:
             scoped_sem.release()
@@ -117,14 +119,17 @@ def _sync_llm_semaphore():
     """
     ceiling_sem = _process_ceiling_semaphore()
     ceiling_sem.acquire()
+    # Only set once the permit is actually held (mirrors _llm_semaphore): guards
+    # against releasing a permit we never acquired if acquire() is interrupted.
     scoped_sem = None
     try:
         effective = get_max_concurrency()
         ceiling = _process_wide_max_concurrency()
         if effective < ceiling:
-            scoped_sem = _max_concurrency_scope_semaphore()
-            if scoped_sem is not None:
-                scoped_sem.acquire()
+            candidate = _max_concurrency_scope_semaphore()
+            if candidate is not None:
+                candidate.acquire()
+                scoped_sem = candidate
         yield
     finally:
         if scoped_sem is not None:

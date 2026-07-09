@@ -11,6 +11,7 @@ from pageindex.config import (
     IndexConfig,
     _env_llm_timeout_default,
     _env_max_concurrency_default,
+    _max_concurrency_scope_semaphore,
     get_llm_params,
     get_max_concurrency,
     llm_params_scope,
@@ -129,6 +130,40 @@ def test_llm_semaphore_cancellation_while_waiting_does_not_leak_a_permit():
 
         await asyncio.sleep(0.2)  # give any orphaned acquire a chance to land
         assert _process_ceiling_semaphore()._value == 1
+
+    asyncio.run(run())
+
+
+def test_scoped_semaphore_cancellation_while_waiting_does_not_over_release():
+    # Mirror of the ceiling test for the scoped override: a coroutine cancelled
+    # while polling for a scoped permit must NOT let the finally release a permit
+    # it never acquired, which would inflate the scoped cap for later calls.
+    set_max_concurrency(5)  # high ceiling so the scope is the narrower cap
+
+    async def run():
+        with max_concurrency_scope(1):
+            sem = _max_concurrency_scope_semaphore()
+            assert sem._value == 1
+
+            async def hold():
+                async with _llm_semaphore():
+                    await asyncio.sleep(10)
+
+            holder = asyncio.create_task(hold())
+            await asyncio.sleep(0.1)  # holder takes the single scoped permit
+
+            waiter = asyncio.create_task(_llm_semaphore().__aenter__())
+            await asyncio.sleep(0.1)  # waiter is now polling for the scoped permit
+            waiter.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await waiter
+
+            holder.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await holder
+
+            await asyncio.sleep(0.2)
+            assert sem._value == 1  # fully recovered, not inflated to 2
 
     asyncio.run(run())
 
