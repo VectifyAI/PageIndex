@@ -1,12 +1,19 @@
 import asyncio
 import io
 import json
+import time
 
 import pytest
 
 import pageindex.backend.cloud as cloud_mod
 from pageindex.backend.cloud import CloudBackend, API_BASE
 from pageindex.errors import CloudAPIError, DocumentNotFoundError
+
+# Real sleep captured at import, before the _no_sleep autouse fixture patches
+# time.sleep on the shared module object. Tests that need genuine pacing (e.g.
+# to let a consumer break before a background thread drains a stream) must use
+# this, since _no_sleep would otherwise no-op an `import time; time.sleep(...)`.
+_REAL_SLEEP = time.sleep
 
 
 def test_cloud_backend_init():
@@ -243,7 +250,6 @@ def test_query_stream_early_break_stops_background_thread(monkeypatch):
     """Consumer breaking early must signal the SSE thread to stop, not let it
     drain the whole stream in the background."""
     import threading
-    import time as _real_time  # autouse fixture stubs cloud_mod.time.sleep, not this
     backend = CloudBackend(api_key="pi-test")
     drained_all = threading.Event()
 
@@ -253,7 +259,11 @@ def test_query_stream_early_break_stops_background_thread(monkeypatch):
         def iter_lines(self, decode_unicode=True):
             for i in range(1000):
                 yield _sse("text", f"chunk{i} ")
-                _real_time.sleep(0.002)  # pace so the consumer reliably breaks first
+                # _REAL_SLEEP, not time.sleep: the _no_sleep autouse fixture
+                # patches the shared time module, so time.sleep here would be a
+                # no-op and the thread would race to drain all 1000 chunks
+                # before the consumer's early break propagates -> flaky.
+                _REAL_SLEEP(0.002)  # pace so the consumer reliably breaks first
             drained_all.set()  # only reached if the thread was NOT stopped
         def close(self):
             pass
