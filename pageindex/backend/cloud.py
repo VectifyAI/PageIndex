@@ -247,7 +247,12 @@ class CloudBackend:
         if isinstance(all_pages, list):
             return [
                 {"page": p.get("page", p.get("page_index")),
-                 "content": p.get("content", p.get("markdown", ""))}
+                 "content": p.get("content", p.get("markdown", "")),
+                 # Cloud OCR pages carry an `images` list (empty on text-only
+                 # pages). Preserve it — omitting when empty, mirroring the local
+                 # backend — so cloud callers get the same PageContent shape and
+                 # the SDK-prompted UI can render figures.
+                 **({"images": p["images"]} if p.get("images") else {})}
                 for p in all_pages
                 if p.get("page", p.get("page_index")) in page_nums
             ]

@@ -142,6 +142,24 @@ def test_get_document_include_text_warns(monkeypatch):
         backend.get_document("col", "d1", include_text=True)
 
 
+def test_get_page_content_preserves_images(monkeypatch):
+    # Cloud OCR pages carry an `images` list; get_page_content must pass it
+    # through (parity with the local backend and the documented PageContent
+    # shape) so the SDK-prompted UI can render figures — omitting it only when
+    # empty. Real API uses page_index/markdown/images keys.
+    backend = CloudBackend(api_key="pi-test")
+    imgs = [{"path": "fig1.png", "width": 640, "height": 480}]
+    monkeypatch.setattr(backend, "_doc_request", lambda *a, **k: {"result": [
+        {"page_index": 1, "markdown": "page one", "images": imgs},
+        {"page_index": 2, "markdown": "page two", "images": []},  # empty -> omitted
+    ]})
+    out = backend.get_page_content("col", "d1", "1,2")
+    assert out == [
+        {"page": 1, "content": "page one", "images": imgs},
+        {"page": 2, "content": "page two"},
+    ]
+
+
 # ── query_stream: terminal contract and error propagation ───────────────────
 
 def _collect_events(backend, **kwargs):
