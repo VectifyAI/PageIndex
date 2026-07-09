@@ -19,6 +19,60 @@ def test_delete_collection(storage):
     storage.delete_collection("papers")
     assert "papers" not in storage.list_collections()
 
+
+def test_create_duplicate_collection_raises_pageindex_error(storage):
+    """A raw sqlite3.IntegrityError leaking out breaks `except PageIndexError`
+    catch-alls; must be translated to a proper SDK exception."""
+    from pageindex.errors import CollectionAlreadyExistsError, PageIndexError
+    storage.create_collection("papers")
+    with pytest.raises(CollectionAlreadyExistsError):
+        storage.create_collection("papers")
+    # also catchable via the SDK's generic base class
+    storage.create_collection("other")
+    with pytest.raises(PageIndexError):
+        storage.create_collection("other")
+
+
+@pytest.mark.parametrize("bad_name", [
+    "a/../../etc/passwd", "/etc/passwd", "a$(whoami)", ".hidden",
+    "a b", "válid", "", "a" * 129,
+])
+def test_create_collection_rejects_invalid_names_at_the_python_layer(storage, bad_name):
+    """SQLiteStorage must validate collection names itself — it's a public
+    StorageEngine that can be used directly, bypassing LocalBackend's own
+    regex check entirely."""
+    from pageindex.errors import PageIndexError
+    with pytest.raises(PageIndexError):
+        storage.create_collection(bad_name)
+
+
+def test_sql_check_constraint_also_rejects_invalid_names_directly(storage):
+    """Defense-in-depth: even bypassing SQLiteStorage's own Python validation
+    and inserting via raw SQL, the schema's CHECK constraint must reject a
+    name that isn't ENTIRELY [a-zA-Z0-9_-] — not just its first character
+    (GLOB '*' is a wildcard, not a regex quantifier over the preceding class,
+    so 'name GLOB [a-zA-Z0-9_-]*' alone only constrains the first character)."""
+    import sqlite3
+    conn = storage._get_conn()
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO collections (name) VALUES (?)", ("a/../../etc/passwd",))
+
+
+def test_malicious_collection_name_rejected_through_local_backend_too(tmp_path):
+    """End-to-end via the normal LocalBackend entry point: a path-traversal-
+    shaped collection name must never reach add_document's
+    files_dir / collection path construction. Three independent layers now
+    reject it (LocalBackend's own regex, SQLiteStorage's regex, and the SQL
+    CHECK constraint) — this pins the outermost one."""
+    from pageindex.backend.local import LocalBackend
+    from pageindex.errors import PageIndexError
+
+    storage = SQLiteStorage(str(tmp_path / "t.db"))
+    backend = LocalBackend(storage=storage, files_dir=str(tmp_path / "files"), model="gpt-4o")
+    with pytest.raises(PageIndexError):
+        backend.create_collection("a/../../escape_me")
+    assert not (tmp_path / "escape_me").exists()
+
 def test_save_and_get_document(storage):
     storage.create_collection("papers")
     doc = {

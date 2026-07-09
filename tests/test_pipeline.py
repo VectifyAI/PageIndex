@@ -25,6 +25,22 @@ def test_detect_strategy_without_level():
     assert detect_strategy(nodes) == "content_based"
 
 
+def test_detect_strategy_empty_nodes_is_level_based():
+    """An empty node list (e.g. an empty/whitespace-only source file) must
+    route to level_based, whose build_tree_from_levels([]) returns an empty
+    structure with zero LLM calls — not content_based, whose TOC-detection
+    pipeline needs real page content and wastes an LLM call before failing."""
+    assert detect_strategy([]) == "level_based"
+
+
+def test_build_index_on_empty_document_makes_no_llm_calls():
+    from pageindex.config import IndexConfig
+    parsed = ParsedDocument(doc_name="empty", nodes=[])
+    opt = IndexConfig(if_add_node_summary=False, if_add_doc_description=False)
+    result = build_index(parsed, opt=opt)
+    assert result == {"doc_name": "empty", "structure": []}
+
+
 def test_build_tree_from_levels():
     nodes = [
         ContentNode(content="ch1 text", tokens=10, title="Chapter 1", index=1, level=1),

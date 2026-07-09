@@ -35,6 +35,27 @@ def test_unsupported_file_type_raises(backend, tmp_path):
         backend.add_document("papers", str(bad_file))
 
 
+def test_add_document_on_empty_markdown_file_does_not_crash(tmp_path):
+    """An empty/whitespace-only .md file used to route into the PDF-oriented
+    TOC-detection pipeline (no node ever has 'level' set), wasting an LLM call
+    and then raising IndexingError. Must complete instantly with zero LLM
+    calls when summary/description are off."""
+    from pageindex.config import IndexConfig
+
+    storage = SQLiteStorage(str(tmp_path / "test.db"))
+    backend = LocalBackend(
+        storage=storage, files_dir=str(tmp_path / "files"), model="gpt-4o",
+        index_config=IndexConfig(if_add_node_summary=False, if_add_doc_description=False),
+    )
+    backend.get_or_create_collection("papers")
+    empty_md = tmp_path / "empty.md"
+    empty_md.write_text("   \n\n  \n")
+
+    doc_id = backend.add_document("papers", str(empty_md))  # must not raise
+
+    assert backend.get_document_structure("papers", doc_id) == []
+
+
 def test_register_custom_parser(backend):
     from pageindex.parser.protocol import ParsedDocument, ContentNode
 

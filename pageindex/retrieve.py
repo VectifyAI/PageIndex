@@ -1,27 +1,24 @@
 import json
-import PyPDF2
 
 try:
-    from .index.utils import get_number_of_pages, remove_fields, get_md_page_content
+    from .index.utils import (
+        get_number_of_pages, remove_fields, get_md_page_content,
+        parse_pages, get_pdf_page_content,
+    )
 except ImportError:
-    from index.utils import get_number_of_pages, remove_fields, get_md_page_content
+    from index.utils import (
+        get_number_of_pages, remove_fields, get_md_page_content,
+        parse_pages, get_pdf_page_content,
+    )
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _parse_pages(pages: str) -> list[int]:
-    """Parse a pages string like '5-7', '3,8', or '12' into a sorted list of ints."""
-    result = []
-    for part in pages.split(','):
-        part = part.strip()
-        if '-' in part:
-            start, end = int(part.split('-', 1)[0].strip()), int(part.split('-', 1)[1].strip())
-            if start > end:
-                raise ValueError(f"Invalid range '{part}': start must be <= end")
-            result.extend(range(start, end + 1))
-        else:
-            result.append(int(part))
-    return sorted(set(result))
+    """Parse a pages string like '5-7', '3,8', or '12' into a sorted list of ints.
+    Delegates to the canonical implementation so the two never drift again —
+    this one used to lack the p>=1 filter and the 1000-page DoS cap."""
+    return parse_pages(pages)
 
 
 def _count_pages(doc_info: dict) -> int:
@@ -34,7 +31,8 @@ def _count_pages(doc_info: dict) -> int:
 
 
 def _get_pdf_page_content(doc_info: dict, page_nums: list[int]) -> list[dict]:
-    """Extract text for specific PDF pages (1-indexed). Prefer cached pages, fallback to PDF."""
+    """Extract text for specific PDF pages (1-indexed). Prefer cached pages,
+    else delegate the file-read fallback to the canonical implementation."""
     cached_pages = doc_info.get('pages')
     if cached_pages:
         page_map = {p['page']: p['content'] for p in cached_pages}
@@ -42,15 +40,7 @@ def _get_pdf_page_content(doc_info: dict, page_nums: list[int]) -> list[dict]:
             {'page': p, 'content': page_map[p]}
             for p in page_nums if p in page_map
         ]
-    path = doc_info['path']
-    with open(path, 'rb') as f:
-        pdf_reader = PyPDF2.PdfReader(f)
-        total = len(pdf_reader.pages)
-        valid_pages = [p for p in page_nums if 1 <= p <= total]
-        return [
-            {'page': p, 'content': pdf_reader.pages[p - 1].extract_text() or ''}
-            for p in valid_pages
-        ]
+    return get_pdf_page_content(doc_info['path'], page_nums)
 
 
 def _get_md_page_content(doc_info: dict, page_nums: list[int]) -> list[dict]:

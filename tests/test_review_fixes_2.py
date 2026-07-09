@@ -2,6 +2,7 @@
 2d46d68..8f536cb): the Markdown text-stripping fix's fallout, plus the other
 directly-fixable findings from that pass."""
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -122,6 +123,20 @@ def test_cloud_delete_collection_still_clears_real_folder_id(monkeypatch):
 
 
 # ── #7: remove_structure_text is skipped when text was never added ───────────
+def _mock_content_based_pipeline(monkeypatch, structure):
+    """content_based's real path (_content_based_pipeline) drives real LLM
+    calls (TOC detection etc.) regardless of if_add_node_summary — a prior
+    version of these two tests didn't mock this out, fell through to it, and
+    made real network calls (with a dummy key: 10 retries before failing;
+    with a real key: real billable requests) on every run."""
+    from pageindex.index import pipeline
+
+    async def fake(page_list, opt):
+        return structure
+
+    monkeypatch.setattr(pipeline, "_content_based_pipeline", fake)
+
+
 def test_build_index_skips_text_strip_when_no_text_was_added(monkeypatch):
     from pageindex.index import pipeline
     from pageindex.parser.protocol import ContentNode, ParsedDocument
@@ -131,6 +146,7 @@ def test_build_index_skips_text_strip_when_no_text_was_added(monkeypatch):
     # ...` inside the function body), so patch it on the utils module itself.
     import pageindex.index.utils as utils_mod
     monkeypatch.setattr(utils_mod, "remove_structure_text", lambda s: calls.append(s) or s)
+    _mock_content_based_pipeline(monkeypatch, [{"title": "T", "start_index": 1, "end_index": 1}])
 
     nodes = [ContentNode(content="page one text", tokens=5, index=1)]
     parsed = ParsedDocument(doc_name="d", nodes=nodes)
@@ -147,6 +163,14 @@ def test_build_index_still_strips_text_when_summary_added_it(monkeypatch):
     calls = []
     import pageindex.index.utils as utils_mod
     monkeypatch.setattr(utils_mod, "remove_structure_text", lambda s: calls.append(s) or s)
+    _mock_content_based_pipeline(monkeypatch, [{"title": "T", "start_index": 1, "end_index": 1}])
+    # Summary generation itself would otherwise make a real LLM call.
+    monkeypatch.setattr(
+        utils_mod, "generate_summaries_for_structure",
+        AsyncMock(side_effect=lambda structure, model=None: [
+            n.__setitem__("summary", "fake") for n in structure
+        ]),
+    )
 
     nodes = [ContentNode(content="page one text", tokens=5, index=1)]
     parsed = ParsedDocument(doc_name="d", nodes=nodes)

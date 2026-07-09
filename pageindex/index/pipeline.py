@@ -5,6 +5,13 @@ from ..parser.protocol import ContentNode, ParsedDocument
 
 def detect_strategy(nodes: list[ContentNode]) -> str:
     """Determine which indexing strategy to use based on node data."""
+    if not nodes:
+        # No content at all (e.g. an empty/whitespace-only source file) ->
+        # level_based's build_tree_from_levels([]) returns an empty structure
+        # immediately with zero LLM calls. content_based's TOC-detection
+        # pipeline needs real page content; on an empty page_list it wastes an
+        # LLM call and then still raises, for no benefit.
+        return "level_based"
     if any(n.level is not None for n in nodes):
         return "level_based"
     return "content_based"

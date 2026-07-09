@@ -37,8 +37,8 @@ if __name__ == "__main__":
                       help='Add raw text to nodes (off by default). Bare flag or yes/no')
 
     # Markdown specific arguments
-    parser.add_argument('--if-thinning', type=str, default='no',
-                      help='Whether to apply tree thinning for markdown (markdown only)')
+    parser.add_argument('--if-thinning', nargs='?', const=True, type=_cli_bool, default=None,
+                      help='Apply tree thinning (off by default, markdown only). Bare flag or yes/no')
     parser.add_argument('--thinning-threshold', type=int, default=5000,
                       help='Minimum token threshold for thinning (markdown only)')
     parser.add_argument('--summary-token-threshold', type=int, default=200,
@@ -101,7 +101,7 @@ if __name__ == "__main__":
 
         toc_with_page_number = asyncio.run(md_to_tree(
             md_path=args.md_path,
-            if_thinning=args.if_thinning.lower() == 'yes',
+            if_thinning=bool(args.if_thinning),
             min_token_threshold=args.thinning_threshold,
             if_add_node_summary=opt.if_add_node_summary,
             summary_token_threshold=args.summary_token_threshold,

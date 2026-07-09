@@ -8,6 +8,11 @@ class CollectionNotFoundError(PageIndexError):
     pass
 
 
+class CollectionAlreadyExistsError(PageIndexError):
+    """Collection already exists (create_collection, not get_or_create)."""
+    pass
+
+
 class DocumentNotFoundError(PageIndexError):
     """Document ID not found."""
     pass

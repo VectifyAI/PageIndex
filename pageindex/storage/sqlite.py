@@ -1,7 +1,21 @@
 import json
+import re
 import sqlite3
 import threading
 from pathlib import Path
+
+from ..errors import CollectionAlreadyExistsError, PageIndexError
+
+# Mirrors LocalBackend's own collection-name rule. SQLiteStorage enforces this
+# itself (not just relying on LocalBackend's pre-check or the schema's CHECK
+# constraint below) because it's a public StorageEngine that can be used
+# directly, bypassing LocalBackend entirely.
+_COLLECTION_NAME_RE = re.compile(r'^[a-zA-Z0-9_-]{1,128}$')
+
+
+def _validate_collection_name(name: str) -> None:
+    if not _COLLECTION_NAME_RE.match(name):
+        raise PageIndexError(f"Invalid collection name: {name!r}. Must be 1-128 chars of [a-zA-Z0-9_-].")
 
 
 class SQLiteStorage:
@@ -48,7 +62,17 @@ class SQLiteStorage:
         conn.execute("PRAGMA user_version = 1")
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS collections (
-                name TEXT PRIMARY KEY CHECK(length(name) <= 128 AND name GLOB '[a-zA-Z0-9_-]*'),
+                -- GLOB '*' is "any characters", not a regex quantifier over the
+                -- preceding class — '[a-zA-Z0-9_-]*' alone only constrains the
+                -- FIRST character. The second GLOB (NOT ... '*[^...]*') checks
+                -- every remaining character too, so this is real defense-in-depth
+                -- for direct SQLiteStorage use (bypassing _validate_collection_name
+                -- above), not just a first-character gate.
+                name TEXT PRIMARY KEY CHECK(
+                    length(name) BETWEEN 1 AND 128
+                    AND name GLOB '[a-zA-Z0-9_-]*'
+                    AND name NOT GLOB '*[^a-zA-Z0-9_-]*'
+                ),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE IF NOT EXISTS documents (
@@ -70,12 +94,17 @@ class SQLiteStorage:
         conn.commit()
 
     def create_collection(self, name: str) -> None:
+        _validate_collection_name(name)
         with self._write_lock:
             conn = self._get_conn()
-            conn.execute("INSERT INTO collections (name) VALUES (?)", (name,))
+            try:
+                conn.execute("INSERT INTO collections (name) VALUES (?)", (name,))
+            except sqlite3.IntegrityError as e:
+                raise CollectionAlreadyExistsError(f"Collection '{name}' already exists") from e
             conn.commit()
 
     def get_or_create_collection(self, name: str) -> None:
+        _validate_collection_name(name)
         with self._write_lock:
             conn = self._get_conn()
             conn.execute("INSERT OR IGNORE INTO collections (name) VALUES (?)", (name,))

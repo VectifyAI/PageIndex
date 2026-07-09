@@ -77,7 +77,13 @@ class PdfParser:
 
                 try:
                     pix = pymupdf.Pixmap(image_bytes)
-                    if pix.n > 4:
+                    # n includes the alpha channel, so a plain RGBA pixmap also
+                    # has n==4 — subtract alpha before comparing. Without this,
+                    # a CMYK image with no alpha (n==4, same as RGBA) skips the
+                    # RGB conversion, and pix.save() as .png then raises
+                    # "unsupported colorspace for 'png'", silently dropping the
+                    # image via the bare except below.
+                    if pix.n - pix.alpha >= 4:
                         pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
                     filename = f"p{page_num}_img{img_idx}.png"
                     save_path = images_path / filename

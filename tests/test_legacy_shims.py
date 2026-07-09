@@ -3,9 +3,14 @@ now deprecation shims over the canonical pageindex.index.* modules. These
 tests pin the compatibility contract."""
 import asyncio
 import importlib
+import subprocess
+import sys
 import warnings
+from pathlib import Path
 
 import pytest
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_plain_import_pageindex_does_not_warn():
@@ -116,3 +121,27 @@ def test_md_to_tree_coerces_legacy_yes_no_strings(tmp_path):
 
     assert not _has_summary(result["structure"])
     assert all("node_id" in n for n in result["structure"])
+
+
+def test_page_index_stays_callable_after_the_submodule_is_imported():
+    """pageindex/__init__.py binds the FUNCTION `page_index` as the package
+    attribute, but pageindex/page_index.py is ALSO a real submodule of the
+    same name — importing that submodule anywhere clobbers the package
+    attribute with the module object (Python's import machinery does this
+    unconditionally). Must run in a fresh subprocess: the effect depends on
+    import order, so it can't be reliably observed against an
+    already-imported pageindex in this test process."""
+    script = (
+        "import warnings; warnings.simplefilter('ignore')\n"
+        "import pageindex.page_index\n"  # the clobbering import
+        "from pageindex import page_index\n"
+        "assert callable(page_index), f'page_index is not callable: {type(page_index)}'\n"
+        "from pageindex.page_index import page_index_main\n"  # old multi-symbol import still works
+        "assert callable(page_index_main)\n"
+        "print('OK')\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, cwd=str(_REPO_ROOT),
+    )
+    assert result.returncode == 0, result.stderr
+    assert "OK" in result.stdout

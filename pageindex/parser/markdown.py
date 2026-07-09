@@ -12,7 +12,12 @@ class MarkdownParser:
         path = Path(file_path)
         model = kwargs.get("model")
 
-        with open(path, "r", encoding="utf-8") as f:
+        # utf-8-sig strips a leading BOM if present (common from Windows
+        # editors/exporters) and is otherwise identical to plain utf-8. Without
+        # it, a BOM-prefixed first line fails the header regex below (the BOM
+        # isn't whitespace, so .strip() doesn't remove it), misclassifying the
+        # document's first heading as unrecognized preamble text.
+        with open(path, "r", encoding="utf-8-sig") as f:
             content = f.read()
 
         lines = content.split("\n")
@@ -23,7 +28,10 @@ class MarkdownParser:
 
     def _extract_headers(self, lines: list[str]) -> list[dict]:
         header_pattern = r"^(#{1,6})\s+(.+)$"
-        code_block_pattern = r"^```"
+        # CommonMark allows both backtick and tilde fences; only recognizing
+        # backticks let a '#'-prefixed line inside a ~~~-fenced block (e.g. a
+        # shell comment in a code sample) be misparsed as a real heading.
+        code_block_pattern = r"^(?:```|~~~)"
         headers = []
         in_code_block = False
 

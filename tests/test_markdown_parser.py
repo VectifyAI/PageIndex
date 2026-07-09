@@ -71,3 +71,32 @@ def test_headerless_file_yields_single_node(tmp_path):
     assert len(result.nodes) == 1
     assert result.nodes[0].title == "plain"
     assert "No headings at all" in result.nodes[0].content
+
+
+def test_utf8_bom_does_not_break_the_first_header(tmp_path):
+    """A leading BOM (common from Windows editors/exporters) isn't
+    whitespace, so .strip() doesn't remove it — without utf-8-sig decoding,
+    the header regex fails to match the BOM-prefixed first line, and it gets
+    misclassified as unrecognized preamble text instead of a real heading."""
+    md = tmp_path / "bom.md"
+    md.write_bytes(b"\xef\xbb\xbf# First Header\nbody text\n")
+    result = MarkdownParser().parse(str(md))
+    assert len(result.nodes) == 1
+    assert result.nodes[0].title == "First Header"
+    assert result.nodes[0].level == 1
+
+
+def test_tilde_fenced_code_blocks_are_recognized(tmp_path):
+    """CommonMark allows both backtick and tilde code fences. Only
+    recognizing backticks let a '#'-prefixed line inside a ~~~-fenced block
+    (e.g. a shell comment in a sample) be misparsed as a real heading."""
+    md = tmp_path / "tilde.md"
+    md.write_text(
+        "# Real Header\nintro\n"
+        "~~~\n# not a real header, just a comment\n~~~\n"
+        "## Real Sub\nmore\n"
+    )
+    result = MarkdownParser().parse(str(md))
+    titles = [n.title for n in result.nodes]
+    assert titles == ["Real Header", "Real Sub"]
+    assert "not a real header" not in " ".join(n.title for n in result.nodes)

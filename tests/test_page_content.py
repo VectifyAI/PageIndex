@@ -34,3 +34,43 @@ def test_retrieve_md_page_content_returns_only_requested_lines():
 
     out = _get_md_page_content({"structure": _md_structure()}, [5, 100])
     assert [r["page"] for r in out] == [5, 100]
+
+
+def test_retrieve_parse_pages_delegates_to_canonical_and_enforces_dos_cap():
+    """retrieve._parse_pages used to be an independent copy that lacked the
+    canonical parse_pages' p>=1 filter and 1000-page cap — a caller of the
+    legacy pageindex.get_page_content could bypass the DoS guard the SDK path
+    enforces. Now it's a one-line delegate, so they can't drift again."""
+    from pageindex.retrieve import _parse_pages
+    from pageindex.index.utils import parse_pages
+    import pytest
+
+    assert _parse_pages("5-7") == parse_pages("5-7") == [5, 6, 7]
+    with pytest.raises(ValueError, match="too large"):
+        _parse_pages("1-99999999")
+
+
+def test_retrieve_get_pdf_page_content_falls_back_to_canonical(tmp_path, monkeypatch):
+    """When no cached 'pages' are present, the file-read fallback must
+    delegate to the canonical get_pdf_page_content instead of re-implementing
+    PDF text extraction inline (a second, independently-maintained copy)."""
+    from pageindex.retrieve import _get_pdf_page_content
+    import pageindex.retrieve as retrieve_mod
+
+    calls = []
+    monkeypatch.setattr(
+        retrieve_mod, "get_pdf_page_content",
+        lambda path, page_nums: calls.append((path, page_nums)) or [{"page": 1, "content": "x"}],
+    )
+    result = _get_pdf_page_content({"path": "/fake/doc.pdf"}, [1])
+    assert calls == [("/fake/doc.pdf", [1])]
+    assert result == [{"page": 1, "content": "x"}]
+
+
+def test_retrieve_get_pdf_page_content_prefers_cache_over_file():
+    from pageindex.retrieve import _get_pdf_page_content
+
+    doc_info = {"path": "/should/not/be/opened.pdf",
+                "pages": [{"page": 1, "content": "cached one"}, {"page": 2, "content": "cached two"}]}
+    result = _get_pdf_page_content(doc_info, [2])
+    assert result == [{"page": 2, "content": "cached two"}]
