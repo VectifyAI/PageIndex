@@ -7,6 +7,7 @@ import pytest
 
 from pageindex.config import (
     IndexConfig,
+    _env_llm_timeout_default,
     _env_max_concurrency_default,
     get_llm_params,
     get_max_concurrency,
@@ -164,6 +165,23 @@ def test_llm_acompletion_holds_the_shared_semaphore(monkeypatch):
     assert state["peak"] == 3
 
 
+def test_llm_acompletion_passes_a_timeout_to_litellm(monkeypatch):
+    # A per-request timeout must reach litellm so a hung / half-open connection
+    # fails fast instead of stalling indexing forever. It rides get_llm_params(),
+    # so both the default and an override flow through automatically.
+    seen = {}
+
+    async def fake_acompletion(**kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
+        )
+
+    monkeypatch.setattr("litellm.acompletion", fake_acompletion)
+    asyncio.run(llm_acompletion("gpt-x", "hi"))
+    assert "timeout" in seen and seen["timeout"] == get_llm_params()["timeout"]
+
+
 def test_run_async_propagates_scope_into_worker_thread():
     # When build_index runs inside an already-running loop, _run_async hops to a
     # worker thread. The max_concurrency_scope override must ride along (copied
@@ -203,6 +221,17 @@ def test_env_default_parsing(monkeypatch):
     assert _env_max_concurrency_default() == 5
     monkeypatch.setenv("PAGEINDEX_MAX_CONCURRENCY", "0")
     assert _env_max_concurrency_default() == 5
+
+
+def test_env_llm_timeout_parsing(monkeypatch):
+    monkeypatch.delenv("PAGEINDEX_LLM_TIMEOUT", raising=False)
+    assert _env_llm_timeout_default() == 120
+    monkeypatch.setenv("PAGEINDEX_LLM_TIMEOUT", "45")
+    assert _env_llm_timeout_default() == 45
+    monkeypatch.setenv("PAGEINDEX_LLM_TIMEOUT", "garbage")
+    assert _env_llm_timeout_default() == 120
+    monkeypatch.setenv("PAGEINDEX_LLM_TIMEOUT", "0")  # <=0 opts out of the timeout
+    assert _env_llm_timeout_default() is None
 
 
 def test_index_config_max_concurrency_field():

@@ -52,15 +52,44 @@ def _env_drop_params_default() -> bool:
     )
 
 
+# Built-in per-request network timeout (seconds) for every litellm completion.
+# Bounds a single in-flight call so a stalled / half-open connection (e.g. a
+# flaky proxy that keeps a socket ESTABLISHED but never sends data) fails fast
+# with a litellm Timeout — caught by the retry loops in index/utils.py — instead
+# of hanging indefinitely. Generous enough for legitimate slow responses on
+# large prompts; tune via PAGEINDEX_LLM_TIMEOUT / set_llm_params(timeout=…).
+_DEFAULT_LLM_TIMEOUT = 120
+
+
+def _env_llm_timeout_default():
+    """Default per-request litellm timeout in seconds, from PAGEINDEX_LLM_TIMEOUT.
+
+    A missing or non-numeric value falls back to ``_DEFAULT_LLM_TIMEOUT``. A
+    value <= 0 means "no timeout" (returns None -> litellm's own default), so a
+    caller can explicitly opt out. Read once at import.
+    """
+    raw = os.getenv("PAGEINDEX_LLM_TIMEOUT", str(_DEFAULT_LLM_TIMEOUT)).strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return _DEFAULT_LLM_TIMEOUT
+    return value if value > 0 else None
+
+
 # Per-call kwargs PageIndex passes to every litellm completion. These are
 # PageIndex-OWNED and applied PER CALL — never written to litellm's shared module
 # globals, so they don't leak into other libraries sharing the litellm module.
 # Defaults preserve historical behavior: temperature=0 keeps structure
 # extraction deterministic; drop_params=True lets a provider that rejects a param
-# (e.g. temperature on some local / reasoning models) succeed by dropping it.
-# Override/extend via set_llm_params(); the common drop_params case also has the
-# PAGEINDEX_DROP_PARAMS env shortcut.
-_LLM_PARAMS: dict = {"temperature": 0, "drop_params": _env_drop_params_default()}
+# (e.g. temperature on some local / reasoning models) succeed by dropping it;
+# timeout bounds a single hung request (see _env_llm_timeout_default). Override/
+# extend via set_llm_params(); the common drop_params / timeout cases also have
+# the PAGEINDEX_DROP_PARAMS / PAGEINDEX_LLM_TIMEOUT env shortcuts.
+_LLM_PARAMS: dict = {
+    "temperature": 0,
+    "drop_params": _env_drop_params_default(),
+    "timeout": _env_llm_timeout_default(),
+}
 
 # Per-call override, isolated per thread / async context — mirrors
 # _MAX_CONCURRENCY_OVERRIDE below. Without this, set_llm_params() is the only
