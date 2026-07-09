@@ -238,7 +238,10 @@ def test_chat_completions_stream_metadata_returns_raw_chunks(monkeypatch):
     ))
 
     assert chunks == [{"object": "chat.completion.chunk"}]
-    assert "stream_metadata" not in calls[0]["json"]
+    # stream_metadata must be forwarded to the server so the wire request matches
+    # the caller's intent (and mirrors the modern CloudBackend), not kept as a
+    # client-only parser switch.
+    assert calls[0]["json"]["stream_metadata"] is True
 
 
 def test_chat_completions_stream_errors_are_pageindex_api_error(monkeypatch):
