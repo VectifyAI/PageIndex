@@ -306,6 +306,14 @@ class LocalBackend:
                 result = backend.get_page_content(col_name, doc_id, pages)
             except DocumentNotFoundError:
                 return json.dumps({"error": f"doc_id '{doc_id}' not found."})
+            except (ValueError, AttributeError) as e:
+                # A malformed page spec ("all", "5-") is a recoverable bad tool
+                # argument: hand the model an actionable error it can correct
+                # (mirroring the legacy retrieval tool) rather than letting the
+                # ValueError surface as the agent SDK's generic tool-failure text.
+                return json.dumps({
+                    "error": f"Invalid pages format: {pages!r}. Use '5-7', '3,8', or '12'. Error: {e}"
+                })
             return json.dumps(result, ensure_ascii=False)
 
         tools = [get_document, get_document_structure, get_page_content]

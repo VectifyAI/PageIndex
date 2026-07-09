@@ -127,6 +127,18 @@ def test_scoped_mode_allows_in_scope_doc_id(populated_backend):
     assert out.get("doc_name") == "alpha.pdf"
 
 
+@pytest.mark.parametrize("bad_pages", ["all", "5-", "abc", "3-1"])
+def test_get_page_content_returns_actionable_error_for_bad_page_spec(populated_backend, bad_pages):
+    # A malformed page spec must come back as a correctable JSON error (like the
+    # legacy retrieval tool), not the agent SDK's generic tool-failure fallback,
+    # so the model can retry with a valid range instead of giving up.
+    tools = populated_backend.get_agent_tools("papers", doc_ids=["d1"])
+    by_name = {t.name: t for t in tools.function_tools}
+    out = json.loads(_invoke_tool(by_name["get_page_content"], {"doc_id": "d1", "pages": bad_pages}))
+    assert "error" in out
+    assert "Invalid pages format" in out["error"]
+
+
 def test_wrap_with_doc_context_single(populated_backend):
     from pageindex.agent import wrap_with_doc_context
     docs = populated_backend._scoped_docs("papers", ["d1"])
