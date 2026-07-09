@@ -15,7 +15,7 @@ from pageindex.config import (
     set_llm_params,
     set_max_concurrency,
 )
-from pageindex.index.utils import _llm_semaphore, llm_acompletion
+from pageindex.index.utils import _llm_semaphore, _process_ceiling_semaphore, llm_acompletion
 
 
 @pytest.fixture(autouse=True)
@@ -89,6 +89,40 @@ def test_llm_semaphore_is_a_true_process_wide_ceiling_across_threads():
     [t.join() for t in threads]
 
     assert state["peak"] == 3
+
+
+def test_llm_semaphore_cancellation_while_waiting_does_not_leak_a_permit():
+    # A blocking ceiling_sem.acquire() run via asyncio.to_thread() would leak a
+    # permit under cancellation: the worker thread can't be interrupted, so if
+    # the awaiting coroutine is cancelled while the thread is still parked
+    # inside acquire(), the thread can go on to actually acquire the permit
+    # *after* the coroutine already unwound, and the matching finally:
+    # release() never runs for that attempt. Cancel a task waiting on an
+    # already-exhausted ceiling and confirm the permit count fully recovers.
+    set_max_concurrency(1)
+
+    async def run():
+        async def hold():
+            async with _llm_semaphore():
+                await asyncio.sleep(10)
+
+        holder = asyncio.create_task(hold())
+        await asyncio.sleep(0.1)  # let it acquire the single permit
+
+        waiter = asyncio.create_task(_llm_semaphore().__aenter__())
+        await asyncio.sleep(0.1)  # let it start waiting for the permit
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+
+        holder.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await holder
+
+        await asyncio.sleep(0.2)  # give any orphaned acquire a chance to land
+        assert _process_ceiling_semaphore()._value == 1
+
+    asyncio.run(run())
 
 
 def test_llm_semaphore_uses_scoped_override():

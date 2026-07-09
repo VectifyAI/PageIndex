@@ -103,11 +103,18 @@ async def _llm_semaphore():
     node at once and exhausts the process file-descriptor limit (Errno 24).
     """
     ceiling_sem = _process_ceiling_semaphore()
-    # threading.Semaphore.acquire() blocks the calling thread, so run it off
-    # the event loop thread — otherwise it would freeze every other coroutine
-    # on this loop while waiting for a slot. release() is non-blocking and
-    # safe to call directly from any thread.
-    await asyncio.to_thread(ceiling_sem.acquire)
+    # A blocking ceiling_sem.acquire() run via asyncio.to_thread() would be
+    # unsafe under cancellation: the worker thread can't be interrupted, so if
+    # this coroutine is cancelled (Ctrl-C, an outer timeout) while the thread
+    # is still parked inside acquire(), the thread can go on to actually
+    # acquire a permit *after* we've already unwound — leaking it forever,
+    # since the matching finally: release() below never runs for that attempt.
+    # Poll with the non-blocking form instead: each check returns immediately
+    # (no OS-level wait), so it's safe to call straight from the event loop
+    # thread and there's no window for a background acquire to succeed after
+    # we've already given up on it.
+    while not ceiling_sem.acquire(False):
+        await asyncio.sleep(0.05)
     try:
         effective = get_max_concurrency()
         ceiling = _process_wide_max_concurrency()
