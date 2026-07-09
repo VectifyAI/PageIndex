@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from contextlib import contextmanager
 from contextvars import ContextVar
 
@@ -142,6 +143,9 @@ _MAX_CONCURRENCY: int = _env_max_concurrency_default()
 _MAX_CONCURRENCY_OVERRIDE: ContextVar[int | None] = ContextVar(
     "pageindex_max_concurrency_override", default=None
 )
+_MAX_CONCURRENCY_SCOPE_SEMAPHORE: ContextVar[threading.Semaphore | None] = ContextVar(
+    "pageindex_max_concurrency_scope_semaphore", default=None
+)
 
 
 def _validate_max_concurrency(value) -> None:
@@ -175,6 +179,15 @@ def _process_wide_max_concurrency() -> int:
     return _MAX_CONCURRENCY
 
 
+def _max_concurrency_scope_semaphore() -> threading.Semaphore | None:
+    """Return the semaphore backing the active scoped override, if any.
+
+    Internal helper used by the LLM call sites so sync and async completions
+    share the same scoped cap when a context is copied across threads.
+    """
+    return _MAX_CONCURRENCY_SCOPE_SEMAPHORE.get()
+
+
 def set_max_concurrency(value: int) -> None:
     """Set the process-wide default cap on concurrent in-flight LLM calls."""
     global _MAX_CONCURRENCY
@@ -193,10 +206,13 @@ def max_concurrency_scope(value: int | None):
     """
     if value is not None:
         _validate_max_concurrency(value)
+    scoped_sem = threading.Semaphore(value) if value is not None else None
     token = _MAX_CONCURRENCY_OVERRIDE.set(value)
+    sem_token = _MAX_CONCURRENCY_SCOPE_SEMAPHORE.set(scoped_sem)
     try:
         yield
     finally:
+        _MAX_CONCURRENCY_SCOPE_SEMAPHORE.reset(sem_token)
         _MAX_CONCURRENCY_OVERRIDE.reset(token)
 
 

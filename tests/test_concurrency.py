@@ -1,5 +1,7 @@
 import asyncio
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pydantic
@@ -16,7 +18,12 @@ from pageindex.config import (
     set_llm_params,
     set_max_concurrency,
 )
-from pageindex.index.utils import _llm_semaphore, _process_ceiling_semaphore, llm_acompletion
+from pageindex.index.utils import (
+    _llm_semaphore,
+    _process_ceiling_semaphore,
+    llm_acompletion,
+    llm_completion,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -142,8 +149,8 @@ def test_llm_semaphore_uses_scoped_override():
 
 
 def test_llm_acompletion_holds_the_shared_semaphore(monkeypatch):
-    # Prove llm_acompletion (the single chokepoint every LLM call funnels
-    # through) actually acquires the shared cap around the network call.
+    # Prove llm_acompletion actually acquires the shared cap around the async
+    # network call.
     set_max_concurrency(3)
     state = {"in_flight": 0, "peak": 0}
 
@@ -180,6 +187,39 @@ def test_llm_acompletion_passes_a_timeout_to_litellm(monkeypatch):
     monkeypatch.setattr("litellm.acompletion", fake_acompletion)
     asyncio.run(llm_acompletion("gpt-x", "hi"))
     assert "timeout" in seen and seen["timeout"] == get_llm_params()["timeout"]
+
+
+def test_llm_completion_holds_the_shared_semaphore(monkeypatch):
+    # Sync litellm.completion calls must share the same process-wide cap as the
+    # async path; otherwise concurrent indexing threads can exceed
+    # set_max_concurrency().
+    set_max_concurrency(1)
+    state = {"in_flight": 0, "peak": 0}
+    lock = threading.Lock()
+
+    def fake_completion(**kwargs):
+        with lock:
+            state["in_flight"] += 1
+            state["peak"] = max(state["peak"], state["in_flight"])
+        time.sleep(0.02)
+        with lock:
+            state["in_flight"] -= 1
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content="ok"),
+                    finish_reason="stop",
+                )
+            ]
+        )
+
+    monkeypatch.setattr("litellm.completion", fake_completion)
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        results = list(pool.map(lambda i: llm_completion("gpt-x", f"p{i}"), range(6)))
+
+    assert results == ["ok"] * 6
+    assert state["peak"] == 1
 
 
 def test_run_async_propagates_scope_into_worker_thread():

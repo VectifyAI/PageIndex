@@ -8,7 +8,6 @@ import copy
 import re
 import asyncio
 import threading
-import weakref
 import PyPDF2
 import pymupdf
 import yaml
@@ -21,9 +20,14 @@ from pprint import pprint
 # `pageindex.config` submodule for those modules.
 from types import SimpleNamespace as _config
 
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 
-from ..config import get_llm_params, get_max_concurrency, _process_wide_max_concurrency
+from ..config import (
+    get_llm_params,
+    get_max_concurrency,
+    _max_concurrency_scope_semaphore,
+    _process_wide_max_concurrency,
+)
 from ..tokens import count_tokens  # re-exported for backward compat
 
 logger = logging.getLogger(__name__)
@@ -41,16 +45,6 @@ _PROCESS_LLM_SEMAPHORE: threading.Semaphore | None = None
 _PROCESS_LLM_SEMAPHORE_SIZE: int | None = None
 _PROCESS_LLM_SEMAPHORE_LOCK = threading.Lock()
 
-# Per-loop, per-size semaphores for a max_concurrency_scope() override that's
-# narrower than the process ceiling — isolates one call's own subtree to a
-# tighter self-imposed limit without needing to be cross-thread itself (it can
-# never let MORE calls through than the process ceiling above already allows,
-# since both are held simultaneously; see _llm_semaphore). Keyed by (loop, size)
-# rather than just loop so a later scope with a different size in the same loop
-# isn't silently ignored.
-_SCOPED_LLM_SEMAPHORES: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
-_SCOPED_LLM_SEMAPHORES_LOCK = threading.Lock()
-
 
 def _process_ceiling_semaphore() -> threading.Semaphore:
     global _PROCESS_LLM_SEMAPHORE, _PROCESS_LLM_SEMAPHORE_SIZE
@@ -62,33 +56,14 @@ def _process_ceiling_semaphore() -> threading.Semaphore:
         return _PROCESS_LLM_SEMAPHORE
 
 
-def _scoped_llm_semaphore(size: int) -> asyncio.Semaphore:
-    loop = asyncio.get_running_loop()
-    per_loop = _SCOPED_LLM_SEMAPHORES.get(loop)
-    if per_loop is None:
-        with _SCOPED_LLM_SEMAPHORES_LOCK:
-            per_loop = _SCOPED_LLM_SEMAPHORES.get(loop)
-            if per_loop is None:
-                per_loop = {}
-                _SCOPED_LLM_SEMAPHORES[loop] = per_loop
-    sem = per_loop.get(size)
-    if sem is None:
-        with _SCOPED_LLM_SEMAPHORES_LOCK:
-            sem = per_loop.get(size)
-            if sem is None:
-                sem = asyncio.Semaphore(size)
-                per_loop[size] = sem
-    return sem
-
-
 @asynccontextmanager
 async def _llm_semaphore():
     """Bound concurrent in-flight LLM calls to a TRUE process-wide ceiling,
     optionally narrowed further by an active max_concurrency_scope() override.
 
     Acquired only around the leaf ``litellm.acompletion`` call in
-    ``llm_acompletion`` — the single point every LLM request funnels through —
-    so the cap holds no matter how deeply the indexing gathers nest
+    ``llm_acompletion`` — sync calls use ``_sync_llm_semaphore`` below — so the
+    cap holds no matter how deeply the indexing gathers nest
     (``tree_parser`` → ``process_large_node_recursively`` → …) AND no matter how
     many threads are each running their own indexing job concurrently. Bounding
     at the leaf rather than at each gather call site is also deadlock-free: a
@@ -97,7 +72,7 @@ async def _llm_semaphore():
 
     The process ceiling (threading.Semaphore, shared cross-thread) is sized from
     the process-wide default only; a narrower max_concurrency_scope() override
-    is enforced as a second, nested, per-loop restriction — it can only
+    is enforced as a second, nested context-local restriction — it can only
     *tighten* the effective cap for its own call tree, never widen it past the
     ceiling. Without the outer bound a many-node document opens one socket per
     node at once and exhausts the process file-descriptor limit (Errno 24).
@@ -115,15 +90,45 @@ async def _llm_semaphore():
     # we've already given up on it.
     while not ceiling_sem.acquire(False):
         await asyncio.sleep(0.05)
+    scoped_sem = None
     try:
         effective = get_max_concurrency()
         ceiling = _process_wide_max_concurrency()
         if effective < ceiling:
-            async with _scoped_llm_semaphore(effective):
-                yield
+            scoped_sem = _max_concurrency_scope_semaphore()
+            if scoped_sem is not None:
+                while not scoped_sem.acquire(False):
+                    await asyncio.sleep(0.05)
+            yield
         else:
             yield
     finally:
+        if scoped_sem is not None:
+            scoped_sem.release()
+        ceiling_sem.release()
+
+
+@contextmanager
+def _sync_llm_semaphore():
+    """Synchronous companion to ``_llm_semaphore`` for ``llm_completion``.
+
+    It uses the same process-wide ceiling so sync and async LLM calls share one
+    real cap. A scoped override can only narrow that cap for the active context.
+    """
+    ceiling_sem = _process_ceiling_semaphore()
+    ceiling_sem.acquire()
+    scoped_sem = None
+    try:
+        effective = get_max_concurrency()
+        ceiling = _process_wide_max_concurrency()
+        if effective < ceiling:
+            scoped_sem = _max_concurrency_scope_semaphore()
+            if scoped_sem is not None:
+                scoped_sem.acquire()
+        yield
+    finally:
+        if scoped_sem is not None:
+            scoped_sem.release()
         ceiling_sem.release()
 
 
@@ -134,13 +139,16 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
     for i in range(max_retries):
         try:
-            response = litellm.completion(
-                model=model,
-                messages=messages,
-                # Per-call litellm kwargs (default temperature=0, drop_params=True);
-                # configure via config.set_llm_params(...) — never the litellm global.
-                **get_llm_params(),
-            )
+            # Hold a concurrency slot only around the actual network call, not
+            # retry backoff, so sync completions obey the same cap as async ones.
+            with _sync_llm_semaphore():
+                response = litellm.completion(
+                    model=model,
+                    messages=messages,
+                    # Per-call litellm kwargs (default temperature=0, drop_params=True);
+                    # configure via config.set_llm_params(...) — never the litellm global.
+                    **get_llm_params(),
+                )
             content = response.choices[0].message.content
             if return_finish_reason:
                 finish_reason = "max_output_reached" if response.choices[0].finish_reason == "length" else "finished"
