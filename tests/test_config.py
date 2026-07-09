@@ -34,3 +34,8 @@ def test_legacy_yes_no_strings_coerce_to_bool():
     config = IndexConfig(if_add_node_id="yes", if_add_node_summary="no")
     assert config.if_add_node_id is True
     assert config.if_add_node_summary is False
+
+
+def test_llm_params_field_defaults_to_none():
+    assert IndexConfig().llm_params is None
+    assert IndexConfig(llm_params={"temperature": 1}).llm_params == {"temperature": 1}

@@ -8,8 +8,11 @@ import pytest
 from pageindex.config import (
     IndexConfig,
     _env_max_concurrency_default,
+    get_llm_params,
     get_max_concurrency,
+    llm_params_scope,
     max_concurrency_scope,
+    set_llm_params,
     set_max_concurrency,
 )
 from pageindex.index.utils import _llm_semaphore, llm_acompletion
@@ -21,6 +24,14 @@ def _restore_max_concurrency():
     prev = get_max_concurrency()
     yield
     set_max_concurrency(prev)
+
+
+@pytest.fixture(autouse=True)
+def _restore_llm_params():
+    """Keep tests isolated — llm params are a module global too."""
+    prev = get_llm_params()
+    yield
+    set_llm_params(**prev)
 
 
 async def _nested_llm_load(state, *, branches=5, leaves=5):
@@ -49,6 +60,34 @@ def test_llm_semaphore_bounds_concurrency_even_when_nested():
     set_max_concurrency(3)
     state = {"in_flight": 0, "peak": 0}
     asyncio.run(_nested_llm_load(state, branches=5, leaves=5))
+    assert state["peak"] == 3
+
+
+def test_llm_semaphore_is_a_true_process_wide_ceiling_across_threads():
+    # The bug this fixes: each asyncio.run() (its own event loop) used to get
+    # an independent full-size semaphore, so N concurrently-indexing threads
+    # multiplied the effective cap by N. 2 threads, cap=3 -> combined peak
+    # must stay at 3, not 6.
+    set_max_concurrency(3)
+    state = {"in_flight": 0, "peak": 0}
+    lock = threading.Lock()
+
+    async def leaf():
+        async with _llm_semaphore():
+            with lock:
+                state["in_flight"] += 1
+                state["peak"] = max(state["peak"], state["in_flight"])
+            await asyncio.sleep(0.05)
+            with lock:
+                state["in_flight"] -= 1
+
+    async def load():
+        await asyncio.gather(*(leaf() for _ in range(5)))
+
+    threads = [threading.Thread(target=lambda: asyncio.run(load())) for _ in range(2)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+
     assert state["peak"] == 3
 
 
@@ -191,6 +230,72 @@ def test_max_concurrency_scope_is_isolated_across_threads():
 
     assert seen["worker"] == 2   # worker sees its own scoped override
     assert seen["main"] == 10    # main is unaffected by the worker's scope
+
+
+def test_llm_params_scope_overrides_then_restores():
+    set_llm_params(temperature=0)
+    with llm_params_scope({"temperature": 1}):
+        assert get_llm_params()["temperature"] == 1
+    assert get_llm_params()["temperature"] == 0
+
+
+def test_llm_params_scope_none_is_a_no_op():
+    set_llm_params(temperature=0)
+    with llm_params_scope(None):
+        assert get_llm_params()["temperature"] == 0
+    assert get_llm_params()["temperature"] == 0
+
+
+def test_llm_params_scope_rejects_reserved_keys():
+    with pytest.raises(ValueError):
+        with llm_params_scope({"model": "x"}):
+            pass
+
+
+def test_llm_params_scope_is_isolated_across_threads():
+    set_llm_params(temperature=0)
+    seen = {}
+    barrier = threading.Barrier(2)
+
+    def worker():
+        with llm_params_scope({"temperature": 1}):
+            barrier.wait()
+            seen["worker"] = get_llm_params()["temperature"]
+            barrier.wait()
+
+    t = threading.Thread(target=worker)
+    t.start()
+    barrier.wait()
+    seen["main"] = get_llm_params()["temperature"]
+    barrier.wait()
+    t.join()
+
+    assert seen["worker"] == 1
+    assert seen["main"] == 0
+
+
+def test_llm_params_scope_does_not_leak_across_concurrent_indexing():
+    # The bug this fixes: set_llm_params() mutates a bare process-wide dict, so
+    # two documents indexed concurrently with different llm_params_scope()
+    # overrides must not see each other's temperature.
+    set_llm_params(temperature=0)
+    seen = {"a": None, "b": None}
+
+    async def job(name, temperature, delay_before, delay_after):
+        with llm_params_scope({"temperature": temperature}):
+            await asyncio.sleep(delay_before)
+            seen[name] = get_llm_params()["temperature"]
+            await asyncio.sleep(delay_after)
+
+    async def run():
+        await asyncio.gather(
+            job("a", 1, 0.0, 0.05),
+            job("b", 2, 0.02, 0.0),
+        )
+
+    asyncio.run(run())
+    assert seen["a"] == 1
+    assert seen["b"] == 2
 
 
 def test_utils_star_import_does_not_leak_config_name():

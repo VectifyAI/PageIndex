@@ -130,6 +130,34 @@ def test_level_based_keeps_text_when_requested():
     assert _structure_has_text(result["structure"])
 
 
+def test_build_index_scopes_llm_params_to_the_call(monkeypatch):
+    """IndexConfig(llm_params=...) must reach get_llm_params() for the duration
+    of this build_index() call only, and not leak into the process default."""
+    from pageindex.config import IndexConfig, get_llm_params, set_llm_params
+
+    set_llm_params(temperature=0)
+    seen = {}
+
+    async def fake_generate_summaries(structure, model=None):
+        seen["llm_params"] = get_llm_params()
+
+    monkeypatch.setattr(
+        "pageindex.index.utils.generate_summaries_for_structure",
+        fake_generate_summaries,
+    )
+
+    # level_based (Markdown) strategy avoids the content_based path's own real
+    # LLM-driven TOC detection, so this stays a fast, network-free unit test.
+    nodes = [ContentNode(content="# Intro\nbody", tokens=5, title="Intro", index=1, level=1)]
+    parsed = ParsedDocument(doc_name="d", nodes=nodes)
+    opt = IndexConfig(if_add_node_summary=True, if_add_doc_description=False,
+                      llm_params={"temperature": 1})
+    build_index(parsed, opt=opt)
+
+    assert seen["llm_params"]["temperature"] == 1   # scoped override was in effect
+    assert get_llm_params()["temperature"] == 0     # process default untouched afterward
+
+
 def test_check_title_appearance_tolerates_out_of_range_physical_index():
     """An LLM-emitted physical_index outside page_list must be marked 'no', not
     raise IndexError (which happens during task construction, outside the

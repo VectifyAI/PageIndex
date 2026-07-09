@@ -16,8 +16,14 @@ async def get_node_summary(node, summary_token_threshold=200, model=None):
 async def generate_summaries_for_structure_md(structure, summary_token_threshold, model=None):
     nodes = structure_to_list(structure)
     tasks = [get_node_summary(node, summary_token_threshold=summary_token_threshold, model=model) for node in nodes]
-    summaries = await asyncio.gather(*tasks)
-    
+    # return_exceptions=True: one node's summary failing must not abort
+    # summarization for the whole document — fall back to its raw text.
+    raw_summaries = await asyncio.gather(*tasks, return_exceptions=True)
+    summaries = [
+        node.get('text', '') if isinstance(s, Exception) else s
+        for node, s in zip(nodes, raw_summaries)
+    ]
+
     for node, summary in zip(nodes, summaries):
         if not node.get('nodes'):
             node['summary'] = summary

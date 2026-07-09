@@ -67,6 +67,21 @@ def test_configloader_no_longer_needs_config_yaml():
         ConfigLoader().load({"nope": 1})
 
 
+def test_configloader_coerces_legacy_yes_no_strings():
+    """A legacy caller passing 'no' must get a real False, not a truthy
+    string — page_index_main's `if opt.if_add_node_summary:` checks (bare
+    truthy, not `== 'yes'`) would otherwise silently invert caller intent and
+    fire unwanted billed LLM calls."""
+    from pageindex.index.utils import ConfigLoader
+    cfg = ConfigLoader().load({"if_add_node_summary": "no", "if_add_doc_description": "no"})
+    assert cfg.if_add_node_summary is False
+    assert cfg.if_add_doc_description is False
+    assert bool(cfg.if_add_node_summary) is False
+
+    cfg2 = ConfigLoader().load({"if_add_node_id": "yes"})
+    assert cfg2.if_add_node_id is True
+
+
 def test_md_to_tree_shim_is_the_canonical_function():
     """The shim no longer wraps md_to_tree with its own coercion — the
     canonical implementation coerces internally, so the shim is a pure

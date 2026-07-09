@@ -68,15 +68,16 @@ def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
     from .utils import (write_node_id, add_node_text, remove_structure_text,
                         generate_summaries_for_structure, generate_doc_description,
                         create_clean_structure_for_description)
-    from ..config import IndexConfig, max_concurrency_scope
+    from ..config import IndexConfig, max_concurrency_scope, llm_params_scope
 
     if opt is None:
         opt = IndexConfig(model=model) if model else IndexConfig()
 
-    # Scope the per-index concurrency cap to THIS call only (per thread/async
-    # context), so concurrent indexing of other documents isn't affected and a
-    # one-off value never sticks as the process default.
-    with max_concurrency_scope(getattr(opt, "max_concurrency", None)):
+    # Scope the per-index concurrency cap AND llm kwargs to THIS call only (per
+    # thread/async context), so concurrent indexing of other documents isn't
+    # affected and a one-off value never sticks as the process default.
+    with max_concurrency_scope(getattr(opt, "max_concurrency", None)), \
+         llm_params_scope(getattr(opt, "llm_params", None)):
         nodes = parsed.nodes
         strategy = detect_strategy(nodes)
 

@@ -46,20 +46,29 @@ Answer based only on tool output. Be concise.
 """
 
 
+def _defang_delimiters(text: str) -> str:
+    """Strip '<'/'>' so untrusted text can never form a literal <docs>/</docs>
+    (or any other tag-shaped string) that would prematurely close the
+    wrap_with_doc_context() delimiter and escape the untrusted-data boundary."""
+    return text.replace("<", "").replace(">", "")
+
+
 def wrap_with_doc_context(docs: list[dict], question: str) -> str:
     """Prepend a doc-context block to the user question for scoped queries.
 
     Document fields (especially doc_description, which is LLM-generated at
     index time) are untrusted text that may contain adversarial instructions.
     We wrap them in a <docs>...</docs> delimiter and tell the agent in the
-    system prompt to treat the block as data only.
+    system prompt to treat the block as data only. '<'/'>' are stripped from
+    the untrusted fields first so embedded content can never form a literal
+    </docs> (or any other tag) that closes the delimiter early.
     """
     lines = []
     for d in docs:
-        line = f"- {d['doc_id']}: {d.get('doc_name', '')}"
+        line = f"- {d['doc_id']}: {_defang_delimiters(d.get('doc_name', ''))}"
         desc = d.get("doc_description") or ""
         if desc:
-            line += f" — {desc}"
+            line += f" — {_defang_delimiters(desc)}"
         lines.append(line)
     label = "document" if len(docs) == 1 else "documents"
     return (

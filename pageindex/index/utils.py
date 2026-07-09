@@ -21,47 +21,103 @@ from pprint import pprint
 # `pageindex.config` submodule for those modules.
 from types import SimpleNamespace as _config
 
-from ..config import get_llm_params, get_max_concurrency
+from contextlib import asynccontextmanager
+
+from ..config import get_llm_params, get_max_concurrency, _process_wide_max_concurrency
 from ..tokens import count_tokens  # re-exported for backward compat
 
 logger = logging.getLogger(__name__)
 
 
-# One shared semaphore per event loop, bounding concurrent in-flight LLM calls.
-# Keyed by the loop object (WeakKeyDictionary drops the entry once the loop is
-# closed and garbage-collected) so each asyncio.run() gets its own, correctly
-# loop-bound semaphore. The lock only guards the tiny get-or-create against two
-# threads (each driving its own loop) racing to insert; within a single loop
-# everything is single-threaded, so no lock is needed on the hot path.
-_LLM_SEMAPHORES: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
-_LLM_SEMAPHORES_LOCK = threading.Lock()
+# TRUE process-wide ceiling on concurrent in-flight LLM calls, shared across
+# EVERY thread and event loop (a plain threading.Semaphore, not an
+# asyncio.Semaphore — those are bound to the loop that created them, so one per
+# loop would let N concurrently-indexing threads each get their own full-size
+# cap and multiply the effective bound by N). Resized lazily when the
+# process-wide default changes; resizing isn't perfectly atomic against
+# in-flight acquires, which is fine since it only happens on an explicit
+# set_max_concurrency() config change, not on the hot path.
+_PROCESS_LLM_SEMAPHORE: threading.Semaphore | None = None
+_PROCESS_LLM_SEMAPHORE_SIZE: int | None = None
+_PROCESS_LLM_SEMAPHORE_LOCK = threading.Lock()
+
+# Per-loop, per-size semaphores for a max_concurrency_scope() override that's
+# narrower than the process ceiling — isolates one call's own subtree to a
+# tighter self-imposed limit without needing to be cross-thread itself (it can
+# never let MORE calls through than the process ceiling above already allows,
+# since both are held simultaneously; see _llm_semaphore). Keyed by (loop, size)
+# rather than just loop so a later scope with a different size in the same loop
+# isn't silently ignored.
+_SCOPED_LLM_SEMAPHORES: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+_SCOPED_LLM_SEMAPHORES_LOCK = threading.Lock()
 
 
-def _llm_semaphore() -> asyncio.Semaphore:
-    """Shared per-loop cap on concurrent in-flight LLM calls.
+def _process_ceiling_semaphore() -> threading.Semaphore:
+    global _PROCESS_LLM_SEMAPHORE, _PROCESS_LLM_SEMAPHORE_SIZE
+    size = _process_wide_max_concurrency()
+    with _PROCESS_LLM_SEMAPHORE_LOCK:
+        if _PROCESS_LLM_SEMAPHORE is None or _PROCESS_LLM_SEMAPHORE_SIZE != size:
+            _PROCESS_LLM_SEMAPHORE = threading.Semaphore(size)
+            _PROCESS_LLM_SEMAPHORE_SIZE = size
+        return _PROCESS_LLM_SEMAPHORE
+
+
+def _scoped_llm_semaphore(size: int) -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    per_loop = _SCOPED_LLM_SEMAPHORES.get(loop)
+    if per_loop is None:
+        with _SCOPED_LLM_SEMAPHORES_LOCK:
+            per_loop = _SCOPED_LLM_SEMAPHORES.get(loop)
+            if per_loop is None:
+                per_loop = {}
+                _SCOPED_LLM_SEMAPHORES[loop] = per_loop
+    sem = per_loop.get(size)
+    if sem is None:
+        with _SCOPED_LLM_SEMAPHORES_LOCK:
+            sem = per_loop.get(size)
+            if sem is None:
+                sem = asyncio.Semaphore(size)
+                per_loop[size] = sem
+    return sem
+
+
+@asynccontextmanager
+async def _llm_semaphore():
+    """Bound concurrent in-flight LLM calls to a TRUE process-wide ceiling,
+    optionally narrowed further by an active max_concurrency_scope() override.
 
     Acquired only around the leaf ``litellm.acompletion`` call in
     ``llm_acompletion`` — the single point every LLM request funnels through —
-    so the cap is a TRUE global bound no matter how deeply the indexing gathers
-    nest (``tree_parser`` → ``process_large_node_recursively`` → …). Bounding at
-    the leaf rather than at each gather call site is also deadlock-free: a parent
-    coroutine awaiting its children holds no slot, so children can always
-    acquire one.
+    so the cap holds no matter how deeply the indexing gathers nest
+    (``tree_parser`` → ``process_large_node_recursively`` → …) AND no matter how
+    many threads are each running their own indexing job concurrently. Bounding
+    at the leaf rather than at each gather call site is also deadlock-free: a
+    parent coroutine awaiting its children holds no slot, so children can
+    always acquire one.
 
-    Sized from ``get_max_concurrency()`` the first time it's needed in a loop, so
-    a per-index ``max_concurrency_scope`` override in effect at that moment is
-    honored. Without this bound a many-node document opens one socket per node at
-    once and exhausts the process file-descriptor limit (Errno 24).
+    The process ceiling (threading.Semaphore, shared cross-thread) is sized from
+    the process-wide default only; a narrower max_concurrency_scope() override
+    is enforced as a second, nested, per-loop restriction — it can only
+    *tighten* the effective cap for its own call tree, never widen it past the
+    ceiling. Without the outer bound a many-node document opens one socket per
+    node at once and exhausts the process file-descriptor limit (Errno 24).
     """
-    loop = asyncio.get_running_loop()
-    sem = _LLM_SEMAPHORES.get(loop)
-    if sem is None:
-        with _LLM_SEMAPHORES_LOCK:
-            sem = _LLM_SEMAPHORES.get(loop)
-            if sem is None:
-                sem = asyncio.Semaphore(get_max_concurrency())
-                _LLM_SEMAPHORES[loop] = sem
-    return sem
+    ceiling_sem = _process_ceiling_semaphore()
+    # threading.Semaphore.acquire() blocks the calling thread, so run it off
+    # the event loop thread — otherwise it would freeze every other coroutine
+    # on this loop while waiting for a slot. release() is non-blocking and
+    # safe to call directly from any thread.
+    await asyncio.to_thread(ceiling_sem.acquire)
+    try:
+        effective = get_max_concurrency()
+        ceiling = _process_wide_max_concurrency()
+        if effective < ceiling:
+            async with _scoped_llm_semaphore(effective):
+                yield
+        else:
+            yield
+    finally:
+        ceiling_sem.release()
 
 
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
@@ -258,7 +314,14 @@ async def generate_node_summary(node, model=None):
 async def generate_summaries_for_structure(structure, model=None):
     nodes = structure_to_list(structure)
     tasks = [generate_node_summary(node, model=model) for node in nodes]
-    summaries = await asyncio.gather(*tasks)
+    # return_exceptions=True: one node's summary failing (e.g. a transient LLM
+    # error) must not abort summarization for the whole document — fall back
+    # to the node's own raw text so retrieval still has something usable.
+    raw_summaries = await asyncio.gather(*tasks, return_exceptions=True)
+    summaries = [
+        node.get('text', '') if isinstance(s, Exception) else s
+        for node, s in zip(nodes, raw_summaries)
+    ]
 
     for node, summary in zip(nodes, summaries):
         node['summary'] = summary
@@ -829,7 +892,13 @@ class ConfigLoader:
 
         self._validate_keys(user_dict)
         merged = {**self._default_dict, **user_dict}
-        return _config(**merged)
+        # Route through IndexConfig so legacy 'yes'/'no' string overrides get
+        # pydantic's bool coercion (a bare 'no' is otherwise a truthy string —
+        # page_index_main's `if opt.if_add_node_summary:` checks would silently
+        # invert the caller's intent).
+        from ..config import IndexConfig
+        validated = IndexConfig(**merged)
+        return _config(**validated.model_dump())
 
 
 def create_node_mapping(tree, include_page_ranges=False, max_page=None):

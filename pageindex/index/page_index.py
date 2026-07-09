@@ -929,13 +929,23 @@ async def verify_toc(page_list, list_result, start_index=1, N=None, model=None):
             item_with_index['list_index'] = idx  # Add the original index in list_result
             indexed_sample_list.append(item_with_index)
 
-    # Run checks concurrently
+    # Run checks concurrently. return_exceptions=True: a transient LLM failure
+    # on one sampled item must degrade that item to 'no' (same as an
+    # unavailable physical_index above), not abort verification for the
+    # whole document.
     tasks = [
         check_title_appearance(item, page_list, start_index, model)
         for item in indexed_sample_list
     ]
-    results = await asyncio.gather(*tasks)
-    
+    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+    results = []
+    for item, result in zip(indexed_sample_list, raw_results):
+        if isinstance(result, Exception):
+            results.append({'list_index': item.get('list_index'), 'answer': 'no',
+                            'title': item.get('title'), 'page_number': item.get('physical_index')})
+        else:
+            results.append(result)
+
     # Process results
     correct_count = 0
     incorrect_results = []
@@ -1022,8 +1032,14 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None)
             process_large_node_recursively(child_node, page_list, opt, logger=logger)
             for child_node in node['nodes']
         ]
-        await asyncio.gather(*tasks)
-    
+        # return_exceptions=True: one child subtree failing to expand further
+        # must not abort the whole document — it's left as a leaf at its
+        # current boundaries instead.
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for child_node, result in zip(node['nodes'], results):
+            if isinstance(result, Exception) and logger:
+                logger.error(f"Failed to expand node '{child_node.get('title')}': {result}")
+
     return node
 
 async def tree_parser(page_list, opt, doc=None, logger=None):
@@ -1058,8 +1074,13 @@ async def tree_parser(page_list, opt, doc=None, logger=None):
         process_large_node_recursively(node, page_list, opt, logger=logger)
         for node in toc_tree
     ]
-    await asyncio.gather(*tasks)
-    
+    # return_exceptions=True: one top-level node failing to expand further
+    # must not abort indexing the whole document.
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    for node, result in zip(toc_tree, results):
+        if isinstance(result, Exception) and logger:
+            logger.error(f"Failed to expand node '{node.get('title')}': {result}")
+
     return toc_tree
 
 

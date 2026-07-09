@@ -29,6 +29,11 @@ class IndexConfig(BaseModel):
     # default (get_max_concurrency(), overridable via PAGEINDEX_MAX_CONCURRENCY).
     # An explicit value here wins for this client.
     max_concurrency: int | None = None
+    # Per-call litellm completion kwargs for this client's indexing calls only
+    # (e.g. {"temperature": 1}). None = use the process-wide defaults
+    # (get_llm_params(), overridable via set_llm_params()). Scoped via
+    # llm_params_scope so it doesn't leak into other concurrent indexing calls.
+    llm_params: dict | None = None
 
     @field_validator("max_concurrency", mode="before")
     @classmethod
@@ -56,6 +61,16 @@ def _env_drop_params_default() -> bool:
 # Override/extend via set_llm_params(); the common drop_params case also has the
 # PAGEINDEX_DROP_PARAMS env shortcut.
 _LLM_PARAMS: dict = {"temperature": 0, "drop_params": _env_drop_params_default()}
+
+# Per-call override, isolated per thread / async context — mirrors
+# _MAX_CONCURRENCY_OVERRIDE below. Without this, set_llm_params() is the only
+# way to change llm params and it mutates the process-wide dict directly, so
+# concurrently indexing two documents with different llm_params_scope() would
+# otherwise leak one caller's settings (e.g. temperature) into the other's
+# in-flight calls. None = no override -> fall back to the process-wide _LLM_PARAMS.
+_LLM_PARAMS_OVERRIDE: ContextVar[dict | None] = ContextVar(
+    "pageindex_llm_params_override", default=None
+)
 
 # Structural kwargs PageIndex always supplies itself — not overridable here.
 _RESERVED_LLM_PARAMS = ("model", "messages")
@@ -121,6 +136,16 @@ def get_max_concurrency() -> int:
     return override if override is not None else _MAX_CONCURRENCY
 
 
+def _process_wide_max_concurrency() -> int:
+    """The process-wide default cap, ignoring any active max_concurrency_scope
+    override. This is the TRUE ceiling shared across every thread/event loop in
+    the process (see index/utils.py's _llm_semaphore) — a per-call override may
+    only narrow the effective cap within that ceiling, never widen it, so the
+    ceiling itself must not vary with a context-local override.
+    """
+    return _MAX_CONCURRENCY
+
+
 def set_max_concurrency(value: int) -> None:
     """Set the process-wide default cap on concurrent in-flight LLM calls."""
     global _MAX_CONCURRENCY
@@ -147,19 +172,53 @@ def max_concurrency_scope(value: int | None):
 
 
 def get_llm_params() -> dict:
-    """Return a copy of the per-call kwargs PageIndex passes to litellm."""
-    return dict(_LLM_PARAMS)
+    """Return a copy of the effective per-call kwargs PageIndex passes to litellm.
+
+    A per-index override (llm_params_scope) is merged over the process-wide
+    defaults for the current context; otherwise just the process-wide defaults
+    apply.
+    """
+    params = dict(_LLM_PARAMS)
+    override = _LLM_PARAMS_OVERRIDE.get()
+    if override:
+        params.update(override)
+    return params
 
 
 def set_llm_params(**kwargs) -> None:
-    """Override or extend the litellm completion kwargs PageIndex sends per call.
+    """Override or extend the process-wide default litellm completion kwargs.
 
     e.g. ``set_llm_params(drop_params=False, temperature=1, num_retries=5)``.
-    Applied per call; never writes litellm's global state, so it can't leak into
-    other litellm users in the same process. ``model`` / ``messages`` are
-    reserved (PageIndex supplies them) and rejected.
+    Never writes litellm's global state, so it can't leak into other litellm
+    users in the same process — but it DOES mutate PageIndex's own process-wide
+    default, so it affects every concurrent caller in this process. For a
+    one-off override scoped to a single indexing call, use ``llm_params_scope``
+    instead. ``model`` / ``messages`` are reserved (PageIndex supplies them) and
+    rejected.
     """
     reserved = [k for k in kwargs if k in _RESERVED_LLM_PARAMS]
     if reserved:
         raise ValueError(f"cannot override reserved litellm kwargs: {reserved}")
     _LLM_PARAMS.update(kwargs)
+
+
+@contextmanager
+def llm_params_scope(overrides: dict | None):
+    """Scope a per-index override of the litellm completion kwargs to the
+    current context.
+
+    ``overrides=None`` (or ``{}``) means "no override" (fall back to the
+    process-wide defaults). Isolated per thread / async context and reset on
+    exit, so concurrent indexing doesn't leak one call's kwargs into another's
+    and a one-off override never becomes the sticky new process default —
+    mirrors ``max_concurrency_scope``.
+    """
+    if overrides:
+        reserved = [k for k in overrides if k in _RESERVED_LLM_PARAMS]
+        if reserved:
+            raise ValueError(f"cannot override reserved litellm kwargs: {reserved}")
+    token = _LLM_PARAMS_OVERRIDE.set(overrides or None)
+    try:
+        yield
+    finally:
+        _LLM_PARAMS_OVERRIDE.reset(token)
