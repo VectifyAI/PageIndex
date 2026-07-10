@@ -20,6 +20,16 @@ def test_scoped_prompt_omits_list_documents():
     assert "get_page_content" in SCOPED_SYSTEM_PROMPT
 
 
+def test_prompts_get_document_guidance_matches_returned_fields():
+    # Regression: get_document returns doc_name/doc_type/doc_description — neither
+    # backend returns a page/line count, and the local backend has no status
+    # field. The prompt must not send the agent hunting for fields that don't
+    # exist (degrades QA), so it references only name and type (like the demo).
+    for prompt in (OPEN_SYSTEM_PROMPT, SCOPED_SYSTEM_PROMPT):
+        assert "page/line count" not in prompt
+        assert "get_document(doc_id) to confirm the document's name and type" in prompt
+
+
 def test_wrap_with_doc_context_cannot_be_escaped_by_untrusted_content():
     """doc_name/doc_description are untrusted (doc_name is an unsanitized
     filename; doc_description is LLM-generated from document content). Neither
