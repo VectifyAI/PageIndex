@@ -50,6 +50,31 @@ def test_retrieve_parse_pages_delegates_to_canonical_and_enforces_dos_cap():
         _parse_pages("1-99999999")
 
 
+def test_parse_pages_caps_a_huge_range_without_materializing_it():
+    """Regression: the 1000-page cap was checked only AFTER
+    `result.extend(range(start, end + 1))`, so a single huge span like
+    '1-2000000000' allocated billions of ints and OOM'd before the check ran.
+    The span must be rejected up front, quickly, without building the list."""
+    import time
+    import pytest
+    from pageindex.index.utils import parse_pages
+
+    start = time.monotonic()
+    with pytest.raises(ValueError, match="too large"):
+        parse_pages("1-2000000000")
+    # Must be near-instant (no billion-element allocation). Generous bound to
+    # avoid flakiness while still failing loudly on a re-materializing regression.
+    assert time.monotonic() - start < 1.0
+
+    # Boundary: exactly 1000 pages is allowed; 1001 is rejected.
+    assert parse_pages("1-1000") == list(range(1, 1001))
+    with pytest.raises(ValueError, match="too large"):
+        parse_pages("1-1001")
+    # A range that fits but whose accumulation across parts crosses the cap.
+    with pytest.raises(ValueError, match="too large"):
+        parse_pages("1-600,700-1400")
+
+
 def test_retrieve_get_pdf_page_content_falls_back_to_canonical(tmp_path, monkeypatch):
     """When no cached 'pages' are present, the file-read fallback must
     delegate to the canonical get_pdf_page_content instead of re-implementing

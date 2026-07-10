@@ -27,6 +27,14 @@ class SQLiteStorage:
         self._local = threading.local()
         self._connections: list[sqlite3.Connection] = []
         self._conn_lock = threading.Lock()
+        # Bumped by close(). A thread caches its connection in thread-local
+        # storage, so after close() every OTHER thread's thread-local still
+        # points at a now-closed connection. Comparing the cached generation
+        # against this counter lets _get_conn detect that and reconnect, instead
+        # of handing back a closed connection (sqlite3.ProgrammingError). close()
+        # can only touch its OWN thread-local, so this is the only way to
+        # invalidate the others consistently.
+        self._generation = 0
         # Serializes the (fast) write operations within this process so
         # concurrent indexing threads don't collide on WAL's single writer
         # ("database is locked"). Reads stay concurrent; the expensive LLM
@@ -36,8 +44,13 @@ class SQLiteStorage:
         self._init_schema()
 
     def _get_conn(self) -> sqlite3.Connection:
-        """Return a thread-local SQLite connection."""
-        if not hasattr(self._local, "conn"):
+        """Return a thread-local SQLite connection.
+
+        Reconnects if this thread has no connection yet OR its cached connection
+        was invalidated by a close() on another thread (generation mismatch).
+        """
+        if (not hasattr(self._local, "conn")
+                or getattr(self._local, "generation", None) != self._generation):
             # Each thread gets its own connection (threading.local), so
             # statements never race. check_same_thread=False exists solely so
             # close() can close every tracked connection from whichever thread
@@ -55,6 +68,7 @@ class SQLiteStorage:
             conn.execute("PRAGMA foreign_keys=ON")
             conn.execute("PRAGMA busy_timeout=10000")
             self._local.conn = conn
+            self._local.generation = self._generation
             with self._conn_lock:
                 self._connections.append(conn)
         return self._local.conn
@@ -213,6 +227,10 @@ class SQLiteStorage:
                 except Exception:
                     pass
             self._connections.clear()
+            # Invalidate every thread's cached connection. close() can only
+            # del its OWN thread-local, so the bump is what makes _get_conn on
+            # any other thread reconnect instead of reusing a closed handle.
+            self._generation += 1
         if hasattr(self._local, "conn"):
             del self._local.conn
 

@@ -139,6 +139,46 @@ def test_close_closes_connections_created_in_other_threads(storage):
         conns["worker"].execute("SELECT 1")
 
 
+def test_worker_reconnects_via_get_conn_after_close(storage):
+    """Regression: after close(), a thread that had already cached a connection
+    in thread-local storage would get that now-CLOSED handle back from
+    _get_conn (close() can only del its own thread-local), raising
+    ProgrammingError instead of transparently reconnecting. A generation bump
+    on close() must make the SAME thread's next _get_conn hand back a fresh,
+    working connection."""
+    import threading
+
+    storage.create_collection("papers")
+
+    cached = threading.Event()
+    closed = threading.Event()
+    result = {}
+
+    def worker():
+        # 1. cache a connection in this thread's thread-local
+        storage._get_conn().execute("SELECT 1")
+        cached.set()
+        # 2. wait until the main thread closed the storage (invalidating it)
+        closed.wait(timeout=5)
+        # 3. reuse from the SAME thread -> must reconnect, not reuse closed conn
+        try:
+            result["val"] = storage._get_conn().execute("SELECT 1").fetchone()[0]
+            result["list"] = storage.list_collections()
+        except Exception as e:  # noqa: BLE001 - record for assertion
+            result["err"] = f"{type(e).__name__}: {e}"
+
+    t = threading.Thread(target=worker)
+    t.start()
+    cached.wait(timeout=5)
+    storage.close()  # closes + invalidates the worker's cached connection
+    closed.set()
+    t.join(timeout=5)
+
+    assert "err" not in result, f"reconnect after close failed: {result.get('err')}"
+    assert result["val"] == 1
+    assert result["list"] == ["papers"]
+
+
 def test_duplicate_file_hash_in_collection_raises(storage):
     """UNIQUE(collection_name, file_hash) guards the add-same-file race."""
     import sqlite3

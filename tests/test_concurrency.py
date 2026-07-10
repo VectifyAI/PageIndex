@@ -290,6 +290,56 @@ def test_llm_completion_holds_the_shared_semaphore(monkeypatch):
     assert state["peak"] == 1
 
 
+def test_sync_llm_completion_on_event_loop_does_not_deadlock(monkeypatch):
+    # Regression: _sync_llm_semaphore used a BLOCKING ceiling acquire. Sync LLM
+    # helpers (check_toc, process_no_toc, toc_transformer, …) run synchronously
+    # ON the event loop (nested inside the async meta_processor). If async
+    # llm_acompletion holders occupy every ceiling permit across their awaits,
+    # a blocking acquire froze the loop -> the holders could never resume to
+    # release their permits -> permanent deadlock. The sync path must never
+    # block the running loop.
+    set_max_concurrency(2)
+
+    async def fake_acompletion(**kwargs):
+        await asyncio.sleep(0.3)  # hold a ceiling permit across the await
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
+        )
+
+    def fake_completion(**kwargs):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(
+                message=SimpleNamespace(content="sync-ok"), finish_reason="stop")]
+        )
+
+    monkeypatch.setattr("litellm.acompletion", fake_acompletion)
+    monkeypatch.setattr("litellm.completion", fake_completion)
+
+    async def run():
+        # Both ceiling permits taken by async holders, held across their await.
+        holders = [asyncio.create_task(llm_acompletion("m", f"p{i}")) for i in range(2)]
+        await asyncio.sleep(0.05)  # let them acquire the permits
+        # Sync call on the loop thread: pre-fix this blocks forever waiting for a
+        # permit the holders own and can't release (loop is frozen).
+        result = llm_completion("m", "sync")
+        await asyncio.gather(*holders)
+        return result
+
+    # Run in a thread with a join timeout so a regression FAILS instead of
+    # hanging CI: a real deadlock freezes the loop, so asyncio.wait_for can't
+    # cancel it (its timeout callback never runs on the frozen loop).
+    box = {}
+
+    def target():
+        box["result"] = asyncio.run(run())
+
+    t = threading.Thread(target=target, daemon=True)
+    t.start()
+    t.join(timeout=8)
+    assert not t.is_alive(), "deadlock: sync llm_completion blocked the event loop"
+    assert box["result"] == "sync-ok"
+
+
 def test_run_async_propagates_scope_into_worker_thread():
     # When build_index runs inside an already-running loop, _run_async hops to a
     # worker thread. The max_concurrency_scope override must ride along (copied

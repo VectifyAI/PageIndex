@@ -116,11 +116,34 @@ def _sync_llm_semaphore():
 
     It uses the same process-wide ceiling so sync and async LLM calls share one
     real cap. A scoped override can only narrow that cap for the active context.
+
+    A *blocking* ceiling acquire is only safe OFF the event-loop thread. Several
+    sync LLM helpers (``check_toc`` → ``toc_detector_single_page``,
+    ``process_no_toc`` → ``generate_toc_init``, ``toc_transformer``, …) are
+    called synchronously from inside async coroutines (``meta_processor`` →
+    ``process_large_node_recursively``), i.e. ON the running loop. There, the
+    async ``_llm_semaphore`` holders own the ceiling permits and can only
+    release them by resuming on that same loop — so a blocking acquire here
+    would freeze the loop and *deadlock*: the permit it waits for can never be
+    freed. When we detect a running loop we therefore take a slot only if one is
+    immediately free (non-blocking) and otherwise proceed without it. That's
+    safe: a sync call monopolizes the loop thread while it runs, so it's already
+    serialized on this loop and can't multiply the in-flight count beyond one
+    extra per loop.
     """
+    try:
+        asyncio.get_running_loop()
+        on_event_loop = True
+    except RuntimeError:
+        on_event_loop = False
+
     ceiling_sem = _process_ceiling_semaphore()
-    ceiling_sem.acquire()
-    # Only set once the permit is actually held (mirrors _llm_semaphore): guards
-    # against releasing a permit we never acquired if acquire() is interrupted.
+    # Blocking acquire() (off-loop) always returns True; acquire(False) (on-loop)
+    # may return False, meaning "no free permit — proceed without one" rather
+    # than block the loop into a deadlock.
+    held_ceiling = ceiling_sem.acquire(False) if on_event_loop else ceiling_sem.acquire()
+    # Only track a permit we actually hold (mirrors _llm_semaphore): guards
+    # against releasing one we never acquired.
     scoped_sem = None
     try:
         effective = get_max_concurrency()
@@ -128,13 +151,19 @@ def _sync_llm_semaphore():
         if effective < ceiling:
             candidate = _max_concurrency_scope_semaphore()
             if candidate is not None:
-                candidate.acquire()
-                scoped_sem = candidate
+                # Same rule for the scoped cap: never block the loop for it.
+                if on_event_loop:
+                    if candidate.acquire(False):
+                        scoped_sem = candidate
+                else:
+                    candidate.acquire()
+                    scoped_sem = candidate
         yield
     finally:
         if scoped_sem is not None:
             scoped_sem.release()
-        ceiling_sem.release()
+        if held_ceiling:
+            ceiling_sem.release()
 
 
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
@@ -530,6 +559,9 @@ def remove_structure_text(data):
 
 # ── Functions migrated from retrieve.py ──────────────────────────────────────
 
+_MAX_PAGES = 1000
+
+
 def parse_pages(pages: str) -> list[int]:
     """Parse a pages string like '5-7', '3,8', or '12' into a sorted list of ints."""
     result = []
@@ -539,13 +571,23 @@ def parse_pages(pages: str) -> list[int]:
             start, end = int(part.split('-', 1)[0].strip()), int(part.split('-', 1)[1].strip())
             if start > end:
                 raise ValueError(f"Invalid range '{part}': start must be <= end")
+            # Bound the span BEFORE materializing range() into the list. Checking
+            # len(result) only after `result.extend(range(...))` is too late: a
+            # single huge span like '1-2000000000' allocates billions of ints
+            # and exhausts memory before the cap is ever reached (DoS). page_nums
+            # is attacker/LLM-reachable via get_page_content.
+            span = end - start + 1
+            if span > _MAX_PAGES or len(result) + span > _MAX_PAGES:
+                raise ValueError(f"Page range too large: max {_MAX_PAGES} pages")
             result.extend(range(start, end + 1))
         else:
+            if len(result) + 1 > _MAX_PAGES:
+                raise ValueError(f"Page range too large: max {_MAX_PAGES} pages")
             result.append(int(part))
     result = [p for p in result if p >= 1]
     result = sorted(set(result))
-    if len(result) > 1000:
-        raise ValueError(f"Page range too large: {len(result)} pages (max 1000)")
+    if len(result) > _MAX_PAGES:
+        raise ValueError(f"Page range too large: {len(result)} pages (max {_MAX_PAGES})")
     return result
 
 

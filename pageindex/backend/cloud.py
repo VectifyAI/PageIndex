@@ -396,6 +396,13 @@ class CloudBackend:
                     timeout=120,
                 )
                 resp_holder["resp"] = resp
+                # The consumer may have abandoned the stream while we were still
+                # blocked in requests.post() (its connect phase, before resp
+                # existed to close). Now that resp exists, bail immediately
+                # rather than reading/draining a stream nobody is listening to;
+                # the finally block closes resp and pushes the sentinel.
+                if stop.is_set():
+                    return
                 if resp.status_code != 200:
                     body = resp.text[:500] if resp.text else ""
                     raise CloudAPIError(
