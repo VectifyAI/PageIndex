@@ -13,12 +13,11 @@ import urllib.parse
 import requests
 from typing import AsyncIterator
 
+from ..cloud_api import API_BASE  # single source of truth for the cloud base URL
 from ..errors import CloudAPIError, DocumentNotFoundError, PageIndexError
 from ..events import QueryEvent
 
 logger = logging.getLogger(__name__)
-
-API_BASE = "https://api.pageindex.ai"
 
 _INTERNAL_TOOLS = frozenset({"ToolSearch", "Read", "Grep", "Glob", "Bash", "Edit", "Write"})
 

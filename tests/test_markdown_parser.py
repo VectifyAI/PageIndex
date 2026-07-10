@@ -100,3 +100,22 @@ def test_tilde_fenced_code_blocks_are_recognized(tmp_path):
     titles = [n.title for n in result.nodes]
     assert titles == ["Real Header", "Real Sub"]
     assert "not a real header" not in " ".join(n.title for n in result.nodes)
+
+
+def test_backtick_fence_is_not_closed_by_a_tilde_line(tmp_path):
+    """CommonMark: a ```-opened fence is closed only by ```. A ~~~ line inside
+    it is content, so a '#'-prefixed line stays inside the still-open block and
+    a real heading after the real close is still recognized."""
+    md = tmp_path / "mixed.md"
+    md.write_text(
+        "# Real Header\n"
+        "```\n"
+        "~~~\n"              # tilde line INSIDE the backtick fence — NOT a close
+        "# not a heading\n"  # stays inside the still-open code block
+        "```\n"              # this (matching char) closes the fence
+        "## Real Sub\n"
+    )
+    result = MarkdownParser().parse(str(md))
+    titles = [n.title for n in result.nodes]
+    assert titles == ["Real Header", "Real Sub"]
+    assert "not a heading" not in " ".join(n.title for n in result.nodes)

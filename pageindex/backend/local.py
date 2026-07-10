@@ -252,13 +252,17 @@ class LocalBackend:
         - doc_ids=None (open mode): includes ``list_documents``; agent picks docs itself.
         - doc_ids=[...] (scoped mode): no ``list_documents``; the other tools
           hard-enforce the whitelist and reject out-of-scope doc_ids.
+
+        Note ``is not None``: an empty list is a scope of *nothing* (reject every
+        doc), NOT open mode. Using truthiness would let ``doc_ids=[]`` collapse to
+        ``None`` and silently grant access to the whole collection.
         """
         from agents import function_tool
         import json
         storage = self._storage
         col_name = collection
         backend = self
-        scope = set(doc_ids) if doc_ids else None
+        scope = set(doc_ids) if doc_ids is not None else None
 
         def _reject(doc_id: str) -> str | None:
             if scope is not None and doc_id not in scope:

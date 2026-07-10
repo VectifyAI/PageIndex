@@ -135,7 +135,7 @@ def test_get_ocr_and_tree_use_legacy_urls(monkeypatch):
 
     assert get_calls[0]["method"] == "GET"
     assert get_calls[0]["url"] == "https://api.pageindex.ai/doc/doc-1/?type=ocr&format=page"
-    assert get_calls[1]["url"] == "https://api.pageindex.ai/doc/doc-1/?type=tree&summary=True"
+    assert get_calls[1]["url"] == "https://api.pageindex.ai/doc/doc-1/?type=tree&summary=true"
 
 
 def test_get_ocr_rejects_invalid_format():
@@ -263,6 +263,22 @@ def test_chat_completions_stream_errors_are_pageindex_api_error(monkeypatch):
 
     with pytest.raises(PageIndexAPIError, match="Failed to stream chat completion: stream stalled"):
         list(stream)
+
+
+def test_get_tree_sends_lowercase_summary_bool(monkeypatch):
+    # A Python f-string renders True/False capitalized; the API expects
+    # summary=true/false. A case-sensitive server would silently drop summaries.
+    calls = []
+
+    def fake_request(method, url, **kwargs):
+        calls.append(url)
+        return FakeResponse(payload={"result": []})
+
+    monkeypatch.setattr("pageindex.cloud_api.requests.request", fake_request)
+    PageIndexClient("pi-test").get_tree("doc-1", node_summary=True)
+    assert "summary=true" in calls[0] and "summary=True" not in calls[0]
+    PageIndexClient("pi-test").get_tree("doc-1", node_summary=False)
+    assert "summary=false" in calls[1]
 
 
 def test_delete_document_tolerates_empty_success_body(monkeypatch):

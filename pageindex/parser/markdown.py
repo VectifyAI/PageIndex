@@ -28,19 +28,27 @@ class MarkdownParser:
 
     def _extract_headers(self, lines: list[str]) -> list[dict]:
         header_pattern = r"^(#{1,6})\s+(.+)$"
-        # CommonMark allows both backtick and tilde fences; only recognizing
-        # backticks let a '#'-prefixed line inside a ~~~-fenced block (e.g. a
-        # shell comment in a code sample) be misparsed as a real heading.
-        code_block_pattern = r"^(?:```|~~~)"
+        # CommonMark allows both backtick and tilde fences, and a fence is
+        # closed only by one of the SAME character. Track which char opened the
+        # block so a ~~~ line inside a ```-fenced block (or vice versa) is
+        # treated as content, not a close — otherwise the block appears to end
+        # early and '#'-prefixed lines inside it get misparsed as headings.
+        fence_pattern = r"^(`{3,}|~{3,})"
         headers = []
-        in_code_block = False
+        open_fence = None  # the fence char ('`' or '~') of the open block, or None
 
         for line_num, line in enumerate(lines, 1):
             stripped = line.strip()
-            if re.match(code_block_pattern, stripped):
-                in_code_block = not in_code_block
+            fence = re.match(fence_pattern, stripped)
+            if fence:
+                marker = fence.group(1)[0]
+                if open_fence is None:
+                    open_fence = marker          # open a block
+                elif open_fence == marker:
+                    open_fence = None            # matching char closes it
+                # a non-matching fence char while a block is open is content
                 continue
-            if not in_code_block and stripped:
+            if open_fence is None and stripped:
                 match = re.match(header_pattern, stripped)
                 if match:
                     headers.append({

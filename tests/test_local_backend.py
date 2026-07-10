@@ -127,6 +127,18 @@ def test_scoped_mode_allows_in_scope_doc_id(populated_backend):
     assert out.get("doc_name") == "alpha.pdf"
 
 
+def test_empty_doc_ids_is_scoped_to_nothing_not_open_mode(populated_backend):
+    # doc_ids=[] means "scope to no documents", NOT open mode. It must exclude
+    # list_documents and reject every doc_id — otherwise an empty list would
+    # collapse to None (truthiness) and silently grant access to the whole
+    # collection.
+    tools = populated_backend.get_agent_tools("papers", doc_ids=[])
+    by_name = {t.name: t for t in tools.function_tools}
+    assert "list_documents" not in by_name
+    out = json.loads(_invoke_tool(by_name["get_document"], {"doc_id": "d1"}))
+    assert "error" in out and "not in scope" in out["error"]
+
+
 @pytest.mark.parametrize("bad_pages", ["all", "5-", "abc", "3-1"])
 def test_get_page_content_returns_actionable_error_for_bad_page_spec(populated_backend, bad_pages):
     # A malformed page spec must come back as a correctable JSON error (like the

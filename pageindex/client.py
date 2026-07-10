@@ -5,6 +5,7 @@ from typing import Any, Iterator
 
 from typing_extensions import deprecated
 
+from .cloud_api import API_BASE
 from .collection import Collection
 from .config import IndexConfig
 from .errors import PageIndexAPIError
@@ -50,7 +51,7 @@ class PageIndexClient:
         # Or use LocalClient / CloudClient for explicit mode selection
     """
 
-    BASE_URL = "https://api.pageindex.ai"
+    BASE_URL = API_BASE  # single source of truth lives in cloud_api
 
     def __init__(self, api_key: str | None = None, model: str = None,
                  retrieve_model: str = None, storage_path: str = None,

@@ -8,11 +8,16 @@ import requests
 
 from .errors import PageIndexAPIError
 
+# Single source of truth for the cloud API base URL — imported by the modern
+# CloudBackend (as API_BASE) and PageIndexClient so a staging/migration change
+# only has to happen here.
+API_BASE = "https://api.pageindex.ai"
+
 
 class LegacyCloudAPI:
     """Compatibility layer for the pageindex 0.2.x cloud SDK API."""
 
-    BASE_URL = "https://api.pageindex.ai"
+    BASE_URL = API_BASE
 
     def __init__(self, api_key: str, base_url: str | None = None):
         self.api_key = api_key
@@ -85,7 +90,11 @@ class LegacyCloudAPI:
     def get_tree(self, doc_id: str, node_summary: bool = False) -> dict[str, Any]:
         response = self._request(
             "GET",
-            f"/doc/{self._enc(doc_id)}/?type=tree&summary={node_summary}",
+            # Lowercase the bool: a Python f-string renders True/False with a
+            # capital letter, but the API expects summary=true/false (the modern
+            # CloudBackend sends lowercase). A case-sensitive server would
+            # otherwise silently drop node summaries.
+            f"/doc/{self._enc(doc_id)}/?type=tree&summary={'true' if node_summary else 'false'}",
             "Failed to get tree result",
         )
         return response.json()
