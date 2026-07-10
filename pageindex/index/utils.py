@@ -165,8 +165,17 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
             if i < max_retries - 1:
                 time.sleep(1)
             else:
-                logger.error('Max retries reached for prompt: ' + prompt)
-                raise RuntimeError(f"LLM call failed after {max_retries} retries") from e
+                # Degrade gracefully instead of aborting the whole index: a single
+                # persistently-failing call returns an empty result so callers can
+                # skip that step (extract_json('') -> {} -> .get(default)) and the
+                # rest of the document still gets indexed. Logged at WARNING so the
+                # failure is visible, not silent.
+                logger.warning(
+                    "LLM completion failed after %d retries; degrading to an empty "
+                    "result so the caller can skip this step. Last error: %s",
+                    max_retries, e,
+                )
+                return ("", "error") if return_finish_reason else ""
 
 
 
@@ -192,8 +201,16 @@ async def llm_acompletion(model, prompt):
             if i < max_retries - 1:
                 await asyncio.sleep(1)
             else:
-                logger.error('Max retries reached for prompt: ' + prompt)
-                raise RuntimeError(f"LLM call failed after {max_retries} retries") from e
+                # Degrade gracefully (see llm_completion): return an empty result
+                # so the caller skips this step and the rest of the document still
+                # indexes. The gather sites still keep return_exceptions=True to
+                # absorb any non-LLM error. WARNING so it's visible, not silent.
+                logger.warning(
+                    "Async LLM completion failed after %d retries; degrading to an "
+                    "empty result so the caller can skip this step. Last error: %s",
+                    max_retries, e,
+                )
+                return ""
 
 
 def extract_json(content):
