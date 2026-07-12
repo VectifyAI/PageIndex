@@ -628,7 +628,7 @@ def process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_che
     matching_pairs = extract_matching_page_pairs(toc_with_page_number, toc_with_physical_index, start_page_index)
     logger.info(f'matching_pairs: {matching_pairs}')
 
-    offset = calculate_page_offset(matching_pairs)
+    offset = calculate_page_offset(matching_pairs) or 0
     logger.info(f'offset: {offset}')
 
     toc_with_page_number = add_page_offset_to_toc_json(toc_with_page_number, offset)
@@ -671,11 +671,11 @@ def process_none_page_numbers(toc_items, page_list, start_index=1, model=None):
                     continue
 
             item_copy = copy.deepcopy(item)
-            del item_copy['page']
+            item_copy.pop('page', None)
             result = add_page_number_to_toc(page_contents, item_copy, model)
             if isinstance(result[0]['physical_index'], str) and result[0]['physical_index'].startswith('<physical_index'):
                 item['physical_index'] = int(result[0]['physical_index'].split('_')[-1].rstrip('>').strip())
-                del item['page']
+                item.pop('page', None)
     
     return toc_items
 
