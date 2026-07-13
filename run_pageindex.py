@@ -64,7 +64,11 @@ if __name__ == "__main__":
             "if_add_node_text": args.if_add_node_text,
         }.items() if v is not None
     }
-    opt = IndexConfig(**config_overrides)
+    # Legacy config.yaml is the base when present, CLI args win
+    try:
+        opt = IndexConfig.from_yaml(**config_overrides)
+    except FileNotFoundError:
+        opt = IndexConfig(**config_overrides)
 
     if args.pdf_path:
         # Validate PDF file

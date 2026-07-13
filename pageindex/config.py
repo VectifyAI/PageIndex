@@ -46,6 +46,17 @@ class IndexConfig(BaseModel):
             _validate_max_concurrency(v)
         return v
 
+    @classmethod
+    def from_yaml(cls, path: str = None, **overrides) -> "IndexConfig":
+        """Load config from a YAML file ("yes"/"no" accepted for booleans);
+        keyword overrides take precedence. Defaults to the package config.yaml."""
+        import yaml
+        if path is None:
+            path = os.path.join(os.path.dirname(__file__), "config.yaml")
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        return cls(**{**data, **overrides})
+
 
 def _env_drop_params_default() -> bool:
     return os.getenv("PAGEINDEX_DROP_PARAMS", "true").strip().lower() not in (
