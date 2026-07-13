@@ -14,12 +14,19 @@ import requests
 from typing import AsyncIterator
 
 from ..cloud_api import API_BASE  # single source of truth for the cloud base URL
-from ..errors import CloudAPIError, DocumentNotFoundError, PageIndexError
+from ..errors import AUTH_HINT, CloudAPIError, DocumentNotFoundError, PageIndexError
 from ..events import QueryEvent
 
 logger = logging.getLogger(__name__)
 
 _INTERNAL_TOOLS = frozenset({"ToolSearch", "Read", "Grep", "Glob", "Bash", "Edit", "Write"})
+
+
+def _as_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 class CloudBackend:
@@ -75,8 +82,10 @@ class CloudBackend:
                     continue
                 if resp.status_code != 200:
                     body = resp.text[:500] if resp.text else ""
-                    raise CloudAPIError(f"Cloud API error {resp.status_code}: {body}",
-                                        status_code=resp.status_code)
+                    msg = f"Cloud API error {resp.status_code}: {body}"
+                    if resp.status_code == 401:
+                        msg += f" — {AUTH_HINT}"
+                    raise CloudAPIError(msg, status_code=resp.status_code)
                 return resp.json() if resp.content else {}
             except requests.RequestException as e:
                 if attempt == retries - 1:
@@ -102,11 +111,21 @@ class CloudBackend:
 
     # ── Collection management (mapped to folders) ─────────────────────────
 
+    def _create_folder(self, name: str) -> str:
+        """POST /folder/ and return the new folder id, never a falsy value."""
+        resp = self._request("POST", "/folder/", json={"name": name})
+        folder_id = resp.get("folder", {}).get("id")
+        if not folder_id:
+            raise PageIndexError(
+                f"Cloud API returned no folder id when creating {name!r} "
+                f"(response keys: {list(resp)})"
+            )
+        return folder_id
+
     def create_collection(self, name: str) -> None:
         self._validate_collection_name(name)
         try:
-            resp = self._request("POST", "/folder/", json={"name": name})
-            self._folder_id_cache[name] = resp.get("folder", {}).get("id")
+            self._folder_id_cache[name] = self._create_folder(name)
         except CloudAPIError as e:
             if e.status_code in self._FOLDER_UNAVAILABLE:
                 self._warn_folder_upgrade()
@@ -118,12 +137,11 @@ class CloudBackend:
         self._validate_collection_name(name)
         try:
             data = self._request("GET", "/folders/")
-            for folder in data.get("folders", []):
+            for folder in data.get("folders", []) or []:
                 if folder.get("name") == name:
                     self._folder_id_cache[name] = folder["id"]
                     return
-            resp = self._request("POST", "/folder/", json={"name": name})
-            self._folder_id_cache[name] = resp.get("folder", {}).get("id")
+            self._folder_id_cache[name] = self._create_folder(name)
         except CloudAPIError as e:
             if e.status_code in self._FOLDER_UNAVAILABLE:
                 self._warn_folder_upgrade()
@@ -148,16 +166,15 @@ class CloudBackend:
                 self._folder_id_cache[name] = None
                 return None
             raise
-        for folder in data.get("folders", []):
+        for folder in data.get("folders", []) or []:
             if folder.get("name") == name:
                 self._folder_id_cache[name] = folder["id"]
                 return folder["id"]
-        self._folder_id_cache[name] = None
         return None
 
     def list_collections(self) -> list[str]:
         data = self._request("GET", "/folders/")
-        return [f["name"] for f in data.get("folders", [])]
+        return [f["name"] for f in data.get("folders", []) or []]
 
     def delete_collection(self, name: str) -> None:
         folder_id = self._get_folder_id(name)
@@ -243,23 +260,29 @@ class CloudBackend:
         from ..index.utils import parse_pages
         page_nums = set(parse_pages(pages))
         all_pages = resp.get("pages", resp.get("ocr", resp.get("result", [])))
-        if isinstance(all_pages, list):
-            return [
-                {"page": p.get("page", p.get("page_index")),
-                 "content": p.get("content", p.get("markdown", "")),
-                 # Cloud OCR pages carry an `images` list (empty on text-only
-                 # pages). Preserve it — omitting when empty, mirroring the local
-                 # backend — so cloud callers get the same PageContent shape and
-                 # the SDK-prompted UI can render figures.
-                 **({"images": p["images"]} if p.get("images") else {})}
-                for p in all_pages
-                if p.get("page", p.get("page_index")) in page_nums
-            ]
-        return []
+        if not isinstance(all_pages, list):
+            return []
+        result = []
+        for p in all_pages:
+            page = _as_int(p.get("page", p.get("page_index")))
+            if page not in page_nums:
+                continue
+            entry = {"page": page,
+                     "content": p.get("content", p.get("markdown", ""))}
+            # Cloud OCR pages carry an `images` list (empty on text-only
+            # pages). Preserve it — omitting when empty, mirroring the local
+            # backend — so cloud callers get the same PageContent shape and
+            # the SDK-prompted UI can render figures.
+            if p.get("images"):
+                entry["images"] = p["images"]
+            result.append(entry)
+        return result
 
     @staticmethod
-    def _normalize_tree(nodes: list) -> list:
+    def _normalize_tree(nodes: list | None) -> list:
         """Normalize cloud tree nodes to match local schema."""
+        if not nodes:
+            return []
         result = []
         for node in nodes:
             normalized = {
@@ -290,7 +313,7 @@ class CloudBackend:
             if folder_id:
                 params["folder_id"] = folder_id
             data = self._request("GET", "/docs/", params=params)
-            batch = data.get("documents", [])
+            batch = data.get("documents", []) or []
             docs.extend(
                 {
                     "doc_id": d.get("id", ""),
@@ -405,10 +428,10 @@ class CloudBackend:
                     return
                 if resp.status_code != 200:
                     body = resp.text[:500] if resp.text else ""
-                    raise CloudAPIError(
-                        f"Cloud streaming error {resp.status_code}: {body}",
-                        status_code=resp.status_code,
-                    )
+                    msg = f"Cloud streaming error {resp.status_code}: {body}"
+                    if resp.status_code == 401:
+                        msg += f" — {AUTH_HINT}"
+                    raise CloudAPIError(msg, status_code=resp.status_code)
 
                 current_tool_name = None
                 current_tool_args: list[str] = []

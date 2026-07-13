@@ -65,7 +65,7 @@ def wrap_with_doc_context(docs: list[dict], question: str) -> str:
     """
     lines = []
     for d in docs:
-        line = f"- {d['doc_id']}: {_defang_delimiters(d.get('doc_name', ''))}"
+        line = f"- {_defang_delimiters(str(d['doc_id']))}: {_defang_delimiters(d.get('doc_name', ''))}"
         desc = d.get("doc_description") or ""
         if desc:
             line += f" — {_defang_delimiters(desc)}"

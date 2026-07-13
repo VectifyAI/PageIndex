@@ -55,3 +55,10 @@ class FileTypeError(PageIndexError, ValueError):
     instead of) a bare ValueError one.
     """
     pass
+
+
+AUTH_HINT = (
+    "api_key must be a PageIndex cloud API key (https://dash.pageindex.ai/api-keys). "
+    "For local mode, omit api_key and set your LLM provider key "
+    "(e.g. OPENAI_API_KEY) in the environment."
+)

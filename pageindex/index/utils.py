@@ -521,9 +521,9 @@ def create_clean_structure_for_description(structure):
 
 
 def _get_text_of_pages(page_list, start_page, end_page):
-    """Concatenate text from page_list for pages [start_page, end_page] (1-indexed)."""
+    """Concatenate text from page_list for pages [start_page, end_page] (1-indexed), clamped to the valid page range."""
     text = ""
-    for page_num in range(start_page - 1, end_page):
+    for page_num in range(max(start_page, 1) - 1, min(end_page, len(page_list))):
         text += page_list[page_num][0]
     return text
 
@@ -831,15 +831,12 @@ def get_page_tokens(pdf_path, model=None, pdf_parser="PyPDF2"):
 
 
 def get_text_of_pdf_pages(pdf_pages, start_page, end_page):
-    text = ""
-    for page_num in range(start_page-1, end_page):
-        text += pdf_pages[page_num][0]
-    return text
+    return _get_text_of_pages(pdf_pages, start_page, end_page)
 
 
 def get_text_of_pdf_pages_with_labels(pdf_pages, start_page, end_page):
     text = ""
-    for page_num in range(start_page-1, end_page):
+    for page_num in range(max(start_page, 1) - 1, min(end_page, len(pdf_pages))):
         text += f"<physical_index_{page_num+1}>\n{pdf_pages[page_num][0]}\n<physical_index_{page_num+1}>\n"
     return text
 

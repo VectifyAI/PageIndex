@@ -6,7 +6,7 @@ from typing import Any, Iterator
 
 import requests
 
-from .errors import PageIndexAPIError
+from .errors import AUTH_HINT, PageIndexAPIError
 
 # Single source of truth for the cloud API base URL — imported by the modern
 # CloudBackend (as API_BASE) and PageIndexClient so a staging/migration change
@@ -47,7 +47,10 @@ class LegacyCloudAPI:
             raise PageIndexAPIError(f"{error_prefix}: {e}") from e
 
         if response.status_code != 200:
-            raise PageIndexAPIError(f"{error_prefix}: {response.text}")
+            msg = f"{error_prefix}: {response.text}"
+            if response.status_code == 401:
+                msg += f" — {AUTH_HINT}"
+            raise PageIndexAPIError(msg)
         return response
 
     def submit_document(
