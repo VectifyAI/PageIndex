@@ -942,8 +942,9 @@ def add_node_text_with_labels(node, pdf_pages):
 
 
 class ConfigLoader:
-    """Legacy 0.2.x config helper. Defaults now come from IndexConfig — the
-    old ``config.yaml`` no longer ships. Prefer ``pageindex.IndexConfig``.
+    """Legacy 0.2.x config helper. Defaults now come from IndexConfig; this
+    class no longer reads the packaged ``config.yaml`` (the CLI still uses it
+    via ``IndexConfig.from_yaml``). Prefer ``pageindex.IndexConfig``.
     """
 
     def __init__(self, default_path=None):

@@ -32,7 +32,7 @@ if __name__ == "__main__":
     parser.add_argument('--if-add-node-summary', nargs='?', const=True, type=_cli_bool, default=None,
                       help='Add node summaries (on by default). Bare flag or yes/no')
     parser.add_argument('--if-add-doc-description', nargs='?', const=True, type=_cli_bool, default=None,
-                      help='Add a document description (on by default). Bare flag or yes/no')
+                      help='Add a document description (off by default). Bare flag or yes/no')
     parser.add_argument('--if-add-node-text', nargs='?', const=True, type=_cli_bool, default=None,
                       help='Add raw text to nodes (off by default). Bare flag or yes/no')
 

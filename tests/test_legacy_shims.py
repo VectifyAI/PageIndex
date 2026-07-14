@@ -63,7 +63,7 @@ def test_get_leaf_nodes_has_331_fix():
 
 
 def test_configloader_no_longer_needs_config_yaml():
-    """config.yaml was removed; ConfigLoader must build defaults from IndexConfig."""
+    """ConfigLoader must build defaults from IndexConfig, not read config.yaml."""
     from pageindex.index.utils import ConfigLoader
     cfg = ConfigLoader().load({"model": "gpt-5.4"})
     assert cfg.model == "gpt-5.4"
