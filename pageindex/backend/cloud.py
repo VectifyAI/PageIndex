@@ -173,7 +173,13 @@ class CloudBackend:
         return None
 
     def list_collections(self) -> list[str]:
-        data = self._request("GET", "/folders/")
+        try:
+            data = self._request("GET", "/folders/")
+        except CloudAPIError as e:
+            if e.status_code in self._FOLDER_UNAVAILABLE:
+                self._warn_folder_upgrade()
+                return []
+            raise
         return [f["name"] for f in data.get("folders", []) or []]
 
     def delete_collection(self, name: str) -> None:

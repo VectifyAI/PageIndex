@@ -127,6 +127,28 @@ def test_folder_transient_error_propagates_and_is_not_cached(monkeypatch):
     assert "col" not in backend._folder_id_cache
 
 
+def test_list_collections_degrades_when_folders_unavailable(monkeypatch):
+    backend = CloudBackend(api_key="pi-test")
+
+    def fake_request(method, path, **kwargs):
+        raise CloudAPIError("Cloud API error 403: upgrade", status_code=403)
+
+    monkeypatch.setattr(backend, "_request", fake_request)
+    with pytest.warns(UserWarning, match="not available on this plan"):
+        assert backend.list_collections() == []
+
+
+def test_list_collections_propagates_transient_error(monkeypatch):
+    backend = CloudBackend(api_key="pi-test")
+
+    def fake_request(method, path, **kwargs):
+        raise CloudAPIError("Cloud API error 503: unavailable", status_code=503)
+
+    monkeypatch.setattr(backend, "_request", fake_request)
+    with pytest.raises(CloudAPIError):
+        backend.list_collections()
+
+
 # ── doc endpoints: 404 maps to DocumentNotFoundError (local parity) ──────────
 
 def test_doc_404_maps_to_document_not_found(monkeypatch):
