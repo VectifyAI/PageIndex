@@ -26,6 +26,14 @@ EXIT_COMMANDS = {"exit", "quit", ":q"}
 ANSI_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|.)")
 PIFS_CONFIG_FILE_ENV = "PIFS_CONFIG_FILE"
 PIFS_WORKSPACE_ENV = "PIFS_WORKSPACE"
+PERSISTED_CONFIG_KEYS = {
+    "workspace",
+    "embedding_api_key",
+    "embedding_base_url",
+    "embedding_model",
+    "embedding_dimensions",
+    "embedding_timeout",
+}
 
 
 def _config_path() -> Path:
@@ -45,14 +53,23 @@ def _read_config() -> dict[str, str]:
         payload = json.load(handle)
     if not isinstance(payload, dict):
         raise ValueError(f"invalid PIFS config file: {path}")
-    return {str(key): str(value) for key, value in payload.items() if value is not None}
+    return {
+        str(key): str(value)
+        for key, value in payload.items()
+        if key in PERSISTED_CONFIG_KEYS and value is not None
+    }
 
 
 def _write_config(config: dict[str, str]) -> Path:
     path = _config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    persisted = {
+        key: value
+        for key, value in config.items()
+        if key in PERSISTED_CONFIG_KEYS and value is not None
+    }
     with path.open("w", encoding="utf-8") as handle:
-        json.dump(config, handle, indent=2, sort_keys=True)
+        json.dump(persisted, handle, indent=2, sort_keys=True)
         handle.write("\n")
     return path
 
@@ -182,8 +199,11 @@ def _filesystem_embedding_config() -> dict[str, object]:
     config_values = _read_config()
     config: dict[str, object] = {}
     base_url = config_values.get("embedding_base_url")
-    api_key = config_values.get("embedding_api_key")
-    provider = config_values.get("embedding_provider")
+    api_key = (
+        os.environ.get("PIFS_EMBEDDING_API_KEY")
+        or config_values.get("embedding_api_key")
+        or os.environ.get("OPENAI_API_KEY")
+    )
     model = config_values.get("embedding_model")
     dimensions = _optional_int(
         "embedding_dimensions",
@@ -193,8 +213,6 @@ def _filesystem_embedding_config() -> dict[str, object]:
         "embedding_timeout",
         config_values.get("embedding_timeout"),
     )
-    if provider and provider.strip():
-        config["summary_projection_embedding_provider"] = provider.strip()
     if model and model.strip():
         config["summary_projection_embedding_model"] = model.strip()
     if dimensions is not None:
@@ -344,7 +362,6 @@ def _run_add(argv: list[str], *, workspace: str) -> int:
     filesystem = _filesystem_from_workspace(workspace)
     info = filesystem.add_file(args.physical_path, args.virtual_target)
     print(f"added: {info.get('path')}")
-    print(f"file_ref: {info['file_ref']}")
     return 0
 
 
@@ -371,7 +388,15 @@ def _run_setmeta(argv: list[str], *, workspace: str) -> int:
 
     filesystem = _filesystem_from_workspace(workspace)
     info = filesystem.set_metadata(args.target, metadata, clear=args.clear)
-    print(json.dumps(info, ensure_ascii=False, sort_keys=True))
+    document = {
+        "path": info.get("path"),
+        "document_id": info.get("external_id"),
+        "title": info.get("title"),
+        "status": info.get("pageindex_tree_status"),
+        "metadata": info.get("metadata", {}),
+        "metadata_status": info.get("metadata_status", {}),
+    }
+    print(json.dumps(document, ensure_ascii=False, sort_keys=True))
     return 0
 
 

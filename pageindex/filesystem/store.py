@@ -7,9 +7,17 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
+from ._sqlite_schema import regular_table_names, sqlite_schema_signature
 from .types import FileEntry, MetadataField
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+CATALOG_TABLES = {
+    "files",
+    "folders",
+    "file_folders",
+    "metadata_fields",
+    "metadata_values",
+}
 
 
 class SQLiteFileSystemStore:
@@ -20,9 +28,9 @@ class SQLiteFileSystemStore:
         self.text_dir = self.workspace / "artifacts" / "text"
         self.raw_dir = self.workspace / "artifacts" / "raw"
         self.pageindex_client_dir = self.workspace / "artifacts" / "pageindex_client"
+        self.initialize_schema()
         for path in (self.text_dir, self.raw_dir, self.pageindex_client_dir):
             path.mkdir(parents=True, exist_ok=True)
-        self.initialize_schema()
 
     def connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -31,12 +39,37 @@ class SQLiteFileSystemStore:
         return conn
 
     def initialize_schema(self) -> None:
+        if self.db_path.exists() or self.db_path.is_symlink():
+            self.validate_existing_database(self.db_path)
+            return
         with self.connect() as conn:
             self._create_current_schema(conn)
             self.ensure_folder(conn, "/")
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
-    def _create_current_schema(self, conn: sqlite3.Connection) -> None:
+    @classmethod
+    def validate_existing_database(cls, db_path: str | Path) -> None:
+        db_path = Path(db_path)
+        if not db_path.is_file() or db_path.stat().st_size <= 0:
+            raise cls._incompatible_schema_error()
+        try:
+            with cls._readonly_connection(db_path) as conn:
+                version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+                actual = cls._schema_signature(conn)
+            with sqlite3.connect(":memory:") as expected_conn:
+                expected_conn.row_factory = sqlite3.Row
+                cls._create_current_schema(expected_conn)
+                expected = cls._schema_signature(expected_conn)
+        except sqlite3.Error as exc:
+            raise cls._incompatible_schema_error() from exc
+        if version != SCHEMA_VERSION or actual != expected:
+            raise cls._incompatible_schema_error()
+        from ._workspace_consistency import validate_catalog_root
+
+        validate_catalog_root(db_path)
+
+    @staticmethod
+    def _create_current_schema(conn: sqlite3.Connection) -> None:
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS files (
@@ -101,17 +134,36 @@ class SQLiteFileSystemStore:
                 FOREIGN KEY(field_id) REFERENCES metadata_fields(field_id) ON DELETE CASCADE
             );
 
-            CREATE VIRTUAL TABLE IF NOT EXISTS file_fts
-            USING fts5(file_ref UNINDEXED, title, body, metadata_text);
-
             CREATE INDEX IF NOT EXISTS idx_files_external_id ON files(external_id);
             CREATE INDEX IF NOT EXISTS idx_files_source_type ON files(source_type);
-            CREATE INDEX IF NOT EXISTS idx_folders_path ON folders(path);
             CREATE INDEX IF NOT EXISTS idx_folders_parent_id ON folders(parent_id);
             CREATE INDEX IF NOT EXISTS idx_file_folders_folder ON file_folders(folder_id);
-            CREATE INDEX IF NOT EXISTS idx_metadata_fields_name ON metadata_fields(name);
             CREATE INDEX IF NOT EXISTS idx_metadata_values_field_text ON metadata_values(field_id, value_text);
             """
+        )
+
+    @staticmethod
+    def _readonly_connection(path: Path) -> sqlite3.Connection:
+        connection = sqlite3.connect(
+            f"{path.resolve().as_uri()}?mode=ro",
+            uri=True,
+        )
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        return connection
+
+    @staticmethod
+    def _schema_signature(conn: sqlite3.Connection) -> dict[str, Any]:
+        tables = regular_table_names(conn)
+        return sqlite_schema_signature(conn, tables)
+
+    @staticmethod
+    def _incompatible_schema_error() -> RuntimeError:
+        return RuntimeError(
+            "Incompatible PIFS catalog schema; migrate this workspace with "
+            "pifs-data/scripts/migrate_pifs_workspace.py before opening it "
+            f"(expected exact schema version {SCHEMA_VERSION} with tables "
+            f"{sorted(CATALOG_TABLES)})."
         )
 
     @staticmethod
@@ -138,8 +190,6 @@ class SQLiteFileSystemStore:
             file_rows = []
             membership_rows = []
             file_ref_rows = []
-            fts_file_ref_rows = []
-            fts_rows = []
             metadata_rows = []
             pending_folder_titles: dict[tuple[str, str], str] = {}
             metadata_field_ids = {
@@ -179,16 +229,6 @@ class SQLiteFileSystemStore:
                     )
                 )
                 file_ref_rows.append((record["file_ref"],))
-                if not record.get("skip_fts", False):
-                    fts_file_ref_rows.append((record["file_ref"],))
-                    fts_rows.append(
-                        (
-                            record["file_ref"],
-                            record["title"],
-                            record["content"],
-                            record["metadata_text"],
-                        )
-                    )
                 metadata_rows.extend(
                     self._metadata_insert_values(
                         record["file_ref"],
@@ -213,15 +253,6 @@ class SQLiteFileSystemStore:
                     ) VALUES (?, ?, ?)
                     """,
                     metadata_rows,
-                )
-            if fts_file_ref_rows:
-                conn.executemany("DELETE FROM file_fts WHERE file_ref = ?", fts_file_ref_rows)
-                conn.executemany(
-                    """
-                    INSERT INTO file_fts(file_ref, title, body, metadata_text)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    fts_rows,
                 )
 
     @staticmethod
@@ -482,21 +513,6 @@ class SQLiteFileSystemStore:
         ).fetchone()
         return None if row is None else row["field_id"]
 
-    def replace_fts(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
-        conn.execute("DELETE FROM file_fts WHERE file_ref = ?", (record["file_ref"],))
-        conn.execute(
-            """
-            INSERT INTO file_fts(file_ref, title, body, metadata_text)
-            VALUES (?, ?, ?, ?)
-            """,
-            (
-                record["file_ref"],
-                record["title"],
-                record["content"],
-                record["metadata_text"],
-            ),
-        )
-
     def upsert_metadata_fields(
         self,
         fields: Iterable[MetadataField],
@@ -538,6 +554,26 @@ class SQLiteFileSystemStore:
                 (name,),
             ).fetchone()
         return row is not None
+
+    def delete_metadata_field_if_unreferenced(self, name: str) -> bool:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT field_id FROM metadata_fields WHERE name = ?",
+                (name,),
+            ).fetchone()
+            if row is None:
+                return False
+            referenced = conn.execute(
+                "SELECT 1 FROM metadata_values WHERE field_id = ? LIMIT 1",
+                (row["field_id"],),
+            ).fetchone()
+            if referenced is not None:
+                return False
+            cursor = conn.execute(
+                "DELETE FROM metadata_fields WHERE field_id = ?",
+                (row["field_id"],),
+            )
+            return cursor.rowcount > 0
 
     def list_metadata_fields(self) -> list[MetadataField]:
         with self.connect() as conn:
@@ -787,48 +823,13 @@ class SQLiteFileSystemStore:
             rows = conn.execute(sql, params).fetchall()
         return [self._folder_row_to_dict(row) for row in rows]
 
-    def search_files(
+    def list_files(
         self,
-        query: str | list[str] | None,
         *,
         scope: Optional[dict[str, Any]] = None,
         metadata_filter: Optional[dict[str, Any]] = None,
-        limit: int = 10,
+        limit: int = 100,
     ) -> list[dict[str, Any]]:
-        query_text = self._query_text(query)
-        match_queries = self._fts_match_queries(query_text) if query_text else [None]
-        if query_text and not match_queries:
-            match_queries = [None]
-        results: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        for match_query in match_queries:
-            if query_text and match_query is None:
-                rows = self._search_literal_once(
-                    query_text,
-                    scope,
-                    metadata_filter,
-                    max(limit * 25, limit),
-                )
-            else:
-                rows = self._search_once(match_query, scope, metadata_filter, max(limit * 25, limit))
-            for row in rows:
-                if row["file_ref"] in seen:
-                    continue
-                seen.add(row["file_ref"])
-                results.append(self._search_row_to_dict(row))
-                if len(results) >= limit:
-                    return results
-            if results:
-                return results
-        return results
-
-    def _search_literal_once(
-        self,
-        query_text: str,
-        scope: Optional[dict[str, Any]],
-        metadata_filter: Optional[dict[str, Any]],
-        limit: int,
-    ) -> list[sqlite3.Row]:
         selects = [
             "f.file_ref",
             "f.external_id",
@@ -860,21 +861,9 @@ class SQLiteFileSystemStore:
                 LIMIT 1
             ) AS folder_path
             """,
-            "f.descriptor AS snippet",
-            "0 AS rank",
         ]
-        where = [
-            "f.deleted_at IS NULL",
-            """
-            (
-                lower(file_fts.title) LIKE lower(?) ESCAPE '\\'
-                OR lower(file_fts.body) LIKE lower(?) ESCAPE '\\'
-                OR lower(file_fts.metadata_text) LIKE lower(?) ESCAPE '\\'
-            )
-            """,
-        ]
-        literal_like = self._contains_like(query_text)
-        params: list[Any] = [literal_like, literal_like, literal_like]
+        where = ["f.deleted_at IS NULL"]
+        params: list[Any] = []
         scope_sql, scope_params = self._scope_sql(scope)
         if scope_sql:
             where.append(scope_sql)
@@ -885,14 +874,14 @@ class SQLiteFileSystemStore:
         sql = f"""
             SELECT {", ".join(selects)}
             FROM files f
-            JOIN file_fts ON file_fts.file_ref = f.file_ref
             WHERE {" AND ".join(where)}
-            ORDER BY f.created_at DESC, f.title
+            ORDER BY lower(f.title), f.title, f.file_ref
             LIMIT ?
         """
         params.append(limit)
         with self.connect() as conn:
-            return conn.execute(sql, params).fetchall()
+            rows = conn.execute(sql, params).fetchall()
+        return [self._file_summary(row) for row in rows]
 
     def file_refs_for_scope(
         self,
@@ -1027,78 +1016,6 @@ class SQLiteFileSystemStore:
             for row in rows
         ]
 
-    def _search_once(
-        self,
-        match_query: str | None,
-        scope: Optional[dict[str, Any]],
-        metadata_filter: Optional[dict[str, Any]],
-        limit: int,
-    ) -> list[sqlite3.Row]:
-        joins = []
-        selects = [
-            "f.file_ref",
-            "f.external_id",
-            "f.title",
-            "f.descriptor",
-            "f.pageindex_tree_status",
-            "f.metadata_json",
-            "f.metadata_status_json",
-            "f.created_at",
-            """
-            (
-                SELECT display_folder.folder_id
-                FROM file_folders display_ff
-                JOIN folders display_folder
-                  ON display_folder.folder_id = display_ff.folder_id
-                WHERE display_ff.file_ref = f.file_ref
-                ORDER BY display_folder.path
-                LIMIT 1
-            ) AS folder_id
-            """,
-            """
-            (
-                SELECT display_folder.path
-                FROM file_folders display_ff
-                JOIN folders display_folder
-                  ON display_folder.folder_id = display_ff.folder_id
-                WHERE display_ff.file_ref = f.file_ref
-                ORDER BY display_folder.path
-                LIMIT 1
-            ) AS folder_path
-            """,
-        ]
-        where = ["f.deleted_at IS NULL"]
-        params: list[Any] = []
-        if match_query:
-            joins.append("JOIN file_fts ON file_fts.file_ref = f.file_ref")
-            selects.append("snippet(file_fts, 2, '', '', '...', 16) AS snippet")
-            selects.append("bm25(file_fts) AS rank")
-            where.append("file_fts MATCH ?")
-            params.append(match_query)
-            order_by = "rank"
-        else:
-            selects.append("f.descriptor AS snippet")
-            selects.append("0 AS rank")
-            order_by = "f.created_at DESC, f.title"
-        scope_sql, scope_params = self._scope_sql(scope)
-        if scope_sql:
-            where.append(scope_sql)
-            params.extend(scope_params)
-        metadata_sql, metadata_params = self._metadata_filter_sql(metadata_filter)
-        where.extend(metadata_sql)
-        params.extend(metadata_params)
-        sql = f"""
-            SELECT {", ".join(selects)}
-            FROM files f
-            {" ".join(joins)}
-            WHERE {" AND ".join(where)}
-            ORDER BY {order_by}
-            LIMIT ?
-        """
-        params.append(limit)
-        with self.connect() as conn:
-            return conn.execute(sql, params).fetchall()
-
     def _metadata_filter_sql(self, metadata_filter: Optional[dict[str, Any]]) -> tuple[list[str], list[Any]]:
         if not metadata_filter:
             return [], []
@@ -1205,7 +1122,6 @@ class SQLiteFileSystemStore:
             if row is None:
                 raise KeyError(f"Unknown file_ref: {file_ref}")
             indexed_metadata = self.indexed_metadata_values(metadata)
-            metadata_text_value = metadata_text(indexed_metadata)
             conn.execute(
                 """
                 UPDATE files
@@ -1225,19 +1141,10 @@ class SQLiteFileSystemStore:
                 file_ref,
                 indexed_metadata,
             )
-            conn.execute(
-                """
-                UPDATE file_fts
-                SET metadata_text = ?
-                WHERE file_ref = ?
-                """,
-                (metadata_text_value, file_ref),
-            )
 
     def delete_file(self, target: str) -> None:
         with self.connect() as conn:
             file_ref = self._resolve_file_ref(conn, target)
-            conn.execute("DELETE FROM file_fts WHERE file_ref = ?", (file_ref,))
             conn.execute("DELETE FROM metadata_values WHERE file_ref = ?", (file_ref,))
             conn.execute("DELETE FROM files WHERE file_ref = ?", (file_ref,))
 
@@ -1573,9 +1480,7 @@ class SQLiteFileSystemStore:
         return [
             {
                 "folder_id": row["folder_id"],
-                "id": row["folder_id"],
                 "parent_id": row["parent_id"],
-                "parent_folder_id": row["parent_id"],
                 "name": row["name"],
                 "path": row["path"],
                 "kind": row["kind"],
@@ -1939,9 +1844,7 @@ class SQLiteFileSystemStore:
     def _folder_row_to_dict(cls, row: sqlite3.Row) -> dict[str, Any]:
         return {
             "folder_id": row["folder_id"],
-            "id": row["folder_id"],
             "parent_id": row["parent_id"],
-            "parent_folder_id": row["parent_id"],
             "name": row["name"],
             "description": cls._row_value(row, "description", ""),
             "path": row["path"],
@@ -1956,44 +1859,17 @@ class SQLiteFileSystemStore:
 
     @classmethod
     def _file_summary(cls, row: sqlite3.Row) -> dict[str, Any]:
-        external_id = row["external_id"]
         display_title = cls._row_value(row, "display_title", row["title"])
         return {
             "file_ref": row["file_ref"],
-            "id": external_id or row["file_ref"],
-            "document_id": external_id,
-            "external_id": external_id,
-            "name": display_title,
+            "external_id": row["external_id"],
             "title": display_title,
-            "original_title": row["title"],
-            "description": cls._row_value(row, "descriptor", row["title"]),
-            "status": cls._row_value(row, "pageindex_tree_status", "not_built"),
-            "pageNum": None,
-            "createdAt": cls._row_value(row, "created_at"),
-            "folderId": cls._row_value(row, "folder_id"),
-            "folder_path": row["folder_path"],
-            "metadata": json.loads(row["metadata_json"] or "{}"),
-            "metadata_status": json.loads(
-                cls._row_value(row, "metadata_status_json", "{}") or "{}"
+            "descriptor": cls._row_value(row, "descriptor", row["title"]),
+            "pageindex_tree_status": cls._row_value(
+                row, "pageindex_tree_status", "not_built"
             ),
-        }
-
-    @classmethod
-    def _search_row_to_dict(cls, row: sqlite3.Row) -> dict[str, Any]:
-        external_id = row["external_id"]
-        return {
-            "file_ref": row["file_ref"],
-            "id": external_id or row["file_ref"],
-            "document_id": external_id,
-            "external_id": external_id,
-            "name": row["title"],
-            "title": row["title"],
-            "description": cls._row_value(row, "descriptor", row["title"]),
-            "status": cls._row_value(row, "pageindex_tree_status", "not_built"),
-            "pageNum": None,
-            "createdAt": cls._row_value(row, "created_at"),
-            "folderId": cls._row_value(row, "folder_id"),
-            "snippet": row["snippet"] or row["title"],
+            "created_at": cls._row_value(row, "created_at"),
+            "folder_id": cls._row_value(row, "folder_id"),
             "folder_path": row["folder_path"],
             "metadata": json.loads(row["metadata_json"] or "{}"),
             "metadata_status": json.loads(
@@ -2031,15 +1907,8 @@ class SQLiteFileSystemStore:
     def _file_entry_to_dict(cls, entry: FileEntry) -> dict[str, Any]:
         return {
             "file_ref": entry.file_ref,
-            "id": entry.external_id or entry.file_ref,
-            "document_id": entry.external_id,
             "external_id": entry.external_id,
-            "name": entry.title,
-            "path": cls._virtual_file_path(entry.folder_path, entry.title),
             "title": entry.title,
-            "description": entry.descriptor,
-            "status": entry.pageindex_tree_status,
-            "pageNum": None,
             "descriptor": entry.descriptor,
             "content_type": entry.content_type,
             "source_type": entry.source_type,
@@ -2050,75 +1919,6 @@ class SQLiteFileSystemStore:
             "metadata_status": entry.metadata_status,
             "folder_path": entry.folder_path,
         }
-
-    @staticmethod
-    def _virtual_file_path(folder_path: str, title: str) -> str:
-        folder_path = normalize_path(folder_path)
-        return f"/{title}" if folder_path == "/" else f"{folder_path}/{title}"
-
-    @staticmethod
-    def _query_text(query: str | list[str] | None) -> str:
-        if query is None:
-            return ""
-        if isinstance(query, list):
-            return " ".join(str(item) for item in query)
-        return str(query)
-
-    @classmethod
-    def _fts_match_queries(cls, query: str) -> list[str]:
-        terms = cls._fts_terms(query)
-        if not terms:
-            return []
-        queries = [" ".join(terms)]
-        if len(terms) > 1:
-            queries.append(" OR ".join(terms))
-        return queries
-
-    @staticmethod
-    def _fts_terms(query: str) -> list[str]:
-        stopwords = {
-            "a",
-            "an",
-            "and",
-            "are",
-            "as",
-            "at",
-            "be",
-            "by",
-            "did",
-            "do",
-            "does",
-            "for",
-            "from",
-            "how",
-            "in",
-            "is",
-            "it",
-            "of",
-            "on",
-            "or",
-            "that",
-            "the",
-            "to",
-            "was",
-            "were",
-            "what",
-            "when",
-            "where",
-            "which",
-            "who",
-            "why",
-            "with",
-        }
-        terms = re.findall(r"[A-Za-z0-9_]+", query.lower())
-        unique_terms = []
-        seen = set()
-        for term in terms:
-            if term in stopwords or term in seen:
-                continue
-            seen.add(term)
-            unique_terms.append(term)
-        return unique_terms
 
     @staticmethod
     def _metadata_value_items(value: Any) -> list[str]:
@@ -2179,15 +1979,3 @@ def make_file_ref(seed: str) -> str:
 
 def fingerprint(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
-
-
-def metadata_text(metadata: dict[str, Any]) -> str:
-    values = []
-    for value in metadata.values():
-        if isinstance(value, list):
-            values.extend(str(item) for item in value)
-        elif isinstance(value, dict):
-            values.append(json.dumps(value, ensure_ascii=False, sort_keys=True))
-        elif value is not None:
-            values.append(str(value))
-    return " ".join(values)

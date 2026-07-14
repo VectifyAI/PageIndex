@@ -5,45 +5,6 @@ from typing import Any, Optional
 
 
 @dataclass(frozen=True)
-class SearchResult:
-    file_ref: str
-    external_id: Optional[str]
-    title: str
-    snippet: str
-    folder_path: str
-    folder_paths: list[str]
-    metadata: dict[str, Any]
-    id: Optional[str] = None
-    document_id: Optional[str] = None
-    name: str = ""
-    description: str = ""
-    status: str = ""
-    pageNum: Optional[int] = None
-    createdAt: Optional[str] = None
-    folderId: Optional[str] = None
-    metadata_status: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class OpenResult:
-    file_ref: str
-    start_line: int
-    end_line: int
-    text: str
-    external_id: Optional[str] = None
-    folder_path: str = ""
-
-
-@dataclass(frozen=True)
-class FolderEntry:
-    folder_id: str
-    parent_id: Optional[str]
-    name: str
-    path: str
-    kind: str
-
-
-@dataclass(frozen=True)
 class FileEntry:
     file_ref: str
     external_id: Optional[str]
@@ -75,10 +36,3 @@ class PIFSQueryScope:
     folder_path: str
     metadata_filter: dict[str, str] = field(default_factory=dict)
     metadata_axis: Optional[str] = None
-
-
-@dataclass(frozen=True)
-class CommandResult:
-    command: str
-    data: Any
-    text: str

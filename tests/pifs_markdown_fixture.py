@@ -38,6 +38,14 @@ class FakePageIndexClient:
         return json.dumps(self.documents[doc_id]["pages"])
 
 
+class FakeEmbeddingClient:
+    def __init__(self, dimensions: int):
+        self.dimensions = dimensions
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        return [[1.0, *([0.0] * (self.dimensions - 1))] for _ in texts]
+
+
 def register_markdown(
     filesystem,
     tmp_path: Path,
@@ -53,6 +61,16 @@ def register_markdown(
         client = FakePageIndexClient()
         filesystem._test_pageindex_client = client
         filesystem._pageindex_client = lambda: client
+    if filesystem.summary_projection is None:
+        from pageindex.filesystem.semantic_projection import SummaryProjection
+
+        profile = filesystem._summary_embedding_profile()
+        filesystem.summary_projection = SummaryProjection(
+            filesystem.summary_projection_index_dir,
+            profile=profile,
+            embedder=FakeEmbeddingClient(profile.dimensions),
+            create=True,
+        )
     filename = title if title and title.endswith(".md") else f"{external_id}.md"
     source = tmp_path / filename
     source.write_text(text or f"{external_id} alpha evidence", encoding="utf-8")

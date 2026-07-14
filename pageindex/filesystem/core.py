@@ -4,22 +4,28 @@ import json
 import os
 import shutil
 import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Optional, Union
 from urllib.parse import quote, unquote, urlparse
 
+from ._projection_topology import (
+    projection_database_pair,
+    projection_database_path_present,
+    projection_database_paths,
+)
 from .metadata import MetadataQueryEngine
 from .store import (
     SQLiteFileSystemStore,
     fingerprint,
     make_file_ref,
-    metadata_text,
     normalize_path,
 )
-from .types import OpenResult, PIFSQueryScope, SearchResult
+from .types import PIFSQueryScope
 
 if TYPE_CHECKING:
     from ..client import PageIndexClient
+    from .semantic_projection import _EmbeddingCacheKey
 
 PROJECTION_INDEX_STATUSES = {
     "not_indexed",
@@ -30,10 +36,6 @@ PROJECTION_INDEX_STATUSES = {
 }
 
 DEFAULT_EMBEDDING_DIMENSIONS = 1024
-SEMANTIC_RETRIEVAL_CHANNELS = ("summary",)
-SEMANTIC_PROJECTION_INDEX_NAMES = {
-    "summary": "summary",
-}
 PAGEINDEX_DOCUMENT_SUFFIXES = {".pdf", ".md", ".markdown"}
 PAGEINDEX_DOCUMENT_CONTENT_TYPES = {
     "application/pdf",
@@ -46,6 +48,24 @@ ADD_FILE_CONTENT_TYPES = {
     ".md": "text/markdown",
     ".markdown": "text/markdown",
 }
+
+
+@dataclass
+class _RegistrationRollbackSnapshot:
+    preexisting_pageindex_doc_ids: set[str]
+    artifact_baselines: dict[Path, bytes | None] = field(default_factory=dict)
+    records: list[dict[str, Any]] = field(default_factory=list)
+    new_records: list[dict[str, Any]] = field(default_factory=list)
+    created_folder_paths: list[str] = field(default_factory=list)
+    new_metadata_fields: set[str] = field(default_factory=set)
+    new_cache_keys: set[_EmbeddingCacheKey] = field(default_factory=set)
+    catalog_rows: dict[str, dict[str, Any]] = field(default_factory=dict)
+    membership_rows: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    metadata_value_rows: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    projection_rows: dict[
+        str,
+        tuple[dict[str, Any], dict[str, Any]],
+    ] = field(default_factory=dict)
 
 
 def strip_pageindex_text_fields(value: Any) -> Any:
@@ -66,7 +86,6 @@ class PageIndexFileSystem:
         workspace: Union[str, Path],
         *,
         summary_projection_index_dir: Union[str, Path, None] = None,
-        summary_projection_embedding_provider: str = "openai",
         summary_projection_embedding_model: str = "text-embedding-3-small",
         summary_projection_embedding_dimensions: int = DEFAULT_EMBEDDING_DIMENSIONS,
         summary_projection_embedding_timeout: float = 60,
@@ -74,16 +93,37 @@ class PageIndexFileSystem:
         summary_projection_embedding_base_url: str | None = None,
     ):
         self.workspace = Path(workspace).expanduser()
-        self.store = SQLiteFileSystemStore(self.workspace)
-        self.metadata = MetadataQueryEngine(self.store)
-        self.semantic_retrieval_backend: Any | None = None
-        self.summary_projection_indexer: Any | None = None
         self.summary_projection_index_dir = (
             Path(summary_projection_index_dir).expanduser()
             if summary_projection_index_dir is not None
             else self.workspace / "artifacts" / "projection_indexes"
         )
-        self.summary_projection_embedding_provider = summary_projection_embedding_provider
+        summary_path, cache_path = projection_database_paths(
+            self.summary_projection_index_dir
+        )
+        catalog_path = self.workspace / "filesystem.sqlite"
+        catalog_present = catalog_path.exists() or catalog_path.is_symlink()
+        summary_present = projection_database_path_present(summary_path)
+        cache_present = projection_database_path_present(cache_path)
+        if catalog_present or summary_present or cache_present:
+            SQLiteFileSystemStore.validate_existing_database(catalog_path)
+        database_pair = projection_database_pair(self.summary_projection_index_dir)
+        if database_pair is not None:
+            from .semantic_projection import validate_projection_topology
+            from ._workspace_consistency import validate_workspace_consistency
+
+            validate_projection_topology(self.summary_projection_index_dir)
+            validate_workspace_consistency(
+                catalog_path,
+                database_pair[0],
+            )
+        elif catalog_present:
+            from ._workspace_consistency import validate_catalog_without_projection
+
+            validate_catalog_without_projection(catalog_path)
+        self.store = SQLiteFileSystemStore(self.workspace)
+        self.metadata = MetadataQueryEngine(self.store)
+        self.summary_projection: Any | None = None
         self.summary_projection_embedding_model = summary_projection_embedding_model
         self.summary_projection_embedding_dimensions = summary_projection_embedding_dimensions
         self.summary_projection_embedding_timeout = summary_projection_embedding_timeout
@@ -117,10 +157,6 @@ class PageIndexFileSystem:
             ]
         )[0]
 
-    def register(self, **kwargs: Any) -> str:
-        self._ensure_register_completion_defaults()
-        return self.register_file(**kwargs)
-
     def add_file(
         self,
         physical_path: Union[str, Path],
@@ -144,7 +180,7 @@ class PageIndexFileSystem:
         )
         if self.store.file_basename_exists_in_folder(folder_path, filename):
             raise FileExistsError(f"File already exists at {virtual_path}")
-        self._ensure_add_completion_defaults()
+        projection = self._ensure_summary_projection()
         add_created_folder_paths = self._add_created_folder_paths(folder_path)
         file_ref = make_file_ref(virtual_path.strip("/"))
         uploads_dir = self.workspace / "artifacts" / "uploads"
@@ -153,6 +189,8 @@ class PageIndexFileSystem:
         final_dir_created = False
         catalog_inserted = False
         records: list[dict[str, Any]] = []
+        cache_keys: set[_EmbeddingCacheKey] = set()
+        preexisting_cache_keys: set[_EmbeddingCacheKey] = set()
         preexisting_pageindex_doc_ids = self._pageindex_cache_doc_ids()
 
         uploads_dir.mkdir(parents=True, exist_ok=True)
@@ -180,6 +218,8 @@ class PageIndexFileSystem:
                     }
                 )
                 records = [record]
+                cache_keys = projection.cache_keys_for_records(records)
+                preexisting_cache_keys = projection.existing_cache_keys(cache_keys)
                 self._require_add_pageindex_ready(record)
                 self._register_custom_metadata_fields(records)
                 self.store.insert_files(records)
@@ -190,16 +230,19 @@ class PageIndexFileSystem:
                         metadata=record["metadata"],
                         metadata_status=record["metadata_status"],
                     )
-                self._require_add_summary_projection_ready(record)
+                self._require_summary_projection_ready(record, operation="add")
                 self._sync_owned_raw_artifact(record)
                 self._ensure_add_semantic_retrieval_ready()
             except Exception:
                 if catalog_inserted:
-                    self._cleanup_add_catalog_record(file_ref)
-                self._cleanup_add_summary_projection(records)
+                    self._cleanup_catalog_record(file_ref)
+                self._cleanup_summary_projection_records(records)
+                self._cleanup_summary_projection_cache(
+                    cache_keys - preexisting_cache_keys
+                )
                 self._cleanup_failed_register_artifacts(records)
-                self._cleanup_add_pageindex_cache(records, preexisting_pageindex_doc_ids)
-                self._cleanup_add_created_folders(add_created_folder_paths)
+                self._cleanup_pageindex_cache(records, preexisting_pageindex_doc_ids)
+                self._cleanup_created_folders(add_created_folder_paths)
                 if final_dir_created:
                     shutil.rmtree(final_dir, ignore_errors=True)
                 raise
@@ -209,15 +252,52 @@ class PageIndexFileSystem:
         return info
 
     def register_files(self, files: list[dict[str, Any]]) -> list[str]:
-        records = [self._prepare_file_record(file) for file in files]
-        preexisting_file_refs = self._existing_file_refs(records)
-        new_records = [
-            record for record in records if record["file_ref"] not in preexisting_file_refs
+        files = [
+            {
+                **file,
+                "metadata": self._validated_register_metadata(file.get("metadata")),
+            }
+            for file in files
         ]
+        rollback = _RegistrationRollbackSnapshot(
+            preexisting_pageindex_doc_ids=self._pageindex_cache_doc_ids()
+        )
         try:
-            self._register_custom_metadata_fields(records)
-            self.store.insert_files(records)
-            for record in records:
+            for file in files:
+                rollback.records.append(
+                    self._prepare_file_record(
+                        file,
+                        artifact_baselines=rollback.artifact_baselines,
+                    )
+                )
+            projection = self._ensure_summary_projection() if rollback.records else None
+            self._capture_existing_registration_rows(rollback, projection)
+            rollback.new_records = [
+                record
+                for record in rollback.records
+                if record["file_ref"] not in rollback.catalog_rows
+            ]
+            rollback.created_folder_paths = sorted(
+                {
+                    path
+                    for record in rollback.records
+                    for path in self._add_created_folder_paths(record["folder_path"])
+                },
+                key=lambda path: (path.count("/"), path),
+            )
+            rollback.new_metadata_fields = {
+                name
+                for name in self._custom_metadata_field_names(rollback.records)
+                if not self.store.metadata_field_exists(name)
+            }
+            if projection is not None:
+                batch_cache_keys = projection.cache_keys_for_records(rollback.records)
+                rollback.new_cache_keys = (
+                    batch_cache_keys - projection.existing_cache_keys(batch_cache_keys)
+                )
+            self._register_custom_metadata_fields(rollback.records)
+            self.store.insert_files(rollback.records)
+            for record in rollback.records:
                 try:
                     if self._complete_summary_projection_index(record):
                         self.store.update_file_metadata_status(
@@ -225,113 +305,61 @@ class PageIndexFileSystem:
                             metadata=record["metadata"],
                             metadata_status=record["metadata_status"],
                         )
+                    self._require_summary_projection_ready(
+                        record,
+                        operation="registration",
+                    )
                     self._sync_owned_raw_artifact(record)
                 except KeyError:
                     continue
         except Exception:
-            self._cleanup_add_summary_projection(new_records)
-            for record in new_records:
-                self._cleanup_add_catalog_record(str(record["file_ref"]))
-            self._cleanup_failed_register_artifacts(records)
+            self._cleanup_summary_projection_records(rollback.new_records)
+            self._restore_existing_registration_projection(rollback)
+            self._cleanup_summary_projection_cache(rollback.new_cache_keys)
+            for record in rollback.new_records:
+                self._cleanup_catalog_record(str(record["file_ref"]))
+            self._restore_existing_registration_catalog(rollback)
+            self._cleanup_created_folders(rollback.created_folder_paths)
+            self._cleanup_new_metadata_fields(rollback.new_metadata_fields)
+            self._cleanup_pageindex_cache(
+                rollback.records,
+                rollback.preexisting_pageindex_doc_ids,
+            )
+            self._restore_registration_artifact_baselines(
+                rollback.artifact_baselines
+            )
             raise
-        return [record["file_ref"] for record in records]
+        return [record["file_ref"] for record in rollback.records]
 
-    def _ensure_register_completion_defaults(self) -> None:
-        if self.summary_projection_indexer is None:
-            from .semantic_projection import SummaryProjectionIndexer
-
-            self.summary_projection_indexer = SummaryProjectionIndexer.from_provider(
-                self.summary_projection_index_dir,
-                embedding_provider=self.summary_projection_embedding_provider,
-                embedding_model=self.summary_projection_embedding_model,
-                embedding_dimensions=self.summary_projection_embedding_dimensions,
-                embedding_timeout=self.summary_projection_embedding_timeout,
-                embedding_api_key=self.summary_projection_embedding_api_key,
-                embedding_base_url=self.summary_projection_embedding_base_url,
-            )
-        if self.semantic_retrieval_backend is None:
-            self.configure_semantic_projection_retrieval(
-                self.summary_projection_index_dir,
-                embedding_provider=self.summary_projection_embedding_provider,
-                embedding_model=self.summary_projection_embedding_model,
-                embedding_dimensions=self.summary_projection_embedding_dimensions,
-                embedding_timeout=self.summary_projection_embedding_timeout,
-                embedding_api_key=self.summary_projection_embedding_api_key,
-                embedding_base_url=self.summary_projection_embedding_base_url,
-            )
-
-    def _ensure_add_completion_defaults(self) -> None:
-        if self.summary_projection_indexer is None:
-            from .semantic_projection import SummaryProjectionIndexer
-
-            self.summary_projection_indexer = SummaryProjectionIndexer.from_provider(
-                self.summary_projection_index_dir,
-                embedding_provider=self.summary_projection_embedding_provider,
-                embedding_model=self.summary_projection_embedding_model,
-                embedding_dimensions=self.summary_projection_embedding_dimensions,
-                embedding_timeout=self.summary_projection_embedding_timeout,
-                embedding_api_key=self.summary_projection_embedding_api_key,
-                embedding_base_url=self.summary_projection_embedding_base_url,
-            )
+    def _ensure_summary_projection(self) -> Any:
+        return self._open_summary_projection(create=True)
 
     def _ensure_add_semantic_retrieval_ready(self) -> None:
-        indexer = self.summary_projection_indexer
-        if indexer is None:
-            raise RuntimeError("pifs add requires a summary projection indexer")
-        from .semantic_projection import SemanticProjectionSearchBackend
+        projection = self._open_summary_projection(create=False)
+        if not projection.available:
+            raise RuntimeError("pifs add failed to make the Summary Projection available")
 
-        index_dir = Path(getattr(indexer, "index_dir", self.summary_projection_index_dir))
-        embedder = getattr(indexer, "embedder", None)
-        if embedder is None:
-            self.configure_semantic_projection_retrieval(
-                index_dir,
-                embedding_provider=str(
-                    getattr(
-                        indexer,
-                        "embedding_provider",
-                        self.summary_projection_embedding_provider,
-                    )
-                ),
-                embedding_model=str(
-                    getattr(indexer, "embedding_model", self.summary_projection_embedding_model)
-                ),
-                embedding_dimensions=int(
-                    getattr(
-                        indexer,
-                        "embedding_dimensions",
-                        self.summary_projection_embedding_dimensions,
-                    )
-                ),
-                embedding_timeout=self.summary_projection_embedding_timeout,
-                embedding_api_key=self.summary_projection_embedding_api_key,
-                embedding_base_url=self.summary_projection_embedding_base_url,
+    def _summary_embedding_profile(self) -> Any:
+        from .semantic_projection import SummaryEmbeddingProfile
+
+        return SummaryEmbeddingProfile(
+            base_url=self.summary_projection_embedding_base_url,
+            model=self.summary_projection_embedding_model,
+            dimensions=self.summary_projection_embedding_dimensions,
+            timeout=self.summary_projection_embedding_timeout,
+            api_key=self.summary_projection_embedding_api_key,
+        )
+
+    def _open_summary_projection(self, *, create: bool) -> Any:
+        if self.summary_projection is None:
+            from .semantic_projection import SummaryProjection
+
+            self.summary_projection = SummaryProjection(
+                self.summary_projection_index_dir,
+                profile=self._summary_embedding_profile(),
+                create=create,
             )
-        else:
-            embedding_cache = getattr(indexer, "embedding_cache", None)
-            self.semantic_retrieval_backend = SemanticProjectionSearchBackend(
-                index_dir,
-                embedder=embedder,
-                embedding_provider=str(
-                    getattr(
-                        indexer,
-                        "embedding_provider",
-                        self.summary_projection_embedding_provider,
-                    )
-                ),
-                embedding_model=str(
-                    getattr(indexer, "embedding_model", self.summary_projection_embedding_model)
-                ),
-                embedding_dimensions=int(
-                    getattr(
-                        indexer,
-                        "embedding_dimensions",
-                        self.summary_projection_embedding_dimensions,
-                    )
-                ),
-                embedding_cache_path=getattr(embedding_cache, "db_path", None),
-            )
-        if "summary" not in self.semantic_retrieval_channels():
-            raise RuntimeError("pifs add failed to configure summary semantic retrieval")
+        return self.summary_projection
 
     def _add_created_folder_paths(self, folder_path: str) -> list[str]:
         paths = self._folder_ancestor_paths(folder_path)
@@ -347,75 +375,6 @@ class PageIndexFileSystem:
         for index in range(1, len(segments) + 1):
             paths.append("/" + "/".join(segments[:index]))
         return paths
-
-    def configure_existing_projection_retrieval(self) -> bool:
-        """Attach semantic retrieval to already-built projection indexes.
-
-        Register-time generation owns building the index files. Opening an
-        existing workspace should still expose semantic retrieval when the
-        configured embedding dimensions match the existing index.
-        """
-        if self.semantic_retrieval_backend is not None:
-            return bool(self.semantic_retrieval_channels())
-        index_config = self._existing_projection_index_config()
-        if index_config is None:
-            return False
-        existing_dimension = int(index_config.get("dimension") or 0)
-        if existing_dimension != self.summary_projection_embedding_dimensions:
-            raise RuntimeError(
-                "summary projection index dimension mismatch: "
-                f"{index_config.get('db_path') or self.summary_projection_index_dir} "
-                f"was built with dimension {existing_dimension}, but configured "
-                "summary_projection_embedding_dimensions is "
-                f"{self.summary_projection_embedding_dimensions}. Rebuild the "
-                "projection index or use a matching embedding configuration."
-            )
-        self.configure_semantic_projection_retrieval(
-            self.summary_projection_index_dir,
-            embedding_provider=self.summary_projection_embedding_provider,
-            embedding_model=self.summary_projection_embedding_model,
-            embedding_dimensions=self.summary_projection_embedding_dimensions,
-            embedding_timeout=self.summary_projection_embedding_timeout,
-            embedding_api_key=self.summary_projection_embedding_api_key,
-            embedding_base_url=self.summary_projection_embedding_base_url,
-        )
-        return bool(self.semantic_retrieval_channels())
-
-    def _existing_projection_index_config(self) -> dict[str, Any] | None:
-        for channel in SEMANTIC_RETRIEVAL_CHANNELS:
-            index_name = SEMANTIC_PROJECTION_INDEX_NAMES.get(channel)
-            if not index_name:
-                continue
-            index_path = self.summary_projection_index_dir / f"{index_name}.sqlite"
-            if not index_path.exists():
-                continue
-            from .semantic_index import SQLiteVecSemanticIndex
-
-            try:
-                info = SQLiteVecSemanticIndex(index_path).info()
-            except Exception:
-                continue
-            if int(info.get("document_count") or 0) <= 0:
-                continue
-            metadata = dict(info.get("metadata") or {})
-            if metadata.get("channel") and metadata.get("channel") != channel:
-                continue
-            return info
-        return None
-
-    def browse(
-        self,
-        path: str = "/",
-        recursive: bool = False,
-        limit: int = 100,
-        max_depth: int | None = None,
-    ) -> dict[str, list[dict[str, Any]]]:
-        return self.store.list_folder(
-            path,
-            recursive=recursive,
-            limit=limit,
-            max_depth=max_depth,
-        )
 
     def resolve_query_scope(self, path: str) -> PIFSQueryScope:
         normalized = normalize_path(path)
@@ -444,10 +403,16 @@ class PageIndexFileSystem:
                     raise KeyError(f"Unknown folder path: {normalized}")
                 raise ValueError(
                     "Metadata axes must come after the physical folder prefix; "
-                    "inspect the physical folder first, then append @field/value buckets. "
+                    "inspect the physical folder first, then append @field/value segments. "
                     "Use the path returned by tree for values containing '/'."
                 )
-            field = unquote(segment[1:])
+            axis_segment = segment[1:]
+            if "=" in axis_segment:
+                raise ValueError(
+                    "Metadata virtual paths use @field/value; run tree <scope>/@field "
+                    "and copy the returned path."
+                )
+            field = unquote(axis_segment)
             self.metadata.validate_field_name(field)
             if not self.store.metadata_field_exists(field):
                 raise ValueError("Unknown metadata axis; run tree <scope> to inspect available @field axes.")
@@ -456,19 +421,21 @@ class PageIndexFileSystem:
                     "A metadata field can appear only once in a scope path; "
                     "choose one value or use browse --where for advanced predicates."
                 )
-            if index + 1 >= len(remainder):
+            value_index = index + 1
+            if value_index == len(remainder):
                 return PIFSQueryScope(
                     path=normalized,
                     folder_path=folder_path,
                     metadata_filter=metadata_filter,
                     metadata_axis=field,
                 )
-            value_segment = remainder[index + 1]
-            if value_segment.startswith("@"):
+            encoded_value = remainder[value_index]
+            if encoded_value.startswith("@"):
                 raise ValueError(
-                    "Metadata axis paths require @field/value; run tree <scope>/@field to inspect values."
+                    "Metadata axis inspection must be the final path segment; "
+                    "choose a value with @field/value before appending another axis."
                 )
-            metadata_filter[field] = unquote(value_segment)
+            metadata_filter[field] = unquote(encoded_value)
             index += 2
 
         return PIFSQueryScope(
@@ -555,15 +522,23 @@ class PageIndexFileSystem:
             files.append(
                 {
                     "path": self._scope_file_locator(scope, locator_leaf),
-                    "name": locator_leaf,
+                    "locator_leaf": locator_leaf,
                     "type": "file",
                     "file_ref": row["file_ref"],
-                    "document_id": row["document_id"],
+                    "external_id": row["external_id"],
                     "title": leaf,
+                    "pageindex_tree_status": row["pageindex_tree_status"],
                     "metadata": row["metadata"],
                 }
             )
-        files = sorted(files, key=lambda item: (str(item["name"]).lower(), item["path"], item["file_ref"]))
+        files = sorted(
+            files,
+            key=lambda item: (
+                str(item["title"]).lower(),
+                item["path"],
+                item["file_ref"],
+            ),
+        )
         return files[:limit]
 
     def scope_file_locator(self, scope: PIFSQueryScope, file_ref: str, leaf: str) -> str:
@@ -575,8 +550,7 @@ class PageIndexFileSystem:
 
     def _scope_file_leaf_items(self, scope: PIFSQueryScope, *, limit: int) -> list[tuple[dict[str, Any], str]]:
         recursive = bool(scope.metadata_filter)
-        rows = self.store.search_files(
-            None,
+        rows = self.store.list_files(
             scope={"folder_path": scope.folder_path, "recursive": recursive},
             metadata_filter=scope.metadata_filter or None,
             limit=limit,
@@ -603,24 +577,23 @@ class PageIndexFileSystem:
             counts[leaf] = counts.get(leaf, 0) + 1
         return counts
 
-    @staticmethod
-    def _disambiguated_scope_leaf(leaf: str, file_ref: str, leaf_counts: dict[str, int]) -> str:
-        if leaf_counts.get(leaf, 0) <= 1:
-            return leaf
-        return f"{leaf}~{file_ref}"
-
     @classmethod
     def _scope_locator_leaf_by_file_ref(cls, leaf_items: list[tuple[dict[str, Any], str]]) -> dict[str, str]:
         leaf_counts = cls._scope_leaf_counts(leaf_items)
+        reserved = {leaf for leaf, count in leaf_counts.items() if count == 1}
         used: set[str] = set()
+        next_suffix: dict[str, int] = {}
         locator_leaf_by_file_ref: dict[str, str] = {}
         for row, leaf in sorted(leaf_items, key=lambda item: (item[1].lower(), item[1], item[0]["file_ref"])):
-            base = cls._disambiguated_scope_leaf(leaf, row["file_ref"], leaf_counts)
-            locator_leaf = base
-            suffix = 2
-            while locator_leaf in used:
-                locator_leaf = f"{base}~{suffix}"
-                suffix += 1
+            if leaf_counts[leaf] == 1:
+                locator_leaf = leaf
+            else:
+                suffix = next_suffix.get(leaf, 1)
+                locator_leaf = f"{leaf}~{suffix}"
+                while locator_leaf in used or locator_leaf in reserved:
+                    suffix += 1
+                    locator_leaf = f"{leaf}~{suffix}"
+                next_suffix[leaf] = suffix + 1
             used.add(locator_leaf)
             locator_leaf_by_file_ref[row["file_ref"]] = locator_leaf
         return locator_leaf_by_file_ref
@@ -640,47 +613,36 @@ class PageIndexFileSystem:
 
     @staticmethod
     def encode_scope_segment(segment: Any) -> str:
-        return quote(str(segment), safe="")
+        value = str(segment)
+        if value in {".", ".."}:
+            return value.replace(".", "%2E")
+        return quote(value, safe="")
 
     def browse_semantic_files(
         self,
         path: str,
         query: str,
         *,
-        retrieval_query: str | None = None,
         recursive: bool = False,
-        space: str = "summary",
         page: int = 1,
-        page_size: int = 10,
         metadata_filter: Optional[dict[str, Any] | str] = None,
     ) -> dict[str, Any]:
+        page_size = 10
         path = normalize_path(path)
         query_scope = self.resolve_query_scope(path)
         self.store.folder_info(query_scope.folder_path)
-        query_text = self._query_text(retrieval_query or query).strip()
+        query_text = self._query_text(query).strip()
         if not query_text:
             raise ValueError("browse requires a query")
         if page < 1:
             raise ValueError("browse --page must be at least 1")
-        if page_size < 1:
-            raise ValueError("browse page_size must be at least 1")
-        if space not in SEMANTIC_RETRIEVAL_CHANNELS:
-            raise ValueError(
-                "Unsupported browse --space: "
-                f"{space}. Supported spaces: {', '.join(SEMANTIC_RETRIEVAL_CHANNELS)}"
-            )
-        available_spaces = self.semantic_retrieval_channels()
-        if space not in available_spaces:
-            available = ", ".join(available_spaces) if available_spaces else "none"
-            raise ValueError(
-                f"browse --space {space} is not available; available spaces: {available}"
-            )
-        search_channel = getattr(self.semantic_retrieval_backend, "search_channel", None)
-        if search_channel is None:
-            available = ", ".join(available_spaces) if available_spaces else "none"
-            raise ValueError(
-                f"browse --space {space} is not available; available spaces: {available}"
-            )
+        if self.summary_projection is None:
+            index_path = self.summary_projection_index_dir / "summary.sqlite"
+            if not index_path.exists():
+                raise ValueError("browse Summary Projection is not available")
+        projection = self._open_summary_projection(create=False)
+        if not projection.available:
+            raise ValueError("browse Summary Projection is not available")
         parsed_filter = self.merge_scope_filter(query_scope, metadata_filter)
         effective_recursive = recursive or bool(query_scope.metadata_filter)
         scope = {"folder_path": query_scope.folder_path, "recursive": effective_recursive}
@@ -690,13 +652,11 @@ class PageIndexFileSystem:
         )
         offset = (page - 1) * page_size
         needed = offset + page_size + 1
-        semantic_filters = {"file_ref": scope_file_refs}
         candidates = (
-            search_channel(
-                space,
+            projection.search(
                 query_text,
                 limit=needed,
-                filters=semantic_filters,
+                file_refs=scope_file_refs,
             )
             if scope_file_refs
             else []
@@ -705,10 +665,7 @@ class PageIndexFileSystem:
         rows: list[dict[str, Any]] = []
         seen: set[str] = set()
         for candidate in candidates:
-            try:
-                file_ref = self.store.resolve_file_ref(candidate.document_id)
-            except KeyError:
-                continue
+            file_ref = candidate.file_ref
             if file_ref in seen:
                 continue
             if file_ref not in scope_file_ref_set:
@@ -746,21 +703,16 @@ class PageIndexFileSystem:
             rows.append(
                 {
                     "rank": rank,
-                    "similarity": self._semantic_candidate_similarity(candidate),
-                    "score": self._semantic_candidate_score(candidate),
+                    "similarity": candidate.similarity,
                     "path": stable_path,
                     "file_ref": file_ref,
-                    "document_id": entry.external_id,
                     "external_id": entry.external_id,
                     "title": display_title,
-                    "original_title": entry.title,
+                    "pageindex_tree_status": entry.pageindex_tree_status,
                     "folder_path": folder_path,
                     "folder_paths": folder_paths,
                     "summary": str((entry.metadata or {}).get("summary") or ""),
-                    "snippet": str(getattr(candidate, "snippet", "") or entry.descriptor),
                     "metadata": entry.metadata,
-                    "metadata_status": entry.metadata_status,
-                    "sources": list(getattr(candidate, "sources", []) or []),
                 }
             )
             if len(rows) >= needed:
@@ -768,12 +720,10 @@ class PageIndexFileSystem:
         page_rows = rows[offset : offset + page_size]
         payload = {
             "mode": "files",
-            "retrieval": f"{space}_vector",
+            "retrieval": "summary",
             "query": query,
             "scope": query_scope.path,
             "recursive": effective_recursive,
-            "space": space,
-            "available_spaces": list(available_spaces),
             "page": page,
             "page_size": page_size,
             "has_more": len(rows) > offset + page_size,
@@ -785,23 +735,6 @@ class PageIndexFileSystem:
 
     def folder_info(self, path: str = "/") -> dict[str, Any]:
         return self.store.folder_info(path)
-
-    def find_folders(
-        self,
-        path: str = "/",
-        metadata_filter: Optional[dict[str, Any] | str] = None,
-        limit: int = 100,
-        max_depth: int | None = None,
-        include_self: bool = False,
-    ) -> list[dict[str, Any]]:
-        parsed_filter = self.metadata.parse_filter(metadata_filter)
-        return self.store.find_folders(
-            path,
-            metadata_filter=parsed_filter,
-            limit=limit,
-            max_depth=max_depth,
-            include_self=include_self,
-        )
 
     def create_folder(
         self,
@@ -854,135 +787,20 @@ class PageIndexFileSystem:
             metadata=replacement,
             metadata_status=dict(info.get("metadata_status") or {}),
         )
-        return self.store.file_info(file_ref)
-
-    def search(
-        self,
-        query: Union[str, list[str], None] = None,
-        scope: Optional[dict[str, Any]] = None,
-        metadata_filter: Optional[dict[str, Any] | str] = None,
-        limit: int = 10,
-    ) -> list[SearchResult]:
-        parsed_filter = self.metadata.parse_filter(metadata_filter)
-        rows = self.store.search_files(
-            query,
-            scope=scope,
-            metadata_filter=parsed_filter,
-            limit=limit,
-        )
-        results = []
-        scope_path = self._scope_folder_path(scope)
-        for row in rows:
-            folder_paths = [
-                folder["path"]
-                for folder in self.store.folder_memberships(row["file_ref"])
-            ]
-            folder_path = self._preferred_folder_path(folder_paths, scope_path, row["folder_path"])
-            display_title = self.store.membership_display_name(row["file_ref"], folder_path) or row["title"]
-            results.append(
-                SearchResult(
-                    file_ref=row["file_ref"],
-                    external_id=row["external_id"],
-                    title=display_title,
-                    snippet=row["snippet"],
-                    folder_path=folder_path,
-                    folder_paths=folder_paths,
-                    metadata=row["metadata"],
-                    metadata_status=row["metadata_status"],
-                    id=row["id"],
-                    document_id=row["document_id"],
-                    name=display_title,
-                    description=row["description"],
-                    status=row["status"],
-                    pageNum=row["pageNum"],
-                    createdAt=row["createdAt"],
-                    folderId=row["folderId"],
-                )
-            )
-        return results
-
-    def configure_semantic_projection_retrieval(
-        self,
-        index_dir: Union[str, Path],
-        *,
-        embedding_provider: str = "openai",
-        embedding_model: str = "text-embedding-3-small",
-        embedding_dimensions: int = DEFAULT_EMBEDDING_DIMENSIONS,
-        embedding_timeout: float = 60,
-        embedding_api_key: str | None = None,
-        embedding_base_url: str | None = None,
-        fetch_multiplier: int = 100,
-    ) -> Any:
-        from .semantic_projection import SemanticProjectionSearchBackend
-
-        self.semantic_retrieval_backend = SemanticProjectionSearchBackend.from_provider(
-            index_dir,
-            embedding_provider=embedding_provider,
-            embedding_model=embedding_model,
-            embedding_dimensions=embedding_dimensions,
-            embedding_timeout=embedding_timeout,
-            embedding_api_key=embedding_api_key,
-            embedding_base_url=embedding_base_url,
-            fetch_multiplier=fetch_multiplier,
-        )
-        return self.semantic_retrieval_backend
-
-    @property
-    def has_semantic_retrieval_backend(self) -> bool:
-        return self.semantic_retrieval_backend is not None
-
-    def semantic_retrieval_channels(self) -> tuple[str, ...]:
-        backend = self.semantic_retrieval_backend
-        if backend is None:
-            return ()
-        available_channels = getattr(backend, "available_channels", None)
-        if callable(available_channels):
-            raw_channels = available_channels()
-        else:
-            raw_channels = getattr(backend, "semantic_tool_channels", ())
-        available = set(raw_channels or ())
-        return tuple(channel for channel in SEMANTIC_RETRIEVAL_CHANNELS if channel in available)
-
-    def has_semantic_channel(self, channel: str) -> bool:
-        return channel in self.semantic_retrieval_channels()
-
-    def retrieval_capabilities(self) -> dict[str, Any]:
-        semantic_channels = ["summary"] if self.has_semantic_channel("summary") else []
-        semantic_commands = ["browse"] if semantic_channels else []
-        return {
-            "lexical": {
-                "grep_recursive": False,
-                "grep_recursive_semantic_prefilter": False,
-                "find_maxdepth": False,
-            },
-            "semantic": {
-                "backend_configured": self.semantic_retrieval_backend is not None,
-                "channels": semantic_channels,
-                "commands": semantic_commands,
-            },
-        }
-
-    def open(self, target: str, location: str = "all") -> OpenResult:
-        file_ref = self._resolve_target(target)
+        updated = self.store.file_info(file_ref)
         entry = self.store.get_file(file_ref)
-        if self._file_format(entry) in {"pdf", "markdown", "pageindex"}:
-            raise ValueError(
-                "open() text artifact reads are not supported for PDF/Markdown PageIndex files; "
-                "use pageindex_structure() or pageindex_pages()."
-            )
-        if str(location).strip().lower() in {"all", "full", "*"}:
-            return self._open_all(file_ref)
-        start, end = self._parse_line_range(location)
-        return self._open_lines(file_ref, start, end)
-
-    def cat_text_artifact(self, target: str, location: str = "all") -> OpenResult:
-        file_ref = self._resolve_target(target)
-        entry = self.store.get_file(file_ref)
-        self._require_text_artifact_file(entry, "cat --all")
-        if str(location).strip().lower() in {"all", "full", "*"}:
-            return self._open_all(file_ref)
-        start, end = self._parse_line_range(location)
-        return self._open_lines(file_ref, start, end)
+        folder_paths = [folder["path"] for folder in updated.get("folders", [])]
+        folder_path = self._preferred_folder_path(
+            folder_paths,
+            entry.folder_path,
+            entry.folder_path,
+        )
+        updated["path"] = self._stable_file_locator(
+            file_ref,
+            entry,
+            folder_path=folder_path,
+        )
+        return updated
 
     def pageindex_structure(
         self,
@@ -1061,20 +879,6 @@ class PageIndexFileSystem:
             "text": text,
         }
 
-    def _stat(self, target: str) -> dict[str, Any]:
-        file_ref = self._resolve_target(target)
-        return self.store.file_info(file_ref)
-
-    def _require_text_artifact_file(self, entry: Any, command: str) -> None:
-        if self._file_format(entry) == "text":
-            return
-        raise ValueError(
-            f"{command} is only supported for txt/text files; "
-            f"got title={entry.title!r}, content_type={entry.content_type!r}. "
-            "Use cat <path|file_ref|document_id> --structure, "
-            "or cat <path|file_ref|document_id> --page for PDF/Markdown PageIndex files."
-        )
-
     def _require_pageindex_document_file(self, entry: Any, command: str) -> None:
         if self._file_format(entry) in {"pdf", "markdown", "pageindex"}:
             return
@@ -1117,7 +921,12 @@ class PageIndexFileSystem:
     def _pageindex_client(self) -> PageIndexClient:
         from ..client import PageIndexClient
 
-        return PageIndexClient(workspace=str(self.pageindex_client_workspace))
+        workspace = self.pageindex_client_workspace
+        workspace.mkdir(parents=True, exist_ok=True)
+        metadata_index = workspace / "_meta.json"
+        if not metadata_index.exists():
+            metadata_index.write_text("{}\n", encoding="utf-8")
+        return PageIndexClient(workspace=str(workspace))
 
     def _pageindex_client_doc_for_entry(self, entry: Any) -> tuple[PageIndexClient, str | None]:
         client = self._pageindex_client()
@@ -1224,9 +1033,6 @@ class PageIndexFileSystem:
         except json.JSONDecodeError:
             return {"error": f"Invalid PageIndexClient JSON response: {payload}"}
 
-    def _create_folder(self, path: str) -> str:
-        return self.create_folder(path)
-
     @classmethod
     def _resolve_add_target(
         cls,
@@ -1288,22 +1094,31 @@ class PageIndexFileSystem:
         )
         raise RuntimeError(f"pifs add failed to build PageIndex tree: {message}")
 
-    def _require_add_summary_projection_ready(self, record: dict[str, Any]) -> None:
+    def _require_summary_projection_ready(
+        self,
+        record: dict[str, Any],
+        *,
+        operation: str,
+    ) -> None:
         summary_projection = (record.get("metadata_status") or {}).get("summary_projection")
         if not summary_projection or not summary_projection.get("requested"):
-            raise RuntimeError("pifs add requires a requested summary projection index")
+            raise RuntimeError(
+                f"PIFS {operation} requires a requested summary projection index"
+            )
         if summary_projection.get("status") != "ready":
             detail = summary_projection.get("error") or summary_projection.get("status")
             raise RuntimeError(
-                f"pifs add failed to build summary projection index: {detail}"
+                f"PIFS {operation} failed to build summary projection index: {detail}"
             )
 
-    def _prepare_file_record(self, file: dict[str, Any]) -> dict[str, Any]:
+    def _prepare_file_record(
+        self,
+        file: dict[str, Any],
+        *,
+        artifact_baselines: dict[Path, bytes | None] | None = None,
+    ) -> dict[str, Any]:
         storage_uri = file["storage_uri"]
-        metadata = file.get("metadata") or {}
-        if not isinstance(metadata, dict):
-            raise ValueError("metadata must be a JSON object")
-        self._validate_register_metadata(metadata)
+        metadata = self._validated_register_metadata(file.get("metadata"))
         external_id = file.get("external_id")
         content = file.get("content") or ""
         folder_path = normalize_path(file.get("folder_path") or "/")
@@ -1325,6 +1140,12 @@ class PageIndexFileSystem:
         file_ref = make_file_ref(
             str(external_id or self._join_virtual_file_path(folder_path, title).strip("/"))
         )
+        if artifact_baselines is not None:
+            self._capture_registration_artifact_baselines(
+                file_ref,
+                file,
+                artifact_baselines,
+            )
         (
             pageindex_doc_id,
             pageindex_tree_status,
@@ -1350,12 +1171,10 @@ class PageIndexFileSystem:
             pageindex_tree_status=pageindex_tree_status,
             fallback_content=content,
         )
-        fts_content = file.get("fts_content", artifact_content)
         source_type = file.get("source_type")
         metadata_status = self._metadata_status_state(metadata=metadata)
         self._attach_pageindex_tree_failure(metadata_status, pageindex_tree_failure)
         indexed_metadata = SQLiteFileSystemStore.indexed_metadata_values(metadata)
-        searchable_metadata = indexed_metadata
         text_artifact_path = file.get("text_artifact_path")
         owns_text_artifact = text_artifact_path is None
         if text_artifact_path is None:
@@ -1365,13 +1184,12 @@ class PageIndexFileSystem:
         if raw_artifact_path is None and file.get("write_raw_artifact", True):
             raw_artifact_path = self.store.raw_dir / f"{file_ref}.json"
             owns_raw_artifact = True
-        descriptor = self._build_descriptor(title, metadata)
         return {
             "file_ref": file_ref,
             "external_id": external_id,
             "storage_uri": storage_uri,
             "title": title,
-            "descriptor": descriptor,
+            "descriptor": title,
             "content_type": content_type,
             "source_type": source_type,
             "fingerprint": fingerprint(artifact_content),
@@ -1384,10 +1202,7 @@ class PageIndexFileSystem:
             "metadata_status": metadata_status,
             "metadata_status_json": json.dumps(metadata_status, ensure_ascii=False),
             "indexed_metadata": indexed_metadata,
-            "metadata_text": metadata_text(searchable_metadata),
             "folder_path": folder_path,
-            "content": fts_content,
-            "skip_fts": bool(file.get("skip_fts", False)),
             "_pifs_owned_text_artifact": owns_text_artifact,
             "_pifs_owned_raw_artifact": owns_raw_artifact,
         }
@@ -1405,7 +1220,7 @@ class PageIndexFileSystem:
             return fallback_content
         if pageindex_tree_status != "built" or not pageindex_doc_id:
             return fallback_content
-        return self._pageindex_extracted_text(pageindex_doc_id)
+        return self._pageindex_extracted_text(pageindex_doc_id) or fallback_content
 
     def _pageindex_extracted_text(self, doc_id: str) -> str:
         client = self._pageindex_client()
@@ -1451,12 +1266,10 @@ class PageIndexFileSystem:
 
     def _sync_owned_raw_artifact(self, record: dict[str, Any]) -> None:
         raw_artifact_path = record.get("raw_artifact_path")
-        if not raw_artifact_path:
-            return
-        default_raw_artifact_path = self.store.raw_dir / f"{record['file_ref']}.json"
-        if Path(raw_artifact_path).expanduser().resolve(strict=False) != (
-            default_raw_artifact_path.resolve(strict=False)
-        ):
+        if self._managed_raw_artifact_path(
+            str(record["file_ref"]),
+            raw_artifact_path,
+        ) is None:
             return
         record["raw_artifact_path"] = str(
             self.store.write_raw_artifact(
@@ -1470,7 +1283,6 @@ class PageIndexFileSystem:
         )
 
     def _record_from_file_entry(self, entry: Any) -> dict[str, Any]:
-        content = self.store.read_text(entry.file_ref)
         metadata_status = self._metadata_status_state(metadata=entry.metadata)
         self._attach_pageindex_tree_failure(
             metadata_status,
@@ -1494,12 +1306,7 @@ class PageIndexFileSystem:
             "metadata_status": metadata_status,
             "metadata_status_json": json.dumps(metadata_status, ensure_ascii=False),
             "indexed_metadata": SQLiteFileSystemStore.indexed_metadata_values(entry.metadata),
-            "metadata_text": metadata_text(
-                SQLiteFileSystemStore.indexed_metadata_values(entry.metadata)
-            ),
             "folder_path": entry.folder_path,
-            "content": content,
-            "skip_fts": False,
         }
 
     def _complete_summary_projection_index(self, record: dict[str, Any]) -> bool:
@@ -1510,20 +1317,19 @@ class PageIndexFileSystem:
         summary = str(record.get("metadata", {}).get("summary") or "").strip()
         if not summary:
             return False
-        if self.summary_projection_indexer is None:
-            self._refresh_record_metadata_status(record)
-            return True
+        if self.summary_projection is None:
+            raise RuntimeError("PIFS Summary Projection is not open")
         try:
-            result = self.summary_projection_indexer.upsert_summary(record)
+            result = self.summary_projection.upsert_summary(record)
         except Exception as exc:
             summary_index["status"] = "failed"
             summary_index["error"] = str(exc)
             self._refresh_record_metadata_status(record)
-            return True
+            raise RuntimeError(
+                f"PIFS failed to build summary projection index: {exc}"
+            ) from exc
         summary_index.clear()
         summary_index.update({"requested": True, **result})
-        if summary_index.get("status") != "ready":
-            summary_index["status"] = "ready"
         self._refresh_record_metadata_status(record)
         return True
 
@@ -1541,49 +1347,255 @@ class PageIndexFileSystem:
             if record.get("_pifs_owned_raw_artifact") and record.get("raw_artifact_path"):
                 self._unlink_artifact(record["raw_artifact_path"])
 
-    def _cleanup_add_catalog_record(self, file_ref: str) -> None:
+    def _capture_registration_artifact_baselines(
+        self,
+        file_ref: str,
+        file: dict[str, Any],
+        baselines: dict[Path, bytes | None],
+    ) -> None:
+        paths = []
+        if file.get("text_artifact_path") is None:
+            paths.append(self.store.text_dir / f"{file_ref}.txt")
+        raw_artifact_path = file.get("raw_artifact_path")
+        if raw_artifact_path is None and file.get("write_raw_artifact", True):
+            raw_artifact_path = self.store.raw_dir / f"{file_ref}.json"
+        managed_raw_path = self._managed_raw_artifact_path(file_ref, raw_artifact_path)
+        if managed_raw_path is not None:
+            paths.append(managed_raw_path)
+        try:
+            existing = self.store.get_file(file_ref)
+        except KeyError:
+            existing = None
+        if existing is not None and existing.pageindex_doc_id:
+            paths.extend(
+                [
+                    self.pageindex_client_workspace / "_meta.json",
+                    self.pageindex_client_workspace
+                    / f"{existing.pageindex_doc_id}.json",
+                ]
+            )
+        for path in paths:
+            if path not in baselines:
+                baselines[path] = path.read_bytes() if path.is_file() else None
+
+    def _managed_raw_artifact_path(
+        self,
+        file_ref: str,
+        raw_artifact_path: Any,
+    ) -> Path | None:
+        if not raw_artifact_path:
+            return None
+        default_path = self.store.raw_dir / f"{file_ref}.json"
+        if Path(raw_artifact_path).expanduser().resolve(strict=False) != (
+            default_path.resolve(strict=False)
+        ):
+            return None
+        return default_path
+
+    def _restore_registration_artifact_baselines(
+        self,
+        baselines: dict[Path, bytes | None],
+    ) -> None:
+        for path, content in baselines.items():
+            if content is None:
+                self._unlink_artifact(path)
+                continue
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+
+    def _cleanup_catalog_record(self, file_ref: str) -> None:
         try:
             self.store.delete_file(file_ref)
         except Exception:
             return
 
-    def _existing_file_refs(self, records: list[dict[str, Any]]) -> set[str]:
-        existing: set[str] = set()
-        for record in records:
-            file_ref = str(record.get("file_ref") or "")
-            if not file_ref:
-                continue
-            try:
-                self.store.get_file(file_ref)
-            except KeyError:
-                continue
-            existing.add(file_ref)
-        return existing
-
-    def _cleanup_add_summary_projection(self, records: list[dict[str, Any]]) -> None:
-        indexer = self.summary_projection_indexer
-        if indexer is None:
-            return
-        delete_summary = getattr(indexer, "delete_summary", None)
-        for record in records:
-            file_ref = str(record.get("file_ref") or "")
-            if not file_ref:
-                continue
-            try:
-                if callable(delete_summary):
-                    delete_summary(file_ref)
+    def _capture_existing_registration_rows(
+        self,
+        snapshot: _RegistrationRollbackSnapshot,
+        projection: Any | None,
+    ) -> None:
+        file_refs = sorted(
+            {
+                str(record.get("file_ref") or "")
+                for record in snapshot.records
+                if str(record.get("file_ref") or "")
+            }
+        )
+        with self.store.connect() as connection:
+            for file_ref in file_refs:
+                file_row = connection.execute(
+                    "SELECT * FROM files WHERE file_ref = ?",
+                    (file_ref,),
+                ).fetchone()
+                if file_row is None:
                     continue
-                index = getattr(indexer, "index", None)
-                delete_file_refs = getattr(index, "delete_file_refs", None)
-                if callable(delete_file_refs):
-                    delete_file_refs([file_ref])
+                snapshot.catalog_rows[file_ref] = dict(file_row)
+                snapshot.membership_rows[file_ref] = [
+                    dict(row)
+                    for row in connection.execute(
+                        "SELECT * FROM file_folders WHERE file_ref = ? ORDER BY folder_id",
+                        (file_ref,),
+                    )
+                ]
+                snapshot.metadata_value_rows[file_ref] = [
+                    dict(row)
+                    for row in connection.execute(
+                        "SELECT * FROM metadata_values WHERE file_ref = ? "
+                        "ORDER BY field_id, value_text, created_at",
+                        (file_ref,),
+                    )
+                ]
+        if not snapshot.catalog_rows:
+            return
+        if projection is None:
+            raise RuntimeError(
+                "PIFS registration cannot snapshot existing files without a Summary Projection"
+            )
+        with projection.index.connect(read_only=True) as connection:
+            for file_ref in sorted(snapshot.catalog_rows):
+                doc = connection.execute(
+                    "SELECT * FROM semantic_index_docs WHERE file_ref = ?",
+                    (file_ref,),
+                ).fetchone()
+                vector = (
+                    None
+                    if doc is None
+                    else connection.execute(
+                        "SELECT rowid, source_type, embedding "
+                        "FROM semantic_index_vec WHERE rowid = ?",
+                        (doc["rowid"],),
+                    ).fetchone()
+                )
+                if doc is None or vector is None:
+                    raise RuntimeError(
+                        "PIFS registration found an incomplete existing Summary Projection; "
+                        "migrate this workspace before retrying."
+                    )
+                vector_row = dict(vector)
+                vector_row["embedding"] = bytes(vector_row["embedding"])
+                snapshot.projection_rows[file_ref] = (dict(doc), vector_row)
+
+    def _restore_existing_registration_catalog(
+        self,
+        snapshot: _RegistrationRollbackSnapshot,
+    ) -> None:
+        if not snapshot.catalog_rows:
+            return
+        with self.store.connect() as connection:
+            for file_ref in sorted(snapshot.catalog_rows):
+                connection.execute(
+                    "DELETE FROM metadata_values WHERE file_ref = ?", (file_ref,)
+                )
+                connection.execute(
+                    "DELETE FROM file_folders WHERE file_ref = ?", (file_ref,)
+                )
+                connection.execute("DELETE FROM files WHERE file_ref = ?", (file_ref,))
+                self._insert_registration_snapshot_row(
+                    connection,
+                    "files",
+                    snapshot.catalog_rows[file_ref],
+                )
+                for row in snapshot.membership_rows[file_ref]:
+                    self._insert_registration_snapshot_row(
+                        connection,
+                        "file_folders",
+                        row,
+                    )
+                for row in snapshot.metadata_value_rows[file_ref]:
+                    self._insert_registration_snapshot_row(
+                        connection,
+                        "metadata_values",
+                        row,
+                    )
+
+    def _restore_existing_registration_projection(
+        self,
+        snapshot: _RegistrationRollbackSnapshot,
+    ) -> None:
+        if not snapshot.projection_rows:
+            return
+        if self.summary_projection is None:
+            raise RuntimeError(
+                "PIFS registration cannot restore an unopened Summary Projection"
+            )
+        with self.summary_projection.index.connect() as connection:
+            for file_ref in sorted(snapshot.projection_rows):
+                current = connection.execute(
+                    "SELECT rowid FROM semantic_index_docs WHERE file_ref = ?",
+                    (file_ref,),
+                ).fetchall()
+                for row in current:
+                    connection.execute(
+                        "DELETE FROM semantic_index_vec WHERE rowid = ?",
+                        (row["rowid"],),
+                    )
+                connection.execute(
+                    "DELETE FROM semantic_index_docs WHERE file_ref = ?",
+                    (file_ref,),
+                )
+                doc, vector = snapshot.projection_rows[file_ref]
+                self._insert_registration_snapshot_row(
+                    connection,
+                    "semantic_index_docs",
+                    doc,
+                )
+                self._insert_registration_snapshot_row(
+                    connection,
+                    "semantic_index_vec",
+                    vector,
+                )
+
+    @staticmethod
+    def _insert_registration_snapshot_row(
+        connection: Any,
+        table: str,
+        row: dict[str, Any],
+    ) -> None:
+        columns = list(row)
+        placeholders = ", ".join("?" for _ in columns)
+        connection.execute(
+            f"INSERT INTO {table}({', '.join(columns)}) VALUES ({placeholders})",
+            [row[column] for column in columns],
+        )
+
+    def _cleanup_summary_projection_records(
+        self,
+        records: list[dict[str, Any]],
+    ) -> None:
+        projection = self.summary_projection
+        if projection is None:
+            return
+        for record in records:
+            file_ref = str(record.get("file_ref") or "")
+            if not file_ref:
+                continue
+            try:
+                projection.delete_summary(file_ref)
             except Exception:
                 continue
 
-    def _cleanup_add_created_folders(self, folder_paths: list[str]) -> None:
+    def _cleanup_summary_projection_cache(
+        self,
+        keys: set[_EmbeddingCacheKey],
+    ) -> None:
+        if not keys or self.summary_projection is None:
+            return
+        try:
+            self.summary_projection.delete_cache_keys(keys)
+        except Exception:
+            return
+
+    def _cleanup_created_folders(self, folder_paths: list[str]) -> None:
         for folder_path in reversed(folder_paths):
             try:
                 self.store.delete_empty_folder(folder_path)
+            except Exception:
+                continue
+
+    def _cleanup_new_metadata_fields(self, names: set[str]) -> None:
+        for name in sorted(names):
+            try:
+                self.store.delete_metadata_field_if_unreferenced(name)
             except Exception:
                 continue
 
@@ -1601,7 +1613,7 @@ class PageIndexFileSystem:
             doc_ids.update(str(doc_id) for doc_id in payload)
         return doc_ids
 
-    def _cleanup_add_pageindex_cache(
+    def _cleanup_pageindex_cache(
         self,
         records: list[dict[str, Any]],
         preexisting_doc_ids: set[str],
@@ -1658,35 +1670,6 @@ class PageIndexFileSystem:
         record["metadata_json"] = json.dumps(record["metadata"], ensure_ascii=False)
         record["metadata_status_json"] = json.dumps(metadata_status, ensure_ascii=False)
         record["indexed_metadata"] = SQLiteFileSystemStore.indexed_metadata_values(record["metadata"])
-        record["metadata_text"] = metadata_text(record["indexed_metadata"])
-
-    def _open_lines(self, file_ref: str, start: int, end: int) -> OpenResult:
-        entry = self.store.get_file(file_ref)
-        lines = self.store.read_text(file_ref).splitlines()
-        start = max(1, start)
-        end = min(max(start, end), len(lines))
-        text = "\n".join(lines[start - 1:end])
-        return OpenResult(
-            file_ref=file_ref,
-            start_line=start,
-            end_line=end,
-            text=text,
-            external_id=entry.external_id,
-            folder_path=entry.folder_path,
-        )
-
-    def _open_all(self, file_ref: str) -> OpenResult:
-        entry = self.store.get_file(file_ref)
-        text = self.store.read_text(file_ref)
-        line_count = len(text.splitlines())
-        return OpenResult(
-            file_ref=file_ref,
-            start_line=1,
-            end_line=line_count,
-            text=text,
-            external_id=entry.external_id,
-            folder_path=entry.folder_path,
-        )
 
     @classmethod
     def _structural_unavailable(
@@ -1769,7 +1752,7 @@ class PageIndexFileSystem:
         matches = [
             item
             for item in self.scope_files(scope, limit=self.scope_file_count(scope) + 1)
-            if item["name"] == leaf
+            if item["locator_leaf"] == leaf
         ]
         if not matches:
             raise KeyError(f"Unknown file target: {target}")
@@ -1786,31 +1769,6 @@ class PageIndexFileSystem:
             f"{path} is a scope, not a file locator; use tree {path} or "
             f'browse {path} "<query>" to select a file leaf.'
         )
-
-    @staticmethod
-    def _semantic_candidate_score(candidate: Any) -> float | None:
-        try:
-            return float(getattr(candidate, "score"))
-        except (AttributeError, TypeError, ValueError):
-            return None
-
-    @classmethod
-    def _semantic_candidate_similarity(cls, candidate: Any) -> float:
-        distances: list[float] = []
-        for source in getattr(candidate, "sources", []) or []:
-            if not isinstance(source, dict) or source.get("distance") is None:
-                continue
-            try:
-                distances.append(float(source["distance"]))
-            except (TypeError, ValueError):
-                continue
-        if distances:
-            distance = max(min(distances), 0.0)
-            return round(max(0.0, min(1.0, 1.0 / (1.0 + distance))), 4)
-        score = cls._semantic_candidate_score(candidate)
-        if score is None:
-            return 0.0
-        return round(max(0.0, min(1.0, score)), 4)
 
     @staticmethod
     def _metadata_filter_payload(metadata_filter: Any) -> str:
@@ -1838,19 +1796,11 @@ class PageIndexFileSystem:
         ).strip()
         if not title:
             raise RuntimeError(f"browse cannot build a virtual path for {file_ref}: missing title")
-        target = self._join_virtual_file_path(folder_path, title.strip("/"))
-        try:
-            resolved_file_ref = self.store.resolve_file_ref(target)
-        except KeyError as exc:
-            raise RuntimeError(
-                f"browse produced an unresolved virtual path for {file_ref}: {target}"
-            ) from exc
-        if resolved_file_ref != file_ref:
-            raise RuntimeError(
-                "browse produced a non-idempotent virtual path: "
-                f"{target} resolved to {resolved_file_ref}, expected {file_ref}"
-            )
-        return target
+        return self.scope_file_locator(
+            self.resolve_query_scope(folder_path),
+            file_ref,
+            title,
+        )
 
     @staticmethod
     def _scope_file_locator(scope: PIFSQueryScope, leaf: Any) -> str:
@@ -1860,25 +1810,39 @@ class PageIndexFileSystem:
         )
 
     @staticmethod
-    def _build_descriptor(title: str, metadata: dict[str, Any]) -> str:
-        source = metadata.get("source_type") or metadata.get("repo") or metadata.get("channel")
-        return f"{title} ({source})" if source else title
-
-    @staticmethod
-    def _validate_register_metadata(metadata: dict[str, Any]) -> None:
-        if "summary" in metadata:
+    def _validated_register_metadata(metadata: Any) -> dict[str, Any]:
+        if metadata is None:
+            validated = {}
+        elif not isinstance(metadata, dict):
+            raise ValueError("metadata must be a JSON object")
+        else:
+            validated = dict(metadata)
+        try:
+            json.dumps(validated, ensure_ascii=False)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("metadata must be JSON serializable") from exc
+        if "summary" in validated:
             raise ValueError("summary is managed by PageIndex doc_description")
+        return validated
 
     def _register_custom_metadata_fields(self, records: list[dict[str, Any]]) -> None:
-        fields = {}
+        fields = {
+            name: {}
+            for name in self._custom_metadata_field_names(records)
+            if not self.store.metadata_field_exists(name)
+        }
+        if fields:
+            self.metadata.register_schema({"fields": fields}, source="user")
+
+    def _custom_metadata_field_names(self, records: list[dict[str, Any]]) -> set[str]:
+        fields = set()
         for record in records:
             for name in SQLiteFileSystemStore.indexed_metadata_values(
                 record.get("metadata", {})
             ):
                 if self.metadata.FIELD_RE.match(str(name)):
-                    fields[str(name)] = {}
-        if fields:
-            self.metadata.register_schema({"fields": fields}, source="user")
+                    fields.add(str(name))
+        return fields
 
     @staticmethod
     def _metadata_status_state(*, metadata: dict[str, Any]) -> dict[str, Any]:
@@ -1906,13 +1870,6 @@ class PageIndexFileSystem:
             return
         if summary_index.get("status", "not_indexed") == "not_indexed":
             summary_index["status"] = "pending_index"
-
-    @staticmethod
-    def _scope_folder_path(scope: Optional[dict[str, Any]]) -> Optional[str]:
-        if not scope:
-            return None
-        path = scope.get("folder_path") or scope.get("path")
-        return normalize_path(path) if path else None
 
     def _folder_exists(self, path: str) -> bool:
         try:
@@ -1947,15 +1904,3 @@ class PageIndexFileSystem:
         if non_root:
             return sorted(non_root, key=lambda item: (len(item), item))[0]
         return fallback
-
-    @staticmethod
-    def _parse_line_range(location: str) -> tuple[int, int]:
-        value = str(location).strip()
-        if "-" in value:
-            left, right = value.split("-", 1)
-            start, end = int(left), int(right)
-        else:
-            start = end = int(value)
-        if start < 1 or end < start:
-            raise ValueError(f"Invalid line range: {location}")
-        return start, end

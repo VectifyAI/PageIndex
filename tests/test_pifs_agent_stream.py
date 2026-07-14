@@ -1,10 +1,8 @@
-import ast
 import io
 import os
 import tempfile
 import threading
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 from types import SimpleNamespace
 
@@ -28,21 +26,6 @@ from pageindex.filesystem.agent import (
     should_use_openai_compatible_chat_model,
 )
 from pageindex.filesystem import PageIndexFileSystem
-
-
-def load_demo_agent_prompt() -> str:
-    demo_path = Path(__file__).resolve().parents[1] / "examples" / "pifs_demo.py"
-    module = ast.parse(demo_path.read_text(encoding="utf-8"))
-    for node in module.body:
-        if isinstance(node, ast.Assign):
-            names = [
-                target.id
-                for target in node.targets
-                if isinstance(target, ast.Name)
-            ]
-            if "PIFS_DEMO_AGENT_PROMPT" in names and isinstance(node.value, ast.Constant):
-                return str(node.value.value)
-    raise AssertionError("PIFS_DEMO_AGENT_PROMPT not found")
 
 
 class StructuredAnswer(BaseModel):
@@ -88,20 +71,25 @@ class PIFSAgentStreamTest(unittest.TestCase):
         observer = PIFSAgentStreamObserver("tools", stream_log=stream_log, output=output)
 
         observer.handle_event(self.raw_event("response.output_text.delta", "hidden from tools mode"))
-        observer.handle_event(self.raw_event("response.function_call_arguments.delta", '{"command":"ls /"}'))
-        observer.emit_tool_call("ls /")
+        observer.handle_event(self.raw_event("response.function_call_arguments.delta", '{"command":"tree / -L 1"}'))
+        observer.emit_tool_call("tree / -L 1")
         observer.emit_tool_result(ok=True, output='{"ok": true}', seconds=0.001)
         observer.finish()
 
         printed = output.getvalue()
         self.assertNotIn("hidden from tools mode", printed)
         self.assertIn("[llm -> pifs command]", printed)
-        self.assertIn("ls /", printed)
+        self.assertIn("tree / -L 1", printed)
         self.assertIn("[pifs -> llm result preview]", printed)
         self.assertIn('{"ok": true}', printed)
-        self.assertEqual(stream_log[0], {"kind": "tool_call", "command": "ls /"})
+        self.assertEqual(
+            stream_log[0], {"kind": "tool_call", "command": "tree / -L 1"}
+        )
         self.assertEqual(stream_log[1]["kind"], "tool_result")
-        self.assertEqual(stream_log[2], {"kind": "tool_args", "text": '{"command":"ls /"}'})
+        self.assertEqual(
+            stream_log[2],
+            {"kind": "tool_args", "text": '{"command":"tree / -L 1"}'},
+        )
 
     def test_empty_tool_command_is_not_printed_or_logged(self):
         output = io.StringIO()
@@ -258,7 +246,7 @@ class PIFSAgentStreamTest(unittest.TestCase):
         self.assertIn("verify the relevant facts with cat or grep", AGENT_TOOL_POLICY)
         self.assertIn("cat <target> --structure", AGENT_TOOL_POLICY)
         self.assertIn("cat <target> --page", AGENT_TOOL_POLICY)
-        self.assertIn("Use grep <query> <path|file_ref|document_id> for a selected single file", AGENT_TOOL_POLICY)
+        self.assertIn("Use grep <query> <path> for a selected single file", AGENT_TOOL_POLICY)
         self.assertIn("Use grep <query> <file> only as a single-document lexical fallback", BASH_TOOL_DESCRIPTION)
 
     def test_prompt_allows_recursive_browse_for_low_signal_tree_labels(self):
@@ -283,20 +271,9 @@ class PIFSAgentStreamTest(unittest.TestCase):
         ):
             self.assertNotIn(old_command, prompt_surface)
 
-    def test_demo_prompt_uses_browse_strategy_and_not_old_vector_commands(self):
-        demo_prompt = load_demo_agent_prompt()
-
-        self.assertIn("Start with tree", demo_prompt)
-        self.assertIn('browse /documents "Federal Reserve supervision regulation"', demo_prompt)
-        self.assertIn('browse -R /documents "Federal Reserve supervision regulation"', demo_prompt)
-        self.assertIn("verify", demo_prompt)
-        self.assertIn("cat <path> --structure", demo_prompt)
-        self.assertIn("Use grep <query> <file> only for one selected file", demo_prompt)
-        self.assertIn("Do not guess cat --page ranges from grep line numbers", demo_prompt)
-        self.assertNotIn("search-summary", demo_prompt)
-
     def test_prompt_rejects_find_grep_as_exhaustive_search(self):
-        self.assertIn("Do not use find, recursive grep, folder grep, pipes", AGENT_TOOL_POLICY)
+        self.assertIn("folder-wide lexical searches", AGENT_TOOL_POLICY)
+        self.assertIn("Other shell commands, pipes", AGENT_TOOL_POLICY)
         self.assertIn("Only after that persistence protocol may you say the workspace lacks evidence", AGENT_TOOL_POLICY)
 
     def test_system_prompt_sets_workspace_identity_and_scope(self):
@@ -304,6 +281,10 @@ class PIFSAgentStreamTest(unittest.TestCase):
         self.assertIn("VectifyAI Team", AGENT_SYSTEM_PROMPT)
         self.assertIn("current PageIndex FileSystem\nworkspace", AGENT_SYSTEM_PROMPT)
         self.assertIn("unrelated to the current workspace", AGENT_SYSTEM_PROMPT)
+        self.assertIn("@field/value", AGENT_TOOL_POLICY)
+        self.assertIn("@field/value", BASH_TOOL_DESCRIPTION)
+        self.assertNotIn("@field=value", AGENT_TOOL_POLICY)
+        self.assertNotIn("@field=value", BASH_TOOL_DESCRIPTION)
         self.assertIn("do not answer it as\na general-purpose assistant", AGENT_SYSTEM_PROMPT)
         self.assertIn("workspace-related topic question", AGENT_SYSTEM_PROMPT)
         self.assertIn("clarify only after the persistence protocol", AGENT_SYSTEM_PROMPT)

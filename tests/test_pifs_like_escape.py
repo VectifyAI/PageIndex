@@ -42,20 +42,16 @@ def test_descendant_folder_filter_treats_underscore_literally(tmp_path):
         external_id="wildcard_neighbor",
     )
 
-    recursive = filesystem.browse("/proj_1", recursive=True, limit=10)
-    folder_id = filesystem.folder_info("/proj_1")["folder_id"]
-    scoped_results = filesystem.search(
-        scope={"folder_id": folder_id, "recursive": True},
+    recursive = filesystem.store.list_folder("/proj_1", recursive=True, limit=10)
+    scoped_results = filesystem.store.list_files(
+        scope={"folder_path": "/proj_1", "recursive": True},
         limit=10,
     )
-    ranked_folders = {
-        folder["path"]: folder
-        for folder in filesystem.find_folders("/", max_depth=1, limit=10)
-    }
+    ranked_folders = {folder["path"]: folder for folder in filesystem.store.find_folders("/", max_depth=1, limit=10)}
 
     assert {folder["path"] for folder in recursive["folders"]} == {"/proj_1/docs"}
     assert {file["external_id"] for file in recursive["files"]} == {"literal_underscore"}
-    assert {result.external_id for result in scoped_results} == {"literal_underscore"}
+    assert {result["external_id"] for result in scoped_results} == {"literal_underscore"}
     assert ranked_folders["/proj_1"]["matched_files"] == 1
     assert ranked_folders["/projA1"]["matched_files"] == 1
     assert filesystem.store.count_files_in_folder("/proj_1", recursive=True) == 1
@@ -99,14 +95,14 @@ def test_metadata_contains_treats_percent_and_underscore_literally(tmp_path):
         metadata={"status": "buildXalpha"},
     )
 
-    percent_results = filesystem.search(
+    percent_results = filesystem.store.list_files(
         metadata_filter={"status": {"$contains": "100% done"}},
         limit=10,
     )
-    underscore_results = filesystem.search(
+    underscore_results = filesystem.store.list_files(
         metadata_filter={"status": {"$contains": "build_alpha"}},
         limit=10,
     )
 
-    assert {result.external_id for result in percent_results} == {"literal_percent"}
-    assert {result.external_id for result in underscore_results} == {"literal_underscore"}
+    assert {result["external_id"] for result in percent_results} == {"literal_percent"}
+    assert {result["external_id"] for result in underscore_results} == {"literal_underscore"}

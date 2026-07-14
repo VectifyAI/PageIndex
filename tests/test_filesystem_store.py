@@ -35,9 +35,6 @@ def test_insert_files_does_not_disable_sqlite_synchronous(tmp_path):
                 "raw_artifact_path": None,
                 "metadata": {},
                 "metadata_json": json.dumps({}),
-                "metadata_text": "",
-                "content": "",
-                "skip_fts": True,
             }
         ]
     )
@@ -106,7 +103,7 @@ def test_file_upsert_preserves_soft_delete_tombstone(tmp_path):
 
     assert row["storage_uri"].endswith("/doc_report.md")
     assert row["deleted_at"] == "2001-02-03 04:05:06"
-    assert filesystem.search(None) == []
+    assert filesystem.store.list_files() == []
 
 
 def test_listing_uses_one_consistent_folder_membership_row(tmp_path):
@@ -127,7 +124,7 @@ def test_listing_uses_one_consistent_folder_membership_row(tmp_path):
         metadata={"display_name": "Alpha"},
     )
 
-    listing = filesystem.browse("/", recursive=True, limit=10)
+    listing = filesystem.store.list_folder("/", recursive=True, limit=10)
     row = next(item for item in listing["files"] if item["external_id"] == "doc_shared")
 
     assert row["folder_path"] == "/a"

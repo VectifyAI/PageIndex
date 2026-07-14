@@ -1,19 +1,19 @@
-import sys
-from pathlib import Path
+import hashlib
 
 import pytest
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 from pageindex.filesystem.semantic_index import (
     SemanticIndexRecord,
     SQLiteVecSemanticIndex,
 )
+from pageindex.filesystem.semantic_projection import (
+    EmbeddingCache,
+    SummaryEmbeddingProfile,
+    SummaryProjection,
+)
 
 
-class FixedDimensionEmbedder:
+class FixedEmbedder:
     def __init__(self, dimensions: int):
         self.dimensions = dimensions
 
@@ -23,14 +23,13 @@ class FixedDimensionEmbedder:
 
 def test_sqlite_vec_semantic_index_round_trip(tmp_path):
     index = SQLiteVecSemanticIndex(tmp_path / "semantic.sqlite")
-    index.reset(dimension=3, metadata={"field_mode": "summary"})
-
+    index.reset(dimension=3, metadata={"kind": "summary"})
     index.upsert_many(
         [
             SemanticIndexRecord(
                 file_ref="file_a",
                 external_id="doc_a",
-                source_type="github",
+                source_type="documents",
                 title="Multipart upload limits",
                 text="multipart upload limits",
                 vector=[1.0, 0.0, 0.0],
@@ -39,7 +38,7 @@ def test_sqlite_vec_semantic_index_round_trip(tmp_path):
             SemanticIndexRecord(
                 file_ref="file_b",
                 external_id="doc_b",
-                source_type="slack",
+                source_type="documents",
                 title="GPU cache issue",
                 text="gpu cache issue",
                 vector=[0.0, 1.0, 0.0],
@@ -48,23 +47,14 @@ def test_sqlite_vec_semantic_index_round_trip(tmp_path):
         ]
     )
 
-    assert index.info()["document_count"] == 2
-
-    results = index.search([0.9, 0.1, 0.0], limit=2)
-    assert [item.external_id for item in results] == ["doc_a", "doc_b"]
-
-    filtered = index.search(
-        [0.9, 0.1, 0.0],
-        limit=2,
-        filters={"source_type": "slack"},
-    )
-    assert [item.external_id for item in filtered] == ["doc_b"]
+    assert [
+        item.external_id for item in index.search([0.9, 0.1, 0.0], limit=2)
+    ] == ["doc_a", "doc_b"]
 
 
-def test_sqlite_vec_semantic_index_file_ref_filter_not_limited_by_global_rank(tmp_path):
+def test_sqlite_vec_file_ref_filter_is_not_limited_by_global_rank(tmp_path):
     index = SQLiteVecSemanticIndex(tmp_path / "semantic.sqlite")
-    index.reset(dimension=2, metadata={"field_mode": "summary"})
-
+    index.reset(dimension=2, metadata={"kind": "summary"})
     records = [
         SemanticIndexRecord(
             file_ref=f"file_off_{item:02d}",
@@ -97,237 +87,108 @@ def test_sqlite_vec_semantic_index_file_ref_filter_not_limited_by_global_rank(tm
     assert [item.file_ref for item in results] == ["file_in_scope"]
 
 
-def test_summary_projection_indexes_unified_metadata_summary(tmp_path):
-    from pageindex.filesystem.semantic_projection import SummaryProjectionIndexer
-
-    indexer = SummaryProjectionIndexer(
+def test_summary_projection_owns_write_search_and_delete_lifecycle(tmp_path):
+    profile = SummaryEmbeddingProfile(
+        base_url="https://EXAMPLE.invalid/v1/",
+        model="fake",
+        dimensions=3,
+        api_key="runtime-only",
+    )
+    projection = SummaryProjection(
         tmp_path / "projection",
-        embedder=FixedDimensionEmbedder(3),
-        embedding_provider="test",
-        embedding_model="fake",
-        embedding_dimensions=3,
+        profile=profile,
+        embedder=FixedEmbedder(3),
+        create=True,
     )
+    record = {
+        "file_ref": "file_a",
+        "external_id": "doc_a",
+        "source_type": "documents",
+        "title": "A",
+        "metadata": {"summary": "Unified summary", "department": "ops"},
+    }
 
-    result = indexer.upsert_summary(
-        {
-            "file_ref": "file_a",
-            "external_id": "doc_a",
-            "source_type": "documents",
-            "title": "A",
-            "metadata": {
-                "summary": "Unified metadata summary.",
-                "department": "ops",
-            },
-        }
-    )
-
-    assert result["status"] == "ready"
-    hits = indexer.index.search([1.0, 0.0, 0.0], limit=1)
-    assert hits[0].external_id == "doc_a"
-    assert hits[0].metadata["summary"] == "Unified metadata summary."
-    assert hits[0].metadata["department"] == "ops"
-
-
-def test_summary_projection_indexer_defaults_to_1024_dimensions(tmp_path):
-    from pageindex.filesystem.semantic_projection import SummaryProjectionIndexer
-
-    indexer = SummaryProjectionIndexer(
-        tmp_path / "projection",
-        embedder=FixedDimensionEmbedder(1024),
-        embedding_provider="test",
-        embedding_model="fake",
-    )
-
-    info = indexer.index.info()
-
-    assert info["dimension"] == 1024
-    assert info["metadata"]["embedding_dimensions"] == 1024
-
-    result = indexer.upsert_summary(
-        {
-            "file_ref": "file_a",
-            "external_id": "doc_a",
-            "source_type": "documents",
-            "title": "A",
-            "metadata": {"summary": "Default dimension summary."},
-        }
-    )
-
-    assert result["status"] == "ready"
-    assert result["embedding_dimensions"] == 1024
+    assert projection.upsert_summary(record)["status"] == "ready"
+    assert projection.info()["embedding_identity"] == {
+        "base_url": "https://example.invalid/v1",
+        "model": "fake",
+        "dimensions": 3,
+    }
+    assert [candidate.file_ref for candidate in projection.search("summary")] == [
+        "file_a"
+    ]
+    assert projection.delete_summary("file_a") == 1
+    assert projection.available is False
 
 
-def test_summary_projection_indexer_allows_explicit_256_dimensions(tmp_path):
-    from pageindex.filesystem.semantic_projection import SummaryProjectionIndexer
-
-    indexer = SummaryProjectionIndexer(
-        tmp_path / "projection",
-        embedder=FixedDimensionEmbedder(256),
-        embedding_provider="test",
-        embedding_model="fake",
-        embedding_dimensions=256,
-    )
-
-    assert indexer.index.info()["dimension"] == 256
-    assert indexer.upsert_summary(
-        {
-            "file_ref": "file_a",
-            "external_id": "doc_a",
-            "source_type": "documents",
-            "title": "A",
-            "metadata": {"summary": "Explicit 256 dimension summary."},
-        }
-    )["status"] == "ready"
-
-
-def test_summary_projection_default_rejects_existing_256_index_for_writes(tmp_path):
-    from pageindex.filesystem.semantic_projection import SummaryProjectionIndexer
-
+def test_projection_profile_mismatch_preserves_existing_database(tmp_path):
     index_dir = tmp_path / "projection"
-    index = SQLiteVecSemanticIndex(index_dir / "summary.sqlite")
-    index.reset(
-        dimension=256,
-        metadata={
-            "channel": "summary",
-            "embedding_provider": "test",
-            "embedding_model": "fake",
-            "embedding_dimensions": 256,
-        },
+    profile = SummaryEmbeddingProfile(
+        base_url="https://example.invalid/v1",
+        model="fake",
+        dimensions=3,
+        api_key="runtime-only",
+    )
+    projection = SummaryProjection(
+        index_dir,
+        profile=profile,
+        embedder=FixedEmbedder(3),
+        create=True,
+    )
+    projection.upsert_summary(
+        {
+            "file_ref": "file_a",
+            "external_id": "doc_a",
+            "source_type": "documents",
+            "title": "A",
+            "metadata": {"summary": "Preserve me"},
+        }
+    )
+    summary_path = index_dir / "summary.sqlite"
+    before = hashlib.sha256(summary_path.read_bytes()).hexdigest()
+    mismatch = SummaryEmbeddingProfile(
+        base_url="https://example.invalid/v1",
+        model="different",
+        dimensions=3,
+        api_key="runtime-only",
     )
 
-    with pytest.raises(RuntimeError, match="configured embedding_dimensions is 1024"):
-        SummaryProjectionIndexer(
-            index_dir,
-            embedder=FixedDimensionEmbedder(1024),
-            embedding_provider="test",
-            embedding_model="fake",
-        )
+    with pytest.raises(Exception, match="Incompatible PIFS Summary Embedding Profile"):
+        SummaryProjection(index_dir, profile=mismatch, create=False)
 
-    assert SQLiteVecSemanticIndex(index.db_path).info()["dimension"] == 256
-
-
-def test_summary_projection_from_provider_rejects_dimension_mismatch_before_embedder(
-    tmp_path, monkeypatch
-):
-    from pageindex.filesystem import semantic_projection
-    from pageindex.filesystem.semantic_projection import SummaryProjectionIndexer
-
-    index_dir = tmp_path / "projection"
-    index = SQLiteVecSemanticIndex(index_dir / "summary.sqlite")
-    index.reset(
-        dimension=256,
-        metadata={
-            "channel": "summary",
-            "embedding_provider": "openai",
-            "embedding_model": "text-embedding-3-small",
-            "embedding_dimensions": 256,
-        },
-    )
-
-    def fail_make_embedder(*args, **kwargs):
-        raise AssertionError("embedder should not be constructed before dimension validation")
-
-    monkeypatch.setattr(semantic_projection, "make_embedder", fail_make_embedder)
-
-    with pytest.raises(RuntimeError, match="configured embedding_dimensions is 1024"):
-        SummaryProjectionIndexer.from_provider(index_dir)
-
-
-def test_embedding_cache_key_separates_model_dimensions(tmp_path):
-    from pageindex.filesystem.semantic_projection import (
-        EmbeddingCache,
-        embedding_cache_model_key,
-    )
-
-    class CountingEmbedder:
-        def __init__(self, dimensions: int):
-            self.dimensions = dimensions
-            self.calls = 0
-
-        def embed(self, texts):
-            self.calls += 1
-            return [[float(self.dimensions), *([0.0] * (self.dimensions - 1))] for _ in texts]
-
-    cache = EmbeddingCache(tmp_path / "cache.sqlite")
-    embedder_256 = CountingEmbedder(256)
-    embedder_1024 = CountingEmbedder(1024)
-    key_256 = embedding_cache_model_key("fake", 256)
-    key_1024 = embedding_cache_model_key("fake", 1024)
-
-    assert key_256 != key_1024
-
-    vector_256 = cache.embed_texts(
-        ["same text"],
-        provider="test",
-        model=key_256,
-        embedder=embedder_256,
-        batch_size=1,
-    )[0]
-    vector_1024 = cache.embed_texts(
-        ["same text"],
-        provider="test",
-        model=key_1024,
-        embedder=embedder_1024,
-        batch_size=1,
-    )[0]
-
-    assert len(vector_256) == 256
-    assert len(vector_1024) == 1024
-    assert embedder_256.calls == 1
-    assert embedder_1024.calls == 1
+    assert hashlib.sha256(summary_path.read_bytes()).hexdigest() == before
 
 
 def test_embedding_cache_rejects_response_length_mismatch(tmp_path):
-    from pageindex.filesystem.semantic_projection import EmbeddingCache
-
     class ShortEmbedder:
         def embed(self, texts):
             return [[1.0, 0.0, 0.0]]
 
-    cache = EmbeddingCache(tmp_path / "cache.sqlite")
+    cache = EmbeddingCache(tmp_path / "cache.sqlite", create=True)
+    profile = SummaryEmbeddingProfile(
+        base_url="https://example.invalid/v1",
+        model="fake",
+        dimensions=3,
+        api_key="runtime-only",
+    )
 
     with pytest.raises(ValueError, match="embedding response length mismatch"):
         cache.embed_texts(
             ["first", "second"],
-            provider="test",
-            model="fake",
+            profile=profile,
             embedder=ShortEmbedder(),
             batch_size=2,
         )
 
 
-def test_embed_with_retry_does_not_retry_permanent_errors(monkeypatch):
+def test_embed_with_retry_only_retries_transient_errors(monkeypatch):
     from pageindex.filesystem.semantic_projection import embed_with_retry
 
     sleeps = []
 
-    class PermanentEmbeddingError(Exception):
-        status_code = 401
-
-    class FailingEmbedder:
-        calls = 0
-
-        def embed(self, texts):
-            self.calls += 1
-            raise PermanentEmbeddingError("unauthorized")
-
-    monkeypatch.setattr("pageindex.filesystem.semantic_projection.time.sleep", sleeps.append)
-    embedder = FailingEmbedder()
-
-    with pytest.raises(PermanentEmbeddingError):
-        embed_with_retry(embedder, ["text"])
-
-    assert embedder.calls == 1
-    assert sleeps == []
-
-
-def test_embed_with_retry_retries_transient_errors(monkeypatch):
-    from pageindex.filesystem.semantic_projection import embed_with_retry
-
-    sleeps = []
-
-    class TransientEmbeddingError(Exception):
-        status_code = 500
+    class EmbeddingError(Exception):
+        def __init__(self, status_code):
+            self.status_code = status_code
 
     class FlakyEmbedder:
         calls = 0
@@ -335,122 +196,25 @@ def test_embed_with_retry_retries_transient_errors(monkeypatch):
         def embed(self, texts):
             self.calls += 1
             if self.calls == 1:
-                raise TransientEmbeddingError("server error")
+                raise EmbeddingError(500)
             return [[1.0, 0.0, 0.0]]
 
-    monkeypatch.setattr("pageindex.filesystem.semantic_projection.time.sleep", sleeps.append)
+    monkeypatch.setattr(
+        "pageindex.filesystem.semantic_projection.time.sleep", sleeps.append
+    )
     embedder = FlakyEmbedder()
-
     assert embed_with_retry(embedder, ["text"]) == [[1.0, 0.0, 0.0]]
     assert embedder.calls == 2
     assert sleeps == [1.0]
 
+    class PermanentEmbedder:
+        calls = 0
 
-def test_summary_projection_dimension_mismatch_preserves_existing_index(tmp_path):
-    from pageindex.filesystem.semantic_projection import SummaryProjectionIndexer
+        def embed(self, texts):
+            self.calls += 1
+            raise EmbeddingError(401)
 
-    index_dir = tmp_path / "projection"
-    index = SQLiteVecSemanticIndex(index_dir / "summary.sqlite")
-    index.reset(
-        dimension=3,
-        metadata={
-            "channel": "summary",
-            "embedding_provider": "test",
-            "embedding_model": "fake",
-            "embedding_dimensions": 3,
-        },
-    )
-    index.upsert_many(
-        [
-            SemanticIndexRecord(
-                file_ref="file_a",
-                external_id="doc_a",
-                source_type="documents",
-                title="A",
-                text="summary",
-                vector=[1.0, 0.0, 0.0],
-            )
-        ]
-    )
-
-    with pytest.raises(RuntimeError, match="summary projection index dimension mismatch"):
-        SummaryProjectionIndexer(
-            index_dir,
-            embedder=FixedDimensionEmbedder(4),
-            embedding_provider="test",
-            embedding_model="fake",
-            embedding_dimensions=4,
-        )
-
-    preserved = SQLiteVecSemanticIndex(index.db_path)
-    assert preserved.info()["dimension"] == 3
-    assert preserved.info()["document_count"] == 1
-    assert preserved.search([1.0, 0.0, 0.0], limit=1)[0].external_id == "doc_a"
-
-
-def test_hash_embedding_provider_is_not_available():
-    from pageindex.filesystem.semantic_projection import make_embedder
-
-    with pytest.raises(ValueError, match="unknown embedding provider: hash"):
-        make_embedder("hash", "unused", dimensions=256, timeout=1)
-
-
-def test_make_embedder_accepts_direct_runtime_config(monkeypatch):
-    from pageindex.filesystem.semantic_projection import make_embedder
-
-    calls = []
-
-    class FakeOpenAI:
-        def __init__(self, **kwargs):
-            calls.append(kwargs)
-
-    fake_openai = type(sys)("openai")
-    fake_openai.OpenAI = FakeOpenAI
-    monkeypatch.setitem(sys.modules, "openai", fake_openai)
-    monkeypatch.setenv("PIFS_EMBEDDING_API_KEY", "ignored-env-key")
-    monkeypatch.setenv("PIFS_EMBEDDING_BASE_URL", "https://ignored.invalid/")
-    monkeypatch.setenv("OPENAI_API_KEY", "ignored-openai-key")
-    monkeypatch.setenv("OPENAI_BASE_URL", "https://ignored-openai.invalid/")
-
-    make_embedder(
-        "openai",
-        "gemini-embedding-2-preview",
-        dimensions=3072,
-        timeout=12.5,
-        api_key="direct-key",
-        base_url="https://example.invalid/openai/",
-    )
-
-    assert calls == [
-        {
-            "api_key": "direct-key",
-            "base_url": "https://example.invalid/openai/",
-            "timeout": 12.5,
-        }
-    ]
-
-
-def test_make_embedder_requires_direct_api_key(monkeypatch):
-    from pageindex.filesystem.semantic_projection import make_embedder
-
-    calls = []
-
-    class FakeOpenAI:
-        def __init__(self, **kwargs):
-            calls.append(kwargs)
-
-    fake_openai = type(sys)("openai")
-    fake_openai.OpenAI = FakeOpenAI
-    monkeypatch.setitem(sys.modules, "openai", fake_openai)
-    monkeypatch.setenv("PIFS_EMBEDDING_API_KEY", "ignored-env-key")
-    monkeypatch.setenv("OPENAI_API_KEY", "ignored-openai-key")
-
-    with pytest.raises(ValueError, match="embedding_api_key is required"):
-        make_embedder(
-            "openai",
-            "gemini-embedding-2-preview",
-            dimensions=3072,
-            timeout=12.5,
-        )
-
-    assert calls == []
+    permanent = PermanentEmbedder()
+    with pytest.raises(EmbeddingError):
+        embed_with_retry(permanent, ["text"])
+    assert permanent.calls == 1

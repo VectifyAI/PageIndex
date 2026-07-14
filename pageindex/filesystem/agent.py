@@ -35,9 +35,9 @@ document contents in the workspace.
 
 If the user asks what tools or capabilities you have, describe only the PIFS
 virtual shell capabilities available inside this workspace: tree, browse,
-stat, cat, grep, and ls as an alias for tree -L 1. Do not mention host runtime
-tools, SDK internals, or orchestration helpers that are not part of the PIFS
-shell.
+stat, cat, and grep. Describe PIFS Listing as tree <scope> -L 1. Do not mention
+host runtime tools, SDK internals, or orchestration helpers that are not part of
+the PIFS shell.
 
 If the user asks a workspace-related topic question without naming a specific
 file, treat it as a retrieval task. Start with tree to understand folder
@@ -52,41 +52,41 @@ format. If the caller needs stricter behavior, pass an explicit system_prompt.
 BASH_TOOL_DESCRIPTION = """
 Run a command in the PageIndex FileSystem virtual shell. This is not a real
 operating-system shell. The tool is read-only and always returns JSON.
-Use only: tree, browse, stat, cat, grep, and ls as an exact alias for tree -L 1.
+Use only: tree, browse, stat, cat, and grep.
 Start broad workspace questions with tree. Then choose a physical folder,
 inspect metadata-derived virtual axes such as @year or @ticker with tree, and
-copy returned scope paths into later commands. Run browse <scope> "<query>" for document
+select exact metadata values through paths such as @field/value. Copy returned
+scope paths into later commands. Run browse <scope> "<query>" for document
 discovery. Use browse -R when low-signal folder or virtual-node labels do not
 help prune the query, or after scoped browse misses/rephrasing. Browse returns document
 candidates only, not final evidence. Use stat only for identity, status, or
 metadata. Use cat <file> --structure before any cat <file> --page N[-M] for
 that file. Use grep <query> <file> only as a single-document lexical fallback.
-Do not use find, recursive grep, folder grep, pipes, stat schema/field modes,
-browse spaces, implicit cat reads, or general knowledge when workspace evidence
-is not found.
+Other shell commands, pipes, stat modes, folder-wide lexical searches, and
+implicit cat reads are unsupported.
 """
 
 AGENT_TOOL_POLICY = """
 Tool policy:
 - The bash tool is a PageIndex virtual shell, not an operating-system shell.
 - The default agent tool surface is read-only.
-- Use only tree, browse, stat, cat, grep, and ls as an alias for tree -L 1.
+- Use only tree, browse, stat, cat, and grep. PIFS Listing is tree <scope> -L 1.
 - Folder paths such as /documents are positional command targets; never put folder paths in --where.
 - Start with tree to understand workspace and folder structure before document retrieval.
-- After choosing a folder, use tree to inspect metadata-derived virtual axis nodes such as @year, then tree <scope>/@field to inspect metadata-derived virtual value nodes, and copy returned scope paths instead of handwriting encoded values.
+- After choosing a folder, use tree to inspect metadata-derived virtual axis nodes such as @year, then tree <scope>/@field to inspect @field/value nodes, and copy returned scope paths instead of handwriting encoded values.
 - After choosing a folder or scope, use browse <scope> "<query>" for relevance-ranked document candidates; quote multi-word queries, for example browse /documents "Federal Reserve".
 - Use browse -R from a broader folder when low-signal folder or virtual-node labels do not help prune the query.
 - If browse misses: inspect sibling or child folders with tree, browse another plausible folder, rephrase the query and browse again, then use browse -R from a broader folder.
 - Only after that persistence protocol may you say the workspace lacks evidence.
-- browse uses summary retrieval only; do not use browse --space.
+- browse always uses summary retrieval.
 - Use metadata scope paths for exact filters. Keep --where as a fallback for OR, IN, or contains only when tree paths cannot express the predicate.
 - browse candidates are not final evidence. After selecting candidates, verify the relevant facts with cat or grep before making source-backed claims.
 - For financial statement, ratio, or calculation questions, prefer citing a primary statement, reconciliation table, or official table when available; use summaries, MD&A, or footnotes as supporting evidence.
-- Use grep <query> <path|file_ref|document_id> for a selected single file only.
-- Do not use find, recursive grep, folder grep, pipes, schema browsing, batch metadata commands, browse spaces, implicit cat reads, or general-knowledge fallback.
+- Use grep <query> <path> for a selected single file only.
+- Other shell commands, pipes, schema browsing, batch metadata commands, folder-wide lexical searches, implicit cat reads, and general-knowledge fallback are unsupported.
 - Command errors are JSON; recover by trying an available command.
 - Use cat or grep to gather evidence before making source-backed claims.
-- Do not reconstruct a file path from a title. Use exact paths returned by PIFS commands, or use file_ref/document_id when available; quote paths that contain spaces.
+- Do not reconstruct a file path from a title. Use the exact path returned by PIFS commands and quote paths that contain spaces.
 - For broad topic, method, or "what solution" questions that are likely about the workspace, browse for candidate documents before asking the user to choose a document.
 - Use stat only for identity, metadata, or status questions. Do not run stat merely to understand what a document says.
 - Prefer target-first cat syntax with stable targets: cat <path> --structure, cat <path> --page 31-59.
@@ -100,7 +100,7 @@ Tool policy:
 - Avoid fetching a broad page span unless page-level citation or verification is required.
 - Do not call cat --page <target> <start> <end>; if you need a page span, use cat <target> --page <start>-<end>.
 - For metadata or summary-field questions, run stat <target> for relevant files before answering.
-- Distinguish default/register metadata from caller-provided custom metadata when the evidence supports it.
+- Distinguish generated metadata from caller-provided custom metadata when the evidence supports it.
 - Do a final consistency check before answering: the headline number, calculation, unit, sign, and yes/no polarity must agree with each other.
 """
 
