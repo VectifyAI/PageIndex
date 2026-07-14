@@ -163,6 +163,48 @@ Create a `.env` file in the root directory with your LLM API key. Multi-LLM is s
 OPENAI_API_KEY=your_openai_key_here
 ```
 
+#### MiniMax
+
+Both `MiniMax-M3` and `MiniMax-M2.7` can be used through LiteLLM. Choose the
+API mode and region that match your account:
+
+| API mode | Region | Base URL |
+| --- | --- | --- |
+| OpenAI-compatible | Global | `https://api.minimax.io/v1` |
+| OpenAI-compatible | China | `https://api.minimaxi.com/v1` |
+| Anthropic-compatible | Global | `https://api.minimax.io/anthropic` |
+| Anthropic-compatible | China | `https://api.minimaxi.com/anthropic` |
+
+For the OpenAI-compatible API, set the matching regional base URL:
+
+```bash
+MINIMAX_API_KEY=your_minimax_key_here
+MINIMAX_API_BASE=https://api.minimax.io/v1
+```
+
+Then select either model in `pageindex/config.yaml` or with `--model`:
+
+```yaml
+model: "minimax/MiniMax-M3"
+retrieve_model: "minimax/MiniMax-M2.7"
+```
+
+For the Anthropic-compatible API, keep the public base URL ending in
+`/anthropic`:
+
+```bash
+ANTHROPIC_API_KEY=your_minimax_key_here
+ANTHROPIC_API_BASE=https://api.minimax.io/anthropic
+```
+
+```yaml
+model: "anthropic/MiniMax-M3"
+retrieve_model: "anthropic/MiniMax-M2.7"
+```
+
+When using `PageIndexClient`, the optional `api_base` argument configures the
+matching base URL variable for the selected model prefix.
+
 ### 3. Generate PageIndex structure for your PDF
 
 ```bash
