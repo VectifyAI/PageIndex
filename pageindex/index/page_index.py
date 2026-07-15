@@ -642,6 +642,11 @@ def process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_che
     offset = calculate_page_offset(matching_pairs)
     logger.info(f'offset: {offset}')
 
+    if offset is None:
+        # no printed→physical anchor: return items without physical_index so
+        # meta_processor's accuracy check falls back to the no-page-number mode
+        return toc_with_page_number
+
     toc_with_page_number = add_page_offset_to_toc_json(toc_with_page_number, offset)
     logger.info(f'toc_with_page_number: {toc_with_page_number}')
 
@@ -684,8 +689,13 @@ def process_none_page_numbers(toc_items, page_list, start_index=1, model=None):
             item_copy = copy.deepcopy(item)
             item_copy.pop('page', None)
             result = add_page_number_to_toc(page_contents, item_copy, model)
-            if isinstance(result[0]['physical_index'], str) and result[0]['physical_index'].startswith('<physical_index'):
-                item['physical_index'] = int(result[0]['physical_index'].split('_')[-1].rstrip('>').strip())
+            first = result[0] if isinstance(result, list) and result and isinstance(result[0], dict) else {}
+            physical_index = first.get('physical_index')
+            if isinstance(physical_index, str) and physical_index.startswith('<physical_index'):
+                try:
+                    item['physical_index'] = int(physical_index.split('_')[-1].rstrip('>').strip())
+                except ValueError:
+                    continue
                 item.pop('page', None)
     
     return toc_items
@@ -1179,7 +1189,9 @@ def validate_and_truncate_physical_indices(toc_with_page_number, page_list_lengt
     for i, item in enumerate(toc_with_page_number):
         if item.get('physical_index') is not None:
             original_index = item['physical_index']
-            if original_index > max_allowed_page:
+            # non-int (e.g. a bare-number string the converter didn't coerce)
+            # is invalid the same way an out-of-range index is
+            if not isinstance(original_index, int) or original_index > max_allowed_page:
                 item['physical_index'] = None
                 truncated_items.append({
                     'title': item.get('title', 'Unknown'),

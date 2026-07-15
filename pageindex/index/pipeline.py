@@ -30,7 +30,7 @@ def build_tree_from_levels(nodes: list[ContentNode]) -> list[dict]:
             "line_num": node.index,
             "nodes": [],
         }
-        current_level = node.level or 1
+        current_level = 1 if node.level is None else node.level
 
         while stack and stack[-1][1] >= current_level:
             stack.pop()

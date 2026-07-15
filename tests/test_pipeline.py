@@ -69,6 +69,17 @@ def test_build_tree_from_levels_single_level():
     assert tree[1]["title"] == "B"
 
 
+def test_build_tree_from_levels_zero_based_levels():
+    nodes = [
+        ContentNode(content="c", tokens=5, title="Chapter", index=1, level=0),
+        ContentNode(content="s", tokens=5, title="Section", index=2, level=1),
+    ]
+    tree = build_tree_from_levels(nodes)
+    assert len(tree) == 1
+    assert tree[0]["title"] == "Chapter"
+    assert [n["title"] for n in tree[0]["nodes"]] == ["Section"]
+
+
 def test_build_tree_from_levels_deep_nesting():
     nodes = [
         ContentNode(content="h1", tokens=5, title="H1", index=1, level=1),

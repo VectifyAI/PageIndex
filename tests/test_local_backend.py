@@ -172,6 +172,13 @@ def test_wrap_with_doc_context_multi(populated_backend):
     assert "User question: compare them" in wrapped
 
 
+def test_wrap_with_doc_context_none_doc_name():
+    from pageindex.agent import wrap_with_doc_context
+    docs = [{"doc_id": "d1", "doc_name": None, "doc_description": None}]
+    wrapped = wrap_with_doc_context(docs, "q?")
+    assert "- d1:" in wrapped
+
+
 def test_scoped_docs_raises_on_missing(populated_backend):
     with pytest.raises(DocumentNotFoundError, match="nonexistent"):
         populated_backend._scoped_docs("papers", ["d1", "nonexistent"])
