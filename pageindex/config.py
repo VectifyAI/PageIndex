@@ -28,7 +28,8 @@ class IndexConfig(BaseModel):
     if_add_node_text: bool = False
     # Max concurrent in-flight LLM calls during indexing. None = use the global
     # default (get_max_concurrency(), overridable via PAGEINDEX_MAX_CONCURRENCY).
-    # An explicit value here wins for this client.
+    # An explicit value can only lower the cap; raise the ceiling itself via
+    # set_max_concurrency() or PAGEINDEX_MAX_CONCURRENCY.
     max_concurrency: int | None = None
     # Per-call litellm completion kwargs for this client's indexing calls only
     # (e.g. {"temperature": 1}). None = use the process-wide defaults
@@ -217,6 +218,16 @@ def max_concurrency_scope(value: int | None):
     """
     if value is not None:
         _validate_max_concurrency(value)
+        if value > _MAX_CONCURRENCY:
+            import warnings
+            warnings.warn(
+                f"max_concurrency={value} exceeds the process-wide ceiling "
+                f"({_MAX_CONCURRENCY}), which still applies — a per-index value "
+                f"can only lower the cap. Raise the ceiling with "
+                f"set_max_concurrency({value}) or PAGEINDEX_MAX_CONCURRENCY.",
+                UserWarning,
+                stacklevel=3,
+            )
     scoped_sem = threading.Semaphore(value) if value is not None else None
     token = _MAX_CONCURRENCY_OVERRIDE.set(value)
     sem_token = _MAX_CONCURRENCY_SCOPE_SEMAPHORE.set(scoped_sem)

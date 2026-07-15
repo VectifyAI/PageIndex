@@ -137,7 +137,7 @@ class LocalBackend:
                 "structure": result["structure"],
                 "pages": pages,
             })
-        except sqlite3.IntegrityError:
+        except sqlite3.IntegrityError as e:
             # Lost a concurrent add of the same content (UNIQUE collection+hash).
             # Discard our managed files and return the winner's doc_id.
             managed_path.unlink(missing_ok=True)
@@ -147,7 +147,12 @@ class LocalBackend:
             existing_id = self._storage.find_document_by_hash(collection, file_hash)
             if existing_id:
                 return existing_id
-            raise
+            # No winner — likely an FK violation from a concurrent collection delete.
+            if collection not in self._storage.list_collections():
+                raise CollectionNotFoundError(
+                    f"Collection '{collection}' was deleted while indexing {file_path}"
+                ) from e
+            raise IndexingError(f"Failed to index {file_path}: {e}") from e
         except Exception as e:
             managed_path.unlink(missing_ok=True)
             doc_dir = col_dir / doc_id

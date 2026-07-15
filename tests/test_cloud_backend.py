@@ -7,7 +7,7 @@ import pytest
 
 import pageindex.backend.cloud as cloud_mod
 from pageindex.backend.cloud import CloudBackend, API_BASE
-from pageindex.errors import CloudAPIError, DocumentNotFoundError
+from pageindex.errors import CloudAPIError, CollectionNotFoundError, DocumentNotFoundError
 
 # Real sleep captured at import, before the _no_sleep autouse fixture patches
 # time.sleep on the shared module object. Tests that need genuine pacing (e.g.
@@ -100,6 +100,47 @@ def test_list_documents_paginates(monkeypatch):
     assert docs[-1]["doc_id"] == "d129"
 
 
+# ── base_url override must reach every request path ──────────────────────────
+
+def test_base_url_override_routes_requests(monkeypatch):
+    backend = CloudBackend(api_key="pi-test", base_url="https://staging.example.com")
+    urls = []
+
+    def fake_request(method, url, headers=None, **kwargs):
+        urls.append(url)
+        return FakeResponse(status_code=200, json_data={"folders": []})
+
+    monkeypatch.setattr(cloud_mod.requests, "request", fake_request)
+    backend.list_collections()
+    assert urls == ["https://staging.example.com/folders/"]
+
+
+def test_base_url_override_routes_streaming(monkeypatch):
+    backend = CloudBackend(api_key="pi-test", base_url="https://staging.example.com")
+    urls = []
+
+    def fake_post(url, **kwargs):
+        urls.append(url)
+        return FakeResponse(status_code=200, lines=["data: [DONE]"])
+
+    monkeypatch.setattr(cloud_mod.requests, "post", fake_post)
+    _collect_events(backend)
+    assert urls == ["https://staging.example.com/chat/completions/"]
+
+
+def test_client_base_url_override_reaches_both_backends():
+    # PageIndexClient.BASE_URL is the documented override point; it must apply
+    # to the Collection API (CloudBackend), not just the legacy SDK methods.
+    from pageindex.client import PageIndexClient
+
+    class StagingClient(PageIndexClient):
+        BASE_URL = "https://staging.example.com"
+
+    client = StagingClient(api_key="pi-test")
+    assert client._backend._base_url == "https://staging.example.com"
+    assert client._legacy_cloud_api.base_url == "https://staging.example.com"
+
+
 # ── folder resolution: plan-limit vs transient errors ────────────────────────
 
 def test_folder_unavailable_warns_and_caches(monkeypatch):
@@ -125,6 +166,42 @@ def test_folder_transient_error_propagates_and_is_not_cached(monkeypatch):
         backend._get_folder_id("col")
     # A blip must not permanently route documents to the global space.
     assert "col" not in backend._folder_id_cache
+
+
+def test_missing_folder_raises_collection_not_found(monkeypatch):
+    # Folders ARE available but the name has no match (e.g. deleted): must
+    # raise, never fall back to the account-wide global space.
+    backend = CloudBackend(api_key="pi-test")
+    monkeypatch.setattr(
+        backend, "_request",
+        lambda *a, **k: {"folders": [{"name": "other", "id": "f1"}]},
+    )
+    with pytest.raises(CollectionNotFoundError):
+        backend._get_folder_id("gone")
+    assert "gone" not in backend._folder_id_cache
+
+
+def test_list_documents_raises_for_missing_collection(monkeypatch):
+    # Guards the query path: a stale collection must error out, not silently
+    # list (and query over) every document in the account.
+    backend = CloudBackend(api_key="pi-test")
+    monkeypatch.setattr(backend, "_request", lambda *a, **k: {"folders": []})
+    with pytest.raises(CollectionNotFoundError):
+        backend.list_documents("gone")
+
+
+def test_delete_collection_missing_is_noop(monkeypatch):
+    backend = CloudBackend(api_key="pi-test")
+    calls = []
+
+    def fake_request(method, path, **kwargs):
+        calls.append((method, path))
+        return {"folders": []}
+
+    monkeypatch.setattr(backend, "_request", fake_request)
+    backend.delete_collection("gone")  # idempotent, matching the local backend
+    assert ("GET", "/folders/") in calls
+    assert not any(method == "DELETE" for method, _ in calls)
 
 
 def test_list_collections_degrades_when_folders_unavailable(monkeypatch):

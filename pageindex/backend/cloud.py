@@ -14,7 +14,8 @@ import requests
 from typing import AsyncIterator
 
 from ..cloud_api import API_BASE  # single source of truth for the cloud base URL
-from ..errors import AUTH_HINT, CloudAPIError, DocumentNotFoundError, PageIndexError
+from ..errors import (AUTH_HINT, CloudAPIError, CollectionNotFoundError,
+                      DocumentNotFoundError, PageIndexError)
 from ..events import QueryEvent
 
 logger = logging.getLogger(__name__)
@@ -30,8 +31,9 @@ def _as_int(value):
 
 
 class CloudBackend:
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, base_url: str | None = None):
         self._api_key = api_key
+        self._base_url = base_url or API_BASE
         self._headers = {"api_key": api_key}
         self._folder_id_cache: dict[str, str | None] = {}
         self._folder_warning_shown = False
@@ -59,7 +61,7 @@ class CloudBackend:
         """HTTP helper. ``retries`` caps total attempts — pass 1 for
         non-idempotent, expensive calls (e.g. chat completions) where a
         retry would redo the full server-side work."""
-        url = f"{API_BASE}{path}"
+        url = f"{self._base_url}{path}"
         kwargs.setdefault("timeout", 30)
         last_status: int | None = None
         for attempt in range(retries):
@@ -150,7 +152,9 @@ class CloudBackend:
                 raise
 
     def _get_folder_id(self, name: str) -> str | None:
-        """Resolve collection name to folder ID. Returns None if folders not available.
+        """Resolve collection name to folder ID. Returns None if folders are
+        not available on this plan; raises CollectionNotFoundError if folders
+        are available but no folder has this name.
 
         Only "folders unavailable on this plan" (403/404) is cached as None —
         transient errors (network, 5xx) propagate so a blip can't silently
@@ -170,7 +174,10 @@ class CloudBackend:
             if folder.get("name") == name:
                 self._folder_id_cache[name] = folder["id"]
                 return folder["id"]
-        return None
+        raise CollectionNotFoundError(
+            f"Collection '{name}' does not exist; "
+            f"create it first (e.g. client.collection('{name}'))."
+        )
 
     def list_collections(self) -> list[str]:
         try:
@@ -183,7 +190,10 @@ class CloudBackend:
         return [f["name"] for f in data.get("folders", []) or []]
 
     def delete_collection(self, name: str) -> None:
-        folder_id = self._get_folder_id(name)
+        try:
+            folder_id = self._get_folder_id(name)
+        except CollectionNotFoundError:
+            return  # already gone — delete is idempotent
         if folder_id:
             self._request("DELETE", f"/folder/{self._enc(folder_id)}/")
             # Drop the cached id so a later same-name op re-resolves instead of
@@ -382,10 +392,13 @@ class CloudBackend:
             raise ValueError(
                 "doc_ids cannot be empty; pass None to query the whole collection"
             )
-        doc_id = doc_ids if doc_ids else self._get_all_doc_ids(collection)
+        doc_id = doc_ids if doc_ids else await asyncio.to_thread(
+            self._get_all_doc_ids, collection
+        )
         if not doc_id:
             raise ValueError("collection has no documents to query")
         headers = self._headers
+        base_url = self._base_url
         # Queue carries QueryEvent, an Exception to re-raise, or None (end).
         queue: asyncio.Queue[QueryEvent | Exception | None] = asyncio.Queue()
         loop = asyncio.get_running_loop()
@@ -413,7 +426,7 @@ class CloudBackend:
             answer_parts: list[str] = []
             try:
                 resp = requests.post(
-                    f"{API_BASE}/chat/completions/",
+                    f"{base_url}/chat/completions/",
                     headers=headers,
                     json={
                         "messages": [{"role": "user", "content": question}],
@@ -521,7 +534,11 @@ class CloudBackend:
                     # during teardown; closing is just to unblock the thread.
                     logger.debug("Ignoring error closing streaming response during cleanup",
                                  exc_info=True)
-            thread.join(timeout=5)
+            try:
+                await asyncio.to_thread(thread.join, 5)
+            except RuntimeError:
+                # event loop already shutting down — fall back to a bounded sync join
+                thread.join(timeout=5)
 
     def _get_all_doc_ids(self, collection: str) -> list[str]:
         """Get all document IDs in a collection."""

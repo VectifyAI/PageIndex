@@ -74,7 +74,7 @@ class PageIndexClient:
     def _init_cloud(self, api_key: str):
         from .backend.cloud import CloudBackend
         from .cloud_api import LegacyCloudAPI
-        self._backend = CloudBackend(api_key=api_key)
+        self._backend = CloudBackend(api_key=api_key, base_url=self.BASE_URL)
         self._legacy_cloud_api = LegacyCloudAPI(api_key=api_key, base_url=self.BASE_URL)
 
     def _init_local(self, model: str = None, retrieve_model: str = None,

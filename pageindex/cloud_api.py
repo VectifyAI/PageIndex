@@ -166,12 +166,15 @@ class LegacyCloudAPI:
         if stream_metadata:
             payload["stream_metadata"] = stream_metadata
 
+        # Non-streaming completions return no bytes until server-side
+        # generation finishes — far longer than the default 30s read timeout.
         response = self._request(
             "POST",
             "/chat/completions/",
             "Failed to get chat completion",
             json=payload,
             stream=stream,
+            **({} if stream else {"timeout": 300}),
         )
 
         if stream:

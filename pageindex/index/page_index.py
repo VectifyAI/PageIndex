@@ -17,6 +17,9 @@ async def check_title_appearance(item, page_list, start_index=1, model=None):
     
     
     page_number = item['physical_index']
+    if page_number < start_index:
+        # a below-range index would wrap to a negative Python index (the last page)
+        return {'list_index': item.get('list_index'), 'answer': 'no', 'title': title, 'page_number': None}
     page_text = page_list[page_number-start_index][0]
 
     
@@ -1085,6 +1088,13 @@ async def tree_parser(page_list, opt, doc=None, logger=None):
 
 
 def page_index_main(doc, opt=None):
+    # accept legacy 'yes'/'no' string flags (a bare 'no' is truthy)
+    from .page_index_md import _coerce_bool
+    for flag in ('if_add_node_id', 'if_add_node_text',
+                 'if_add_node_summary', 'if_add_doc_description'):
+        if hasattr(opt, flag):
+            setattr(opt, flag, _coerce_bool(getattr(opt, flag)))
+
     logger = JsonLogger(doc)
     
     is_valid_pdf = (

@@ -64,6 +64,11 @@ __all__ = [
     # Legacy top-level exports (pre-SDK API), kept so `from pageindex import *`
     # still binds them.
     "page_index",
+    "page_index_main",
+    "tree_parser",
+    "ConfigLoader",
+    "llm_completion",
+    "llm_acompletion",
     "md_to_tree",
     "get_document",
     "get_document_structure",
