@@ -30,6 +30,39 @@ def count_tokens(text, model=None):
     return litellm.token_counter(model=model, text=text)
 
 
+def truncate_to_token_limit(text, max_tokens, model=None):
+    """Truncate text so ``count_tokens`` stays within ``max_tokens``.
+
+    Used to keep TOC / LLM prompts inside the budget implied by
+    ``--max-tokens-per-node`` (issue #15). Returns ``text`` unchanged when
+    ``max_tokens`` is unset/non-positive or the text already fits.
+    """
+    if not text or max_tokens is None or max_tokens <= 0:
+        return text
+    if count_tokens(text, model) <= max_tokens:
+        return text
+
+    # Binary-search a character cut; tokenizers are roughly monotone in length.
+    lo, hi = 0, len(text)
+    best = ""
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        candidate = text[:mid]
+        if count_tokens(candidate, model) <= max_tokens:
+            best = candidate
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    if best and best != text:
+        logging.warning(
+            "Truncated text from %s to %s tokens (limit=%s)",
+            count_tokens(text, model),
+            count_tokens(best, model),
+            max_tokens,
+        )
+    return best
+
+
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
     if model:
         model = model.removeprefix("litellm/")
@@ -43,10 +76,14 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
                 temperature=0,
             )
             content = response.choices[0].message.content
+            if content is None:
+                content = ""
             if return_finish_reason:
+                # Always return a 2-tuple so callers never hit
+                # "too many values to unpack" when providers return unexpected shapes (#15).
                 finish_reason = "max_output_reached" if response.choices[0].finish_reason == "length" else "finished"
-                return content, finish_reason
-            return content
+                return str(content), finish_reason
+            return str(content)
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
