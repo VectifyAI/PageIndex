@@ -1089,7 +1089,7 @@ async def tree_parser(page_list, opt, doc=None, logger=None):
 
 def page_index_main(doc, opt=None):
     # accept legacy 'yes'/'no' string flags (a bare 'no' is truthy)
-    from .page_index_md import _coerce_bool
+    from .utils import _coerce_bool
     for flag in ('if_add_node_id', 'if_add_node_text',
                  'if_add_node_summary', 'if_add_doc_description'):
         if hasattr(opt, flag):

@@ -941,6 +941,13 @@ def add_node_text_with_labels(node, pdf_pages):
     return
 
 
+def _coerce_bool(value):
+    """Coerce a legacy 'yes'/'no' string flag to bool (a bare 'no' is truthy)."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("yes", "true", "1", "y", "on")
+    return bool(value)
+
+
 class ConfigLoader:
     """Legacy 0.2.x config helper. Defaults now come from IndexConfig; this
     class no longer reads the packaged ``config.yaml`` (the CLI still uses it

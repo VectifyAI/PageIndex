@@ -6,7 +6,8 @@ from pageindex.index.page_index import *
 # a bare ``--flag`` (no value) resolves to True via argparse's ``const``; an
 # explicit value keeps the legacy yes/no style working, so ``--flag no`` turns
 # it off. argparse only ever passes a str here (const/default bypass type=).
-from pageindex.index.page_index_md import md_to_tree, _coerce_bool as _cli_bool
+from pageindex.index.page_index_md import md_to_tree
+from pageindex.index.utils import _coerce_bool as _cli_bool
 from pageindex.config import IndexConfig
 
 

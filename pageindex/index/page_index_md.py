@@ -3,6 +3,7 @@ import json
 import re
 import os
 from .utils import *
+from .utils import _coerce_bool  # underscore names aren't star-exported
 
 async def get_node_summary(node, summary_token_threshold=200, model=None):
     node_text = node.get('text')
@@ -241,13 +242,6 @@ def clean_tree_for_output(tree_nodes):
         cleaned_nodes.append(cleaned_node)
     
     return cleaned_nodes
-
-
-def _coerce_bool(value):
-    """Coerce a legacy 'yes'/'no' string flag to bool (a bare 'no' is truthy)."""
-    if isinstance(value, str):
-        return value.strip().lower() in ("yes", "true", "1", "y", "on")
-    return bool(value)
 
 
 async def md_to_tree(md_path, if_thinning=False, min_token_threshold=None, if_add_node_summary=False, summary_token_threshold=None, model=None, if_add_doc_description=False, if_add_node_text=False, if_add_node_id=True):
