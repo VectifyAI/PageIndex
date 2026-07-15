@@ -239,6 +239,23 @@ class CloudBackend:
                 raise DocumentNotFoundError(f"Document {doc_id} not found") from e
             raise
 
+    def _get_metadata(self, doc_id: str) -> dict:
+        return self._doc_request(doc_id, "GET", f"/doc/{self._enc(doc_id)}/metadata/")
+
+    def _require_document(self, collection: str, doc_id: str) -> dict | None:
+        """Membership guard (the server's doc endpoints are user-scoped, not
+        folder-scoped, so this is checked client-side). Returns the doc's
+        metadata, or None when folders are unavailable on this plan."""
+        folder_id = self._get_folder_id(collection)
+        if folder_id is None:
+            return None
+        meta = self._get_metadata(doc_id)
+        if meta.get("folderId") != folder_id:
+            raise DocumentNotFoundError(
+                f"Document {doc_id} not found in collection '{collection}'"
+            )
+        return meta
+
     def get_document(self, collection: str, doc_id: str, include_text: bool = False) -> dict:
         if include_text:
             import warnings
@@ -249,7 +266,9 @@ class CloudBackend:
                 UserWarning,
                 stacklevel=3,
             )
-        resp = self._doc_request(doc_id, "GET", f"/doc/{self._enc(doc_id)}/metadata/")
+        resp = self._require_document(collection, doc_id)
+        if resp is None:
+            resp = self._get_metadata(doc_id)
         # Fetch structure in the same call via tree endpoint
         tree_resp = self._doc_request(doc_id, "GET", f"/doc/{self._enc(doc_id)}/",
                                       params={"type": "tree", "summary": "true"})
@@ -264,12 +283,14 @@ class CloudBackend:
         }
 
     def get_document_structure(self, collection: str, doc_id: str) -> list:
+        self._require_document(collection, doc_id)
         resp = self._doc_request(doc_id, "GET", f"/doc/{self._enc(doc_id)}/",
                                  params={"type": "tree", "summary": "true"})
         raw_tree = resp.get("tree", resp.get("structure", resp.get("result", [])))
         return self._normalize_tree(raw_tree)
 
     def get_page_content(self, collection: str, doc_id: str, pages: str) -> list:
+        self._require_document(collection, doc_id)
         resp = self._doc_request(doc_id, "GET", f"/doc/{self._enc(doc_id)}/",
                                  params={"type": "ocr", "format": "page"})
         # Filter to requested pages
@@ -344,6 +365,7 @@ class CloudBackend:
             offset += page_size
 
     def delete_document(self, collection: str, doc_id: str) -> None:
+        self._require_document(collection, doc_id)
         self._doc_request(doc_id, "DELETE", f"/doc/{self._enc(doc_id)}/")
 
     # ── Query (uses cloud chat/completions, no LLM key needed) ────────────

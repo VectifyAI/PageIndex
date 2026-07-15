@@ -243,6 +243,7 @@ def test_doc_404_maps_to_document_not_found(monkeypatch):
 
 def test_get_document_include_text_warns(monkeypatch):
     backend = CloudBackend(api_key="pi-test")
+    backend._folder_id_cache["col"] = None  # folders unavailable on this plan
     monkeypatch.setattr(backend, "_doc_request", lambda *a, **k: {"tree": []})
     with pytest.warns(UserWarning, match="include_text is not supported"):
         backend.get_document("col", "d1", include_text=True)
@@ -254,6 +255,7 @@ def test_get_page_content_preserves_images(monkeypatch):
     # shape) so the SDK-prompted UI can render figures — omitting it only when
     # empty. Real API uses page_index/markdown/images keys.
     backend = CloudBackend(api_key="pi-test")
+    backend._folder_id_cache["col"] = None  # folders unavailable on this plan
     imgs = [{"path": "fig1.png", "width": 640, "height": 480}]
     monkeypatch.setattr(backend, "_doc_request", lambda *a, **k: {"result": [
         {"page_index": 1, "markdown": "page one", "images": imgs},
@@ -264,6 +266,69 @@ def test_get_page_content_preserves_images(monkeypatch):
         {"page": 1, "content": "page one", "images": imgs},
         {"page": 2, "content": "page two"},
     ]
+
+
+# ── collection membership guard on doc-scoped operations ────────────────────
+
+def _membership_backend(monkeypatch, doc_folder="f-col"):
+    """Collection 'col' → folder 'f-col'; fake server holds doc 'd1' in
+    ``doc_folder``. Returns (backend, log of (method, path))."""
+    backend = CloudBackend(api_key="pi-test")
+    backend._folder_id_cache["col"] = "f-col"
+    log = []
+
+    def fake_request(method, path, **kwargs):
+        log.append((method, path))
+        if path.endswith("/metadata/"):
+            return {"id": "d1", "name": "doc.pdf", "folderId": doc_folder}
+        if method == "DELETE":
+            return {}
+        return {"tree": [], "result": []}
+
+    monkeypatch.setattr(backend, "_request", fake_request)
+    return backend, log
+
+
+def test_doc_ops_reject_doc_from_another_collection(monkeypatch):
+    backend, log = _membership_backend(monkeypatch, doc_folder="f-other")
+    with pytest.raises(DocumentNotFoundError, match="collection 'col'"):
+        backend.get_document("col", "d1")
+    with pytest.raises(DocumentNotFoundError, match="collection 'col'"):
+        backend.get_document_structure("col", "d1")
+    with pytest.raises(DocumentNotFoundError, match="collection 'col'"):
+        backend.get_page_content("col", "d1", "1")
+    with pytest.raises(DocumentNotFoundError, match="collection 'col'"):
+        backend.delete_document("col", "d1")
+    # guard must fail before any destructive/content request goes out
+    assert all(method == "GET" and path.endswith("/metadata/") for method, path in log)
+
+
+def test_delete_document_scoped_to_collection(monkeypatch):
+    backend, log = _membership_backend(monkeypatch)
+    backend.delete_document("col", "d1")
+    assert ("DELETE", "/doc/d1/") in log
+
+
+def test_get_document_reuses_membership_metadata(monkeypatch):
+    backend, log = _membership_backend(monkeypatch)
+    doc = backend.get_document("col", "d1")
+    assert doc["doc_id"] == "d1"
+    metadata_calls = [p for _, p in log if p.endswith("/metadata/")]
+    assert len(metadata_calls) == 1
+
+
+def test_doc_ops_skip_guard_when_folders_unavailable(monkeypatch):
+    backend = CloudBackend(api_key="pi-test")
+    backend._folder_id_cache["col"] = None
+    log = []
+
+    def fake_request(method, path, **kwargs):
+        log.append((method, path))
+        return {}
+
+    monkeypatch.setattr(backend, "_request", fake_request)
+    backend.delete_document("col", "d1")
+    assert log == [("DELETE", "/doc/d1/")]
 
 
 # ── query_stream: terminal contract and error propagation ───────────────────

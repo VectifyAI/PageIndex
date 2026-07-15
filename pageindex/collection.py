@@ -71,7 +71,8 @@ class Collection:
 
         ``include_text=True`` fills each node's text from cached pages (local
         backend only; can be large — avoid for LLM contexts). Raises
-        ``DocumentNotFoundError`` if the doc_id is unknown.
+        ``DocumentNotFoundError`` if the doc_id is unknown or belongs to
+        another collection.
         """
         return self._backend.get_document(self._name, doc_id, include_text=include_text)
 
@@ -91,7 +92,8 @@ class Collection:
     def delete_document(self, doc_id: str) -> None:
         """Delete a document and its stored files/artifacts.
 
-        Raises ``DocumentNotFoundError`` if the doc_id is unknown.
+        Raises ``DocumentNotFoundError`` if the doc_id is unknown or belongs
+        to another collection.
         """
         self._backend.delete_document(self._name, doc_id)
 
