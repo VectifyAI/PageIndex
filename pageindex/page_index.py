@@ -412,7 +412,9 @@ def add_page_offset_to_toc_json(data, offset):
 
 
 
-def page_list_to_group_text(page_contents, token_lengths, max_tokens=20000, overlap_page=1):    
+def page_list_to_group_text(page_contents, token_lengths, max_tokens=20000, overlap_page=1):
+    if max_tokens is None or max_tokens <= 0:
+        max_tokens = 20000
     num_tokens = sum(token_lengths)
     
     if num_tokens <= max_tokens:
@@ -428,7 +430,9 @@ def page_list_to_group_text(page_contents, token_lengths, max_tokens=20000, over
     average_tokens_per_part = math.ceil(((num_tokens / expected_parts_num) + max_tokens) / 2)
     
     for i, (page_content, page_tokens) in enumerate(zip(page_contents, token_lengths)):
-        if current_token_count + page_tokens > average_tokens_per_part:
+        # A single page larger than the budget still becomes its own group;
+        # callers truncate that group before the LLM call (#15).
+        if current_subset and current_token_count + page_tokens > average_tokens_per_part:
 
             subsets.append(''.join(current_subset))
             # Start new subset from overlap if specified
@@ -447,7 +451,7 @@ def page_list_to_group_text(page_contents, token_lengths, max_tokens=20000, over
     print('divide page_list to groups', len(subsets))
     return subsets
 
-def add_page_number_to_toc(part, structure, model=None):
+def add_page_number_to_toc(part, structure, model=None, max_tokens=None):
     fill_prompt_seq = """
     You are given an JSON structure of a document and a partial part of the document. Your task is to check if the title that is described in the structure is started in the partial given document.
 
@@ -470,6 +474,7 @@ def add_page_number_to_toc(part, structure, model=None):
     The given structure contains the result of the previous part, you need to fill the result of the current part, do not change the previous result.
     Directly return the final JSON structure. Do not output anything else."""
 
+    part = truncate_to_token_limit(part, max_tokens, model=model)
     prompt = fill_prompt_seq + f"\n\nCurrent Partial Document:\n{part}\n\nGiven Structure\n{json.dumps(structure, indent=2)}\n"
     current_json_raw = llm_completion(model=model, prompt=prompt)
     json_result = extract_json(current_json_raw)
@@ -493,7 +498,7 @@ def remove_first_physical_index_section(text):
     return text
 
 ### add verify completeness
-def generate_toc_continue(toc_content, part, model=None):
+def generate_toc_continue(toc_content, part, model=None, max_tokens=None):
     print('start generate_toc_continue')
     prompt = """
     You are an expert in extracting hierarchical tree structure.
@@ -520,6 +525,7 @@ def generate_toc_continue(toc_content, part, model=None):
 
     Directly return the additional part of the final JSON structure. Do not output anything else."""
 
+    part = truncate_to_token_limit(part, max_tokens, model=model)
     prompt = prompt + '\nGiven text\n:' + part + '\nPrevious tree structure\n:' + json.dumps(toc_content, indent=2)
     response, finish_reason = llm_completion(model=model, prompt=prompt, return_finish_reason=True)
     if finish_reason == 'finished':
@@ -528,7 +534,7 @@ def generate_toc_continue(toc_content, part, model=None):
         raise Exception(f'finish reason: {finish_reason}')
     
 ### add verify completeness
-def generate_toc_init(part, model=None):
+def generate_toc_init(part, model=None, max_tokens=None):
     print('start generate_toc_init')
     prompt = """
     You are an expert in extracting hierarchical tree structure, your task is to generate the tree structure of the document.
@@ -554,6 +560,7 @@ def generate_toc_init(part, model=None):
 
     Directly return the final JSON structure. Do not output anything else."""
 
+    part = truncate_to_token_limit(part, max_tokens, model=model)
     prompt = prompt + '\nGiven text\n:' + part
     response, finish_reason = llm_completion(model=model, prompt=prompt, return_finish_reason=True)
 
@@ -562,19 +569,20 @@ def generate_toc_init(part, model=None):
     else:
         raise Exception(f'finish reason: {finish_reason}')
 
-def process_no_toc(page_list, start_index=1, model=None, logger=None):
+def process_no_toc(page_list, start_index=1, model=None, logger=None, max_tokens=None):
     page_contents=[]
     token_lengths=[]
     for page_index in range(start_index, start_index+len(page_list)):
         page_text = f"<physical_index_{page_index}>\n{page_list[page_index-start_index][0]}\n<physical_index_{page_index}>\n\n"
         page_contents.append(page_text)
         token_lengths.append(count_tokens(page_text, model))
-    group_texts = page_list_to_group_text(page_contents, token_lengths)
+    # Honor --max-tokens-per-node when building TOC groups (issue #15).
+    group_texts = page_list_to_group_text(page_contents, token_lengths, max_tokens=max_tokens)
     logger.info(f'len(group_texts): {len(group_texts)}')
 
-    toc_with_page_number= generate_toc_init(group_texts[0], model)
+    toc_with_page_number= generate_toc_init(group_texts[0], model, max_tokens=max_tokens)
     for group_text in group_texts[1:]:
-        toc_with_page_number_additional = generate_toc_continue(toc_with_page_number, group_text, model)    
+        toc_with_page_number_additional = generate_toc_continue(toc_with_page_number, group_text, model, max_tokens=max_tokens)    
         toc_with_page_number.extend(toc_with_page_number_additional)
     logger.info(f'generate_toc: {toc_with_page_number}')
 
@@ -583,7 +591,7 @@ def process_no_toc(page_list, start_index=1, model=None, logger=None):
 
     return toc_with_page_number
 
-def process_toc_no_page_numbers(toc_content, toc_page_list, page_list,  start_index=1, model=None, logger=None):
+def process_toc_no_page_numbers(toc_content, toc_page_list, page_list,  start_index=1, model=None, logger=None, max_tokens=None):
     page_contents=[]
     token_lengths=[]
     toc_content = toc_transformer(toc_content, model)
@@ -593,12 +601,12 @@ def process_toc_no_page_numbers(toc_content, toc_page_list, page_list,  start_in
         page_contents.append(page_text)
         token_lengths.append(count_tokens(page_text, model))
     
-    group_texts = page_list_to_group_text(page_contents, token_lengths)
+    group_texts = page_list_to_group_text(page_contents, token_lengths, max_tokens=max_tokens)
     logger.info(f'len(group_texts): {len(group_texts)}')
 
     toc_with_page_number=copy.deepcopy(toc_content)
     for group_text in group_texts:
-        toc_with_page_number = add_page_number_to_toc(group_text, toc_with_page_number, model)
+        toc_with_page_number = add_page_number_to_toc(group_text, toc_with_page_number, model, max_tokens=max_tokens)
     logger.info(f'add_page_number_to_toc: {toc_with_page_number}')
 
     toc_with_page_number = convert_physical_index_to_int(toc_with_page_number)
@@ -955,9 +963,15 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
     if mode == 'process_toc_with_page_numbers':
         toc_with_page_number = process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_check_page_num=opt.toc_check_page_num, model=opt.model, logger=logger)
     elif mode == 'process_toc_no_page_numbers':
-        toc_with_page_number = process_toc_no_page_numbers(toc_content, toc_page_list, page_list, model=opt.model, logger=logger)
+        toc_with_page_number = process_toc_no_page_numbers(
+            toc_content, toc_page_list, page_list,
+            model=opt.model, logger=logger, max_tokens=opt.max_token_num_each_node,
+        )
     else:
-        toc_with_page_number = process_no_toc(page_list, start_index=start_index, model=opt.model, logger=logger)
+        toc_with_page_number = process_no_toc(
+            page_list, start_index=start_index, model=opt.model, logger=logger,
+            max_tokens=opt.max_token_num_each_node,
+        )
             
     toc_with_page_number = [item for item in toc_with_page_number if item.get('physical_index') is not None] 
     
