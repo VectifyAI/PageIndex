@@ -24,6 +24,32 @@ if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
 
 litellm.drop_params = True
 
+ATLASCLOUD_API_BASE = "https://api.atlascloud.ai/v1"
+ATLASCLOUD_MODEL_PREFIX = "atlascloud/"
+
+
+def prepare_litellm_call(model):
+    """Normalize PageIndex model aliases into LiteLLM completion kwargs."""
+    if not model:
+        return model, {}
+
+    model = model.removeprefix("litellm/")
+    if not model.startswith(ATLASCLOUD_MODEL_PREFIX):
+        return model, {}
+
+    atlas_model = model[len(ATLASCLOUD_MODEL_PREFIX):]
+    if not atlas_model:
+        raise ValueError("Atlas Cloud model must be provided after 'atlascloud/'.")
+
+    api_key = os.getenv("ATLASCLOUD_API_KEY")
+    if not api_key:
+        raise ValueError("ATLASCLOUD_API_KEY is required when using Atlas Cloud models.")
+
+    return f"openai/{atlas_model}", {
+        "api_base": os.getenv("ATLASCLOUD_API_BASE", ATLASCLOUD_API_BASE),
+        "api_key": api_key,
+    }
+
 def count_tokens(text, model=None):
     if not text:
         return 0
@@ -31,8 +57,7 @@ def count_tokens(text, model=None):
 
 
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
-    if model:
-        model = model.removeprefix("litellm/")
+    model, provider_kwargs = prepare_litellm_call(model)
     max_retries = 10
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
     for i in range(max_retries):
@@ -41,6 +66,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
                 model=model,
                 messages=messages,
                 temperature=0,
+                **provider_kwargs,
             )
             content = response.choices[0].message.content
             if return_finish_reason:
@@ -61,8 +87,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
 
 
 async def llm_acompletion(model, prompt):
-    if model:
-        model = model.removeprefix("litellm/")
+    model, provider_kwargs = prepare_litellm_call(model)
     max_retries = 10
     messages = [{"role": "user", "content": prompt}]
     for i in range(max_retries):
@@ -71,6 +96,7 @@ async def llm_acompletion(model, prompt):
                 model=model,
                 messages=messages,
                 temperature=0,
+                **provider_kwargs,
             )
             return response.choices[0].message.content
         except Exception as e:
@@ -708,4 +734,3 @@ def print_tree(tree, indent=0):
 def print_wrapped(text, width=100):
     for line in text.splitlines():
         print(textwrap.fill(line, width=width))
-

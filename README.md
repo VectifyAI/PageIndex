@@ -163,6 +163,18 @@ Create a `.env` file in the root directory with your LLM API key. Multi-LLM is s
 OPENAI_API_KEY=your_openai_key_here
 ```
 
+For Atlas Cloud's OpenAI-compatible endpoint, set `ATLASCLOUD_API_KEY` and use the
+`atlascloud/` model prefix:
+
+```bash
+ATLASCLOUD_API_KEY=your_atlascloud_key_here
+```
+
+```yaml
+model: "atlascloud/qwen/qwen3.5-flash"
+retrieve_model: "atlascloud/qwen/qwen3.5-flash"
+```
+
 ### 3. Generate PageIndex structure for your PDF
 
 ```bash
