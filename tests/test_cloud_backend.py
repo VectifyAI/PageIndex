@@ -331,9 +331,37 @@ def test_doc_ops_skip_guard_when_folders_unavailable(monkeypatch):
     assert log == [("DELETE", "/doc/d1/")]
 
 
+def test_query_rejects_doc_from_another_collection(monkeypatch):
+    backend, log = _membership_backend(monkeypatch, doc_folder="f-other")
+    with pytest.raises(DocumentNotFoundError, match="collection 'col'"):
+        backend.query("col", "q", doc_ids=["d1"])
+    # guard must fail before the completion request goes out
+    assert all(method == "GET" and path.endswith("/metadata/") for method, path in log)
+
+
+def test_query_stream_rejects_doc_from_another_collection(monkeypatch):
+    backend, log = _membership_backend(monkeypatch, doc_folder="f-other")
+
+    async def _run():
+        async for _ in backend.query_stream("col", "q", doc_ids=["d1"]):
+            pass
+
+    with pytest.raises(DocumentNotFoundError, match="collection 'col'"):
+        asyncio.run(_run())
+    assert all(method == "GET" and path.endswith("/metadata/") for method, path in log)
+
+
+def test_query_checks_membership_then_completes(monkeypatch):
+    backend, log = _membership_backend(monkeypatch)
+    backend.query("col", "q", doc_ids=["d1"])
+    assert ("GET", "/doc/d1/metadata/") in log
+    assert ("POST", "/chat/completions/") in log
+
+
 # ── query_stream: terminal contract and error propagation ───────────────────
 
 def _collect_events(backend, **kwargs):
+    backend._folder_id_cache.setdefault("col", None)  # skip folder lookup
     async def _run():
         events = []
         async for ev in backend.query_stream("col", "q", doc_ids=["d1"], **kwargs):
@@ -349,7 +377,7 @@ def _sse(block_type, content):
     })
 
 
-def test_query_stream_emits_answer_done(monkeypatch):
+def test_query_stream_emits_text_done(monkeypatch):
     backend = CloudBackend(api_key="pi-test")
     lines = [_sse("text", "Hello "), _sse("text", "world"), "data: [DONE]"]
     monkeypatch.setattr(
@@ -357,13 +385,14 @@ def test_query_stream_emits_answer_done(monkeypatch):
         lambda *a, **k: FakeResponse(status_code=200, lines=lines),
     )
     events = _collect_events(backend)
-    assert [e.type for e in events] == ["answer_delta", "answer_delta", "answer_done"]
-    # Same contract as the local backend: answer_done carries the full text.
+    assert [e.type for e in events] == ["text_delta", "text_delta", "text_done"]
+    # The whole cloud answer is one text message, so text_done carries the full text.
     assert events[-1].data == "Hello world"
 
 
 def test_query_stream_http_error_raises(monkeypatch):
     backend = CloudBackend(api_key="pi-test")
+    backend._folder_id_cache["col"] = None  # skip folder lookup
     monkeypatch.setattr(
         cloud_mod.requests, "post",
         lambda *a, **k: FakeResponse(status_code=401, text="unauthorized"),
@@ -379,6 +408,7 @@ def test_query_stream_http_error_raises(monkeypatch):
 
 def test_query_stream_connect_failure_raises_instead_of_hanging(monkeypatch):
     backend = CloudBackend(api_key="pi-test")
+    backend._folder_id_cache["col"] = None  # skip folder lookup
 
     def fake_post(*a, **k):
         raise cloud_mod.requests.ConnectionError("dns failure")
@@ -397,6 +427,7 @@ def test_query_uses_long_timeout_and_single_attempt(monkeypatch):
     """Non-streaming chat completion is non-idempotent and slow: it must get
     a long timeout and must NOT be retried (each retry re-bills the query)."""
     backend = CloudBackend(api_key="pi-test")
+    backend._folder_id_cache["col"] = None  # skip folder lookup
     calls = []
 
     def fake_request(method, url, headers=None, **kwargs):
@@ -415,6 +446,7 @@ def test_query_stream_early_break_stops_background_thread(monkeypatch):
     drain the whole stream in the background."""
     import threading
     backend = CloudBackend(api_key="pi-test")
+    backend._folder_id_cache["col"] = None  # skip folder lookup
     drained_all = threading.Event()
 
     class SlowResponse:

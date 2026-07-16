@@ -179,7 +179,7 @@ import asyncio
 
 async def main():
     async for ev in col.query("Explain multi-head attention", doc_ids=doc_id, stream=True):
-        if ev.type == "answer_delta":
+        if ev.type == "text_delta":
             print(ev.data, end="", flush=True)
         elif ev.type == "tool_call":
             print(f"\n[tool] {ev.data['name']}")
@@ -187,7 +187,7 @@ async def main():
 asyncio.run(main())
 ```
 
-`ev.type` is one of: `tool_call`, `tool_result`, `answer_delta`, `answer_done`.
+`ev.type` is one of: `tool_call`, `tool_result`, `text_delta`, `text_done`. A `text_done` fires each time a text message completes — a local agentic query may emit several as the agent narrates between tool calls; the last `text_done` before the stream ends carries the final answer.
 
 ### Multi-document collections (experimental)
 

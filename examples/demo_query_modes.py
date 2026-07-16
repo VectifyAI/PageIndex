@@ -68,7 +68,7 @@ async def stream_and_collect(coro_or_stream) -> list[str]:
         if ev.type == "tool_call":
             calls.append(ev.data["name"])
             print(f"  [tool] {ev.data['name']}({ev.data.get('args','')})")
-        elif ev.type == "answer_done":
+        elif ev.type == "text_done":
             text = str(ev.data)
             print(f"  [answer] {text[:160]}{'...' if len(text) > 160 else ''}")
     return calls

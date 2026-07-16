@@ -51,7 +51,7 @@ stream = col.query(
 async def main():
     streamed_text = False
     async for event in stream:
-        if event.type == "answer_delta":
+        if event.type == "text_delta":
             print(event.data, end="", flush=True)
             streamed_text = True
         elif event.type == "tool_call":
@@ -62,7 +62,7 @@ async def main():
         elif event.type == "tool_result":
             preview = str(event.data)[:200] + "..." if len(str(event.data)) > 200 else event.data
             print(f"[tool output] {preview}")
-        elif event.type == "answer_done":
+        elif event.type == "text_done":
             print()
             streamed_text = False
 

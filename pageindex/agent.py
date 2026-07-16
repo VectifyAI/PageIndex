@@ -89,7 +89,7 @@ class QueryStream:
     Usage:
         stream = col.query("question", stream=True)
         async for event in stream:
-            if event.type == "answer_delta":
+            if event.type == "text_delta":
                 print(event.data, end="", flush=True)
     """
 
@@ -117,7 +117,7 @@ class QueryStream:
         async for event in streamed_run.stream_events():
             if isinstance(event, RawResponsesStreamEvent):
                 if isinstance(event.data, ResponseTextDeltaEvent):
-                    yield QueryEvent(type="answer_delta", data=event.data.delta)
+                    yield QueryEvent(type="text_delta", data=event.data.delta)
             elif isinstance(event, RunItemStreamEvent):
                 item = event.item
                 if item.type == "tool_call_item":
@@ -130,7 +130,7 @@ class QueryStream:
                 elif item.type == "message_output_item":
                     text = ItemHelpers.text_message_output(item)
                     if text:
-                        yield QueryEvent(type="answer_done", data=text)
+                        yield QueryEvent(type="text_done", data=text)
 
     def __aiter__(self):
         return self.stream_events()

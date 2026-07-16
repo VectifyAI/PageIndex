@@ -3,13 +3,13 @@ from pageindex.backend.protocol import AgentTools
 
 
 def test_query_event():
-    event = QueryEvent(type="answer_delta", data="hello")
-    assert event.type == "answer_delta"
+    event = QueryEvent(type="text_delta", data="hello")
+    assert event.type == "text_delta"
     assert event.data == "hello"
 
 
 def test_query_event_types():
-    for t in ["reasoning", "tool_call", "tool_result", "answer_delta", "answer_done"]:
+    for t in ["reasoning", "tool_call", "tool_result", "text_delta", "text_done"]:
         event = QueryEvent(type=t, data="test")
         assert event.type == t
 

@@ -256,6 +256,10 @@ class CloudBackend:
             )
         return meta
 
+    def _require_documents(self, collection: str, doc_ids: list[str]) -> None:
+        for doc_id in doc_ids:
+            self._require_document(collection, doc_id)
+
     def get_document(self, collection: str, doc_id: str, include_text: bool = False) -> dict:
         if include_text:
             import warnings
@@ -379,6 +383,8 @@ class CloudBackend:
             raise ValueError(
                 "doc_ids cannot be empty; pass None to query the whole collection"
             )
+        if doc_ids:
+            self._require_documents(collection, doc_ids)
         doc_id = doc_ids if doc_ids else self._get_all_doc_ids(collection)
         if not doc_id:
             raise ValueError("collection has no documents to query")
@@ -414,6 +420,8 @@ class CloudBackend:
             raise ValueError(
                 "doc_ids cannot be empty; pass None to query the whole collection"
             )
+        if doc_ids:
+            await asyncio.to_thread(self._require_documents, collection, doc_ids)
         doc_id = doc_ids if doc_ids else await asyncio.to_thread(
             self._get_all_doc_ids, collection
         )
@@ -516,11 +524,11 @@ class CloudBackend:
 
                     elif block_type == "text" and content:
                         answer_parts.append(content)
-                        _put(QueryEvent(type="answer_delta", data=content))
+                        _put(QueryEvent(type="text_delta", data=content))
 
-                # Same terminal contract as the local backend: a final
-                # answer_done event carrying the full answer text.
-                _put(QueryEvent(type="answer_done", data="".join(answer_parts)))
+                # The whole cloud answer is one text message, so its text_done
+                # carries the full answer text.
+                _put(QueryEvent(type="text_done", data="".join(answer_parts)))
 
             except requests.RequestException as e:
                 _put(CloudAPIError(f"Cloud streaming request failed: {e}"))

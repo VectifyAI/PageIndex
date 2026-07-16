@@ -46,7 +46,7 @@ stream = col.query("What is the main contribution of this paper?", stream=True)
 async def main():
     streamed_text = False
     async for event in stream:
-        if event.type == "answer_delta":
+        if event.type == "text_delta":
             print(event.data, end="", flush=True)
             streamed_text = True
         elif event.type == "tool_call":
@@ -55,7 +55,7 @@ async def main():
                 streamed_text = False
             args = event.data.get("args", "")
             print(f"[tool call] {event.data['name']}({args})")
-        elif event.type == "answer_done":
+        elif event.type == "text_done":
             print()
             streamed_text = False
 
