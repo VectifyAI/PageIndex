@@ -69,6 +69,25 @@ def test_delete_collection(tmp_path):
     assert "papers" not in client.list_collections()
 
 
+def test_retrieve_model_defaults_to_strong_reasoner(tmp_path):
+    """Retrieval must not silently follow the (cheaper) indexing model."""
+    client = LocalClient(model="gpt-4o", storage_path=str(tmp_path / "pi"))
+    assert client._backend.get_retrieve_model() == "gpt-5.4"
+
+
+def test_explicit_retrieve_model_wins(tmp_path):
+    client = LocalClient(model="gpt-4o", retrieve_model="ollama/llama3",
+                         storage_path=str(tmp_path / "pi"))
+    assert client._backend.get_retrieve_model() == "litellm/ollama/llama3"
+
+
+def test_retrieve_model_none_follows_model(tmp_path):
+    from pageindex.config import IndexConfig
+    client = LocalClient(model="gpt-4o", storage_path=str(tmp_path / "pi"),
+                         index_config=IndexConfig(retrieve_model=None))
+    assert client._backend.get_retrieve_model() == "gpt-4o"
+
+
 def test_register_parser(tmp_path):
     client = LocalClient(model="gpt-4o", storage_path=str(tmp_path / "pi"))
     class FakeParser:

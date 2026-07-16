@@ -18,7 +18,7 @@ class IndexConfig(BaseModel):
     model_config = {"extra": "forbid"}
 
     model: str = "gpt-4o-2024-11-20"
-    retrieve_model: str | None = None
+    retrieve_model: str | None = "gpt-5.4"  # None = follow `model`
     toc_check_page_num: int = 20
     max_page_num_each_node: int = 10
     max_token_num_each_node: int = 20000

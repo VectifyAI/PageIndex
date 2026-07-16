@@ -35,7 +35,7 @@ class PageIndexClient:
         api_key: PageIndex cloud API key. When provided, cloud mode is used
             and local-only params (model, storage_path, index_config, …) are ignored.
         model: LLM model for indexing (local mode only, default: gpt-4o-2024-11-20).
-        retrieve_model: LLM model for agent QA (local mode only, default: same as model).
+        retrieve_model: LLM model for agent QA (local mode only, default: gpt-5.4).
         storage_path: Directory for SQLite DB and files (local mode only, default: ./.pageindex).
         storage: Custom StorageEngine instance (local mode only).
         index_config: Advanced indexing parameters (local mode only, optional).
@@ -312,7 +312,7 @@ class LocalClient(PageIndexClient):
 
     Args:
         model: LLM model for indexing (default: gpt-4o-2024-11-20)
-        retrieve_model: LLM model for agent QA (default: same as model)
+        retrieve_model: LLM model for agent QA (default: gpt-5.4)
         storage_path: Directory for SQLite DB and files (default: ./.pageindex)
         storage: Custom StorageEngine instance (default: SQLiteStorage)
         index_config: Advanced indexing parameters. Pass an IndexConfig instance

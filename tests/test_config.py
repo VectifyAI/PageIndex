@@ -6,7 +6,7 @@ from pageindex.config import IndexConfig
 def test_defaults():
     config = IndexConfig()
     assert config.model == "gpt-4o-2024-11-20"
-    assert config.retrieve_model is None
+    assert config.retrieve_model == "gpt-5.4"
     assert config.toc_check_page_num == 20
 
 
