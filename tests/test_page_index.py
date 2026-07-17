@@ -6,6 +6,7 @@ from pageindex.page_index import (
     process_no_toc,
     process_toc_no_page_numbers,
 )
+from pageindex.utils import extract_json, get_json_content
 
 
 class ProcessTocNoPageNumbersTest(unittest.TestCase):
@@ -63,6 +64,26 @@ class ProcessTocNoPageNumbersTest(unittest.TestCase):
         self.assertIn("&lt;/user_document>", wrapped)
         self.assertIn("&lt; USER_DOCUMENT>", wrapped)
         self.assertIn("<physical_index_1>", wrapped)
+
+    def test_extract_json_accepts_uppercase_json_fence(self):
+        response = """The requested JSON is:
+
+```JSON
+{"title": "Intro", "items": [1, 2, 3]}
+```
+"""
+
+        self.assertEqual(
+            extract_json(response),
+            {"title": "Intro", "items": [1, 2, 3]},
+        )
+
+    def test_get_json_content_accepts_plain_code_fence(self):
+        response = """```
+{"ok": true}
+```"""
+
+        self.assertEqual(get_json_content(response), '{"ok": true}')
 
 
 if __name__ == "__main__":

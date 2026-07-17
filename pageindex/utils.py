@@ -84,30 +84,17 @@ async def llm_acompletion(model, prompt):
             
             
 def get_json_content(response):
-    start_idx = response.find("```json")
-    if start_idx != -1:
-        start_idx += 7
-        response = response[start_idx:]
-        
-    end_idx = response.rfind("```")
-    if end_idx != -1:
-        response = response[:end_idx]
-    
-    json_content = response.strip()
-    return json_content
+    fenced_match = re.search(r"```\s*(?:json)?\s*(.*?)```", response, re.IGNORECASE | re.DOTALL)
+    if fenced_match:
+        response = fenced_match.group(1)
+
+    return response.strip()
          
 
 def extract_json(content):
     try:
-        # First, try to extract JSON enclosed within ```json and ```
-        start_idx = content.find("```json")
-        if start_idx != -1:
-            start_idx += 7  # Adjust index to start after the delimiter
-            end_idx = content.rfind("```")
-            json_content = content[start_idx:end_idx].strip()
-        else:
-            # If no delimiters, assume entire content could be JSON
-            json_content = content.strip()
+        # First, try to extract JSON enclosed in a Markdown code fence.
+        json_content = get_json_content(content)
 
         # Clean up common issues that might cause parsing errors
         json_content = json_content.replace('None', 'null')  # Replace Python None with JSON null
