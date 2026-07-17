@@ -10,23 +10,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 ######################### Hardening for prompt injection patterns ####################################################
-_INJECTION_PATTERNS = re.compile(
-    r"(?i)("
-    r"system\s+override|"
-    r"ignore\s+(all\s+)?(previous|prior|above)\s+instructions?|"
-    r"forget\s+(all\s+)?(previous|prior|above)\s+instructions?|"
-    r"you\s+are\s+now|act\s+as|new\s+instructions?|"
-    r"do\s+not\s+follow|override\s+(the\s+)?(system|previous|prior)|"
-    r"disregard|jailbreak|ALL\s+sections\s+MUST"
-    r")"
-)
-
-
-def _sanitize_doc_text(text: str) -> str:
-    """Redact known prompt-injection keywords from PDF-extracted text."""
-    return _INJECTION_PATTERNS.sub("[REDACTED]", text)
-
-
 def _wrap_doc_text(text: str) -> str:
     """Wrap untrusted document text in delimiter tags so the LLM treats it as data."""
     text = re.sub(r"(?i)<(?=\s*/?\s*user_document\b)", "&lt;", text)
@@ -50,38 +33,17 @@ _SYSTEM_HARDENING = (
 
 
 def _secure_doc_text(text: str) -> str:
-    """Sanitize + delimiter-frame a PDF text block before LLM injection."""
-    return _wrap_doc_text(_sanitize_doc_text(text))
+    """Delimiter-frame a document text block so the LLM treats it as data.
+
+    Deliberately no keyword redaction: phrases like "act as" / "disregard"
+    also appear in legitimate titles and prose, and blanking them corrupts the
+    content this reasoning-based index relies on. The <user_document> framing
+    plus _SYSTEM_HARDENING carry the injection defense without touching content.
+    """
+    return _wrap_doc_text(text)
 
 
 _PHYSICAL_INDEX_MARKER_RE = re.compile(r"^<physical_index_(\d+)>$")
-
-
-def _parse_physical_index(raw):
-    if raw is None:
-        return None
-    marker_match = _PHYSICAL_INDEX_MARKER_RE.match(str(raw).strip())
-    if marker_match:
-        return int(marker_match.group(1))
-    try:
-        return int(raw)
-    except (TypeError, ValueError):
-        return None
-
-
-def _validate_physical_indices(toc: list, total_pages: int, start_index: int = 1) -> list:
-    """Nullify any physical_index the LLM produced that falls outside the real page range."""
-    max_idx = start_index + total_pages - 1
-    for entry in toc:
-        raw = entry.get("physical_index")
-        if raw is None:
-            continue
-        val = _parse_physical_index(raw)
-        if val is None or not (start_index <= val <= max_idx):
-            entry["physical_index"] = None
-        else:
-            entry["physical_index"] = val
-    return toc
 
 
 def _extract_chunk_marker_set(content: str) -> set:
@@ -94,9 +56,16 @@ def _validate_chunk_physical_indices(toc: list, content: str) -> list:
     This prevents the model from referencing markers that exist elsewhere
     in the document but not in the current prompt.
     """
+    if not isinstance(toc, list):
+        # extract_json returns {} on parse failure (or an object the LLM wrapped
+        # the array in); leave non-list payloads untouched instead of crashing.
+        return toc
+
     valid_indices = _extract_chunk_marker_set(content)
 
     for entry in toc:
+        if not isinstance(entry, dict):
+            continue
         raw = entry.get("physical_index")
         if raw is None:
             continue
@@ -711,11 +680,6 @@ def process_no_toc(page_list, start_index=1, model=None, logger=None):
         toc=toc_with_page_number,
         content=group_texts[0]
     )
-    toc_with_page_number = _validate_physical_indices(
-        toc=toc_with_page_number,
-        total_pages=len(page_list),
-        start_index=start_index
-    )
 
     for group_text in group_texts[1:]:
         toc_with_page_number_additional = generate_toc_continue(
@@ -726,11 +690,6 @@ def process_no_toc(page_list, start_index=1, model=None, logger=None):
         toc_with_page_number_additional = _validate_chunk_physical_indices(
             toc=toc_with_page_number_additional,
             content=group_text
-        )
-        toc_with_page_number_additional = _validate_physical_indices(
-            toc=toc_with_page_number_additional,
-            total_pages=len(page_list),
-            start_index=start_index
         )
         toc_with_page_number.extend(toc_with_page_number_additional)
     logger.info(f'generate_toc: {toc_with_page_number}')
@@ -756,16 +715,21 @@ def process_toc_no_page_numbers(toc_content, toc_page_list, page_list,  start_in
     toc_with_page_number = copy.deepcopy(toc_content)
     for group_text in group_texts:
         llm_result = add_page_number_to_toc(group_text, toc_with_page_number, model)
-        if len(llm_result) != len(toc_with_page_number):
-            raise ValueError(
-                "LLM returned a different number of TOC entries than expected."
-            )
+        # Don't trust a response that changed the entry count or reordered/renamed
+        # entries: skip filling from this chunk rather than aborting the whole
+        # document (meta_processor's accuracy check falls back to another mode if
+        # too little gets filled). Aborting here would defeat the graceful
+        # degradation the rest of the pipeline is built around.
+        if not isinstance(llm_result, list) or len(llm_result) != len(toc_with_page_number):
+            logger.info("Skipping chunk: LLM returned an unexpected number of TOC entries.")
+            continue
         if any(
             (update.get("structure"), update.get("title"))
             != (current.get("structure"), current.get("title"))
             for update, current in zip(llm_result, toc_with_page_number)
         ):
-            raise ValueError("LLM returned reordered or modified TOC entries.")
+            logger.info("Skipping chunk: LLM returned reordered or modified TOC entries.")
+            continue
         valid_indices = _extract_chunk_marker_set(group_text)
 
         for idx, current in enumerate(toc_with_page_number):
