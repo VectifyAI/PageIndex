@@ -741,13 +741,15 @@ def sanitize_filename(filename, replacement='-'):
 
 def get_pdf_name(pdf_path):
     # Extract PDF name
-    if isinstance(pdf_path, str):
+    if isinstance(pdf_path, (str, Path)):
         pdf_name = os.path.basename(pdf_path)
     elif isinstance(pdf_path, BytesIO):
         pdf_reader = PyPDF2.PdfReader(pdf_path)
         meta = pdf_reader.metadata
         pdf_name = meta.title if meta and meta.title else 'Untitled'
         pdf_name = sanitize_filename(pdf_name)
+    else:
+        pdf_name = 'Untitled'
     return pdf_name
 
 
