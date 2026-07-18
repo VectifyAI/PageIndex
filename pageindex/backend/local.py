@@ -230,7 +230,7 @@ class LocalBackend:
         # stripped (if_add_node_text=False, the default). Reachable only for a
         # custom StorageEngine that doesn't cache pages (the built-in
         # SQLiteStorage always does).
-        if doc["doc_type"] == "pdf":
+        if doc["doc_type"].lower() == "pdf":
             return get_pdf_page_content(doc["file_path"], page_nums)
         else:
             parser = self._resolve_parser(doc["file_path"])

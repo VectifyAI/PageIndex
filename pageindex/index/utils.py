@@ -748,6 +748,8 @@ def get_pdf_name(pdf_path):
         meta = pdf_reader.metadata
         pdf_name = meta.title if meta and meta.title else 'Untitled'
         pdf_name = sanitize_filename(pdf_name)
+    else:
+        pdf_name = os.path.basename(str(pdf_path))
     return pdf_name
 
 
@@ -820,6 +822,8 @@ def get_page_tokens(pdf_path, model=None, pdf_parser="PyPDF2"):
             doc = pymupdf.open(stream=pdf_stream, filetype="pdf")
         elif isinstance(pdf_path, str) and os.path.isfile(pdf_path) and pdf_path.lower().endswith(".pdf"):
             doc = pymupdf.open(pdf_path)
+        else:
+            raise ValueError(f"Invalid pdf_path for PyMuPDF: {pdf_path!r}")
         page_list = []
         for page in doc:
             page_text = page.get_text()

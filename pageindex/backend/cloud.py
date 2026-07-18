@@ -214,7 +214,9 @@ class CloudBackend:
         with open(file_path, "rb") as f:
             resp = self._request("POST", "/doc/", files={"file": f}, data=data)
 
-        doc_id = resp["doc_id"]
+        doc_id = resp.get("doc_id")
+        if not doc_id:
+            raise CloudAPIError("Cloud API upload response missing 'doc_id'")
 
         # Poll until indexing completes. The cloud API signals readiness via
         # status == "completed"; retrieval_ready is not a reliable indicator.
