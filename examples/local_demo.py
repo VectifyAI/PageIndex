@@ -19,8 +19,8 @@ import requests
 from pageindex import LocalClient
 
 _EXAMPLES_DIR = Path(__file__).parent
-PDF_URL = "https://arxiv.org/pdf/1706.03762.pdf"
-PDF_PATH = _EXAMPLES_DIR / "documents" / "attention.pdf"
+PDF_URL = "https://arxiv.org/pdf/2603.15031"
+PDF_PATH = _EXAMPLES_DIR / "documents" / "attention-residuals.pdf"
 WORKSPACE = _EXAMPLES_DIR / "workspace"
 MODEL = "gpt-4o-2024-11-20"  # any LiteLLM-supported model
 
@@ -44,7 +44,7 @@ print(f"Indexed: {doc_id}\n")
 
 # Streaming query
 stream = col.query(
-    "What is the main architecture proposed in this paper and how does self-attention work?",
+    "Explain Attention Residuals in simple language.",
     stream=True,
 )
 

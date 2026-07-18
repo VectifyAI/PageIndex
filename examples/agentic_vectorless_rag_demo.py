@@ -40,10 +40,10 @@ from openai.types.responses import ResponseTextDeltaEvent, ResponseReasoningSumm
 
 from pageindex import LocalClient
 
-PDF_URL = "https://arxiv.org/pdf/1706.03762.pdf"
+PDF_URL = "https://arxiv.org/pdf/2603.15031"
 
 _EXAMPLES_DIR = Path(__file__).parent
-PDF_PATH = _EXAMPLES_DIR / "documents" / "attention.pdf"
+PDF_PATH = _EXAMPLES_DIR / "documents" / "attention-residuals.pdf"
 WORKSPACE = _EXAMPLES_DIR / "workspace"
 MODEL = "gpt-4o-2024-11-20"  # any LiteLLM-supported model
 
@@ -199,6 +199,6 @@ if __name__ == "__main__":
     print("\n" + "=" * 60)
     print("Step 3: Agent Query (auto tool-use)")
     print("=" * 60)
-    question = "Explain the Transformer's self-attention in simple language."
+    question = "Explain Attention Residuals in simple language."
     print(f"\nQuestion: '{question}'")
-    query_agent(col, doc_id, question, MODEL, verbose=True)
+    query_agent(col, doc_id, question, client.retrieve_model, verbose=True)

@@ -105,7 +105,14 @@ def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
                 add_node_text(structure, page_list)
 
         if opt.if_add_node_summary:
-            _run_async(generate_summaries_for_structure(structure, model=opt.model))
+            if strategy == "level_based":
+                # Markdown keeps the legacy summarizer: nodes under 200 tokens
+                # reuse their text instead of spending an LLM call.
+                from .page_index_md import generate_summaries_for_structure_md
+                _run_async(generate_summaries_for_structure_md(
+                    structure, summary_token_threshold=200, model=opt.model))
+            else:
+                _run_async(generate_summaries_for_structure(structure, model=opt.model))
 
         result = {
             "doc_name": parsed.doc_name,

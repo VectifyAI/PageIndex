@@ -165,11 +165,11 @@ def test_build_index_scopes_llm_params_to_the_call(monkeypatch):
     set_llm_params(temperature=0)
     seen = {}
 
-    async def fake_generate_summaries(structure, model=None):
+    async def fake_generate_summaries(structure, summary_token_threshold=200, model=None):
         seen["llm_params"] = get_llm_params()
 
     monkeypatch.setattr(
-        "pageindex.index.utils.generate_summaries_for_structure",
+        "pageindex.index.page_index_md.generate_summaries_for_structure_md",
         fake_generate_summaries,
     )
 

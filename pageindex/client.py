@@ -101,6 +101,9 @@ class PageIndexClient:
 
         self._validate_llm_provider(opt.model)
 
+        self.model = opt.model
+        self.retrieve_model = _normalize_retrieve_model(opt.retrieve_model or self.model)
+
         storage_path = Path(storage_path or ".pageindex").resolve()
         storage_path.mkdir(parents=True, exist_ok=True)
 
@@ -111,7 +114,7 @@ class PageIndexClient:
             storage=storage_engine,
             files_dir=str(storage_path / "files"),
             model=opt.model,
-            retrieve_model=_normalize_retrieve_model(opt.retrieve_model or opt.model),
+            retrieve_model=self.retrieve_model,
             index_config=opt,
         )
 

@@ -19,8 +19,8 @@ import requests
 from pageindex import CloudClient
 
 _EXAMPLES_DIR = Path(__file__).parent
-PDF_URL = "https://arxiv.org/pdf/1706.03762.pdf"
-PDF_PATH = _EXAMPLES_DIR / "documents" / "attention.pdf"
+PDF_URL = "https://arxiv.org/pdf/2603.15031"
+PDF_PATH = _EXAMPLES_DIR / "documents" / "attention-residuals.pdf"
 
 # Download PDF if needed
 if not PDF_PATH.exists():
