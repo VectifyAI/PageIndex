@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import urllib.parse
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 import requests
 
@@ -19,9 +19,19 @@ class LegacyCloudAPI:
 
     BASE_URL = API_BASE
 
-    def __init__(self, api_key: str, base_url: str | None = None):
+    def __init__(self, api_key: str, base_url: str | Callable[[], str] | None = None):
         self.api_key = api_key
-        self.base_url = base_url or self.BASE_URL
+        self._base_url = base_url or self.BASE_URL
+
+    @property
+    def base_url(self) -> str:
+        # A callable is resolved per request so reassigning client.BASE_URL
+        # after construction takes effect, matching 0.2.x call-time semantics.
+        return self._base_url() if callable(self._base_url) else self._base_url
+
+    @base_url.setter
+    def base_url(self, value: str | Callable[[], str]) -> None:
+        self._base_url = value
 
     @staticmethod
     def _enc(value: str) -> str:

@@ -137,7 +137,7 @@ def test_client_base_url_override_reaches_both_backends():
         BASE_URL = "https://staging.example.com"
 
     client = StagingClient(api_key="pi-test")
-    assert client._backend._base_url == "https://staging.example.com"
+    assert client._backend.base_url == "https://staging.example.com"
     assert client._legacy_cloud_api.base_url == "https://staging.example.com"
 
 

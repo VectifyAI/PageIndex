@@ -84,6 +84,23 @@ def test_legacy_base_url_can_be_overridden_from_client(monkeypatch):
     assert calls[0]["headers"] == {"api_key": "pi-test"}
 
 
+def test_legacy_base_url_reassignment_after_construction(monkeypatch):
+    calls = []
+
+    def fake_request(method, url, headers=None, **kwargs):
+        calls.append({"method": method, "url": url})
+        return FakeResponse(payload={"id": "doc-1"})
+
+    monkeypatch.setattr("pageindex.cloud_api.requests.request", fake_request)
+
+    client = PageIndexClient("pi-test")
+    client.BASE_URL = "https://staging.pageindex.test"
+    client.get_document("doc-1")
+
+    assert calls[0]["url"] == "https://staging.pageindex.test/doc/doc-1/metadata/"
+    assert client._backend.base_url == "https://staging.pageindex.test"
+
+
 def test_submit_document_uses_legacy_endpoint(monkeypatch, tmp_path):
     calls = []
 

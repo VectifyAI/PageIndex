@@ -11,7 +11,7 @@ import re
 import time
 import urllib.parse
 import requests
-from typing import AsyncIterator
+from typing import AsyncIterator, Callable
 
 from ..cloud_api import API_BASE  # single source of truth for the cloud base URL
 from ..errors import (AUTH_HINT, CloudAPIError, CollectionNotFoundError,
@@ -31,12 +31,18 @@ def _as_int(value):
 
 
 class CloudBackend:
-    def __init__(self, api_key: str, base_url: str | None = None):
+    def __init__(self, api_key: str, base_url: str | Callable[[], str] | None = None):
         self._api_key = api_key
         self._base_url = base_url or API_BASE
         self._headers = {"api_key": api_key}
         self._folder_id_cache: dict[str, str | None] = {}
         self._folder_warning_shown = False
+
+    @property
+    def base_url(self) -> str:
+        # A callable is resolved per request so reassigning client.BASE_URL
+        # after construction takes effect, matching 0.2.x call-time semantics.
+        return self._base_url() if callable(self._base_url) else self._base_url
 
     # ── HTTP helpers ──────────────────────────────────────────────────────
 
@@ -61,7 +67,7 @@ class CloudBackend:
         """HTTP helper. ``retries`` caps total attempts — pass 1 for
         non-idempotent, expensive calls (e.g. chat completions) where a
         retry would redo the full server-side work."""
-        url = f"{self._base_url}{path}"
+        url = f"{self.base_url}{path}"
         kwargs.setdefault("timeout", 30)
         last_status: int | None = None
         for attempt in range(retries):
@@ -430,7 +436,7 @@ class CloudBackend:
         if not doc_id:
             raise ValueError("collection has no documents to query")
         headers = self._headers
-        base_url = self._base_url
+        base_url = self.base_url
         # Queue carries QueryEvent, an Exception to re-raise, or None (end).
         queue: asyncio.Queue[QueryEvent | Exception | None] = asyncio.Queue()
         loop = asyncio.get_running_loop()
