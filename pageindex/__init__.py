@@ -74,3 +74,12 @@ __all__ = [
     "get_document_structure",
     "get_page_content",
 ]
+
+
+def __getattr__(name):
+    # Lazy so plain `import pageindex` never trips the shims' deprecation
+    # warnings; they fire only when the legacy attribute is actually used.
+    if name in ("utils", "page_index_md"):
+        import importlib
+        return importlib.import_module(f".{name}", __name__)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

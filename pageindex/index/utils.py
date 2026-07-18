@@ -953,14 +953,14 @@ def _coerce_bool(value):
 
 
 class ConfigLoader:
-    """Legacy 0.2.x config helper. Defaults now come from IndexConfig; this
-    class no longer reads the packaged ``config.yaml`` (the CLI still uses it
-    via ``IndexConfig.from_yaml``). Prefer ``pageindex.IndexConfig``.
+    """Legacy 0.2.x config helper. Defaults come from ``default_path`` (or the
+    packaged ``config.yaml``), with IndexConfig field defaults filling any keys
+    the YAML omits. Prefer ``pageindex.IndexConfig`` in new code.
     """
 
     def __init__(self, default_path=None):
         from ..config import IndexConfig
-        self._default_dict = IndexConfig().model_dump()
+        self._default_dict = IndexConfig.from_yaml(default_path).model_dump()
 
     def _validate_keys(self, user_dict):
         unknown_keys = set(user_dict) - set(self._default_dict)
@@ -968,7 +968,7 @@ class ConfigLoader:
             raise ValueError(f"Unknown config keys: {unknown_keys}")
 
     def load(self, user_opt=None) -> _config:
-        """Merge user options over IndexConfig defaults, returning a namespace."""
+        """Merge user options over the YAML defaults, returning a namespace."""
         if user_opt is None:
             user_dict = {}
         elif isinstance(user_opt, _config):

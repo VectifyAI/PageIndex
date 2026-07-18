@@ -40,8 +40,6 @@ class CloudBackend:
 
     @property
     def base_url(self) -> str:
-        # A callable is resolved per request so reassigning client.BASE_URL
-        # after construction takes effect, matching 0.2.x call-time semantics.
         return self._base_url() if callable(self._base_url) else self._base_url
 
     # ── HTTP helpers ──────────────────────────────────────────────────────

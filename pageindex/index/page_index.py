@@ -1314,7 +1314,7 @@ def page_index(doc, model=None, toc_check_page_num=None, max_page_num_each_node=
         "if_add_node_text": if_add_node_text,
     }
     user_opt = {k: v for k, v in user_opt.items() if v is not None}
-    opt = IndexConfig(**user_opt)
+    opt = IndexConfig.from_yaml(**user_opt)
     return page_index_main(doc, opt)
 
 

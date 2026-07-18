@@ -62,14 +62,76 @@ def test_get_leaf_nodes_has_331_fix():
     assert leaves == [{"title": "Leaf", "start_index": 1, "end_index": 2}]
 
 
-def test_configloader_no_longer_needs_config_yaml():
-    """ConfigLoader must build defaults from IndexConfig, not read config.yaml."""
+def test_configloader_defaults_come_from_packaged_yaml():
+    """ConfigLoader must read the packaged config.yaml as its defaults, like
+    0.2.x — notably if_add_doc_description ships as "no" there, while the
+    IndexConfig field default is True (the new-SDK default)."""
     from pageindex.index.utils import ConfigLoader
     cfg = ConfigLoader().load({"model": "gpt-5.4"})
     assert cfg.model == "gpt-5.4"
-    assert cfg.if_add_node_summary is True  # IndexConfig default
+    assert cfg.if_add_node_summary is True  # config.yaml: "yes"
+    assert cfg.if_add_doc_description is False  # config.yaml: "no"
     with pytest.raises(ValueError, match="Unknown config keys"):
         ConfigLoader().load({"nope": 1})
+
+
+def test_configloader_reads_custom_yaml_path(tmp_path):
+    """A custom default_path must be honored; keys the YAML omits fall back to
+    IndexConfig field defaults."""
+    from pageindex.index.utils import ConfigLoader
+    custom = tmp_path / "my.yaml"
+    custom.write_text('model: "my-model"\nif_add_node_summary: "no"\n')
+    cfg = ConfigLoader(str(custom)).load()
+    assert cfg.model == "my-model"
+    assert cfg.if_add_node_summary is False
+    assert cfg.if_add_node_id is True  # omitted -> IndexConfig default
+
+
+def test_configloader_missing_custom_yaml_raises(tmp_path):
+    from pageindex.index.utils import ConfigLoader
+    with pytest.raises(FileNotFoundError):
+        ConfigLoader(str(tmp_path / "nope.yaml"))
+
+
+def test_legacy_submodule_attrs_lazy_bound():
+    """Shim warnings fire on first attribute use, never at package import.
+    Subprocess: in-process the attrs may already be bound by other tests."""
+    import subprocess
+    import sys
+    code = (
+        "import warnings\n"
+        "with warnings.catch_warnings(record=True) as w:\n"
+        "    warnings.simplefilter('always')\n"
+        "    import pageindex\n"
+        "assert not any('has moved' in str(x.message) for x in w), 'import warned'\n"
+        "with warnings.catch_warnings(record=True) as w:\n"
+        "    warnings.simplefilter('always')\n"
+        "    assert callable(pageindex.utils.print_tree)\n"
+        "assert any('pageindex.utils has moved' in str(x.message) for x in w)\n"
+        "assert callable(pageindex.page_index_md.md_to_tree)\n"
+    )
+    result = subprocess.run([sys.executable, "-c", code],
+                            capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stderr
+
+
+def test_unknown_package_attr_still_raises():
+    import pageindex
+    with pytest.raises(AttributeError, match="no attribute 'definitely_not_real'"):
+        pageindex.definitely_not_real
+
+
+def test_page_index_defaults_follow_config_yaml(monkeypatch):
+    """page_index() resolution order: explicit args > config.yaml > IndexConfig
+    field defaults (the 0.2.x contract)."""
+    import pageindex.index.page_index as pi
+    captured = {}
+    monkeypatch.setattr(pi, "page_index_main",
+                        lambda doc, opt: captured.setdefault("opt", opt))
+    pi.page_index("dummy.pdf", model="my-model")
+    opt = captured["opt"]
+    assert opt.model == "my-model"  # explicit arg wins
+    assert opt.if_add_doc_description is False  # config.yaml "no", not True
 
 
 def test_configloader_coerces_legacy_yes_no_strings():
