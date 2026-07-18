@@ -45,7 +45,6 @@ PDF_URL = "https://arxiv.org/pdf/2603.15031"
 _EXAMPLES_DIR = Path(__file__).parent
 PDF_PATH = _EXAMPLES_DIR / "documents" / "attention-residuals.pdf"
 WORKSPACE = _EXAMPLES_DIR / "workspace"
-MODEL = "gpt-4o-2024-11-20"  # any LiteLLM-supported model
 
 AGENT_SYSTEM_PROMPT = """
 You are PageIndex, a document QA assistant.
@@ -173,7 +172,7 @@ if __name__ == "__main__":
         print("Download complete.\n")
 
     # Setup: self-hosted local client + a collection
-    client = LocalClient(model=MODEL, storage_path=str(WORKSPACE))
+    client = LocalClient(storage_path=str(WORKSPACE))
     col = client.collection("agentic-demo")
 
     # Step 1: Index PDF and view tree structure

@@ -22,7 +22,6 @@ _EXAMPLES_DIR = Path(__file__).parent
 PDF_URL = "https://arxiv.org/pdf/2603.15031"
 PDF_PATH = _EXAMPLES_DIR / "documents" / "attention-residuals.pdf"
 WORKSPACE = _EXAMPLES_DIR / "workspace"
-MODEL = "gpt-4o-2024-11-20"  # any LiteLLM-supported model
 
 # Download PDF if needed
 if not PDF_PATH.exists():
@@ -36,7 +35,7 @@ if not PDF_PATH.exists():
                     f.write(chunk)
     print("Download complete.\n")
 
-client = LocalClient(model=MODEL, storage_path=str(WORKSPACE))
+client = LocalClient(storage_path=str(WORKSPACE))
 col = client.collection()
 
 doc_id = col.add(str(PDF_PATH))

@@ -58,7 +58,7 @@ beta_md.write_text(
     "potassium, supporting muscle function.\n"
 )
 
-client = PageIndexClient(model="gpt-4o-2024-11-20", storage_path=WORKSPACE)
+client = PageIndexClient(storage_path=WORKSPACE)
 
 
 async def stream_and_collect(coro_or_stream) -> list[str]:
