@@ -134,6 +134,7 @@ class LocalBackend:
                 "file_path": str(managed_path),
                 "file_hash": file_hash,
                 "doc_type": ext.lstrip("."),
+                **(parsed.metadata or {}),  # parser-reported, e.g. page_count / line_count
                 "structure": result["structure"],
                 "pages": pages,
             })
@@ -184,6 +185,7 @@ class LocalBackend:
                 use in agent/LLM contexts as it can exhaust the context window.
         """
         doc = self._require_document(collection, doc_id)
+        doc["status"] = "completed"  # local indexing is synchronous
         doc["structure"] = self._storage.get_document_structure(collection, doc_id)
         if include_text:
             pages = self._storage.get_pages(collection, doc_id) or []

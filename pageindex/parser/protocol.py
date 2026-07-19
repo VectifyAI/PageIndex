@@ -19,6 +19,9 @@ class ParsedDocument:
     """Unified parser output. Always a flat list of ContentNode."""
     doc_name: str
     nodes: list[ContentNode]
+    # Doc-level fields merged into the stored document record at index time.
+    # The built-in storage only persists keys it has columns for
+    # (currently page_count / line_count); other keys are dropped.
     metadata: dict | None = None
 
 

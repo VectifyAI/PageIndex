@@ -99,6 +99,8 @@ class SQLiteStorage:
                 file_path TEXT,
                 file_hash TEXT,
                 doc_type TEXT NOT NULL,
+                page_count INTEGER,
+                line_count INTEGER,
                 structure JSON,
                 pages JSON,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -107,6 +109,14 @@ class SQLiteStorage:
             CREATE INDEX IF NOT EXISTS idx_docs_collection ON documents(collection_name);
             CREATE INDEX IF NOT EXISTS idx_docs_hash ON documents(collection_name, file_hash);
         """)
+        # DBs created before the count columns existed: add them in place.
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(documents)")}
+        for name in ("page_count", "line_count"):
+            if name not in cols:
+                try:
+                    conn.execute(f"ALTER TABLE documents ADD COLUMN {name} INTEGER")
+                except sqlite3.OperationalError:
+                    pass  # concurrent open of the same legacy DB already added it
         conn.commit()
 
     def create_collection(self, name: str) -> None:
@@ -145,10 +155,11 @@ class SQLiteStorage:
             conn = self._get_conn()
             conn.execute(
                 """INSERT INTO documents
-                   (doc_id, collection_name, doc_name, doc_description, file_path, file_hash, doc_type, structure, pages)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (doc_id, collection_name, doc_name, doc_description, file_path, file_hash, doc_type, page_count, line_count, structure, pages)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (doc_id, collection, doc.get("doc_name"), doc.get("doc_description"),
                  doc.get("file_path"), doc.get("file_hash"), doc["doc_type"],
+                 doc.get("page_count"), doc.get("line_count"),
                  json.dumps(doc.get("structure", [])),
                  json.dumps(doc.get("pages")) if doc.get("pages") else None),
             )
@@ -165,13 +176,15 @@ class SQLiteStorage:
     def get_document(self, collection: str, doc_id: str) -> dict:
         conn = self._get_conn()
         row = conn.execute(
-            "SELECT doc_id, doc_name, doc_description, file_path, doc_type FROM documents WHERE doc_id = ? AND collection_name = ?",
+            "SELECT doc_id, doc_name, doc_description, file_path, doc_type, page_count, line_count FROM documents WHERE doc_id = ? AND collection_name = ?",
             (doc_id, collection),
         ).fetchone()
         if not row:
             return {}
-        return {"doc_id": row[0], "doc_name": row[1], "doc_description": row[2],
-                "file_path": row[3], "doc_type": row[4]}
+        doc = {"doc_id": row[0], "doc_name": row[1], "doc_description": row[2],
+               "file_path": row[3], "doc_type": row[4]}
+        doc.update({k: v for k, v in (("page_count", row[5]), ("line_count", row[6])) if v is not None})
+        return doc
 
     def get_document_structure(self, collection: str, doc_id: str) -> list:
         conn = self._get_conn()

@@ -1,28 +1,22 @@
 """
-Agentic Vectorless RAG with PageIndex — Demo
+Agentic Vectorless RAG with PageIndex - Demo
 
-Build a document-QA agent with self-hosted PageIndex and the OpenAI Agents SDK.
-Instead of vector similarity search and chunking, PageIndex builds a
-hierarchical tree index and lets an agent reason over it for human-like,
-context-aware retrieval.
-
-This demo wires up your OWN agent + tools against the PageIndex Collection API.
-For the batteries-included version, just use ``col.query(..., stream=True)`` —
-see local_demo.py.
+A simple example of building a document QA agent with self-hosted PageIndex
+and the OpenAI Agents SDK. Instead of vector similarity search and chunking,
+PageIndex builds a hierarchical tree index and uses agentic LLM reasoning for
+human-like, context-aware retrieval.
 
 Agent tools:
-  - get_document()           — document metadata (name, type, description)
-  - get_document_structure() — the document's tree-structure index
-  - get_page_content()       — text of specific pages / line ranges
+  - get_document()           — document metadata (status, page count, etc.)
+  - get_document_structure() — tree structure index of a document
+  - get_page_content()       — retrieve text content of specific pages
 
 Steps:
-  1 — Index a PDF and view its tree structure
+  1 — Index a PDF and view its tree structure index
   2 — View document metadata
   3 — Ask a question (agent reasons over the index and auto-calls tools)
 
-Requirements:
-    pip install pageindex openai-agents
-    export OPENAI_API_KEY=your-api-key   # or any LiteLLM-supported provider
+Requirements: pip install openai-agents
 """
 import sys
 import json
@@ -49,7 +43,7 @@ WORKSPACE = _EXAMPLES_DIR / "workspace"
 AGENT_SYSTEM_PROMPT = """
 You are PageIndex, a document QA assistant.
 TOOL USE:
-- Call get_document() first to confirm the document's name and type.
+- Call get_document() first to confirm status and page/line count.
 - Call get_document_structure() to identify relevant page ranges.
 - Call get_page_content(pages="5-7") with tight ranges; never fetch the whole document.
 - Before each tool call, output one short sentence explaining the reason.
@@ -67,7 +61,7 @@ def _normalize_model_for_agents_sdk(model: str) -> str:
     return model
 
 
-def query_agent(col, doc_id: str, prompt: str, model: str, verbose: bool = False) -> str:
+def query_agent(collection, doc_id: str, prompt: str, model: str, verbose: bool = False) -> str:
     """Run a document QA agent using the OpenAI Agents SDK.
 
     Streams text output token-by-token and returns the full answer string.
@@ -76,15 +70,15 @@ def query_agent(col, doc_id: str, prompt: str, model: str, verbose: bool = False
 
     @function_tool
     def get_document() -> str:
-        """Get document metadata: name, type, and description."""
-        doc = col.get_document(doc_id)
+        """Get document metadata: status, page count, name, and description."""
+        doc = collection.get_document(doc_id)
         doc.pop("structure", None)  # keep tool output small for the LLM context
         return json.dumps(doc, ensure_ascii=False)
 
     @function_tool
     def get_document_structure() -> str:
         """Get the document's full tree structure (without text) to find relevant sections."""
-        return json.dumps(col.get_document_structure(doc_id), ensure_ascii=False)
+        return json.dumps(collection.get_document_structure(doc_id), ensure_ascii=False)
 
     @function_tool
     def get_page_content(pages: str) -> str:
@@ -93,7 +87,7 @@ def query_agent(col, doc_id: str, prompt: str, model: str, verbose: bool = False
         Use tight ranges: e.g. '5-7' for pages 5 to 7, '3,8' for pages 3 and 8, '12' for page 12.
         For Markdown documents, use line numbers from the structure's line_num field.
         """
-        return json.dumps(col.get_page_content(doc_id, pages), ensure_ascii=False)
+        return json.dumps(collection.get_page_content(doc_id, pages), ensure_ascii=False)
 
     agent = Agent(
         name="PageIndex",
@@ -173,24 +167,24 @@ if __name__ == "__main__":
 
     # Setup: self-hosted local client + a collection
     client = LocalClient(storage_path=str(WORKSPACE))
-    col = client.collection("agentic-demo")
+    collection = client.collection("agentic-demo")
 
     # Step 1: Index PDF and view tree structure
     print("=" * 60)
     print("Step 1: Index PDF and view tree structure")
     print("=" * 60)
     # Content-hash dedup: re-running reuses the existing doc_id, no re-index.
-    doc_id = col.add(str(PDF_PATH))
+    doc_id = collection.add(str(PDF_PATH))
     print(f"\ndoc_id: {doc_id}")
     print("\nTree Structure (top-level sections):")
-    for node in col.get_document_structure(doc_id):
+    for node in collection.get_document_structure(doc_id):
         print(f"  - {node.get('title', '(untitled)')}")
 
     # Step 2: View document metadata
     print("\n" + "=" * 60)
     print("Step 2: View document metadata")
     print("=" * 60)
-    meta = col.get_document(doc_id)
+    meta = collection.get_document(doc_id)
     meta.pop("structure", None)
     print("\n" + json.dumps(meta, ensure_ascii=False, indent=2))
 
@@ -200,4 +194,4 @@ if __name__ == "__main__":
     print("=" * 60)
     question = "Explain Attention Residuals in simple language."
     print(f"\nQuestion: '{question}'")
-    query_agent(col, doc_id, question, client.retrieve_model, verbose=True)
+    query_agent(collection, doc_id, question, client.retrieve_model, verbose=True)

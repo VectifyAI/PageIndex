@@ -18,6 +18,7 @@ class PdfParser:
         nodes = []
 
         with pymupdf.open(str(path)) as doc:
+            page_count = doc.page_count
             for i, page in enumerate(doc):
                 page_num = i + 1
                 if images_dir:
@@ -35,7 +36,8 @@ class PdfParser:
                     images=images if images else None,
                 ))
 
-        return ParsedDocument(doc_name=path.stem, nodes=nodes)
+        return ParsedDocument(doc_name=path.stem, nodes=nodes,
+                              metadata={"page_count": page_count})
 
     @staticmethod
     def _extract_page_with_images(doc, page, page_num: int,

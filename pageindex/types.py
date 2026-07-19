@@ -28,11 +28,13 @@ class _DocumentDetailRequired(DocumentInfo):
 class DocumentDetail(_DocumentDetailRequired, total=False):
     """A document with its tree, as returned by ``get_document()``.
 
-    ``structure`` is always present; ``file_path`` is local-only and
-    ``status`` is cloud-only, hence total=False for those two only.
+    ``structure`` is always present; the remaining fields are
+    backend-specific, hence total=False.
     """
-    file_path: str  # local backend only
-    status: str     # cloud backend only
+    file_path: str   # local backend only
+    status: str      # local: always "completed" (indexing is synchronous); cloud: server-reported
+    page_count: int  # local backend, PDF documents
+    line_count: int  # local backend, Markdown documents
 
 
 class PageContent(TypedDict, total=False):
