@@ -109,9 +109,9 @@ class Collection:
         the entire collection (experimental).
 
         Usage:
-            answer = col.query("question", doc_ids=doc_id)            # single
-            answer = col.query("question", doc_ids=[d1, d2])          # multi
-            async for event in col.query("question", doc_ids=doc_id, stream=True):
+            answer = collection.query("question", doc_ids=doc_id)            # single
+            answer = collection.query("question", doc_ids=[d1, d2])          # multi
+            async for event in collection.query("question", doc_ids=doc_id, stream=True):
                 ...
 
         Passing doc_ids=None queries the entire collection — this is
@@ -131,7 +131,7 @@ class Collection:
             if not docs:
                 raise ValueError(
                     f"Cannot query collection '{self._name}': it is empty. "
-                    "Add documents with col.add(...) first."
+                    "Add documents with collection.add(...) first."
                 )
             if len(docs) > 1 and not _multidoc_acked():
                 warnings.warn(_MULTIDOC_WARNING, UserWarning, stacklevel=2)

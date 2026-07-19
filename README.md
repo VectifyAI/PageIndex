@@ -162,16 +162,16 @@ from pageindex import PageIndexClient
 # `model` drives indexing; agent QA uses `retrieve_model` (default: gpt-5.4).
 client = PageIndexClient(model="gpt-4o-2024-11-20")
 
-col = client.collection()
-doc_id = col.add("path/to/your.pdf")
+collection = client.collection()
+doc_id = collection.add("path/to/your.pdf")
 
-print(col.query("What is the main contribution?", doc_ids=doc_id))
+print(collection.query("What is the main contribution?", doc_ids=doc_id))
 
 # Cloud mode — fully managed, no LLM key needed:
 # client = PageIndexClient(api_key="your-pageindex-api-key")
 ```
 
-`col.query(...)` returns the answer string by default. Always pass `doc_ids` for reliable single-document QA — omitting it queries the entire collection, which is experimental (see below).
+`collection.query(...)` returns the answer string by default. Always pass `doc_ids` for reliable single-document QA — omitting it queries the entire collection, which is experimental (see below).
 
 ### Streaming queries
 
@@ -179,7 +179,7 @@ print(col.query("What is the main contribution?", doc_ids=doc_id))
 import asyncio
 
 async def main():
-    async for ev in col.query("Explain multi-head attention", doc_ids=doc_id, stream=True):
+    async for ev in collection.query("Explain multi-head attention", doc_ids=doc_id, stream=True):
         if ev.type == "text_delta":
             print(ev.data, end="", flush=True)
         elif ev.type == "tool_call":
@@ -195,8 +195,8 @@ asyncio.run(main())
 Passing `doc_ids` scopes the query to a specific subset of documents — this is the recommended path. `doc_ids` accepts a single id (`str`) or a list:
 
 ```python
-col.query("What does this paper say?", doc_ids=doc1)            # single
-col.query("Compare these two papers", doc_ids=[doc1, doc2])     # multi
+collection.query("What does this paper say?", doc_ids=doc1)            # single
+collection.query("Compare these two papers", doc_ids=[doc1, doc2])     # multi
 ```
 
 Omitting `doc_ids` queries the **entire collection** and lets the agent pick which docs to read. This is an **experimental** feature with a naive first implementation — we're actively working on better cross-document retrieval. A `UserWarning` is emitted; set `PAGEINDEX_EXPERIMENTAL_MULTIDOC=1` to silence it.

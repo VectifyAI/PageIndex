@@ -35,13 +35,13 @@ if not PDF_PATH.exists():
     print("Download complete.\n")
 
 client = CloudClient(api_key=os.environ["PAGEINDEX_API_KEY"])
-col = client.collection()
+collection = client.collection()
 
-doc_id = col.add(str(PDF_PATH))
+doc_id = collection.add(str(PDF_PATH))
 print(f"Indexed: {doc_id}\n")
 
 # Streaming query
-stream = col.query("What is the main contribution of this paper?", stream=True)
+stream = collection.query("What is the main contribution of this paper?", stream=True)
 
 async def main():
     streamed_text = False

@@ -36,13 +36,13 @@ if not PDF_PATH.exists():
     print("Download complete.\n")
 
 client = LocalClient(storage_path=str(WORKSPACE))
-col = client.collection()
+collection = client.collection()
 
-doc_id = col.add(str(PDF_PATH))
+doc_id = collection.add(str(PDF_PATH))
 print(f"Indexed: {doc_id}\n")
 
 # Streaming query
-stream = col.query(
+stream = collection.query(
     "Explain Attention Residuals in simple language.",
     stream=True,
 )

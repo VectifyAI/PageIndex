@@ -87,7 +87,7 @@ class QueryStream:
     """Streaming query result, similar to OpenAI's RunResultStreaming.
 
     Usage:
-        stream = col.query("question", stream=True)
+        stream = collection.query("question", stream=True)
         async for event in stream:
             if event.type == "text_delta":
                 print(event.data, end="", flush=True)
