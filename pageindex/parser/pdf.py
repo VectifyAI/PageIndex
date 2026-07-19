@@ -19,9 +19,9 @@ class PdfParser:
         model = kwargs.get("model")
         images_dir = kwargs.get("images_dir")
 
-        # Images are extracted with PyMuPDF (optional extra); text stays with
-        # PyPDF2 below so the extracted text — and therefore the tree — matches
-        # the CLI / pre-SDK default.
+        # Images are extracted with PyMuPDF (optional); text stays with PyPDF2
+        # below so the extracted text — and therefore the tree — matches the
+        # CLI / pre-SDK default.
         page_images = self._extract_images(path, images_dir) if images_dir else {}
 
         reader = PyPDF2.PdfReader(str(path))
