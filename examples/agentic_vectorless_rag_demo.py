@@ -139,8 +139,6 @@ def query_agent(collection, doc_id: str, prompt: str, model: str, verbose: bool 
             print()
         return "" if not streamed_run.final_output else str(streamed_run.final_output)
 
-    # Only the detection is guarded, not the run, so a real error inside _run
-    # isn't misread as "no running loop".
     try:
         asyncio.get_running_loop()
     except RuntimeError:

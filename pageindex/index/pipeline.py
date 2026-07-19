@@ -51,19 +51,12 @@ def _run_async(coro):
     import asyncio
     import concurrent.futures
     import contextvars
-    # Only the detection is guarded — NOT the run. If the coroutine's own work
-    # raises RuntimeError, letting it fall into `except RuntimeError` here would
-    # misfire the "no running loop" branch and mask the real error behind a
-    # bogus "asyncio.run() cannot be called from a running event loop".
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        # No running loop -- drive the coroutine directly.
         return asyncio.run(coro)
-    # Already inside an event loop -- run in a separate thread so we don't nest
-    # asyncio.run. Copy the current context so ContextVar-based settings (e.g.
-    # the max_concurrency_scope override set by build_index) propagate into the
-    # worker thread; .result() re-raises the worker's real exception unchanged.
+    # In a running loop: run in a worker thread, with the current context copied
+    # so ContextVar-based settings propagate.
     ctx = contextvars.copy_context()
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         return pool.submit(ctx.run, asyncio.run, coro).result()
@@ -106,8 +99,7 @@ def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
 
         if opt.if_add_node_summary:
             if strategy == "level_based":
-                # Markdown keeps the legacy summarizer: nodes under 200 tokens
-                # reuse their text instead of spending an LLM call.
+                # Markdown: legacy summarizer — nodes under 200 tokens reuse their text.
                 from .page_index_md import generate_summaries_for_structure_md
                 _run_async(generate_summaries_for_structure_md(
                     structure, summary_token_threshold=200, model=opt.model))
@@ -125,15 +117,7 @@ def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
                 clean_structure, model=opt.model
             )
 
-        # 'text' is populated for level_based (Markdown, always) or for
-        # content_based when if_add_node_text/if_add_node_summary requested it.
-        # Strip it LAST, for BOTH strategies, unless explicitly requested —
-        # otherwise a default index leaks each node's full text into
-        # get_document_structure / storage, inconsistent with
-        # if_add_node_text=False, the README, and the legacy md_to_tree. Skip
-        # the walk entirely when text was never added in the first place
-        # (content_based with if_add_node_text=if_add_node_summary=False) —
-        # there's nothing to strip.
+        # Strip 'text' last unless explicitly requested; skip when it was never added.
         text_present = strategy == "level_based" or opt.if_add_node_text or opt.if_add_node_summary
         if text_present and not opt.if_add_node_text:
             remove_structure_text(structure)

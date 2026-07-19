@@ -15,9 +15,7 @@ except ImportError:
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _parse_pages(pages: str) -> list[int]:
-    """Parse a pages string like '5-7', '3,8', or '12' into a sorted list of ints.
-    Delegates to the canonical implementation so the two never drift again —
-    this one used to lack the p>=1 filter and the 1000-page DoS cap."""
+    """Parse a pages string like '5-7', '3,8', or '12' into a sorted list of ints."""
     return parse_pages(pages)
 
 
@@ -31,8 +29,7 @@ def _count_pages(doc_info: dict) -> int:
 
 
 def _get_pdf_page_content(doc_info: dict, page_nums: list[int]) -> list[dict]:
-    """Extract text for specific PDF pages (1-indexed). Prefer cached pages,
-    else delegate the file-read fallback to the canonical implementation."""
+    """Extract text for specific PDF pages (1-indexed). Prefer cached pages, fallback to PDF."""
     cached_pages = doc_info.get('pages')
     if cached_pages:
         page_map = {p['page']: p['content'] for p in cached_pages}
@@ -44,8 +41,7 @@ def _get_pdf_page_content(doc_info: dict, page_nums: list[int]) -> list[dict]:
 
 
 def _get_md_page_content(doc_info: dict, page_nums: list[int]) -> list[dict]:
-    """For Markdown documents, 'pages' are line numbers. Delegates to the
-    canonical implementation so the two never drift again."""
+    """For Markdown documents, 'pages' are line numbers."""
     return get_md_page_content(doc_info.get('structure', []), page_nums)
 
 
