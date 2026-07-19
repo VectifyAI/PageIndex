@@ -56,7 +56,7 @@ class PdfParser:
             if not _warned_no_pymupdf:
                 logging.getLogger(__name__).warning(
                     "PyMuPDF is not installed; skipping image extraction. "
-                    'Install with: pip install "pageindex[pymupdf]"')
+                    "Install with: pip install pymupdf")
                 _warned_no_pymupdf = True
             return {}
 

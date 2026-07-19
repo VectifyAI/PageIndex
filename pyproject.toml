@@ -22,8 +22,6 @@ packages = [{include = "pageindex"}]
 [tool.poetry.dependencies]
 python = ">=3.10"
 litellm = ">=1.83.0"
-# AGPL-licensed; optional so the default install stays permissively licensed.
-pymupdf = {version = ">=1.26.0", optional = true}
 PyPDF2 = ">=3.0.0"
 python-dotenv = ">=1.0.0"
 pyyaml = ">=6.0"
@@ -33,9 +31,6 @@ requests = ">=2.28.0"
 httpx = {extras = ["socks"], version = ">=0.28.1"}
 typing-extensions = ">=4.9.0"
 pydantic = ">=2.5.0,<3.0.0"
-
-[tool.poetry.extras]
-pymupdf = ["pymupdf"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=7.0"
