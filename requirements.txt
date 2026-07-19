@@ -8,4 +8,4 @@ requests==2.33.1
 httpx[socks]==0.28.1
 typing-extensions==4.15.0
 openai==2.30.0
-# openai-agents  # optional: required for local agentic query + examples/agentic_vectorless_rag_demo.py
+openai-agents==0.18.3
