@@ -35,7 +35,7 @@ typing-extensions = ">=4.9.0"
 pydantic = ">=2.5.0,<3.0.0"
 
 [tool.poetry.extras]
-images = ["pymupdf"]
+pymupdf = ["pymupdf"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=7.0"
