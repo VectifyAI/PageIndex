@@ -1,11 +1,13 @@
+import logging
 import PyPDF2
-import pymupdf
 from pathlib import Path
 from .protocol import ContentNode, ParsedDocument
 from ..tokens import count_tokens
 
 # Minimum image dimension to keep (skip icons/artifacts)
 _MIN_IMAGE_SIZE = 32
+
+_warned_no_pymupdf = False
 
 
 class PdfParser:
@@ -17,16 +19,10 @@ class PdfParser:
         model = kwargs.get("model")
         images_dir = kwargs.get("images_dir")
 
-        # Images are extracted with PyMuPDF (PyPDF2 cannot); text stays with
+        # Images are extracted with PyMuPDF (optional extra); text stays with
         # PyPDF2 below so the extracted text — and therefore the tree — matches
         # the CLI / pre-SDK default.
-        page_images: dict[int, list[dict]] = {}
-        if images_dir:
-            with pymupdf.open(str(path)) as doc:
-                for i, page in enumerate(doc):
-                    images = self._extract_page_images(page, i + 1, images_dir)
-                    if images:
-                        page_images[i + 1] = images
+        page_images = self._extract_images(path, images_dir) if images_dir else {}
 
         reader = PyPDF2.PdfReader(str(path))
         nodes = []
@@ -50,8 +46,32 @@ class PdfParser:
                               metadata={"page_count": len(reader.pages)})
 
     @staticmethod
+    def _extract_images(path: Path, images_dir: str) -> dict[int, list[dict]]:
+        """Extract images per page. Requires the optional PyMuPDF dependency;
+        without it, indexing proceeds text-only."""
+        global _warned_no_pymupdf
+        try:
+            import pymupdf
+        except ImportError:
+            if not _warned_no_pymupdf:
+                logging.getLogger(__name__).warning(
+                    "PyMuPDF is not installed; skipping image extraction. "
+                    'Install with: pip install "pageindex[images]"')
+                _warned_no_pymupdf = True
+            return {}
+
+        page_images: dict[int, list[dict]] = {}
+        with pymupdf.open(str(path)) as doc:
+            for i, page in enumerate(doc):
+                images = PdfParser._extract_page_images(page, i + 1, images_dir)
+                if images:
+                    page_images[i + 1] = images
+        return page_images
+
+    @staticmethod
     def _extract_page_images(page, page_num: int, images_dir: str) -> list[dict]:
         """Save a page's images to disk and return their metadata."""
+        import pymupdf
         images_path = Path(images_dir)
         images_path.mkdir(parents=True, exist_ok=True)
         # Store an absolute path so the ![image](...) reference resolves

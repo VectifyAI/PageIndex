@@ -153,6 +153,8 @@ A unified `PageIndexClient` powers both local self-hosted and cloud-managed mode
 pip install pageindex
 ```
 
+Local-mode image extraction uses PyMuPDF (AGPL-licensed) and is an optional extra: `pip install "pageindex[images]"`. Without it, local indexing is text-only.
+
 ### Quick start
 
 ```python
