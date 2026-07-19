@@ -205,7 +205,7 @@ Omitting `doc_ids` queries the **entire collection** and lets the agent pick whi
 
 # ⚙️ Package Usage
 
-> **Note:** This package uses standard PDF parsing. For use cases with complex PDFs, our [cloud service](https://pageindex.ai/developer) (via MCP and API) offers enhanced OCR, tree building, and retrieval.
+> **Note:** This package uses standard PDF parsing. The CLI parses PDFs with PyPDF2 (as in previous releases), while the SDK's local mode parses with PyMuPDF and also extracts images — extracted text can differ slightly, so the two entry points may produce different trees for the same PDF. For use cases with complex PDFs, our [cloud service](https://pageindex.ai/developer) (via MCP and API) offers enhanced OCR, tree building, and retrieval.
 
 You can follow these steps to generate a PageIndex tree from a PDF document.
 
