@@ -299,18 +299,23 @@ def toc_index_extractor(toc, content, model=None):
     return _validate_chunk_physical_indices(toc=items, content=content)
 
 def toc_transformer(toc_content, model=None):
-    # TODO after rebase completes — two known gaps vs. main's version, to
-    # resolve deliberately (see PR discussion), not silently:
-    # 1. No continuation/retry logic for truncated completions (main uses
-    #    a chat-history "please continue" loop, capped at 5 attempts).
-    #    llm_structured already fails fast on finish_reason == "length",
-    #    which is a deliberate trade-off, not an oversight.
-    # 2. No equivalent of check_if_toc_transformation_is_complete — main
-    #    catches "complete-looking but actually missing sections" output
-    #    (finish_reason == "stop" but content silently incomplete), which
-    #    Pydantic validation alone cannot catch (a shorter-than-expected
-    #    list still validates fine). This gap needs an explicit decision:
-    #    port the check, or document and accept it.
+    # TODO — two known gaps vs. main's version, tracked for follow-up
+    # (see PR discussion), not silent omissions:
+    # 1. No continuation/retry for truncated completions. Main uses a
+    #    chat-history "please continue" loop, capped at 5 attempts.
+    #    llm_structured fails fast instead on finish_reason == "length" —
+    #    a deliberate trade-off (Instructor's structured output doesn't
+    #    compose cleanly with resuming a partial JSON response).
+    # 2. No completeness check yet. Main's check_if_toc_transformation_is_
+    #    complete catches a case schema validation can't: a response that
+    #    validates fine but silently skipped sections (finish_reason ==
+    #    "stop", not truncated, just incomplete). Planned: reuse that
+    #    function unmodified via a Pydantic model_validator on
+    #    TOCTransformation, using Instructor's context= passthrough so
+    #    the validator can access toc_content — this way the completeness
+    #    check participates in Instructor's own retry loop instead of a
+    #    separate hand-rolled one. Not yet implemented; requires
+    #    llm_structured to accept/forward a context param.
     print('start toc_transformer')
     init_prompt = """
     You are given a table of contents, You job is to transform the whole table of content into a JSON format included table_of_contents.
