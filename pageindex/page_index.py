@@ -88,7 +88,7 @@ def _validate_physical_indices(toc: list, total_pages: int, start_index: int = 1
     return toc
 
 ################### check title in page #########################################################
-async def check_title_appearance(item, page_list, start_index=1, model=None):    
+async def check_title_appearance(item, page_list, start_index=1, model=None):
     title=item['title']
     if 'physical_index' not in item or item['physical_index'] is None:
         return {'list_index': item.get('list_index'), 'answer': 'no', 'title': title, 'page_number': None}
@@ -96,7 +96,7 @@ async def check_title_appearance(item, page_list, start_index=1, model=None):
     page_number = item['physical_index']
     page_text = page_list[page_number-start_index][0]
 
-    
+
     prompt = _SYSTEM_HARDENING + f"""
     Your job is to check if the given section appears or starts in the given page_text.
 
@@ -108,7 +108,7 @@ async def check_title_appearance(item, page_list, start_index=1, model=None):
     return {'list_index': item['list_index'], 'answer': result.answer, 'title': title, 'page_number': page_number}
 
 
-async def check_title_appearance_in_start(title, page_text, model=None, logger=None):    
+async def check_title_appearance_in_start(title, page_text, model=None, logger=None):
     prompt = _SYSTEM_HARDENING + f"""
     You will be given the current section title and the current page_text.
     Your job is to check if the current section starts in the beginning of the given page_text.
@@ -210,7 +210,7 @@ def extract_toc_content(content, model=None):
         {"role": "assistant", "content": response},    
     ]
     continue_prompt = "please continue the generation of table of contents, directly output the remaining part of the structure"
-    
+
     max_attempts = 5
     for attempt in range(max_attempts):
         new_response, finish_reason = llm_completion(model=model, prompt=continue_prompt, chat_history=chat_history, return_finish_reason=True)
@@ -222,7 +222,7 @@ def extract_toc_content(content, model=None):
             break
     else:
         raise Exception('Failed to complete table of contents extraction after maximum retries')
-    
+
     return response
 
 def detect_page_index(toc_content, model=None):
@@ -298,73 +298,31 @@ def toc_index_extractor(toc, content, model=None):
     items = [item.model_dump() for item in result.items]
     return _validate_chunk_physical_indices(toc=items, content=content)
 
-
-
 def toc_transformer(toc_content, model=None):
+    # TODO after rebase completes — two known gaps vs. main's version, to
+    # resolve deliberately (see PR discussion), not silently:
+    # 1. No continuation/retry logic for truncated completions (main uses
+    #    a chat-history "please continue" loop, capped at 5 attempts).
+    #    llm_structured already fails fast on finish_reason == "length",
+    #    which is a deliberate trade-off, not an oversight.
+    # 2. No equivalent of check_if_toc_transformation_is_complete — main
+    #    catches "complete-looking but actually missing sections" output
+    #    (finish_reason == "stop" but content silently incomplete), which
+    #    Pydantic validation alone cannot catch (a shorter-than-expected
+    #    list still validates fine). This gap needs an explicit decision:
+    #    port the check, or document and accept it.
     print('start toc_transformer')
     init_prompt = """
     You are given a table of contents, You job is to transform the whole table of content into a JSON format included table_of_contents.
 
     structure is the numeric system which represents the index of the hierarchy section in the table of contents. For example, the first section has structure index 1, the first subsection has structure index 1.1, the second subsection has structure index 1.2, etc.
 
-    The response should be in the following JSON format: 
-    {
-    table_of_contents: [
-        {
-            "structure": <structure index, "x.x.x" or None> (string),
-            "title": <title of the section>,
-            "page": <page number or None>,
-        },
-        ...
-        ],
-    }
     You should transform the full table of contents in one go.
     Directly return the final JSON structure, do not output anything else. """
 
     prompt = init_prompt + '\n Given table of contents\n:' + _secure_doc_text(toc_content)
-    last_complete, finish_reason = llm_completion(model=model, prompt=prompt, return_finish_reason=True)
-    if_complete = check_if_toc_transformation_is_complete(toc_content, last_complete, model)
-    if if_complete == "yes" and finish_reason == "finished":
-        last_complete = extract_json(last_complete)
-        cleaned_response = convert_page_to_int(last_complete.get('table_of_contents', []))
-        return cleaned_response
-    
-    last_complete = get_json_content(last_complete)
-    chat_history = [
-        {"role": "user", "content": prompt},
-        {"role": "assistant", "content": last_complete},
-    ]
-    continue_prompt = "Please continue the table of contents JSON structure from where you left off. Directly output only the remaining part."
-
-    position = last_complete.rfind('}')
-    if position != -1:
-        last_complete = last_complete[:position+2]
-
-    max_attempts = 5
-    for attempt in range(max_attempts):
-
-        new_complete, finish_reason = llm_completion(model=model, prompt=continue_prompt, chat_history=chat_history, return_finish_reason=True)
-
-        if new_complete.startswith('```json'):
-            new_complete = get_json_content(new_complete)
-        last_complete = last_complete + new_complete
-
-        chat_history.append({"role": "user", "content": continue_prompt})
-        chat_history.append({"role": "assistant", "content": new_complete})
-
-        if_complete = check_if_toc_transformation_is_complete(toc_content, last_complete, model)
-        if if_complete == "yes" and finish_reason == "finished":
-            break
-    else:
-        raise Exception('Failed to complete TOC transformation after maximum retries')
-
-    last_complete = extract_json(last_complete)
-
-    cleaned_response = convert_page_to_int(last_complete.get('table_of_contents', []))
-    return cleaned_response
-
-
-
+    result = llm_structured(model=model, prompt=prompt, response_model=TOCTransformation, max_tokens=8000)
+    return convert_page_to_int([item.model_dump() for item in result.table_of_contents])
 
 def find_toc_pages(start_page_index, page_list, opt, logger=None):
     print('start find_toc_pages')
@@ -572,16 +530,15 @@ def generate_toc_init(part, model=None):
     return output
 
 def process_no_toc(page_list, start_index=1, model=None, logger=None):
-    page_contents=[]
-    token_lengths=[]
-    for page_index in range(start_index, start_index+len(page_list)):
+    page_contents = []
+    token_lengths = []
+    for page_index in range(start_index, start_index + len(page_list)):
         page_text = f"<physical_index_{page_index}>\n{page_list[page_index-start_index][0]}\n<physical_index_{page_index}>\n\n"
         page_contents.append(page_text)
         token_lengths.append(count_tokens(page_text, model))
     group_texts = page_list_to_group_text(page_contents, token_lengths)
     logger.info(f'len(group_texts): {len(group_texts)}')
 
-    toc_with_page_number = generate_toc_init(group_texts[0], model)
     toc_with_page_number = generate_toc_init(group_texts[0], model)
     toc_with_page_number = _validate_chunk_physical_indices(
         toc=toc_with_page_number,

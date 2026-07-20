@@ -35,29 +35,53 @@ def count_tokens(text, model=None):
         return 0
     return litellm.token_counter(model=model, text=text)
 
-def llm_structured(model, prompt, response_model, chat_history=None):
+def llm_structured(model, prompt, response_model, chat_history=None, max_tokens=4000):
     if model:
         model = model.removeprefix("litellm/")
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
-    return sync_instructor_client.chat.completions.create(
+
+    result, completion = sync_instructor_client.chat.completions.create_with_completion(
         model=model,
         messages=messages,
         response_model=response_model,
         temperature=0,
-        max_retries=3,
+        max_retries=1,
+        max_tokens=max_tokens,
     )
 
-async def llm_astructured(model, prompt, response_model):
+    finish_reason = completion.choices[0].finish_reason
+    if finish_reason == "length":
+        raise ValueError(
+            f"Response was truncated (finish_reason='length') before completing "
+            f"the {response_model.__name__} structure. Increase max_tokens (currently "
+            f"{max_tokens}) for this call."
+        )
+
+    return result
+
+async def llm_astructured(model, prompt, response_model, max_tokens=4000):
     if model:
         model = model.removeprefix("litellm/")
     messages = [{"role": "user", "content": prompt}]
-    return await async_instructor_client.chat.completions.create(
+
+    result, completion = await async_instructor_client.chat.completions.create_with_completion(
         model=model,
         messages=messages,
         response_model=response_model,
         temperature=0,
-        max_retries=3,
+        max_retries=1,
+        max_tokens=max_tokens,
     )
+
+    finish_reason = completion.choices[0].finish_reason
+    if finish_reason == "length":
+        raise ValueError(
+            f"Response was truncated (finish_reason='length') before completing "
+            f"the {response_model.__name__} structure. Increase max_tokens (currently "
+            f"{max_tokens}) for this call."
+        )
+
+    return result
 
 
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
