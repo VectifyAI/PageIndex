@@ -289,15 +289,15 @@ class CloudBackend:
             "doc_description": resp.get("description", ""),
             "doc_type": "pdf",
             "status": resp.get("status", ""),
-            "structure": self._normalize_tree(raw_tree),
+            "structure": self._normalize_tree(raw_tree, max_page=resp.get("pageNum") or None),
         }
 
     def get_document_structure(self, collection: str, doc_id: str) -> list:
-        self._require_document(collection, doc_id)
+        meta = self._require_document(collection, doc_id) or self._get_metadata(doc_id)
         resp = self._doc_request(doc_id, "GET", f"/doc/{self._enc(doc_id)}/",
                                  params={"type": "tree", "summary": "true"})
         raw_tree = resp.get("result", [])
-        return self._normalize_tree(raw_tree)
+        return self._normalize_tree(raw_tree, max_page=meta.get("pageNum") or None)
 
     def get_page_content(self, collection: str, doc_id: str, pages: str) -> list:
         self._require_document(collection, doc_id)
@@ -324,8 +324,24 @@ class CloudBackend:
         return result
 
     @staticmethod
-    def _normalize_tree(nodes: list | None) -> list:
-        """Normalize cloud tree nodes to match local schema."""
+    def _normalize_tree(nodes: list | None, max_page: int | None = None) -> list:
+        """Normalize cloud tree nodes to match local schema.
+
+        Cloud nodes carry only their starting page_index; end_index is
+        reconstructed with the 0.2.x create_node_mapping semantics — a node
+        ends where the next node in document order starts, the last node at
+        max_page (the doc's pageNum), falling back to its own start.
+        """
+        from ..index.utils import create_node_mapping
+        tree = CloudBackend._normalize_nodes(nodes)
+        mapping = create_node_mapping(tree, include_page_ranges=True, max_page=max_page)
+        for entry in mapping.values():
+            entry["node"]["end_index"] = entry["end_index"]
+        CloudBackend._fill_missing_ends(tree)
+        return tree
+
+    @staticmethod
+    def _normalize_nodes(nodes: list | None) -> list:
         if not nodes:
             return []
         result = []
@@ -335,15 +351,22 @@ class CloudBackend:
                 "node_id": node.get("node_id", ""),
                 "summary": node.get("summary", node.get("prefix_summary", "")),
                 "start_index": node.get("page_index"),
-                "end_index": node.get("page_index"),
+                "end_index": None,
             }
             if "text" in node:
                 normalized["text"] = node["text"]
             children = node.get("nodes", [])
             if children:
-                normalized["nodes"] = CloudBackend._normalize_tree(children)
+                normalized["nodes"] = CloudBackend._normalize_nodes(children)
             result.append(normalized)
         return result
+
+    @staticmethod
+    def _fill_missing_ends(nodes: list) -> None:
+        for node in nodes:
+            if node.get("end_index") is None:
+                node["end_index"] = node.get("start_index")
+            CloudBackend._fill_missing_ends(node.get("nodes", []))
 
     def list_documents(self, collection: str) -> list[dict]:
         folder_id = self._get_folder_id(collection)
