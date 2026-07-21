@@ -114,9 +114,6 @@ class QueryStream:
         from openai.types.responses import ResponseTextDeltaEvent
 
         streamed_run = Runner.run_streamed(self._agent, self._question)
-        # cancel() in finally: the SDK starts the run eagerly, and abandoning
-        # this generator (consumer breaks / client disconnects) would otherwise
-        # leave the agent loop running — and billing LLM calls — to completion.
         try:
             async for event in streamed_run.stream_events():
                 if isinstance(event, RawResponsesStreamEvent):

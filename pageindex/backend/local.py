@@ -128,16 +128,13 @@ class LocalBackend:
                       **({"images": n.images} if n.images else {})}
                      for n in parsed.nodes if n.content]
 
-            meta = parsed.metadata or {}
             self._storage.save_document(collection, doc_id, {
                 "doc_name": parsed.doc_name,
                 "doc_description": result.get("doc_description", ""),
                 "file_path": str(managed_path),
                 "file_hash": file_hash,
                 "doc_type": ext.lstrip("."),
-                # Only the documented parser metadata fields — anything else a
-                # parser reports must not reach (or overwrite) storage columns.
-                **{k: meta[k] for k in ("page_count", "line_count") if k in meta},
+                **(parsed.metadata or {}),  # parser-reported, e.g. page_count / line_count
                 "structure": result["structure"],
                 "pages": pages,
             })
@@ -248,12 +245,12 @@ class LocalBackend:
 
     def delete_document(self, collection: str, doc_id: str) -> None:
         doc = self._require_document(collection, doc_id)
-        # DB row first: an interrupted delete then leaves harmless orphan
-        # files, not a valid-looking document whose files are gone.
+        # DB row first, files after (same order as delete_collection): a failure
+        # mid-way then leaves harmless orphan files, not a listed document whose
+        # files are gone.
         self._storage.delete_document(collection, doc_id)
         if doc.get("file_path"):
             Path(doc["file_path"]).unlink(missing_ok=True)
-        # Clean up images directory: files/{collection}/{doc_id}/
         doc_dir = self._files_dir / collection / doc_id
         if doc_dir.exists():
             shutil.rmtree(doc_dir)
