@@ -424,11 +424,10 @@ class CloudBackend:
             "doc_id": doc_id,
             "stream": False,
         })
-        # Extract answer from response
         choices = resp.get("choices", [])
         if choices:
             return choices[0].get("message", {}).get("content", "")
-        return resp.get("content", resp.get("answer", ""))
+        return ""
 
     async def query_stream(self, collection: str, question: str,
                            doc_ids: str | list[str] | None = None) -> AsyncIterator[QueryEvent]:
