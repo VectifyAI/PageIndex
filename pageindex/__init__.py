@@ -1,5 +1,5 @@
 # pageindex/__init__.py
-# Load .env first so env-based credentials (OPENAI_API_KEY, PAGEINDEX_API_KEY) are set.
+# Load .env first so env-based credentials (e.g. OPENAI_API_KEY) are set.
 from dotenv import load_dotenv as _load_dotenv
 _load_dotenv()
 
