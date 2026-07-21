@@ -245,9 +245,6 @@ class LocalBackend:
 
     def delete_document(self, collection: str, doc_id: str) -> None:
         doc = self._require_document(collection, doc_id)
-        # DB row first, files after (same order as delete_collection): a failure
-        # mid-way then leaves harmless orphan files, not a listed document whose
-        # files are gone.
         self._storage.delete_document(collection, doc_id)
         if doc.get("file_path"):
             Path(doc["file_path"]).unlink(missing_ok=True)
