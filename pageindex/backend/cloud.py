@@ -282,7 +282,7 @@ class CloudBackend:
         # Fetch structure in the same call via tree endpoint
         tree_resp = self._doc_request(doc_id, "GET", f"/doc/{self._enc(doc_id)}/",
                                       params={"type": "tree", "summary": "true"})
-        raw_tree = tree_resp.get("tree", tree_resp.get("structure", tree_resp.get("result", [])))
+        raw_tree = tree_resp.get("result", [])
         return {
             "doc_id": resp.get("id", doc_id),
             "doc_name": resp.get("name", ""),
@@ -296,7 +296,7 @@ class CloudBackend:
         self._require_document(collection, doc_id)
         resp = self._doc_request(doc_id, "GET", f"/doc/{self._enc(doc_id)}/",
                                  params={"type": "tree", "summary": "true"})
-        raw_tree = resp.get("tree", resp.get("structure", resp.get("result", [])))
+        raw_tree = resp.get("result", [])
         return self._normalize_tree(raw_tree)
 
     def get_page_content(self, collection: str, doc_id: str, pages: str) -> list:
@@ -306,16 +306,14 @@ class CloudBackend:
         # Filter to requested pages
         from ..index.utils import parse_pages
         page_nums = set(parse_pages(pages))
-        all_pages = resp.get("pages", resp.get("ocr", resp.get("result", [])))
-        if not isinstance(all_pages, list):
-            return []
+        all_pages = resp.get("result", [])
         result = []
         for p in all_pages:
-            page = _as_int(p.get("page", p.get("page_index")))
+            page = _as_int(p.get("page_index"))
             if page not in page_nums:
                 continue
             entry = {"page": page,
-                     "content": p.get("content", p.get("markdown", ""))}
+                     "content": p.get("markdown", "")}
             # Cloud OCR pages carry an `images` list (empty on text-only
             # pages). Preserve it — omitting when empty, mirroring the local
             # backend — so cloud callers get the same PageContent shape and
@@ -336,8 +334,8 @@ class CloudBackend:
                 "title": node.get("title", ""),
                 "node_id": node.get("node_id", ""),
                 "summary": node.get("summary", node.get("prefix_summary", "")),
-                "start_index": node.get("start_index", node.get("page_index")),
-                "end_index": node.get("end_index", node.get("page_index")),
+                "start_index": node.get("page_index"),
+                "end_index": node.get("page_index"),
             }
             if "text" in node:
                 normalized["text"] = node["text"]
