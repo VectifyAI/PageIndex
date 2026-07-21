@@ -67,7 +67,7 @@ def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
     Routes to the appropriate strategy and runs enhancement."""
     from .utils import (write_node_id, add_node_text, remove_structure_text,
                         generate_summaries_for_structure, generate_doc_description,
-                        create_clean_structure_for_description)
+                        create_clean_structure_for_description, format_structure)
     from ..config import IndexConfig, max_concurrency_scope, llm_params_scope
 
     if opt is None:
@@ -121,6 +121,12 @@ def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
         text_present = strategy == "level_based" or opt.if_add_node_text or opt.if_add_node_summary
         if text_present and not opt.if_add_node_text:
             remove_structure_text(structure)
+
+        if strategy == "level_based":
+            order = ['title', 'node_id', 'line_num', 'summary', 'prefix_summary', 'text', 'nodes']
+        else:
+            order = ['title', 'node_id', 'start_index', 'end_index', 'summary', 'text', 'nodes']
+        result["structure"] = format_structure(structure, order=order)
 
         return result
 
