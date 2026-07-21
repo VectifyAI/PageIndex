@@ -101,10 +101,6 @@ class LegacyCloudAPI:
     def get_tree(self, doc_id: str, node_summary: bool = False) -> dict[str, Any]:
         response = self._request(
             "GET",
-            # Lowercase the bool: a Python f-string renders True/False with a
-            # capital letter, but the API expects summary=true/false (the modern
-            # CloudBackend sends lowercase). A case-sensitive server would
-            # otherwise silently drop node summaries.
             f"/doc/{self._enc(doc_id)}/?type=tree&summary={'true' if node_summary else 'false'}",
             "Failed to get tree result",
         )
