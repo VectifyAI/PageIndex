@@ -42,7 +42,7 @@ class PdfParser:
                 images=images,
             ))
 
-        return ParsedDocument(doc_name=path.stem, nodes=nodes,
+        return ParsedDocument(doc_name=path.name, nodes=nodes,
                               metadata={"page_count": len(reader.pages)})
 
     @staticmethod

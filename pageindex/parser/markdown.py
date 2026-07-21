@@ -24,7 +24,7 @@ class MarkdownParser:
         headers = self._extract_headers(lines)
         nodes = self._build_nodes(headers, lines, model, doc_title=path.stem)
 
-        return ParsedDocument(doc_name=path.stem, nodes=nodes,
+        return ParsedDocument(doc_name=path.name, nodes=nodes,
                               metadata={"line_count": len(lines)})
 
     def _extract_headers(self, lines: list[str]) -> list[dict]:
