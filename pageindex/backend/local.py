@@ -245,13 +245,15 @@ class LocalBackend:
 
     def delete_document(self, collection: str, doc_id: str) -> None:
         doc = self._require_document(collection, doc_id)
+        # DB row first: an interrupted delete then leaves harmless orphan
+        # files, not a valid-looking document whose files are gone.
+        self._storage.delete_document(collection, doc_id)
         if doc.get("file_path"):
             Path(doc["file_path"]).unlink(missing_ok=True)
         # Clean up images directory: files/{collection}/{doc_id}/
         doc_dir = self._files_dir / collection / doc_id
         if doc_dir.exists():
             shutil.rmtree(doc_dir)
-        self._storage.delete_document(collection, doc_id)
 
     def get_agent_tools(self, collection: str, doc_ids: list[str] | None = None) -> AgentTools:
         """Build agent tools.
