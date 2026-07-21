@@ -146,8 +146,8 @@ class PageIndexClient:
                     "(client.collection(...)) for local mode."
                 )
             raise PageIndexAPIError(
-                "This method is part of the pageindex 0.2.x cloud SDK API. "
-                "Initialize with api_key to use it."
+                "This method calls the PageIndex cloud API — create the client "
+                "with an api_key (get one at https://dash.pageindex.ai)."
             )
         return self._legacy_cloud_api
 
