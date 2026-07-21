@@ -11,7 +11,7 @@ import re
 import time
 import urllib.parse
 import requests
-from typing import AsyncIterator, Callable
+from typing import Any, AsyncIterator, Callable
 
 from ..cloud_api import API_BASE  # single source of truth for the cloud base URL
 from ..errors import (AUTH_HINT, CloudAPIError, CollectionNotFoundError,
@@ -211,7 +211,7 @@ class CloudBackend:
 
     def add_document(self, collection: str, file_path: str) -> str:
         folder_id = self._get_folder_id(collection)
-        data = {"if_retrieval": "true"}
+        data: dict[str, Any] = {"if_retrieval": True}
         if folder_id:
             data["folder_id"] = folder_id
 
