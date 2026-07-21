@@ -28,7 +28,6 @@ pyyaml = ">=6.0"
 openai = ">=1.70.0"
 openai-agents = ">=0.1.0"
 requests = ">=2.28.0"
-httpx = {extras = ["socks"], version = ">=0.28.1"}
 typing-extensions = ">=4.9.0"
 pydantic = ">=2.5.0,<3.0.0"
 
