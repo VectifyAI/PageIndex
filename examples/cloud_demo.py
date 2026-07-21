@@ -14,6 +14,7 @@ Requirements:
 """
 import asyncio
 import os
+import sys
 from pathlib import Path
 import requests
 from pageindex import CloudClient
@@ -34,7 +35,10 @@ if not PDF_PATH.exists():
                     f.write(chunk)
     print("Download complete.\n")
 
-client = CloudClient(api_key=os.environ["PAGEINDEX_API_KEY"])
+api_key = os.environ.get("PAGEINDEX_API_KEY")
+if not api_key:
+    sys.exit("PAGEINDEX_API_KEY not set — get a key at https://dash.pageindex.ai")
+client = CloudClient(api_key=api_key)
 collection = client.collection()
 
 doc_id = collection.add(str(PDF_PATH))
