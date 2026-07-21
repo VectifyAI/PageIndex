@@ -309,5 +309,10 @@ class CloudClient(PageIndexClient):
     """Cloud mode — fully managed by PageIndex cloud service. No LLM key needed."""
 
     def __init__(self, api_key: str):
+        if not api_key:
+            raise PageIndexAPIError(
+                "CloudClient requires a PageIndex API key — get one at "
+                "https://dash.pageindex.ai."
+            )
         self._empty_api_key = False
         self._init_cloud(api_key)
