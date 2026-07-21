@@ -99,8 +99,6 @@ class PageIndexClient:
         else:
             opt = IndexConfig(**overrides) if overrides else IndexConfig()
 
-        self._validate_llm_provider(opt.model)
-
         self.model = opt.model
         self.retrieve_model = _normalize_retrieve_model(opt.retrieve_model or self.model)
 
@@ -117,43 +115,6 @@ class PageIndexClient:
             retrieve_model=self.retrieve_model,
             index_config=opt,
         )
-
-    @staticmethod
-    def _validate_llm_provider(model: str) -> None:
-        """Validate the model string and require an API key for providers that
-        need one. Local / keyless providers (ollama, lm_studio, …) are skipped so
-        a keyless LiteLLM model isn't rejected at construction time."""
-        try:
-            import litellm
-            _, provider, _, _ = litellm.get_llm_provider(model=model)
-        except Exception:
-            return
-
-        # LiteLLM providers that run locally / self-hosted and need no API key
-        # by default (litellm itself falls back to a placeholder key for these
-        # rather than erroring — see e.g. hosted_vllm's transformation.py).
-        # This list is necessarily a manual allowlist (litellm.validate_environment
-        # isn't reliable enough to derive it from); extend it as litellm adds
-        # more local-inference providers.
-        keyless = {
-            "ollama", "ollama_chat", "lm_studio", "hosted_vllm", "vllm",
-            "xinference", "llamafile", "triton", "oobabooga",
-            "openai_like", "custom_openai", "custom", "docker_model_runner",
-            "petals",
-        }
-        if provider in keyless:
-            return
-
-        key = litellm.get_api_key(llm_provider=provider, dynamic_api_key=None)
-        if not key:
-            import os
-            common_var = f"{provider.upper()}_API_KEY"
-            if not os.getenv(common_var):
-                from .errors import PageIndexError
-                raise PageIndexError(
-                    f"API key not configured for provider '{provider}' (model: {model}). "
-                    f"Set the {common_var} environment variable."
-                )
 
     def collection(self, name: str = "default") -> Collection:
         """Get or create a collection. Defaults to 'default'."""
