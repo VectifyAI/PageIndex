@@ -23,6 +23,10 @@ _EXAMPLES_DIR = Path(__file__).parent
 PDF_URL = "https://arxiv.org/pdf/2603.15031"
 PDF_PATH = _EXAMPLES_DIR / "documents" / "attention-residuals.pdf"
 
+api_key = os.environ.get("PAGEINDEX_API_KEY")
+if not api_key:
+    sys.exit("PAGEINDEX_API_KEY not set — get a key at https://dash.pageindex.ai")
+
 # Download PDF if needed
 if not PDF_PATH.exists():
     print(f"Downloading {PDF_URL} ...")
@@ -35,9 +39,6 @@ if not PDF_PATH.exists():
                     f.write(chunk)
     print("Download complete.\n")
 
-api_key = os.environ.get("PAGEINDEX_API_KEY")
-if not api_key:
-    sys.exit("PAGEINDEX_API_KEY not set — get a key at https://dash.pageindex.ai")
 client = CloudClient(api_key=api_key)
 collection = client.collection()
 
