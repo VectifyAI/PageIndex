@@ -128,13 +128,16 @@ class LocalBackend:
                       **({"images": n.images} if n.images else {})}
                      for n in parsed.nodes if n.content]
 
+            meta = parsed.metadata or {}
             self._storage.save_document(collection, doc_id, {
                 "doc_name": parsed.doc_name,
                 "doc_description": result.get("doc_description", ""),
                 "file_path": str(managed_path),
                 "file_hash": file_hash,
                 "doc_type": ext.lstrip("."),
-                **(parsed.metadata or {}),  # parser-reported, e.g. page_count / line_count
+                # Only the documented parser metadata fields — anything else a
+                # parser reports must not reach (or overwrite) storage columns.
+                **{k: meta[k] for k in ("page_count", "line_count") if k in meta},
                 "structure": result["structure"],
                 "pages": pages,
             })
