@@ -124,6 +124,13 @@ class CloudBackend:
 
     # ── Collection management (mapped to folders) ─────────────────────────
 
+    def _root_folders(self) -> list[dict]:
+        """List root-level folders only. Collections are always created at the
+        root, so name resolution must not match a nested folder that happens
+        to share the name (folder names are only unique per parent)."""
+        data = self._request("GET", "/folders/", params={"parent_folder_id": "root"})
+        return data.get("folders", []) or []
+
     def _create_folder(self, name: str) -> str:
         """POST /folder/ and return the new folder id, never a falsy value."""
         resp = self._request("POST", "/folder/", json={"name": name})
@@ -152,8 +159,7 @@ class CloudBackend:
     def get_or_create_collection(self, name: str) -> None:
         self._validate_collection_name(name)
         try:
-            data = self._request("GET", "/folders/")
-            for folder in data.get("folders", []) or []:
+            for folder in self._root_folders():
                 if folder.get("name") == name:
                     self._folder_id_cache[name] = folder["id"]
                     return
@@ -177,14 +183,14 @@ class CloudBackend:
         if name in self._folder_id_cache:
             return self._folder_id_cache.get(name)
         try:
-            data = self._request("GET", "/folders/")
+            folders = self._root_folders()
         except CloudAPIError as e:
             if e.status_code in self._FOLDER_UNAVAILABLE:
                 self._warn_folder_upgrade()
                 self._folder_id_cache[name] = None
                 return None
             raise
-        for folder in data.get("folders", []) or []:
+        for folder in folders:
             if folder.get("name") == name:
                 self._folder_id_cache[name] = folder["id"]
                 return folder["id"]
@@ -195,13 +201,13 @@ class CloudBackend:
 
     def list_collections(self) -> list[str]:
         try:
-            data = self._request("GET", "/folders/")
+            folders = self._root_folders()
         except CloudAPIError as e:
             if e.status_code in self._FOLDER_UNAVAILABLE:
                 self._warn_folder_upgrade()
                 return []
             raise
-        return [f["name"] for f in data.get("folders", []) or []]
+        return [f["name"] for f in folders]
 
     def delete_collection(self, name: str) -> None:
         try:
@@ -387,7 +393,7 @@ class CloudBackend:
         offset = 0
         docs: list[dict] = []
         while True:
-            params = {"limit": page_size, "offset": offset}
+            params: dict[str, Any] = {"limit": page_size, "offset": offset}
             if folder_id:
                 params["folder_id"] = folder_id
             data = self._request("GET", "/docs/", params=params)
