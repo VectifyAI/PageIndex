@@ -9,6 +9,7 @@ import PyPDF2
 
 from .page_index import page_index
 from .page_index_md import md_to_tree
+from .page_index_txt import txt_to_tree
 from .retrieve import get_document, get_document_structure, get_page_content
 from .utils import ConfigLoader, remove_fields
 
@@ -65,6 +66,7 @@ class PageIndexClient:
 
         is_pdf = ext == '.pdf'
         is_md = ext in ['.md', '.markdown']
+        is_txt = ext == '.txt'
 
         if mode == "pdf" or (mode == "auto" and is_pdf):
             print(f"Indexing PDF: {file_path}")
@@ -121,6 +123,33 @@ class PageIndexClient:
                 'line_count': result.get('line_count', 0),
                 'structure': result['structure'],
             }
+
+        elif mode == "txt" or (mode == "auto" and is_txt):
+            print(f"Indexing Text: {file_path}")
+            coro = txt_to_tree(
+                txt_path=file_path,
+                if_add_node_summary='yes',
+                summary_token_threshold=200,
+                model=self.model,
+                if_add_doc_description='yes',
+                if_add_node_text='yes',
+                if_add_node_id='yes'
+            )
+            try:
+                asyncio.get_running_loop()
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    result = pool.submit(asyncio.run, coro).result()
+            except RuntimeError:
+                result = asyncio.run(coro)
+            self.documents[doc_id] = {
+                'id': doc_id,
+                'type': 'txt',
+                'path': file_path,
+                'doc_name': result.get('doc_name', ''),
+                'doc_description': result.get('doc_description', ''),
+                'line_count': result.get('line_count', 0),
+                'structure': result['structure'],
+            }
         else:
             raise ValueError(f"Unsupported file format for: {file_path}")
 
@@ -140,7 +169,7 @@ class PageIndexClient:
         }
         if doc.get('type') == 'pdf':
             entry['page_count'] = doc.get('page_count')
-        elif doc.get('type') == 'md':
+        elif doc.get('type') in ('md', 'txt'):
             entry['line_count'] = doc.get('line_count')
         return entry
 

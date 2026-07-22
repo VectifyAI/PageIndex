@@ -3,6 +3,7 @@ import os
 import json
 from pageindex import *
 from pageindex.page_index_md import md_to_tree
+from pageindex.page_index_txt import txt_to_tree
 from pageindex.utils import ConfigLoader
 
 if __name__ == "__main__":
@@ -10,6 +11,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Process PDF or Markdown document and generate structure')
     parser.add_argument('--pdf_path', type=str, help='Path to the PDF file')
     parser.add_argument('--md_path', type=str, help='Path to the Markdown file')
+    parser.add_argument('--txt_path', type=str, help='Path to the plain text file')
 
     parser.add_argument('--model', type=str, default=None, help='Model to use (overrides config.yaml)')
 
@@ -39,10 +41,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     # Validate that exactly one file type is specified
-    if not args.pdf_path and not args.md_path:
-        raise ValueError("Either --pdf_path or --md_path must be specified")
-    if args.pdf_path and args.md_path:
-        raise ValueError("Only one of --pdf_path or --md_path can be specified")
+    specified = [p for p in (args.pdf_path, args.md_path, args.txt_path) if p]
+    if not specified:
+        raise ValueError("Either --pdf_path, --md_path, or --txt_path must be specified")
+    if len(specified) > 1:
+        raise ValueError("Only one of --pdf_path, --md_path, or --txt_path can be specified")
     
     if args.pdf_path:
         # Validate PDF file
@@ -131,4 +134,48 @@ if __name__ == "__main__":
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(toc_with_page_number, f, indent=2, ensure_ascii=False)
         
+        print(f'Tree structure saved to: {output_file}')
+
+    elif args.txt_path:
+        if not args.txt_path.lower().endswith('.txt'):
+            raise ValueError("Text file must have .txt extension")
+        if not os.path.isfile(args.txt_path):
+            raise ValueError(f"Text file not found: {args.txt_path}")
+
+        print('Processing text file...')
+
+        import asyncio
+        from pageindex.utils import ConfigLoader
+        config_loader = ConfigLoader()
+
+        user_opt = {
+            'model': args.model,
+            'if_add_node_summary': args.if_add_node_summary,
+            'if_add_doc_description': args.if_add_doc_description,
+            'if_add_node_text': args.if_add_node_text,
+            'if_add_node_id': args.if_add_node_id
+        }
+
+        opt = config_loader.load(user_opt)
+
+        toc_with_page_number = asyncio.run(txt_to_tree(
+            txt_path=args.txt_path,
+            if_add_node_summary=opt.if_add_node_summary,
+            summary_token_threshold=args.summary_token_threshold,
+            model=opt.model,
+            if_add_doc_description=opt.if_add_doc_description,
+            if_add_node_text=opt.if_add_node_text,
+            if_add_node_id=opt.if_add_node_id
+        ))
+
+        print('Parsing done, saving to file...')
+
+        txt_name = os.path.splitext(os.path.basename(args.txt_path))[0]
+        output_dir = './results'
+        output_file = f'{output_dir}/{txt_name}_structure.json'
+        os.makedirs(output_dir, exist_ok=True)
+
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(toc_with_page_number, f, indent=2, ensure_ascii=False)
+
         print(f'Tree structure saved to: {output_file}')
