@@ -111,7 +111,10 @@ def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
             "structure": structure,
         }
 
-        if opt.if_add_doc_description:
+        # Description requires summaries (legacy gating): the clean structure
+        # fed to the LLM carries only titles/summaries, so without summaries
+        # the description would be generated from bare titles.
+        if opt.if_add_node_summary and opt.if_add_doc_description:
             clean_structure = create_clean_structure_for_description(structure)
             result["doc_description"] = generate_doc_description(
                 clean_structure, model=opt.model
