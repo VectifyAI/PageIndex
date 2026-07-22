@@ -557,10 +557,98 @@ def add_node_text(node, pdf_pages):
         node['text'] = get_text_of_pdf_pages(pdf_pages, start_page, end_page)
         if 'nodes' in node:
             add_node_text(node['nodes'], pdf_pages)
+            refine_overlapping_node_text(node)
     elif isinstance(node, list):
         for index in range(len(node)):
             add_node_text(node[index], pdf_pages)
+        refine_overlapping_sibling_texts(node)
     return
+
+
+def _find_title_anchor(page_text, title):
+    """Return the start offset of title (or a prefix) in page_text, or -1."""
+    if not page_text or not title:
+        return -1
+    haystack = page_text.lower()
+    needle = title.strip()
+    for length in (len(needle), 80, 60, 40, 20):
+        fragment = needle[:length].strip()
+        if len(fragment) < 8:
+            break
+        idx = haystack.find(fragment.lower())
+        if idx >= 0:
+            return idx
+    return -1
+
+
+def partition_text_by_titles(page_text, titles):
+    """
+    Split page_text into exclusive slices for each title using first-occurrence anchors.
+    Returns None when anchors cannot be resolved reliably.
+    """
+    if not page_text or len(titles) < 2:
+        return None
+
+    anchors = [_find_title_anchor(page_text, t) for t in titles]
+    if sum(1 for a in anchors if a >= 0) < 2:
+        return None
+
+    # Build ordered cuts for titles we found; unknown titles keep full text later.
+    indexed = [(i, a) for i, a in enumerate(anchors) if a >= 0]
+    indexed.sort(key=lambda x: x[1])
+
+    slices = [page_text] * len(titles)
+    for order, (idx, start) in enumerate(indexed):
+        end = indexed[order + 1][1] if order + 1 < len(indexed) else len(page_text)
+        if end < start:
+            continue
+        slices[idx] = page_text[start:end].strip()
+    return slices
+
+
+def refine_overlapping_sibling_texts(siblings):
+    """When siblings share identical whole-page text, partition by title anchors."""
+    if not isinstance(siblings, list) or len(siblings) < 2:
+        return
+    texts = [s.get('text') for s in siblings]
+    if not texts or any(t is None for t in texts):
+        return
+    if len(set(texts)) != 1 or not texts[0]:
+        return
+    titles = [s.get('title', '') for s in siblings]
+    slices = partition_text_by_titles(texts[0], titles)
+    if not slices:
+        return
+    for sibling, text in zip(siblings, slices):
+        sibling['text'] = text
+
+
+def refine_overlapping_node_text(parent):
+    """Partition same-page children under a parent and shrink parent preface text."""
+    children = parent.get('nodes') or []
+    if len(children) < 2:
+        return
+
+    parent_text = parent.get('text') or ''
+    child_texts = [c.get('text') for c in children]
+    shared_with_parent = (
+        len(set(child_texts)) == 1
+        and bool(child_texts[0])
+        and (not parent_text or parent_text == child_texts[0])
+    )
+
+    refine_overlapping_sibling_texts(children)
+
+    if not shared_with_parent or not parent_text:
+        return
+
+    first_title = (children[0].get('title') or '').strip()
+    idx = _find_title_anchor(parent_text, first_title)
+    if idx > 0:
+        parent['text'] = parent_text[:idx].strip()
+    elif idx == 0:
+        # No exclusive preface; leave empty so summarization uses child titles.
+        parent['text'] = ''
 
 
 def add_node_text_with_labels(node, pdf_pages):
@@ -587,13 +675,49 @@ async def generate_node_summary(node, model=None):
     return response
 
 
+def _container_summary_from_children(node):
+    titles = [c.get('title', '').strip() for c in (node.get('nodes') or []) if c.get('title')]
+    section = (node.get('title') or '').strip() or 'Section'
+    if titles:
+        return f'{section} covering: ' + '; '.join(titles)
+    return section
+
+
 async def generate_summaries_for_structure(structure, model=None):
     nodes = structure_to_list(structure)
-    tasks = [generate_node_summary(node, model=model) for node in nodes]
-    summaries = await asyncio.gather(*tasks)
-    
-    for node, summary in zip(nodes, summaries):
-        node['summary'] = summary
+
+    # Pre-assign container summaries when parent text is empty or duplicates children.
+    pending = []
+    for node in nodes:
+        children = node.get('nodes') or []
+        text = node.get('text') or ''
+        if children and (
+            not text.strip()
+            or any(text == (c.get('text') or '') for c in children)
+        ):
+            node['summary'] = _container_summary_from_children(node)
+        else:
+            pending.append(node)
+
+    # Deduplicate LLM calls for identical text (same-page siblings before partition, etc.).
+    unique_texts = []
+    text_to_nodes = {}
+    for node in pending:
+        key = node.get('text') or ''
+        if key not in text_to_nodes:
+            text_to_nodes[key] = []
+            unique_texts.append(key)
+        text_to_nodes[key].append(node)
+
+    if unique_texts:
+        reps = [text_to_nodes[t][0] for t in unique_texts]
+        summaries = await asyncio.gather(
+            *[generate_node_summary(node, model=model) for node in reps]
+        )
+        for key, summary in zip(unique_texts, summaries):
+            for node in text_to_nodes[key]:
+                node['summary'] = summary
+
     return structure
 
 
