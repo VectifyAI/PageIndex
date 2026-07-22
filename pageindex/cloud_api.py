@@ -19,9 +19,18 @@ class LegacyCloudAPI:
 
     BASE_URL = API_BASE
 
-    def __init__(self, api_key: str, base_url: str | Callable[[], str] | None = None):
-        self.api_key = api_key
+    def __init__(self, api_key: str | Callable[[], str],
+                 base_url: str | Callable[[], str] | None = None):
+        self._api_key = api_key
         self._base_url = base_url or self.BASE_URL
+
+    @property
+    def api_key(self) -> str:
+        return self._api_key() if callable(self._api_key) else self._api_key
+
+    @api_key.setter
+    def api_key(self, value: str | Callable[[], str]) -> None:
+        self._api_key = value
 
     @property
     def base_url(self) -> str:

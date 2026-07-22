@@ -74,11 +74,13 @@ class PageIndexClient:
     def _init_cloud(self, api_key: str):
         from .backend.cloud import CloudBackend
         from .cloud_api import LegacyCloudAPI
-        # Callable: re-read per request so post-construction BASE_URL
-        # reassignment (a 0.2.x pattern) still applies.
+        # Callables: re-read per request so post-construction BASE_URL /
+        # api_key reassignment (0.2.x patterns) still applies.
+        self.api_key = api_key
         base_url = lambda: self.BASE_URL
-        self._backend = CloudBackend(api_key=api_key, base_url=base_url)
-        self._legacy_cloud_api = LegacyCloudAPI(api_key=api_key, base_url=base_url)
+        api_key_ref = lambda: self.api_key
+        self._backend = CloudBackend(api_key=api_key_ref, base_url=base_url)
+        self._legacy_cloud_api = LegacyCloudAPI(api_key=api_key_ref, base_url=base_url)
 
     def _init_local(self, model: str = None, retrieve_model: str = None,
                     storage_path: str = None, storage=None,

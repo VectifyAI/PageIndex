@@ -30,16 +30,23 @@ def _as_int(value):
 
 
 class CloudBackend:
-    def __init__(self, api_key: str, base_url: str | Callable[[], str] | None = None):
+    def __init__(self, api_key: str | Callable[[], str],
+                 base_url: str | Callable[[], str] | None = None):
         self._api_key = api_key
         self._base_url = base_url or API_BASE
-        self._headers = {"api_key": api_key}
         self._folder_id_cache: dict[str, str | None] = {}
         self._folder_warning_shown = False
 
     @property
+    def api_key(self) -> str:
+        return self._api_key() if callable(self._api_key) else self._api_key
+
+    @property
     def base_url(self) -> str:
         return self._base_url() if callable(self._base_url) else self._base_url
+
+    def _headers(self) -> dict[str, str]:
+        return {"api_key": self.api_key}
 
     # ── HTTP helpers ──────────────────────────────────────────────────────
 
@@ -77,7 +84,7 @@ class CloudBackend:
                     if hasattr(fobj, "seek"):
                         fobj.seek(0)
             try:
-                resp = requests.request(method, url, headers=self._headers, **kwargs)
+                resp = requests.request(method, url, headers=self._headers(), **kwargs)
                 if resp.status_code in (429, 500, 502, 503):
                     last_status = resp.status_code
                     if attempt == retries - 1:
@@ -452,7 +459,7 @@ class CloudBackend:
         )
         if not doc_id:
             raise ValueError("collection has no documents to query")
-        headers = self._headers
+        headers = self._headers()
         base_url = self.base_url
         # Queue carries QueryEvent, an Exception to re-raise, or None (end).
         queue: asyncio.Queue[QueryEvent | Exception | None] = asyncio.Queue()
