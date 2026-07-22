@@ -53,8 +53,6 @@ class LegacyCloudAPI:
         # forever. Streamed responses get a longer read timeout since it
         # applies between chunks, not to the whole response.
         kwargs.setdefault("timeout", 120 if kwargs.get("stream") else 30)
-        # Transport errors propagate raw (0.2.x contract) — they must escape
-        # is_retrieval_ready's except-PageIndexAPIError, not read as "not ready".
         response = requests.request(
             method,
             f"{self.base_url}{path}",

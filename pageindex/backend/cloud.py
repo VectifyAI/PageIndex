@@ -144,8 +144,6 @@ class CloudBackend:
                 self._warn_folder_upgrade()
                 self._folder_id_cache[name] = None
             elif e.status_code == 400 and "already exists" in str(e):
-                # Duplicate-name 400, for parity with the local backend's
-                # error taxonomy.
                 raise CollectionAlreadyExistsError(
                     f"Collection '{name}' already exists") from e
             else:
@@ -211,9 +209,6 @@ class CloudBackend:
         except CollectionNotFoundError:
             return  # already gone — delete is idempotent
         if folder_id:
-            # The cloud API has no folder-deletion endpoint (only POST /folder
-            # and GET /folders exist) — fail clearly instead of issuing a
-            # request that can only 404.
             raise PageIndexError(
                 f"Deleting a cloud collection is not supported by the PageIndex "
                 f"API — delete folder '{name}' in the dashboard "

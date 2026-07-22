@@ -51,8 +51,7 @@ class IndexConfig(BaseModel):
     def from_yaml(cls, path: str = None, **overrides) -> "IndexConfig":
         """Load config from a YAML file ("yes"/"no" accepted for booleans);
         keyword overrides take precedence. Defaults to the package config.yaml.
-        Unknown YAML keys are ignored with a warning (legacy config.yaml
-        tolerance); unknown keyword overrides still raise."""
+        Unknown YAML keys are ignored with a warning."""
         import yaml
         if path is None:
             path = os.path.join(os.path.dirname(__file__), "config.yaml")

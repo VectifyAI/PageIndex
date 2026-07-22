@@ -210,8 +210,6 @@ class SQLiteStorage:
     def list_documents(self, collection: str) -> list[dict]:
         conn = self._get_conn()
         rows = conn.execute(
-            # Newest first, matching the cloud API's createdAt DESC order;
-            # rowid breaks same-second ties by insertion order.
             "SELECT doc_id, doc_name, doc_description, doc_type FROM documents WHERE collection_name = ? ORDER BY created_at DESC, rowid DESC",
             (collection,),
         ).fetchall()
