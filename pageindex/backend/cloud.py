@@ -209,11 +209,13 @@ class CloudBackend:
         except CollectionNotFoundError:
             return  # already gone — delete is idempotent
         if folder_id:
-            raise PageIndexError(
-                f"Deleting a cloud collection is not supported by the PageIndex "
-                f"API — delete folder '{name}' in the dashboard "
-                "(https://dash.pageindex.ai) instead."
-            )
+            try:
+                self._request("DELETE", f"/folder/{self._enc(folder_id)}/")
+            except CloudAPIError as e:
+                # a route-miss 404 (endpoint not deployed) must not read as deleted
+                if not (e.status_code == 404 and "Folder not found" in str(e)):
+                    raise
+            self._folder_id_cache.pop(name, None)
 
     # ── Document management ───────────────────────────────────────────────
 
