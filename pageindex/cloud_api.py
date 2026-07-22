@@ -44,15 +44,14 @@ class LegacyCloudAPI:
         # forever. Streamed responses get a longer read timeout since it
         # applies between chunks, not to the whole response.
         kwargs.setdefault("timeout", 120 if kwargs.get("stream") else 30)
-        try:
-            response = requests.request(
-                method,
-                f"{self.base_url}{path}",
-                headers=self._headers(),
-                **kwargs,
-            )
-        except requests.RequestException as e:
-            raise PageIndexAPIError(f"{error_prefix}: {e}") from e
+        # Transport errors propagate raw (0.2.x contract) — they must escape
+        # is_retrieval_ready's except-PageIndexAPIError, not read as "not ready".
+        response = requests.request(
+            method,
+            f"{self.base_url}{path}",
+            headers=self._headers(),
+            **kwargs,
+        )
 
         if response.status_code != 200:
             msg = f"{error_prefix}: {response.text}"
@@ -209,8 +208,6 @@ class LegacyCloudAPI:
                 content = choices[0].get("delta", {}).get("content", "")
                 if content:
                     yield content
-        except requests.RequestException as e:
-            raise PageIndexAPIError(f"Failed to stream chat completion: {e}") from e
         finally:
             response.close()
 
@@ -230,8 +227,6 @@ class LegacyCloudAPI:
                     yield json.loads(data)
                 except json.JSONDecodeError:
                     continue
-        except requests.RequestException as e:
-            raise PageIndexAPIError(f"Failed to stream chat completion: {e}") from e
         finally:
             response.close()
 
