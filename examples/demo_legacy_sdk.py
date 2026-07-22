@@ -56,7 +56,7 @@ def main() -> int:
 
         # 3) get_tree
         tree = client.get_tree(doc_id)
-        node_count = len(tree.get("result") or tree.get("tree") or [])
+        node_count = len(tree.get("result") or [])
         log("get_tree", f"top-level nodes={node_count}, status={tree.get('status')}")
 
         # 4) get_document (metadata)
