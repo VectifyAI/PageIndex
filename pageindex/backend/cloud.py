@@ -13,8 +13,9 @@ import requests
 from typing import Any, AsyncIterator, Callable
 
 from ..cloud_api import API_BASE  # single source of truth for the cloud base URL
-from ..errors import (AUTH_HINT, CloudAPIError, CollectionNotFoundError,
-                      DocumentNotFoundError, PageIndexError)
+from ..errors import (AUTH_HINT, CloudAPIError, CollectionAlreadyExistsError,
+                      CollectionNotFoundError, DocumentNotFoundError,
+                      PageIndexError)
 from ..events import QueryEvent
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,11 @@ class CloudBackend:
             if e.status_code in self._FOLDER_UNAVAILABLE:
                 self._warn_folder_upgrade()
                 self._folder_id_cache[name] = None
+            elif e.status_code == 400 and "already exists" in str(e):
+                # Duplicate-name 400, for parity with the local backend's
+                # error taxonomy.
+                raise CollectionAlreadyExistsError(
+                    f"Collection '{name}' already exists") from e
             else:
                 raise
 
