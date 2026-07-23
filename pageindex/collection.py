@@ -56,6 +56,8 @@ class Collection:
         Returns the ``doc_id``. Re-adding byte-identical content returns the
         existing doc_id (content-hash dedup); change ``IndexConfig`` won't
         force a re-index — delete the doc first if you need a fresh tree.
+        A different file with an already-used name is stored under a numeric
+        suffix (``a.pdf`` -> ``a_1.pdf``), matching the cloud service.
         """
         return self._backend.add_document(self._name, file_path)
 

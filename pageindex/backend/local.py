@@ -3,6 +3,7 @@ import hashlib
 import os
 import re
 import sqlite3
+import unicodedata
 import uuid
 import shutil
 from pathlib import Path
@@ -22,6 +23,10 @@ from .._validation import validate_collection_name
 # directory names. Preserve that layout for backward compatibility; names newly
 # allowed by the cloud-compatible contract use an opaque directory instead.
 _LEGACY_COLLECTION_DIR_RE = re.compile(r'[a-zA-Z0-9_-]{1,128}')
+
+
+class _DocResolveError(Exception):
+    """Agent-tool doc_name resolution failure; str() is the agent-facing error JSON."""
 
 
 class LocalBackend:
@@ -90,6 +95,35 @@ class LocalBackend:
                 h.update(chunk)
         return h.hexdigest()
 
+    @staticmethod
+    def _sanitize_doc_name(doc_name: str, max_bytes: int = 180) -> str:
+        """Match the cloud upload pipeline's sanitize_filename: NFKC-normalize
+        and collapse whitespace so names are reproducible by the agent (and a
+        newline in a filename can't forge extra entries in the <docs> prompt
+        block), then truncate over-long names with a stable hash suffix."""
+        name = re.sub(r"\s+", " ", unicodedata.normalize("NFKC", doc_name)).strip()
+        if len(name.encode("utf-8")) <= max_bytes:
+            return name
+        stem, ext = os.path.splitext(name)
+        suffix = "_" + hashlib.md5(name.encode("utf-8")).hexdigest()[:8]
+        max_stem = max_bytes - len(ext.encode("utf-8")) - len(suffix.encode("utf-8"))
+        while len(stem.encode("utf-8")) > max_stem and stem:
+            stem = stem[:-1]
+        return stem + suffix + ext
+
+    def _dedupe_doc_name(self, collection: str, doc_name: str) -> str:
+        """Uniquify a colliding doc_name with a numeric suffix (a.pdf ->
+        a_1.pdf), matching the cloud upload contract — names stay unique per
+        collection so the name-based agent tools resolve unambiguously."""
+        existing = {d["doc_name"] for d in self._storage.list_documents(collection)}
+        if doc_name not in existing:
+            return doc_name
+        stem, ext = os.path.splitext(doc_name)
+        num = 1
+        while f"{stem}_{num}{ext}" in existing:
+            num += 1
+        return f"{stem}_{num}{ext}"
+
     # Document management
     def add_document(self, collection: str, file_path: str) -> str:
         file_path = os.path.realpath(file_path)
@@ -139,8 +173,10 @@ class LocalBackend:
                       **({"images": n.images} if n.images else {})}
                      for n in parsed.nodes if n.content]
 
+            doc_name = self._dedupe_doc_name(
+                collection, self._sanitize_doc_name(parsed.doc_name))
             self._storage.save_document(collection, doc_id, {
-                "doc_name": parsed.doc_name,
+                "doc_name": doc_name,
                 "doc_description": result.get("doc_description", ""),
                 "file_path": str(managed_path),
                 "file_hash": file_hash,
@@ -268,7 +304,12 @@ class LocalBackend:
 
         - doc_ids=None (open mode): includes ``list_documents``; agent picks docs itself.
         - doc_ids=[...] (scoped mode): no ``list_documents``; the other tools
-          hard-enforce the whitelist and reject out-of-scope doc_ids.
+          hard-enforce the whitelist and reject out-of-scope references.
+
+        Tools identify documents by ``doc_name``, matching the cloud
+        chat/completions agent contract (names are far more reliable for an
+        LLM to pass than UUIDs). A ``doc_id`` is accepted in the same
+        parameter as the tie-breaker when several documents share a name.
 
         Note ``is not None``: an empty list is a scope of *nothing* (reject every
         doc), NOT open mode. Using truthiness would let ``doc_ids=[]`` collapse to
@@ -281,52 +322,70 @@ class LocalBackend:
         backend = self
         scope = set(doc_ids) if doc_ids is not None else None
 
-        def _reject(doc_id: str) -> str | None:
-            if scope is not None and doc_id not in scope:
-                return json.dumps({
-                    "error": f"doc_id '{doc_id}' is not in scope.",
-                    "allowed_doc_ids": sorted(scope),
-                })
-            return None
+        def _resolve(doc_name: str) -> str:
+            """Resolve a doc_name (or doc_id) to a doc_id within scope.
+            Raises _DocResolveError carrying an agent-facing error JSON on failure."""
+            rows = storage.list_documents(col_name)
+            if scope is not None:
+                rows = [r for r in rows if r["doc_id"] in scope]
+            for row in rows:
+                if row["doc_id"] == doc_name:
+                    return doc_name
+            matches = [r for r in rows if r["doc_name"] == doc_name]
+            if len(matches) == 1:
+                return matches[0]["doc_id"]
+            if len(matches) > 1:
+                raise _DocResolveError(json.dumps({
+                    "error": f"Multiple documents are named {doc_name!r} — "
+                             "retry with one of these doc_ids.",
+                    "candidates": [{"doc_id": r["doc_id"],
+                                    "doc_description": r["doc_description"]}
+                                   for r in matches],
+                }, ensure_ascii=False))
+            if scope is not None:
+                raise _DocResolveError(json.dumps({
+                    "error": f"{doc_name!r} is not in scope.",
+                    "allowed_documents": [{"doc_id": r["doc_id"],
+                                           "doc_name": r["doc_name"]}
+                                          for r in rows],
+                }, ensure_ascii=False))
+            raise _DocResolveError(json.dumps({
+                "error": f"Document {doc_name!r} not found.",
+                "available_doc_names": list(dict.fromkeys(r["doc_name"] for r in rows)),
+            }, ensure_ascii=False))
 
         @function_tool
-        def get_document(doc_id: str) -> str:
-            """Get document metadata."""
-            rejection = _reject(doc_id)
-            if rejection:
-                return rejection
+        def get_document(doc_name: str) -> str:
+            """Get document metadata. Pass the document's doc_name (a doc_id also works)."""
             try:
                 # _require_document (not backend.get_document) deliberately:
                 # the metadata-only row, no 'structure' — keeps this tool's
                 # output small for the agent's context window.
-                doc = backend._require_document(col_name, doc_id)
+                doc = backend._require_document(col_name, _resolve(doc_name))
+            except _DocResolveError as e:
+                return str(e)
             except DocumentNotFoundError:
-                return json.dumps({"error": f"doc_id '{doc_id}' not found."})
+                return json.dumps({"error": f"Document {doc_name!r} not found."})
             return json.dumps(doc)
 
         @function_tool
-        def get_document_structure(doc_id: str) -> str:
-            """Get document tree structure (without text)."""
-            rejection = _reject(doc_id)
-            if rejection:
-                return rejection
+        def get_document_structure(doc_name: str) -> str:
+            """Get document tree structure (without text). Pass the document's doc_name (a doc_id also works)."""
             try:
-                backend._require_document(col_name, doc_id)
-            except DocumentNotFoundError:
-                return json.dumps({"error": f"doc_id '{doc_id}' not found."})
-            structure = storage.get_document_structure(col_name, doc_id)
+                structure = storage.get_document_structure(col_name, _resolve(doc_name))
+            except _DocResolveError as e:
+                return str(e)
             return json.dumps(remove_fields(structure, fields=["text"]), ensure_ascii=False)
 
         @function_tool
-        def get_page_content(doc_id: str, pages: str) -> str:
-            """Get page content. Use tight ranges: '5-7', '3,8', '12'."""
-            rejection = _reject(doc_id)
-            if rejection:
-                return rejection
+        def get_page_content(doc_name: str, pages: str) -> str:
+            """Get page content. Pass the document's doc_name (a doc_id also works). Use tight ranges: '5-7', '3,8', '12'."""
             try:
-                result = backend.get_page_content(col_name, doc_id, pages)
+                result = backend.get_page_content(col_name, _resolve(doc_name), pages)
+            except _DocResolveError as e:
+                return str(e)
             except DocumentNotFoundError:
-                return json.dumps({"error": f"doc_id '{doc_id}' not found."})
+                return json.dumps({"error": f"Document {doc_name!r} not found."})
             except (ValueError, AttributeError) as e:
                 # A malformed page spec ("all", "5-") is a recoverable bad tool
                 # argument: hand the model an actionable error it can correct
