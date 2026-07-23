@@ -265,7 +265,10 @@ class SQLiteStorage:
     def list_documents(self, collection: str) -> list[dict]:
         conn = self._get_conn()
         rows = conn.execute(
-            "SELECT doc_id, doc_name, doc_description, doc_type FROM documents WHERE collection_name = ? ORDER BY created_at DESC, doc_id ASC",
+            # Tie-breaker mirrors the cloud's effective order: server ids are
+            # time-ordered cuids, so "id" ASC there means insertion order —
+            # which locally is rowid ASC (uuid4 doc_ids sort randomly).
+            "SELECT doc_id, doc_name, doc_description, doc_type FROM documents WHERE collection_name = ? ORDER BY created_at DESC, rowid ASC",
             (collection,),
         ).fetchall()
         return [{"doc_id": r[0], "doc_name": r[1], "doc_description": r[2] or "", "doc_type": r[3]} for r in rows]
