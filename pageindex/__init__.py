@@ -11,14 +11,13 @@ if not _os.getenv("OPENAI_API_KEY") and _chatgpt_key:
 
 from typing import TYPE_CHECKING as _TYPE_CHECKING
 if _TYPE_CHECKING:
-    # Static-only bindings for the lazily-loaded legacy names below, so type
-    # checkers and IDEs see real signatures without the runtime import cost.
+    # Static-only bindings for the lazy legacy names — real signatures for IDEs.
     from .index.page_index import page_index, page_index_main, tree_parser
     from .index.page_index_md import md_to_tree
     from .index.utils import ConfigLoader, llm_completion, llm_acompletion
     from .retrieve import get_document, get_document_structure, get_page_content
 
-# SDK exports — lightweight, no LLM/indexing libraries.
+# SDK exports — must stay light: no LLM/indexing imports here.
 from .client import PageIndexClient, LocalClient, CloudClient
 from .config import IndexConfig, set_llm_params
 from .collection import Collection
@@ -72,9 +71,8 @@ __all__ = [
     "get_page_content",
 ]
 
-# Legacy (pre-SDK) exports resolve lazily via PEP 562: importing the indexing
-# stack costs seconds (litellm fetches a remote model cost map at import), so
-# plain `import pageindex` for cloud-only use must not pay for it.
+# Legacy (pre-SDK) exports resolve lazily (PEP 562) so cloud-only
+# `import pageindex` never pays for litellm/PyPDF2.
 _LAZY_LEGACY = {
     "md_to_tree": ".index.page_index_md",
     "get_document": ".retrieve",
@@ -85,8 +83,7 @@ _LAZY_LEGACY = {
 
 def __getattr__(name):
     if name.startswith("_"):
-        # Tooling probes dunders (pickle, IPython, …) — never let those
-        # trigger the heavy legacy import.
+        # dunder probes (pickle, IPython) must not trigger the heavy import
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     import importlib
     if name in ("utils", "page_index_md"):
@@ -96,9 +93,7 @@ def __getattr__(name):
         value = getattr(importlib.import_module(module, __name__), name)
         globals()[name] = value
         return value
-    # Everything else from the pre-SDK surface (page_index, page_index_main,
-    # tree_parser, ConfigLoader, llm_completion, …) lives in the canonical
-    # index.page_index namespace (which star-exports index.utils).
+    # Remaining pre-SDK names live in index.page_index (star-exports index.utils).
     legacy = importlib.import_module(".index.page_index", __name__)
     try:
         value = getattr(legacy, name)
