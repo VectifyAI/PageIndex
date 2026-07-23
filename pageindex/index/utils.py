@@ -1,4 +1,3 @@
-import litellm
 import logging
 import os
 import textwrap
@@ -8,7 +7,6 @@ import copy
 import re
 import asyncio
 import threading
-import PyPDF2
 import yaml
 from datetime import datetime
 from io import BytesIO
@@ -166,6 +164,7 @@ def _sync_llm_semaphore():
 
 
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
+    import litellm
     if model:
         model = model.removeprefix("litellm/")
     max_retries = 10
@@ -208,6 +207,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
 
 
 async def llm_acompletion(model, prompt):
+    import litellm
     if model:
         model = model.removeprefix("litellm/")
     max_retries = 10
@@ -592,6 +592,7 @@ def parse_pages(pages: str) -> list[int]:
 
 def get_pdf_page_content(file_path: str, page_nums: list[int]) -> list[dict]:
     """Extract text for specific PDF pages (1-indexed), opening the PDF once."""
+    import PyPDF2
     with open(file_path, 'rb') as f:
         pdf_reader = PyPDF2.PdfReader(f)
         total = len(pdf_reader.pages)
@@ -684,6 +685,7 @@ def get_last_node(structure):
 
 
 def extract_text_from_pdf(pdf_path):
+    import PyPDF2
     pdf_reader = PyPDF2.PdfReader(pdf_path)
     ###return text not list 
     text=""
@@ -694,6 +696,7 @@ def extract_text_from_pdf(pdf_path):
 
 
 def get_pdf_title(pdf_path):
+    import PyPDF2
     pdf_reader = PyPDF2.PdfReader(pdf_path)
     meta = pdf_reader.metadata
     title = meta.title if meta and meta.title else 'Untitled'
@@ -701,6 +704,7 @@ def get_pdf_title(pdf_path):
 
 
 def get_text_of_pages(pdf_path, start_page, end_page, tag=True):
+    import PyPDF2
     pdf_reader = PyPDF2.PdfReader(pdf_path)
     text = ""
     for page_num in range(start_page-1, end_page):
@@ -739,6 +743,7 @@ def sanitize_filename(filename, replacement='-'):
 
 
 def get_pdf_name(pdf_path):
+    import PyPDF2
     # Extract PDF name
     if isinstance(pdf_path, str):
         pdf_name = os.path.basename(pdf_path)
@@ -806,6 +811,8 @@ def add_preface_if_needed(data):
 
 
 def get_page_tokens(pdf_path, model=None, pdf_parser="PyPDF2"):
+    import litellm
+    import PyPDF2
     if pdf_parser == "PyPDF2":
         pdf_reader = PyPDF2.PdfReader(pdf_path)
         page_list = []
@@ -846,6 +853,7 @@ def get_text_of_pdf_pages_with_labels(pdf_pages, start_page, end_page):
 
 
 def get_number_of_pages(pdf_path):
+    import PyPDF2
     pdf_reader = PyPDF2.PdfReader(pdf_path)
     num = len(pdf_reader.pages)
     return num
