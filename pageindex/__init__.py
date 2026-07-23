@@ -9,8 +9,6 @@ _chatgpt_key = _os.getenv("CHATGPT_API_KEY")
 if not _os.getenv("OPENAI_API_KEY") and _chatgpt_key:
     _os.environ["OPENAI_API_KEY"] = _chatgpt_key
 
-# Legacy (pre-SDK) exports. Cheap to import eagerly: litellm/PyPDF2 load
-# inside the functions that use them, not at module import.
 from .index.page_index import *  # noqa: E402
 from .index.page_index_md import md_to_tree
 from .retrieve import get_document, get_document_structure, get_page_content
@@ -71,8 +69,6 @@ __all__ = [
 
 
 def __getattr__(name):
-    # `pageindex.utils` / `pageindex.page_index_md` attribute access without an
-    # explicit submodule import.
     if name in ("utils", "page_index_md"):
         import importlib
         return importlib.import_module(f".{name}", __name__)

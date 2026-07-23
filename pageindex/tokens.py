@@ -1,8 +1,5 @@
 # pageindex/tokens.py
-# Leaf utility so both the parser and index layers can count tokens without
-# the parser reaching back into pageindex.index (a reverse/horizontal
-# dependency). Depends only on litellm (imported lazily — it's several
-# seconds and a network fetch, and cloud-only paths never need it).
+# Shared by parser and index layers (avoids a reverse dependency).
 
 
 def count_tokens(text, model=None):

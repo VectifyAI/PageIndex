@@ -1,8 +1,4 @@
-# pageindex/page_index.py
-# Compatibility shim. The PDF indexing pipeline now lives in
-# pageindex/index/page_index.py (the single source of truth). This module
-# re-exports it so legacy imports (`from pageindex.page_index import ...`,
-# `from pageindex import page_index`) keep working.
+# pageindex/page_index.py — re-exports from index/page_index.py
 import sys
 import types
 from .index.page_index import *  # noqa: F401,F403,E402
