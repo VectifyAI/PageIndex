@@ -3,20 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterator
 
-from typing_extensions import deprecated
-
 from .cloud_api import API_BASE
 from .collection import Collection
 from .config import IndexConfig
 from .errors import PageIndexAPIError
 from .parser.protocol import DocumentParser
-
-_LEGACY_SDK_MSG = (
-    "Legacy compatibility — new code should prefer the Collection-based API "
-    "(PageIndexClient.collection(...))."
-)
-_legacy_sdk = deprecated(_LEGACY_SDK_MSG, category=PendingDeprecationWarning)
-
 
 def _normalize_retrieve_model(model: str) -> str:
     """Preserve supported Agents SDK prefixes and route other provider paths via LiteLLM."""
@@ -153,8 +144,7 @@ class PageIndexClient:
             )
         return self._legacy_cloud_api
 
-    # ── pageindex 0.2.x cloud SDK compatibility (prefer Collection API for new code) ──
-    @_legacy_sdk
+    # ── pageindex 0.2.x cloud SDK surface (cloud mode only) ──
     def submit_document(
         self,
         file_path: str,
@@ -162,7 +152,7 @@ class PageIndexClient:
         beta_headers: list[str] | None = None,
         folder_id: str | None = None,
     ) -> dict[str, Any]:
-        """Legacy SDK compatibility — prefer ``client.collection(...).add(path)``."""
+        """Collection API equivalent: ``client.collection(...).add(path)``."""
         return self._require_cloud_api().submit_document(
             file_path=file_path,
             mode=mode,
@@ -170,36 +160,30 @@ class PageIndexClient:
             folder_id=folder_id,
         )
 
-    @_legacy_sdk
     def get_ocr(self, doc_id: str, format: str = "page") -> dict[str, Any]:
-        """Legacy SDK compatibility — prefer ``collection.get_page_content(doc_id, pages)``."""
+        """Collection API equivalent: ``collection.get_page_content(doc_id, pages)``."""
         return self._require_cloud_api().get_ocr(doc_id=doc_id, format=format)
 
-    @_legacy_sdk
     def get_tree(self, doc_id: str, node_summary: bool = False) -> dict[str, Any]:
-        """Legacy SDK compatibility — prefer ``collection.get_document_structure(doc_id)``."""
+        """Collection API equivalent: ``collection.get_document_structure(doc_id)``."""
         return self._require_cloud_api().get_tree(doc_id=doc_id, node_summary=node_summary)
 
-    @_legacy_sdk
     def is_retrieval_ready(self, doc_id: str) -> bool:
-        """Legacy SDK compatibility — Collection API handles readiness internally."""
+        """The Collection API (``collection.add``) handles readiness internally."""
         return self._require_cloud_api().is_retrieval_ready(doc_id=doc_id)
 
-    @_legacy_sdk
     def submit_query(self, doc_id: str, query: str, thinking: bool = False) -> dict[str, Any]:
-        """Legacy SDK compatibility — prefer ``collection.query(question, doc_ids=[doc_id])``."""
+        """Collection API equivalent: ``collection.query(question, doc_ids=[doc_id])``."""
         return self._require_cloud_api().submit_query(
             doc_id=doc_id,
             query=query,
             thinking=thinking,
         )
 
-    @_legacy_sdk
     def get_retrieval(self, retrieval_id: str) -> dict[str, Any]:
-        """Legacy SDK compatibility — Collection API returns answers synchronously."""
+        """The Collection API (``collection.query``) returns answers synchronously."""
         return self._require_cloud_api().get_retrieval(retrieval_id=retrieval_id)
 
-    @_legacy_sdk
     def chat_completions(
         self,
         messages: list[dict[str, str]],
@@ -209,7 +193,7 @@ class PageIndexClient:
         stream_metadata: bool = False,
         enable_citations: bool = False,
     ) -> dict[str, Any] | Iterator[str] | Iterator[dict[str, Any]]:
-        """Legacy SDK compatibility — prefer ``collection.query(...)``."""
+        """Collection API equivalent: ``collection.query(...)`` (fewer knobs — no temperature/citations/history)."""
         return self._require_cloud_api().chat_completions(
             messages=messages,
             stream=stream,
@@ -219,24 +203,21 @@ class PageIndexClient:
             enable_citations=enable_citations,
         )
 
-    @_legacy_sdk
     def get_document(self, doc_id: str) -> dict[str, Any]:
-        """Legacy SDK compatibility — prefer ``collection.get_document(doc_id)``."""
+        """Collection API equivalent: ``collection.get_document(doc_id)``."""
         return self._require_cloud_api().get_document(doc_id=doc_id)
 
-    @_legacy_sdk
     def delete_document(self, doc_id: str) -> dict[str, Any]:
-        """Legacy SDK compatibility — prefer ``collection.delete_document(doc_id)``."""
+        """Collection API equivalent: ``collection.delete_document(doc_id)``."""
         return self._require_cloud_api().delete_document(doc_id=doc_id)
 
-    @_legacy_sdk
     def list_documents(
         self,
         limit: int = 50,
         offset: int = 0,
         folder_id: str | None = None,
     ) -> dict[str, Any]:
-        """Legacy SDK compatibility — prefer ``collection.list_documents()``.
+        """Collection API equivalent: ``collection.list_documents()``.
 
         Note the return shape differs between the two APIs:
 
@@ -256,23 +237,21 @@ class PageIndexClient:
             folder_id=folder_id,
         )
 
-    @_legacy_sdk
     def create_folder(
         self,
         name: str,
         description: str | None = None,
         parent_folder_id: str | None = None,
     ) -> dict[str, Any]:
-        """Legacy SDK compatibility — prefer ``client.collection(name)`` (auto-creates)."""
+        """Collection API equivalent: ``client.collection(name)`` (auto-creates)."""
         return self._require_cloud_api().create_folder(
             name=name,
             description=description,
             parent_folder_id=parent_folder_id,
         )
 
-    @_legacy_sdk
     def list_folders(self, parent_folder_id: str | None = None) -> dict[str, Any]:
-        """Legacy SDK compatibility — prefer ``client.list_collections()``."""
+        """Collection API equivalent: ``client.list_collections()``."""
         return self._require_cloud_api().list_folders(parent_folder_id=parent_folder_id)
 
 
