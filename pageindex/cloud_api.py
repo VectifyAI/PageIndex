@@ -169,13 +169,6 @@ class LegacyCloudAPI:
             payload["temperature"] = temperature
         if enable_citations:
             payload["enable_citations"] = enable_citations
-        # Forward stream_metadata so the wire request matches the caller's intent
-        # (and stays correct if the server ever gates metadata chunks behind it),
-        # mirroring the modern CloudBackend which always sends it. It only affects
-        # streaming responses, where it selects the raw dict-chunk parser below.
-        if stream_metadata:
-            payload["stream_metadata"] = stream_metadata
-
         # Non-streaming completions return no bytes until server-side
         # generation finishes — far longer than the default 30s read timeout.
         response = self._request(

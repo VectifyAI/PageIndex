@@ -307,7 +307,7 @@ class CloudBackend:
             "status": resp.get("status", ""),
             "structure": self._normalize_tree(raw_tree, max_page=page_num),
         }
-        if page_num is not None:
+        if page_num:
             result["page_count"] = page_num
         return result
 
@@ -508,7 +508,6 @@ class CloudBackend:
                         "messages": [{"role": "user", "content": question}],
                         "doc_id": doc_id,
                         "stream": True,
-                        "stream_metadata": True,
                     },
                     stream=True,
                     timeout=120,
