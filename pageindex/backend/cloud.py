@@ -6,7 +6,6 @@ API reference: https://github.com/VectifyAI/pageindex_sdk
 from __future__ import annotations
 import json
 import logging
-import re
 import time
 import urllib.parse
 import requests
@@ -17,6 +16,7 @@ from ..errors import (AUTH_HINT, CloudAPIError, CollectionAlreadyExistsError,
                       CollectionNotFoundError, DocumentNotFoundError,
                       PageIndexError)
 from ..events import QueryEvent
+from .._validation import validate_collection_name
 
 logger = logging.getLogger(__name__)
 
@@ -110,13 +110,7 @@ class CloudBackend:
 
     @staticmethod
     def _validate_collection_name(name: str) -> None:
-        # .fullmatch() (not .match()): a $-anchored .match() would accept a
-        # trailing newline ("papers\n") because $ matches just before a final \n.
-        if not re.fullmatch(r'[a-zA-Z0-9_-]{1,128}', name):
-            raise PageIndexError(
-                f"Invalid collection name: {name!r}. "
-                "Must be 1-128 chars of [a-zA-Z0-9_-]."
-            )
+        validate_collection_name(name)
 
     @staticmethod
     def _enc(value: str) -> str:
@@ -210,6 +204,7 @@ class CloudBackend:
         return [f["name"] for f in folders]
 
     def delete_collection(self, name: str) -> None:
+        self._validate_collection_name(name)
         try:
             folder_id = self._get_folder_id(name)
         except CollectionNotFoundError:
@@ -264,15 +259,14 @@ class CloudBackend:
     def _get_metadata(self, doc_id: str) -> dict:
         return self._doc_request(doc_id, "GET", f"/doc/{self._enc(doc_id)}/metadata/")
 
-    def _require_document(self, collection: str, doc_id: str) -> dict | None:
+    def _require_document(self, collection: str, doc_id: str) -> dict:
         """Membership guard (the server's doc endpoints are user-scoped, not
-        folder-scoped, so this is checked client-side). Returns the doc's
-        metadata, or None when folders are unavailable on this plan."""
+        folder-scoped, so this is checked client-side). Always verifies the
+        document exists (raises DocumentNotFoundError on 404); when folders
+        are available, also checks that the doc belongs to this collection."""
         folder_id = self._get_folder_id(collection)
-        if folder_id is None:
-            return None
         meta = self._get_metadata(doc_id)
-        if meta.get("folderId") != folder_id:
+        if folder_id is not None and meta.get("folderId") != folder_id:
             raise DocumentNotFoundError(
                 f"Document {doc_id} not found in collection '{collection}'"
             )
@@ -293,23 +287,25 @@ class CloudBackend:
                 stacklevel=3,
             )
         resp = self._require_document(collection, doc_id)
-        if resp is None:
-            resp = self._get_metadata(doc_id)
         # Fetch structure in the same call via tree endpoint
         tree_resp = self._doc_request(doc_id, "GET", f"/doc/{self._enc(doc_id)}/",
                                       params={"type": "tree", "summary": "true"})
         raw_tree = tree_resp.get("result", [])
-        return {
+        page_num = _as_int(resp.get("pageNum"))
+        result = {
             "doc_id": resp.get("id", doc_id),
             "doc_name": resp.get("name", ""),
             "doc_description": resp.get("description", ""),
             "doc_type": "pdf",
             "status": resp.get("status", ""),
-            "structure": self._normalize_tree(raw_tree, max_page=resp.get("pageNum") or None),
+            "structure": self._normalize_tree(raw_tree, max_page=page_num),
         }
+        if page_num is not None:
+            result["page_count"] = page_num
+        return result
 
     def get_document_structure(self, collection: str, doc_id: str) -> list:
-        meta = self._require_document(collection, doc_id) or self._get_metadata(doc_id)
+        meta = self._require_document(collection, doc_id)
         resp = self._doc_request(doc_id, "GET", f"/doc/{self._enc(doc_id)}/",
                                  params={"type": "tree", "summary": "true"})
         raw_tree = resp.get("result", [])
@@ -365,10 +361,13 @@ class CloudBackend:
             normalized = {
                 "title": node.get("title", ""),
                 "node_id": node.get("node_id", ""),
-                "summary": node.get("summary", node.get("prefix_summary", "")),
                 "start_index": node.get("page_index"),
                 "end_index": None,
             }
+            if "summary" in node:
+                normalized["summary"] = node["summary"]
+            if "prefix_summary" in node:
+                normalized["prefix_summary"] = node["prefix_summary"]
             if "text" in node:
                 normalized["text"] = node["text"]
             children = node.get("nodes", [])
