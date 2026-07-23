@@ -15,11 +15,13 @@ from ..index.pipeline import build_index
 from ..index.utils import parse_pages, get_pdf_page_content, remove_fields
 from ..backend.protocol import AgentTools
 from ..errors import (FileTypeError, DocumentNotFoundError, CollectionNotFoundError,
-                      IndexingError, PageIndexError)
+                      IndexingError)
+from .._validation import validate_collection_name
 
-# Matched with .fullmatch() (not .match()): a $-anchored .match() would accept a
-# trailing newline ("papers\n") because $ matches just before a final \n.
-_COLLECTION_NAME_RE = re.compile(r'[a-zA-Z0-9_-]{1,128}')
+# Collections created by older SDK versions used their names directly as safe
+# directory names. Preserve that layout for backward compatibility; names newly
+# allowed by the cloud-compatible contract use an opaque directory instead.
+_LEGACY_COLLECTION_DIR_RE = re.compile(r'[a-zA-Z0-9_-]{1,128}')
 
 
 class LocalBackend:
@@ -47,8 +49,19 @@ class LocalBackend:
 
     # Collection management
     def _validate_collection_name(self, name: str) -> None:
-        if not _COLLECTION_NAME_RE.fullmatch(name):
-            raise PageIndexError(f"Invalid collection name: {name!r}. Must be 1-128 chars of [a-zA-Z0-9_-].")
+        validate_collection_name(name)
+
+    def _collection_dir(self, name: str) -> Path:
+        """Return a stable, contained directory for a logical collection name.
+
+        Legacy-safe names retain their historical ``files/{name}`` layout. Any
+        other cloud-valid name is hashed so spaces, Unicode, slashes, ``..``, or
+        platform-specific path characters can never escape ``files_dir``.
+        """
+        if _LEGACY_COLLECTION_DIR_RE.fullmatch(name):
+            return self._files_dir / name
+        digest = hashlib.sha256(name.encode("utf-8")).hexdigest()
+        return self._files_dir / ".collections" / digest
 
     def create_collection(self, name: str) -> None:
         self._validate_collection_name(name)
@@ -62,11 +75,9 @@ class LocalBackend:
         return self._storage.list_collections()
 
     def delete_collection(self, name: str) -> None:
-        # Validate before touching the filesystem — an unvalidated name like
-        # "../.." would make the rmtree below escape files_dir entirely.
         self._validate_collection_name(name)
         self._storage.delete_collection(name)
-        col_dir = self._files_dir / name
+        col_dir = self._collection_dir(name)
         if col_dir.exists():
             shutil.rmtree(col_dir)
 
@@ -107,13 +118,13 @@ class LocalBackend:
 
         # Copy file to managed directory
         ext = os.path.splitext(file_path)[1]
-        col_dir = self._files_dir / collection
+        col_dir = self._collection_dir(collection)
         col_dir.mkdir(parents=True, exist_ok=True)
         managed_path = col_dir / f"{doc_id}{ext}"
         shutil.copy2(file_path, managed_path)
 
         try:
-            # Store images alongside the document: files/{collection}/{doc_id}/images/
+            # Store images alongside the managed document directory.
             images_dir = str(col_dir / doc_id / "images")
             parsed = parser.parse(file_path, model=self._model, images_dir=images_dir)
             result = build_index(parsed, model=self._model, opt=self._index_config)
@@ -134,6 +145,7 @@ class LocalBackend:
                 "file_path": str(managed_path),
                 "file_hash": file_hash,
                 "doc_type": ext.lstrip("."),
+                "status": "completed",
                 **(parsed.metadata or {}),  # parser-reported, e.g. page_count / line_count
                 "structure": result["structure"],
                 "pages": pages,
@@ -185,7 +197,6 @@ class LocalBackend:
                 use in agent/LLM contexts as it can exhaust the context window.
         """
         doc = self._require_document(collection, doc_id)
-        doc["status"] = "completed"  # local indexing is synchronous
         doc["structure"] = self._storage.get_document_structure(collection, doc_id)
         if include_text:
             pages = self._storage.get_pages(collection, doc_id) or []
@@ -248,7 +259,7 @@ class LocalBackend:
         self._storage.delete_document(collection, doc_id)
         if doc.get("file_path"):
             Path(doc["file_path"]).unlink(missing_ok=True)
-        doc_dir = self._files_dir / collection / doc_id
+        doc_dir = self._collection_dir(collection) / doc_id
         if doc_dir.exists():
             shutil.rmtree(doc_dir)
 

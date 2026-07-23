@@ -1,23 +1,16 @@
 import json
-import re
 import sqlite3
 import threading
 from pathlib import Path
 
-from ..errors import CollectionAlreadyExistsError, PageIndexError
-
-# Mirrors LocalBackend's own collection-name rule. SQLiteStorage enforces this
-# itself (not just relying on LocalBackend's pre-check or the schema's CHECK
-# constraint below) because it's a public StorageEngine that can be used
-# directly, bypassing LocalBackend entirely.
-# Matched with .fullmatch() (not .match()): a $-anchored .match() would accept a
-# trailing newline ("papers\n") because $ matches just before a final \n.
-_COLLECTION_NAME_RE = re.compile(r'[a-zA-Z0-9_-]{1,128}')
+from ..errors import CollectionAlreadyExistsError
+from .._validation import validate_collection_name
 
 
 def _validate_collection_name(name: str) -> None:
-    if not _COLLECTION_NAME_RE.fullmatch(name):
-        raise PageIndexError(f"Invalid collection name: {name!r}. Must be 1-128 chars of [a-zA-Z0-9_-].")
+    # SQLiteStorage is a public StorageEngine and may be used without
+    # LocalBackend, so enforce the shared contract at this boundary too.
+    validate_collection_name(name)
 
 
 class SQLiteStorage:
@@ -75,46 +68,98 @@ class SQLiteStorage:
 
     def _init_schema(self):
         conn = self._get_conn()
-        conn.execute("PRAGMA user_version = 1")
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS collections (
-                -- GLOB '*' is "any characters", not a regex quantifier over the
-                -- preceding class — '[a-zA-Z0-9_-]*' alone only constrains the
-                -- FIRST character. The second GLOB (NOT ... '*[^...]*') checks
-                -- every remaining character too, so this is real defense-in-depth
-                -- for direct SQLiteStorage use (bypassing _validate_collection_name
-                -- above), not just a first-character gate.
-                name TEXT PRIMARY KEY CHECK(
-                    length(name) BETWEEN 1 AND 128
-                    AND name GLOB '[a-zA-Z0-9_-]*'
-                    AND name NOT GLOB '*[^a-zA-Z0-9_-]*'
-                ),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            CREATE TABLE IF NOT EXISTS documents (
-                doc_id TEXT PRIMARY KEY,
-                collection_name TEXT NOT NULL REFERENCES collections(name) ON DELETE CASCADE,
-                doc_name TEXT,
-                doc_description TEXT,
-                file_path TEXT,
-                file_hash TEXT,
-                doc_type TEXT NOT NULL,
-                page_count INTEGER,
-                line_count INTEGER,
-                structure JSON,
-                pages JSON,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(collection_name, file_hash)
-            );
-            CREATE INDEX IF NOT EXISTS idx_docs_collection ON documents(collection_name);
-            CREATE INDEX IF NOT EXISTS idx_docs_hash ON documents(collection_name, file_hash);
-        """)
-        # DBs created before the count columns existed: add them in place.
+        # SQLite cannot ALTER a CHECK constraint. Rebuild the small parent table
+        # transactionally when opening a v1 database; documents keep referring to
+        # the same table name and are verified after foreign keys are re-enabled.
+        conn.execute("PRAGMA foreign_keys=OFF")
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            schema_version = conn.execute("PRAGMA user_version").fetchone()[0]
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS collections (
+                    name TEXT PRIMARY KEY NOT NULL
+                        CHECK(
+                            length(name) BETWEEN 1 AND 255
+                            -- SQLite length(TEXT) stops at the first NUL, while
+                            -- Python and the cloud API count it as a character.
+                            -- The Python boundary still enforces the 255 limit.
+                            OR (instr(name, char(0)) > 0 AND name <> '')
+                        ),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            schema_row = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'collections'"
+            ).fetchone()
+            schema_sql = schema_row[0] if schema_row else ""
+            schema_upper = schema_sql.upper()
+            if "BETWEEN 1 AND 128" in schema_upper or "NAME GLOB" in schema_upper:
+                conn.execute("""
+                    CREATE TABLE _pageindex_collections_v2 (
+                        name TEXT PRIMARY KEY NOT NULL
+                            CHECK(
+                                length(name) BETWEEN 1 AND 255
+                                OR (instr(name, char(0)) > 0 AND name <> '')
+                            ),
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                conn.execute("""
+                    INSERT INTO _pageindex_collections_v2 (name, created_at)
+                    SELECT name, created_at FROM collections
+                """)
+                conn.execute("DROP TABLE collections")
+                conn.execute("ALTER TABLE _pageindex_collections_v2 RENAME TO collections")
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS documents (
+                    doc_id TEXT PRIMARY KEY,
+                    collection_name TEXT NOT NULL REFERENCES collections(name) ON DELETE CASCADE,
+                    doc_name TEXT,
+                    doc_description TEXT,
+                    file_path TEXT,
+                    file_hash TEXT,
+                    doc_type TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    page_count INTEGER,
+                    line_count INTEGER,
+                    structure JSON,
+                    pages JSON,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(collection_name, file_hash)
+                )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_docs_collection ON documents(collection_name)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_docs_hash ON documents(collection_name, file_hash)"
+            )
+            if schema_version < 2:
+                conn.execute("PRAGMA user_version = 2")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.execute("PRAGMA foreign_keys=ON")
+
+        violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+        if violations:
+            raise sqlite3.IntegrityError(
+                f"Foreign-key violations after SQLite schema migration: {violations!r}"
+            )
+
+        # DBs created before these columns existed: add them in place.
         cols = {r[1] for r in conn.execute("PRAGMA table_info(documents)")}
-        for name in ("page_count", "line_count"):
-            if name not in cols:
+        for col_name, col_def in (
+            ("page_count", "INTEGER"),
+            ("line_count", "INTEGER"),
+            ("status", "TEXT NOT NULL DEFAULT 'completed'"),
+        ):
+            if col_name not in cols:
                 try:
-                    conn.execute(f"ALTER TABLE documents ADD COLUMN {name} INTEGER")
+                    conn.execute(f"ALTER TABLE documents ADD COLUMN {col_name} {col_def}")
                 except sqlite3.OperationalError:
                     pass  # concurrent open of the same legacy DB already added it
         conn.commit()
@@ -133,7 +178,16 @@ class SQLiteStorage:
         _validate_collection_name(name)
         with self._write_lock:
             conn = self._get_conn()
+            # INSERT OR IGNORE works with older SQLite versions, but it can also
+            # suppress CHECK failures. Verify the row so ignored non-duplicate
+            # constraints never falsely report success.
             conn.execute("INSERT OR IGNORE INTO collections (name) VALUES (?)", (name,))
+            if conn.execute(
+                "SELECT 1 FROM collections WHERE name = ?", (name,)
+            ).fetchone() is None:
+                raise sqlite3.IntegrityError(
+                    f"Collection {name!r} was rejected by the SQLite schema"
+                )
             conn.commit()
 
     def list_collections(self) -> list[str]:
@@ -155,10 +209,11 @@ class SQLiteStorage:
             conn = self._get_conn()
             conn.execute(
                 """INSERT INTO documents
-                   (doc_id, collection_name, doc_name, doc_description, file_path, file_hash, doc_type, page_count, line_count, structure, pages)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (doc_id, collection_name, doc_name, doc_description, file_path, file_hash, doc_type, status, page_count, line_count, structure, pages)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (doc_id, collection, doc.get("doc_name"), doc.get("doc_description"),
                  doc.get("file_path"), doc.get("file_hash"), doc["doc_type"],
+                 doc["status"],
                  doc.get("page_count"), doc.get("line_count"),
                  json.dumps(doc.get("structure", [])),
                  json.dumps(doc.get("pages")) if doc.get("pages") else None),
@@ -176,14 +231,14 @@ class SQLiteStorage:
     def get_document(self, collection: str, doc_id: str) -> dict:
         conn = self._get_conn()
         row = conn.execute(
-            "SELECT doc_id, doc_name, doc_description, file_path, doc_type, page_count, line_count FROM documents WHERE doc_id = ? AND collection_name = ?",
+            "SELECT doc_id, doc_name, doc_description, file_path, doc_type, status, page_count, line_count FROM documents WHERE doc_id = ? AND collection_name = ?",
             (doc_id, collection),
         ).fetchone()
         if not row:
             return {}
         doc = {"doc_id": row[0], "doc_name": row[1], "doc_description": row[2],
-               "file_path": row[3], "doc_type": row[4]}
-        doc.update({k: v for k, v in (("page_count", row[5]), ("line_count", row[6])) if v is not None})
+               "file_path": row[3], "doc_type": row[4], "status": row[5]}
+        doc.update({k: v for k, v in (("page_count", row[6]), ("line_count", row[7])) if v is not None})
         return doc
 
     def get_document_structure(self, collection: str, doc_id: str) -> list:

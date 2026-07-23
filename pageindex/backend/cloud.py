@@ -6,6 +6,7 @@ API reference: https://github.com/VectifyAI/pageindex_sdk
 from __future__ import annotations
 import json
 import logging
+import os
 import time
 import urllib.parse
 import requests
@@ -28,6 +29,11 @@ def _as_int(value):
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _doc_type_from_name(name: str) -> str:
+    ext = os.path.splitext(name)[1].lstrip(".").lower()
+    return ext or "pdf"
 
 
 class CloudBackend:
@@ -292,11 +298,12 @@ class CloudBackend:
                                       params={"type": "tree", "summary": "true"})
         raw_tree = tree_resp.get("result", [])
         page_num = _as_int(resp.get("pageNum"))
+        doc_name = resp.get("name", "")
         result = {
             "doc_id": resp.get("id", doc_id),
-            "doc_name": resp.get("name", ""),
+            "doc_name": doc_name,
             "doc_description": resp.get("description", ""),
-            "doc_type": "pdf",
+            "doc_type": _doc_type_from_name(doc_name),
             "status": resp.get("status", ""),
             "structure": self._normalize_tree(raw_tree, max_page=page_num),
         }
@@ -385,9 +392,8 @@ class CloudBackend:
 
     def list_documents(self, collection: str) -> list[dict]:
         folder_id = self._get_folder_id(collection)
-        # The API caps `limit` at 100; paginate with `offset` until a short
-        # page comes back so collections with >100 docs aren't silently
-        # truncated (queries over the whole collection rely on this list).
+        # Paginate with `offset` until a short page comes back so large
+        # collections aren't silently truncated.
         page_size = 100
         offset = 0
         docs: list[dict] = []
@@ -397,15 +403,14 @@ class CloudBackend:
                 params["folder_id"] = folder_id
             data = self._request("GET", "/docs/", params=params)
             batch = data.get("documents", []) or []
-            docs.extend(
-                {
+            for d in batch:
+                name = d.get("name", "")
+                docs.append({
                     "doc_id": d.get("id", ""),
-                    "doc_name": d.get("name", ""),
+                    "doc_name": name,
                     "doc_description": d.get("description", ""),
-                    "doc_type": "pdf",
-                }
-                for d in batch
-            )
+                    "doc_type": _doc_type_from_name(name),
+                })
             if len(batch) < page_size:
                 return docs
             offset += page_size
