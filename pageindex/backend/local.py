@@ -372,9 +372,11 @@ class LocalBackend:
         def get_document_structure(doc_name: str) -> str:
             """Get document tree structure (without text). Pass the document's doc_name (a doc_id also works)."""
             try:
-                structure = storage.get_document_structure(col_name, _resolve(doc_name))
+                structure = backend.get_document_structure(col_name, _resolve(doc_name))
             except _DocResolveError as e:
                 return str(e)
+            except DocumentNotFoundError:
+                return json.dumps({"error": f"Document {doc_name!r} not found."})
             return json.dumps(remove_fields(structure, fields=["text"]), ensure_ascii=False)
 
         @function_tool
