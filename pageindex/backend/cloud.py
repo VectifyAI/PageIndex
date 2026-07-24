@@ -316,7 +316,7 @@ class CloudBackend:
         resp = self._doc_request(doc_id, "GET", f"/doc/{self._enc(doc_id)}/",
                                  params={"type": "tree", "summary": "true"})
         raw_tree = resp.get("result", [])
-        return self._normalize_tree(raw_tree, max_page=meta.get("pageNum") or None)
+        return self._normalize_tree(raw_tree, max_page=_as_int(meta.get("pageNum")))
 
     def get_page_content(self, collection: str, doc_id: str, pages: str) -> list:
         self._require_document(collection, doc_id)
