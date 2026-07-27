@@ -28,8 +28,8 @@ from ..stats import DocStats, column_index_of, tally_scripts, dominant_script_fa
 from ..tokens import is_superscript_adjacent, clamp_value, enumerate_tokens, jenkins_hash, trie_prefix_match, set_case_fold, TrieConfig, build_trie, tokenize_block, _de_norm, BuiltTrie, is_word_token
 
 from .dicts import (
-    TITLE_LABEL_TRIE,
     INSTITUTION_WORDS,
+    TITLE_LABEL_TRIE,
 )
 
 
