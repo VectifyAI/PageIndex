@@ -598,6 +598,34 @@ def remove_first_physical_index_section(text):
         return text.replace(match.group(0), '', 1)
     return text
 
+# Shared title guidance for no-TOC structure extraction (issues #340/#341).
+_TOC_TITLE_INSTRUCTION = """
+    For the title:
+    - Prefer a short natural heading from the text when one exists (only fix spacing).
+    - If there is no short heading (e.g. a numbered list item or a full sentence), synthesize a concise title of at most 12 words that captures the topic.
+    - Do NOT copy an entire long sentence or paragraph into the title field.
+"""
+
+MAX_TOC_TITLE_CHARS = 120
+
+
+def clamp_toc_titles(toc, max_chars=MAX_TOC_TITLE_CHARS):
+    """Truncate oversized TOC titles at a word boundary (safety net for #341)."""
+    if not isinstance(toc, list):
+        return toc
+    for item in toc:
+        if not isinstance(item, dict):
+            continue
+        title = item.get('title')
+        if not isinstance(title, str) or len(title) <= max_chars:
+            continue
+        truncated = title[:max_chars].rsplit(' ', 1)[0].rstrip()
+        if not truncated:
+            truncated = title[:max_chars]
+        item['title'] = truncated + '...'
+    return toc
+
+
 ### add verify completeness
 def generate_toc_continue(toc_content, part, model=None):
     print('start generate_toc_continue')
@@ -607,9 +635,7 @@ def generate_toc_continue(toc_content, part, model=None):
     Your task is to continue the tree structure from the previous part to include the current part.
 
     The structure variable is the numeric system which represents the index of the hierarchy section in the table of contents. For example, the first section has structure index 1, the first subsection has structure index 1.1, the second subsection has structure index 1.2, etc.
-
-    For the title, you need to extract the original title from the text, only fix the space inconsistency.
-
+""" + _TOC_TITLE_INSTRUCTION + """
     The provided text contains tags like <physical_index_X> and <physical_index_X> to indicate the start and end of page X. \
     
     For the physical_index, you need to extract the physical index of the start of the section from the text. Keep the <physical_index_X> format.
@@ -618,7 +644,7 @@ def generate_toc_continue(toc_content, part, model=None):
         [
             {
                 "structure": <structure index, "x.x.x"> (string),
-                "title": <title of the section, keep the original title>,
+                "title": <short section title>,
                 "physical_index": "<physical_index_X> (keep the format)"
             },
             ...
@@ -645,9 +671,7 @@ def generate_toc_init(part, model=None):
     You are an expert in extracting hierarchical tree structure, your task is to generate the tree structure of the document.
 
     The structure variable is the numeric system which represents the index of the hierarchy section in the table of contents. For example, the first section has structure index 1, the first subsection has structure index 1.1, the second subsection has structure index 1.2, etc.
-
-    For the title, you need to extract the original title from the text, only fix the space inconsistency.
-
+""" + _TOC_TITLE_INSTRUCTION + """
     The provided text contains tags like <physical_index_X> and <physical_index_X> to indicate the start and end of page X. 
 
     For the physical_index, you need to extract the physical index of the start of the section from the text. Keep the <physical_index_X> format.
@@ -656,7 +680,7 @@ def generate_toc_init(part, model=None):
         [
             {{
                 "structure": <structure index, "x.x.x"> (string),
-                "title": <title of the section, keep the original title>,
+                "title": <short section title>,
                 "physical_index": "<physical_index_X> (keep the format)"
             }},
             
@@ -718,6 +742,8 @@ def process_no_toc(page_list, start_index=1, model=None, logger=None):
 
     toc_with_page_number = convert_physical_index_to_int(toc_with_page_number)
     logger.info(f'convert_physical_index_to_int: {toc_with_page_number}')
+    toc_with_page_number = clamp_toc_titles(toc_with_page_number)
+    logger.info(f'clamp_toc_titles: {toc_with_page_number}')
 
     return toc_with_page_number
 
