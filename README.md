@@ -198,9 +198,8 @@ python3 run_pageindex.py --md_path /path/to/your/document.md
 > Note: in this mode, we use "#" to determine node headings and their levels. For example, "##" is level 2, "###" is level 3, etc. Make sure your markdown file is formatted correctly. If your Markdown file was converted from a PDF or HTML, we don't recommend using this mode, since most existing conversion tools cannot preserve the original hierarchy. Instead, use our [PageIndex OCR](https://pageindex.ai/blog/ocr), which is designed to preserve it, to convert the PDF to a markdown file and then use this mode.
 </details>
 
-## ⚡ PageIndex Flash *(preview)*
-
-For ultra fast, **LLM-free** PageIndex tree structure generation from PDFs, see [`pageindex/flash`](https://github.com/VectifyAI/PageIndex/tree/feat/pageindex-flash/pageindex/flash).
+> ### ⚡ PageIndex Flash *(preview)*
+> See **PageIndex Flash** ([`pageindex/flash`](https://github.com/VectifyAI/PageIndex/tree/feat/pageindex-flash/pageindex/flash)) for ultra-fast, **LLM-free** PageIndex tree structure generation from PDFs. No LLM API key, a few seconds per document.
 
 ## 🚀 Agentic Vectorless RAG: An Example
 
