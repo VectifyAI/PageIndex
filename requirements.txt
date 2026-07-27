@@ -2,5 +2,8 @@ litellm==1.84.0
 # openai-agents  # optional: required for examples/agentic_vectorless_rag_demo.py
 pymupdf==1.26.4
 PyPDF2==3.0.1
+pypdfium2==4.30.0
 python-dotenv==1.2.2
 pyyaml==6.0.2
+regex>=2024.0.0
+sortedcontainers==2.4.0
