@@ -25,12 +25,18 @@ missing, non-PDF, encrypted, empty, or unreadable file.
     "doc_name": str,
     "doc_title": str,
     "structure": [
-        {"title": str, "start_index": int, "end_index": int, "nodes": [...]}
+        {
+            "title": str,
+            "node_id": str,       # 4-digit, zero-padded
+            "start_index": int,
+            "end_index": int,
+            "nodes": [...],       # absent on leaf nodes
+        }
     ],
 }
 ```
 
-Page indexes are 1-based. `nodes` nests recursively.
+Page indexes are 1-based. `nodes` nests the same shape recursively.
 
 ## Limits
 
