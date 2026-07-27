@@ -85,6 +85,7 @@ The PageIndex service is available as a ChatGPT-style [chat platform](https://ch
 
 ### 🧪 Quick Hands-on
 
+- ⚡ [**PageIndex Flash**](https://github.com/VectifyAI/PageIndex/tree/feat/pageindex-flash/pageindex/flash) *(preview)* — ultra fast, **LLM-free** PageIndex tree structure generation from PDFs.
 - 🔥 [**Agentic Vectorless RAG**](examples/agentic_vectorless_rag_demo.py) *(latest)* — a simple but complete **agentic vectorless RAG** [example](#-agentic-vectorless-rag-an-example) with *self-hosted* PageIndex, using OpenAI Agents SDK.
 - Try the [Vectorless RAG](https://github.com/VectifyAI/PageIndex/blob/main/cookbook/pageindex_RAG_simple.ipynb) notebook — a *minimal*, hands-on example of reasoning-based RAG using PageIndex.
 - Check out [Vision-based Vectorless RAG](https://github.com/VectifyAI/PageIndex/blob/main/cookbook/vision_RAG_pageindex.ipynb) — no OCR; a minimal, vision-based & reasoning-native RAG pipeline that works directly over page images.
