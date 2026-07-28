@@ -71,7 +71,9 @@ if __name__ == "__main__":
         # Save results
         pdf_name = os.path.splitext(os.path.basename(args.pdf_path))[0]    
         output_dir = './results'
-        output_file = f'{output_dir}/{pdf_name}_structure.json'
+        from datetime import datetime
+        current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_file = f'{output_dir}/{pdf_name}_structure_{current_time}.json'
         os.makedirs(output_dir, exist_ok=True)
         
         with open(output_file, 'w', encoding='utf-8') as f:
