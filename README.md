@@ -176,13 +176,35 @@ python3 run_pageindex.py --pdf_path /path/to/your/document.pdf
 You can customize the processing with additional optional arguments:
 
 ```
---model                 LLM model to use (default: gpt-4o-2024-11-20)
---toc-check-pages       Pages to check for table of contents (default: 20)
---max-pages-per-node    Max pages per node (default: 10)
---max-tokens-per-node   Max tokens per node (default: 20000)
---if-add-node-id        Add node ID (yes/no, default: yes)
---if-add-node-summary   Add node summary (yes/no, default: yes)
---if-add-doc-description Add doc description (yes/no, default: yes)
+--model                  LLM model to use (default: gpt-4o-2024-11-20)
+                         Supports any LiteLLM provider prefix, e.g.:
+                           anthropic/claude-sonnet-4-6
+                           gemini/gemini-2.0-flash
+--toc-check-pages        Pages to check for table of contents (default: 20)
+--max-pages-per-node     Max pages per node (default: 10)
+--max-tokens-per-node    Max tokens per node (default: 20000)
+--if-add-node-id         Add node ID (yes/no, default: yes)
+--if-add-node-summary    Add node summary (yes/no, default: yes)
+--if-add-doc-description Add doc description (yes/no, default: no)
+--output-format          Output format: "json" (default) or "markdown"
+                         "markdown" writes a human-readable outline with
+                         headings and summaries instead of raw JSON.
+--output-dir             Directory to write the output file (default: ./results)
+--verbose                Enable verbose logging (LiteLLM requests, retries,
+                         token counts)
+```
+
+**Examples:**
+
+```bash
+# Use Anthropic Claude instead of OpenAI
+python3 run_pageindex.py --pdf_path report.pdf --model anthropic/claude-sonnet-4-6
+
+# Export a human-readable Markdown outline instead of JSON
+python3 run_pageindex.py --pdf_path report.pdf --output-format markdown
+
+# Save results to a custom directory with verbose logging
+python3 run_pageindex.py --pdf_path report.pdf --output-dir ./my_results --verbose
 ```
 </details>
 
