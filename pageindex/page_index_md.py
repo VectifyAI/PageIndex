@@ -29,6 +29,19 @@ async def generate_summaries_for_structure_md(structure, summary_token_threshold
     return structure
 
 
+def split_summary_fields(tree_nodes):
+    """Apply the same leaf/parent convention as generate_summaries_for_structure_md.
+
+    For callers that attach `summary` to a flat node list before the tree is
+    built, so parent nodes end up with `prefix_summary` as index() produces.
+    """
+    for node in tree_nodes:
+        if node.get('nodes'):
+            node['prefix_summary'] = node.pop('summary', '')
+            split_summary_fields(node['nodes'])
+    return tree_nodes
+
+
 def extract_nodes_from_markdown(markdown_content):
     header_pattern = r'^(#{1,6})\s+(.+)$'
     code_block_pattern = r'^```'
@@ -217,6 +230,10 @@ def build_tree_from_nodes(node_list):
             'line_num': node['line_num'],
             'nodes': []
         }
+        # Callers that summarize before building the tree (e.g. incremental
+        # update) would otherwise have their summaries dropped here.
+        if 'summary' in node:
+            tree_node['summary'] = node['summary']
         node_counter += 1
         
         while stack and stack[-1][1] >= current_level:

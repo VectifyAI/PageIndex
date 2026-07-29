@@ -10,7 +10,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pageindex.page_index_md import extract_nodes_from_markdown, extract_node_text_content
+from pageindex.page_index_md import (
+    extract_nodes_from_markdown,
+    extract_node_text_content,
+    build_tree_from_nodes,
+    split_summary_fields,
+)
 from pageindex.utils import compute_section_hashes, find_ancestors
 
 
@@ -63,6 +68,42 @@ def test_dirty_set_includes_ancestors():
     for p in changed:
         to_summarize.update(find_ancestors(p))
     assert to_summarize == {"Root", "Root > A", "Root > A > A1"}, to_summarize
+
+
+def test_build_tree_preserves_summaries():
+    """update() attaches summaries before building the tree; they must survive."""
+    md = "# Root\nintro\n## A\nalpha\n## B\nbeta\n"
+    node_list, lines = extract_nodes_from_markdown(md)
+    nodes = extract_node_text_content(node_list, lines)
+    for n in nodes:
+        n["summary"] = f"S:{n['title_path']}"
+
+    tree = split_summary_fields(build_tree_from_nodes(nodes))
+    root = tree[0]
+    # Parents carry prefix_summary, leaves carry summary — as index() produces.
+    assert root["prefix_summary"] == "S:Root", root
+    assert "summary" not in root, root
+    assert [c["summary"] for c in root["nodes"]] == ["S:Root > A", "S:Root > B"]
+
+
+def test_tree_walk_paths_match_flat_title_paths():
+    """The cached-summary lookup keys the old tree by walking it; those paths
+    must equal the title_paths the new flat node list is keyed by."""
+    md = "# Root\nintro\n## A\nalpha\n### A1\nsub\n## B\nbeta\n"
+    node_list, lines = extract_nodes_from_markdown(md)
+    nodes = extract_node_text_content(node_list, lines)
+    tree = build_tree_from_nodes(nodes)
+
+    walked = []
+
+    def collect(ns, prefix=""):
+        for n in ns:
+            path = f"{prefix} > {n['title']}" if prefix else n["title"]
+            walked.append(path)
+            collect(n.get("nodes", []), path)
+
+    collect(tree)
+    assert walked == [n["title_path"] for n in nodes], walked
 
 
 if __name__ == "__main__":

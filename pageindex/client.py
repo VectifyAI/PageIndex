@@ -14,6 +14,7 @@ from .page_index_md import (
     extract_node_text_content,
     get_node_summary,
     build_tree_from_nodes,
+    split_summary_fields,
 )
 from .retrieve import get_document, get_document_structure, get_page_content
 from .utils import (
@@ -22,7 +23,6 @@ from .utils import (
     hash_text,
     compute_section_hashes,
     find_ancestors,
-    structure_to_list,
     write_node_id,
     format_structure,
 )
@@ -292,12 +292,17 @@ class PageIndexClient:
         for path in dirty:
             to_summarize.update(find_ancestors(path))
 
-        # Reuse cached summaries for clean sections.
-        old_structure_flat = structure_to_list(doc.get('structure', []))
-        old_summary_map = {
-            n.get('title_path', n.get('title')): n.get('summary') or n.get('prefix_summary', '')
-            for n in old_structure_flat
-        }
+        # Reuse cached summaries for clean sections. The persisted tree has no
+        # title_path, so rebuild it to match the keys used by new_nodes.
+        old_summary_map = {}
+
+        def _collect_summaries(nodes, prefix=''):
+            for n in nodes:
+                path = f"{prefix} > {n['title']}" if prefix else n['title']
+                old_summary_map[path] = n.get('summary') or n.get('prefix_summary', '')
+                _collect_summaries(n.get('nodes', []), path)
+
+        _collect_summaries(doc.get('structure', []))
 
         async def _identity(val):
             return val
@@ -323,6 +328,7 @@ class PageIndexClient:
 
         # Rebuild the tree with fresh node ids.
         new_structure = build_tree_from_nodes(new_nodes)
+        split_summary_fields(new_structure)
         write_node_id(new_structure)
         new_structure = format_structure(
             new_structure,
