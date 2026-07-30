@@ -68,9 +68,37 @@ def _validate_pdf(pdf):
     return pdf
 
 
-def page_index_flash(pdf) -> dict:
-    """Build a PageIndex tree structure from a PDF using layout statistics, without an LLM. Args: pdf: path to a PDF file (``str`` or ``pathlib.Path``) or an in-memory binary stream (``io.BytesIO``). Returns: dict with keys ``doc_name``, ``doc_title``, ``structure`` (a list of nested ``{"title", "start_index", "end_index", "nodes"}`` dicts; page indexes are 1-based) and ``has_abstract_or_references_section`` (True when a top-level entry is an abstract or references heading). """
-    return extract_toc(_validate_pdf(pdf))
+def _thin(structure):
+    from ..utils import page_level_thinning, write_node_id
+    page_level_thinning(structure)
+    write_node_id(structure)
+
+
+async def _summarize(structure, page_list, model):
+    from ..utils import add_node_text, generate_summaries_for_structure, remove_structure_text
+    add_node_text(structure, page_list)
+    await generate_summaries_for_structure(structure, model=model)
+    remove_structure_text(structure)
+
+
+def page_index_flash(pdf, summary=True, summary_model=None) -> dict:
+    """Build a PageIndex tree structure from a PDF using layout statistics, without an LLM. Args: pdf: path to a PDF file (``str`` or ``pathlib.Path``) or an in-memory binary stream (``io.BytesIO``). summary: if True, generate LLM summaries for each node (requires ``summary_model``). summary_model: the LLM model identifier to use for summary generation. Returns: dict with keys ``doc_name``, ``doc_title``, ``structure`` (a list of nested ``{"title", "start_index", "end_index", "nodes"}`` dicts; page indexes are 1-based) and ``has_abstract_or_references_section`` (True when a top-level entry is an abstract or references heading). """
+    result = extract_toc(_validate_pdf(pdf))
+    structure = result.get("structure", [])
+    if structure:
+        _thin(structure)
+    if summary and structure:
+        import asyncio
+        from ..utils import ConfigLoader
+        if summary_model is None:
+            cfg = ConfigLoader().load()
+            summary_model = getattr(cfg, 'summary_model', None) or cfg.model
+        page_texts = result.pop("page_texts", [])
+        page_list = [(text, 0) for text in page_texts]
+        asyncio.run(_summarize(structure, page_list, summary_model))
+    else:
+        result.pop("page_texts", None)
+    return result
 
 
 __all__ = ["page_index_flash"]

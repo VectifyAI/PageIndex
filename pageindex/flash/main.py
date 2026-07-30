@@ -295,11 +295,19 @@ def extract_toc(
     else:
         doc_name = "document.pdf"
 
+    page_texts = []
+    for page in pages:
+        parts = []
+        for block in (page.secondary_slot or []):
+            parts.append(block_text(block))
+        page_texts.append("\n".join(parts))
+
     return {
         "doc_name": doc_name,
         "doc_title": doc_title,
         "structure": structure,
         "has_abstract_or_references_section": has_abstract_or_references,
+        "page_texts": page_texts,
     }
 
 
