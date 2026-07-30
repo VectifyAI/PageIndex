@@ -17,9 +17,8 @@ from pathlib import Path
 from types import SimpleNamespace as config
 import re
 
-# litellm is deliberately not imported here: importing it costs ~3.4s and
-# fetches a remote model-cost map. Functions that need it import it locally;
-# after the first load that is a cached sys.modules lookup.
+# litellm is imported inside the functions that use it; eager import is slow
+# and fetches a remote model-cost map.
 
 # Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
 if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
@@ -44,7 +43,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
                 model=model,
                 messages=messages,
                 temperature=0,
-                drop_params=True,  # per-call, never the litellm global
+                drop_params=True,
             )
             content = response.choices[0].message.content
             if return_finish_reason:
@@ -76,7 +75,7 @@ async def llm_acompletion(model, prompt):
                 model=model,
                 messages=messages,
                 temperature=0,
-                drop_params=True,  # per-call, never the litellm global
+                drop_params=True,
             )
             return response.choices[0].message.content
         except Exception as e:
