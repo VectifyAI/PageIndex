@@ -1,4 +1,3 @@
-import litellm
 import logging
 import os
 import textwrap
@@ -18,19 +17,23 @@ from pathlib import Path
 from types import SimpleNamespace as config
 import re
 
+# litellm is deliberately not imported here: importing it costs ~3.4s and
+# fetches a remote model-cost map. Functions that need it import it locally;
+# after the first load that is a cached sys.modules lookup.
+
 # Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
 if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
     os.environ["OPENAI_API_KEY"] = os.getenv("CHATGPT_API_KEY")
 
-litellm.drop_params = True
-
 def count_tokens(text, model=None):
     if not text:
         return 0
+    import litellm
     return litellm.token_counter(model=model, text=text)
 
 
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
+    import litellm
     if model:
         model = model.removeprefix("litellm/")
     max_retries = 10
@@ -41,6 +44,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
                 model=model,
                 messages=messages,
                 temperature=0,
+                drop_params=True,  # per-call, never the litellm global
             )
             content = response.choices[0].message.content
             if return_finish_reason:
@@ -61,6 +65,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
 
 
 async def llm_acompletion(model, prompt):
+    import litellm
     if model:
         model = model.removeprefix("litellm/")
     max_retries = 10
@@ -71,6 +76,7 @@ async def llm_acompletion(model, prompt):
                 model=model,
                 messages=messages,
                 temperature=0,
+                drop_params=True,  # per-call, never the litellm global
             )
             return response.choices[0].message.content
         except Exception as e:
@@ -386,6 +392,7 @@ def add_preface_if_needed(data):
 
 
 def get_page_tokens(pdf_path, model=None, pdf_parser="PyPDF2"):
+    import litellm
     if pdf_parser == "PyPDF2":
         pdf_reader = PyPDF2.PdfReader(pdf_path)
         page_list = []
