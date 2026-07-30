@@ -57,19 +57,19 @@ _OP_OPERAND_COUNTS: dict[bytes, tuple[int, bool]] = {
 
 
 def _tokenize_show_operators(
-    content_bytes: bytes,
+    content_bytes: bytes, init_tz: float = 1.0,
 ) -> tuple[list[int], list[bytes | None], list[tuple[int, ...]], list[float],
-           list[tuple[int, bytes, bytes | None]]]:
-    """Tokenize a PDF page content stream. For each text-showing operator, records the active flush scope, font redefinition name, raw charcode units, horizontal scaling, and Form XObject paint position. The tokenizer is deliberately tolerant of malformed operators: it skips bad or short operands, preserves unknown-command operands, and emits an empty string for a show operator with the wrong string operand type."""
+           list[tuple[int, bytes, bytes | None, float]]]:
+    """Tokenize a PDF page content stream. For each text-showing operator, records the active flush scope, font redefinition name, raw charcode units, and horizontal scaling (starting at ``init_tz`` on stream entry, saved and restored by q/Q), plus every Form XObject paint position with the font and horizontal scaling live at that paint. The tokenizer is deliberately tolerant of malformed operators: it skips bad or short operands, preserves unknown-command operands, and emits an empty string for a show operator with the wrong string operand type."""
     flush_ids: list[int] = []
     fonts: list[bytes | None] = []
     show_text_units: list[tuple[int, ...]] = []
-    xobject_paints: list[tuple[int, bytes, bytes | None]] = []
+    xobject_paints: list[tuple[int, bytes, bytes | None, float]] = []
     horizontal_scales: list[float] = []
     flush_id = 0
     cur_font: bytes | None = None
     font_stack: list[bytes | None] = []
-    cur_tz = 1.0
+    cur_tz = init_tz
     tz_stack: list[float] = []
     opnds: list[tuple[str, object]] = []
     frames: list[tuple[str, list]] = []      # open [ / << collectors
@@ -328,7 +328,7 @@ def _tokenize_show_operators(
                     if tz_stack:
                         cur_tz = tz_stack.pop()
                 elif operator_token == b"Do" and opnds[0][0] == "name":
-                    xobject_paints.append((len(flush_ids), opnds[0][1], cur_font))  # type: ignore[arg-type]
+                    xobject_paints.append((len(flush_ids), opnds[0][1], cur_font, cur_tz))  # type: ignore[arg-type]
             elif operator_token == b"Tf":
                 if opnds[0][0] == "name":
                     cur_font = opnds[0][1]  # type: ignore[assignment]

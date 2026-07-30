@@ -212,6 +212,11 @@ def _parse_tounicode_cmap(data: bytes) -> dict[int, str]:
             raise ValueError("code-point conversion non-integer")
         return chr(codepoint)
 
+    def is_int(numeric_value: float) -> bool:
+        # The integer test that guards the numeric-entry check and selects the
+        # destination branch rejects +-Infinity, NaN AND any fractional value.
+        return math.isfinite(numeric_value) and numeric_value == int(numeric_value)
+
     def map_range_units(range_start: int, range_end: int, units: list[int]) -> None:
         # text extraction CMap.bf-range mapping : ``last byte`` is FIXED to
         # the ORIGINAL dst length-1; only THAT byte index is incremented. On
@@ -260,34 +265,47 @@ def _parse_tounicode_cmap(data: bytes) -> dict[int, str]:
                 src_end = _cmap_str_to_int(tokens[key_value + 1][1])
                 key_value += 2
                 if src_end - src_start > 0xFFFFFF:
-                    # content stream tokenizer range-limit throw, contained by CMap parsing's
-                    # catch: the oversized entry is dropped, the map survives.
+                    # The range-limit throw is raised from INSIDE the bf-range
+                    # mapping itself, i.e. from inside the call that CMap
+                    # parsing wraps, so the rest of the block goes with it (the
+                    # destination has already been lexed -- for an array, up to
+                    # and including the "]").
                     if key_value < len(tokens) and tokens[key_value] == ("delim", "["):
                         while key_value < len(tokens) and tokens[key_value] != ("delim", "]"):
                             key_value += 1
                         key_value += 1
                     elif key_value < len(tokens) and tokens[key_value][0] in ("hex", "num"):
                         key_value += 1
-                    continue
+                    break
                 if key_value < len(tokens) and tokens[key_value] == ("delim", "["):
                     key_value += 1
                     code = src_start
-                    while key_value < len(tokens) and tokens[key_value][0] in ("hex", "num"):
+                    # The array form stores EVERY lexed object up to "]" or end
+                    # of input; the UTF-16BE walk over a value that has no
+                    # length (a name, an operator) runs zero times and yields
+                    # the empty string.
+                    while key_value < len(tokens) and tokens[key_value] != ("delim", "]"):
                         if code <= src_end:
                             dst_token = tokens[key_value]
-                            out[code] = (_utf16be_units_to_str(list(dst_token[1]))
-                                         if dst_token[0] == "hex" else codepoint_to_string(dst_token[1]))
+                            if dst_token[0] == "hex":
+                                out[code] = _utf16be_units_to_str(list(dst_token[1]))
+                            elif dst_token[0] == "num":
+                                out[code] = codepoint_to_string(dst_token[1])
+                            else:
+                                out[code] = ""
                         code += 1
                         key_value += 1
-                    if key_value < len(tokens) and tokens[key_value] == ("delim", "]"):
+                    if key_value < len(tokens):
                         key_value += 1
                 elif key_value < len(tokens) and tokens[key_value][0] == "hex":
                     units = list(tokens[key_value][1])
                     key_value += 1
                     map_range_units(src_start, src_end, units)
-                elif key_value < len(tokens) and tokens[key_value][0] == "num":
+                elif key_value < len(tokens) and tokens[key_value][0] == "num" and is_int(tokens[key_value][1]):
                     # Integer destinations are one UTF-16 unit, then the normal
-                    # increment walk applies.
+                    # increment walk applies. A non-integer number is neither an
+                    # integer nor a string nor "[", so it falls through to the
+                    # `else` arm below.
                     units = [int(tokens[key_value][1]) & 0xFFFF]
                     key_value += 1
                     map_range_units(src_start, src_end, units)
@@ -297,6 +315,11 @@ def _parse_tounicode_cmap(data: bytes) -> dict[int, str]:
             key_value += 1
             while (key_value + 1 < len(tokens) and tokens[key_value][0] == "hex"
                    and tokens[key_value + 1][0] == "num"):
+                if not is_int(tokens[key_value + 1][1]):
+                    # The integer check throws -> the CMap parsing catch drops
+                    # the rest of the block, map survives.
+                    key_value += 2
+                    break
                 out[_cmap_str_to_int(tokens[key_value][1])] = codepoint_to_string(tokens[key_value + 1][1])
                 key_value += 2
         elif kind == "op" and val == "begincidrange":
@@ -307,8 +330,10 @@ def _parse_tounicode_cmap(data: bytes) -> dict[int, str]:
                 src_end = _cmap_str_to_int(tokens[key_value + 1][1])
                 start = tokens[key_value + 2][1]
                 key_value += 3
+                if not is_int(start):
+                    break  # the integer check precedes CID-range mapping: block dropped
                 if src_end - src_start > 0xFFFFFF:
-                    continue  # range-limit, contained
+                    break  # CID-range range-limit: the block is dropped too
                 for code in range(src_start, src_end + 1):
                     out[code] = codepoint_to_string(start + (code - src_start))
         else:

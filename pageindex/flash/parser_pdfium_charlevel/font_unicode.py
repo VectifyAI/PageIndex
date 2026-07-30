@@ -216,26 +216,32 @@ def _font_unicode_map(pdf_doc, xref: int) -> tuple[int, dict[int, str]] | None:
             pdf_value_type, pdf_value = _xref_key(desc_xref, "ToUnicode")
         if pdf_value_type != "xref":
             pdf_value_type, pdf_value = _xref_key(xref, "ToUnicode")
-        if pdf_value_type != "xref":
-            # No ToUnicode: text extraction predefined collection Unicode-map construction maps Adobe-{GB1,CNS1,Japan1,
-            # Korea1} CIDSystemInfo through the shipped Adobe-XX-UCS2 bcmap
-            # (real unicode per cid) -- not implemented. Returning identity
-            # chr(cid) would actively CORRUPT PDFium's table-driven decode
-            # for that class, so keep the guarded None (PDFium output).
-            # Every other registry/ordering IS the heading heuristics identity fallback.
-            if desc_xref:
-                right_type, right_value_local = _xref_key(desc_xref, "CIDSystemInfo/Registry")
-                other_type, other_value_local = _xref_key(desc_xref, "CIDSystemInfo/Ordering")
-                reg = re.sub(r"[()\s]", "", right_value_local) if right_type != "null" else ""
-                ordering = re.sub(r"[()\s]", "", other_value_local) if other_type != "null" else ""
-                if reg == "Adobe" and ordering in ("GB1", "CNS1", "Japan1", "Korea1"):
-                    return None
-            return 2, {}  # identity Unicode map: unicode == chr(cid)
-        try:
-            return 2, _parse_tounicode_cmap(
-                pdf_doc.xref_stream(int(pdf_value.split()[0])))
-        except Exception:
-            return 2, {}  # ToUnicode parsing error path -> identity fallback
+        tu_map: dict[int, str] | None = None
+        if pdf_value_type == "xref":
+            try:
+                tu_map = _parse_tounicode_cmap(
+                    pdf_doc.xref_stream(int(pdf_value.split()[0])))
+            except Exception:
+                tu_map = None  # ToUnicode parsing rejects -> no ToUnicode map
+        # The "font carries a ToUnicode map" flag is set only for a present,
+        # accepted and NON-EMPTY map. A missing, rejected or empty ToUnicode all
+        # leave it false, so all three take the composite branch below.
+        if tu_map:
+            return 2, tu_map
+        # No usable ToUnicode: predefined-collection Unicode-map construction
+        # maps Adobe-{GB1,CNS1,Japan1,Korea1} CIDSystemInfo through the shipped
+        # Adobe-XX-UCS2 bcmap (real unicode per cid) -- not implemented.
+        # Returning identity chr(cid) would actively CORRUPT PDFium's
+        # table-driven decode for that class, so keep the guarded None (PDFium
+        # output). Every other registry/ordering IS the identity fallback.
+        if desc_xref:
+            right_type, right_value_local = _xref_key(desc_xref, "CIDSystemInfo/Registry")
+            other_type, other_value_local = _xref_key(desc_xref, "CIDSystemInfo/Ordering")
+            reg = re.sub(r"[()\s]", "", right_value_local) if right_type != "null" else ""
+            ordering = re.sub(r"[()\s]", "", other_value_local) if other_type != "null" else ""
+            if reg == "Adobe" and ordering in ("GB1", "CNS1", "Japan1", "Korea1"):
+                return None
+        return 2, {}  # identity Unicode map: unicode == chr(cid)
     pdf_value_type, pdf_value = _xref_key(xref, "BaseFont")
     base_font = pdf_value.lstrip("/") if pdf_value_type == "name" else ""
 

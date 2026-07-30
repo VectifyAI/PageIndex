@@ -210,5 +210,12 @@ def letter_to_ordinal(tok_str: str) -> Optional[int]:
     """'a'/'A' -> 1, 'b' -> 2, ..., 'h' -> 8. None otherwise."""
     if len(tok_str) != 1:
         return None
-    value = ord(tok_str[0].lower()) - ord("a") + 1
+    # Only the FIRST UTF-16 code unit of the lowercased character counts: a
+    # case mapping that expands to several units (U+0130) contributes just its
+    # first, and an astral lowercase contributes its high surrogate.
+    low = tok_str[0].lower()
+    code_unit = ord(low[0])
+    if code_unit > 0xFFFF:
+        code_unit = 0xD800 + ((code_unit - 0x10000) >> 10)
+    value = code_unit - 96
     return value if 1 <= value <= 8 else None

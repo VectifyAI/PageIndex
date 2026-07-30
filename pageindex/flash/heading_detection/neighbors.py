@@ -91,7 +91,11 @@ class PageNeighborMap:
                 if 0 <= index < self.secondary_slot:
                     marked[index] = True
         recent_height: list[int] = [-1] * self.secondary_slot        # most recent body block height at bucket
-        recent_block_index: list[int] = [-1] * self.secondary_slot        # most-recent block V (j-direction)
+        # Reads past the end of this list must behave like an unset slot: -1 is
+        # falsy at the ``>= 0`` tests below just as a missing entry is, and a
+        # write to it extends the list. On a degenerate page with zero buckets
+        # every clamped index is 0, so one slot reproduces that growth.
+        recent_block_index: list[int] = [-1] * max(self.secondary_slot, 1)  # most-recent block V (j-direction)
         recent: list[Optional[Block]] = [None] * self.secondary_slot    # most-recent block at bucket
         pending: list[list[int]] = [[] for _ in range(self.secondary_slot)]   # pending V's per bucket
 

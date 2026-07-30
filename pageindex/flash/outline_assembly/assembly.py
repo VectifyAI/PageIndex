@@ -265,15 +265,19 @@ def outline_to_dict_tree(outline_node_list: list[OutlineNode], total_pages: int)
     def _walk_nodes(items: list[OutlineNode]) -> list[dict]:
         result: list[dict] = []
         for item in items:
-            # Title text is prefix tokens plus heading tokens.
-            prefix_tokens = item.heading.secondary_slot
-            token = item.heading.primary_slot
-            child = str(prefix_tokens) if prefix_tokens is not None else ""
-            node = str(token) if token is not None else ""
-            title = (child + " " + node) if child else node
+            # Title text is the numbering prefix plus the heading tokens, but
+            # the two are carried as separate fields and trimmed one by one,
+            # then rejoined with a single space and only for a non-empty
+            # prefix. A prefix's string form ends in a space after every
+            # space-flagged token, so trimming the parts separately is what
+            # keeps that space out of the join.
             # Trim with the Unicode WhiteSpace+LineTerminator set, not Python's
             # str.strip set: they differ on U+FEFF, U+0085, and U+001C-1F.
-            title = _trim_unicode_ws(title)
+            prefix_tokens = item.heading.secondary_slot
+            token = item.heading.primary_slot
+            child = _trim_unicode_ws(str(prefix_tokens)) if prefix_tokens is not None else ""
+            node = _trim_unicode_ws(str(token)) if token is not None else ""
+            title = (child + " " if child else "") + node
             if not title:
                 if item.child_nodes:
                     result.extend(_walk_nodes(item.child_nodes))

@@ -161,6 +161,9 @@ from .remerge import (
     _remerge_vertical,
 )
 from .pipeline import (
+    _page_pass1,
+    _page_pass2,
+    _page_spans,
     parse_charlevel_meta,
     parse_charlevel,
 )

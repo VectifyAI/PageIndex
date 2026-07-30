@@ -5,7 +5,9 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-from ..model import Rect, rect_union, EMPTY_RECT, Line, info_weight, text_of_line, numbering_kind, numbering_value, _UNICODE_WHITESPACE_CLASS, _max_nan_propagating
+from ..model import (
+    Rect, rect_union, EMPTY_RECT, Line, info_weight, text_of_line, numbering_kind, numbering_value, _UNICODE_WHITESPACE_CLASS, _max_nan_propagating, _min_nan_propagating,
+)
 
 
 # Detect TOC dot leaders ("... 5", "....3"). Gutter scoring rejects a split
@@ -62,7 +64,7 @@ class ColumnDetectionContext:
         # ``log2(0)`` would be -inf -- guard against empty input.
         self.tertiary_slot = math.floor(2 * math.log2(len(candidate_item))) if candidate_item else 0
         self.state_slot = primary_item.bbox_width() / 6.0
-        self.auxiliary_slot = max(0.5 * secondary_item.primary_slot, min(1.1 * (secondary_item.tertiary_slot - secondary_item.primary_slot), 3.0 * secondary_item.primary_slot))
+        self.auxiliary_slot = _max_nan_propagating(0.5 * secondary_item.primary_slot, _min_nan_propagating(1.1 * (secondary_item.tertiary_slot - secondary_item.primary_slot), 3.0 * secondary_item.primary_slot))
         self.option_slot = secondary_item.measure_slot
         self.measure_slot = 1.5 * secondary_item.primary_slot
 DOT_LEADER_RE = re_module.compile(r"([.][" + _UNICODE_WHITESPACE_CLASS + r"]*){5,}\Z")

@@ -89,14 +89,14 @@ def _collect_text_objs(page, text_page) -> list[dict]:
             continue
         # Bounds include the object's own matrix but not its ancestors'; map
         # the four corners into page space.
-        corners = [
-            _xf_point(anc_mtx, corner_x, corner_y)
-            for corner_x in (bounds_left.value, bounds_right.value) for corner_y in (value.value, bounds_top.value)
-        ]
-        object_left = min(corner_x for corner_x, _ in corners)
-        object_right = max(corner_x for corner_x, _ in corners)
-        text = min(corner_y for _, corner_y in corners)
-        object_top = max(corner_y for _, corner_y in corners)
+        x00, y00 = _xf_point(anc_mtx, bounds_left.value, value.value)
+        x01, y01 = _xf_point(anc_mtx, bounds_left.value, bounds_top.value)
+        x10, y10 = _xf_point(anc_mtx, bounds_right.value, value.value)
+        x11, y11 = _xf_point(anc_mtx, bounds_right.value, bounds_top.value)
+        object_left = min(x00, x01, x10, x11)
+        object_right = max(x00, x01, x10, x11)
+        text = min(y00, y01, y10, y11)
+        object_top = max(y00, y01, y10, y11)
         ink_height = max(0.0, object_top - text)
         # text extraction folds Tfs (text font size) + FontMatrix into the text transform
         # so ``hypot(transform[2], transform[3])`` always gives the
@@ -137,6 +137,9 @@ def _collect_text_objs(page, text_page) -> list[dict]:
 
         objects.append({
             "font": font,
+            # Handle address as a hashable per-document font identity; computed
+            # once here so per-char consumers never re-cast.
+            "font_key": ctypes.cast(font, ctypes.c_void_p).value,
             "fs_raw": fs_raw,
             "scale_x": scale_x,
             "scale_y": scale_y,
@@ -194,15 +197,21 @@ def _find_obj_for_char(
     char_fs: float | None = None, text_page=None, char_idx: int | None = None,
 ) -> dict | None:
     """Bbox containment lookup. When a char falls inside more than one text object, pick the candidate whose effective rendered size matches the char's true per-char matrix size from ``FPDFText_GetMatrix``. That folds Tfs and FontMatrix into the same glyph-to-font attribution used by the text-item reconstruction. This disambiguates overlapping objects such as a large figure-axis label drawn over a smaller heading, and avoids selecting tiny ghost objects that share the same raw textpage font size. Falls back to the PDFium ``fs_raw`` textpage font size and finally to smallest area."""
-    cands: list[dict] = []
+    first: dict | None = None
+    cands: list[dict] | None = None
     for item_value in obj_index.get(int(round(query_origin_y)), ()):
         if (item_value["l"] - tol) <= query_origin_x <= (item_value["r"] + tol) and\
            (item_value["b"] - tol) <= query_origin_y <= (item_value["t"] + tol):
-            cands.append(item_value)
-    if not cands:
+            if first is None:
+                first = item_value
+            elif cands is None:
+                cands = [first, item_value]
+            else:
+                cands.append(item_value)
+    if first is None:
         return None
-    if len(cands) == 1:
-        return cands[0]
+    if cands is None:
+        return first
     char_render = (
         _char_render_fs(text_page, char_idx) if text_page is not None and char_idx is not None
         else 0.0
@@ -213,6 +222,11 @@ def _find_obj_for_char(
             cands,
             key=lambda item_value: (abs(item_value["fs_eff"] - char_render), item_value["area"]),
         )
+    if char_fs is None and text_page is not None and char_idx is not None:
+        # Deferred FPDFText_GetFontSize: only this rare branch (multi-candidate
+        # AND no per-char matrix) consumes it, so the caller no longer pays the
+        # FFI call on every char.
+        char_fs = pdfium_c.FPDFText_GetFontSize(text_page, char_idx)
     if char_fs is not None and char_fs > 0:
         # Sort by absolute fs diff first, then smallest area as tiebreak.
         return min(

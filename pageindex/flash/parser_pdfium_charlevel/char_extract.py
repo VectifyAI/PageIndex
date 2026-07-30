@@ -29,10 +29,35 @@ def _extract_raw_chars(page, text_page) -> tuple[list[dict], list[dict]]:
     font_name_buffer = (ctypes.c_char * 256)()
     flags = ctypes.c_int(0)
     field = ctypes.c_float(0)
+    # Per-char FFI out-buffers and entry points, hoisted: each is overwritten
+    # by its call (buffers whose call result is unchecked are re-zeroed below,
+    # so a failed call reads back 0 exactly as a fresh buffer would).
+    char_origin_x = ctypes.c_double(0); char_origin_y = ctypes.c_double(0)
+    char_left_box = ctypes.c_double(0); char_right_box = ctypes.c_double(0)
+    value = ctypes.c_double(0); char_top_box = ctypes.c_double(0)
+    loose_box = pdfium_c.FS_RECTF(0, 0, 0, 0)
+    u32 = ctypes.c_uint32(0)
+    fs32 = ctypes.c_float(0)
+    byref = ctypes.byref
+    ox_ref = byref(char_origin_x); oy_ref = byref(char_origin_y)
+    l_ref = byref(char_left_box); r_ref = byref(char_right_box)
+    b_ref = byref(value); t_ref = byref(char_top_box)
+    loose_ref = byref(loose_box)
+    w_ref = byref(field)
+    flags_ref = byref(flags)
+    get_unicode = pdfium_c.FPDFText_GetUnicode
+    is_generated = pdfium_c.FPDFText_IsGenerated
+    get_char_origin = pdfium_c.FPDFText_GetCharOrigin
+    get_char_box = pdfium_c.FPDFText_GetCharBox
+    get_loose_box = pdfium_c.FPDFText_GetLooseCharBox
+    get_font_info = pdfium_c.FPDFText_GetFontInfo
+    get_glyph_width = pdfium_c.FPDFFont_GetGlyphWidth
+    js_is_ws = _is_whitespace
+    name_cache: dict[bytes, str] = {}
     raw_chars: list[dict] = []
     last_obj: dict | None = None
     for index_value in range(count_item):
-        codepoint = pdfium_c.FPDFText_GetUnicode(text_page, index_value)
+        codepoint = get_unicode(text_page, index_value)
         if codepoint < 0:
             continue
         # u == 0 (PDFium found no unicode for the glyph) is KEPT as '\x00':
@@ -41,7 +66,12 @@ def _extract_raw_chars(page, text_page) -> tuple[list[dict], list[dict]]:
         # textpage char carries normal geometry. Skipping it lost the char AND desynced
         # the unicode walk's object pairing around it.
         ch_str = chr(codepoint)
-        is_gen = bool(pdfium_c.FPDFText_IsGenerated(text_page, index_value))
+        is_ws = js_is_ws(codepoint)
+        # FPDFText_IsGenerated returns a c_int: 1 generated, 0 real, -1 error.
+        # Only a POSITIVE 1 may mark a char generated -- the -1 has to read the
+        # same way here as it does in the page-mode unicode walk, or the two
+        # char sets disagree and that walk desyncs.
+        is_gen = is_generated(text_page, index_value) == 1
         # PDFium inserts is_generated chars as layout placeholders for
         # Td/Tm jumps with no literal content-stream char (typically
         # " ", "\r", "\n"). Dropping them outright leaves an
@@ -53,11 +83,11 @@ def _extract_raw_chars(page, text_page) -> tuple[list[dict], list[dict]]:
         # save_last_char without emitting, letting the next visible
         # glyph compute a tracking-size in-flow advance. Drop only
         # non-whitespace generated chars (very rare).
-        if is_gen and not _is_whitespace(codepoint):
+        if is_gen and not is_ws:
             continue
-        char_origin_x = ctypes.c_double(0)
-        char_origin_y = ctypes.c_double(0)
-        pdfium_c.FPDFText_GetCharOrigin(text_page, index_value, ctypes.byref(char_origin_x), ctypes.byref(char_origin_y))
+        char_origin_x.value = 0.0; char_origin_y.value = 0.0
+        get_char_origin(text_page, index_value, ox_ref, oy_ref)
+        ox_v = char_origin_x.value; oy_v = char_origin_y.value
 
         # Fetch char bbox first so we can use its center for the obj
         # lookup — origin alone fails when adjacent obj bboxes nearly
@@ -65,17 +95,12 @@ def _extract_raw_chars(page, text_page) -> tuple[list[dict], list[dict]]:
         # with sub-pt gaps, where origin x falls inside the wrong obj's
         # tolerance window). Using bbox center gives unambiguous
         # containment.
-        char_left_box = ctypes.c_double(0); char_right_box = ctypes.c_double(0)
-        value = ctypes.c_double(0); char_top_box = ctypes.c_double(0)
-        pdfium_c.FPDFText_GetCharBox(
-            text_page, index_value,
-            ctypes.byref(char_left_box), ctypes.byref(char_right_box),
-            ctypes.byref(value), ctypes.byref(char_top_box),
-        )
+        char_left_box.value = 0.0; char_right_box.value = 0.0; value.value = 0.0; char_top_box.value = 0.0
+        get_char_box(text_page, index_value, l_ref, r_ref, b_ref, t_ref)
         char_left, char_right, char_top, char_bottom = char_left_box.value, char_right_box.value, char_top_box.value, value.value
         # Tight (ink) box center -> font-object disambiguation only.
-        center_x = (char_left + char_right) / 2 if char_right > char_left else char_origin_x.value
-        center_y = (char_top + char_bottom) / 2 if char_top > char_bottom else char_origin_y.value
+        center_x = (char_left + char_right) / 2 if char_right > char_left else ox_v
+        center_y = (char_top + char_bottom) / 2 if char_top > char_bottom else oy_v
         # Horizontal extent for the SPAN comes from the LOOSE char box (the
         # glyph's full advance cell), not the tight ink box. the PDF text-item
         # widths are advance-based; the ink box undershoots each glyph's right
@@ -84,8 +109,9 @@ def _extract_raw_chars(page, text_page) -> tuple[list[dict], list[dict]]:
         # display-math gaps so the column detector mis-reads them as gutters
         # and splits a line ("E[x] = μ" -> "E[x]" fragment). Fall back to the
         # ink box if the loose box is unavailable/degenerate.
-        loose_box = pdfium_c.FS_RECTF(0, 0, 0, 0)
-        if (pdfium_c.FPDFText_GetLooseCharBox(text_page, index_value, ctypes.byref(loose_box))
+        # (_loose is only READ when the call succeeded, so the hoisted struct
+        # never leaks a previous char's values.)
+        if (get_loose_box(text_page, index_value, loose_ref)
                 and loose_box.right > loose_box.left):
             loose_left, loose_right = loose_box.left, loose_box.right
             # Vertical edges of the loose (advance-cell) box. For vertical-
@@ -101,30 +127,35 @@ def _extract_raw_chars(page, text_page) -> tuple[list[dict], list[dict]]:
 
         # Character font size disambiguates overlapping objects, such as large
         # figure labels sharing a y range with smaller heading text.
-        char_fs_tp = pdfium_c.FPDFText_GetFontSize(text_page, index_value)
         # text-page and character-index lookup read the true per-char rendered size
-        # (FPDFText_GetMatrix, == text extraction font size) lazily, only to break a
-        # multi-object containment tie — see _find_obj_for_char.
+        # (FPDFText_GetMatrix) and the reported font size (FPDFText_GetFontSize)
+        # lazily, only to break a multi-object containment tie — see
+        # _find_obj_for_char.
         obj = _find_obj_for_char(
-            obj_index, center_x, center_y, tol=1.0, char_fs=char_fs_tp, text_page=text_page, char_idx=index_value
+            obj_index, center_x, center_y, tol=1.0, char_fs=None, text_page=text_page, char_idx=index_value
         )
         if obj is None:
             obj = (
-                _find_obj_for_char(obj_index, char_origin_x.value, char_origin_y.value, tol=1.0,
-                                   char_fs=char_fs_tp, text_page=text_page, char_idx=index_value)
-                or _find_obj_for_char(obj_index, char_origin_x.value, char_origin_y.value, tol=5.0,
-                                      char_fs=char_fs_tp, text_page=text_page, char_idx=index_value)
+                _find_obj_for_char(obj_index, ox_v, oy_v, tol=1.0,
+                                   char_fs=None, text_page=text_page, char_idx=index_value)
+                or _find_obj_for_char(obj_index, ox_v, oy_v, tol=5.0,
+                                      char_fs=None, text_page=text_page, char_idx=index_value)
                 or last_obj
             )
         if obj is None:
             continue
         last_obj = obj
 
-        name = pdfium_c.FPDFText_GetFontInfo(text_page, index_value, font_name_buffer, 256, ctypes.byref(flags))
-        char_font_name = (
-            bytes(font_name_buffer[:name]).decode("latin-1", errors="replace").rstrip("\x00")
-            if name > 1 else obj["font_name"]
-        )
+        name = get_font_info(text_page, index_value, font_name_buffer, 256, flags_ref)
+        if name > 1:
+            raw_name = font_name_buffer[:name]
+            char_font_name = name_cache.get(raw_name)
+            if char_font_name is None:
+                char_font_name = raw_name.decode(
+                    "latin-1", errors="replace").rstrip("\x00")
+                name_cache[raw_name] = char_font_name
+        else:
+            char_font_name = obj["font_name"]
 
         # Use baseline (oy) as bbox bottom and baseline + fs_eff as top.
         # the span anchoring rule uses matrix.f (= baseline y) for both top/
@@ -134,7 +165,7 @@ def _extract_raw_chars(page, text_page) -> tuple[list[dict], list[dict]]:
         # math glyphs). This is what the heading heuristics' tokenizer assumes when
         # checking |c1.C - c2.C| < 1 to decide whether two spans are on
         # the same line.
-        baseline_y = char_origin_y.value
+        baseline_y = oy_v
         char_top = baseline_y + obj["fs_eff"]
         # Capture the raw glyph advance now, while this page (and thus the
         # font handle) is alive. The fs_eff-dependent scaling happens later
@@ -142,17 +173,16 @@ def _extract_raw_chars(page, text_page) -> tuple[list[dict], list[dict]]:
         # so deferring the call would require keeping every page open just to
         # keep font handles valid (PDFium frees the font when the page is
         # closed -> dangling handle).
-        pdfium_c.FPDFFont_GetGlyphWidth(
-            obj["font"], ctypes.c_uint32(codepoint),
-            ctypes.c_float(obj["fs_raw"]), ctypes.byref(field),
-        )
+        u32.value = codepoint
+        fs32.value = obj["fs_raw"]
+        get_glyph_width(obj["font"], u32, fs32, w_ref)
         raw_chars.append({
-            "i": index_value, "ch": chr(codepoint), "u": codepoint,
+            "i": index_value, "ch": ch_str, "u": codepoint,
             "is_gen": is_gen,
-            "is_ws": _is_whitespace(codepoint),
+            "is_ws": is_ws,
             "is_mn": _is_zero_width_diacritic(codepoint),
             "is_cf": _is_invisible_format_mark(codepoint),
-            "ox": char_origin_x.value, "oy": char_origin_y.value,
+            "ox": ox_v, "oy": oy_v,
             "left": loose_left, "right": loose_right,
             "top": char_top, "bottom": baseline_y,
             "box_top": char_top,
@@ -175,7 +205,7 @@ def _accumulate_type3_extents(raw_chars: list[dict], acc: dict) -> None:
         bot = candidate_item["box_bottom"] - candidate_item["oy"]
         if top <= bot:  # degenerate glyph box (text extraction skips d1 i==0)
             continue
-        _xref_key = ctypes.cast(item_value["font"], ctypes.c_void_p).value
+        _xref_key = item_value["font_key"]
         entry_item = acc.get(_xref_key)
         if entry_item is None:
             acc[_xref_key] = [top, bot]
@@ -203,7 +233,7 @@ def _apply_type3_sizes(raw_chars: list[dict], size_by_font: dict) -> None:
         item_value = candidate_item["obj"]
         if item_value["fs_raw"] >= 1.5 or item_value["scale_y"] >= 1.5:
             continue
-        font_size_value = size_by_font.get(ctypes.cast(item_value["font"], ctypes.c_void_p).value)
+        font_size_value = size_by_font.get(item_value["font_key"])
         if font_size_value:
             item_value["fs_eff"] = font_size_value
             candidate_item["top"] = candidate_item["oy"] + font_size_value
@@ -276,7 +306,7 @@ def _finalize_chars(raw_chars: list[dict]) -> list[dict]:
             # emits a separate text item per font, so the body keeps fs=12 and
             # the code word fs=11.16 instead of the whole run collapsing to the
             # smaller fs_min.
-            "font_key": ctypes.cast(obj["font"], ctypes.c_void_p).value,
+            "font_key": obj["font_key"],
             "weight": obj["weight"],
             "obj": obj,                    # host text object (Tj/show-text)
         }

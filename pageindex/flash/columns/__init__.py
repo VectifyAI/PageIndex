@@ -11,7 +11,9 @@ breaks.
 import math
 from typing import Optional
 
-from ..model import Rect, rect_union, EMPTY_RECT, Line, info_weight, text_of_line, numbering_kind, numbering_value, _UNICODE_WHITESPACE_CLASS, _max_nan_propagating
+from ..model import (
+    Rect, rect_union, EMPTY_RECT, Line, info_weight, text_of_line, numbering_kind, numbering_value, _UNICODE_WHITESPACE_CLASS, _max_nan_propagating, _min_nan_propagating,
+)
 
 
 # Detect TOC dot leaders ("... 5", "....3"). Gutter scoring rejects a split

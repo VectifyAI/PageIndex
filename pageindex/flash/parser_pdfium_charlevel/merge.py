@@ -68,6 +68,7 @@ def _merge_text_items(chars: list[dict], view_box=None) -> list[dict]:
         horizontal_scale_factor = abs(mapping["obj"].get("tz", 1.0))
         if not (horizontal_scale_factor > 0):
             horizontal_scale_factor = 1.0
+        fs_x_tz = mapping["fs_x"] / horizontal_scale_factor
         chunk = {
             "str": [],
             "sign": sign,                       # +1 LTR, -1 RTL (signed x-axis)
@@ -112,11 +113,11 @@ def _merge_text_items(chars: list[dict], view_box=None) -> list[dict]:
             # (item initialization: Tz enters only the pen advance, not
             # text advance scale). PDFium folds Tz into the object matrix, so
             # fs_x carries it; divide the show-op's text horizontal scale back out.
-            "tracking": mapping["fs_x"] / horizontal_scale_factor * TRACKING_SPACE_FACTOR,
-            "not_a_space": mapping["fs_x"] / horizontal_scale_factor * NON_SPACE_GAP_FACTOR,
-            "negative": mapping["fs_x"] / horizontal_scale_factor * NEGATIVE_SPACE_FACTOR,
-            "flow_min": mapping["fs_x"] / horizontal_scale_factor * SPACE_IN_FLOW_MIN_FACTOR,
-            "flow_max": mapping["fs_x"] / horizontal_scale_factor * SPACE_IN_FLOW_MAX_FACTOR,
+            "tracking": fs_x_tz * TRACKING_SPACE_FACTOR,
+            "not_a_space": fs_x_tz * NON_SPACE_GAP_FACTOR,
+            "negative": fs_x_tz * NEGATIVE_SPACE_FACTOR,
+            "flow_min": fs_x_tz * SPACE_IN_FLOW_MIN_FACTOR,
+            "flow_max": fs_x_tz * SPACE_IN_FLOW_MAX_FACTOR,
             "height": mapping["fs"],
             # True once a real whitespace glyph follows the last visible glyph in
             # this chunk; gates whether an object boundary is a prose word-break
@@ -213,6 +214,20 @@ def _merge_text_items(chars: list[dict], view_box=None) -> list[dict]:
         # text extraction text-item box accumulation char loop order (span merger+):
         # invisible format-mark classification is skipped entirely BEFORE the whitespace test.
         if text["is_cf"]:
+            # The format-mark skip sits ahead of the scaled-advance and
+            # char-spacing block, so the mark moves neither the text matrix nor
+            # the previous-position reference: the reference pen never sees it.
+            # PDFium's char origins DO include its advance, so carry the
+            # reading-direction reference past it; otherwise that advance
+            # reappears as a gap and the next glyph gets an in-flow or
+            # standalone " " with no counterpart. (Char spacing, also skipped
+            # here, is not separable from PDFium's origins.) With no chunk open
+            # the page's previous-position reference is still unset, so the
+            # position comparison is unconditionally true and there is no gap
+            # to correct.
+            if chunk is not None and chunk["prev_text_x"] is not None:
+                chunk["prev_text_x"] += chunk["sign"] * text.get("glyph_w", 0.0)
+                last_ref = (chunk["prev_text_x"], chunk["prev_oy"])
             continue
         if text["is_ws"]:
             save_last_char(" ")

@@ -70,21 +70,21 @@ def _resource_dict_xrefs(pdf_doc, owner_xref: int, sub: str) -> dict[bytes, int]
 
 def _page_show_codes(
     pdf_doc, page_idx: int,
-) -> list[tuple[int | None, tuple[int, ...]]] | None:
-    """Every show op the page paints, in paint order, as ``(font_xref | None, charcode units)-- including text inside Form XObjects, spliced at their ``Do`` position with the XObject's own font redefinitions (span merger text-content extraction recurses the same way; PDFium's textpage flattens them inline). None when the page can't be read."""
+) -> list[tuple[int | None, tuple[int, ...], float]] | None:
+    """Every show op the page paints, in paint order, as ``(font_xref | None, charcode units, horizontal scale)-- including text inside Form XObjects, spliced at their ``Do`` position with the XObject's own font redefinitions (span merger text-content extraction recurses the same way; PDFium's textpage flattens them inline). The recursion runs on a CLONE of the live text state, so a form inherits both the active font and the horizontal scale; a Tz inside the form REPLACES it and never leaks back out. None when the page can't be read."""
     page_xref = pdf_doc.page_xref(page_idx)
 
     def walk(stream: bytes, fonts_res: dict[bytes, int],
-             xobjs_res: dict[bytes, int], cur_font: int | None,
+             xobjs_res: dict[bytes, int], cur_font: int | None, cur_tz: float,
              visited: frozenset, depth: int,
-             out: list[tuple[int | None, tuple[int, ...]]]) -> None:
+             out: list[tuple[int | None, tuple[int, ...], float]]) -> None:
         if depth > 8:
             return
-        flush_ids, fonts, show_text_units, horizontal_scales, xobject_paints = _tokenize_show_operators(stream)
+        flush_ids, fonts, show_text_units, horizontal_scales, xobject_paints = _tokenize_show_operators(stream, cur_tz)
         dict_index = 0
         for key_value in range(len(show_text_units) + 1):
             while dict_index < len(xobject_paints) and xobject_paints[dict_index][0] == key_value:
-                paint_position, xname, font_at_do = xobject_paints[dict_index]
+                paint_position, xname, font_at_do, tz_at_do = xobject_paints[dict_index]
                 dict_index += 1
                 xobject_ref = xobjs_res.get(xname)  # lexer names arrive #XX-parsed
                 if xobject_ref is None or xobject_ref in visited:
@@ -104,20 +104,20 @@ def _page_show_codes(
                     # as /Form has no stream; must not kill the whole page).
                     continue
                 walk(sub_stream, sub_fonts, sub_xobjs,
-                     inherited, visited | {xobject_ref}, depth + 1, out)
+                     inherited, tz_at_do, visited | {xobject_ref}, depth + 1, out)
             if key_value < len(show_text_units):
                 resource_font_name = fonts[key_value]
                 resource_font_index = (fonts_res.get(resource_font_name)
                       if resource_font_name is not None else cur_font)
-                out.append((resource_font_index, show_text_units[key_value]))
+                out.append((resource_font_index, show_text_units[key_value], horizontal_scales[key_value]))
 
     try:
-        out: list[tuple[int | None, tuple[int, ...]]] = []
+        out: list[tuple[int | None, tuple[int, ...], float]] = []
         walk(
             pdf_doc[page_idx].read_contents(),
             _resource_dict_xrefs(pdf_doc, page_xref, "Font"),
             _resource_dict_xrefs(pdf_doc, page_xref, "XObject"),
-            None, frozenset(), 0, out,
+            None, 1.0, frozenset(), 0, out,   # the initial text state starts at scale 1
         )
         return out
     except Exception:

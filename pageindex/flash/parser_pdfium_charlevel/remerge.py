@@ -216,7 +216,7 @@ def _remerge_oblique(items: list[dict], fin_chars: list[dict]) -> list[dict]:
 
 
 def _start_vert_span(chunk: dict) -> dict:
-    """Create a vertical item from its first chunk. Vertical items use the rendered font size as width, accumulate height per glyph, and keep the first glyph's pen as the item transform. The span box therefore extends upward from the first pen even when glyphs visually run downward; this follows the same item-box convention used by horizontal and oblique items rather than the ink AABB."""
+    """Create a vertical item from its first chunk. Vertical items use the rendered font size as width, accumulate height per glyph, and keep the first glyph's pen as the item transform. The item-to-span conversion reads the style's vertical flag and flips the sign of the height offset, so a vertical item's box runs DOWN from the pen where a horizontal one runs up. The span box reproduces that convention rather than the ink AABB."""
     span = dict(chunk)
     span["str"] = list(chunk["str"])
     span["font_tally"] = dict(chunk.get("font_tally", {}))
@@ -229,8 +229,8 @@ def _close_vert_span(mapping: dict) -> dict:
     """Finalize the item merger-convention box of a vertical item."""
     mapping["left"] = mapping["v_pen_x"]
     mapping["right"] = mapping["v_pen_x"] + mapping["fs"]
-    mapping["bottom"] = mapping["v_pen_y"]
-    mapping["top"] = mapping["v_pen_y"] + abs(mapping["v_height"])
+    mapping["top"] = mapping["v_pen_y"]
+    mapping["bottom"] = mapping["v_pen_y"] - abs(mapping["v_height"])
     return mapping
 
 
@@ -270,7 +270,9 @@ def _merge_vertical_one(group: list[dict]) -> list[dict]:
             spans.append({
                 "str": [" "], "sign": 1, "obj": meta["obj"],
                 "left": last_x, "right": last_x,            # WIDTH 0
-                "bottom": after, "top": after + abs(vertical_gap),
+                # A vertical style flips the height offset: the box runs DOWN
+                # from the previous pen, like _close_vert_span's.
+                "top": after, "bottom": after - abs(vertical_gap),
                 "fs": meta["fs"], "fs_min": meta["fs"],
                 "font_name": meta["font_name"], "font_key": meta["font_key"],
                 "weight": meta["weight"],

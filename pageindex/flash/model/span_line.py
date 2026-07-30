@@ -26,9 +26,13 @@ from .rects import (
 # --------------------------------------------------------------------------- #
 
 
-# Font-style detectors.
-_bold_font_re = re.compile(r"(bold|timesb)", re.IGNORECASE)
-_italic_font_re = re.compile(r"(ital|it$|i[1-9][0-9]*$|obliq)", re.IGNORECASE)
+# Font-style detectors. Neither pattern is multiline or Unicode-aware: the end
+# anchor binds at end of INPUT (Python's `$` would also match before a trailing
+# newline, hence `\Z`), and case folding stays ASCII-only, so U+017F, U+0130
+# and U+0131 do not fold onto "s"/"i". The digit classes are spelled out, so
+# the ASCII flag touches nothing else here.
+_bold_font_re = re.compile(r"(bold|timesb)", re.IGNORECASE | re.ASCII)
+_italic_font_re = re.compile(r"(ital|it\Z|i[1-9][0-9]*\Z|obliq)", re.IGNORECASE | re.ASCII)
 # Font-name canonicalization map.
 _font_name_aliases = {
     "timesnewroman":  "Times",

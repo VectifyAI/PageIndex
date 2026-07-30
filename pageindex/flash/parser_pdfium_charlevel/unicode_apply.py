@@ -19,7 +19,7 @@ def _apply_font_unicode(
     text_page,
     raw_chars: list[dict],
     objects: list[dict],
-    show_codes: list[tuple[int | None, tuple[int, ...]]],
+    show_codes: list[tuple[int | None, tuple[int, ...], float]],
     pdf_doc,
     map_cache: dict,
 ) -> None:
@@ -71,7 +71,7 @@ def _apply_font_unicode(
         failed_windows: list[list[int]] = []
         synth_sites: list[dict] = []
         targets_by_object_index: dict[int, list[str] | None] = {}
-        for object_index, (obj, (font_index, encoded_text)) in enumerate(zip(objects, show_codes)):
+        for object_index, (obj, (font_index, encoded_text, _tz)) in enumerate(zip(objects, show_codes)):
             target_text_items = targets_for(font_index, encoded_text)
             targets_by_object_index[object_index] = target_text_items
             if target_text_items is None:
@@ -296,7 +296,7 @@ def _apply_font_unicode(
         codepoint = pdfium_c.FPDFText_GetUnicode(text_page, char_index)
         seq.append((char_index, chr(codepoint) if codepoint > 0 else "\x00"))
     targets: list[str] = []
-    for font_index, encoded_text in show_codes:
+    for font_index, encoded_text, _tz in show_codes:
         if not encoded_text:
             continue
         text_state = targets_for(font_index, encoded_text)

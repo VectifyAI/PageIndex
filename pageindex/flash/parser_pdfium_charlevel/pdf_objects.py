@@ -164,8 +164,8 @@ class _PdfDoc:
             self._reader.stream.close()
         except Exception:
             pass
-_PDF_WHITESPACE_BYTES = bytes({0x20, 0x09, 0x0d, 0x0a, 0x0c, 0x00})
-_PDF_DELIMITER_BYTES = b"()<>[]{}/%"
+_PDF_WHITESPACE_BYTES = frozenset({0x20, 0x09, 0x0d, 0x0a, 0x0c, 0x00})
+_PDF_DELIMITER_BYTES = frozenset(b"()<>[]{}/%")
 
 
 _PDF_STRING_ESCAPE_BYTES = {0x6E: 0x0A, 0x72: 0x0D, 0x74: 0x09, 0x62: 0x08, 0x66: 0x0C,
