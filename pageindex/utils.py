@@ -640,7 +640,12 @@ async def generate_summaries_for_structure(structure, model=None):
     return structure
 
 
-def get_intro_text(node, pdf_pages, max_pages=3):
+SUMMARY_CONCURRENCY = 32        # simultaneous summary model calls
+SUMMARY_RAW_TEXT_TOKENS = 200   # leaves under this reuse their raw text as the summary
+SUMMARY_INTRO_MAX_PAGES = 3     # cap on leading pages fed into a parent summary
+
+
+def get_intro_text(node, pdf_pages, max_pages=SUMMARY_INTRO_MAX_PAGES):
     """Pages of the node covered by no child: from its start to just before the
     first child starts. Empty when the first child opens on the node's own page."""
     children = node.get('nodes') or []
@@ -651,14 +656,15 @@ def get_intro_text(node, pdf_pages, max_pages=3):
     return get_text_of_pdf_pages(pdf_pages, node['start_index'], end)
 
 
-async def summarize_tree(structure, pdf_pages, model=None, small_node_tokens=200,
-                         max_intro_pages=3, concurrency=32):
+async def summarize_tree(structure, pdf_pages, model=None,
+                         small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
+                         max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None):
     """Bottom-up summaries: leaves from their own pages, parents composed from
     child summaries plus the pages no child covers. A parent's summary describes
     its whole subtree (end_index union semantics). Nodes that already carry a
     summary are left untouched; leaves under `small_node_tokens` use their raw
     text as the summary without a model call."""
-    semaphore = asyncio.Semaphore(concurrency)
+    semaphore = asyncio.Semaphore(concurrency or SUMMARY_CONCURRENCY)
 
     async def ask(prompt):
         async with semaphore:
