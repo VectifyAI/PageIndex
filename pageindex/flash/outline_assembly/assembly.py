@@ -327,6 +327,19 @@ def outline_to_dict_tree(outline_node_list: list[OutlineNode], total_pages: int)
     if flat:
         flat[-1]["end_index"] = max(flat[-1]["start_index"], total_pages)
 
+    # Promote parent end_index to the subtree maximum: end_index covers the
+    # whole section, children included.  The leading segment stays derivable
+    # from the first child's start_index.
+    def _promote(nodes: list[dict]) -> int:
+        end = 0
+        for child in nodes:
+            if child["nodes"]:
+                child["end_index"] = max(child["end_index"], _promote(child["nodes"]))
+            end = max(end, child["end_index"])
+        return end
+
+    _promote(root)
+
     # Stable DFS pre-order node ids, zero-padded to 4 (PageIndex convention;
     # uses zero-padded depth-first ids). Drop the
     # transient appear_start marker now that end_index is settled.

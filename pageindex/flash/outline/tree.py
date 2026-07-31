@@ -92,6 +92,19 @@ def build_tree(headings: list[Block], levels: dict[int, int], page_lookup, total
     if flat:
         flat[-1]["end_index"] = max(flat[-1]["start_index"], total_pages)
 
+    # Promote parent end_index to the subtree maximum: end_index covers the
+    # whole section, children included.  The leading segment stays derivable
+    # from the first child's start_index.
+    def _promote(nodes: list[dict]) -> int:
+        end = 0
+        for child in nodes:
+            if child["nodes"]:
+                child["end_index"] = max(child["end_index"], _promote(child["nodes"]))
+            end = max(end, child["end_index"])
+        return end
+
+    _promote(root)
+
     # Drop empty children so the JSON matches the shape the rest of PageIndex emits.
     def _drop_empty_children(nodes: list[dict]) -> list[dict]:
         for count_item in nodes:

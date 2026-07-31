@@ -81,11 +81,36 @@ async def _summarize(structure, page_list, model):
     remove_structure_text(structure)
 
 
-def page_index_flash(pdf, summary=True, summary_model=None) -> dict:
-    """Build a PageIndex tree structure from a PDF using layout statistics, without an LLM. Args: pdf: path to a PDF file (``str`` or ``pathlib.Path``) or an in-memory binary stream (``io.BytesIO``). summary: if True, generate LLM summaries for each node (requires ``summary_model``). summary_model: the LLM model identifier to use for summary generation. Returns: dict with keys ``doc_name``, ``doc_title``, ``structure`` (a list of nested ``{"title", "start_index", "end_index", "nodes"}`` dicts; page indexes are 1-based) and ``has_abstract_or_references_section`` (True when a top-level entry is an abstract or references heading). """
+def _optimize(structure, page_texts, do_expand, model):
+    """Merge/expand refinement between extraction and summaries.
+
+    Supersedes ``_thin``: merge collapses everything thinning would, but keeps
+    the dropped titles as ``key_items``. Summaries run after, so they describe
+    the final tree. Expand reads the same page text the summaries use.
+    """
+    import asyncio
+    from ..tree_optimize import optimize
+    lines = [[line_text.strip() for line_text in (page_text or "").splitlines()
+              if line_text.strip()]
+             for page_text in page_texts]
+    outcome = asyncio.run(optimize(structure, page_texts, lines, model=model,
+                                   do_expand=do_expand,
+                                   page_count=len(page_texts)))
+    return {"merges": outcome["merges"], "expands": outcome["expands"],
+            "before": outcome["before"], "after": outcome["after"]}
+
+
+def page_index_flash(pdf, summary=True, summary_model=None,
+                     optimize=False, optimize_expand=True,
+                     optimize_model=None) -> dict:
+    """Build a PageIndex tree structure from a PDF using layout statistics, without an LLM. Args: pdf: path to a PDF file (``str`` or ``pathlib.Path``) or an in-memory binary stream (``io.BytesIO``). summary: if True, generate LLM summaries for each node (requires ``summary_model``). summary_model: the LLM model identifier to use for summary generation. optimize: if True, refine the tree for search cost (merge + expand) before summaries. optimize_expand: if False, optimization only merges - deterministic, no LLM calls. optimize_model: the LLM model for expand (defaults to the summary model). Returns: dict with keys ``doc_name``, ``doc_title``, ``structure`` (a list of nested ``{"title", "start_index", "end_index", "nodes"}`` dicts; page indexes are 1-based) and ``has_abstract_or_references_section`` (True when a top-level entry is an abstract or references heading). With ``optimize`` an ``optimize`` key reports merge/expand counts and before/after search-cost metrics. """
     result = extract_toc(_validate_pdf(pdf))
     structure = result.get("structure", [])
-    if structure:
+    if optimize and structure:
+        result["optimize"] = _optimize(structure, result.get("page_texts") or [],
+                                       optimize_expand,
+                                       optimize_model or summary_model)
+    elif structure:
         _thin(structure)
     if summary and structure:
         import asyncio
