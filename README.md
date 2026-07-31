@@ -205,24 +205,7 @@ python3 run_pageindex.py --md_path /path/to/your/document.md
 > python3 run_pageindex.py --flash --pdf_path /path/to/your/document.pdf
 > ```
 >
-> In Flash output, a node's `end_index` covers its whole section, subsections included; the pages between a parent's heading and its first child run from `start_index` to the first child's `start_index`.
-
-### Tree Optimization *(preview)*
-
-`--optimize` refines a Flash tree to minimize **worst-case search cost**: how many pages a search must read in the worst case, counting one page per routing step. Two operators run until the tree stops changing:
-
-- **merge** — collapses any subtree whose structure costs more to route through than its pages cost to read. Deterministic, no LLM. The removed titles are kept on the parent as `key_items`.
-- **expand** — splits a large section into the subsections actually printed on its pages, when routing into them is cheaper than scanning the section. Uses the summary model for one lookahead call per large section.
-
-```bash
-# merge + expand, then summaries
-python3 run_pageindex.py --flash --optimize --pdf_path /path/to/your/document.pdf
-
-# merge only: deterministic, no extra LLM calls
-python3 run_pageindex.py --flash --optimize-merge-only --pdf_path /path/to/your/document.pdf
-```
-
-The output gains an `optimize` key reporting merge/expand counts and before/after search-cost metrics. Node summaries are generated after optimization, so they always describe the final tree.
+> A node's `end_index` covers its whole section, subsections included. Add `--optimize` to refine the tree for search cost before summaries (`--optimize-merge-only` for the LLM-free variant).
 
 ## 🚀 Agentic Vectorless RAG: An Example
 
