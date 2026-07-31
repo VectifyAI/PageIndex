@@ -1,4 +1,3 @@
-import litellm
 import logging
 import os
 import textwrap
@@ -18,30 +17,59 @@ from pathlib import Path
 from types import SimpleNamespace as config
 import re
 
+# litellm is imported inside the functions that use it; eager import is slow
+# and fetches a remote model-cost map.
+
 # Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
 if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
     os.environ["OPENAI_API_KEY"] = os.getenv("CHATGPT_API_KEY")
 
-litellm.drop_params = True
-
 def count_tokens(text, model=None):
     if not text:
         return 0
+    import litellm
     return litellm.token_counter(model=model, text=text)
 
 
+def _is_openai_model(model):
+    """Models without a provider prefix (no '/') use the openai SDK directly.
+    For other providers, use 'provider/model' format (e.g. 'anthropic/claude-sonnet-4-6')."""
+    if not model or model.startswith('litellm/'):
+        return False
+    return '/' not in model or model.startswith('openai/')
+
+
+_openai_sync_client = None
+_openai_async_client = None
+
+
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
+    use_openai_sdk = _is_openai_model(model)
     if model:
         model = model.removeprefix("litellm/")
+        if use_openai_sdk:
+            model = model.removeprefix("openai/")
     max_retries = 10
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
     for i in range(max_retries):
         try:
-            response = litellm.completion(
-                model=model,
-                messages=messages,
-                temperature=0,
-            )
+            if use_openai_sdk:
+                global _openai_sync_client
+                if _openai_sync_client is None:
+                    import openai
+                    _openai_sync_client = openai.OpenAI(max_retries=0)
+                response = _openai_sync_client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                )
+            else:
+                import litellm
+                response = litellm.completion(
+                    model=model,
+                    messages=messages,
+                    temperature=0,
+                    drop_params=True,
+                )
             content = response.choices[0].message.content
             if return_finish_reason:
                 finish_reason = "max_output_reached" if response.choices[0].finish_reason == "length" else "finished"
@@ -59,19 +87,33 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
                 return ""
 
 
-
 async def llm_acompletion(model, prompt):
+    use_openai_sdk = _is_openai_model(model)
     if model:
         model = model.removeprefix("litellm/")
+        if use_openai_sdk:
+            model = model.removeprefix("openai/")
     max_retries = 10
     messages = [{"role": "user", "content": prompt}]
     for i in range(max_retries):
         try:
-            response = await litellm.acompletion(
-                model=model,
-                messages=messages,
-                temperature=0,
-            )
+            if use_openai_sdk:
+                global _openai_async_client
+                if _openai_async_client is None:
+                    import openai
+                    _openai_async_client = openai.AsyncOpenAI(max_retries=0)
+                response = await _openai_async_client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                )
+            else:
+                import litellm
+                response = await litellm.acompletion(
+                    model=model,
+                    messages=messages,
+                    temperature=0,
+                    drop_params=True,
+                )
             return response.choices[0].message.content
         except Exception as e:
             print('************* Retrying *************')
@@ -386,6 +428,7 @@ def add_preface_if_needed(data):
 
 
 def get_page_tokens(pdf_path, model=None, pdf_parser="PyPDF2"):
+    import litellm
     if pdf_parser == "PyPDF2":
         pdf_reader = PyPDF2.PdfReader(pdf_path)
         page_list = []
@@ -649,6 +692,39 @@ def format_structure(structure, order=None):
         structure = reorder_dict(structure, order)
     elif isinstance(structure, list):
         structure = [format_structure(item, order) for item in structure]
+    return structure
+
+
+def page_level_thinning(structure, thinning_threshold_node_num=20, min_pages_for_large_tree=3):
+    def count_nodes(nodes):
+        total = 0
+        for node in nodes:
+            total += 1
+            if node.get('nodes'):
+                total += count_nodes(node['nodes'])
+        return total
+
+    def get_subtree_end(node):
+        while node.get('nodes'):
+            node = node['nodes'][-1]
+        return node.get('end_index', 0)
+
+    def thin(nodes, total_nodes):
+        for node in nodes:
+            children = node.get('nodes')
+            if not children:
+                continue
+            end_index = get_subtree_end(node)
+            page_count = end_index - node.get('start_index', 0) + 1
+            if page_count == 1 or (total_nodes > thinning_threshold_node_num and page_count < min_pages_for_large_tree):
+                node['end_index'] = end_index
+                node.pop('nodes', None)
+            else:
+                thin(children, total_nodes)
+
+    nodes = structure if isinstance(structure, list) else [structure]
+    total = count_nodes(nodes)
+    thin(nodes, total)
     return structure
 
 

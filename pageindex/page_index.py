@@ -1246,20 +1246,21 @@ def page_index_main(doc, opt=None):
 
     async def page_index_builder():
         structure = await tree_parser(page_list, opt, doc=doc, logger=logger)
+        page_level_thinning(structure)
         if opt.if_add_node_id == 'yes':
-            write_node_id(structure)    
+            write_node_id(structure)
         if opt.if_add_node_text == 'yes':
             add_node_text(structure, page_list)
         if opt.if_add_node_summary == 'yes':
             if opt.if_add_node_text == 'no':
                 add_node_text(structure, page_list)
-            await generate_summaries_for_structure(structure, model=opt.model)
+            await generate_summaries_for_structure(structure, model=getattr(opt, 'summary_model', None) or opt.model)
             if opt.if_add_node_text == 'no':
                 remove_structure_text(structure)
             if opt.if_add_doc_description == 'yes':
                 # Create a clean structure without unnecessary fields for description generation
                 clean_structure = create_clean_structure_for_description(structure)
-                doc_description = generate_doc_description(clean_structure, model=opt.model)
+                doc_description = generate_doc_description(clean_structure, model=getattr(opt, 'summary_model', None) or opt.model)
                 structure = format_structure(structure, order=['title', 'node_id', 'start_index', 'end_index', 'summary', 'text', 'nodes'])
                 return {
                     'doc_name': get_pdf_name(doc),

@@ -85,6 +85,7 @@ The PageIndex service is available as a ChatGPT-style [chat platform](https://ch
 
 ### 🧪 Quick Hands-on
 
+- ⚡ [**PageIndex Flash**](pageindex/flash) *(preview)* — ultra fast PageIndex tree structure generation from PDFs.
 - 🔥 [**Agentic Vectorless RAG**](examples/agentic_vectorless_rag_demo.py) *(latest)* — a simple but complete **agentic vectorless RAG** [example](#-agentic-vectorless-rag-an-example) with *self-hosted* PageIndex, using OpenAI Agents SDK.
 - Try the [Vectorless RAG](https://github.com/VectifyAI/PageIndex/blob/main/cookbook/pageindex_RAG_simple.ipynb) notebook — a *minimal*, hands-on example of reasoning-based RAG using PageIndex.
 - Check out [Vision-based Vectorless RAG](https://github.com/VectifyAI/PageIndex/blob/main/cookbook/vision_RAG_pageindex.ipynb) — no OCR; a minimal, vision-based & reasoning-native RAG pipeline that works directly over page images.
@@ -196,6 +197,13 @@ python3 run_pageindex.py --md_path /path/to/your/document.md
 
 > Note: in this mode, we use "#" to determine node headings and their levels. For example, "##" is level 2, "###" is level 3, etc. Make sure your markdown file is formatted correctly. If your Markdown file was converted from a PDF or HTML, we don't recommend using this mode, since most existing conversion tools cannot preserve the original hierarchy. Instead, use our [PageIndex OCR](https://pageindex.ai/blog/ocr), which is designed to preserve it, to convert the PDF to a markdown file and then use this mode.
 </details>
+
+> ### ⚡ PageIndex Flash *(preview)*
+> **PageIndex Flash** ([`pageindex/flash`](pageindex/flash)) generates tree structures from PDFs in seconds. Structure extraction is purely heuristic-based, no LLM needed. LLM is only used to generate node summaries.
+>
+> ```bash
+> python3 run_pageindex.py --flash --pdf_path /path/to/your/document.pdf
+> ```
 
 ## 🚀 Agentic Vectorless RAG: An Example
 
