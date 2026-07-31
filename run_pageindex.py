@@ -11,6 +11,10 @@ if __name__ == "__main__":
     parser.add_argument('--pdf_path', type=str, help='Path to the PDF file')
     parser.add_argument('--md_path', type=str, help='Path to the Markdown file')
     parser.add_argument('--flash', action='store_true', help='Use PageIndex Flash (with --pdf_path)')
+    parser.add_argument('--optimize', action='store_true',
+                      help='Refine the tree for search cost: merge + LLM expand (PDF only)')
+    parser.add_argument('--optimize-merge-only', action='store_true',
+                      help='Refine the tree with merge only, no LLM calls (PDF only)')
 
     parser.add_argument('--model', type=str, default=None, help='Model to use (overrides config.yaml)')
 
@@ -44,6 +48,8 @@ if __name__ == "__main__":
         raise ValueError("Either --pdf_path or --md_path must be specified")
     if args.pdf_path and args.md_path:
         raise ValueError("Only one of --pdf_path or --md_path can be specified")
+    if (args.optimize or args.optimize_merge_only) and not (args.pdf_path and args.flash):
+        raise ValueError("--optimize / --optimize-merge-only require --flash with --pdf_path")
 
     if args.pdf_path:
         # Validate PDF file
@@ -54,7 +60,24 @@ if __name__ == "__main__":
             
         if args.flash:
             from pageindex.flash import page_index_flash
-            toc_with_page_number = page_index_flash(args.pdf_path)
+            if args.optimize:
+                from pageindex.tree_optimize import default_model
+                from pageindex.utils import _is_openai_model
+                expand_model = args.model or default_model()
+                if _is_openai_model(expand_model) and not os.getenv("OPENAI_API_KEY"):
+                    raise SystemExit(f"OPENAI_API_KEY is not set (expand model: {expand_model}).")
+            toc_with_page_number = page_index_flash(
+                args.pdf_path,
+                optimize=args.optimize or args.optimize_merge_only,
+                optimize_expand=args.optimize,
+                optimize_model=args.model,
+            )
+            if 'optimize' in toc_with_page_number:
+                o = toc_with_page_number['optimize']
+                print(f"Optimize: merges={o['merges']} expands={o['expands']}, "
+                      f"worst-case search cost "
+                      f"{o['before'].get('worst_case_search_complexity')} -> "
+                      f"{o['after'].get('worst_case_search_complexity')} pages")
         else:
             # Process PDF file
             user_opt = {
