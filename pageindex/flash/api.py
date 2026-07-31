@@ -75,10 +75,8 @@ def _thin(structure):
 
 
 async def _summarize(structure, page_list, model):
-    from ..utils import add_node_text, generate_summaries_for_structure, remove_structure_text
-    add_node_text(structure, page_list)
-    await generate_summaries_for_structure(structure, model=model)
-    remove_structure_text(structure)
+    from ..utils import summarize_tree
+    await summarize_tree(structure, page_list, model=model)
 
 
 def _optimize(structure, page_texts, do_expand, model):
