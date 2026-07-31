@@ -205,7 +205,7 @@ python3 run_pageindex.py --md_path /path/to/your/document.md
 > python3 run_pageindex.py --flash --pdf_path /path/to/your/document.pdf
 > ```
 >
-> A node's `end_index` covers its whole section, subsections included. Add `--optimize` to refine the tree for search cost before summaries (`--optimize-merge-only` for the LLM-free variant).
+> Add `--optimize` to refine the tree structure for more efficient retrieval (`--optimize-merge-only` for the no-LLM variant).
 
 ## 🚀 Agentic Vectorless RAG: An Example
 
