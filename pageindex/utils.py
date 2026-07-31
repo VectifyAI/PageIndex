@@ -634,9 +634,92 @@ async def generate_summaries_for_structure(structure, model=None):
     nodes = structure_to_list(structure)
     tasks = [generate_node_summary(node, model=model) for node in nodes]
     summaries = await asyncio.gather(*tasks)
-    
+
     for node, summary in zip(nodes, summaries):
         node['summary'] = summary
+    return structure
+
+
+def get_intro_text(node, pdf_pages, max_pages=3):
+    """Pages of the node covered by no child: from its start to just before the
+    first child starts. Empty when the first child opens on the node's own page."""
+    children = node.get('nodes') or []
+    first = children[0].get('start_index') if children else None
+    if not isinstance(first, int) or first <= node['start_index']:
+        return ""
+    end = min(first - 1, node['start_index'] + max_pages - 1)
+    return get_text_of_pdf_pages(pdf_pages, node['start_index'], end)
+
+
+async def summarize_tree(structure, pdf_pages, model=None, small_node_tokens=200,
+                         max_intro_pages=3, concurrency=32):
+    """Bottom-up summaries: leaves from their own pages, parents composed from
+    child summaries plus the pages no child covers. A parent's summary describes
+    its whole subtree (end_index union semantics). Nodes that already carry a
+    summary are left untouched; leaves under `small_node_tokens` use their raw
+    text as the summary without a model call."""
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def ask(prompt):
+        async with semaphore:
+            response = await llm_acompletion(model, prompt)
+        return (extract_json(response) or {}).get('summary') or ""
+
+    async def leaf_summary(node):
+        text = get_text_of_pdf_pages(pdf_pages, node['start_index'], node['end_index'])
+        if count_tokens(text, model="gpt-4o") < small_node_tokens:
+            return text.strip()
+        prompt = f"""You are given a text chunk from a document.
+    Your task is to generate a concise description of everything that is covered in the text, summarizing all its points without omitting any type of content.
+    Keep the description concise and to the point, avoiding unnecessary details.
+
+    Given Text: {text}
+
+    Reply strictly in the following JSON format:
+    {{
+        "points": <a list of points covered in the text>,
+        "summary": <a concise description of everything that is covered in the text, summarizing all its points without omitting any type of content>
+    }}
+
+    Follow strictly the above JSON return format. Do not include any other text!
+    """
+        return await ask(prompt)
+
+    async def parent_summary(node):
+        children = node['nodes']
+        intro = get_intro_text(node, pdf_pages, max_pages=max_intro_pages)
+        listing = json.dumps(
+            [{'title': c.get('title', ''), 'summary': c.get('summary', '')} for c in children],
+            ensure_ascii=False)
+        prompt = f"""You are given a section of a document: the text that opens the section (possibly empty) and the titles and summaries of its subsections.
+    Your task is to generate a concise description of everything that is covered in the whole section, summarizing all its points without omitting any type of content.
+    Keep the description concise and to the point, avoiding unnecessary details.
+
+    Section Title: {node.get('title', '')}
+
+    Opening Text: {intro}
+
+    Subsection Titles and Summaries: {listing}
+
+    Reply strictly in the following JSON format:
+    {{
+        "points": <a list of points covered in the section>,
+        "summary": <a concise description of everything that is covered in the section, summarizing all its points without omitting any type of content>
+    }}
+
+    Follow strictly the above JSON return format. Do not include any other text!
+    """
+        return await ask(prompt)
+
+    async def visit(node):
+        children = node.get('nodes') or []
+        if children:
+            await asyncio.gather(*(visit(child) for child in children))
+        if node.get('summary'):
+            return
+        node['summary'] = await (parent_summary(node) if children else leaf_summary(node))
+
+    await asyncio.gather(*(visit(root) for root in structure))
     return structure
 
 
