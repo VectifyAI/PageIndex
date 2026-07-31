@@ -74,9 +74,9 @@ def _thin(structure):
     write_node_id(structure)
 
 
-async def _summarize(structure, page_list, model):
+async def _summarize(structure, page_list, model, concurrency=32):
     from ..utils import summarize_tree
-    await summarize_tree(structure, page_list, model=model)
+    await summarize_tree(structure, page_list, model=model, concurrency=concurrency)
 
 
 def _optimize(structure, page_texts, do_expand, model):
@@ -100,8 +100,8 @@ def _optimize(structure, page_texts, do_expand, model):
 
 def page_index_flash(pdf, summary=True, summary_model=None,
                      optimize=False, optimize_expand=True,
-                     optimize_model=None) -> dict:
-    """Build a PageIndex tree structure from a PDF using layout statistics, without an LLM. Args: pdf: path to a PDF file (``str`` or ``pathlib.Path``) or an in-memory binary stream (``io.BytesIO``). summary: if True, generate LLM summaries for each node (requires ``summary_model``). summary_model: the LLM model identifier to use for summary generation. optimize: if True, refine the tree for search cost (merge + expand) before summaries. optimize_expand: if False, optimization only merges - deterministic, no LLM calls. optimize_model: the LLM model for expand (defaults to the summary model). Returns: dict with keys ``doc_name``, ``doc_title``, ``structure`` (a list of nested ``{"title", "start_index", "end_index", "nodes"}`` dicts; page indexes are 1-based) and ``has_abstract_or_references_section`` (True when a top-level entry is an abstract or references heading). With ``optimize`` an ``optimize`` key reports merge/expand counts and before/after search-cost metrics. """
+                     optimize_model=None, summary_concurrency=32) -> dict:
+    """Build a PageIndex tree structure from a PDF using layout statistics, without an LLM. Args: pdf: path to a PDF file (``str`` or ``pathlib.Path``) or an in-memory binary stream (``io.BytesIO``). summary: if True, generate LLM summaries for each node (requires ``summary_model``). summary_model: the LLM model identifier to use for summary generation. optimize: if True, refine the tree for search cost (merge + expand) before summaries. optimize_expand: if False, optimization only merges - deterministic, no LLM calls. optimize_model: the LLM model for expand (defaults to the summary model). summary_concurrency: maximum simultaneous summary model calls. Returns: dict with keys ``doc_name``, ``doc_title``, ``structure`` (a list of nested ``{"title", "start_index", "end_index", "nodes"}`` dicts; page indexes are 1-based) and ``has_abstract_or_references_section`` (True when a top-level entry is an abstract or references heading). With ``optimize`` an ``optimize`` key reports merge/expand counts and before/after search-cost metrics. """
     result = extract_toc(_validate_pdf(pdf))
     structure = result.get("structure", [])
     if optimize and structure:
@@ -118,7 +118,8 @@ def page_index_flash(pdf, summary=True, summary_model=None,
             summary_model = getattr(cfg, 'summary_model', None) or cfg.model
         page_texts = result.pop("page_texts", [])
         page_list = [(text, 0) for text in page_texts]
-        asyncio.run(_summarize(structure, page_list, summary_model))
+        asyncio.run(_summarize(structure, page_list, summary_model,
+                               concurrency=summary_concurrency))
     else:
         result.pop("page_texts", None)
     return result
