@@ -640,7 +640,7 @@ async def generate_summaries_for_structure(structure, model=None):
     return structure
 
 
-SUMMARY_CONCURRENCY = 32        # simultaneous summary model calls
+SUMMARY_CONCURRENCY = 64        # simultaneous summary model calls
 SUMMARY_RAW_TEXT_TOKENS = 200   # leaves under this reuse their raw text as the summary
 SUMMARY_INTRO_MAX_PAGES = 3     # cap on leading pages fed into a parent summary
 
