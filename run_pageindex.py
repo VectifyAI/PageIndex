@@ -11,12 +11,14 @@ if __name__ == "__main__":
     parser.add_argument('--pdf_path', type=str, help='Path to the PDF file')
     parser.add_argument('--md_path', type=str, help='Path to the Markdown file')
     parser.add_argument('--flash', action='store_true', help='Use PageIndex Flash (with --pdf_path)')
-    parser.add_argument('--optimize', action='store_true',
-                      help='Refine the tree for search cost: merge + LLM expand (PDF only)')
-    parser.add_argument('--optimize-merge-only', action='store_true',
-                      help='Refine the tree with merge only, no LLM calls (PDF only)')
+    parser.add_argument('--optimize', nargs='?', const='full', choices=['full', 'merge'],
+                      default=None,
+                      help='Refine the tree for search cost: merge + LLM expand; '
+                           'pass `merge` to skip the expansion pass (PDF only)')
 
     parser.add_argument('--model', type=str, default=None, help='Model to use (overrides config.yaml)')
+    parser.add_argument('--summary-model', type=str, default=None,
+                      help='Model for node summaries (defaults to --model, then config.yaml)')
 
     parser.add_argument('--toc-check-pages', type=int, default=None,
                       help='Number of pages to check for table of contents (PDF only)')
@@ -48,8 +50,8 @@ if __name__ == "__main__":
         raise ValueError("Either --pdf_path or --md_path must be specified")
     if args.pdf_path and args.md_path:
         raise ValueError("Only one of --pdf_path or --md_path can be specified")
-    if (args.optimize or args.optimize_merge_only) and not (args.pdf_path and args.flash):
-        raise ValueError("--optimize / --optimize-merge-only require --flash with --pdf_path")
+    if args.optimize and not (args.pdf_path and args.flash):
+        raise ValueError("--optimize requires --flash with --pdf_path")
 
     if args.pdf_path:
         # Validate PDF file
@@ -60,7 +62,7 @@ if __name__ == "__main__":
             
         if args.flash:
             from pageindex.flash import page_index_flash
-            if args.optimize:
+            if args.optimize == 'full':
                 from pageindex.tree_optimize import default_model
                 from pageindex.utils import _is_openai_model
                 expand_model = args.model or default_model()
@@ -68,9 +70,10 @@ if __name__ == "__main__":
                     raise SystemExit(f"OPENAI_API_KEY is not set (expand model: {expand_model}).")
             toc_with_page_number = page_index_flash(
                 args.pdf_path,
-                optimize=args.optimize or args.optimize_merge_only,
-                optimize_expand=args.optimize,
+                optimize=args.optimize is not None,
+                optimize_expand=args.optimize == 'full',
                 optimize_model=args.model,
+                summary_model=args.summary_model or args.model,
             )
             if 'optimize' in toc_with_page_number:
                 o = toc_with_page_number['optimize']
