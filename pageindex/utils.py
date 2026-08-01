@@ -656,6 +656,35 @@ def get_intro_text(node, pdf_pages, max_pages=SUMMARY_INTRO_MAX_PAGES):
     return get_text_of_pdf_pages(pdf_pages, node['start_index'], end)
 
 
+def parse_summary(reply):
+    """The `summary` field of a model reply, or the reply itself when there is no
+    such field. Not extract_json: that rewrites `None` to `null` and collapses
+    whitespace in replies that parse as written."""
+    if not isinstance(reply, str) or not reply.strip():
+        return ""
+    text = reply.strip()
+    if '```' in text:
+        text = re.sub(r'^.*?```(?:json)?\s*', '', text, flags=re.S).split('```')[0]
+    start, end = text.find('{'), text.rfind('}')
+    if start != -1 and end > start:
+        obj = text[start:end + 1]
+        collapsed = ' '.join(obj.split())
+        parsed = None
+        # repairs, tried only once the reply fails to parse as written
+        for candidate in (obj, collapsed, collapsed.replace(',]', ']').replace(',}', '}')):
+            try:
+                parsed = json.loads(candidate)
+                break
+            except json.JSONDecodeError:
+                continue
+        if isinstance(parsed, dict) and 'summary' in parsed:
+            summary = parsed['summary']
+            if isinstance(summary, list):
+                summary = ' '.join(str(item).strip() for item in summary if str(item).strip())
+            return str(summary).strip() if summary else ""
+    return reply.strip()
+
+
 async def summarize_tree(structure, pdf_pages, model=None,
                          small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
                          max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None):
@@ -669,7 +698,7 @@ async def summarize_tree(structure, pdf_pages, model=None,
     async def ask(prompt):
         async with semaphore:
             response = await llm_acompletion(model, prompt)
-        return (extract_json(response) or {}).get('summary') or ""
+        return parse_summary(response)
 
     async def leaf_summary(node):
         text = get_text_of_pdf_pages(pdf_pages, node['start_index'], node['end_index'])
