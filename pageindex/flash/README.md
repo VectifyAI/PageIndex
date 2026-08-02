@@ -1,8 +1,8 @@
 # PageIndex Flash
 
 Builds the PageIndex tree structure from a PDF using layout statistics without
-LLM. Augmenting the tree with summaries and refining it for retrieval needs an
-LLM.
+an LLM. Augmenting the tree with summaries and refining it for retrieval needs
+an LLM.
 
 ## Usage
 
@@ -11,13 +11,13 @@ LLM.
 ```python
 from pageindex.flash import page_index_flash
 
+tree = page_index_flash("paper.pdf")                  # structure + node summaries
 tree = page_index_flash("paper.pdf", summary=False)   # structure only
-tree = page_index_flash("paper.pdf")                  # + a summary per node
-tree = page_index_flash("paper.pdf", optimize=True)   # + retrieval refinement
+tree = page_index_flash("paper.pdf", optimize=True)   # also refine for retrieval
 ```
 
 Takes a file path or an `io.BytesIO` stream and returns the tree as a dict.
-Summaries are on by default and need an API key.
+Summaries are on by default and need an LLM API key.
 
 ### Command line
 
@@ -34,7 +34,6 @@ Writes the tree to `results/<name>_structure_flash.json`.
 {
     "doc_name": str,
     "doc_title": str,
-    "has_abstract_or_references_section": bool,
     "structure": [
         {
             "title": str,
