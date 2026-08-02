@@ -11,9 +11,9 @@ an LLM.
 ```python
 from pageindex.flash import page_index_flash
 
-tree = page_index_flash("paper.pdf")                  # structure + node summaries
-tree = page_index_flash("paper.pdf", summary=False)   # structure only
-tree = page_index_flash("paper.pdf", optimize=True)   # also refine for retrieval
+tree = page_index_flash("paper.pdf")                  # with node summaries
+tree = page_index_flash("paper.pdf", summary=False)   # tree structure only, no LLM
+tree = page_index_flash("paper.pdf", optimize=True)   # with node summaries + refined tree
 ```
 
 Takes a file path or an `io.BytesIO` stream and returns the tree as a dict.
@@ -40,8 +40,8 @@ Writes the tree to `results/<name>_structure_flash.json`.
             "node_id": str,       # 4-digit, zero-padded
             "start_index": int,   # 1-based, inclusive
             "end_index": int,
-            "summary": str,       # with summary
-            "key_items": [str],   # with optimize: titles merged away
+            "summary": str,
+            "key_items": [str],   # optimize only: titles of subsections merged away
             "nodes": [...],       # absent on leaves
         }
     ],
