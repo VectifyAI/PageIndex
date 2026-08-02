@@ -13,8 +13,8 @@ if __name__ == "__main__":
     parser.add_argument('--flash', action='store_true', help='Use PageIndex Flash (with --pdf_path)')
     parser.add_argument('--optimize', nargs='?', const='full', choices=['full', 'merge'],
                       default=None,
-                      help='Refine the tree for search cost: merge + LLM expand; '
-                           'pass `merge` to skip the expansion pass (PDF only)')
+                      help='Refine the tree for search cost: a deterministic merge, then an '
+                           'LLM expansion pass; pass `merge` to run the merge alone (PDF only)')
 
     parser.add_argument('--model', type=str, default=None, help='Model to use (overrides config.yaml)')
     parser.add_argument('--summary-model', type=str, default=None,

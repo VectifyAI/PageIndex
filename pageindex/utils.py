@@ -656,33 +656,71 @@ def get_intro_text(node, pdf_pages, max_pages=SUMMARY_INTRO_MAX_PAGES):
     return get_text_of_pdf_pages(pdf_pages, node['start_index'], end)
 
 
-def parse_summary(reply):
-    """The `summary` field of a model reply, or the reply itself when there is no
-    such field. Not extract_json: that rewrites `None` to `null` and collapses
-    whitespace in replies that parse as written."""
+def _reply_json(reply):
+    """The JSON object in a model reply, or None when none of it parses.
+
+    Not extract_json: that rewrites `None` to `null` and collapses whitespace in
+    replies that parse as written.
+    """
     if not isinstance(reply, str) or not reply.strip():
-        return ""
+        return None
     text = reply.strip()
     if '```' in text:
         text = re.sub(r'^.*?```(?:json)?\s*', '', text, flags=re.S).split('```')[0]
     start, end = text.find('{'), text.rfind('}')
-    if start != -1 and end > start:
-        obj = text[start:end + 1]
-        collapsed = ' '.join(obj.split())
-        parsed = None
-        # repairs, tried only once the reply fails to parse as written
-        for candidate in (obj, collapsed, collapsed.replace(',]', ']').replace(',}', '}')):
-            try:
-                parsed = json.loads(candidate)
-                break
-            except json.JSONDecodeError:
-                continue
-        if isinstance(parsed, dict) and 'summary' in parsed:
-            summary = parsed['summary']
-            if isinstance(summary, list):
-                summary = ' '.join(str(item).strip() for item in summary if str(item).strip())
-            return str(summary).strip() if summary else ""
+    if start == -1 or end <= start:
+        return None
+    obj = text[start:end + 1]
+    collapsed = ' '.join(obj.split())
+    # repairs, tried only once the reply fails to parse as written
+    for candidate in (obj, collapsed, collapsed.replace(',]', ']').replace(',}', '}')):
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def parse_summary(reply):
+    """The `summary` field of a model reply, or the reply itself when there is no
+    such field."""
+    if not isinstance(reply, str) or not reply.strip():
+        return ""
+    parsed = _reply_json(reply)
+    if isinstance(parsed, dict) and 'summary' in parsed:
+        summary = parsed['summary']
+        if isinstance(summary, list):
+            summary = ' '.join(str(item).strip() for item in summary if str(item).strip())
+        return str(summary).strip() if summary else ""
     return reply.strip()
+
+
+def parse_title(reply):
+    """The `title` field of a model reply, or "" when it is absent or unusable.
+
+    Unlike parse_summary there is no falling back to the raw reply: a title that
+    did not come back as a named field is not a title, and the caller keeps the
+    deterministic one it already has.
+    """
+    parsed = _reply_json(reply)
+    if not isinstance(parsed, dict):
+        return ""
+    title = parsed.get('title')
+    if isinstance(title, list):
+        title = ' '.join(str(item).strip() for item in title if str(item).strip())
+    return ' '.join(str(title).split()) if title else ""
+
+
+def strip_internal_keys(structure):
+    """Drop the bookkeeping keys the optimize/summary passes leave behind."""
+    nodes = structure if isinstance(structure, list) else [structure]
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        node.pop('_same_page', None)
+        if node.get('nodes'):
+            strip_internal_keys(node['nodes'])
+    return structure
 
 
 async def summarize_tree(structure, pdf_pages, model=None,
@@ -697,28 +735,45 @@ async def summarize_tree(structure, pdf_pages, model=None,
 
     async def ask(prompt):
         async with semaphore:
-            response = await llm_acompletion(model, prompt)
-        return parse_summary(response)
+            return await llm_acompletion(model, prompt)
 
     async def leaf_summary(node):
         text = get_text_of_pdf_pages(pdf_pages, node['start_index'], node['end_index'])
         if count_tokens(text, model="gpt-4o") < small_node_tokens:
             return text.strip()
+
+        # A node merged from same-page siblings carries a title joined from theirs.
+        # This call already has the page text in front of it, so the better title
+        # costs no extra call; every other node keeps the heading the document
+        # printed, and its prompt stays byte-identical to the one without this.
+        retitle = bool(node.get('_same_page'))
+        titles = "; ".join(node.get('key_items') or [])
+        ask_title = (f"\n    The text is one page holding several short sections: {titles}. "
+                     f"Also return a short title, at most 12 words, naming what the "
+                     f"whole page covers." if retitle else "")
+        title_field = ('\n        "title": <a short title naming what the whole page covers>,'
+                       if retitle else "")
+
         prompt = f"""You are given a text chunk from a document.
     Your task is to generate a concise description of everything that is covered in the text, summarizing all its points without omitting any type of content.
-    Keep the description concise and to the point, avoiding unnecessary details.
+    Keep the description concise and to the point, avoiding unnecessary details.{ask_title}
 
     Given Text: {text}
 
     Reply strictly in the following JSON format:
-    {{
+    {{{title_field}
         "points": <a list of points covered in the text>,
         "summary": <a concise description of everything that is covered in the text, summarizing all its points without omitting any type of content>
     }}
 
     Follow strictly the above JSON return format. Do not include any other text!
     """
-        return await ask(prompt)
+        reply = await ask(prompt)
+        if retitle:
+            written = parse_title(reply)
+            if written:
+                node['title'] = written
+        return parse_summary(reply)
 
     async def parent_summary(node):
         children = node['nodes']
@@ -744,7 +799,7 @@ async def summarize_tree(structure, pdf_pages, model=None,
 
     Follow strictly the above JSON return format. Do not include any other text!
     """
-        return await ask(prompt)
+        return parse_summary(await ask(prompt))
 
     async def visit(node):
         children = node.get('nodes') or []
@@ -755,6 +810,7 @@ async def summarize_tree(structure, pdf_pages, model=None,
         node['summary'] = await (parent_summary(node) if children else leaf_summary(node))
 
     await asyncio.gather(*(visit(root) for root in structure))
+    strip_internal_keys(structure)
     return structure
 
 
@@ -814,6 +870,7 @@ def format_structure(structure, order=None):
 
 
 def page_level_thinning(structure, thinning_threshold_node_num=20, min_pages_for_large_tree=3):
+    """Legacy; superseded by tree_optimize.merge_tree."""
     def count_nodes(nodes):
         total = 0
         for node in nodes:

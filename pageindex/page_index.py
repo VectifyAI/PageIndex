@@ -5,6 +5,7 @@ import math
 import random
 import re
 from .utils import *
+from .tree_optimize import merge_tree
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -1246,7 +1247,7 @@ def page_index_main(doc, opt=None):
 
     async def page_index_builder():
         structure = await tree_parser(page_list, opt, doc=doc, logger=logger)
-        page_level_thinning(structure)
+        merge_tree(structure)
         if opt.if_add_node_id == 'yes':
             write_node_id(structure)
         if opt.if_add_node_text == 'yes':
@@ -1261,13 +1262,13 @@ def page_index_main(doc, opt=None):
                 # Create a clean structure without unnecessary fields for description generation
                 clean_structure = create_clean_structure_for_description(structure)
                 doc_description = generate_doc_description(clean_structure, model=getattr(opt, 'summary_model', None) or opt.model)
-                structure = format_structure(structure, order=['title', 'node_id', 'start_index', 'end_index', 'summary', 'text', 'nodes'])
+                structure = format_structure(structure, order=['title', 'node_id', 'start_index', 'end_index', 'key_items', 'summary', 'text', 'nodes'])
                 return {
                     'doc_name': get_pdf_name(doc),
                     'doc_description': doc_description,
                     'structure': structure,
                 }
-        structure = format_structure(structure, order=['title', 'node_id', 'start_index', 'end_index', 'summary', 'text', 'nodes'])
+        structure = format_structure(structure, order=['title', 'node_id', 'start_index', 'end_index', 'key_items', 'summary', 'text', 'nodes'])
         return {
             'doc_name': get_pdf_name(doc),
             'structure': structure,

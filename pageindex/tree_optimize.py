@@ -36,6 +36,13 @@ When a subtree is merged away, the removed titles are kept on the parent as
 `key_items`: the pages stay reachable by scanning the parent, but the titles
 are routing information that would otherwise be lost.
 
+merge_same_page() runs first, as a special case of the same idea. Retrieval is
+page-granular, so frontier siblings covering identical pages cannot be told apart:
+an agent routed to any of them reads the same text, and because the leaf summary
+prompt sees only that text, their summaries come back near-identical. They collapse
+into one node titled with the union of theirs, which a leaf summary call rewrites
+when the node is large enough to earn one.
+
 merge is deterministic and needs no LLM; expand proposes subsections with the
 model configured as `summary_model` (falling back to `model`) in config.yaml.
 
@@ -54,11 +61,13 @@ import re
 import sys
 from types import SimpleNamespace
 
-from .utils import ConfigLoader, _is_openai_model, llm_acompletion
+from .utils import (ConfigLoader, _is_openai_model, llm_acompletion,
+                    strip_internal_keys)
 
 TRIGGER_PAGES = 5        # only look ahead on nodes larger than this
 ROUTING_COST = 1         # R(v), in pages
 PAGE_CHARS = 6000        # per-page text handed to the model
+TITLE_MAX_CHARS = 200    # a union title longer than this falls back to a page label
 
 EXPAND_PROMPT = """You are splitting an over-long section of a PDF into its subsections.
 
@@ -456,6 +465,70 @@ def validate(structure, page_count):
 # MERGE
 # --------------------------------------------------------------------------
 
+def page_label(node):
+    """A node's page span, for use as a title of last resort."""
+    start, end = node["start_index"], subtree_end(node)
+    return f"p.{start}" if start == end else f"p.{start}-{end}"
+
+
+def union_title(titles, node):
+    """The titles of merged same-page siblings, joined.
+
+    Falls back to a page label when the join is empty or too long to serve as a
+    title - PRML, for instance, extracts whole exercise bodies as headings, and
+    two of those joined run past a thousand characters. Titles reach the model
+    (the parent summary prompt lists them, and they survive `format_structure`),
+    so this is the field that has to stay readable; `key_items` keeps the
+    untruncated original.
+    """
+    joined = "; ".join(title for title in titles if title)
+    if not joined or len(joined) > TITLE_MAX_CHARS:
+        return page_label(node)
+    return joined
+
+
+def merge_same_page(structure, log):
+    """Collapse frontier siblings that cover exactly the same pages.
+
+    Deterministic and free. Runs before merge() because a narrower tree changes
+    its ancestors' tree_cost, and before expand() because children an expand pass
+    lands on one page are the same redundancy arriving later.
+    """
+    changed = False
+
+    def visit(nodes):
+        nonlocal changed
+        groups = {}
+        for node in nodes:
+            visit(node.get("nodes") or [])
+            if is_frontier(node):
+                groups.setdefault((node["start_index"], subtree_end(node)), []).append(node)
+
+        for span, group in groups.items():
+            if len(group) < 2:
+                continue
+            keeper, dropped = group[0], group[1:]
+            titles = []
+            for node in group:                 # document order, key_items carried forward
+                titles.append(node["title"])
+                titles.extend(node.get("key_items") or [])
+            log.append({"op": "merge_same_page", "node_id": keeper.get("node_id"),
+                        "pages": list(span), "dropped": len(dropped),
+                        "dropped_ids": [n.get("node_id") for n in dropped],
+                        "key_items": titles})
+            keeper["key_items"] = titles
+            keeper["title"] = union_title(titles, keeper)
+            # tells summarize_tree this title was synthesized and may be rewritten;
+            # stripped from the output once summaries are done
+            keeper["_same_page"] = True
+            for node in dropped:
+                nodes.remove(node)
+            changed = True
+
+    visit(structure)
+    return changed
+
+
 def merge(structure, routing, log, frozen, progress=False):
     """Collapse any subtree whose structure does not beat a linear scan.
 
@@ -477,7 +550,8 @@ def merge(structure, routing, log, frozen, progress=False):
         checked = tree_cost_via_frontier(node, routing)
         span = S(node)
         if span <= cost:
-            removed = [c["node_id"] for c, _ in flatten(node["nodes"])]
+            # trees arrive here before ids are assigned in the main pipeline
+            removed = [c.get("node_id") for c, _ in flatten(node["nodes"])]
             # titles are routing information; keep them on the parent, in document
             # order, carrying forward anything an earlier merge already folded in
             titles = []
@@ -496,12 +570,22 @@ def merge(structure, routing, log, frozen, progress=False):
                 node["key_items"] = titles
             frozen.add(node.get("node_id"))
             changed = True
-            note(progress, f"    merge  {node.get('node_id'):>8}  "
+            note(progress, f"    merge  {node.get('node_id') or '-':>8}  "
                            f"S={span} <= tree_cost={cost}  dropped {len(removed)} node(s)")
 
     for root in list(structure):
         visit(root)
     return changed
+
+
+def merge_tree(structure):
+    """Deterministic merge over a structure list; the no-LLM default path.
+
+    One bottom-up pass reaches the fixpoint: every decision is made after the
+    subtree below it is final.
+    """
+    merge(structure, ROUTING_COST, [], set())
+    return structure
 
 
 # --------------------------------------------------------------------------
@@ -689,11 +773,13 @@ async def optimize(structure, pages, lines, model=None, routing=ROUTING_COST,
     for round_no in range(1, max_rounds + 1):
         rounds = round_no
         note(progress, f"  round {round_no}")
+        same_page = merge_same_page(structure, log) if do_merge else False
         merged = merge(structure, routing, log, frozen, progress) if do_merge else False
         expanded = await expand(structure, pages, lines, opts, log, frozen) \
             if do_expand else False
-        log.append({"op": "round", "round": round_no, "merged": merged, "expanded": expanded})
-        if not (merged or expanded):
+        log.append({"op": "round", "round": round_no, "same_page": same_page,
+                    "merged": merged, "expanded": expanded})
+        if not (same_page or merged or expanded):
             break
 
     id_map = relabel(structure) if do_relabel else {}
@@ -703,6 +789,9 @@ async def optimize(structure, pages, lines, model=None, routing=ROUTING_COST,
     return {"structure": structure, "log": log, "rounds": rounds,
             "before": before, "after": after, "id_map": id_map,
             "merges": sum(1 for e in log if e["op"] == "merge"),
+            "same_page_merges": sum(1 for e in log if e["op"] == "merge_same_page"),
+            "same_page_dropped": sum(e["dropped"] for e in log
+                                     if e["op"] == "merge_same_page"),
             "expands": sum(1 for e in log if e.get("decision") == "expand"),
             "kept_collapsed": sum(1 for e in log if e.get("decision") == "keep_collapsed"),
             "new_issues": issues}
@@ -728,6 +817,7 @@ def optimize_tree(doc, pdf_path=None, model=None, do_expand=None, **kwargs):
     result = asyncio.run(optimize(structure, pages, lines, model=model,
                                   page_count=page_count, do_expand=do_expand,
                                   **kwargs))
+    strip_internal_keys(result["structure"])
     doc["structure"] = result["structure"]
     return result
 
@@ -835,6 +925,7 @@ async def main():
     if result["new_issues"]:
         print(f"\nnew validation issues: {result['new_issues']}")
 
+    strip_internal_keys(structure)
     refined = dict(original)
     refined["structure"] = structure
     json.dump(refined, open(out_path, "w"), indent=2, ensure_ascii=False)

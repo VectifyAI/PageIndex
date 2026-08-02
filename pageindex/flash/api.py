@@ -68,12 +68,6 @@ def _validate_pdf(pdf):
     return pdf
 
 
-def _thin(structure):
-    from ..utils import page_level_thinning, write_node_id
-    page_level_thinning(structure)
-    write_node_id(structure)
-
-
 async def _summarize(structure, page_list, model, concurrency=None):
     from ..utils import summarize_tree
     await summarize_tree(structure, page_list, model=model, concurrency=concurrency)
@@ -82,9 +76,9 @@ async def _summarize(structure, page_list, model, concurrency=None):
 def _optimize(structure, page_texts, do_expand, model):
     """Merge/expand refinement between extraction and summaries.
 
-    Supersedes ``_thin``: merge collapses everything thinning would, but keeps
-    the dropped titles as ``key_items``. Summaries run after, so they describe
-    the final tree. Expand reads the same page text the summaries use.
+    Beyond the merge the default path runs anyway, this adds LLM expand and
+    reports before/after search-cost metrics. Summaries run after, so they
+    describe the final tree. Expand reads the same page text the summaries use.
     """
     import asyncio
     from ..tree_optimize import optimize
@@ -95,21 +89,22 @@ def _optimize(structure, page_texts, do_expand, model):
                                    do_expand=do_expand,
                                    page_count=len(page_texts)))
     return {"merges": outcome["merges"], "expands": outcome["expands"],
+            "same_page_merges": outcome["same_page_merges"],
+            "same_page_dropped": outcome["same_page_dropped"],
+            "kept_collapsed": outcome["kept_collapsed"],
             "before": outcome["before"], "after": outcome["after"]}
 
 
 def page_index_flash(pdf, summary=True, summary_model=None,
                      optimize=False, optimize_expand=True,
                      optimize_model=None, summary_concurrency=None) -> dict:
-    """Build a PageIndex tree structure from a PDF using layout statistics, without an LLM. Args: pdf: path to a PDF file (``str`` or ``pathlib.Path``) or an in-memory binary stream (``io.BytesIO``). summary: if True, generate LLM summaries for each node (requires ``summary_model``). summary_model: the LLM model identifier to use for summary generation. optimize: if True, refine the tree for search cost (merge + expand) before summaries. optimize_expand: if False, optimization only performs deterministic merge; summary generation is unchanged. optimize_model: the LLM model for expand (defaults to the summary model). summary_concurrency: maximum simultaneous summary model calls; None uses the library default. Returns: dict with keys ``doc_name``, ``doc_title``, ``structure`` (a list of nested ``{"title", "start_index", "end_index", "nodes"}`` dicts; page indexes are 1-based) and ``has_abstract_or_references_section`` (True when a top-level entry is an abstract or references heading). With ``optimize`` an ``optimize`` key reports merge/expand counts and before/after search-cost metrics. """
+    """Build a PageIndex tree structure from a PDF using layout statistics, without an LLM. Args: pdf: path to a PDF file (``str`` or ``pathlib.Path``) or an in-memory binary stream (``io.BytesIO``). summary: if True, generate LLM summaries for each node (requires ``summary_model``). summary_model: the LLM model identifier to use for summary generation. optimize: if True, refine the tree for search cost before summaries: a deterministic merge collapses subtrees whose structure does not beat a linear scan, keeping the removed titles on the parent as ``key_items``, then an LLM pass expands oversized sections. Without it the extracted tree is returned unchanged. optimize_expand: if False, run the merge but skip the LLM expansion. optimize_model: the LLM model for expand (defaults to the summary model). summary_concurrency: maximum simultaneous summary model calls; None uses the library default. Returns: dict with keys ``doc_name``, ``doc_title``, ``structure`` (a list of nested ``{"title", "start_index", "end_index", "nodes"}`` dicts; page indexes are 1-based) and ``has_abstract_or_references_section`` (True when a top-level entry is an abstract or references heading). With ``optimize`` an ``optimize`` key reports merge/expand counts and before/after search-cost metrics. """
     result = extract_toc(_validate_pdf(pdf))
     structure = result.get("structure", [])
     if optimize and structure:
         result["optimize"] = _optimize(structure, result.get("page_texts") or [],
                                        optimize_expand,
                                        optimize_model or summary_model)
-    elif structure:
-        _thin(structure)
     if summary and structure:
         import asyncio
         from ..utils import ConfigLoader
@@ -122,6 +117,9 @@ def page_index_flash(pdf, summary=True, summary_model=None,
                                concurrency=summary_concurrency))
     else:
         result.pop("page_texts", None)
+        if structure:
+            from ..utils import strip_internal_keys
+            strip_internal_keys(structure)   # summarize_tree does this on its way out
     return result
 
 
