@@ -61,8 +61,8 @@ import re
 import sys
 from types import SimpleNamespace
 
-from .utils import (ConfigLoader, _is_openai_model, llm_acompletion,
-                    strip_internal_keys)
+from .utils import (ConfigLoader, _is_openai_model, _is_unrecoverable,
+                    llm_acompletion, strip_internal_keys)
 
 TRIGGER_PAGES = 5        # only look ahead on nodes larger than this
 ROUTING_COST = 1         # R(v), in pages
@@ -679,6 +679,8 @@ async def expand(structure, pages, lines, args, log, frozen):
             try:
                 proposed = await propose_children(node, pages, args)
             except Exception as exc:
+                if _is_unrecoverable(exc):
+                    raise  # every remaining node would fail identically
                 log.append({"op": "expand", "node_id": node.get("node_id"),
                             "decision": "error", "attempt": attempts,
                             "detail": f"{type(exc).__name__}: {exc}"})

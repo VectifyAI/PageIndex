@@ -43,6 +43,17 @@ _openai_sync_client = None
 _openai_async_client = None
 
 
+# Misconfiguration: no retry can fix a rejected key or a model that does not
+# exist, and every later call fails the same way. Deliberately not 400, which
+# also carries context_length_exceeded, a per-prompt failure the caller absorbs
+# today. An unknown status is a transport failure and stays retryable.
+_UNRECOVERABLE_STATUS = frozenset({401, 403, 404})
+
+
+def _is_unrecoverable(exc: Exception) -> bool:
+    return getattr(exc, "status_code", None) in _UNRECOVERABLE_STATUS
+
+
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
     use_openai_sdk = _is_openai_model(model)
     if model:
@@ -76,6 +87,8 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
                 return content, finish_reason
             return content
         except Exception as e:
+            if _is_unrecoverable(e):
+                raise
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
@@ -116,6 +129,8 @@ async def llm_acompletion(model, prompt):
                 )
             return response.choices[0].message.content
         except Exception as e:
+            if _is_unrecoverable(e):
+                raise
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
