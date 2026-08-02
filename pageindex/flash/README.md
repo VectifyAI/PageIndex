@@ -30,14 +30,15 @@ missing, non-PDF, encrypted, empty, or unreadable file.
             "node_id": str,       # 4-digit, zero-padded
             "start_index": int,
             "end_index": int,
-            "key_items": [str],   # titles of merged-away subsections; absent when none
+            "key_items": [str],   # with --optimize: titles of merged-away subsections
             "nodes": [...],       # absent on leaf nodes
         }
     ],
 }
 ```
 
-Page indexes are 1-based. `nodes` nests the same shape recursively.
+Page indexes are 1-based. `nodes` nests the same shape recursively. Without
+`--optimize` the extracted tree is returned as-is.
 
 ## Benchmark
 
