@@ -11,9 +11,7 @@ an LLM.
 ```python
 from pageindex.flash import page_index_flash
 
-tree = page_index_flash("paper.pdf")                  # with node summaries
-tree = page_index_flash("paper.pdf", summary=False)   # tree structure only, no LLM
-tree = page_index_flash("paper.pdf", optimize=True)   # with node summaries + refined tree
+tree = page_index_flash("paper.pdf")
 ```
 
 Takes a file path or an `io.BytesIO` stream and returns the tree as a dict.
@@ -23,7 +21,7 @@ Summaries are on by default and need an LLM API key.
 
 ```bash
 python3 run_pageindex.py --pdf_path document.pdf --flash
-python3 run_pageindex.py --pdf_path document.pdf --flash --optimize
+python3 run_pageindex.py --pdf_path document.pdf --flash --optimize  # refined tree for retrieval
 ```
 
 Writes the tree to `results/<name>_structure_flash.json`.
@@ -42,7 +40,7 @@ Writes the tree to `results/<name>_structure_flash.json`.
             "end_index": int,
             "summary": str,
             "key_items": [str],   # optimize only: titles of subsections merged away
-            "nodes": [...],       # absent on leaves
+            "nodes": [...],
         }
     ],
 }
@@ -66,6 +64,3 @@ outline, merge, LLM expand, then a summary for every node.
 | 9/11 Commission Report | 585 | 720,624 | 200,202 |
 | Pattern Recognition and Machine Learning | 758 | 857,983 | 277,675 |
 | Machine Learning: A Probabilistic Perspective | 1,098 | 1,587,265 | 646,958 |
-| **Total** | **2,985** | **3,751,599** | **1,392,588** |
-
-Measured with `gpt-5.6-luna`.
