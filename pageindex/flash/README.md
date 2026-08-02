@@ -53,7 +53,7 @@ Writes the tree to `results/<name>_structure_flash.json`.
 Nine PDFs, each run end to end with tree optimization: PDF parse, layout
 outline, merge, LLM expand, then a summary for every node.
 
-![Time against document length](assets/time_vs_pages.png)
+<img src="assets/time_vs_pages.png" alt="Time against document length" width="70%">
 
 | Document | Pages | Input tokens | Output tokens |
 |---|---:|---:|---:|
