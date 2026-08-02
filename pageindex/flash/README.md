@@ -1,22 +1,32 @@
 # PageIndex Flash
 
-Builds a PageIndex tree structure from a PDF using layout statistics alone.
-No LLM, no API key, no OCR, no network. Runs in seconds, fully offline.
+Builds the PageIndex tree structure from a PDF using layout statistics without
+an LLM. Augmenting the tree with summaries and refining it for retrieval needs
+an LLM.
 
 ## Usage
+
+### Python
 
 ```python
 from pageindex.flash import page_index_flash
 
-tree = page_index_flash("paper.pdf")
+tree = page_index_flash("paper.pdf")                  # with node summaries
+tree = page_index_flash("paper.pdf", summary=False)   # tree structure only, no LLM
+tree = page_index_flash("paper.pdf", optimize=True)   # with node summaries + refined tree
 ```
+
+Takes a file path or an `io.BytesIO` stream and returns the tree as a dict.
+Summaries are on by default and need an LLM API key.
+
+### Command line
 
 ```bash
 python3 run_pageindex.py --pdf_path document.pdf --flash
+python3 run_pageindex.py --pdf_path document.pdf --flash --optimize
 ```
 
-Accepts a path (`str` or `pathlib.Path`) or an `io.BytesIO` stream. Raises on a
-missing, non-PDF, encrypted, empty, or unreadable file.
+Writes the tree to `results/<name>_structure_flash.json`.
 
 ## Output
 
@@ -28,32 +38,22 @@ missing, non-PDF, encrypted, empty, or unreadable file.
         {
             "title": str,
             "node_id": str,       # 4-digit, zero-padded
-            "start_index": int,
+            "start_index": int,   # 1-based, inclusive
             "end_index": int,
-            "key_items": [str],   # with --optimize: titles of merged-away subsections
-            "nodes": [...],       # absent on leaf nodes
+            "summary": str,
+            "key_items": [str],   # optimize only: titles of subsections merged away
+            "nodes": [...],       # absent on leaves
         }
     ],
 }
 ```
-
-Page indexes are 1-based. `nodes` nests the same shape recursively. Without
-`--optimize` the extracted tree is returned as-is.
 
 ## Benchmark
 
 Nine PDFs, each run end to end with tree optimization: PDF parse, layout
 outline, merge, LLM expand, then a summary for every node.
 
-![Time against document length](assets/time_vs_pages.png)
-
-![Cost against document length](assets/cost_vs_pages.png)
-
-Both scale close to linearly with length, at 218 s and $0.85 per 1,000 pages.
-Two qualifiers. Cost follows node count a little more closely than page count,
-$0.0007 to $0.0016 per node, so a densely structured document costs more than
-its length suggests. And wall clock flattens past roughly 700 pages, where
-summary concurrency rather than length becomes the limit.
+<img src="assets/time_vs_pages.png" alt="Time against document length" width="50%">
 
 | Document | Pages | Input tokens | Output tokens |
 |---|---:|---:|---:|
@@ -68,16 +68,4 @@ summary concurrency rather than length becomes the limit.
 | Machine Learning: A Probabilistic Perspective | 1,098 | 1,587,265 | 646,958 |
 | **Total** | **2,985** | **3,751,599** | **1,392,588** |
 
-Measured with `gpt-5.6-luna` at $0.20 / $1.20 per million input / output tokens,
-priced cold with no prompt-cache discount.
-
-## Limits
-
-- Scanned PDFs without embedded text are not supported.
-- Encrypted PDFs need preprocessing first.
-- Headings drawn as vector paths, or very decorative layouts, can be missed.
-- Titles are taken from the document text as-is.
-
-## Dependencies
-
-`pypdfium2`, `PyPDF2`, `regex`, `sortedcontainers`.
+Measured with `gpt-5.6-luna`.
