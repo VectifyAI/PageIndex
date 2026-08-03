@@ -31,6 +31,7 @@ async def generate_summaries_for_structure_md(structure, summary_token_threshold
 
 def extract_nodes_from_markdown(markdown_content):
     header_pattern = r'^(#{1,6})\s+(.+)$'
+    bold_heading_pattern = r'^\*\*(.+?)\*\*\s*$'
     code_block_pattern = r'^```'
     node_list = []
     
@@ -54,7 +55,15 @@ def extract_nodes_from_markdown(markdown_content):
             match = re.match(header_pattern, stripped_line)
             if match:
                 title = match.group(2).strip()
-                node_list.append({'node_title': title, 'line_num': line_num})
+                level = len(match.group(1))
+                node_list.append({'node_title': title, 'line_num': line_num, 'level': level})
+                continue
+
+            bold_match = re.match(bold_heading_pattern, stripped_line)
+            if bold_match:
+                title = bold_match.group(1).strip()
+                if title:
+                    node_list.append({'node_title': title, 'line_num': line_num, 'level': 1})
 
     return node_list, lines
 
@@ -62,17 +71,10 @@ def extract_nodes_from_markdown(markdown_content):
 def extract_node_text_content(node_list, markdown_lines):    
     all_nodes = []
     for node in node_list:
-        line_content = markdown_lines[node['line_num'] - 1]
-        header_match = re.match(r'^(#{1,6})', line_content)
-        
-        if header_match is None:
-            print(f"Warning: Line {node['line_num']} does not contain a valid header: '{line_content}'")
-            continue
-            
         processed_node = {
             'title': node['node_title'],
             'line_num': node['line_num'],
-            'level': len(header_match.group(1))
+            'level': node['level']
         }
         all_nodes.append(processed_node)
     
