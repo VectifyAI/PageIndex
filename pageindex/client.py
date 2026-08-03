@@ -22,7 +22,7 @@ from .utils import (
     remove_fields,
     hash_text,
     compute_section_hashes,
-    find_ancestors,
+    walk_with_paths,
     write_node_id,
     format_structure,
 )
@@ -132,7 +132,30 @@ class PageIndexClient:
             # Compute hashes from the raw file to enable incremental update().
             _md_content = open(file_path, encoding='utf-8').read()
             _node_list, _md_lines = extract_nodes_from_markdown(_md_content)
+
             _flat_nodes = extract_node_text_content(_node_list, _md_lines)
+            _new_hashes = compute_section_hashes(_flat_nodes)
+            # Re-indexing reuses the doc_id, so versions must carry forward:
+            # a reader holding version N must never see it go backwards.
+            if doc_id in self.documents and self.workspace:
+                self._ensure_doc_loaded(doc_id)
+            _prev = self.documents.get(doc_id, {})
+            _old_versions = {
+                p: n.get('text_version', 1)
+                for p, n in walk_with_paths(_prev.get('structure') or [])
+            }
+            _old_hashes = _prev.get('section_hashes') or {}
+            for _p, _n in walk_with_paths(result['structure']):
+                _old_tv = _old_versions.get(_p)
+                if _old_tv is None:
+                    _tv = 1
+                elif _old_hashes.get(_p) != _new_hashes.get(_p):
+                    _tv = _old_tv + 1
+                else:
+                    _tv = _old_tv
+                # index() regenerates every summary, so nothing is left stale.
+                _n['text_version'] = _tv
+                _n['summary_version'] = _tv
             self.documents[doc_id] = {
                 'id': doc_id,
                 'type': 'md',
@@ -142,7 +165,7 @@ class PageIndexClient:
                 'line_count': result.get('line_count', 0),
                 'structure': result['structure'],
                 'file_hash': hash_text(_md_content),
-                'section_hashes': compute_section_hashes(_flat_nodes),
+                'section_hashes': _new_hashes,
             }
         else:
             raise ValueError(f"Unsupported file format for: {file_path}")
@@ -286,45 +309,31 @@ class PageIndexClient:
         deleted = old_keys - new_keys
         changed = {p for p in new_keys & old_keys if new_hashes[p] != old_hashes[p]}
 
-        # Dirty sections plus the ancestors of each (roll-up summaries).
         dirty = changed | added
-        to_summarize = set(dirty)
-        for path in dirty:
-            to_summarize.update(find_ancestors(path))
 
-        # Reuse cached summaries for clean sections. The persisted tree has no
-        # title_path, so rebuild it to match the keys used by new_nodes.
-        old_summary_map = {}
+        # Carry summaries and versions forward from the old tree.
+        old_by_path = dict(walk_with_paths(doc.get('structure', [])))
+        old_summary_map = {
+            p: n.get('summary') or n.get('prefix_summary', '')
+            for p, n in old_by_path.items()
+        }
 
-        def _collect_summaries(nodes, prefix=''):
-            for n in nodes:
-                path = f"{prefix} > {n['title']}" if prefix else n['title']
-                old_summary_map[path] = n.get('summary') or n.get('prefix_summary', '')
-                _collect_summaries(n.get('nodes', []), path)
-
-        _collect_summaries(doc.get('structure', []))
-
-        async def _identity(val):
-            return val
-
-        async def _regenerate():
-            tasks = {}
-            for path, node in {n['title_path']: n for n in new_nodes}.items():
-                if path in to_summarize:
-                    tasks[path] = get_node_summary(node, summary_token_threshold=200, model=self.model)
-                else:
-                    tasks[path] = _identity(old_summary_map.get(path, ''))
-            return {path: await coro for path, coro in tasks.items()}
-
-        try:
-            asyncio.get_running_loop()
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                summaries = pool.submit(asyncio.run, _regenerate()).result()
-        except RuntimeError:
-            summaries = asyncio.run(_regenerate())
-
+        # No LLM work here. Bump text_version on dirty sections and leave
+        # summary_version behind, marking the summary stale; regeneration is
+        # deferred to read time (see _reconcile_summaries). Repeated updates
+        # between two reads therefore cost one regeneration, not one each.
         for node in new_nodes:
-            node['summary'] = summaries.get(node['title_path'], '')
+            path = node['title_path']
+            old = old_by_path.get(path)
+            node['summary'] = old_summary_map.get(path, '')
+            if old is None:
+                # Newly added: no summary yet, so it starts out stale.
+                node['text_version'] = 1
+                node['summary_version'] = 0
+            else:
+                old_tv = old.get('text_version', 1)
+                node['text_version'] = old_tv + 1 if path in dirty else old_tv
+                node['summary_version'] = old.get('summary_version', old_tv)
 
         # Rebuild the tree with fresh node ids.
         new_structure = build_tree_from_nodes(new_nodes)
@@ -332,7 +341,8 @@ class PageIndexClient:
         write_node_id(new_structure)
         new_structure = format_structure(
             new_structure,
-            order=['title', 'node_id', 'line_num', 'summary', 'prefix_summary', 'text', 'nodes'],
+            order=['title', 'node_id', 'line_num', 'text_version', 'summary_version',
+                   'summary', 'prefix_summary', 'text', 'nodes'],
         )
 
         doc['structure'] = new_structure
@@ -360,10 +370,61 @@ class PageIndexClient:
         """Return document metadata JSON."""
         return get_document(self.documents, doc_id)
 
-    def get_document_structure(self, doc_id: str) -> str:
-        """Return document tree structure JSON (without text fields)."""
+    def _reconcile_summaries(self, doc_id: str) -> int:
+        """Regenerate summaries whose text has moved on, and return how many.
+
+        A node is stale when summary_version != text_version. update() only
+        bumps text_version, so this is where deferred regeneration is paid --
+        on the first read after an edit, batched across every stale node.
+        """
         if self.workspace:
             self._ensure_doc_loaded(doc_id)
+        doc = self.documents.get(doc_id)
+        if not doc or doc.get('type') != 'md':
+            return 0
+
+        stale = [
+            n for _, n in walk_with_paths(doc.get('structure', []))
+            if n.get('summary_version') != n.get('text_version')
+        ]
+        if not stale:
+            return 0
+
+        async def _run():
+            return await asyncio.gather(*(
+                get_node_summary(n, summary_token_threshold=200, model=self.model)
+                for n in stale
+            ))
+
+        try:
+            asyncio.get_running_loop()
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                summaries = pool.submit(asyncio.run, _run()).result()
+        except RuntimeError:
+            summaries = asyncio.run(_run())
+
+        for node, summary in zip(stale, summaries):
+            key = 'prefix_summary' if node.get('nodes') else 'summary'
+            node.pop('prefix_summary' if key == 'summary' else 'summary', None)
+            node[key] = summary
+            node['summary_version'] = node['text_version']
+
+        if self.workspace:
+            # _save_doc evicts structure from memory for lazy reload; pull it
+            # back so callers see the tree we just reconciled, not an empty one.
+            self._save_doc(doc_id)
+            self._ensure_doc_loaded(doc_id)
+        return len(stale)
+
+    def get_document_structure(self, doc_id: str) -> str:
+        """Return document tree structure JSON (without text fields).
+
+        Stale summaries are regenerated first, so a reader never sees a
+        summary that describes text the document no longer contains.
+        """
+        if self.workspace:
+            self._ensure_doc_loaded(doc_id)
+        self._reconcile_summaries(doc_id)
         return get_document_structure(self.documents, doc_id)
 
     def get_page_content(self, doc_id: str, pages: str) -> str:

@@ -230,10 +230,11 @@ def build_tree_from_nodes(node_list):
             'line_num': node['line_num'],
             'nodes': []
         }
-        # Callers that summarize before building the tree (e.g. incremental
-        # update) would otherwise have their summaries dropped here.
-        if 'summary' in node:
-            tree_node['summary'] = node['summary']
+        # Callers that summarize or version nodes before building the tree
+        # (e.g. incremental update) would otherwise have those fields dropped.
+        for field in ('summary', 'text_version', 'summary_version'):
+            if field in node:
+                tree_node[field] = node[field]
         node_counter += 1
         
         while stack and stack[-1][1] >= current_level:
