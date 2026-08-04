@@ -199,7 +199,7 @@ python3 run_pageindex.py --md_path /path/to/your/document.md
 </details>
 
 > ### ⚡ PageIndex Flash *(preview)*
-> **PageIndex Flash** ([`pageindex/flash`](pageindex/flash)) generates tree structures from PDFs in seconds. Structure extraction is purely heuristic-based, no LLM needed. LLM is only used to generate node summaries. Trustworthy embedded PDF bookmarks are merged into the structure by default (`--no-embedded-toc` to disable).
+> **PageIndex Flash** ([`pageindex/flash`](pageindex/flash)) generates tree structures from PDFs in seconds. Structure extraction is purely heuristic-based, no LLM needed. LLM is only used to generate node summaries.
 >
 > ```bash
 > python3 run_pageindex.py --flash --pdf_path /path/to/your/document.pdf
