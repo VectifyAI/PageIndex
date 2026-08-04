@@ -124,8 +124,9 @@ def page_by_block_lookup(pages, block) -> Optional[PageView]:
 def extract_toc(
     doc_handle: Union[str, Path, BytesIO],
     workers: Optional[int] = None,
+    use_embedded_toc: bool = True,
 ) -> dict:
-    """Run the full pipeline. Returns a dict shaped like:: { "doc_name": "...", "doc_title": "...", "structure": [ {"title": "...", "start_index": 1, "end_index": 3, "nodes": [...]}, ... ], "has_abstract_or_references_section": False } ``has_abstract_or_references_section`` is True when any TOP-LEVEL outline entry is an abstract-keyword heading or carries the prominent-heading flag (a references-keyword heading, plain or numbered). The near-empty bail and the valid-outline branch both report False. ``workers`` sets the process count for the per-page parallel parser: None = auto (CPU count - 1), 1 forces the sequential path; output is identical either way. """
+    """Run the full pipeline. Returns a dict shaped like:: { "doc_name": "...", "doc_title": "...", "structure": [ {"title": "...", "start_index": 1, "end_index": 3, "nodes": [...]}, ... ], "has_abstract_or_references_section": False } ``has_abstract_or_references_section`` is True when any TOP-LEVEL outline entry is an abstract-keyword heading or carries the prominent-heading flag (a references-keyword heading, plain or numbered). The near-empty bail and the valid-outline branch both report False. ``workers`` sets the process count for the per-page parallel parser: None = auto (CPU count - 1), 1 forces the sequential path; output is identical either way. ``use_embedded_toc`` consumes the PDF's embedded bookmarks when trustworthy: deep bookmarks become the frame with the detected sections they lack grafted back in, coarse ones become the chapter frame with detected nodes re-hung under them, garbage ones are ignored; adds ``toc_source`` to the result. On by default; pass False for the pure detected structure. """
     # ----- 1) Parse PDF -> flat spans per page --------------------------
     # per-page (view box, /Rotate) comes from the same engine (PDFium) that
     # produced the block coordinates, so the geometry frame is consistent.
@@ -165,12 +166,23 @@ def extract_toc(
             doc_name = Path(str(doc_handle)).name
         else:
             doc_name = "document.pdf"
-        return {
+        result = {
             "doc_name": doc_name,
             "doc_title": None,
             "structure": [],
             "has_abstract_or_references_section": False,
         }
+        # Bookmarks need no extracted text, so they can still structure a
+        # document this gate wrote off as unreadable.
+        if use_embedded_toc:
+            from .embedded_toc import apply_embedded_toc
+            result["structure"], result["toc_source"] = apply_embedded_toc(
+                [], doc_handle, len(pages),
+                page_texts=["\n".join(block_text(block)
+                                      for block in (page.secondary_slot or []))
+                            for page in pages],
+            )
+        return result
 
     # ----- 5) Classification: header / footer / watermark / TOC pages ---
     detect_header_footer(HeaderFooterContext(doc, 1))                              # HEADER
@@ -302,13 +314,19 @@ def extract_toc(
             parts.append(block_text(block))
         page_texts.append("\n".join(parts))
 
-    return {
+    result = {
         "doc_name": doc_name,
         "doc_title": doc_title,
         "structure": structure,
         "has_abstract_or_references_section": has_abstract_or_references,
         "page_texts": page_texts,
     }
+    if use_embedded_toc:
+        from .embedded_toc import apply_embedded_toc
+        result["structure"], result["toc_source"] = apply_embedded_toc(
+            structure, doc_handle, len(pages), page_texts=page_texts
+        )
+    return result
 
 
 __all__ = ["extract_toc", "DocumentState", "find_references", "mark_references"]
