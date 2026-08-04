@@ -13,6 +13,8 @@ if __name__ == "__main__":
     parser.add_argument('--flash', action='store_true', help='Use PageIndex Flash (with --pdf_path)')
     parser.add_argument('--embedded-toc', action=argparse.BooleanOptionalAction, default=None,
                       help='Use the PDF\'s embedded bookmarks when trustworthy (default: on with --flash)')
+    parser.add_argument('--summary', action=argparse.BooleanOptionalAction, default=None,
+                      help='Generate node summaries with an LLM (default: on with --flash)')
     parser.add_argument('--optimize', nargs='?', const='full', choices=['full', 'merge'],
                       default=None,
                       help='Refine the tree for search cost: a deterministic merge, then an '
@@ -56,6 +58,8 @@ if __name__ == "__main__":
         raise ValueError("--optimize requires --flash with --pdf_path")
     if args.embedded_toc is not None and not (args.pdf_path and args.flash):
         raise ValueError("--embedded-toc requires --flash with --pdf_path")
+    if args.summary is not None and not (args.pdf_path and args.flash):
+        raise ValueError("--summary requires --flash with --pdf_path")
 
     if args.pdf_path:
         # Validate PDF file
@@ -79,6 +83,7 @@ if __name__ == "__main__":
                 optimize_model=args.model,
                 summary_model=args.summary_model or args.model,
                 use_embedded_toc=args.embedded_toc if args.embedded_toc is not None else True,
+                summary=args.summary if args.summary is not None else True,
             )
             if 'optimize' in toc_with_page_number:
                 o = toc_with_page_number['optimize']
