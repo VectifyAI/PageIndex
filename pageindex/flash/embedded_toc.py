@@ -66,6 +66,7 @@ _TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
 _ROMAN = re.compile(r"m{0,3}(cm|cd|d?c{0,3})(xc|xl|l?x{0,3})(ix|iv|v?i{0,3})")
 _ROMAN_VALUES = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
 _DIGIT_RUN = re.compile(r"[0-9]+")
+_ROMAN_EXCLUDED = frozenset({"di", "div", "li", "liv", "mi", "mix", "xi"})
 
 # Words that number a CONTENT unit: a majority template built on one of
 # these ("Chapter N") is a genuine coarse frame, not a filing enumeration.
@@ -86,10 +87,14 @@ def _roman_to_arabic(token: str) -> str:
     return str(total)
 
 
+def _is_roman(token: str) -> bool:
+    return bool(_ROMAN.fullmatch(token)) and token not in _ROMAN_EXCLUDED
+
+
 def _normalize_title(title: str) -> str:
     tokens = _TOKEN.findall(_LATEX_SPAN.sub("", title.lower()))
     return "".join(
-        _roman_to_arabic(token) if _ROMAN.fullmatch(token) else token
+        _roman_to_arabic(token) if _is_roman(token) else token
         for token in tokens
     )
 
@@ -98,7 +103,7 @@ def _title_template(title: str) -> str:
     """Collapse every counter (digit run or roman token) to ``#``."""
     tokens = _TOKEN.findall(_LATEX_SPAN.sub("", title.lower()))
     return "".join(
-        "#" if _ROMAN.fullmatch(token) else _DIGIT_RUN.sub("#", token)
+        "#" if _is_roman(token) else _DIGIT_RUN.sub("#", token)
         for token in tokens
     )
 
