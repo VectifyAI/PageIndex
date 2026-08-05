@@ -7,7 +7,6 @@ import json
 import PyPDF2
 import copy
 import asyncio
-import pymupdf
 from io import BytesIO
 from dotenv import load_dotenv
 load_dotenv()
@@ -454,6 +453,7 @@ def get_page_tokens(pdf_path, model=None, pdf_parser="PyPDF2"):
             page_list.append((page_text, token_length))
         return page_list
     elif pdf_parser == "PyMuPDF":
+        import pymupdf
         if isinstance(pdf_path, BytesIO):
             pdf_stream = pdf_path
             doc = pymupdf.open(stream=pdf_stream, filetype="pdf")

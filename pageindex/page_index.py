@@ -1229,8 +1229,8 @@ async def tree_parser(page_list, opt, doc=None, logger=None):
     return toc_tree
 
 
-def page_index_main(doc, opt=None):
-    logger = JsonLogger(doc)
+def page_index_main(doc, opt=None, logger=None):
+    logger = logger or JsonLogger(doc)
     
     is_valid_pdf = (
         (isinstance(doc, str) and os.path.isfile(doc) and doc.lower().endswith(".pdf")) or 

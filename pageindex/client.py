@@ -1,234 +1,314 @@
-import os
-import uuid
-import json
-import asyncio
-import concurrent.futures
-from pathlib import Path
+"""PageIndex SDK client: the 0.2.x cloud surface, now with a local mode."""
+from __future__ import annotations
 
-import PyPDF2
+from typing import Any, Iterator, Optional, Union
 
-from .page_index import page_index
-from .page_index_md import md_to_tree
-from .retrieve import get_document, get_document_structure, get_page_content
-from .utils import ConfigLoader, remove_fields
-
-META_INDEX = "_meta.json"
-
-
-def _normalize_retrieve_model(model: str) -> str:
-    """Preserve supported Agents SDK prefixes and route other provider paths via LiteLLM."""
-    passthrough_prefixes = ("litellm/", "openai/")
-    if not model or "/" not in model:
-        return model
-    if model.startswith(passthrough_prefixes):
-        return model
-    return f"litellm/{model}"
+from .errors import PageIndexAPIError
 
 
 class PageIndexClient:
     """
-    A client for indexing and retrieving document content.
-    Flow: index() -> get_document() / get_document_structure() / get_page_content()
+    Python SDK client for PageIndex.
 
-    For agent-based QA, see examples/agentic_vectorless_rag_demo.py.
+    Cloud mode (an ``api_key`` is given) talks to the PageIndex API at
+    api.pageindex.ai, exactly like the 0.2.x SDK. Local mode (no ``api_key``)
+    runs the same operations on your machine: documents are indexed with the
+    open-source PageIndex pipeline using your own LLM provider key (e.g.
+    ``OPENAI_API_KEY`` in the environment) and stored under ``storage_path``.
+
+    Args:
+        api_key (str, optional): PageIndex cloud API key
+            (https://dash.pageindex.ai/api-keys). Omit for local mode.
+        model (str, optional): Local mode only — LLM used to build document
+            trees. Defaults to the packaged config (see pageindex/config.yaml).
+        summary_model (str, optional): Local mode only — LLM used for node
+            summaries and document descriptions.
+        retrieve_model (str, optional): Local mode only — LLM used for
+            retrieval tree search and chat completions.
+        storage_path (str, optional): Local mode only — directory where
+            indexed documents are stored. Defaults to ``./.pageindex``.
+
+    Usage:
+        client = PageIndexClient(api_key="...")   # cloud
+        client = PageIndexClient()                # local
+
+    Local mode differences (all documented per method): indexing is
+    synchronous, only PDFs are supported, and folders / ``beta_headers`` /
+    ``enable_citations`` are cloud-only.
     """
-    def __init__(self, api_key: str = None, model: str = None, retrieve_model: str = None, workspace: str = None):
-        if api_key:
-            os.environ["OPENAI_API_KEY"] = api_key
-        elif not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
-            os.environ["OPENAI_API_KEY"] = os.getenv("CHATGPT_API_KEY")
-        self.workspace = Path(workspace).expanduser() if workspace else None
-        overrides = {}
-        if model:
-            overrides["model"] = model
-        if retrieve_model:
-            overrides["retrieve_model"] = retrieve_model
-        opt = ConfigLoader().load(overrides or None)
-        self.model = opt.model
-        self.retrieve_model = _normalize_retrieve_model(opt.retrieve_model or self.model)
-        if self.workspace:
-            self.workspace.mkdir(parents=True, exist_ok=True)
-        self.documents = {}
-        if self.workspace:
-            self._load_workspace()
 
-    def index(self, file_path: str, mode: str = "auto") -> str:
-        """Index a document. Returns a document_id."""
-        # Persist a canonical absolute path so workspace reloads do not
-        # reinterpret caller-relative paths against the workspace directory.
-        file_path = os.path.abspath(os.path.expanduser(file_path))
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"File not found: {file_path}")
+    BASE_URL = "https://api.pageindex.ai"
 
-        doc_id = str(uuid.uuid4())
-        ext = os.path.splitext(file_path)[1].lower()
-
-        is_pdf = ext == '.pdf'
-        is_md = ext in ['.md', '.markdown']
-
-        if mode == "pdf" or (mode == "auto" and is_pdf):
-            print(f"Indexing PDF: {file_path}")
-            result = page_index(
-                doc=file_path,
-                model=self.model,
-                if_add_node_summary='yes',
-                if_add_node_text='yes',
-                if_add_node_id='yes',
-                if_add_doc_description='yes'
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        *,
+        model: Optional[str] = None,
+        summary_model: Optional[str] = None,
+        retrieve_model: Optional[str] = None,
+        storage_path: Optional[str] = None,
+    ):
+        if api_key == "":
+            raise PageIndexAPIError(
+                "api_key is an empty string. Pass a real PageIndex API key for "
+                "cloud mode, or omit api_key entirely for local mode."
             )
-            # Extract per-page text so queries don't need the original PDF
-            pages = []
-            with open(file_path, 'rb') as f:
-                pdf_reader = PyPDF2.PdfReader(f)
-                for i, page in enumerate(pdf_reader.pages, 1):
-                    pages.append({'page': i, 'content': page.extract_text() or ''})
-
-            self.documents[doc_id] = {
-                'id': doc_id,
-                'type': 'pdf',
-                'path': file_path,
-                'doc_name': result.get('doc_name', ''),
-                'doc_description': result.get('doc_description', ''),
-                'page_count': len(pages),
-                'structure': result['structure'],
-                'pages': pages,
-            }
-
-        elif mode == "md" or (mode == "auto" and is_md):
-            print(f"Indexing Markdown: {file_path}")
-            coro = md_to_tree(
-                md_path=file_path,
-                if_thinning=False,
-                if_add_node_summary='yes',
-                summary_token_threshold=200,
-                model=self.model,
-                if_add_doc_description='yes',
-                if_add_node_text='yes',
-                if_add_node_id='yes'
-            )
-            try:
-                asyncio.get_running_loop()
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    result = pool.submit(asyncio.run, coro).result()
-            except RuntimeError:
-                result = asyncio.run(coro)
-            self.documents[doc_id] = {
-                'id': doc_id,
-                'type': 'md',
-                'path': file_path,
-                'doc_name': result.get('doc_name', ''),
-                'doc_description': result.get('doc_description', ''),
-                'line_count': result.get('line_count', 0),
-                'structure': result['structure'],
-            }
+        if api_key is not None:
+            local_only = {"model": model, "summary_model": summary_model,
+                          "retrieve_model": retrieve_model, "storage_path": storage_path}
+            passed = [name for name, value in local_only.items() if value is not None]
+            if passed:
+                raise ValueError(
+                    f"Local-mode arguments ({', '.join(passed)}) cannot be "
+                    "combined with api_key — remove them, or omit api_key to "
+                    "run locally."
+                )
+            self.api_key = api_key
+            from .cloud_api import CloudAPI
+            self._api = CloudAPI(self)
         else:
-            raise ValueError(f"Unsupported file format for: {file_path}")
+            from .utils import ConfigLoader
+            overrides = {key: value for key, value in
+                         {"model": model, "summary_model": summary_model,
+                          "retrieve_model": retrieve_model}.items() if value}
+            opt = ConfigLoader().load(overrides or None)
+            self.model = opt.model
+            self.summary_model = getattr(opt, "summary_model", None) or opt.model
+            self.retrieve_model = getattr(opt, "retrieve_model", None) or opt.model
+            self.storage_path = storage_path or ".pageindex"
+            from .local_api import LocalAPI
+            self._api = LocalAPI(
+                storage_path=self.storage_path,
+                model=self.model,
+                summary_model=self.summary_model,
+                retrieve_model=self.retrieve_model,
+            )
 
-        print(f"Indexing complete. Document ID: {doc_id}")
-        if self.workspace:
-            self._save_doc(doc_id)
-        return doc_id
+    # ---------- DOCUMENT SUBMISSION ----------
 
-    @staticmethod
-    def _make_meta_entry(doc: dict) -> dict:
-        """Build a lightweight meta entry from a document dict."""
-        entry = {
-            'type': doc.get('type', ''),
-            'doc_name': doc.get('doc_name', ''),
-            'doc_description': doc.get('doc_description', ''),
-            'path': doc.get('path', ''),
-        }
-        if doc.get('type') == 'pdf':
-            entry['page_count'] = doc.get('page_count')
-        elif doc.get('type') == 'md':
-            entry['line_count'] = doc.get('line_count')
-        return entry
+    def submit_document(
+        self,
+        file_path: str,
+        mode: Optional[str] = None,
+        beta_headers: Optional[list[str]] = None,
+        folder_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """
+        Submit a PDF document for processing. Returns {'doc_id': ...}.
 
-    @staticmethod
-    def _read_json(path) -> dict | None:
-        """Read a JSON file, returning None on any error."""
+        Cloud: uploads the file; processing is asynchronous — poll
+        ``is_retrieval_ready(doc_id)`` before retrieving.
+
+        Local: indexes the document in this call (it blocks while your LLM
+        builds the tree — minutes for a standard index of a long document),
+        then stores it under ``storage_path``. Pass ``mode="flash"`` to build
+        the tree with PageIndex Flash (layout-based extraction, no LLM calls
+        for the structure; node summaries and the document description still
+        use ``summary_model``). ``beta_headers`` and ``folder_id`` are
+        cloud-only.
+
+        Args:
+            file_path (str): Path to the PDF file.
+            mode (str, optional): Processing mode. Local mode supports
+                "flash"; cloud modes are passed through (e.g. "mcp").
+            beta_headers (list[str], optional): Cloud-only beta feature headers.
+            folder_id (str, optional): Cloud-only folder (workspace) ID.
+
+        Returns:
+            dict: {'doc_id': ...}
+        """
+        return self._api.submit_document(
+            file_path=file_path, mode=mode,
+            beta_headers=beta_headers, folder_id=folder_id,
+        )
+
+    # ---------- OCR FUNCTIONALITY ----------
+
+    def get_ocr(self, doc_id: str, format: str = "page") -> dict[str, Any]:
+        """
+        Get OCR status and results.
+
+        Args:
+            doc_id (str): Document ID.
+            format (str): 'page' for page-based results, 'node' for node-based
+                results, or 'raw' for concatenated markdown.
+
+        Returns:
+            dict: {'doc_id', 'status', 'retrieval_ready', 'result', ...}.
+            With 'page', result entries are {'page_index', 'markdown', ...}.
+
+        Local: the "OCR" result is the text extracted from the PDF while
+        indexing (no OCR model runs locally, so scanned/image-only PDFs have
+        no local text).
+        """
+        return self._api.get_ocr(doc_id=doc_id, format=format)
+
+    # ---------- TREE GENERATION ----------
+
+    def get_tree(self, doc_id: str, node_summary: bool = False) -> dict[str, Any]:
+        """
+        Get tree generation status and results.
+
+        Args:
+            doc_id (str): Document ID.
+            node_summary (bool): Include node summaries in the tree.
+
+        Returns:
+            dict: {'doc_id', 'status', 'retrieval_ready', 'result', ...} where
+            result nodes are {'title', 'node_id', 'page_index', ('summary' /
+            'prefix_summary',) ('text',) 'nodes'}.
+
+        Local: status is always "completed" (indexing happened during
+        ``submit_document``) and nodes always carry 'text'.
+        """
+        return self._api.get_tree(doc_id=doc_id, node_summary=node_summary)
+
+    def is_retrieval_ready(self, doc_id: str) -> bool:
+        """
+        Check if a document is ready for retrieval. Errors (including a
+        missing document) are reported as False, matching the 0.2.x SDK.
+        """
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError) as e:
-            print(f"Warning: corrupt {Path(path).name}: {e}")
-            return None
+            result = self.get_tree(doc_id)
+            return result.get("retrieval_ready", False)
+        except PageIndexAPIError:
+            return False
 
-    def _save_doc(self, doc_id: str):
-        doc = self.documents[doc_id].copy()
-        # Strip text from structure nodes — redundant with pages (PDF only)
-        if doc.get('structure') and doc.get('type') == 'pdf':
-            doc['structure'] = remove_fields(doc['structure'], fields=['text'])
-        path = self.workspace / f"{doc_id}.json"
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(doc, f, ensure_ascii=False, indent=2)
-        self._save_meta(doc_id, self._make_meta_entry(doc))
-        # Drop heavy fields; will lazy-load on demand
-        self.documents[doc_id].pop('structure', None)
-        self.documents[doc_id].pop('pages', None)
+    # ---------- RETRIEVAL ----------
 
-    def _rebuild_meta(self) -> dict:
-        """Scan individual doc JSON files and return a meta dict."""
-        meta = {}
-        for path in self.workspace.glob("*.json"):
-            if path.name == META_INDEX:
-                continue
-            doc = self._read_json(path)
-            if doc and isinstance(doc, dict):
-                meta[path.stem] = self._make_meta_entry(doc)
-        return meta
+    def submit_query(self, doc_id: str, query: str, thinking: bool = False) -> dict[str, Any]:
+        """
+        Submit a retrieval query for a document. Returns {'retrieval_id': ...}.
 
-    def _read_meta(self) -> dict | None:
-        """Read and validate _meta.json, returning None on any corruption."""
-        meta = self._read_json(self.workspace / META_INDEX)
-        if meta is not None and not isinstance(meta, dict):
-            print(f"Warning: {META_INDEX} is not a JSON object, ignoring")
-            return None
-        return meta
+        Local: retrieval runs in this call (LLM tree search over the document
+        tree with ``retrieve_model``); ``get_retrieval`` has the result
+        immediately. ``thinking`` is accepted for compatibility but does not
+        change the local search.
+        """
+        return self._api.submit_query(doc_id=doc_id, query=query, thinking=thinking)
 
-    def _save_meta(self, doc_id: str, entry: dict):
-        meta = self._read_meta() or self._rebuild_meta()
-        meta[doc_id] = entry
-        meta_path = self.workspace / META_INDEX
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump(meta, f, ensure_ascii=False, indent=2)
+    def get_retrieval(self, retrieval_id: str) -> dict[str, Any]:
+        """
+        Get retrieval status and results.
 
-    def _load_workspace(self):
-        meta = self._read_meta()
-        if meta is None:
-            meta = self._rebuild_meta()
-            if meta:
-                print(f"Loaded {len(meta)} document(s) from workspace (legacy mode).")
-        for doc_id, entry in meta.items():
-            doc = dict(entry, id=doc_id)
-            if doc.get('path') and not os.path.isabs(doc['path']):
-                doc['path'] = str((self.workspace / doc['path']).resolve())
-            self.documents[doc_id] = doc
+        Returns:
+            dict: on success {'retrieval_id', 'doc_id', 'status': 'completed',
+            'query', 'retrieved_nodes'}; on failure {'retrieval_id',
+            'status': 'error', 'error_message'}.
 
-    def _ensure_doc_loaded(self, doc_id: str):
-        """Load full document JSON on demand (structure, pages, etc.)."""
-        doc = self.documents.get(doc_id)
-        if not doc or doc.get('structure') is not None:
-            return
-        full = self._read_json(self.workspace / f"{doc_id}.json")
-        if not full:
-            return
-        doc['structure'] = full.get('structure', [])
-        if full.get('pages'):
-            doc['pages'] = full['pages']
+        Local: retrieved_nodes entries are {'node_id', 'title',
+        'relevant_contents': [{'page_index', 'relevant_content'}, ...]} with
+        the full text of the node's pages.
+        """
+        return self._api.get_retrieval(retrieval_id=retrieval_id)
 
-    def get_document(self, doc_id: str) -> str:
-        """Return document metadata JSON."""
-        return get_document(self.documents, doc_id)
+    # ---------- CHAT COMPLETIONS ----------
 
-    def get_document_structure(self, doc_id: str) -> str:
-        """Return document tree structure JSON (without text fields)."""
-        if self.workspace:
-            self._ensure_doc_loaded(doc_id)
-        return get_document_structure(self.documents, doc_id)
+    def chat_completions(
+        self,
+        messages: list[dict[str, str]],
+        stream: bool = False,
+        doc_id: Optional[Union[str, list[str]]] = None,
+        temperature: Optional[float] = None,
+        stream_metadata: bool = False,
+        enable_citations: bool = False,
+    ) -> Union[dict[str, Any], Iterator[str], Iterator[dict[str, Any]]]:
+        """
+        PageIndex Chat Completions, scoped to specific PageIndex documents.
 
-    def get_page_content(self, doc_id: str, pages: str) -> str:
-        """Return page content for the given pages string (e.g. '5-7', '3,8', '12')."""
-        if self.workspace:
-            self._ensure_doc_loaded(doc_id)
-        return get_page_content(self.documents, doc_id, pages)
+        Args:
+            messages: Conversation messages with 'role' and 'content' keys.
+            stream: Enable streaming responses.
+            doc_id: Document ID or list of IDs to scope the conversation.
+                Required in local mode.
+            temperature: Sampling temperature (0.0-1.0).
+            stream_metadata: With stream=True, yield chunk dicts instead of
+                text pieces.
+            enable_citations: Cloud-only citation support; raises in local mode.
+
+        Returns:
+            - stream=False: complete response dict ({'id', 'object', 'created',
+              'choices', 'usage'})
+            - stream=True, stream_metadata=False: iterator of text chunks
+            - stream=True, stream_metadata=True: iterator of chunk dicts
+
+        Local: the question (last user message) is answered by tree-search
+        retrieval over the given documents plus a ``retrieve_model`` chat call.
+        """
+        return self._api.chat_completions(
+            messages=messages, stream=stream, doc_id=doc_id,
+            temperature=temperature, stream_metadata=stream_metadata,
+            enable_citations=enable_citations,
+        )
+
+    # ---------- DOCUMENT MANAGEMENT ----------
+
+    def get_document(self, doc_id: str) -> dict[str, Any]:
+        """
+        Get document metadata: {'id', 'name', 'description', 'status',
+        'createdAt', 'pageNum', 'folderId'}. Status is one of "pending",
+        "queued", "processing", "completed", "failed" (local documents are
+        always "completed"; local 'folderId' is always None).
+        """
+        return self._api.get_document(doc_id=doc_id)
+
+    def delete_document(self, doc_id: str) -> dict[str, Any]:
+        """
+        Delete a PageIndex document and all its associated data.
+
+        Returns:
+            dict: {'message': 'Document deleted successfully.'}
+        """
+        return self._api.delete_document(doc_id=doc_id)
+
+    def list_documents(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        folder_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """
+        List documents with pagination, newest first.
+
+        Args:
+            limit (int): Maximum documents to return (1-100).
+            offset (int): Number of documents to skip.
+            folder_id (str, optional): Cloud-only folder filter.
+
+        Returns:
+            dict: {'documents': [...], 'total', 'limit', 'offset'}.
+        """
+        return self._api.list_documents(limit=limit, offset=offset, folder_id=folder_id)
+
+    # ---------- FOLDER MANAGEMENT ----------
+
+    def create_folder(
+        self,
+        name: str,
+        description: Optional[str] = None,
+        parent_folder_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """
+        Create a folder (workspace). Cloud-only: local mode raises
+        PageIndexAPIError.
+        """
+        return self._require_cloud("create_folder").create_folder(
+            name=name, description=description, parent_folder_id=parent_folder_id,
+        )
+
+    def list_folders(self, parent_folder_id: Optional[str] = None) -> dict[str, Any]:
+        """
+        List folders. Cloud-only: local mode raises PageIndexAPIError.
+        """
+        return self._require_cloud("list_folders").list_folders(
+            parent_folder_id=parent_folder_id,
+        )
+
+    def _require_cloud(self, method: str):
+        from .cloud_api import CloudAPI
+        if not isinstance(self._api, CloudAPI):
+            raise PageIndexAPIError(
+                f"{method} is cloud-only — folders are not supported in local "
+                "mode. Create the client with an api_key to use folders."
+            )
+        return self._api

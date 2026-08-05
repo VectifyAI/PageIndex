@@ -1,0 +1,464 @@
+"""SDK surface tests: PageIndexClient in local and cloud mode."""
+import json
+import sys
+import types
+
+import pytest
+
+import pageindex
+import pageindex.flash
+import pageindex.utils
+from pageindex import PageIndexClient, PageIndexAPIError
+from pageindex.local_api import LocalAPI
+
+# `from .page_index import *` shadows the submodule with the function of the
+# same name, so the module must come from sys.modules.
+page_index_module = sys.modules["pageindex.page_index"]
+
+
+STRUCTURE = [
+    {
+        "title": "Root Section", "node_id": "0000",
+        "start_index": 1, "end_index": 2,
+        "summary": "root summary", "text": "root text",
+        "nodes": [
+            {"title": "Child Section", "node_id": "0001",
+             "start_index": 2, "end_index": 2,
+             "summary": "child summary", "text": "child text"},
+        ],
+    },
+]
+
+
+@pytest.fixture
+def local_client(tmp_path):
+    return PageIndexClient(storage_path=str(tmp_path / "store"))
+
+
+@pytest.fixture
+def indexed_doc(local_client, sample_pdf, monkeypatch):
+    """A document indexed through a stubbed standard pipeline."""
+    def fake_page_index_main(doc, opt=None, logger=None):
+        assert opt.if_add_node_summary == "yes"
+        assert opt.if_add_node_text == "yes"
+        assert logger is not None
+        return {"doc_name": "sample.pdf",
+                "doc_description": "A test document.",
+                "structure": json.loads(json.dumps(STRUCTURE))}
+    monkeypatch.setattr(page_index_module, "page_index_main", fake_page_index_main)
+    return local_client.submit_document(sample_pdf)["doc_id"]
+
+
+# ── constructor ──
+
+def test_empty_api_key_raises():
+    with pytest.raises(PageIndexAPIError, match="empty string"):
+        PageIndexClient(api_key="")
+
+
+def test_cloud_rejects_local_args():
+    with pytest.raises(ValueError, match="model, storage_path"):
+        PageIndexClient(api_key="k", model="m", storage_path="/tmp/x")
+
+
+def test_local_client_does_not_touch_disk(tmp_path):
+    storage = tmp_path / "store"
+    PageIndexClient(storage_path=str(storage))
+    assert not storage.exists()
+
+
+# ── local: indexing and reading ──
+
+def test_submit_and_get_tree(local_client, indexed_doc, tmp_path, monkeypatch):
+    tree = local_client.get_tree(indexed_doc, node_summary=True)
+    assert tree["status"] == "completed"
+    assert tree["retrieval_ready"] is True
+    root = tree["result"][0]
+    assert root["page_index"] == 1
+    assert "start_index" not in root and "end_index" not in root
+    assert root["prefix_summary"] == "root summary"
+    assert "summary" not in root
+    child = root["nodes"][0]
+    assert child["summary"] == "child summary"
+    assert child["text"] == "child text"
+
+    no_summary = local_client.get_tree(indexed_doc)["result"][0]
+    assert "summary" not in no_summary and "prefix_summary" not in no_summary
+
+
+def test_submit_does_not_create_cwd_logs(local_client, sample_pdf, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    def fake_page_index_main(doc, opt=None, logger=None):
+        logger.info({"probe": True})
+        return {"doc_name": "sample.pdf", "doc_description": None,
+                "structure": json.loads(json.dumps(STRUCTURE))}
+    monkeypatch.setattr(page_index_module, "page_index_main", fake_page_index_main)
+    local_client.submit_document(sample_pdf)
+    assert not (tmp_path / "logs").exists()
+
+
+def test_submit_flash(local_client, sample_pdf, monkeypatch):
+    calls = {}
+    def fake_flash(pdf, summary=True, summary_model=None, **kwargs):
+        calls["summary"] = summary
+        calls["summary_model"] = summary_model
+        return {"doc_name": "sample.pdf",
+                "structure": [{"title": "Flash Root", "start_index": 1,
+                               "end_index": 2, "summary": "s", "nodes": []}]}
+    monkeypatch.setattr(pageindex.flash, "page_index_flash", fake_flash)
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda model, prompt, **kw: "Flash description.")
+    doc_id = local_client.submit_document(sample_pdf, mode="flash")["doc_id"]
+    assert calls == {"summary": True, "summary_model": local_client.summary_model}
+    root = local_client.get_tree(doc_id)["result"][0]
+    assert root["node_id"] == "0000"
+    assert "Hello page one" in root["text"]
+    assert local_client.get_document(doc_id)["description"] == "Flash description."
+
+
+def test_submit_rejections(local_client, sample_pdf, tmp_path):
+    with pytest.raises(FileNotFoundError):
+        local_client.submit_document(str(tmp_path / "missing.pdf"))
+    (tmp_path / "notes.txt").write_text("hi")
+    with pytest.raises(PageIndexAPIError, match="only PDF"):
+        local_client.submit_document(str(tmp_path / "notes.txt"))
+    with pytest.raises(PageIndexAPIError, match="unknown local processing mode"):
+        local_client.submit_document(sample_pdf, mode="mcp")
+    with pytest.raises(PageIndexAPIError, match="folders"):
+        local_client.submit_document(sample_pdf, folder_id="f1")
+    with pytest.raises(PageIndexAPIError, match="beta_headers"):
+        local_client.submit_document(sample_pdf, beta_headers=["block_reference"])
+
+
+def test_blank_pdf_rejected(local_client, tmp_path):
+    from conftest import build_pdf
+    blank = tmp_path / "blank.pdf"
+    blank.write_bytes(build_pdf(["", ""]))
+    with pytest.raises(PageIndexAPIError, match="All pages are blank"):
+        local_client.submit_document(str(blank))
+
+
+def test_get_ocr(local_client, indexed_doc):
+    page = local_client.get_ocr(indexed_doc)
+    assert page["result"][0] == {"page_index": 1,
+                                 "markdown": "Hello page one about apples"}
+    raw = local_client.get_ocr(indexed_doc, format="raw")
+    assert raw["result"] == ("Hello page one about apples\n\n"
+                             "Second page about bananas")
+    node = local_client.get_ocr(indexed_doc, format="node")
+    assert node["result"] == [
+        {"title": "Root Section", "level": 1, "page_index": 1, "text": "root text"},
+        {"title": "Child Section", "level": 2, "page_index": 2, "text": "child text"},
+    ]
+    with pytest.raises(ValueError):
+        local_client.get_ocr(indexed_doc, format="bogus")
+
+
+def test_document_management(local_client, indexed_doc):
+    doc = local_client.get_document(indexed_doc)
+    assert doc["id"] == indexed_doc
+    assert doc["name"] == "sample.pdf"
+    assert doc["description"] == "A test document."
+    assert doc["status"] == "completed"
+    assert doc["pageNum"] == 2
+    assert doc["folderId"] is None
+
+    listing = local_client.list_documents()
+    assert listing["total"] == 1
+    assert listing["limit"] == 50 and listing["offset"] == 0
+    assert listing["documents"][0]["id"] == indexed_doc
+
+    assert local_client.is_retrieval_ready(indexed_doc) is True
+
+    assert local_client.delete_document(indexed_doc) == {
+        "message": "Document deleted successfully."}
+    with pytest.raises(PageIndexAPIError, match="Document not found"):
+        local_client.delete_document(indexed_doc)
+    assert local_client.is_retrieval_ready(indexed_doc) is False
+
+
+def test_list_documents_validation(local_client):
+    with pytest.raises(ValueError):
+        local_client.list_documents(limit=0)
+    with pytest.raises(ValueError):
+        local_client.list_documents(offset=-1)
+    with pytest.raises(PageIndexAPIError, match="folders"):
+        local_client.list_documents(folder_id="f1")
+
+
+def test_missing_document_errors(local_client):
+    with pytest.raises(PageIndexAPIError):
+        local_client.get_tree("nope")
+    with pytest.raises(PageIndexAPIError):
+        local_client.get_document("nope")
+    assert local_client.is_retrieval_ready("nope") is False
+
+
+def test_traversal_ids_are_contained(local_client, indexed_doc, tmp_path):
+    store_root = tmp_path / "store"
+    with pytest.raises(PageIndexAPIError):
+        local_client.get_document("../../etc")
+    with pytest.raises(PageIndexAPIError):
+        local_client.delete_document("..")
+    assert (store_root / "docs").exists()
+
+
+def test_folders_are_cloud_only(local_client):
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        local_client.create_folder("team")
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        local_client.list_folders()
+
+
+# ── local: retrieval ──
+
+def test_retrieval_flow(local_client, indexed_doc, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    def fake_llm(model, prompt, **kwargs):
+        assert model == local_client.retrieve_model
+        assert "Root Section" in prompt and "root text" not in prompt
+        return json.dumps({"thinking": "child is about bananas",
+                           "node_list": ["0001", "9999"]})
+    monkeypatch.setattr(pageindex.utils, "llm_completion", fake_llm)
+
+    retrieval_id = local_client.submit_query(indexed_doc, "What about bananas?")["retrieval_id"]
+    result = local_client.get_retrieval(retrieval_id)
+    assert result["status"] == "completed"
+    assert result["doc_id"] == indexed_doc
+    assert result["query"] == "What about bananas?"
+    assert result["retrieved_nodes"] == [{
+        "node_id": "0001",
+        "title": "Child Section",
+        "relevant_contents": [
+            {"page_index": 2, "relevant_content": "Second page about bananas"},
+        ],
+    }]
+
+
+def test_retrieval_error_is_stored(local_client, indexed_doc, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda model, prompt, **kw: "")
+    retrieval_id = local_client.submit_query(indexed_doc, "q")["retrieval_id"]
+    result = local_client.get_retrieval(retrieval_id)
+    assert result["status"] == "error"
+    assert "no output" in result["error_message"]
+
+
+def test_retrieval_missing(local_client, indexed_doc):
+    with pytest.raises(PageIndexAPIError, match="Retrieval task not found"):
+        local_client.get_retrieval("nope")
+    with pytest.raises(PageIndexAPIError, match="Document not found"):
+        local_client.submit_query("nope", "q")
+
+
+def test_missing_llm_key_fails_fast(local_client, indexed_doc, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with pytest.raises(PageIndexAPIError, match="OPENAI_API_KEY is not set"):
+        local_client.submit_query(indexed_doc, "q")
+    with pytest.raises(PageIndexAPIError, match="OPENAI_API_KEY is not set"):
+        local_client.chat_completions(
+            messages=[{"role": "user", "content": "q"}], doc_id=indexed_doc)
+
+
+# ── local: chat completions ──
+
+def _fake_completion(content="Bananas are on page two.", finish="stop"):
+    return types.SimpleNamespace(
+        choices=[types.SimpleNamespace(
+            message=types.SimpleNamespace(content=content),
+            finish_reason=finish)],
+        usage=types.SimpleNamespace(prompt_tokens=10, completion_tokens=5,
+                                    total_tokens=15),
+    )
+
+
+def _fake_stream():
+    def chunk(content=None, finish=None, usage=None):
+        return types.SimpleNamespace(
+            choices=[types.SimpleNamespace(
+                delta=types.SimpleNamespace(content=content),
+                finish_reason=finish)] if content or finish else [],
+            usage=usage)
+    return iter([
+        chunk(content="Bananas "),
+        chunk(content="page two."),
+        chunk(finish="stop",
+              usage=types.SimpleNamespace(prompt_tokens=10, completion_tokens=5,
+                                          total_tokens=15)),
+    ])
+
+
+@pytest.fixture
+def chat_ready(local_client, indexed_doc, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setattr(
+        pageindex.utils, "llm_completion",
+        lambda model, prompt, **kw: json.dumps({"thinking": "t", "node_list": ["0001"]}))
+    return indexed_doc
+
+
+def test_chat_completions(local_client, chat_ready, monkeypatch):
+    captured = {}
+    def fake_chat_llm(self, messages, temperature, stream):
+        captured["messages"] = messages
+        captured["temperature"] = temperature
+        return _fake_completion()
+    monkeypatch.setattr(LocalAPI, "_chat_llm", fake_chat_llm)
+
+    response = local_client.chat_completions(
+        messages=[{"role": "user", "content": "What about bananas?"}],
+        doc_id=chat_ready, temperature=0.2)
+    assert response["object"] == "chat.completion"
+    assert response["choices"][0]["message"]["content"] == "Bananas are on page two."
+    assert response["choices"][0]["finish_reason"] == "stop"
+    assert response["usage"]["total_tokens"] == 15
+    assert captured["temperature"] == 0.2
+    assert captured["messages"][0]["role"] == "system"
+    assert "child text" in captured["messages"][0]["content"]
+    assert captured["messages"][-1] == {"role": "user", "content": "What about bananas?"}
+
+
+def test_chat_completions_stream(local_client, chat_ready, monkeypatch):
+    monkeypatch.setattr(LocalAPI, "_chat_llm",
+                        lambda self, messages, temperature, stream: _fake_stream())
+    pieces = list(local_client.chat_completions(
+        messages=[{"role": "user", "content": "q"}], doc_id=chat_ready, stream=True))
+    assert pieces == ["Bananas ", "page two."]
+
+    monkeypatch.setattr(LocalAPI, "_chat_llm",
+                        lambda self, messages, temperature, stream: _fake_stream())
+    chunks = list(local_client.chat_completions(
+        messages=[{"role": "user", "content": "q"}], doc_id=chat_ready,
+        stream=True, stream_metadata=True))
+    assert chunks[0]["object"] == "chat.completion.chunk"
+    assert chunks[0]["choices"][0]["delta"] == {"role": "assistant", "content": ""}
+    assert chunks[-1]["choices"][0]["finish_reason"] == "stop"
+    assert chunks[-1]["usage"]["total_tokens"] == 15
+
+
+def test_chat_validation(local_client, chat_ready):
+    with pytest.raises(PageIndexAPIError, match="doc_id is required"):
+        local_client.chat_completions(messages=[{"role": "user", "content": "q"}])
+    with pytest.raises(PageIndexAPIError, match="cannot be empty"):
+        local_client.chat_completions(messages=[], doc_id=chat_ready)
+    with pytest.raises(PageIndexAPIError, match="First message"):
+        local_client.chat_completions(
+            messages=[{"role": "assistant", "content": "hi"}], doc_id=chat_ready)
+    with pytest.raises(PageIndexAPIError, match="System messages"):
+        local_client.chat_completions(
+            messages=[{"role": "user", "content": "q"},
+                      {"role": "system", "content": "s"}], doc_id=chat_ready)
+    with pytest.raises(PageIndexAPIError, match="temperature"):
+        local_client.chat_completions(
+            messages=[{"role": "user", "content": "q"}], doc_id=chat_ready,
+            temperature=1.5)
+    with pytest.raises(PageIndexAPIError, match="enable_citations"):
+        local_client.chat_completions(
+            messages=[{"role": "user", "content": "q"}], doc_id=chat_ready,
+            enable_citations=True)
+    with pytest.raises(PageIndexAPIError, match="Document not found or access denied"):
+        local_client.chat_completions(
+            messages=[{"role": "user", "content": "q"}], doc_id=[chat_ready, "nope"])
+    with pytest.raises(PageIndexAPIError, match="cannot be empty"):
+        local_client.chat_completions(
+            messages=[{"role": "user", "content": "q"}], doc_id=[])
+
+
+# ── cloud mode: request wiring ──
+
+class FakeResponse:
+    def __init__(self, payload=None, status_code=200, text="", content=b"{}",
+                 lines=None):
+        self._payload = payload if payload is not None else {}
+        self.status_code = status_code
+        self.text = text
+        self.content = content
+        self._lines = lines or []
+
+    def json(self):
+        return self._payload
+
+    def iter_lines(self):
+        return iter(self._lines)
+
+    def close(self):
+        pass
+
+
+@pytest.fixture
+def cloud(monkeypatch):
+    client = PageIndexClient(api_key="secret")
+    calls = []
+    def fake_request(method, url, **kwargs):
+        calls.append({"method": method, "url": url, **kwargs})
+        return calls[-1].pop("_response", FakeResponse(fake_request.payload))
+    fake_request.payload = {}
+    monkeypatch.setattr("pageindex.cloud_api.requests.request", fake_request)
+    return client, calls, fake_request
+
+
+def test_cloud_request_wiring(cloud, sample_pdf):
+    client, calls, fake = cloud
+
+    fake.payload = {"doc_id": "pi-1"}
+    assert client.submit_document(sample_pdf) == {"doc_id": "pi-1"}
+    assert calls[-1]["url"] == "https://api.pageindex.ai/doc/"
+    assert calls[-1]["headers"] == {"api_key": "secret"}
+    assert calls[-1]["data"] == {"if_retrieval": True}
+    assert calls[-1]["timeout"] is None
+
+    fake.payload = {"status": "processing", "retrieval_ready": False}
+    client.get_tree("pi-1", node_summary=True)
+    assert calls[-1]["url"].endswith("/doc/pi-1/?type=tree&summary=true")
+    assert calls[-1]["timeout"] == 30
+    assert client.is_retrieval_ready("pi-1") is False
+
+    client.get_ocr("pi/../1")
+    assert "/doc/pi%2F..%2F1/" in calls[-1]["url"]
+
+    client.BASE_URL = "https://staging.example"
+    client.api_key = "other"
+    client.get_document("pi-1")
+    assert calls[-1]["url"] == "https://staging.example/doc/pi-1/metadata/"
+    assert calls[-1]["headers"] == {"api_key": "other"}
+
+
+def test_cloud_error_and_empty_delete(cloud, monkeypatch):
+    client, calls, fake = cloud
+    monkeypatch.setattr(
+        "pageindex.cloud_api.requests.request",
+        lambda method, url, **kw: FakeResponse(status_code=401, text="denied"))
+    with pytest.raises(PageIndexAPIError, match="dash.pageindex.ai"):
+        client.get_document("pi-1")
+
+    monkeypatch.setattr(
+        "pageindex.cloud_api.requests.request",
+        lambda method, url, **kw: FakeResponse(content=b""))
+    assert client.delete_document("pi-1") == {}
+
+
+def test_cloud_chat_stream_parsing(cloud, monkeypatch):
+    client, calls, fake = cloud
+    lines = [
+        b'data: {"choices": [{"delta": {"role": "assistant", "content": ""}}]}',
+        b'data: {"choices": [{"delta": {"content": "Hi"}}]}',
+        b"",
+        b'data: {"object": "chat.completion.citations", "citations": []}',
+        b'data: {"choices": [{"delta": {"content": " there"}}]}',
+        b"data: [DONE]",
+    ]
+    monkeypatch.setattr(
+        "pageindex.cloud_api.requests.request",
+        lambda method, url, **kw: FakeResponse(lines=lines))
+    pieces = list(client.chat_completions(
+        messages=[{"role": "user", "content": "q"}], stream=True))
+    assert pieces == ["Hi", " there"]
+
+    monkeypatch.setattr(
+        "pageindex.cloud_api.requests.request",
+        lambda method, url, **kw: FakeResponse(lines=lines))
+    chunks = list(client.chat_completions(
+        messages=[{"role": "user", "content": "q"}], stream=True,
+        stream_metadata=True))
+    assert {"object": "chat.completion.citations", "citations": []} in chunks
