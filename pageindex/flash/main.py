@@ -166,11 +166,16 @@ def extract_toc(
             doc_name = Path(str(doc_handle)).name
         else:
             doc_name = "document.pdf"
+        page_texts = [
+            "\n".join(block_text(block) for block in (page.secondary_slot or []))
+            for page in pages
+        ]
         result = {
             "doc_name": doc_name,
             "doc_title": None,
             "structure": [],
             "has_abstract_or_references_section": False,
+            "page_texts": page_texts,
         }
         # Bookmarks need no extracted text, so they can still structure a
         # document this gate wrote off as unreadable.
@@ -178,9 +183,7 @@ def extract_toc(
             from .embedded_toc import apply_embedded_toc
             result["structure"], result["toc_source"] = apply_embedded_toc(
                 [], doc_handle, len(pages),
-                page_texts=["\n".join(block_text(block)
-                                      for block in (page.secondary_slot or []))
-                            for page in pages],
+                page_texts=page_texts,
             )
         return result
 
