@@ -6,10 +6,3 @@ class PageIndexAPIError(Exception):
     0.2.x cloud SDK keeps working unchanged in local mode.
     """
     pass
-
-
-AUTH_HINT = (
-    "api_key must be a PageIndex cloud API key (https://dash.pageindex.ai/api-keys). "
-    "For local mode, omit api_key and set your LLM provider key "
-    "(e.g. OPENAI_API_KEY) in the environment."
-)

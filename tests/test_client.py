@@ -386,16 +386,28 @@ class FakeResponse:
         pass
 
 
+def _patch_requests(monkeypatch, handler):
+    """Replace cloud_api's requests module with per-verb fakes."""
+    fake = types.SimpleNamespace(
+        post=lambda url, **kw: handler("POST", url, kw),
+        get=lambda url, **kw: handler("GET", url, kw),
+        delete=lambda url, **kw: handler("DELETE", url, kw),
+        Response=FakeResponse,
+    )
+    monkeypatch.setattr("pageindex.cloud_api.requests", fake)
+
+
 @pytest.fixture
 def cloud(monkeypatch):
     client = PageIndexClient(api_key="secret")
     calls = []
-    def fake_request(method, url, **kwargs):
-        calls.append({"method": method, "url": url, **kwargs})
-        return calls[-1].pop("_response", FakeResponse(fake_request.payload))
-    fake_request.payload = {}
-    monkeypatch.setattr("pageindex.cloud_api.requests.request", fake_request)
-    return client, calls, fake_request
+    class Fake:
+        payload = {}
+    def handler(method, url, kw):
+        calls.append({"method": method, "url": url, **kw})
+        return FakeResponse(Fake.payload)
+    _patch_requests(monkeypatch, handler)
+    return client, calls, Fake
 
 
 def test_cloud_request_wiring(cloud, sample_pdf):
@@ -406,11 +418,11 @@ def test_cloud_request_wiring(cloud, sample_pdf):
     assert calls[-1]["url"] == "https://api.pageindex.ai/doc/"
     assert calls[-1]["headers"] == {"api_key": "secret"}
     assert calls[-1]["data"] == {"if_retrieval": True}
-    assert calls[-1]["timeout"] is None
+    assert "timeout" not in calls[-1]
 
     fake.payload = {"status": "processing", "retrieval_ready": False}
     client.get_tree("pi-1", node_summary=True)
-    assert calls[-1]["url"].endswith("/doc/pi-1/?type=tree&summary=true")
+    assert calls[-1]["url"].endswith("/doc/pi-1/?type=tree&summary=True")
     assert calls[-1]["timeout"] == 30
     assert client.is_retrieval_ready("pi-1") is False
 
@@ -426,15 +438,13 @@ def test_cloud_request_wiring(cloud, sample_pdf):
 
 def test_cloud_error_and_empty_delete(cloud, monkeypatch):
     client, calls, fake = cloud
-    monkeypatch.setattr(
-        "pageindex.cloud_api.requests.request",
-        lambda method, url, **kw: FakeResponse(status_code=401, text="denied"))
-    with pytest.raises(PageIndexAPIError, match="dash.pageindex.ai"):
+    _patch_requests(monkeypatch,
+                    lambda m, url, kw: FakeResponse(status_code=401, text="denied"))
+    with pytest.raises(PageIndexAPIError,
+                       match="Failed to get document metadata: denied"):
         client.get_document("pi-1")
 
-    monkeypatch.setattr(
-        "pageindex.cloud_api.requests.request",
-        lambda method, url, **kw: FakeResponse(content=b""))
+    _patch_requests(monkeypatch, lambda m, url, kw: FakeResponse(content=b""))
     assert client.delete_document("pi-1") == {}
 
 
@@ -448,16 +458,11 @@ def test_cloud_chat_stream_parsing(cloud, monkeypatch):
         b'data: {"choices": [{"delta": {"content": " there"}}]}',
         b"data: [DONE]",
     ]
-    monkeypatch.setattr(
-        "pageindex.cloud_api.requests.request",
-        lambda method, url, **kw: FakeResponse(lines=lines))
+    _patch_requests(monkeypatch, lambda m, url, kw: FakeResponse(lines=lines))
     pieces = list(client.chat_completions(
         messages=[{"role": "user", "content": "q"}], stream=True))
     assert pieces == ["Hi", " there"]
 
-    monkeypatch.setattr(
-        "pageindex.cloud_api.requests.request",
-        lambda method, url, **kw: FakeResponse(lines=lines))
     chunks = list(client.chat_completions(
         messages=[{"role": "user", "content": "q"}], stream=True,
         stream_metadata=True))
