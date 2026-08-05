@@ -207,6 +207,36 @@ python3 run_pageindex.py --md_path /path/to/your/document.md
 >
 > Add `--optimize` to refine the tree structure for more efficient retrieval (with an LLM expansion pass).
 
+## 🐍 Python SDK: Cloud & Local
+
+The `pageindex` package on PyPI is the Python SDK for the [PageIndex API](https://docs.pageindex.ai) — and the same client now also runs fully **locally**, powered by this repo's indexing pipeline (including Flash).
+
+```bash
+pip3 install --pre --upgrade pageindex   # local mode ships in the 0.3.0 pre-releases; without --pre, pip installs 0.2.8 (cloud-only)
+```
+
+```python
+from pageindex import PageIndexClient
+
+client = PageIndexClient(api_key="YOUR_PAGEINDEX_API_KEY")  # cloud: managed OCR, tree building, retrieval
+client = PageIndexClient()                                  # local: same methods on your machine, using your LLM key (e.g. OPENAI_API_KEY)
+
+doc_id = client.submit_document("doc.pdf")["doc_id"]        # local mode blocks until indexing finishes
+doc_id = client.submit_document("doc.pdf", mode="flash")["doc_id"]  # local mode with PageIndex Flash
+
+tree = client.get_tree(doc_id, node_summary=True)["result"]
+
+retrieval_id = client.submit_query(doc_id, "What are the conclusions?")["retrieval_id"]
+nodes = client.get_retrieval(retrieval_id)["retrieved_nodes"]
+
+answer = client.chat_completions(
+    messages=[{"role": "user", "content": "Summarize the key findings"}],
+    doc_id=doc_id,
+)["choices"][0]["message"]["content"]
+```
+
+Local documents are stored as plain JSON under `./.pageindex` (configurable via `storage_path`). Local mode supports PDFs; folders, `beta_headers`, and `enable_citations` remain cloud-only — each method's docstring spells out the differences.
+
 ## 🚀 Agentic Vectorless RAG: An Example
 
 For a simple, end-to-end **agentic vectorless RAG** example using **self-hosted PageIndex** (with OpenAI Agents SDK), see [`examples/agentic_vectorless_rag_demo.py`](examples/agentic_vectorless_rag_demo.py).
