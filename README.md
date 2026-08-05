@@ -226,16 +226,13 @@ doc_id = client.submit_document("doc.pdf", mode="flash")["doc_id"]  # local mode
 
 tree = client.get_tree(doc_id, node_summary=True)["result"]
 
-retrieval_id = client.submit_query(doc_id, "What are the conclusions?")["retrieval_id"]
-nodes = client.get_retrieval(retrieval_id)["retrieved_nodes"]
-
 answer = client.chat_completions(
     messages=[{"role": "user", "content": "Summarize the key findings"}],
     doc_id=doc_id,
 )["choices"][0]["message"]["content"]
 ```
 
-Local documents are stored as plain JSON under `./.pageindex` (configurable via `storage_path`). Local mode supports PDFs; folders, `beta_headers`, and `enable_citations` remain cloud-only — each method's docstring spells out the differences.
+Local documents are stored as plain JSON under `./.pageindex` (configurable via `storage_path`). Local mode supports PDFs; folders, `beta_headers`, `enable_citations`, and the deprecated retrieval API (`submit_query`/`get_retrieval`) remain cloud-only — each method's docstring spells out the differences.
 
 ## 🚀 Agentic Vectorless RAG: An Example
 

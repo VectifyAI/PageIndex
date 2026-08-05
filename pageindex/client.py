@@ -34,7 +34,8 @@ class PageIndexClient:
 
     Local mode differences (all documented per method): indexing is
     synchronous, only PDFs are supported, and folders / ``beta_headers`` /
-    ``enable_citations`` are cloud-only.
+    ``enable_citations`` / the deprecated retrieval API (``submit_query``,
+    ``get_retrieval``) are cloud-only.
     """
 
     BASE_URL = "https://api.pageindex.ai"
@@ -174,33 +175,33 @@ class PageIndexClient:
         except PageIndexAPIError:
             return False
 
-    # ---------- RETRIEVAL ----------
+    # ---------- RETRIEVAL (cloud-only, deprecated) ----------
 
     def submit_query(self, doc_id: str, query: str, thinking: bool = False) -> dict[str, Any]:
         """
         Submit a retrieval query for a document. Returns {'retrieval_id': ...}.
 
-        Local: retrieval runs in this call (LLM tree search over the document
-        tree with ``retrieve_model``); ``get_retrieval`` has the result
-        immediately. ``thinking`` is accepted for compatibility but does not
-        change the local search.
+        Cloud-only: the cloud API marks this endpoint deprecated in favor of
+        chat completions, so local mode does not implement it — raises
+        PageIndexAPIError. Use ``chat_completions`` instead.
         """
-        return self._api.submit_query(doc_id=doc_id, query=query, thinking=thinking)
+        return self._require_cloud(
+            "submit_query is cloud-only — the retrieval API is deprecated in "
+            "favor of chat completions; use chat_completions in local mode."
+        ).submit_query(doc_id=doc_id, query=query, thinking=thinking)
 
     def get_retrieval(self, retrieval_id: str) -> dict[str, Any]:
         """
-        Get retrieval status and results.
+        Get retrieval status and results for a submitted query.
 
-        Returns:
-            dict: on success {'retrieval_id', 'doc_id', 'status': 'completed',
-            'query', 'retrieved_nodes'}; on failure {'retrieval_id',
-            'status': 'error', 'error_message'}.
-
-        Local: retrieved_nodes entries are {'node_id', 'title',
-        'relevant_contents': [{'page_index', 'relevant_content'}, ...]} with
-        the full text of the node's pages.
+        Cloud-only: the cloud API marks this endpoint deprecated in favor of
+        chat completions, so local mode does not implement it — raises
+        PageIndexAPIError. Use ``chat_completions`` instead.
         """
-        return self._api.get_retrieval(retrieval_id=retrieval_id)
+        return self._require_cloud(
+            "get_retrieval is cloud-only — the retrieval API is deprecated in "
+            "favor of chat completions; use chat_completions in local mode."
+        ).get_retrieval(retrieval_id=retrieval_id)
 
     # ---------- CHAT COMPLETIONS ----------
 
@@ -292,7 +293,10 @@ class PageIndexClient:
         Create a folder (workspace). Cloud-only: local mode raises
         PageIndexAPIError.
         """
-        return self._require_cloud("create_folder").create_folder(
+        return self._require_cloud(
+            "create_folder is cloud-only — folders are not supported in local "
+            "mode. Create the client with an api_key to use folders."
+        ).create_folder(
             name=name, description=description, parent_folder_id=parent_folder_id,
         )
 
@@ -300,15 +304,15 @@ class PageIndexClient:
         """
         List folders. Cloud-only: local mode raises PageIndexAPIError.
         """
-        return self._require_cloud("list_folders").list_folders(
+        return self._require_cloud(
+            "list_folders is cloud-only — folders are not supported in local "
+            "mode. Create the client with an api_key to use folders."
+        ).list_folders(
             parent_folder_id=parent_folder_id,
         )
 
-    def _require_cloud(self, method: str):
+    def _require_cloud(self, message: str):
         from .cloud_api import CloudAPI
         if not isinstance(self._api, CloudAPI):
-            raise PageIndexAPIError(
-                f"{method} is cloud-only — folders are not supported in local "
-                "mode. Create the client with an api_key to use folders."
-            )
+            raise PageIndexAPIError(message)
         return self._api

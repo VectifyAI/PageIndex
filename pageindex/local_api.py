@@ -7,10 +7,11 @@ Mirrors the response shapes of api.pageindex.ai so code written against the
   (your machine runs the LLM calls), so ``status`` is always ``"completed"``
   and polling loops succeed on the first try.
 - Only PDF files are supported.
-- Folders, ``beta_headers``, and ``enable_citations`` are cloud-only and raise.
-- Cloud responses carry a ``deprecation`` notice on retrieval endpoints, OCR
-  ``images``, and a ``block_metadata`` key on streaming chunks; local
-  responses omit them.
+- Folders, ``beta_headers``, ``enable_citations``, and the deprecated
+  retrieval API (``submit_query``/``get_retrieval``) are cloud-only and
+  raise; use ``chat_completions`` for retrieval-backed answers.
+- Cloud responses carry OCR ``images`` and a ``block_metadata`` key on
+  streaming chunks; local responses omit them.
 """
 from __future__ import annotations
 
@@ -269,41 +270,7 @@ class LocalAPI:
             "offset": offset,
         }
 
-    # ── retrieval ──
-
-    def submit_query(self, doc_id: str, query: str, thinking: bool = False) -> dict[str, Any]:
-        """Run tree-search retrieval and store the result under a retrieval_id.
-
-        Runs synchronously; ``get_retrieval`` has the answer immediately. The
-        ``thinking`` flag is accepted for compatibility — local retrieval
-        always uses the same tree search.
-        """
-        self._require_doc(doc_id, "Failed to submit retrieval")
-        self._require_llm_key()
-        retrieval_id = str(uuid.uuid4())
-        try:
-            node_ids = self._tree_search(doc_id, query)
-            retrieval = {
-                "retrieval_id": retrieval_id,
-                "doc_id": doc_id,
-                "status": "completed",
-                "query": query,
-                "retrieved_nodes": self._build_retrieved_nodes(doc_id, node_ids),
-            }
-        except Exception as e:
-            retrieval = {
-                "retrieval_id": retrieval_id,
-                "status": "error",
-                "error_message": str(e),
-            }
-        self._store.save_retrieval(retrieval_id, retrieval)
-        return {"retrieval_id": retrieval_id}
-
-    def get_retrieval(self, retrieval_id: str) -> dict[str, Any]:
-        retrieval = self._store.get_retrieval(retrieval_id)
-        if retrieval is None:
-            raise PageIndexAPIError("Failed to get retrieval result: Retrieval task not found.")
-        return retrieval
+    # ── retrieval (internal: backs chat_completions) ──
 
     def _require_llm_key(self) -> None:
         """Fail fast with a clear message instead of ten silent retries."""
@@ -358,27 +325,6 @@ class LocalAPI:
                 _walk(node.get("nodes") or [])
         _walk(structure)
         return mapping
-
-    def _build_retrieved_nodes(self, doc_id: str, node_ids: list[str]) -> list[dict]:
-        structure = self._store.get_tree(doc_id) or []
-        pages = self._store.get_pages(doc_id) or []
-        page_map = {p["page_index"]: p.get("markdown", "") for p in pages}
-        node_map = self._node_map(structure)
-        retrieved = []
-        for node_id in node_ids:
-            node = node_map[node_id]
-            start, end = node.get("start_index"), node.get("end_index")
-            if isinstance(start, int) and isinstance(end, int):
-                contents = [{"page_index": p, "relevant_content": page_map.get(p, "")}
-                            for p in range(start, end + 1)]
-            else:
-                contents = [{"page_index": start, "relevant_content": node.get("text", "")}]
-            retrieved.append({
-                "node_id": node_id,
-                "title": node.get("title", ""),
-                "relevant_contents": contents,
-            })
-        return retrieved
 
     # ── chat completions ──
 

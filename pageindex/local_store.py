@@ -4,8 +4,7 @@ Layout under the storage directory:
 
     docs/<doc_id>/doc.json    document metadata (small; read by list/get)
     docs/<doc_id>/tree.json   the PageIndex tree structure
-    docs/<doc_id>/pages.json  extracted page text: [{"page": 1, "content": ...}, ...]
-    retrievals/<retrieval_id>.json
+    docs/<doc_id>/pages.json  extracted page text: [{"page_index": 1, "markdown": ...}, ...]
 
 Every file is written atomically (temp file + os.replace). ``doc.json`` is
 written last, so its presence marks a completely stored document; directories
@@ -54,7 +53,6 @@ class DocStore:
     def __init__(self, storage_dir: str):
         self._root = Path(storage_dir).expanduser()
         self._docs = self._root / "docs"
-        self._retrievals = self._root / "retrievals"
 
     def _doc_dir(self, doc_id: str) -> Path | None:
         if not _is_safe_id(doc_id):
@@ -104,13 +102,3 @@ class DocStore:
         if doc_dir.is_dir():
             shutil.rmtree(doc_dir)
         return existed
-
-    # ── retrievals ──
-    def save_retrieval(self, retrieval_id: str, data: dict) -> None:
-        self._retrievals.mkdir(parents=True, exist_ok=True)
-        _write_json_atomic(self._retrievals / f"{retrieval_id}.json", data)
-
-    def get_retrieval(self, retrieval_id: str) -> dict | None:
-        if not _is_safe_id(retrieval_id):
-            return None
-        return _read_json(self._retrievals / f"{retrieval_id}.json")

@@ -210,53 +210,27 @@ def test_folders_are_cloud_only(local_client):
         local_client.list_folders()
 
 
-# ── local: retrieval ──
+# ── local: retrieval endpoints are cloud-only ──
 
-def test_retrieval_flow(local_client, indexed_doc, monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "test")
-    def fake_llm(model, prompt, **kwargs):
-        assert model == local_client.retrieve_model
-        assert "Root Section" in prompt and "root text" not in prompt
-        return json.dumps({"thinking": "child is about bananas",
-                           "node_list": ["0001", "9999"]})
-    monkeypatch.setattr(pageindex.utils, "llm_completion", fake_llm)
-
-    retrieval_id = local_client.submit_query(indexed_doc, "What about bananas?")["retrieval_id"]
-    result = local_client.get_retrieval(retrieval_id)
-    assert result["status"] == "completed"
-    assert result["doc_id"] == indexed_doc
-    assert result["query"] == "What about bananas?"
-    assert result["retrieved_nodes"] == [{
-        "node_id": "0001",
-        "title": "Child Section",
-        "relevant_contents": [
-            {"page_index": 2, "relevant_content": "Second page about bananas"},
-        ],
-    }]
-
-
-def test_retrieval_error_is_stored(local_client, indexed_doc, monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "test")
-    monkeypatch.setattr(pageindex.utils, "llm_completion",
-                        lambda model, prompt, **kw: "")
-    retrieval_id = local_client.submit_query(indexed_doc, "q")["retrieval_id"]
-    result = local_client.get_retrieval(retrieval_id)
-    assert result["status"] == "error"
-    assert "no output" in result["error_message"]
-
-
-def test_retrieval_missing(local_client, indexed_doc):
-    with pytest.raises(PageIndexAPIError, match="Retrieval task not found"):
-        local_client.get_retrieval("nope")
-    with pytest.raises(PageIndexAPIError, match="Document not found"):
-        local_client.submit_query("nope", "q")
+def test_retrieval_endpoints_cloud_only(local_client):
+    with pytest.raises(PageIndexAPIError, match="use chat_completions"):
+        local_client.submit_query("any", "q")
+    with pytest.raises(PageIndexAPIError, match="use chat_completions"):
+        local_client.get_retrieval("any")
 
 
 def test_missing_llm_key_fails_fast(local_client, indexed_doc, monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     with pytest.raises(PageIndexAPIError, match="OPENAI_API_KEY is not set"):
-        local_client.submit_query(indexed_doc, "q")
-    with pytest.raises(PageIndexAPIError, match="OPENAI_API_KEY is not set"):
+        local_client.chat_completions(
+            messages=[{"role": "user", "content": "q"}], doc_id=indexed_doc)
+
+
+def test_chat_tree_search_failure(local_client, indexed_doc, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda model, prompt, **kw: "")
+    with pytest.raises(PageIndexAPIError, match="no output"):
         local_client.chat_completions(
             messages=[{"role": "user", "content": "q"}], doc_id=indexed_doc)
 
