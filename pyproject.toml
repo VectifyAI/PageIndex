@@ -1,0 +1,50 @@
+[tool.poetry]
+name = "pageindex"
+version = "0.3.0.dev4"
+description = "Python SDK for PageIndex — reasoning-based, vectorless document retrieval, cloud and local"
+readme = "README.md"
+license = "MIT"
+authors = ["Ray <ray@vectify.ai>"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+keywords = ["rag", "document", "retrieval", "llm", "pageindex", "vectorless"]
+packages = [{ include = "pageindex" }]
+include = [
+    { path = "pageindex/config.yaml", format = ["sdist", "wheel"] },
+    { path = "pageindex/flash/data/*.json", format = ["sdist", "wheel"] },
+]
+exclude = ["pageindex/flash/assets"]
+
+[tool.poetry.dependencies]
+python = ">=3.10"
+requests = ">=2.28.0"
+openai = ">=1.70.0"
+litellm = ">=1.84.0"
+PyPDF2 = ">=3.0.0"
+pypdfium2 = ">=4.30.0"
+sortedcontainers = ">=2.4.0"
+regex = ">=2024.0.0"
+python-dotenv = ">=1.0.0"
+pyyaml = ">=6.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7.0"
+
+[tool.poetry.urls]
+Repository = "https://github.com/VectifyAI/PageIndex"
+Homepage = "https://pageindex.ai"
+Documentation = "https://docs.pageindex.ai"
+Issues = "https://github.com/VectifyAI/PageIndex/issues"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
