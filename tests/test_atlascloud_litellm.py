@@ -1,11 +1,29 @@
+import asyncio
 import os
 import sys
+from types import SimpleNamespace
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from pageindex.utils import ATLASCLOUD_API_BASE, prepare_litellm_call
+from pageindex.utils import (
+    ATLASCLOUD_API_BASE,
+    llm_acompletion,
+    llm_completion,
+    prepare_litellm_call,
+)
+
+
+def completion_response(content):
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                finish_reason="stop",
+                message=SimpleNamespace(content=content),
+            )
+        ]
+    )
 
 
 def test_prepare_litellm_call_keeps_regular_models():
@@ -43,3 +61,51 @@ def test_prepare_litellm_call_requires_atlascloud_api_key(monkeypatch):
     monkeypatch.delenv("ATLASCLOUD_API_KEY", raising=False)
     with pytest.raises(ValueError, match="ATLASCLOUD_API_KEY"):
         prepare_litellm_call("atlascloud/qwen/qwen3.5-flash")
+
+
+def test_llm_completion_routes_atlascloud_through_litellm(monkeypatch):
+    calls = []
+
+    def completion(**kwargs):
+        calls.append(kwargs)
+        return completion_response("sync response")
+
+    monkeypatch.setenv("ATLASCLOUD_API_KEY", "test-key")
+    monkeypatch.setitem(sys.modules, "litellm", SimpleNamespace(completion=completion))
+
+    result = llm_completion("atlascloud/qwen/qwen3.5-flash", "hello")
+
+    assert result == "sync response"
+    assert calls == [{
+        "api_base": ATLASCLOUD_API_BASE,
+        "api_key": "test-key",
+        "drop_params": True,
+        "messages": [{"role": "user", "content": "hello"}],
+        "model": "openai/qwen/qwen3.5-flash",
+        "temperature": 0,
+    }]
+
+
+def test_llm_acompletion_routes_atlascloud_through_litellm(monkeypatch):
+    calls = []
+
+    async def acompletion(**kwargs):
+        calls.append(kwargs)
+        return completion_response("async response")
+
+    monkeypatch.setenv("ATLASCLOUD_API_KEY", "test-key")
+    monkeypatch.setitem(sys.modules, "litellm", SimpleNamespace(acompletion=acompletion))
+
+    result = asyncio.run(
+        llm_acompletion("atlascloud/qwen/qwen3.5-flash", "hello")
+    )
+
+    assert result == "async response"
+    assert calls == [{
+        "api_base": ATLASCLOUD_API_BASE,
+        "api_key": "test-key",
+        "drop_params": True,
+        "messages": [{"role": "user", "content": "hello"}],
+        "model": "openai/qwen/qwen3.5-flash",
+        "temperature": 0,
+    }]
