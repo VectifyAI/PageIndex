@@ -32,6 +32,10 @@ class PageIndexClient:
         client = PageIndexClient(api_key="...")   # cloud
         client = PageIndexClient()                # local
 
+        # Or fix the mode at the type level:
+        client = CloudClient(api_key="...")       # raises if the key is missing
+        client = LocalClient(model="...")         # has no api_key parameter
+
     Local mode differences (all documented per method): indexing is
     synchronous, only PDFs are supported, and folders / ``beta_headers`` /
     ``enable_citations`` / the deprecated retrieval API (``submit_query``,
@@ -329,3 +333,40 @@ class PageIndexClient:
         if not isinstance(self._api, CloudAPI):
             raise PageIndexAPIError(message)
         return self._api
+
+
+class LocalClient(PageIndexClient):
+    """Local mode, fixed at the type level.
+
+    Same methods as ``PageIndexClient()`` without an api_key, but there is no
+    api_key parameter at all — a misconfigured environment can never silently
+    switch this client to the cloud.
+    """
+
+    def __init__(
+        self,
+        *,
+        model: Optional[str] = None,
+        summary_model: Optional[str] = None,
+        retrieve_model: Optional[str] = None,
+        storage_path: Optional[str] = None,
+    ):
+        super().__init__(api_key=None, model=model, summary_model=summary_model,
+                         retrieve_model=retrieve_model, storage_path=storage_path)
+
+
+class CloudClient(PageIndexClient):
+    """Cloud mode, fixed at the type level.
+
+    Requires a PageIndex API key and raises when it is missing — including
+    the ``os.getenv(...)`` returning None case, where ``PageIndexClient``
+    would silently fall through to local mode.
+    """
+
+    def __init__(self, api_key: str):
+        if not api_key:
+            raise PageIndexAPIError(
+                "CloudClient requires a PageIndex API key — get one at "
+                "https://dash.pageindex.ai/api-keys."
+            )
+        super().__init__(api_key=api_key)
