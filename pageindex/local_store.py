@@ -2,8 +2,7 @@
 
 Layout under the storage directory:
 
-    manifest.json             all documents' metadata in one file, for
-                              one-read listings and human inspection
+    manifest.json             all documents' metadata in one file
     docs/<doc_id>/doc.json    document metadata (small; read by get)
     docs/<doc_id>/tree.json   the PageIndex tree structure
     docs/<doc_id>/pages.json  extracted page text: [{"page_index": 1, "markdown": ...}, ...]
@@ -17,9 +16,8 @@ The manifest is a cache, never a second source of truth: writers update it
 best-effort, and ``list_metas`` serves an entry only after confirming the
 document's ``doc.json`` still exists (documents are immutable, so presence
 implies the cached content is valid). Anything missing from the cache is
-re-read from the doc.json files and the manifest rewritten. An unreadable
-JSON file is logged and treated as absent — except a document's meta, which
-can be served from the manifest copy. No locks anywhere.
+re-read from the doc.json files and the manifest rewritten. No locks
+anywhere.
 """
 from __future__ import annotations
 
