@@ -13,10 +13,10 @@
 
 # PageIndex: Vectorless, Reasoning-based RAG
 
-<p align="center"><b>Reasoning-based RAG&nbsp; ◦ &nbsp;No Vector DB or Chunking&nbsp; ◦ &nbsp;Context-Aware&nbsp; ◦ &nbsp;Human-like Retrieval</b></p>
+<p align="center"><b>Reasoning-based RAG&nbsp; ◦ &nbsp;No Vector DB, No Chunking&nbsp; ◦ &nbsp;Context-Aware Retrieval&nbsp; ◦ &nbsp;Reads Like a Human</b></p>
 
 <h4 align="center">
-  <a href="https://vectify.ai">🌐 Homepage</a>&nbsp; • &nbsp;
+  <a href="https://vectify.ai">🌐 Website</a>&nbsp; • &nbsp;
   <a href="https://chat.pageindex.ai">🖥️ Chat Platform</a>&nbsp; • &nbsp;
   <a href="https://pageindex.ai/developer">🔌 MCP & API</a>&nbsp; • &nbsp;
   <a href="https://docs.pageindex.ai">📖 Docs</a>&nbsp; • &nbsp;
@@ -30,8 +30,8 @@
 <details open>
 <summary><h2>📢 Updates</h2></summary>
 
-- 🔥 [**Agentic Vectorless RAG**](https://github.com/VectifyAI/PageIndex/blob/main/examples/agentic_vectorless_rag_demo.py) — A simple *agentic, vectorless RAG* [example](#agentic-vectorless-rag-an-example) with self-hosted PageIndex, using OpenAI Agents SDK.
-- [**Scale PageIndex to Millions of Documents**](https://pageindex.ai/blog/pageindex-filesystem) — *PageIndex File System* is a file-level tree layer that lets PageIndex reason over an entire corpus, not just a single document, enabling massive-scale document search.
+- 🔥 [**Agentic Vectorless RAG**](https://github.com/VectifyAI/PageIndex/blob/main/examples/agentic_vectorless_rag_demo.py) — A simple agentic, vectorless RAG [example](#-agentic-vectorless-rag-an-example) with *self-hosted PageIndex*, using OpenAI Agents SDK.
+- [**Scale PageIndex to Millions of Documents**](https://pageindex.ai/blog/pageindex-filesystem) — *PageIndex File System* is a file-level tree indexing layer that lets PageIndex reason over an entire corpus, not just a single document, enabling massive-scale document search.
 - [PageIndex Chat](https://chat.pageindex.ai) — Human-like document analysis agent [platform](https://chat.pageindex.ai) for professional long documents. Also available via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer).
 - [PageIndex Framework](https://pageindex.ai/blog/pageindex-intro) — Deep dive into PageIndex: an *agentic, in-context tree index* that enables LLMs to perform *reasoning-based, context-aware retrieval* over long documents.
 
@@ -45,13 +45,13 @@
 
 # 📑 Introduction to PageIndex
 
-Are you frustrated with vector database retrieval accuracy for long professional documents? Traditional vector-based RAG relies on semantic *similarity* rather than true *relevance*. But **similarity ≠ relevance** — what we truly need in retrieval is **relevance**, and that requires **reasoning**. When working with professional documents that demand domain expertise and multi-step reasoning, similarity search often falls short.
+Are you frustrated with vector database retrieval accuracy for long professional documents? Traditional vector-based RAG relies on semantic *similarity* rather than true *relevance*. But **similarity ≠ relevance** — what we truly need in retrieval is **relevance**, and that requires **reasoning**. When working with professional documents that demand *contextual understanding*, domain expertise, and multi-step reasoning, similarity search often falls short — missing what's relevant but not similar, and returning what's similar yet not relevant.
 
-Inspired by AlphaGo, we propose **[PageIndex](https://vectify.ai/pageindex)** — a **vectorless**, **reasoning-based RAG** system that builds a **hierarchical tree index** from long documents and uses LLMs to **reason** *over that index* for **agentic, context-aware retrieval**.
-It simulates how *human experts* navigate and extract knowledge from complex documents through *tree search*, enabling LLMs to *think* and *reason* their way to the most relevant document sections. PageIndex performs retrieval in two steps:
+Inspired by AlphaGo, we propose **[PageIndex](https://vectify.ai/pageindex)** — a **vectorless**, **reasoning-based RAG** system that builds a **hierarchical tree index** from long documents, and uses LLMs to **reason** *over that index* for **agentic, context-aware retrieval**. The retrieval is *traceable* and *explainable*, with no vector DBs or chunking.
+PageIndex simulates how *human experts* navigate and extract knowledge from complex documents through *tree search*, enabling LLMs to *think* and *reason* their way to the most relevant document sections. It performs retrieval in two steps:
 
 1. Generate a “Table-of-Contents” **tree structure index** of documents
-2. Perform reasoning-based retrieval through **tree search**
+2. Perform (agentic) reasoning-based retrieval through **tree search**
 
 <div align="center">
   <a href="https://pageindex.ai/blog/pageindex-intro" target="_blank" title="The PageIndex Framework">
@@ -61,29 +61,32 @@ It simulates how *human experts* navigate and extract knowledge from complex doc
 
 ### 🎯 Core Features
 
+> PageIndex is a vectorless, reasoning-based RAG engine that mirrors how humans read, delivering traceable, explainable, and context-aware retrieval, without vector databases or chunking.
+
 Compared to traditional vector-based RAG, **PageIndex** features:
 - **No Vector DB**: Uses document structure and LLM reasoning for retrieval, instead of vector similarity search.
 - **No Chunking**: Documents are organized into natural sections, not artificial chunks.
-- **Better Explainability and Traceability**: Retrieval is based on reasoning, traceable and interpretable, with page and section references. No more opaque, approximate vector search (“vibe retrieval”).
+- **Better Traceability & Explainability**: Retrieval is reasoning-driven and grounded in explicit page and section references, making every result traceable and interpretable — no more “vibe retrieval” with opaque, approximate vector search.
 - **Context-Aware Retrieval**: Retrieval depends on your full context (e.g., conversation history and domain knowledge), and easily incorporates new context.
-- **Human-like Retrieval**: Simulates how human experts navigate and extract knowledge from complex documents.
+- **Human-like Retrieval**: Mirrors how human experts navigate and extract knowledge from complex documents.
 
-PageIndex powers a reasoning-based RAG system that achieved **state-of-the-art** [98.7% accuracy](https://github.com/VectifyAI/Mafin2.5-FinanceBench) on FinanceBench, demonstrating superior performance over vector-based RAG solutions in professional document analysis. See our [blog post](https://vectify.ai/blog/Mafin2.5) for details.
+PageIndex achieved **state-of-the-art** [98.7% accuracy](https://github.com/VectifyAI/Mafin2.5-FinanceBench) on FinanceBench (financial document QA benchmark), vastly outperforming vector RAG solutions on professional document analysis ([blog post](https://vectify.ai/blog/Mafin2.5)).
 
 ### 📍 Explore PageIndex
 
-To learn more, please see a detailed introduction to the [PageIndex framework](https://pageindex.ai/blog/pageindex-intro). Check out this GitHub repo for open-source code, and the [cookbooks](https://docs.pageindex.ai/cookbook), [tutorials](https://docs.pageindex.ai/tutorials), and [blog](https://pageindex.ai/blog) for additional usage guides and examples.
+To learn more, please see a detailed introduction to the [PageIndex framework](https://pageindex.ai/blog/pageindex-intro). Check out [our GitHub](https://docs.pageindex.ai/open-source) for open-source code, and the [cookbooks](https://docs.pageindex.ai/cookbook), [tutorials](https://docs.pageindex.ai/tutorials), and [blog](https://pageindex.ai/blog) for more usage guides and examples.
 
-The PageIndex service is available as a ChatGPT-style [chat platform](https://chat.pageindex.ai), or can be integrated via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer).
+The PageIndex service is available as a ChatGPT-style [chat platform](https://chat.pageindex.ai), or can be integrated via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer), with [enterprise](https://pageindex.ai/enterprise) deployment available.
 
 ### 🛠️ Deployment Options
-- Self-host — run locally with this open-source repo (using standard PDF parsing).
-- Cloud Service — production-grade pipeline with enhanced OCR, tree building, and retrieval for best results. Try instantly with our [Chat Platform](https://chat.pageindex.ai/), or integrate via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer).
-- _Enterprise_ — private or on-prem deployment. [Contact us](https://ii2abc2jejf.typeform.com/to/tK3AXl8T) or [book a demo](https://calendly.com/pageindex/meet) for more details.
+- **Self-host** — run locally with this open-source repo (using standard PDF parsing).
+- **Cloud Service** — production-grade pipeline with enhanced OCR, tree building, and retrieval for best results. Try instantly on our [Chat Platform](https://chat.pageindex.ai/), or integrate via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer).
+- **Enterprise** — dedicated or private deployment (VPC, on-prem). [Contact us](https://ii2abc2jejf.typeform.com/to/gVv7qkaN) or [book a demo](https://calendly.com/pageindex/meet) to learn more.
 
 ### 🧪 Quick Hands-on
 
-- 🔥 [**Agentic Vectorless RAG**](examples/agentic_vectorless_rag_demo.py) (**latest**) — a simple but complete **agentic vectorless RAG** [example](#agentic-vectorless-rag-an-example) with *self-hosted* PageIndex, using OpenAI Agents SDK.
+- ⚡ [**PageIndex Flash**](pageindex/flash) *(preview)* — ultra fast PageIndex tree structure generation from PDFs.
+- 🔥 [**Agentic Vectorless RAG**](examples/agentic_vectorless_rag_demo.py) *(latest)* — a simple but complete **agentic vectorless RAG** [example](#-agentic-vectorless-rag-an-example) with *self-hosted* PageIndex, using OpenAI Agents SDK.
 - Try the [Vectorless RAG](https://github.com/VectifyAI/PageIndex/blob/main/cookbook/pageindex_RAG_simple.ipynb) notebook — a *minimal*, hands-on example of reasoning-based RAG using PageIndex.
 - Check out [Vision-based Vectorless RAG](https://github.com/VectifyAI/PageIndex/blob/main/cookbook/vision_RAG_pageindex.ipynb) — no OCR; a minimal, vision-based & reasoning-native RAG pipeline that works directly over page images.
   
@@ -105,7 +108,7 @@ The PageIndex service is available as a ChatGPT-style [chat platform](https://ch
 
 # 🌲 PageIndex Tree Structure
 
-PageIndex can transform lengthy PDF documents into a semantic **tree structure**, similar to a _“table of contents”_ but optimized for use with Large Language Models (LLMs). It's ideal for: financial reports, regulatory filings, academic textbooks, legal or technical manuals, and any document that exceeds LLM context limits.
+PageIndex can transform lengthy PDF documents into a semantic **tree structure**, similar to a _“table of contents”_ but optimized for use with LLMs and AI agents. It's ideal for: financial reports, legal documents, regulatory filings, technical manuals, medical literature, academic textbooks, and any long, complex professional documents.
 
 Below is an example PageIndex tree structure. Also see more example [documents](https://github.com/VectifyAI/PageIndex/tree/main/examples/documents) and generated [tree structures](https://github.com/VectifyAI/PageIndex/tree/main/examples/documents/results).
 
@@ -137,13 +140,13 @@ Below is an example PageIndex tree structure. Also see more example [documents](
 ...
 ```
 
-You can generate the PageIndex tree structure with this open-source repo; or use our [API](https://pageindex.ai/developer) for higher-quality results powered by our enhanced OCR and tree building pipeline.
+You can generate PageIndex tree structures with this open-source repo. Or use our [API](https://pageindex.ai/developer) for higher-quality results powered by our enhanced OCR and tree building pipeline.
 
 ---
 
 # ⚙️ Package Usage
 
-> **Note:** This package uses standard PDF parsing. For use cases with complex PDFs, our [Cloud Service](https://pageindex.ai/developer) (via MCP and API) offers enhanced OCR, tree building, and retrieval.
+> **Note:** This package uses standard PDF parsing. For use cases with complex PDFs, our [cloud service](https://pageindex.ai/developer) (via MCP and API) offers enhanced OCR, tree building, and retrieval.
 
 You can follow these steps to generate a PageIndex tree from a PDF document.
 
@@ -195,9 +198,18 @@ python3 run_pageindex.py --md_path /path/to/your/document.md
 > Note: in this mode, we use "#" to determine node headings and their levels. For example, "##" is level 2, "###" is level 3, etc. Make sure your markdown file is formatted correctly. If your Markdown file was converted from a PDF or HTML, we don't recommend using this mode, since most existing conversion tools cannot preserve the original hierarchy. Instead, use our [PageIndex OCR](https://pageindex.ai/blog/ocr), which is designed to preserve it, to convert the PDF to a markdown file and then use this mode.
 </details>
 
-## Agentic Vectorless RAG: An Example
+> ### ⚡ PageIndex Flash *(preview)*
+> **PageIndex Flash** ([`pageindex/flash`](pageindex/flash)) generates tree structures from PDFs in seconds. Structure extraction is purely heuristic-based, no LLM needed. LLM is only used to generate node summaries.
+>
+> ```bash
+> python3 run_pageindex.py --flash --pdf_path /path/to/your/document.pdf
+> ```
+>
+> Add `--optimize` to refine the tree structure for more efficient retrieval (with an LLM expansion pass).
 
-For a simple, end-to-end _**agentic vectorless RAG**_ example using PageIndex with OpenAI Agents SDK, see [`examples/agentic_vectorless_rag_demo.py`](examples/agentic_vectorless_rag_demo.py).
+## 🚀 Agentic Vectorless RAG: An Example
+
+For a simple, end-to-end **agentic vectorless RAG** example using **self-hosted PageIndex** (with OpenAI Agents SDK), see [`examples/agentic_vectorless_rag_demo.py`](examples/agentic_vectorless_rag_demo.py).
 
 ```bash
 # Install optional dependency
@@ -226,7 +238,7 @@ To address this, we introduced PageIndex OCR — the first long-context OCR mode
 
 # 📈 Case Study: PageIndex Leads Finance QA Benchmark
 
-[Mafin 2.5](https://vectify.ai/mafin) is a reasoning-based RAG system for financial document analysis, powered by **PageIndex**. It achieved a state-of-the-art [**98.7% accuracy**](https://vectify.ai/blog/Mafin2.5) on the [FinanceBench](https://arxiv.org/abs/2311.11944) benchmark, significantly outperforming traditional vector-based RAG systems.
+[Mafin 2.5](https://vectify.ai/mafin) is a reasoning-based RAG system for financial document analysis, powered by **PageIndex**. It achieved a state-of-the-art [**98.7% accuracy**](https://vectify.ai/blog/Mafin2.5) on [FinanceBench](https://arxiv.org/abs/2311.11944) (financial document QA benchmark), significantly outperforming traditional vector-based RAG systems.
 
 PageIndex's hierarchical indexing and reasoning-driven retrieval enable precise navigation and extraction of relevant context from complex financial reports, such as SEC filings and earnings disclosures.
 
@@ -280,14 +292,20 @@ PageIndex Blog, Sep 2025.
 </details>
 
 
+### 🌐 Open-Source Ecosystem
+
+[PageIndex](https://github.com/VectifyAI/PageIndex) anchors a growing open-source [ecosystem](https://docs.pageindex.ai/open-source) of **long-context AI infra** — [OpenKB](https://github.com/VectifyAI/OpenKB) is an LLM knowledge base that compiles documents into an interlinked wiki. [ChatIndex](https://github.com/VectifyAI/ChatIndex) provides tree indexing and retrieval for long conversational histories and memory. [ConDB](https://github.com/VectifyAI/ConDB) is a KV-cache native context database for tree-based retrieval at scale. [PageIndex MCP](https://github.com/VectifyAI/pageindex-mcp) is PageIndex's MCP server.
+
 ### Connect with Us
 
 <div align="center">
 
-[![Twitter](https://img.shields.io/badge/Twitter-000000?style=for-the-badge&logo=x&logoColor=white)](https://x.com/PageIndexAI)&ensp;
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/company/vectify-ai/)&ensp;
-[![Discord](https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/invite/VuXuf29EUj)&ensp;
-[![Contact Us](https://img.shields.io/badge/Contact_Us-3B82F6?style=for-the-badge&logo=envelope&logoColor=white)](https://ii2abc2jejf.typeform.com/to/tK3AXl8T)
+[![Website](https://img.shields.io/badge/Website-2D72CF?style=for-the-badge&logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTEyIDEgMSAxMWgyLjV2MTJoNnYtN2g1djdoNlYxMUgyM3oiLz48L3N2Zz4%3D)](https://pageindex.ai)&nbsp;
+[![Twitter](https://img.shields.io/badge/Twitter-000000?style=for-the-badge&logo=x&logoColor=white)](https://x.com/PageIndexAI)&nbsp;
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=for-the-badge&logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTIwLjQ1IDIwLjQ1aC0zLjU1di01LjU3YzAtMS4zMy0uMDMtMy4wNC0xLjg1LTMuMDQtMS44NSAwLTIuMTQgMS40NS0yLjE0IDIuOTR2NS42N0g5LjM1VjloMy40MXYxLjU2aC4wNWMuNDgtLjkgMS42NC0xLjg1IDMuMzctMS44NSAzLjYgMCA0LjI3IDIuMzcgNC4yNyA1LjQ2djYuMjh6TTUuMzQgNy40M2EyLjA2IDIuMDYgMCAxIDEgMC00LjEzIDIuMDYgMi4wNiAwIDAgMSAwIDQuMTN6TTcuMTIgMjAuNDVIMy41NlY5aDMuNTZ2MTEuNDV6TTIyLjIyIDBIMS43N0MuNzkgMCAwIC43NyAwIDEuNzN2MjAuNTRDMCAyMy4yMy43OSAyNCAxLjc3IDI0aDIwLjQ1QzIzLjIgMjQgMjQgMjMuMjMgMjQgMjIuMjdWMS43M0MyNCAuNzcgMjMuMiAwIDIyLjIyIDB6Ii8%2BPC9zdmc%2B)](https://www.linkedin.com/company/vectify-ai/)&nbsp;
+[![Discord](https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/invite/VuXuf29EUj)&nbsp;
+[![Book a Demo](https://img.shields.io/badge/Book_a_Demo-6E7E96?style=for-the-badge&logo=googlecalendar&logoColor=white)](https://calendly.com/pageindex/meet)&nbsp;
+[![Contact Us](https://img.shields.io/badge/Contact_Us-3B82F6?style=for-the-badge&logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjIgNCAyMCAxNiI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTIwIDRINGMtMS4xIDAtMiAuOS0yIDJ2MTJjMCAxLjEuOSAyIDIgMmgxNmMxLjEgMCAyLS45IDItMlY2YzAtMS4xLS45LTItMi0yem0wIDQtOCA1LTgtNVY2bDggNSA4LTV6Ii8%2BPC9zdmc%2B)](https://ii2abc2jejf.typeform.com/to/tK3AXl8T)
 
 </div>
 
