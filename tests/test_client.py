@@ -289,6 +289,44 @@ def test_corrupt_doc_json_is_contained(local_client, indexed_doc, sample_pdf, tm
     assert local_client.is_retrieval_ready(indexed_doc) is False
 
 
+def test_invalid_utf8_is_contained(local_client, indexed_doc, tmp_path):
+    doc_json = tmp_path / "store" / "docs" / indexed_doc / "doc.json"
+    doc_json.write_bytes(b'{"id": "\xff\xfe broken')
+
+    # the manifest copy keeps serving, consistently across list and get
+    assert local_client.get_document(indexed_doc)["id"] == indexed_doc
+    assert local_client.list_documents()["total"] == 1
+
+    # even with the manifest corrupted the same way: no crash, self-heals
+    (tmp_path / "store" / "manifest.json").write_bytes(b"\xff\xfe")
+    assert local_client.list_documents()["total"] == 0
+    with pytest.raises(PageIndexAPIError):
+        local_client.get_document(indexed_doc)
+
+
+def test_corrupt_data_files_fail_loud(local_client, indexed_doc, tmp_path):
+    doc_dir = tmp_path / "store" / "docs" / indexed_doc
+    (doc_dir / "tree.json").write_bytes(b"\xff\xfe")
+    with pytest.raises(PageIndexAPIError, match="unreadable"):
+        local_client.get_tree(indexed_doc)
+    assert local_client.is_retrieval_ready(indexed_doc) is False
+
+    (doc_dir / "pages.json").write_text("{broken")
+    with pytest.raises(PageIndexAPIError, match="unreadable"):
+        local_client.get_ocr(indexed_doc)
+
+    # the metadata itself is intact, so listings stay honest
+    assert local_client.list_documents()["total"] == 1
+
+
+def test_delete_survives_marker_tamper(local_client, tmp_path):
+    tampered = tmp_path / "store" / "docs" / "tampered" / "doc.json"
+    tampered.mkdir(parents=True)
+    with pytest.raises(PageIndexAPIError, match="Document not found"):
+        local_client.delete_document("tampered")
+    assert not tampered.parent.exists()
+
+
 def test_list_documents_validation(local_client):
     with pytest.raises(ValueError):
         local_client.list_documents(limit=0)

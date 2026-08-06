@@ -46,7 +46,9 @@ def _read_json(path: Path):
             return json.load(f)
     except (FileNotFoundError, NotADirectoryError):
         return None
-    except json.JSONDecodeError:
+    except ValueError:
+        # Covers JSONDecodeError and the UnicodeDecodeError a torn multi-byte
+        # write produces.
         logger.warning("Unreadable JSON at %s; treating it as absent", path)
         return None
 
@@ -147,6 +149,10 @@ class DocStore:
             (doc_dir / "doc.json").unlink()
             existed = True
         except (FileNotFoundError, NotADirectoryError):
+            existed = False
+        except OSError:
+            if not (doc_dir / "doc.json").is_dir():
+                raise  # a real unlink failure, e.g. permissions — stay loud
             existed = False
         if doc_dir.is_dir():
             shutil.rmtree(doc_dir, ignore_errors=True)

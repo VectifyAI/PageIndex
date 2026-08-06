@@ -177,7 +177,8 @@ class LocalAPI:
 
     def get_tree(self, doc_id: str, node_summary: bool = False) -> dict[str, Any]:
         meta = self._require_doc(doc_id, "Failed to get tree result")
-        structure = copy.deepcopy(self._store.get_tree(doc_id)) or []
+        structure = copy.deepcopy(
+            self._require_data(self._store.get_tree(doc_id), "Failed to get tree result"))
         result = [_format_tree_node(node, node_summary) for node in structure]
         return self._completed_envelope(doc_id, result, meta)
 
@@ -185,13 +186,8 @@ class LocalAPI:
         if format not in ["page", "node", "raw"]:
             raise ValueError("Format parameter must be 'page', 'node', or 'raw'")
         meta = self._require_doc(doc_id, "Failed to get OCR result")
-        pages = self._store.get_pages(doc_id) or []
-        if format == "page":
-            result: Any = pages
-        elif format == "raw":
-            result = "\n\n".join(p.get("markdown", "") for p in pages)
-        else:  # node
-            result = []
+        if format == "node":
+            result: Any = []
             def _walk(nodes, level):
                 for node in nodes:
                     result.append({
@@ -201,8 +197,24 @@ class LocalAPI:
                         "text": node.get("text", ""),
                     })
                     _walk(node.get("nodes") or [], level + 1)
-            _walk(self._store.get_tree(doc_id) or [], 1)
+            _walk(self._require_data(self._store.get_tree(doc_id),
+                                     "Failed to get OCR result"), 1)
+        else:
+            pages = self._require_data(self._store.get_pages(doc_id),
+                                       "Failed to get OCR result")
+            if format == "page":
+                result = pages
+            else:  # raw
+                result = "\n\n".join(p.get("markdown", "") for p in pages)
         return self._completed_envelope(doc_id, result, meta)
+
+    @staticmethod
+    def _require_data(data, error_prefix: str):
+        """Missing or unreadable data files under an intact doc.json must fail
+        loud, not serve an empty document."""
+        if data is None:
+            raise PageIndexAPIError(f"{error_prefix}: stored document data is unreadable.")
+        return data
 
     def _completed_envelope(self, doc_id: str, result, meta: dict) -> dict[str, Any]:
         return {
@@ -282,7 +294,8 @@ class LocalAPI:
         """Ask the retrieve model which tree nodes answer the query."""
         from .utils import llm_completion, remove_fields
         self._require_llm_key()
-        structure = self._store.get_tree(doc_id) or []
+        structure = self._require_data(self._store.get_tree(doc_id),
+                                       "Failed to get chat completion")
         tree_without_text = remove_fields(copy.deepcopy(structure), fields=["text"])
         prompt = TREE_SEARCH_PROMPT.format(
             query=query, tree=json.dumps(tree_without_text, indent=2, ensure_ascii=False)
