@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pageindex"
-version = "0.3.0.dev4"
+version = "0.2.9"
 description = "Python SDK for PageIndex — reasoning-based, vectorless document retrieval, cloud and local"
 readme = "README.md"
 license = "MIT"

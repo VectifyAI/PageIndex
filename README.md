@@ -212,7 +212,7 @@ python3 run_pageindex.py --md_path /path/to/your/document.md
 The `pageindex` package on PyPI is the Python SDK for the [PageIndex API](https://docs.pageindex.ai) — and the same client now also runs fully **locally**, powered by this repo's indexing pipeline (including Flash).
 
 ```bash
-pip3 install --pre --upgrade pageindex   # local mode ships in the 0.3.0 pre-releases; without --pre, pip installs 0.2.8 (cloud-only)
+pip3 install --upgrade pageindex   # local mode ships in pageindex >= 0.2.9; earlier versions are cloud-only
 ```
 
 ```python
