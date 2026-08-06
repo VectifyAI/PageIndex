@@ -58,8 +58,9 @@ CHAT_CONTEXT_TOKEN_LIMIT = 100_000
 
 
 def _now_iso() -> str:
-    # Mirror the cloud's createdAt generation: its MySQL column is datetime(3),
-    # so the server isoformat()s a millisecond-precision naive-UTC datetime.
+    # Mirror the cloud's createdAt: naive UTC from a timestamp(3) column —
+    # millisecond precision rendered by bare isoformat() (six fractional
+    # digits ending in 000, or no fraction when the millisecond is zero).
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     return now.replace(microsecond=now.microsecond // 1000 * 1000).isoformat()
 
