@@ -1,18 +1,4 @@
-"""Local implementation of the PageIndex SDK surface.
-
-Mirrors the response shapes of api.pageindex.ai so code written against the
-0.2.x cloud SDK works unchanged, with these documented differences:
-
-- Indexing is synchronous: ``submit_document`` blocks until the tree is built
-  (your machine runs the LLM calls), so ``status`` is always ``"completed"``
-  and polling loops succeed on the first try.
-- Only PDF files are supported.
-- Folders, ``beta_headers``, ``enable_citations``, and the deprecated
-  retrieval API (``submit_query``/``get_retrieval``) are cloud-only and
-  raise; use ``chat_completions`` for retrieval-backed answers.
-- Cloud responses carry OCR ``images`` and a ``block_metadata`` key on
-  streaming chunks; local responses omit them.
-"""
+"""Local implementation of the PageIndex SDK surface."""
 from __future__ import annotations
 
 import copy
@@ -52,15 +38,12 @@ If the context does not contain the information needed, say so instead of guessi
 {context}
 </retrieved_context>"""
 
-# Retrieved context handed to the chat model is capped to leave room for the
-# conversation and the answer.
+# Cap the retrieved context to leave room for the conversation and the answer.
 CHAT_CONTEXT_TOKEN_LIMIT = 100_000
 
 
 def _now_iso() -> str:
-    # Mirror the cloud's createdAt: naive UTC from a timestamp(3) column —
-    # millisecond precision rendered by bare isoformat() (six fractional
-    # digits ending in 000, or no fraction when the millisecond is zero).
+    """Naive UTC, millisecond precision."""
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     return now.replace(microsecond=now.microsecond // 1000 * 1000).isoformat()
 
@@ -110,7 +93,6 @@ class LocalAPI:
                 "Supported: None (standard) or 'flash'."
             )
         if not os.path.isfile(file_path):
-            # The 0.2.8 client fails on open(); keep the same exception type.
             raise FileNotFoundError(f"No such file: {file_path}")
         if not file_path.lower().endswith(".pdf"):
             raise PageIndexAPIError(
@@ -243,7 +225,6 @@ class LocalAPI:
     def get_document(self, doc_id: str) -> dict[str, Any]:
         meta = self._store.get_meta(doc_id)
         if meta is None:
-            # The metadata endpoint's cloud message has no trailing period.
             raise PageIndexAPIError("Failed to get document metadata: Document not found")
         return {key: meta.get(key) for key in
                 ("id", "name", "description", "status", "createdAt", "pageNum", "folderId")}
@@ -290,7 +271,6 @@ class LocalAPI:
     # ── retrieval (internal: backs chat_completions) ──
 
     def _require_llm_key(self) -> None:
-        """Fail fast with a clear message instead of ten silent retries."""
         from .utils import _is_openai_model
         if _is_openai_model(self._retrieve_model) and not os.getenv("OPENAI_API_KEY"):
             raise PageIndexAPIError(
@@ -489,7 +469,7 @@ class LocalAPI:
 
     @staticmethod
     def _stream_chunks(response, chat_id: str, created: int) -> Iterator[dict[str, Any]]:
-        """Adapt a provider stream into cloud-shaped chat.completion.chunk dicts."""
+        """Adapt a provider stream into chat.completion.chunk dicts."""
         def _generate():
             yield {
                 "id": chat_id,
@@ -537,8 +517,7 @@ class LocalAPI:
 
 
 class _SilentLogger:
-    """Drop-in for JsonLogger that writes nothing (the SDK must not create
-    a ./logs directory in the caller's working directory)."""
+    """JsonLogger stand-in that keeps ./logs out of the caller's working directory."""
 
     def log(self, *args, **kwargs):
         pass
@@ -547,12 +526,9 @@ class _SilentLogger:
 
 
 def _format_tree_node(node: dict, node_summary: bool) -> dict:
-    """Reshape one stored (local-format) tree node into the cloud tree format.
-
-    Mirrors the server: ``start_index`` is renamed ``page_index``,
-    ``end_index`` is dropped, a non-leaf node's ``summary`` is renamed
-    ``prefix_summary``, and keys come back in a fixed order.
-    """
+    """Reshape a stored tree node for the API: ``start_index`` becomes
+    ``page_index``, ``end_index`` is dropped, and a non-leaf node's
+    ``summary`` becomes ``prefix_summary``."""
     children = node.get("nodes") or []
     out = {
         "title": node.get("title", ""),

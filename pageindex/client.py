@@ -171,7 +171,7 @@ class PageIndexClient:
     def is_retrieval_ready(self, doc_id: str) -> bool:
         """
         Check if a document is ready for retrieval. Errors (including a
-        missing document) are reported as False, matching the 0.2.x SDK.
+        missing document) are reported as False.
         """
         try:
             result = self.get_tree(doc_id)

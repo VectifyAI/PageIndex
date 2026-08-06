@@ -44,12 +44,8 @@ def _read_json(path: Path):
 
 
 def _is_safe_id(value: str) -> bool:
-    """True when the id is usable as a single path component under the store.
-
-    Ids the store hands out are uuid4 strings, but callers can pass any string
-    to lookups (and to delete_document, which removes a directory tree), so a
-    traversal like ``..`` or ``a/b`` must never leave the storage directory.
-    """
+    """Reject ids that could escape the store — callers pass arbitrary
+    strings, and delete_document removes a directory tree."""
     return (
         isinstance(value, str)
         and value not in ("", ".", "..")

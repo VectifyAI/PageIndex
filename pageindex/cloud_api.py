@@ -1,9 +1,5 @@
-"""Cloud mode of the PageIndex SDK — the pageindex 0.2.8 client code.
-
-Kept line-for-line with the 0.2.8 source; review this file by diffing
-against ../pageindex_sdk/pageindex/client.py. Every deviation is a
-deliberate fix listed in the introducing commit.
-"""
+"""Cloud mode of the PageIndex SDK — the pageindex 0.2.8 client code, kept
+line-for-line; don't restructure it."""
 import requests
 from typing import Optional, Dict, Any, List, Union, Iterator
 import json
@@ -23,8 +19,8 @@ class CloudAPI:
     """
 
     def __init__(self, client):
-        # BASE_URL and api_key read through the owning PageIndexClient so the
-        # 0.2.x reassignment-after-construction patterns still take effect.
+        # Read through the owning client so reassigning client.BASE_URL or
+        # client.api_key after construction still takes effect.
         self._client = client
 
     @property
