@@ -58,7 +58,8 @@ CHAT_CONTEXT_TOKEN_LIMIT = 100_000
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    # Mirror the cloud's createdAt format: naive UTC ISO, second precision.
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds")
 
 
 class LocalAPI:
@@ -117,7 +118,7 @@ class LocalAPI:
         except Exception as e:
             raise PageIndexAPIError(f"Failed to submit document: {e}") from e
 
-        doc_id = str(uuid.uuid4())
+        doc_id = "pi-" + uuid.uuid4().hex
         meta = {
             "id": doc_id,
             "name": os.path.basename(file_path),

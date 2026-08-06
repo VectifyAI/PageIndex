@@ -1,5 +1,6 @@
 """SDK surface tests: PageIndexClient in local and cloud mode."""
 import json
+import re
 import shutil
 import sys
 import types
@@ -156,8 +157,10 @@ def test_get_ocr(local_client, indexed_doc):
 
 
 def test_document_management(local_client, indexed_doc):
+    assert indexed_doc.startswith("pi-")
     doc = local_client.get_document(indexed_doc)
     assert doc["id"] == indexed_doc
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", doc["createdAt"])
     assert doc["name"] == "sample.pdf"
     assert doc["description"] == "A test document."
     assert doc["status"] == "completed"
