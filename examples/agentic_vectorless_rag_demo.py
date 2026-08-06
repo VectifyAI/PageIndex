@@ -58,8 +58,10 @@ def _parse_pages(pages: str) -> list[int]:
     for part in pages.split(","):
         part = part.strip()
         if "-" in part:
-            start, end = part.split("-", 1)
-            result.extend(range(int(start), int(end) + 1))
+            start, end = (int(x) for x in part.split("-", 1))
+            if start > end:
+                raise ValueError(f"Invalid range '{part}': start must be <= end")
+            result.extend(range(start, end + 1))
         else:
             result.append(int(part))
     return sorted(set(result))

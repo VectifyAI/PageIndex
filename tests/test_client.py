@@ -256,6 +256,39 @@ def test_manifest_ignores_incomplete_dir(local_client, indexed_doc, tmp_path):
     assert listing["documents"][0]["id"] == indexed_doc
 
 
+def test_torn_delete_never_lists_ghost(local_client, indexed_doc, tmp_path):
+    # crash mid-delete: doc.json gone, dir and manifest entry remain
+    doc_dir = tmp_path / "store" / "docs" / indexed_doc
+    (doc_dir / "doc.json").unlink()
+
+    assert local_client.list_documents()["total"] == 0
+    manifest = json.loads((tmp_path / "store" / "manifest.json").read_text())
+    assert manifest == {"docs": {}}
+    with pytest.raises(PageIndexAPIError):
+        local_client.get_document(indexed_doc)
+    with pytest.raises(PageIndexAPIError, match="Document not found"):
+        local_client.delete_document(indexed_doc)
+    assert not doc_dir.exists()
+
+
+def test_corrupt_doc_json_is_contained(local_client, indexed_doc, sample_pdf, tmp_path):
+    second = local_client.submit_document(sample_pdf)["doc_id"]
+    (tmp_path / "store" / "docs" / indexed_doc / "doc.json").write_text("{truncated")
+
+    # manifest still holds a good copy of the meta — served consistently
+    assert local_client.get_document(indexed_doc)["id"] == indexed_doc
+    assert local_client.list_documents()["total"] == 2
+
+    # without the manifest copy, the doc is treated as absent, not a crash
+    (tmp_path / "store" / "manifest.json").unlink()
+    listing = local_client.list_documents()
+    assert listing["total"] == 1
+    assert listing["documents"][0]["id"] == second
+    with pytest.raises(PageIndexAPIError):
+        local_client.get_document(indexed_doc)
+    assert local_client.is_retrieval_ready(indexed_doc) is False
+
+
 def test_list_documents_validation(local_client):
     with pytest.raises(ValueError):
         local_client.list_documents(limit=0)

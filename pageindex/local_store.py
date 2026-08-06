@@ -8,30 +8,37 @@ Layout under the storage directory:
     docs/<doc_id>/tree.json   the PageIndex tree structure
     docs/<doc_id>/pages.json  extracted page text: [{"page_index": 1, "markdown": ...}, ...]
 
-Every file is written atomically (temp file + os.replace). ``doc.json`` is
-written last, so its presence marks a completely stored document; directories
-without it (e.g. from a crashed indexing run) are ignored everywhere.
+Every file is written atomically (temp file, fsync, os.replace). ``doc.json``
+is the existence marker in both directions: it is written last on save and
+unlinked first on delete, so a document exists exactly while it is present.
+Directories without it (a crashed save or delete) are ignored everywhere.
 
 The manifest is a cache, never a second source of truth: writers update it
-best-effort, and ``list_metas`` trusts it only while its id set matches the
-``docs/`` directory names (documents are immutable, so matching names imply
-valid content). On any mismatch — a concurrently lost update, a crash, a
-corrupt or deleted manifest — it is rebuilt from the doc.json files. No
-locks anywhere.
+best-effort, and ``list_metas`` serves an entry only after confirming the
+document's ``doc.json`` still exists (documents are immutable, so presence
+implies the cached content is valid). Anything missing from the cache is
+re-read from the doc.json files and the manifest rewritten. An unreadable
+JSON file is logged and treated as absent — except a document's meta, which
+can be served from the manifest copy. No locks anywhere.
 """
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import uuid
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def _write_json_atomic(path: Path, data) -> None:
     tmp = path.with_name(path.name + f".{uuid.uuid4().hex}.tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
     os.replace(tmp, path)
 
 
@@ -40,6 +47,9 @@ def _read_json(path: Path):
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except (FileNotFoundError, NotADirectoryError):
+        return None
+    except json.JSONDecodeError:
+        logger.warning("Unreadable JSON at %s; treating it as absent", path)
         return None
 
 
@@ -67,10 +77,7 @@ class DocStore:
 
     # ── manifest cache ──
     def _read_manifest(self) -> dict:
-        try:
-            data = _read_json(self._manifest)
-        except ValueError:
-            return {}
+        data = _read_json(self._manifest)
         docs = data.get("docs") if isinstance(data, dict) else None
         return docs if isinstance(docs, dict) else {}
 
@@ -100,7 +107,14 @@ class DocStore:
         return _read_json(doc_dir / name)
 
     def get_meta(self, doc_id: str) -> dict | None:
-        return self._read_doc_file(doc_id, "doc.json")
+        doc_dir = self._doc_dir(doc_id)
+        if doc_dir is None or not (doc_dir / "doc.json").is_file():
+            return None
+        meta = _read_json(doc_dir / "doc.json")
+        if meta is None:
+            # doc.json exists but is unreadable — the manifest holds a copy
+            meta = self._read_manifest().get(doc_id)
+        return meta
 
     def get_tree(self, doc_id: str) -> list | None:
         return self._read_doc_file(doc_id, "tree.json")
@@ -114,10 +128,10 @@ class DocStore:
         with os.scandir(self._docs) as entries:
             dir_names = {entry.name for entry in entries if entry.is_dir()}
         cached = self._read_manifest()
-        if set(cached) == dir_names:
-            return list(cached.values())
         fresh = {}
         for name in dir_names:
+            if not (self._docs / name / "doc.json").is_file():
+                continue
             meta = cached.get(name)
             if meta is None:
                 meta = _read_json(self._docs / name / "doc.json")
@@ -131,9 +145,13 @@ class DocStore:
         doc_dir = self._doc_dir(doc_id)
         if doc_dir is None:
             return False
-        existed = (doc_dir / "doc.json").is_file()
+        try:
+            (doc_dir / "doc.json").unlink()
+            existed = True
+        except (FileNotFoundError, NotADirectoryError):
+            existed = False
         if doc_dir.is_dir():
-            shutil.rmtree(doc_dir)
+            shutil.rmtree(doc_dir, ignore_errors=True)
         manifest = self._read_manifest()
         if manifest.pop(doc_id, None) is not None:
             self._write_manifest(manifest)
