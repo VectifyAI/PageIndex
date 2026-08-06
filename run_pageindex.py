@@ -39,7 +39,17 @@ if __name__ == "__main__":
                       help='Whether to add doc description to the doc')
     parser.add_argument('--if-add-node-text', type=str, default=None,
                       help='Whether to add text to the node')
-                      
+
+    parser.add_argument('--pdf-parser', type=str, default=None,
+                      choices=['PyPDF2', 'PyMuPDF', 'pdf_inspector'],
+                      help='PDF text extractor backend (PDF only, non-flash). '
+                           '`pdf_inspector` preserves headings, lists and tables '
+                           'and requires `pip install pdf-inspector`.')
+    parser.add_argument('--check-ocr', action='store_true',
+                      help='Classify the PDF with pdf-inspector before parsing '
+                           'and refuse image-based files that would need OCR '
+                           '(requires `pip install pdf-inspector`).')
+
     # Markdown specific arguments
     parser.add_argument('--if-thinning', type=str, default='no',
                       help='Whether to apply tree thinning for markdown (markdown only)')
@@ -67,8 +77,27 @@ if __name__ == "__main__":
             raise ValueError("PDF file must have .pdf extension")
         if not os.path.isfile(args.pdf_path):
             raise ValueError(f"PDF file not found: {args.pdf_path}")
-            
+
+        if args.check_ocr:
+            from pageindex.utils import classify_pdf
+            info = classify_pdf(args.pdf_path)
+            if info is None:
+                raise SystemExit(
+                    "--check-ocr requires the `pdf-inspector` package. "
+                    "Install it with `pip install pdf-inspector`."
+                )
+            print(f"PDF type: {info['pdf_type']} ({info['page_count']} pages)")
+            if info['pdf_type'] in ('scanned', 'image_based'):
+                raise SystemExit(
+                    f"Refusing to parse: this PDF is {info['pdf_type']} and "
+                    "needs OCR. PageIndex does not run OCR locally."
+                )
+            if info['pages_needing_ocr']:
+                print(f"Warning: pages needing OCR: {info['pages_needing_ocr']}")
+
         if args.flash:
+            if args.pdf_parser is not None:
+                raise ValueError("--pdf-parser is not supported with --flash")
             from pageindex.flash import page_index_flash
             if args.optimize == 'full':
                 from pageindex.tree_optimize import default_model
@@ -102,6 +131,7 @@ if __name__ == "__main__":
                 'if_add_node_summary': args.if_add_node_summary,
                 'if_add_doc_description': args.if_add_doc_description,
                 'if_add_node_text': args.if_add_node_text,
+                'pdf_parser': args.pdf_parser,
             }
             opt = ConfigLoader().load({k: v for k, v in user_opt.items() if v is not None})
             toc_with_page_number = page_index_main(args.pdf_path, opt)

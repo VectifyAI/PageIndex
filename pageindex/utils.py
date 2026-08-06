@@ -20,6 +20,57 @@ import re
 # litellm is imported inside the functions that use it; eager import is slow
 # and fetches a remote model-cost map.
 
+# pdf-inspector is an optional backend imported lazily so its absence does not
+# break users on the default PyPDF2 path.
+SUPPORTED_PDF_PARSERS = ("PyPDF2", "PyMuPDF", "pdf_inspector")
+
+
+def _load_pdf_inspector():
+    try:
+        import pdf_inspector  # noqa: F401
+        return pdf_inspector
+    except ImportError as e:
+        raise ImportError(
+            "pdf_parser='pdf_inspector' requires the 'pdf-inspector' package. "
+            "Install it with `pip install pdf-inspector`."
+        ) from e
+
+
+def _pdf_inspector_pages(pdf_path, pages=None):
+    """Return the raw list of PageMarkdown items from pdf-inspector.
+
+    Accepts a filesystem path or a BytesIO buffer. `pages` is an optional list
+    of 0-indexed page numbers matching pdf-inspector's convention.
+    """
+    pi = _load_pdf_inspector()
+    if isinstance(pdf_path, BytesIO):
+        buf = pdf_path.getvalue()
+        return pi.extract_pages_markdown_bytes(buf, pages=pages).pages
+    return pi.extract_pages_markdown(pdf_path, pages=pages).pages
+
+
+def classify_pdf(pdf_path):
+    """Classify a PDF as text_based / scanned / image_based / mixed.
+
+    Returns a dict with `pdf_type`, `page_count`, `pages_needing_ocr`
+    (1-indexed), or None if pdf-inspector is not installed. Useful as a
+    preflight before running the full PageIndex pipeline.
+    """
+    try:
+        pi = _load_pdf_inspector()
+    except ImportError:
+        return None
+    if isinstance(pdf_path, BytesIO):
+        result = pi.classify_pdf_bytes(pdf_path.getvalue())
+    else:
+        result = pi.classify_pdf(pdf_path)
+    return {
+        "pdf_type": result.pdf_type,
+        "page_count": result.page_count,
+        # pdf-inspector reports 0-indexed pages; PageIndex uses 1-indexed.
+        "pages_needing_ocr": [p + 1 for p in getattr(result, "pages_needing_ocr", []) or []],
+    }
+
 # Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
 if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
     os.environ["OPENAI_API_KEY"] = os.getenv("CHATGPT_API_KEY")
@@ -276,22 +327,62 @@ def get_last_node(structure):
     return structure[-1]
 
 
-def extract_text_from_pdf(pdf_path):
+def extract_text_from_pdf(pdf_path, pdf_parser="PyPDF2"):
+    if pdf_parser == "pdf_inspector":
+        pages = _pdf_inspector_pages(pdf_path)
+        return "".join((p.markdown or "") for p in pages)
+    if pdf_parser == "PyMuPDF":
+        if isinstance(pdf_path, BytesIO):
+            doc = pymupdf.open(stream=pdf_path, filetype="pdf")
+        else:
+            doc = pymupdf.open(pdf_path)
+        return "".join(page.get_text() for page in doc)
+    if pdf_parser != "PyPDF2":
+        raise ValueError(f"Unsupported PDF parser: {pdf_parser}")
     pdf_reader = PyPDF2.PdfReader(pdf_path)
-    ###return text not list 
+    ###return text not list
     text=""
     for page_num in range(len(pdf_reader.pages)):
         page = pdf_reader.pages[page_num]
         text+=page.extract_text()
     return text
 
-def get_pdf_title(pdf_path):
+def get_pdf_title(pdf_path, pdf_parser="PyPDF2"):
+    # Title lives in the PDF metadata dictionary regardless of the text-parser
+    # backend; PyPDF2 handles that cheaply so we keep it as the single path.
     pdf_reader = PyPDF2.PdfReader(pdf_path)
     meta = pdf_reader.metadata
     title = meta.title if meta and meta.title else 'Untitled'
     return title
 
-def get_text_of_pages(pdf_path, start_page, end_page, tag=True):
+def get_text_of_pages(pdf_path, start_page, end_page, tag=True, pdf_parser="PyPDF2"):
+    if pdf_parser == "pdf_inspector":
+        # pdf-inspector uses 0-indexed page numbers.
+        wanted = list(range(start_page - 1, end_page))
+        pages = _pdf_inspector_pages(pdf_path, pages=wanted)
+        text = ""
+        for page_num, page in zip(wanted, pages):
+            page_text = page.markdown or ""
+            if tag:
+                text += f"<start_index_{page_num+1}>\n{page_text}\n<end_index_{page_num+1}>\n"
+            else:
+                text += page_text
+        return text
+    if pdf_parser == "PyMuPDF":
+        if isinstance(pdf_path, BytesIO):
+            doc = pymupdf.open(stream=pdf_path, filetype="pdf")
+        else:
+            doc = pymupdf.open(pdf_path)
+        text = ""
+        for page_num in range(start_page - 1, end_page):
+            page_text = doc[page_num].get_text()
+            if tag:
+                text += f"<start_index_{page_num+1}>\n{page_text}\n<end_index_{page_num+1}>\n"
+            else:
+                text += page_text
+        return text
+    if pdf_parser != "PyPDF2":
+        raise ValueError(f"Unsupported PDF parser: {pdf_parser}")
     pdf_reader = PyPDF2.PdfReader(pdf_path)
     text = ""
     for page_num in range(start_page-1, end_page):
@@ -465,6 +556,17 @@ def get_page_tokens(pdf_path, model=None, pdf_parser="PyPDF2"):
             token_length = litellm.token_counter(model=model, text=page_text)
             page_list.append((page_text, token_length))
         return page_list
+    elif pdf_parser == "pdf_inspector":
+        # pdf-inspector emits per-page Markdown with heading tiers, list
+        # markers and GFM tables preserved. That structure carries into the
+        # downstream LLM prompt and node summaries.
+        pages = _pdf_inspector_pages(pdf_path)
+        page_list = []
+        for page in pages:
+            page_text = page.markdown or ""
+            token_length = litellm.token_counter(model=model, text=page_text)
+            page_list.append((page_text, token_length))
+        return page_list
     else:
         raise ValueError(f"Unsupported PDF parser: {pdf_parser}")
 
@@ -482,7 +584,16 @@ def get_text_of_pdf_pages_with_labels(pdf_pages, start_page, end_page):
         text += f"<physical_index_{page_num+1}>\n{pdf_pages[page_num][0]}\n<physical_index_{page_num+1}>\n"
     return text
 
-def get_number_of_pages(pdf_path):
+def get_number_of_pages(pdf_path, pdf_parser="PyPDF2"):
+    if pdf_parser == "pdf_inspector":
+        try:
+            pi = _load_pdf_inspector()
+        except ImportError:
+            pass
+        else:
+            if isinstance(pdf_path, BytesIO):
+                return pi.classify_pdf_bytes(pdf_path.getvalue()).page_count
+            return pi.classify_pdf(pdf_path).page_count
     pdf_reader = PyPDF2.PdfReader(pdf_path)
     num = len(pdf_reader.pages)
     return num
