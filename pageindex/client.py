@@ -170,8 +170,9 @@ class PageIndexClient:
 
     def is_retrieval_ready(self, doc_id: str) -> bool:
         """
-        Check if a document is ready for retrieval. Errors (including a
-        missing document) are reported as False.
+        Check if a document is ready for retrieval. API errors (including a
+        missing document) are reported as False; transport errors (connection
+        failures, timeouts) propagate.
         """
         try:
             result = self.get_tree(doc_id)
@@ -269,7 +270,8 @@ class PageIndexClient:
         Delete a PageIndex document and all its associated data.
 
         Returns:
-            dict: {'message': 'Document deleted successfully.'}
+            dict: {'message': 'Document deleted successfully.'}, or an empty
+            dict if the cloud API responds with no body.
         """
         return self._api.delete_document(doc_id=doc_id)
 
