@@ -232,7 +232,7 @@ answer = client.chat_completions(
 )["choices"][0]["message"]["content"]
 ```
 
-Local documents are stored as plain JSON under `./.pageindex` (configurable via `storage_path`). Local mode supports PDFs; folders, `beta_headers`, `enable_citations`, and the deprecated retrieval API (`submit_query`/`get_retrieval`) remain cloud-only — each method's docstring spells out the differences. To fix the mode at the type level, use `CloudClient` (raises without an API key) or `LocalClient` (has no `api_key` parameter).
+Local documents are stored as plain JSON under `./.pageindex` (configurable via `storage_path`). Local mode supports PDFs; folders, `beta_headers`, `enable_citations`, and the deprecated retrieval API (`submit_query`/`get_retrieval`) remain cloud-only — each method's docstring spells out the differences. To pin the mode at construction instead of inferring it from `api_key`, use `PageIndexCloudClient` (fails without a real key) or `PageIndexLocalClient` (has no key parameter).
 
 ## 🚀 Agentic Vectorless RAG: An Example
 

@@ -70,18 +70,18 @@ def test_local_client_does_not_touch_disk(tmp_path):
 
 
 def test_explicit_mode_clients(tmp_path):
-    from pageindex import CloudClient, LocalClient
+    from pageindex import PageIndexCloudClient, PageIndexLocalClient
 
-    local = LocalClient(storage_path=str(tmp_path / "store"))
-    assert local.retrieve_model
-    with pytest.raises(TypeError):
-        LocalClient(api_key="k")
-
-    cloud = CloudClient(api_key="secret")
-    assert cloud.api_key == "secret"
-    for missing_key in (None, ""):
+    for bad_key in (None, ""):
         with pytest.raises(PageIndexAPIError, match="requires a PageIndex API key"):
-            CloudClient(api_key=missing_key)
+            PageIndexCloudClient(bad_key)
+    cloud = PageIndexCloudClient("k")
+    assert cloud.api_key == "k" and isinstance(cloud, PageIndexClient)
+
+    local = PageIndexLocalClient(model="m", storage_path=str(tmp_path / "s"))
+    assert local.model == "m" and isinstance(local, PageIndexClient)
+    with pytest.raises(TypeError):
+        PageIndexLocalClient("k")
 
 
 # ── local: indexing and reading ──
