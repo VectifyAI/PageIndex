@@ -93,6 +93,7 @@ class PageIndexClient:
         mode: Optional[str] = None,
         beta_headers: Optional[list[str]] = None,
         folder_id: Optional[str] = None,
+        metadata: Optional[dict] = None,
     ) -> dict[str, Any]:
         """
         Submit a PDF document for processing. Returns {'doc_id': ...}.
@@ -114,13 +115,16 @@ class PageIndexClient:
                 "flash"; cloud modes are passed through (e.g. "mcp").
             beta_headers (list[str], optional): Cloud-only beta feature headers.
             folder_id (str, optional): Cloud-only folder (workspace) ID.
+            metadata (dict, optional): Your own JSON-serializable tags for the
+                document; returned in get_tree/get_ocr responses and
+                list_documents entries (both modes).
 
         Returns:
             dict: {'doc_id': ...}
         """
         return self._api.submit_document(
             file_path=file_path, mode=mode,
-            beta_headers=beta_headers, folder_id=folder_id,
+            beta_headers=beta_headers, folder_id=folder_id, metadata=metadata,
         )
 
     # ---------- OCR FUNCTIONALITY ----------

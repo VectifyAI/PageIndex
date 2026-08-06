@@ -46,6 +46,7 @@ class CloudAPI:
         mode: Optional[str] = None,
         beta_headers: Optional[List[str]] = None,
         folder_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Upload a PDF document for processing. The system will automatically process both tree generation and OCR.
@@ -57,6 +58,8 @@ class CloudAPI:
             beta_headers (List[str], optional): Beta feature headers (e.g., ["block_reference"]
                 to enable block-level content with bounding boxes). Defaults to None.
             folder_id (str, optional): Folder (workspace) ID to assign the document to. Defaults to None.
+            metadata (dict, optional): Your own JSON-serializable tags for the document;
+                returned in get_tree/get_ocr responses and list_documents entries. Defaults to None.
 
         Returns:
             dict: {'doc_id': ...}
@@ -68,6 +71,8 @@ class CloudAPI:
             data['beta_headers'] = json.dumps(beta_headers)
         if folder_id is not None:
             data['folder_id'] = folder_id
+        if metadata is not None:
+            data['metadata'] = json.dumps(metadata)
 
         with open(file_path, "rb") as f:
             response = requests.post(

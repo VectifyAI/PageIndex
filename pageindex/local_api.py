@@ -80,6 +80,7 @@ class LocalAPI:
         mode: str | None = None,
         beta_headers: list[str] | None = None,
         folder_id: str | None = None,
+        metadata: dict | None = None,
     ) -> dict[str, Any]:
         if beta_headers is not None:
             raise PageIndexAPIError(
@@ -89,6 +90,17 @@ class LocalAPI:
             raise PageIndexAPIError(
                 "Failed to submit document: folders are not supported in local mode."
             )
+        if metadata is not None:
+            if not isinstance(metadata, dict):
+                raise PageIndexAPIError(
+                    "Failed to submit document: metadata must be a dict."
+                )
+            try:
+                json.dumps(metadata)
+            except (TypeError, ValueError) as e:
+                raise PageIndexAPIError(
+                    f"Failed to submit document: metadata must be valid JSON. {e}"
+                ) from e
         if mode not in (None, "flash"):
             raise PageIndexAPIError(
                 f"Failed to submit document: unknown local processing mode {mode!r}. "
@@ -127,6 +139,7 @@ class LocalAPI:
             "createdAt": _now_iso(),
             "pageNum": len(page_texts),
             "folderId": None,
+            "metadata": metadata,
             "mode": mode or "standard",
         }
         pages = [{"page_index": i + 1, "markdown": text}
@@ -178,15 +191,15 @@ class LocalAPI:
     # ── tree / ocr ──
 
     def get_tree(self, doc_id: str, node_summary: bool = False) -> dict[str, Any]:
-        self._require_doc(doc_id, "Failed to get tree result")
+        meta = self._require_doc(doc_id, "Failed to get tree result")
         structure = copy.deepcopy(self._store.get_tree(doc_id)) or []
         result = [_format_tree_node(node, node_summary) for node in structure]
-        return self._completed_envelope(doc_id, result)
+        return self._completed_envelope(doc_id, result, meta)
 
     def get_ocr(self, doc_id: str, format: str = "page") -> dict[str, Any]:
         if format not in ["page", "node", "raw"]:
             raise ValueError("Format parameter must be 'page', 'node', or 'raw'")
-        self._require_doc(doc_id, "Failed to get OCR result")
+        meta = self._require_doc(doc_id, "Failed to get OCR result")
         pages = self._store.get_pages(doc_id) or []
         if format == "page":
             result: Any = pages
@@ -204,15 +217,15 @@ class LocalAPI:
                     })
                     _walk(node.get("nodes") or [], level + 1)
             _walk(self._store.get_tree(doc_id) or [], 1)
-        return self._completed_envelope(doc_id, result)
+        return self._completed_envelope(doc_id, result, meta)
 
-    def _completed_envelope(self, doc_id: str, result) -> dict[str, Any]:
+    def _completed_envelope(self, doc_id: str, result, meta: dict) -> dict[str, Any]:
         return {
             "doc_id": doc_id,
             "status": "completed",
             "retrieval_ready": True,
             "result": result,
-            "metadata": None,
+            "metadata": meta.get("metadata"),
             "features": {},
         }
 
@@ -261,7 +274,7 @@ class LocalAPI:
             "createdAt": m.get("createdAt"),
             "pageNum": m.get("pageNum", 0),
             "folderId": None,
-            "metadata": None,
+            "metadata": m.get("metadata"),
             "features": {},
         } for m in metas[offset:offset + limit]]
         return {

@@ -132,6 +132,32 @@ def test_submit_rejections(local_client, sample_pdf, tmp_path):
         local_client.submit_document(sample_pdf, beta_headers=["block_reference"])
 
 
+def test_submit_with_metadata(local_client, sample_pdf, monkeypatch):
+    monkeypatch.setattr(
+        page_index_module, "page_index_main",
+        lambda doc, opt=None, logger=None: {
+            "doc_name": "sample.pdf", "doc_description": None,
+            "structure": json.loads(json.dumps(STRUCTURE))})
+    tags = {"project": "alpha", "year": 2026}
+    doc_id = local_client.submit_document(sample_pdf, metadata=tags)["doc_id"]
+    assert local_client.get_tree(doc_id)["metadata"] == tags
+    assert local_client.get_ocr(doc_id)["metadata"] == tags
+    assert local_client.list_documents()["documents"][0]["metadata"] == tags
+    # the cloud metadata endpoint doesn't return user metadata; mirror that
+    assert "metadata" not in local_client.get_document(doc_id)
+
+
+def test_submit_metadata_validation(local_client, sample_pdf, monkeypatch):
+    indexed = []
+    monkeypatch.setattr(page_index_module, "page_index_main",
+                        lambda *args, **kwargs: indexed.append(1))
+    with pytest.raises(PageIndexAPIError, match="metadata must be a dict"):
+        local_client.submit_document(sample_pdf, metadata=["not", "a", "dict"])
+    with pytest.raises(PageIndexAPIError, match="valid JSON"):
+        local_client.submit_document(sample_pdf, metadata={"x": object()})
+    assert indexed == []
+
+
 def test_blank_pdf_rejected(local_client, tmp_path):
     from conftest import build_pdf
     blank = tmp_path / "blank.pdf"
@@ -446,6 +472,9 @@ def test_cloud_request_wiring(cloud, sample_pdf):
     assert calls[-1]["headers"] == {"api_key": "secret"}
     assert calls[-1]["data"] == {"if_retrieval": True}
     assert "timeout" not in calls[-1]
+
+    client.submit_document(sample_pdf, metadata={"project": "alpha"})
+    assert calls[-1]["data"]["metadata"] == json.dumps({"project": "alpha"})
 
     fake.payload = {"status": "processing", "retrieval_ready": False}
     client.get_tree("pi-1", node_summary=True)
