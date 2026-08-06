@@ -254,6 +254,13 @@ class PageIndexClient:
         'createdAt', 'pageNum', 'folderId'}. Status is one of "pending",
         "queued", "processing", "completed", "failed" (local documents are
         always "completed"; local 'folderId' is always None).
+
+        'createdAt' is UTC with no timezone marker, in both modes. To show
+        it in the user's timezone::
+
+            from datetime import datetime, timezone
+            datetime.fromisoformat(doc["createdAt"]).replace(
+                tzinfo=timezone.utc).astimezone()
         """
         return self._api.get_document(doc_id=doc_id)
 
