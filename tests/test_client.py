@@ -186,7 +186,10 @@ def test_document_management(local_client, indexed_doc):
     assert indexed_doc.startswith("pi-")
     doc = local_client.get_document(indexed_doc)
     assert doc["id"] == indexed_doc
-    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", doc["createdAt"])
+    # millisecond-precision naive UTC, like the cloud's datetime(3) column;
+    # bare seconds only in the rare microsecond==0 case (isoformat behavior)
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3}000)?",
+                        doc["createdAt"])
     assert doc["name"] == "sample.pdf"
     assert doc["description"] == "A test document."
     assert doc["status"] == "completed"
