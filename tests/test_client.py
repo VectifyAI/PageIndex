@@ -1,5 +1,6 @@
 """SDK surface tests: PageIndexClient in local and cloud mode."""
 import json
+import shutil
 import sys
 import types
 
@@ -175,6 +176,55 @@ def test_document_management(local_client, indexed_doc):
     with pytest.raises(PageIndexAPIError, match="Document not found"):
         local_client.delete_document(indexed_doc)
     assert local_client.is_retrieval_ready(indexed_doc) is False
+
+
+def test_manifest_write_through_and_self_heal(local_client, indexed_doc, tmp_path):
+    manifest_path = tmp_path / "store" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["docs"][indexed_doc]["name"] == "sample.pdf"
+
+    # corrupt cache → listings rebuild it from the doc.json files
+    manifest_path.write_text("{broken")
+    assert local_client.list_documents()["total"] == 1
+    assert indexed_doc in json.loads(manifest_path.read_text())["docs"]
+
+    # missing cache → same
+    manifest_path.unlink()
+    assert local_client.list_documents()["total"] == 1
+
+    # doc dir removed behind the store's back → healed, not served stale
+    shutil.rmtree(tmp_path / "store" / "docs" / indexed_doc)
+    assert local_client.list_documents()["total"] == 0
+
+    local_client_meta = json.loads(manifest_path.read_text())
+    assert local_client_meta == {"docs": {}}
+
+
+def test_manifest_updated_on_delete(local_client, indexed_doc, tmp_path):
+    local_client.delete_document(indexed_doc)
+    manifest = json.loads((tmp_path / "store" / "manifest.json").read_text())
+    assert manifest == {"docs": {}}
+
+
+def test_manifest_picks_up_external_doc(local_client, indexed_doc, tmp_path):
+    # a doc whose manifest update was lost (e.g. concurrent writer) still lists
+    docs_dir = tmp_path / "store" / "docs"
+    external_id = "11111111-1111-4111-8111-111111111111"
+    shutil.copytree(docs_dir / indexed_doc, docs_dir / external_id)
+    meta_path = docs_dir / external_id / "doc.json"
+    meta = json.loads(meta_path.read_text())
+    meta["id"] = external_id
+    meta_path.write_text(json.dumps(meta))
+
+    ids = {d["id"] for d in local_client.list_documents()["documents"]}
+    assert ids == {indexed_doc, external_id}
+
+
+def test_manifest_ignores_incomplete_dir(local_client, indexed_doc, tmp_path):
+    (tmp_path / "store" / "docs" / "crashed-save").mkdir()
+    listing = local_client.list_documents()
+    assert listing["total"] == 1
+    assert listing["documents"][0]["id"] == indexed_doc
 
 
 def test_list_documents_validation(local_client):
