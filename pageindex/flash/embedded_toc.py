@@ -51,6 +51,7 @@ IGNORE, SKELETON, FULL = 1, 2, 3
 
 # Same-page titles at or above this similarity refer to the same section.
 _REPAIR_SIMILARITY = 0.7
+_DISSOLVE_SIMILARITY = 0.9
 
 # Backfill noise filters: a normalized title recurring this often across the
 # detected tree is a running label, not a section; a title longer than this
@@ -481,8 +482,14 @@ def merge_bookmark_tree(
     anchored to the deepest bookmark section active at its start page. A
     detected subtree that fits inside its anchor's range moves under it
     whole; one that spans ranges is dissolved, leaving a leaf, with its
-    children placed individually. A node that duplicates its anchor
-    heading dissolves into it. Two noise filters prune the whole detected
+    children placed individually. A node whose normalized title matches
+    a frame heading starting on its page -- equal, apart by a numbering
+    prefix, or apart by character-level garble -- dissolves without a
+    trace, its children re-placed individually. Dissolving holds fuzzy
+    matches to a higher bar than title repair: at the repair bar,
+    wordy-overlapping titles of distinct sections false-match, and a
+    false dissolve deletes a real heading, while an escaped garbled
+    duplicate only leaves a stray leaf. Two noise filters prune the whole detected
     tree before placement: titles recurring across it (running labels,
     not sections) and overlong titles (paragraph leads picked up as
     headings) are spliced out, their children promoted into their place.
@@ -513,6 +520,22 @@ def merge_bookmark_tree(
             else:
                 break
         return idx
+
+    def dissolves(node: dict, idx: int) -> bool:
+        node_norm = _normalize_title(node["title"])
+        if not node_norm:
+            return False
+        pos = idx
+        while pos >= 0 and flat[pos]["start_index"] == node["start_index"]:
+            frame_norm = _normalize_title(flat[pos]["title"])
+            if frame_norm and (node_norm == frame_norm
+                               or node_norm.endswith(frame_norm)
+                               or frame_norm.endswith(node_norm)
+                               or _similarity(node_norm, frame_norm)
+                               >= _DISSOLVE_SIMILARITY):
+                return True
+            pos -= 1
+        return False
 
     title_counts: Counter = Counter()
 
@@ -561,16 +584,15 @@ def merge_bookmark_tree(
                 for child in children:
                     place(child)
             return
+        if dissolves(node, idx):
+            for child in children:
+                place(child)
+            return
         target = flat[idx]
         if _subtree_max_start(node) < range_end[idx]:
-            if _same_heading(node, target):
-                for child in children:
-                    insert_by_page(target["nodes"], child)
-            else:
-                insert_by_page(target["nodes"], node)
+            insert_by_page(target["nodes"], node)
             return
-        if not _same_heading(node, target):
-            insert_by_page(target["nodes"], dict(node, nodes=[]))
+        insert_by_page(target["nodes"], dict(node, nodes=[]))
         for child in children:
             place(child)
 
