@@ -64,6 +64,27 @@ def _is_safe_id(value: str) -> bool:
     )
 
 
+def _is_valid_meta(meta, doc_id: str) -> bool:
+    if not isinstance(meta, dict) or meta.get("id") != doc_id:
+        return False
+    page_num = meta.get("pageNum")
+    return (
+        isinstance(meta.get("name"), str)
+        and (meta.get("description") is None
+             or isinstance(meta.get("description"), str))
+        and isinstance(meta.get("status"), str)
+        and isinstance(meta.get("createdAt"), str)
+        and isinstance(page_num, int)
+        and not isinstance(page_num, bool)
+        and page_num >= 0
+        and (meta.get("folderId") is None
+             or isinstance(meta.get("folderId"), str))
+        and (meta.get("metadata") is None
+             or isinstance(meta.get("metadata"), dict))
+        and (meta.get("mode") is None or isinstance(meta.get("mode"), str))
+    )
+
+
 class DocStore:
     def __init__(self, storage_dir: str):
         self._root = Path(storage_dir).expanduser()
@@ -111,10 +132,11 @@ class DocStore:
         if doc_dir is None or not (doc_dir / "doc.json").is_file():
             return None
         meta = _read_json(doc_dir / "doc.json")
-        if meta is None:
-            # doc.json exists but is unreadable — the manifest holds a copy
+        if not _is_valid_meta(meta, doc_id):
+            # doc.json exists but is unreadable or invalid — the manifest may
+            # still hold a valid copy.
             meta = self._read_manifest().get(doc_id)
-        return meta
+        return meta if _is_valid_meta(meta, doc_id) else None
 
     def get_tree(self, doc_id: str) -> list | None:
         return self._read_doc_file(doc_id, "tree.json")
@@ -133,9 +155,9 @@ class DocStore:
             if not (self._docs / name / "doc.json").is_file():
                 continue
             meta = cached.get(name)
-            if meta is None:
+            if not _is_valid_meta(meta, name):
                 meta = _read_json(self._docs / name / "doc.json")
-            if meta is not None:
+            if _is_valid_meta(meta, name):
                 fresh[name] = meta
         if fresh != cached:
             self._write_manifest(fresh)

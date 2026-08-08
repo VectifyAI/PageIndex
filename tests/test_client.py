@@ -1,4 +1,5 @@
 """SDK surface tests: PageIndexClient in local and cloud mode."""
+import asyncio
 import json
 import re
 import shutil
@@ -11,7 +12,7 @@ import pageindex
 import pageindex.flash
 import pageindex.utils
 from pageindex import PageIndexClient, PageIndexAPIError
-from pageindex.local_api import LocalAPI
+from pageindex.local_api import CHAT_CONTEXT_TOKEN_LIMIT, LocalAPI
 
 # `from .page_index import *` shadows the submodule with the function of the
 # same name, so the module must come from sys.modules.
@@ -147,6 +148,41 @@ def test_submit_rejections(local_client, sample_pdf, tmp_path):
         local_client.submit_document(sample_pdf, beta_headers=["block_reference"])
 
 
+def test_submit_explicit_standard_mode(local_client, sample_pdf, monkeypatch):
+    calls = []
+
+    def fake_page_index_main(doc, opt=None, logger=None):
+        calls.append(doc)
+        return {
+            "doc_name": "sample.pdf",
+            "doc_description": "A test document.",
+            "structure": json.loads(json.dumps(STRUCTURE)),
+        }
+
+    monkeypatch.setattr(page_index_module, "page_index_main", fake_page_index_main)
+    doc_id = local_client.submit_document(sample_pdf, mode="standard")["doc_id"]
+
+    assert calls == [sample_pdf]
+    assert local_client._api._store.get_meta(doc_id)["mode"] == "standard"
+
+
+@pytest.mark.parametrize("mode", ["standard", "flash"])
+def test_submit_from_running_event_loop(
+    local_client, sample_pdf, monkeypatch, mode
+):
+    def fake_index(*args):
+        asyncio.run(asyncio.sleep(0))
+        return json.loads(json.dumps(STRUCTURE)), "A test document."
+
+    monkeypatch.setattr(local_client._api, f"_index_{mode}", fake_index)
+
+    async def submit():
+        return local_client.submit_document(sample_pdf, mode=mode)
+
+    doc_id = asyncio.run(submit())["doc_id"]
+    assert local_client.get_document(doc_id)["status"] == "completed"
+
+
 def test_submit_with_metadata(local_client, sample_pdf, monkeypatch):
     monkeypatch.setattr(
         page_index_module, "page_index_main",
@@ -242,6 +278,21 @@ def test_manifest_write_through_and_self_heal(local_client, indexed_doc, tmp_pat
 
     local_client_meta = json.loads(manifest_path.read_text())
     assert local_client_meta == {"docs": {}}
+
+
+@pytest.mark.parametrize("bad_entry", ["corrupt-entry", {"id": "wrong"}])
+def test_manifest_invalid_entry_self_heals(
+    local_client, indexed_doc, tmp_path, bad_entry
+):
+    manifest_path = tmp_path / "store" / "manifest.json"
+    manifest_path.write_text(json.dumps({"docs": {indexed_doc: bad_entry}}))
+
+    listing = local_client.list_documents()
+
+    assert listing["total"] == 1
+    assert listing["documents"][0]["id"] == indexed_doc
+    healed = json.loads(manifest_path.read_text())
+    assert healed["docs"][indexed_doc]["name"] == "sample.pdf"
 
 
 def test_manifest_updated_on_delete(local_client, indexed_doc, tmp_path):
@@ -398,6 +449,26 @@ def test_chat_tree_search_failure(local_client, indexed_doc, monkeypatch):
     with pytest.raises(PageIndexAPIError, match="no output"):
         local_client.chat_completions(
             messages=[{"role": "user", "content": "q"}], doc_id=indexed_doc)
+
+
+def test_chat_context_continues_after_oversized_node(
+    local_client, indexed_doc, monkeypatch
+):
+    monkeypatch.setattr(
+        LocalAPI, "_tree_search",
+        lambda self, doc_id, query: ["0000", "0001"],
+    )
+    monkeypatch.setattr(
+        pageindex.utils, "count_tokens",
+        lambda text, model=None: (
+            CHAT_CONTEXT_TOKEN_LIMIT + 1 if "root text" in text else 2
+        ),
+    )
+
+    context = local_client._api._build_chat_context([indexed_doc], "q")
+
+    assert "root text" not in context
+    assert "child text" in context
 
 
 # ── local: chat completions ──

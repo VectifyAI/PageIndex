@@ -115,7 +115,8 @@ class PageIndexClient:
         Args:
             file_path (str): Path to the PDF file.
             mode (str, optional): Processing mode. Local mode supports
-                "flash"; cloud modes are passed through (e.g. "mcp").
+                "standard" and "flash"; omit it for standard indexing. Cloud
+                modes are passed through (e.g. "mcp").
             beta_headers (list[str], optional): Cloud-only beta feature headers.
             folder_id (str, optional): Cloud-only folder (workspace) ID.
             metadata (dict, optional): Your own JSON-serializable tags for the

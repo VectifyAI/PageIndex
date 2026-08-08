@@ -1,11 +1,13 @@
 """Local implementation of the PageIndex SDK surface."""
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 import os
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any, Iterator
 
@@ -48,6 +50,16 @@ def _now_iso() -> str:
     return now.replace(microsecond=now.microsecond // 1000 * 1000).isoformat()
 
 
+def _run_indexer(func, *args, **kwargs):
+    """Run an indexer safely from synchronous or event-loop-hosted callers."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return func(*args, **kwargs)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(func, *args, **kwargs).result()
+
+
 class LocalAPI:
     """Backs PageIndexClient's local mode. One instance per client."""
 
@@ -87,10 +99,10 @@ class LocalAPI:
                 raise PageIndexAPIError(
                     f"Failed to submit document: metadata must be valid JSON. {e}"
                 ) from e
-        if mode not in (None, "flash"):
+        if mode not in (None, "standard", "flash"):
             raise PageIndexAPIError(
                 f"Failed to submit document: unknown local processing mode {mode!r}. "
-                "Supported: None (standard) or 'flash'."
+                "Supported: None or 'standard' for standard indexing, or 'flash'."
             )
         if not os.path.isfile(file_path):
             raise FileNotFoundError(f"No such file: {file_path}")
@@ -107,9 +119,13 @@ class LocalAPI:
 
         try:
             if mode == "flash":
-                structure, description = self._index_flash(file_path, page_texts)
+                structure, description = _run_indexer(
+                    self._index_flash, file_path, page_texts
+                )
             else:
-                structure, description = self._index_standard(file_path)
+                structure, description = _run_indexer(
+                    self._index_standard, file_path
+                )
         except PageIndexAPIError:
             raise
         except Exception as e:
@@ -450,7 +466,7 @@ class LocalAPI:
                 block_tokens = count_tokens(block, model=self._retrieve_model)
                 if used_tokens + block_tokens > CHAT_CONTEXT_TOKEN_LIMIT:
                     truncated = True
-                    break
+                    continue
                 used_tokens += block_tokens
                 sections.append(block)
         if truncated:
