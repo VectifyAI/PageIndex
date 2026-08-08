@@ -1,7 +1,53 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from pageindex.page_index import process_toc_no_page_numbers
+from pageindex.page_index import (
+    _parse_physical_index,
+    process_toc_no_page_numbers,
+    validate_and_truncate_physical_indices,
+)
+from pageindex.utils import convert_physical_index_to_int
+
+
+class PhysicalIndexGuardsTest(unittest.TestCase):
+    def test_parse_rejects_non_integral_values(self):
+        self.assertEqual(_parse_physical_index("<physical_index_7>"), 7)
+        self.assertEqual(_parse_physical_index("7"), 7)
+        self.assertEqual(_parse_physical_index(7.0), 7)
+        self.assertIsNone(_parse_physical_index(True))
+        self.assertIsNone(_parse_physical_index(1.9))
+        self.assertIsNone(_parse_physical_index(float("inf")))
+        self.assertIsNone(_parse_physical_index(float("nan")))
+
+    def test_convert_handles_bare_and_malformed_strings(self):
+        data = [
+            {"physical_index": "1"},
+            {"physical_index": "<physical_index_2>"},
+            {"physical_index": "<physical_index_x>"},
+            {"physical_index": "abc"},
+        ]
+        convert_physical_index_to_int(data)
+        self.assertEqual(data[0]["physical_index"], 1)
+        self.assertEqual(data[1]["physical_index"], 2)
+        self.assertEqual(data[2]["physical_index"], "<physical_index_x>")
+        self.assertEqual(data[3]["physical_index"], "abc")
+        self.assertEqual(convert_physical_index_to_int("7"), 7)
+        self.assertIsNone(convert_physical_index_to_int("<physical_index_x>"))
+
+    def test_truncate_nullifies_out_of_range_and_non_int(self):
+        toc = [
+            {"physical_index": 1},
+            {"physical_index": 5},
+            {"physical_index": 99},
+            {"physical_index": "abc"},
+            {"physical_index": 1.9},
+        ]
+        validate_and_truncate_physical_indices(toc, 10, start_index=5)
+        self.assertIsNone(toc[0]["physical_index"])
+        self.assertEqual(toc[1]["physical_index"], 5)
+        self.assertIsNone(toc[2]["physical_index"])
+        self.assertIsNone(toc[3]["physical_index"])
+        self.assertIsNone(toc[4]["physical_index"])
 
 
 class ProcessTocNoPageNumbersTest(unittest.TestCase):

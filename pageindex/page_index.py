@@ -12,14 +12,16 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 _PHYSICAL_INDEX_MARKER_RE = re.compile(r"^<physical_index_(\d+)>$")
 
 def _parse_physical_index(raw):
-    if raw is None:
+    if raw is None or isinstance(raw, bool):
         return None
     marker_match = _PHYSICAL_INDEX_MARKER_RE.match(str(raw).strip())
     if marker_match:
         return int(marker_match.group(1))
+    if isinstance(raw, float) and not raw.is_integer():
+        return None
     try:
         return int(raw)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
@@ -1188,14 +1190,15 @@ def validate_and_truncate_physical_indices(toc_with_page_number, page_list_lengt
     for i, item in enumerate(toc_with_page_number):
         if item.get('physical_index') is not None:
             original_index = item['physical_index']
-            if original_index > max_allowed_page:
+            if (not isinstance(original_index, int) or isinstance(original_index, bool)
+                    or not (start_index <= original_index <= max_allowed_page)):
                 item['physical_index'] = None
                 truncated_items.append({
                     'title': item.get('title', 'Unknown'),
                     'original_index': original_index
                 })
                 if logger:
-                    logger.info(f"Removed physical_index for '{item.get('title', 'Unknown')}' (was {original_index}, too far beyond document)")
+                    logger.info(f"Removed physical_index for '{item.get('title', 'Unknown')}' (was {original_index}, outside the document range)")
     
     if truncated_items and logger:
         logger.info(f"Total removed items: {len(truncated_items)}")

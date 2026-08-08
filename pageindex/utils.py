@@ -580,19 +580,24 @@ def convert_physical_index_to_int(data):
             # Check if item is a dictionary and has 'physical_index' key
             if isinstance(data[i], dict) and 'physical_index' in data[i]:
                 if isinstance(data[i]['physical_index'], str):
-                    if data[i]['physical_index'].startswith('<physical_index_'):
-                        data[i]['physical_index'] = int(data[i]['physical_index'].split('_')[-1].rstrip('>').strip())
-                    elif data[i]['physical_index'].startswith('physical_index_'):
-                        data[i]['physical_index'] = int(data[i]['physical_index'].split('_')[-1].strip())
+                    value = data[i]['physical_index']
+                    if value.startswith('<physical_index_'):
+                        value = value.split('_')[-1].rstrip('>').strip()
+                    elif value.startswith('physical_index_'):
+                        value = value.split('_')[-1].strip()
+                    try:
+                        data[i]['physical_index'] = int(value)
+                    except ValueError:
+                        pass
     elif isinstance(data, str):
-        if data.startswith('<physical_index_'):
-            data = int(data.split('_')[-1].rstrip('>').strip())
-        elif data.startswith('physical_index_'):
-            data = int(data.split('_')[-1].strip())
-        # Check data is int
-        if isinstance(data, int):
-            return data
-        else:
+        value = data
+        if value.startswith('<physical_index_'):
+            value = value.split('_')[-1].rstrip('>').strip()
+        elif value.startswith('physical_index_'):
+            value = value.split('_')[-1].strip()
+        try:
+            return int(value)
+        except ValueError:
             return None
     return data
 
