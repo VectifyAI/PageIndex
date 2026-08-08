@@ -53,6 +53,10 @@ IGNORE, SKELETON, FULL = 1, 2, 3
 _REPAIR_SIMILARITY = 0.7
 _DISSOLVE_SIMILARITY = 0.9
 
+# A climb past a same-page frame heading must leave it at least this much
+# of the page as content, or it is claiming the section is empty.
+_MIN_SECTION_GAP = 0.15
+
 # Backfill noise filters: a normalized title recurring this often across the
 # detected tree is a running label, not a section; a title longer than this
 # is a paragraph lead picked up as a heading.
@@ -253,6 +257,25 @@ def _build_bookmark_nodes(entries: list[dict]) -> list[dict]:
 def bookmarks_to_structure(entries: list[dict], n_pages: int) -> list[dict]:
     """Nest validated entries into the output tree shape."""
     return _finalize(_build_bookmark_nodes(entries), n_pages)
+
+
+_NUMERAL_RE = re.compile(r"^([A-Z]\.\d*(?:\.\d+)*|[A-Z]\.$|\d+(?:\.\d+)*)")
+
+
+def _numeral_prefix(title: str) -> Optional[str]:
+    match = _NUMERAL_RE.match(title.strip())
+    return match.group(1) if match else None
+
+
+def _numeral_child(parent_title: str, child_title: str) -> bool:
+    """'1'->'1.1', '1.1'->'1.1.1', 'D.'->'D.1' are parent->child pairs."""
+    parent = _numeral_prefix(parent_title)
+    child = _numeral_prefix(child_title)
+    if not parent or not child:
+        return False
+    if parent.endswith(".") and len(parent) == 2:
+        return child.startswith(parent) and len(child) > 2
+    return child.startswith(parent + ".") and len(child) > len(parent)
 
 
 def _same_heading(node: dict, chapter: dict) -> bool:
@@ -489,21 +512,42 @@ def merge_bookmark_tree(
     matches to a higher bar than title repair: at the repair bar,
     wordy-overlapping titles of distinct sections false-match, and a
     false dissolve deletes a real heading, while an escaped garbled
-    duplicate only leaves a stray leaf. Two noise filters prune the whole detected
-    tree before placement: titles recurring across it (running labels,
-    not sections) and overlong titles (paragraph leads picked up as
-    headings) are spliced out, their children promoted into their place.
-    Nodes wholly before the first bookmark stay at the root.
+    duplicate only leaves a stray leaf.
+
+    A surviving node attaches along its anchor's ancestor chain -- the
+    open sections at its page, the only parents page containment allows.
+    It climbs past a candidate only on positive evidence that it is the
+    candidate's peer, not its child: a numbering prefix outside the
+    candidate's numbering, or the same style fingerprint -- face, weight
+    and size as one hash; a larger raw size in a different face is not
+    seniority (margin-box titles run larger-regular than bold subsection
+    headings). Frame nodes learn style and position from the duplicates
+    that dissolve into them; detection exports the ``_style``/``_y``
+    keys and ``extract_toc`` strips them after the merge. A
+    same-page climb must also leave the candidate real content below its
+    heading -- climbing past it on a near-zero gap would claim the
+    section is empty, the signature of margin-box noise rather than of a
+    tail section. Numbering-driven climbs are exempt: the numbering
+    itself proves the level relation. With no evidence the node stays at
+    the anchor, and a climb past the last ancestor makes it top-level.
+
+    Two noise filters prune the whole detected tree before placement:
+    titles recurring across it (running labels, not sections) and
+    overlong titles (paragraph leads picked up as headings) are spliced
+    out, their children promoted into their place. Nodes wholly before
+    the first bookmark stay at the root.
     """
     roots = _build_bookmark_nodes(entries)
     flat: list[dict] = []
+    parent_pos: list[Optional[int]] = []
 
-    def collect(nodes: list[dict]) -> None:
+    def collect(nodes: list[dict], parent: Optional[int]) -> None:
         for node in nodes:
             flat.append(node)
-            collect(node["nodes"])
+            parent_pos.append(parent)
+            collect(node["nodes"], len(flat) - 1)
 
-    collect(roots)
+    collect(roots, None)
     if not flat:
         return structure
 
@@ -521,10 +565,10 @@ def merge_bookmark_tree(
                 break
         return idx
 
-    def dissolves(node: dict, idx: int) -> bool:
+    def dissolve_target(node: dict, idx: int) -> Optional[int]:
         node_norm = _normalize_title(node["title"])
         if not node_norm:
-            return False
+            return None
         pos = idx
         while pos >= 0 and flat[pos]["start_index"] == node["start_index"]:
             frame_norm = _normalize_title(flat[pos]["title"])
@@ -533,9 +577,37 @@ def merge_bookmark_tree(
                                or frame_norm.endswith(node_norm)
                                or _similarity(node_norm, frame_norm)
                                >= _DISSOLVE_SIMILARITY):
-                return True
+                return pos
             pos -= 1
-        return False
+        return None
+
+    def _style_climbs(node: dict, cand: dict) -> bool:
+        return (node.get("_style") is not None
+                and node["_style"] == cand.get("_style"))
+
+    def _claims_empty(node: dict, cand: dict) -> bool:
+        if cand["start_index"] != node["start_index"]:
+            return False
+        node_y = node.get("_y")
+        cand_y = cand.get("_y")
+        if node_y is None or cand_y is None:
+            return True
+        return node_y - cand_y < _MIN_SECTION_GAP
+
+    def choose_parent(node: dict, idx: int) -> Optional[int]:
+        pos: Optional[int] = idx
+        while pos is not None:
+            cand = flat[pos]
+            if (_numeral_prefix(cand["title"]) is not None
+                    and _numeral_prefix(node["title"]) is not None):
+                if _numeral_child(cand["title"], node["title"]):
+                    return pos
+                pos = parent_pos[pos]
+                continue
+            if not _style_climbs(node, cand) or _claims_empty(node, cand):
+                return pos
+            pos = parent_pos[pos]
+        return None
 
     title_counts: Counter = Counter()
 
@@ -584,15 +656,21 @@ def merge_bookmark_tree(
                 for child in children:
                     place(child)
             return
-        if dissolves(node, idx):
+        matched = dissolve_target(node, idx)
+        if matched is not None:
+            frame = flat[matched]
+            for key in ("_style", "_y"):
+                if frame.get(key) is None and node.get(key) is not None:
+                    frame[key] = node[key]
             for child in children:
                 place(child)
             return
-        target = flat[idx]
+        chosen = choose_parent(node, idx)
+        siblings = roots if chosen is None else flat[chosen]["nodes"]
         if _subtree_max_start(node) < range_end[idx]:
-            insert_by_page(target["nodes"], node)
+            insert_by_page(siblings, node)
             return
-        insert_by_page(target["nodes"], dict(node, nodes=[]))
+        insert_by_page(siblings, dict(node, nodes=[]))
         for child in children:
             place(child)
 

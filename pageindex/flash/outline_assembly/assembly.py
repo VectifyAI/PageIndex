@@ -282,6 +282,7 @@ def outline_to_dict_tree(outline_node_list: list[OutlineNode], total_pages: int)
                 if item.child_nodes:
                     result.extend(_walk_nodes(item.child_nodes))
                 continue
+            heading_block = item.heading.group_slot
             node = {
                 "title": title,
                 "node_id": "",
@@ -289,6 +290,12 @@ def outline_to_dict_tree(outline_node_list: list[OutlineNode], total_pages: int)
                 "end_index": item.heading.page.page_index,
                 "nodes": _walk_nodes(item.child_nodes) if item.child_nodes else [],
                 "_appear_start": _heading_appears_at_page_top(item.heading),
+                # Heading-level signals for the embedded-TOC merge;
+                # extract_toc strips them from the final output.
+                "_style": ((dominant_style_of(heading_block)
+                            + ("|C" if is_caps_heavy(heading_block) else ""))
+                           if heading_block is not None else None),
+                "_y": item.heading.auxiliary_slot,
             }
             flat_nodes.append(node)
             result.append(node)

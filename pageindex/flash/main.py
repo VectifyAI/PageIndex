@@ -326,6 +326,14 @@ def extract_toc(
         result["structure"], result["toc_source"] = apply_embedded_toc(
             structure, doc_handle, len(pages), page_texts=page_texts
         )
+
+    def _drop_signal_keys(nodes: list[dict]) -> None:
+        for node in nodes:
+            node.pop("_style", None)
+            node.pop("_y", None)
+            _drop_signal_keys(node.get("nodes") or [])
+
+    _drop_signal_keys(result["structure"])
     return result
 
 
