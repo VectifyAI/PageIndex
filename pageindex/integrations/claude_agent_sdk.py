@@ -1,0 +1,67 @@
+"""Claude Agent SDK adapter: one value for the mcp_servers slot.
+
+Cloud clients get the remote PageIndex MCP config (the framework connects
+directly and discovers the full cloud tool set); local clients get an
+in-process SDK MCP server over the same tool contract.
+"""
+from __future__ import annotations
+
+import asyncio
+from typing import Any
+
+from ..errors import PageIndexAPIError
+
+
+def _sdk_version() -> str:
+    try:
+        from importlib.metadata import version
+        return version("pageindex")
+    except Exception:
+        return "0.0.0"
+
+
+def build_claude_mcp(client, include_management: bool = False):
+    if getattr(client, "api_key", None):
+        return {
+            "type": "http",
+            "url": f"{client.BASE_URL}/mcp",
+            "headers": {"Authorization": f"Bearer {client.api_key}"},
+        }
+
+    try:
+        from claude_agent_sdk import create_sdk_mcp_server, tool
+    except ImportError as exc:
+        raise PageIndexAPIError(
+            "as_claude_mcp in local mode requires the Claude Agent SDK — "
+            "pip install claude-agent-sdk (or pip install 'pageindex[claude]')."
+        ) from exc
+    from ..agent_tools import TOOL_CONTRACT, call_tool, tool_names
+
+    def make_handler(name: str):
+        async def handler(arguments: dict[str, Any]) -> dict[str, Any]:
+            text, is_error = await asyncio.to_thread(
+                call_tool, client, name, arguments or {}
+            )
+            result: dict[str, Any] = {"content": [{"type": "text", "text": text}]}
+            if is_error:
+                result["is_error"] = True
+            return result
+        return handler
+
+    def tool_kwargs(name: str) -> dict:
+        annotations = TOOL_CONTRACT[name].get("annotations")
+        if not annotations:
+            return {}
+        try:
+            from claude_agent_sdk import ToolAnnotations
+        except ImportError:
+            return {}
+        return {"annotations": ToolAnnotations(**annotations)}
+
+    tools = [
+        tool(name, TOOL_CONTRACT[name]["description"],
+             TOOL_CONTRACT[name]["schema"], **tool_kwargs(name))(make_handler(name))
+        for name in tool_names(include_management)
+    ]
+    return create_sdk_mcp_server(name="pageindex", version=_sdk_version(),
+                                 tools=tools)

@@ -1,7 +1,8 @@
 """PageIndex SDK client: the 0.2.x cloud surface, now with a local mode."""
 from __future__ import annotations
 
-from typing import Any, Iterator, Optional, Union
+import time
+from typing import Any, Callable, Iterator, Optional, Union
 
 from .errors import PageIndexAPIError
 
@@ -126,12 +127,14 @@ class PageIndexClient:
         beta_headers: Optional[list[str]] = None,
         folder_id: Optional[str] = None,
         metadata: Optional[dict] = None,
+        wait: bool = False,
     ) -> dict[str, Any]:
         """
         Submit a PDF document for processing. Returns {'doc_id': ...}.
 
-        Cloud: uploads the file; processing is asynchronous — poll
-        ``is_retrieval_ready(doc_id)`` before retrieving.
+        Cloud: uploads the file; processing is asynchronous. Pass
+        ``wait=True`` to block until the document is ready, or poll
+        ``get_document(doc_id)['status']`` yourself.
 
         Local: indexes the document in this call (it blocks while your LLM
         builds the tree — minutes for a standard index of a long document),
@@ -151,14 +154,53 @@ class PageIndexClient:
             metadata (dict, optional): Your own JSON-serializable tags for the
                 document; returned in get_tree/get_ocr responses and
                 list_documents entries (both modes).
+            wait (bool): Return only once the document is ready for use.
+                Cloud: polls status until "completed" (raises on "failed" or
+                after 30 minutes). Local: indexing is synchronous already, so
+                this changes nothing. Leave False to submit many documents
+                concurrently and poll afterwards.
 
         Returns:
             dict: {'doc_id': ...}
         """
-        return self._api.submit_document(
+        result = self._api.submit_document(
             file_path=file_path, mode=mode,
             beta_headers=beta_headers, folder_id=folder_id, metadata=metadata,
         )
+        if wait:
+            self._wait_until_ready(result["doc_id"])
+        return result
+
+    def _wait_until_ready(self, doc_id: str, timeout: float = 1800.0) -> None:
+        interval = 2.0
+        deadline = time.monotonic() + timeout
+        poll_failures = 0
+        while True:
+            try:
+                status = self.get_document(doc_id).get("status")
+                poll_failures = 0
+            except PageIndexAPIError:
+                # Tolerate transient poll failures; a 30-minute wait should
+                # not die on one 502.
+                poll_failures += 1
+                if poll_failures >= 3:
+                    raise
+                status = None
+            if status == "completed":
+                return
+            if status == "failed":
+                raise PageIndexAPIError(
+                    f"Document processing failed (doc_id: {doc_id})."
+                )
+            if time.monotonic() >= deadline:
+                raise PageIndexAPIError(
+                    f"Timed out after {int(timeout)}s waiting for document "
+                    f"processing (doc_id: {doc_id}, last status: {status}). "
+                    "Processing continues in the cloud — poll "
+                    "get_document(doc_id) for status."
+                )
+            time.sleep(interval)
+            interval = min(interval * 1.5, 15.0)
 
     # ---------- OCR FUNCTIONALITY ----------
 
@@ -364,6 +406,104 @@ class PageIndexClient:
             dict: {'documents': [...], 'total', 'limit', 'offset'}.
         """
         return self._api.list_documents(limit=limit, offset=offset, folder_id=folder_id)
+
+    # ---------- AGENT INTEGRATION ----------
+
+    def agent_tools(self, include_management: bool = False) -> list[Callable[..., str]]:
+        """
+        Plain functions for any agent framework (LangChain, PydanticAI, ...).
+        For the OpenAI / Claude Agent SDKs, prefer ``as_openai_tools()`` /
+        ``as_claude_mcp()``.
+
+        Cloud: the full cloud tool set, discovered live from the PageIndex
+        MCP server when this method is called — one function per tool,
+        signature and docstring synthesized from the server's schemas, calls
+        executed from your process over MCP. Raises PageIndexAPIError if the
+        server cannot be reached. Local: the built-in tools over the local
+        store (``browse_documents``, ``get_document``,
+        ``get_document_structure``, ``get_page_content``).
+
+        Each function takes JSON-serializable arguments, returns a JSON
+        string, and reports failures inside that JSON instead of raising.
+
+        Args:
+            include_management (bool): Also expose tools that modify the
+                library. Local: adds ``remove_document``. Cloud: by default
+                only tools the server marks read-only are exposed; True
+                exposes the server's complete list (upload, delete, ...).
+        """
+        from .agent_tools import build_agent_tools
+        return build_agent_tools(self, include_management)
+
+    def as_openai_tools(self, include_management: bool = False,
+                        hosted: bool = False) -> list:
+        """
+        Tools for the OpenAI Agents SDK — pass to ``Agent(tools=...)``.
+
+        Cloud (default): the full live read tool set (search, folders,
+        images — as enabled for your key) as plain function tools,
+        discovered from the PageIndex MCP server and executed from your
+        process — works with any model backend. Pass ``hosted=True`` to
+        hand the connection to OpenAI instead: one hosted MCP tool, tool
+        calls executed server-side (lowest latency; requires an
+        OpenAI-hosted model on the Responses API).
+
+        Local: the in-process tools, any model backend; ``hosted`` does
+        not apply. (The framework's own ``MCPServerStreamableHttp``
+        against ``{BASE_URL}/mcp`` is the async-native alternative for
+        its ``mcp_servers=`` slot.)
+
+        Requires ``openai-agents`` (``pip install 'pageindex[openai]'``),
+        imported only when this method is called.
+
+        Args:
+            include_management (bool): Also expose tools that modify the
+                library (delete, upload). Default off: the cloud default
+                serves only server-annotated read-only tools, and
+                ``hosted=True`` routes non-read-only tools through the
+                Responses API approval flow instead.
+            hosted (bool): Cloud only — hand the MCP connection to OpenAI
+                for server-side tool execution (OpenAI models only).
+        """
+        from .integrations.openai_agents import build_openai_tools
+        return build_openai_tools(self, include_management, hosted)
+
+    def as_claude_mcp(self, include_management: bool = False):
+        """
+        ``mcp_servers`` entry for the Claude Agent SDK.
+
+        Cloud: returns the remote PageIndex MCP config — the framework
+        connects to api.pageindex.ai/mcp directly and discovers the full
+        cloud tool set. ``include_management`` has no effect there; gate
+        destructive tools with the framework's permission layer (e.g. list
+        read tools in ``allowed_tools`` instead of the ``*`` wildcard, or
+        add ``disallowed_tools=["mcp__pageindex__remove_document"]``).
+        Local: returns an in-process SDK MCP server exposing the agent
+        tools (requires ``claude-agent-sdk``;
+        ``pip install 'pageindex[claude]'``).
+
+        Usage::
+
+            options = ClaudeAgentOptions(
+                mcp_servers={"pageindex": client.as_claude_mcp()},
+                allowed_tools=["mcp__pageindex__*"],
+            )
+        """
+        from .integrations.claude_agent_sdk import build_claude_mcp
+        return build_claude_mcp(self, include_management)
+
+    def agent_instructions(self, doc_id: Optional[Union[str, list[str]]] = None) -> str:
+        """
+        Orchestration guidance for document QA agents — pass as the agent's
+        system prompt (or append to your own).
+
+        With ``doc_id`` (str or list, same shape as ``chat_completions``),
+        appends the target documents' names and metadata and directs the
+        agent to work within them. Raises PageIndexAPIError if a doc_id does
+        not exist.
+        """
+        from .agent_tools import build_agent_instructions
+        return build_agent_instructions(self, doc_id)
 
     # ---------- FOLDER MANAGEMENT ----------
 

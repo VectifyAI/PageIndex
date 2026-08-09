@@ -1,0 +1,879 @@
+"""Agent tools layer: cloud-contract parity and behavior against a seeded
+local store (no LLM calls; one live parity test gated on PAGEINDEX_API_KEY)."""
+import json
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+import pageindex.client as client_module
+from pageindex import PageIndexAPIError, PageIndexCloudClient, PageIndexLocalClient
+from pageindex.agent_tools import (
+    AGENT_INSTRUCTIONS,
+    TOOL_CONTRACT,
+    call_tool,
+    tool_names,
+)
+from pageindex.local_store import DocStore
+
+SNAPSHOT_PATH = Path(__file__).parent / "data" / "cloud_mcp_contract.json"
+
+
+def seed_doc(storage_path, doc_id, name, *, created_at="2026-08-01T10:00:00.123000",
+             description="A test document", metadata=None, tree=None, pages=None,
+             page_num=None):
+    pages = pages if pages is not None else [
+        {"page_index": 1, "markdown": "Page one text about apples"},
+        {"page_index": 2, "markdown": "Page two text about bananas"},
+    ]
+    tree = tree if tree is not None else [{
+        "title": "Doc", "node_id": "0000", "start_index": 1, "end_index": 2,
+        "summary": "root summary", "text": "ROOT TEXT",
+        "nodes": [
+            {"title": "Intro", "node_id": "0001", "start_index": 1,
+             "end_index": 1, "summary": "intro summary", "text": "INTRO TEXT"},
+            {"title": "Body", "node_id": "0002", "start_index": 2,
+             "end_index": 2, "summary": "body summary", "text": "BODY TEXT"},
+        ],
+    }]
+    meta = {
+        "id": doc_id, "name": name, "description": description,
+        "status": "completed", "createdAt": created_at,
+        "pageNum": page_num if page_num is not None else len(pages),
+        "folderId": None, "metadata": metadata, "mode": "standard",
+    }
+    DocStore(storage_path).save_document(doc_id, meta, tree, pages)
+    return doc_id
+
+
+@pytest.fixture
+def store_path(tmp_path):
+    return str(tmp_path / "store")
+
+
+@pytest.fixture
+def client(store_path):
+    return PageIndexLocalClient(storage_path=store_path)
+
+
+def run(client, name, **arguments):
+    text, is_error = call_tool(client, name, arguments)
+    return json.loads(text), is_error
+
+
+# ── contract parity ──
+
+def test_contract_matches_snapshot():
+    snapshot = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
+    assert snapshot["tools"] == TOOL_CONTRACT
+
+
+def test_tool_surface_and_docstrings(client):
+    tools = client.agent_tools()
+    assert [tool.__name__ for tool in tools] == list(tool_names())
+    with_management = client.agent_tools(include_management=True)
+    assert [tool.__name__ for tool in with_management][-1] == "remove_document"
+    for tool in tools:
+        contract = TOOL_CONTRACT[tool.__name__]
+        assert tool.__doc__.startswith(contract["description"])
+        for param in contract["schema"]["properties"]:
+            assert param in tool.__doc__
+
+
+# ── browse_documents ──
+
+def test_browse_documents_shape(client, store_path):
+    seed_doc(store_path, "pi-a", "older.pdf", created_at="2026-08-01T10:00:00.123000")
+    seed_doc(store_path, "pi-b", "newer.pdf", created_at="2026-08-02T10:00:00.456000",
+             metadata={"team": "research", "year": 2026, "nested": {"x": 1}})
+    payload, is_error = run(client, "browse_documents")
+    assert not is_error
+    assert payload["success"] is True
+    assert payload["folders"] == []
+    assert payload["has_more"] is False
+    assert payload["next_offset"] is None
+    names = [doc["name"] for doc in payload["documents"]]
+    assert names == ["newer.pdf", "older.pdf"]
+    newer = payload["documents"][0]
+    assert newer["status"] == "completed"
+    assert newer["created_at"] == "2026-08-02T10:00:00.456Z"
+    assert newer["metadata"] == {"team": "research", "year": 2026}
+    assert "folder_id" not in newer
+    assert "next_steps" in payload
+
+    flat, _ = run(client, "browse_documents", recursive=True)
+    assert "folders" not in flat
+
+
+def test_browse_documents_pagination(client, store_path):
+    for index in range(3):
+        seed_doc(store_path, f"pi-{index}", f"doc{index}.pdf",
+                 created_at=f"2026-08-0{index + 1}T10:00:00.000000")
+    first, _ = run(client, "browse_documents", limit=2)
+    assert [d["name"] for d in first["documents"]] == ["doc2.pdf", "doc1.pdf"]
+    assert first["has_more"] is True and first["next_offset"] == 2
+    second, _ = run(client, "browse_documents", limit=2, offset=2)
+    assert [d["name"] for d in second["documents"]] == ["doc0.pdf"]
+    assert second["has_more"] is False
+
+
+def test_browse_documents_relevance(client, store_path):
+    seed_doc(store_path, "pi-a", "annual-report.pdf",
+             description="Financial results for the year")
+    seed_doc(store_path, "pi-b", "attention.pdf",
+             description="Transformers and attention mechanisms")
+    payload, is_error = run(client, "browse_documents", sort="relevance",
+                            query="attention transformers")
+    assert not is_error
+    assert [d["name"] for d in payload["documents"]] == ["attention.pdf"]
+    assert payload["sort"] == "relevance"
+
+    missing_query, is_error = run(client, "browse_documents", sort="relevance")
+    assert is_error and missing_query["errorCode"] == "INVALID_INPUT"
+    stray_query, is_error = run(client, "browse_documents", query="x")
+    assert is_error and "relevance" in stray_query["error"]
+
+
+def test_browse_documents_empty_and_folder_error(client):
+    payload, is_error = run(client, "browse_documents")
+    assert not is_error
+    assert payload["documents"] == []
+    assert "submit_document" in json.dumps(payload)
+
+    folder, is_error = run(client, "browse_documents", folder_id="folder-123")
+    assert is_error and folder["errorCode"] == "INVALID_INPUT"
+
+
+# ── get_document ──
+
+def test_get_document(client, store_path):
+    seed_doc(store_path, "pi-a", "report.pdf", metadata={"team": "research"})
+    payload, is_error = run(client, "get_document", doc_name="report.pdf")
+    assert not is_error
+    assert payload["name"] == "report.pdf"
+    assert payload["status"] == "completed"
+    assert payload["page_count"] == 2
+    assert payload["folder_id"] is None
+    assert payload["created_at"].endswith("Z")
+    assert payload["metadata"] == {"team": "research"}
+    assert any("short document" in option
+               for option in payload["next_steps"]["options"])
+
+
+def test_get_document_not_found_suggests_similar(client, store_path):
+    seed_doc(store_path, "pi-a", "annual-report.pdf")
+    payload, is_error = run(client, "get_document", doc_name="anual-report.pdf")
+    assert is_error
+    assert payload["errorCode"] == "NOT_FOUND"
+    assert "annual-report.pdf" in payload["similar_files"]
+    assert "Did you mean" in payload["error"]
+
+
+def test_get_document_duplicate_names_resolve_newest(client, store_path):
+    seed_doc(store_path, "pi-old", "same.pdf", description="old copy",
+             created_at="2026-08-01T10:00:00.000000")
+    seed_doc(store_path, "pi-new", "same.pdf", description="new copy",
+             created_at="2026-08-02T10:00:00.000000")
+    payload, _ = run(client, "get_document", doc_name="same.pdf")
+    assert payload["description"] == "new copy"
+
+
+# ── get_document_structure ──
+
+def test_structure_strips_text_and_orders_keys(client, store_path):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    payload, is_error = run(client, "get_document_structure", doc_name="report.pdf")
+    assert not is_error
+    assert payload["doc_name"] == "report.pdf"
+    assert "pagination" not in payload and "total_parts" not in payload
+    serialized = json.dumps(payload["structure"])
+    assert "ROOT TEXT" not in serialized and "INTRO TEXT" not in serialized
+    # Cloud structure node shape: start_index/end_index/summary (live-verified).
+    root = payload["structure"][0]
+    assert list(root)[:4] == ["title", "node_id", "start_index", "end_index"]
+    assert root["summary"] == "root summary"
+    assert (root["start_index"], root["end_index"]) == (1, 2)
+    assert root["nodes"][0]["summary"] == "intro summary"
+    assert root["nodes"][0]["end_index"] == 1
+
+
+def test_structure_multipart_pagination(client, store_path):
+    big_tree = [{
+        "title": f"Chapter {index}", "node_id": f"{index:04d}",
+        "start_index": index + 1, "end_index": index + 1,
+        "summary": "s" * 4000, "text": "T",
+    } for index in range(60)]
+    seed_doc(store_path, "pi-big", "big.pdf", tree=big_tree,
+             pages=[{"page_index": 1, "markdown": "x"}])
+    first, _ = run(client, "get_document_structure", doc_name="big.pdf")
+    assert first["total_parts"] > 1
+    assert first["pagination"] == {
+        "part": 1, "total_parts": first["total_parts"], "has_more": True,
+    }
+    titles = []
+    for part in range(1, first["total_parts"] + 1):
+        payload, _ = run(client, "get_document_structure", doc_name="big.pdf",
+                         part=part)
+        chunk = payload["structure"]
+        nodes = chunk if isinstance(chunk, list) else [chunk]
+        titles.extend(node["title"] for node in nodes)
+        assert payload["pagination"]["has_more"] == (part < first["total_parts"])
+    assert titles == [f"Chapter {index}" for index in range(60)]
+
+    clamped, _ = run(client, "get_document_structure", doc_name="big.pdf",
+                     part=999)
+    assert clamped["pagination"]["part"] == first["total_parts"]
+
+
+# ── get_page_content ──
+
+def test_page_content(client, store_path):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    payload, is_error = run(client, "get_page_content", doc_name="report.pdf",
+                            pages="1-2")
+    assert not is_error
+    assert payload["total_pages"] == 2
+    assert payload["requested_pages"] == "1-2"
+    assert payload["returned_pages"] == "1-2"
+    assert payload["content"] == [
+        {"page": 1, "text": "Page one text about apples"},
+        {"page": 2, "text": "Page two text about bananas"},
+    ]
+
+
+def test_page_content_out_of_range(client, store_path):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    mixed, is_error = run(client, "get_page_content", doc_name="report.pdf",
+                          pages="1,99")
+    assert not is_error
+    assert mixed["returned_pages"] == "1"
+    assert "out of range" in mixed["next_steps"]["summary"]
+
+    all_out, is_error = run(client, "get_page_content", doc_name="report.pdf",
+                            pages="99")
+    assert is_error and all_out["errorCode"] == "INVALID_INPUT"
+    assert all_out["max_pages"] == 2
+
+
+@pytest.mark.parametrize("bad_spec", ["abc", "5-3", "1,,2", "-3", ""])
+def test_page_content_invalid_spec(client, store_path, bad_spec):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    payload, is_error = run(client, "get_page_content", doc_name="report.pdf",
+                            pages=bad_spec)
+    assert is_error and payload["errorCode"] == "INVALID_INPUT"
+
+
+def test_page_content_zero_page_rejected(client, store_path):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    payload, is_error = run(client, "get_page_content", doc_name="report.pdf",
+                            pages="0")
+    assert is_error
+    assert "positive integers" in payload["error"]
+
+
+def test_page_content_preserves_blank_pages(client, store_path):
+    pages = [
+        {"page_index": 1, "markdown": ""},
+        {"page_index": 2, "markdown": "content"},
+    ]
+    seed_doc(store_path, "pi-a", "blanks.pdf", pages=pages)
+    payload, is_error = run(client, "get_page_content", doc_name="blanks.pdf",
+                            pages="1-2")
+    assert not is_error
+    assert payload["content"][0] == {"page": 1, "text": ""}
+    assert payload["content"][1] == {"page": 2, "text": "content"}
+
+
+def test_created_at_accepts_z_suffixed_input(client, store_path):
+    seed_doc(store_path, "pi-a", "cloudlike.pdf",
+             created_at="2026-08-01T10:00:00.123Z")
+    payload, _ = run(client, "browse_documents")
+    assert payload["documents"][0]["created_at"] == "2026-08-01T10:00:00.123Z"
+
+
+def test_page_content_char_budget(client, store_path):
+    pages = [
+        {"page_index": 1, "markdown": "x" * 96_000},
+        {"page_index": 2, "markdown": "short"},
+    ]
+    seed_doc(store_path, "pi-a", "huge.pdf", pages=pages)
+    payload, is_error = run(client, "get_page_content", doc_name="huge.pdf",
+                            pages="1-2")
+    assert not is_error
+    assert payload["returned_pages"] == "1"
+    assert any("For remaining pages, request: 2" in option
+               for option in payload["next_steps"]["options"])
+
+
+# ── remove_document (management-gated) ──
+
+def test_remove_document(client, store_path):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    payload, is_error = run(client, "remove_document",
+                            doc_names=["report.pdf", "ghost.pdf"])
+    assert not is_error
+    assert payload["results"] == [
+        {"doc_name": "report.pdf", "status": "deleted"},
+        {"doc_name": "ghost.pdf", "status": "not_found"},
+    ]
+    assert client.list_documents()["total"] == 0
+
+
+def test_management_tools_hidden_by_default(client):
+    assert "remove_document" not in [t.__name__ for t in client.agent_tools()]
+
+
+# ── error containment ──
+
+def test_tools_never_raise(client, store_path, monkeypatch):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    monkeypatch.setattr(client._api._store, "get_tree",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    payload, is_error = run(client, "get_document_structure",
+                            doc_name="report.pdf")
+    assert is_error
+    assert "boom" in payload["error"]
+
+
+def test_unknown_argument_becomes_error_envelope(client, store_path):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    payload, is_error = run(client, "get_document", doc_name="report.pdf",
+                            bogus=True)
+    assert is_error and payload["errorCode"] == "INVALID_INPUT"
+
+
+# ── framework adapters ──
+
+def test_as_openai_tools_missing_dependency(client, monkeypatch):
+    monkeypatch.setitem(sys.modules, "agents", None)
+    with pytest.raises(PageIndexAPIError, match="openai-agents"):
+        client.as_openai_tools()
+
+
+def test_as_openai_tools_local_in_process(client):
+    pytest.importorskip("agents")
+    tools = client.as_openai_tools()
+    assert [tool.name for tool in tools] == list(tool_names())
+
+
+def test_as_openai_tools_cloud_default_uses_bridge(monkeypatch):
+    pytest.importorskip("agents")
+    from agents import FunctionTool
+    import pageindex.mcp_bridge as mcp_bridge
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _FakeBridge)
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    tools = cloud.as_openai_tools()
+    assert all(isinstance(tool, FunctionTool) for tool in tools)
+    assert [tool.name for tool in tools] == ["search_documents", "get_document"]
+
+
+def test_as_openai_tools_cloud_hosted_opt_in():
+    pytest.importorskip("agents")
+    from agents import HostedMCPTool
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    tools = cloud.as_openai_tools(hosted=True)
+    assert len(tools) == 1
+    assert isinstance(tools[0], HostedMCPTool)
+    config = tools[0].tool_config
+    assert config["server_url"] == "https://api.pageindex.ai/mcp"
+    assert config["headers"] == {"Authorization": "Bearer pi-test-key"}
+    assert config["server_label"] == "pageindex"
+
+
+def test_as_openai_tools_local_ignores_hosted(client):
+    pytest.importorskip("agents")
+    assert ([tool.name for tool in client.as_openai_tools(hosted=True)]
+            == [tool.name for tool in client.as_openai_tools()]
+            == list(tool_names()))
+
+
+def test_as_claude_mcp_cloud_needs_no_framework(monkeypatch):
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    config = cloud.as_claude_mcp()
+    assert config == {
+        "type": "http",
+        "url": "https://api.pageindex.ai/mcp",
+        "headers": {"Authorization": "Bearer pi-test-key"},
+    }
+
+
+def test_as_claude_mcp_local_missing_dependency(client, monkeypatch):
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
+    with pytest.raises(PageIndexAPIError, match="claude-agent-sdk"):
+        client.as_claude_mcp()
+
+
+def test_as_claude_mcp_local_when_installed(client):
+    pytest.importorskip("claude_agent_sdk")
+    server = client.as_claude_mcp()
+    assert server is not None
+    if isinstance(server, dict):
+        assert server.get("type") != "http"
+
+
+def test_agent_tools_work_without_frameworks(client, store_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "agents", None)
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
+    seed_doc(store_path, "pi-a", "report.pdf")
+    browse = client.agent_tools()[0]
+    assert "report.pdf" in browse()
+
+
+# ── cloud agent_tools: MCP bridge ──
+
+class _FakeBridge:
+    def __init__(self, url, headers):
+        self.url = url
+        self.headers = headers
+        self.calls = []
+        read_only = {"readOnlyHint": True, "openWorldHint": False}
+        self.tools = [
+            {
+                "name": "search_documents",
+                "description": "ESCALATION tool — keyword search.",
+                "annotations": read_only,
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Keyword query."},
+                        "limit": {"type": "number", "default": 10},
+                    },
+                    "required": ["query"],
+                },
+            },
+            {
+                "name": "get_document",
+                "description": "Check a document's status.",
+                "annotations": read_only,
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "doc_name": {"type": "string"},
+                        "folder_id": {"type": ["string", "null"]},
+                    },
+                    "required": ["doc_name"],
+                },
+            },
+            {
+                "name": "remove_document",
+                "description": "Permanently delete documents.",
+                "annotations": {"readOnlyHint": False, "destructiveHint": True},
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"doc_names": {"type": "array"}},
+                    "required": ["doc_names"],
+                },
+            },
+            {
+                "name": "unannotated_tool",
+                "description": "A tool the server sent without annotations.",
+                "inputSchema": {"type": "object", "properties": {},
+                                "required": []},
+            },
+        ]
+
+    def list_tools(self):
+        return self.tools
+
+    def call_tool(self, name, arguments):
+        self.calls.append((name, arguments))
+        return json.dumps({"success": True, "tool": name, "args": arguments})
+
+
+@pytest.fixture
+def cloud_with_fake_bridge(monkeypatch):
+    import pageindex.mcp_bridge as mcp_bridge
+    created = {}
+
+    def factory(url, headers):
+        created["bridge"] = _FakeBridge(url, headers)
+        return created["bridge"]
+
+    monkeypatch.setattr(mcp_bridge, "McpBridge", factory)
+    return PageIndexCloudClient(api_key="pi-test-key"), created
+
+
+def test_cloud_agent_tools_discover_live_tool_set(cloud_with_fake_bridge):
+    cloud, created = cloud_with_fake_bridge
+    tools = cloud.agent_tools()
+    bridge = created["bridge"]
+    assert bridge.url == "https://api.pageindex.ai/mcp"
+    assert bridge.headers == {"Authorization": "Bearer pi-test-key"}
+    # Default: only tools the server marks read-only; unannotated tools are
+    # treated as non-read-only.
+    assert [t.__name__ for t in tools] == ["search_documents", "get_document"]
+    assert "ESCALATION tool" in tools[0].__doc__
+
+
+def test_cloud_agent_tools_management_gate(cloud_with_fake_bridge):
+    cloud, _ = cloud_with_fake_bridge
+    names = [t.__name__ for t in cloud.agent_tools(include_management=True)]
+    assert names == ["search_documents", "get_document", "remove_document",
+                     "unannotated_tool"]
+
+
+def test_cloud_agent_tools_signatures_from_schema(cloud_with_fake_bridge):
+    import inspect
+    cloud, _ = cloud_with_fake_bridge
+    search, get_document = cloud.agent_tools()
+    params = inspect.signature(search).parameters
+    assert list(params) == ["query", "limit"]
+    assert params["query"].default is inspect.Parameter.empty
+    assert params["limit"].default == 10
+    assert search.__annotations__["query"] is str
+    folder_param = inspect.signature(get_document).parameters["folder_id"]
+    assert folder_param.default is None
+
+
+def test_cloud_agent_tools_proxy_and_drop_none(cloud_with_fake_bridge):
+    cloud, created = cloud_with_fake_bridge
+    _, get_document = cloud.agent_tools()
+    result = json.loads(get_document("report.pdf"))
+    assert result["tool"] == "get_document"
+    assert result["args"] == {"doc_name": "report.pdf"}  # folder_id=None dropped
+    assert created["bridge"].calls == [("get_document", {"doc_name": "report.pdf"})]
+
+
+def test_cloud_agent_tools_call_errors_contained(cloud_with_fake_bridge):
+    cloud, created = cloud_with_fake_bridge
+    search, _ = cloud.agent_tools()
+    created["bridge"].call_tool = lambda *a, **k: (_ for _ in ()).throw(
+        RuntimeError("network down"))
+    payload = json.loads(search(query="x"))
+    assert payload["errorCode"] == "INTERNAL_ERROR"
+    assert "network down" in payload["error"]
+
+
+def test_cloud_agent_tools_list_failure_raises(monkeypatch):
+    import pageindex.mcp_bridge as mcp_bridge
+
+    class _DeadBridge:
+        def __init__(self, url, headers):
+            pass
+
+        def list_tools(self):
+            raise PageIndexAPIError("Could not connect")
+
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _DeadBridge)
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    with pytest.raises(PageIndexAPIError, match="Could not connect"):
+        cloud.agent_tools()
+
+
+def test_mcp_bridge_protocol(monkeypatch):
+    from pageindex.mcp_bridge import McpBridge
+    import pageindex.mcp_bridge as mcp_bridge
+
+    posts = []
+
+    class _Resp:
+        def __init__(self, status, body=None, headers=None, text=""):
+            self.status_code = status
+            self._body = body
+            self.headers = headers or {"Content-Type": "application/json"}
+            self.text = text or (json.dumps(body) if body else "")
+            self.content = self.text.encode("utf-8")
+
+        def json(self):
+            if self._body is None:
+                raise ValueError("no body")
+            return self._body
+
+    session_alive = {"first": True}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        posts.append({"payload": json, "headers": headers})
+        method = json.get("method")
+        rid = json.get("id")
+        if method == "initialize":
+            return _Resp(200, {"jsonrpc": "2.0", "id": rid,
+                               "result": {"protocolVersion": "2025-06-18"}},
+                         {"Content-Type": "application/json",
+                          "Mcp-Session-Id": "sess-1"})
+        if method == "notifications/initialized":
+            return _Resp(202)
+        if method == "tools/list":
+            # SSE-framed response exercises the event-stream parser; the
+            # em-dash guards UTF-8 decoding (SSE is UTF-8 by spec).
+            body = {"jsonrpc": "2.0", "id": rid,
+                    "result": {"tools": [{"name": "t1",
+                                          "description": "reads — never writes"}],
+                               "nextCursor": None}}
+            import json as json_mod
+            return _Resp(200, None,
+                         {"Content-Type": "text/event-stream"},
+                         f"event: message\ndata: {json_mod.dumps(body)}\n\n")
+        if method == "tools/call":
+            if session_alive["first"]:
+                session_alive["first"] = False
+                return _Resp(404, text="session expired")
+            return _Resp(200, {"jsonrpc": "2.0", "id": rid, "result": {
+                "content": [{"type": "text", "text": "hello"},
+                            {"type": "text", "text": "world"}]}})
+        raise AssertionError(f"unexpected method {method}")
+
+    monkeypatch.setattr(mcp_bridge.requests, "post", fake_post)
+    bridge = McpBridge("https://api.pageindex.ai/mcp",
+                       {"Authorization": "Bearer k"})
+
+    tools = bridge.list_tools()
+    assert tools == [{"name": "t1", "description": "reads — never writes"}]
+    list_headers = posts[-1]["headers"]
+    assert list_headers["Mcp-Session-Id"] == "sess-1"
+    assert list_headers["MCP-Protocol-Version"] == "2025-06-18"
+    assert list_headers["Authorization"] == "Bearer k"
+
+    # First tools/call 404s (expired session) → re-initialize → retry succeeds.
+    text = bridge.call_tool("t1", {"a": 1})
+    assert text == "hello\nworld"
+    methods = [p["payload"]["method"] for p in posts]
+    assert methods.count("initialize") == 2
+
+
+# ── review-round regressions ──
+
+def test_synth_optional_no_default_param_is_nullable():
+    """A non-required, no-default schema param must annotate Optional, or
+    strict schemas force the model to always send a value (browse.query)."""
+    from pageindex.agent_tools import _make_bridge_function, TOOL_CONTRACT
+    from typing import get_args
+
+    class _Bridge:
+        def call_tool(self, name, args):
+            return json.dumps(args)
+
+    meta = {"name": "browse_documents",
+            "description": "d",
+            "inputSchema": TOOL_CONTRACT["browse_documents"]["schema"]}
+    fn = _make_bridge_function(_Bridge(), meta)
+    assert type(None) in get_args(fn.__annotations__["query"])
+
+
+def test_synth_escape_hatches():
+    from pageindex.agent_tools import _make_bridge_function
+
+    calls = []
+
+    class _Bridge:
+        def call_tool(self, name, args):
+            calls.append((name, args))
+            return "ok"
+
+    # Tool named "_invoke" must not recurse into itself.
+    invoke_named = _make_bridge_function(_Bridge(), {
+        "name": "_invoke", "description": "d",
+        "inputSchema": {"type": "object", "properties": {"x": {"type": "string"}},
+                        "required": ["x"]}})
+    assert invoke_named("v") == "ok"
+    assert calls[-1] == ("_invoke", {"x": "v"})
+
+    # Param named "dict" must not shadow the builtin.
+    dict_param = _make_bridge_function(_Bridge(), {
+        "name": "t", "description": "d",
+        "inputSchema": {"type": "object", "properties": {"dict": {"type": "string"}},
+                        "required": ["dict"]}})
+    assert dict_param("v") == "ok"
+    assert calls[-1] == ("t", {"dict": "v"})
+
+    # Non-identifier tool name still gets a real signature.
+    import inspect
+    dashed = _make_bridge_function(_Bridge(), {
+        "name": "page-content.v2", "description": "d",
+        "inputSchema": {"type": "object", "properties": {"a": {"type": "string"}},
+                        "required": ["a"]}})
+    assert dashed.__name__ == "page-content.v2"
+    assert list(inspect.signature(dashed).parameters) == ["a"]
+    assert dashed("v") == "ok"
+
+
+def test_cloud_agent_tools_empty_filter_raises(monkeypatch):
+    import pageindex.mcp_bridge as mcp_bridge
+
+    class _AllWriteBridge:
+        def __init__(self, url, headers):
+            pass
+
+        def list_tools(self):
+            return [{"name": "remove_document",
+                     "annotations": {"readOnlyHint": False},
+                     "inputSchema": {"type": "object", "properties": {}}}]
+
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _AllWriteBridge)
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    with pytest.raises(PageIndexAPIError, match="annotation"):
+        cloud.agent_tools()
+    assert len(cloud.agent_tools(include_management=True)) == 1
+
+
+def test_sse_crlf_multi_message():
+    from pageindex.mcp_bridge import _parse_sse
+    body = ('event: message\r\ndata: {"jsonrpc":"2.0","method":"notifications/progress"}\r\n\r\n'
+            'event: message\r\ndata: {"jsonrpc":"2.0","id":7,"result":{"ok":true}}\r\n\r\n')
+    messages = _parse_sse(body)
+    assert len(messages) == 2
+    assert messages[1]["result"] == {"ok": True}
+
+
+def test_bridge_transport_error_is_pageindex_error(monkeypatch):
+    import requests as requests_mod
+    import pageindex.mcp_bridge as mcp_bridge
+    from pageindex.mcp_bridge import McpBridge
+
+    def dead_post(*args, **kwargs):
+        raise requests_mod.ConnectionError("dns down")
+
+    monkeypatch.setattr(mcp_bridge.requests, "post", dead_post)
+    bridge = McpBridge("https://api.pageindex.ai/mcp", {})
+    with pytest.raises(PageIndexAPIError, match="Could not reach"):
+        bridge.list_tools()
+
+
+def test_failed_document_status_message(client, store_path):
+    seed_doc(store_path, "pi-a", "broken.pdf")
+    import pageindex.agent_tools as agent_tools_mod
+    entry = {"id": "pi-a", "name": "broken.pdf", "status": "failed"}
+    payload, is_error = agent_tools_mod._not_ready_error(
+        "broken.pdf", "failed", "structure retrieval", timed_out=False)
+    assert is_error
+    assert "failed" in payload["error"]
+    assert any("submit_document" in option
+               for option in payload["next_steps"]["options"])
+
+
+def test_hosted_approval_gate():
+    pytest.importorskip("agents")
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    gated = cloud.as_openai_tools(hosted=True)[0].tool_config
+    assert gated["require_approval"] == {"never": {"read_only": True}}
+    open_config = cloud.as_openai_tools(hosted=True,
+                                        include_management=True)[0].tool_config
+    assert open_config["require_approval"] == "never"
+
+
+def test_wait_tolerates_transient_poll_failures(fake_cloud_client, monkeypatch):
+    cloud = fake_cloud_client(["processing", "completed"])
+    original = cloud._api.get_document
+    state = {"raised": False}
+
+    def flaky(doc_id):
+        if not state["raised"]:
+            state["raised"] = True
+            raise PageIndexAPIError("502")
+        return original(doc_id)
+
+    monkeypatch.setattr(cloud._api, "get_document", flaky)
+    assert cloud.submit_document("x.pdf", wait=True) == {"doc_id": "pi-fake"}
+
+
+LIVE_KEY = os.getenv("PAGEINDEX_API_KEY")
+
+
+@pytest.mark.skipif(not LIVE_KEY, reason="PAGEINDEX_API_KEY not set")
+def test_live_cloud_contract_parity():
+    """Real-drift detector: the frozen contract must match the live server
+    on every shared tool, including the annotations the gates rely on."""
+    from pageindex.mcp_bridge import McpBridge
+    bridge = McpBridge("https://api.pageindex.ai/mcp",
+                       {"Authorization": f"Bearer {LIVE_KEY}"})
+    live = {t["name"]: t for t in bridge.list_tools()}
+    for name, ours in TOOL_CONTRACT.items():
+        real = live.get(name)
+        assert real is not None, f"{name} missing from live tools/list"
+        assert real.get("description") == ours["description"], name
+        real_schema = real.get("inputSchema") or {}
+        real_props = real_schema.get("properties") or {}
+        assert set(real_props) == set(ours["schema"]["properties"]), name
+        for param, spec in ours["schema"]["properties"].items():
+            assert (real_props[param].get("description")
+                    == spec.get("description")), (name, param)
+        assert (sorted(real_schema.get("required") or [])
+                == sorted(ours["schema"].get("required", []))), name
+        for key, value in (ours.get("annotations") or {}).items():
+            assert (real.get("annotations") or {}).get(key) == value, (name, key)
+
+
+# ── agent_instructions ──
+
+def test_agent_instructions_default(client):
+    text = client.agent_instructions()
+    assert text == AGENT_INSTRUCTIONS
+    assert "READING WORKFLOW" in text
+    assert "browse_documents" in text
+    assert "search_documents" not in text
+    assert "get_folder_structure" not in text
+
+
+def test_agent_instructions_with_doc_id(client, store_path):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    text = client.agent_instructions(doc_id="pi-a")
+    assert text.startswith(AGENT_INSTRUCTIONS)
+    assert "The user has specified document: report.pdf" in text
+
+    seed_doc(store_path, "pi-b", "other.pdf")
+    multi = client.agent_instructions(doc_id=["pi-a", "pi-b"])
+    assert "The user has specified documents: report.pdf, other.pdf" in multi
+
+    with pytest.raises(PageIndexAPIError):
+        client.agent_instructions(doc_id="pi-missing")
+
+
+# ── submit_document(wait=True) ──
+
+class _FakeCloudAPI:
+    def __init__(self, statuses):
+        self._statuses = list(statuses)
+        self.polls = 0
+
+    def submit_document(self, **kwargs):
+        return {"doc_id": "pi-fake"}
+
+    def get_document(self, doc_id):
+        self.polls += 1
+        status = (self._statuses.pop(0) if len(self._statuses) > 1
+                  else self._statuses[0])
+        return {"id": doc_id, "status": status}
+
+
+@pytest.fixture
+def fake_cloud_client(tmp_path, monkeypatch):
+    monkeypatch.setattr(client_module.time, "sleep", lambda seconds: None)
+
+    def build(statuses):
+        cloud = PageIndexLocalClient(storage_path=str(tmp_path / "unused"))
+        cloud._api = _FakeCloudAPI(statuses)
+        return cloud
+    return build
+
+
+def test_submit_wait_polls_until_completed(fake_cloud_client):
+    cloud = fake_cloud_client(["processing", "processing", "completed"])
+    result = cloud.submit_document("whatever.pdf", wait=True)
+    assert result == {"doc_id": "pi-fake"}
+    assert cloud._api.polls == 3
+
+
+def test_submit_wait_raises_on_failed(fake_cloud_client):
+    cloud = fake_cloud_client(["processing", "failed"])
+    with pytest.raises(PageIndexAPIError, match="failed"):
+        cloud.submit_document("whatever.pdf", wait=True)
+
+
+def test_submit_wait_times_out(fake_cloud_client, monkeypatch):
+    clock = {"now": 0.0}
+
+    def fake_monotonic():
+        clock["now"] += 700.0
+        return clock["now"]
+
+    monkeypatch.setattr(client_module.time, "monotonic", fake_monotonic)
+    cloud = fake_cloud_client(["processing"])
+    with pytest.raises(PageIndexAPIError, match="Timed out"):
+        cloud.submit_document("whatever.pdf", wait=True)
+
+
+def test_submit_without_wait_does_not_poll(fake_cloud_client):
+    cloud = fake_cloud_client(["processing"])
+    assert cloud.submit_document("whatever.pdf") == {"doc_id": "pi-fake"}
+    assert cloud._api.polls == 0

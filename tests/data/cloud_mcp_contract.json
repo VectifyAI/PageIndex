@@ -1,0 +1,197 @@
+{
+  "_provenance": "Frozen copy of the PageIndex cloud MCP server's tool contract (names, input schemas, descriptions, and annotations as served via tools/list). The parity test asserts pageindex.agent_tools.TOOL_CONTRACT matches this file; update both together only when the cloud contract changes.",
+  "tools": {
+    "browse_documents": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      },
+      "description": "Primary document retrieval tool. After orienting with get_folder_structure() (when available), use this for all document-related questions. The bare call returns root-level sub-folders and documents; pass folder_id to drill into a sub-folder level by level. Use sort=\"relevance\" + query for semantic ranking. Do NOT jump to search_documents() first — it is an escalation path, only after browse_documents(sort=\"relevance\") has failed.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "folder_id": {
+            "type": "string",
+            "default": "root",
+            "description": "Folder scope (default \"root\"). Pass a specific folder ID to scope into that folder, or \"root\" to reference the library root. The read-only \"shared-with-me\" and \"following\" folders live at the library root — pass one of those ids to browse them. Copy any folder_id verbatim from a browse/tree response, never construct one. Combine with `recursive` to control breadth."
+          },
+          "recursive": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether to include documents from descendant folders. When false (default), returns the direct contents of folder_id along with its sub-folders — prefer this for level-by-level exploration so you retain folder hierarchy context. When true, flattens all descendant documents into one list and omits sub-folders — use only when a non-recursive browse of the target folder returned no relevant results and you need to widen the scope, or the user explicitly requests a flat listing."
+          },
+          "sort": {
+            "type": "string",
+            "enum": [
+              "time",
+              "relevance"
+            ],
+            "default": "time",
+            "description": "Sort order. \"time\" (default) sorts by upload date (newest first); \"relevance\" orders documents by semantic relevance to `query`. Relevance also works inside the read-only shared folders — pass their folder_id — but at the library root it ranks only your own documents."
+          },
+          "query": {
+            "type": "string",
+            "description": "Search query for relevance ranking. Required when sort=\"relevance\"; must be omitted when sort=\"time\"."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Zero-based pagination offset. Pass the value of `next_offset` from the previous response to fetch the next page."
+          },
+          "limit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 10,
+            "description": "Number of documents to return per page (1-50, default 10)"
+          }
+        },
+        "required": []
+      }
+    },
+    "get_document": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      },
+      "description": "Check a document's processing status and metadata. `status` is one of \"pending\", \"queued\", \"processing\", \"completed\", or \"failed\" — call this before `get_document_structure()` or `get_page_content()` to confirm the document is ready.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "doc_name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Copy the `name` field verbatim from a browse_documents() or search_documents() response (case-sensitive, include extension). Example: \"Q3 Report.pdf\". If the response shows two documents with the same name, pass `folder_id` alongside to disambiguate."
+          },
+          "folder_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Disambiguator for same-name documents. Copy the `folder_id` from the intended browse/search result; use \"root\" for root-level documents, or \"shared-with-me\"/\"following\" for the read-only folders at the library root; omit if `doc_name` is unique. Copy any folder_id verbatim from a browse_documents()/get_folder_structure() response, never construct one."
+          },
+          "wait_for_completion": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true and document is processing, automatically wait up to 3 minutes until completed. Reduces repeated tool calls."
+          }
+        },
+        "required": [
+          "doc_name"
+        ]
+      }
+    },
+    "get_document_structure": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      },
+      "description": "Extract a document's hierarchical outline (headers, sections, page references). REQUIRED for documents over 20 pages — call this first to locate relevant sections, then pass their page numbers to `get_page_content()`. Use the `part` parameter to iterate large outlines until `pagination.has_more` is false.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "doc_name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Copy the `name` field verbatim from a browse_documents() or search_documents() response (case-sensitive, include extension). Example: \"Q3 Report.pdf\". If the response shows two documents with the same name, pass `folder_id` alongside to disambiguate."
+          },
+          "folder_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Disambiguator for same-name documents. Copy the `folder_id` from the intended browse/search result; use \"root\" for root-level documents, or \"shared-with-me\"/\"following\" for the read-only folders at the library root; omit if `doc_name` is unique. Copy any folder_id verbatim from a browse_documents()/get_folder_structure() response, never construct one."
+          },
+          "part": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1,
+            "description": "Part number for pagination (1-based, default 1). For large outlines, increment until the response's `pagination.has_more` becomes false."
+          },
+          "wait_for_completion": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true and document is processing, automatically wait up to 3 minutes until completed. Reduces repeated tool calls."
+          }
+        },
+        "required": [
+          "doc_name"
+        ]
+      }
+    },
+    "get_page_content": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      },
+      "description": "Extract page content from a processed document. Use tight, targeted page ranges — never the whole document at once. For documents over 20 pages, call `get_document_structure()` first to pick relevant sections. Embedded image paths in the response feed into `get_document_image()`.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "doc_name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Copy the `name` field verbatim from a browse_documents() or search_documents() response (case-sensitive, include extension). Example: \"Q3 Report.pdf\". If the response shows two documents with the same name, pass `folder_id` alongside to disambiguate."
+          },
+          "folder_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Disambiguator for same-name documents. Copy the `folder_id` from the intended browse/search result; use \"root\" for root-level documents, or \"shared-with-me\"/\"following\" for the read-only folders at the library root; omit if `doc_name` is unique. Copy any folder_id verbatim from a browse_documents()/get_folder_structure() response, never construct one."
+          },
+          "pages": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(\\d+(-\\d+)?)(,\\s*\\d+(-\\d+)?)*$",
+            "description": "Page specification: \"5\", \"3,7,10\", \"5-10\", or \"1-3,7,9-12\""
+          },
+          "wait_for_completion": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true and document is processing, automatically wait up to 3 minutes until completed. Reduces repeated tool calls."
+          }
+        },
+        "required": [
+          "doc_name",
+          "pages"
+        ]
+      }
+    },
+    "remove_document": {
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "description": "Permanently delete documents and all associated data. Only invoke when the user explicitly names the documents AND confirms deletion. Returns `results` — one entry per requested document: `{ doc_name, status: \"deleted\" | \"not_found\" | \"failed\", error? }`. Inspect each entry for per-document failures. This action is irreversible.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "doc_names": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "maxItems": 10,
+            "description": "Array of document names to delete. Each name must be copied verbatim from the `name` field of a browse_documents() or search_documents() response (case-sensitive, include extension). Example: [\"Q3 Report.pdf\", \"draft.pdf\"]. Max 10 per call."
+          },
+          "folder_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Disambiguator for same-name documents. Copy the `folder_id` from the intended browse/search result; use \"root\" for root-level documents, or \"shared-with-me\"/\"following\" for the read-only folders at the library root; omit if `doc_name` is unique. Copy any folder_id verbatim from a browse_documents()/get_folder_structure() response, never construct one."
+          }
+        },
+        "required": [
+          "doc_names"
+        ]
+      }
+    }
+  }
+}

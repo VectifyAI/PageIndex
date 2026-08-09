@@ -6,20 +6,21 @@ local mode and the OpenAI Agents SDK. Instead of vector similarity search and
 chunking, PageIndex builds a hierarchical tree index and uses agentic LLM
 reasoning for human-like, context-aware retrieval.
 
-Agent tools:
-  - get_document()           — document metadata (status, page count, etc.)
-  - get_document_structure() — tree structure index of a document
-  - get_page_content()       — retrieve text content of specific pages
+The agent tools come straight from the SDK — ``client.as_openai_tools()``
+exposes the PageIndex tool contract (browse_documents, get_document,
+get_document_structure, get_page_content) and ``client.agent_instructions()``
+provides the retrieval playbook, so the whole agent is a few lines. Swap
+``PageIndexLocalClient()`` for ``PageIndexCloudClient(api_key=...)`` and the
+same code runs against the cloud.
 
 Steps:
   1 — Index a PDF locally and view its tree structure index
   2 — View document metadata
   3 — Ask a question (agent reasons over the index and auto-calls tools)
 
-Requirements: pip install openai-agents; OPENAI_API_KEY in the environment.
+Requirements: pip install "pageindex[openai]"; OPENAI_API_KEY in the environment.
 """
 import sys
-import json
 import asyncio
 import concurrent.futures
 from pathlib import Path
@@ -27,12 +28,12 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from agents import Agent, Runner, function_tool, set_tracing_disabled
+from agents import Agent, Runner, set_tracing_disabled
 from agents.model_settings import ModelSettings
 from agents.stream_events import RawResponsesStreamEvent, RunItemStreamEvent
 from openai.types.responses import ResponseTextDeltaEvent, ResponseReasoningSummaryTextDeltaEvent
 
-from pageindex import PageIndexClient
+from pageindex import PageIndexLocalClient
 import pageindex.utils as utils
 
 PDF_URL = "https://arxiv.org/pdf/2603.15031"
@@ -41,47 +42,18 @@ _EXAMPLES_DIR = Path(__file__).parent
 PDF_PATH = _EXAMPLES_DIR / "documents" / "attention-residuals.pdf"
 STORAGE_PATH = _EXAMPLES_DIR / ".pageindex"
 
-AGENT_SYSTEM_PROMPT = """
-You are PageIndex, a document QA assistant.
-TOOL USE:
-- Call get_document() first to confirm status and page count.
-- Call get_document_structure() to identify relevant page ranges.
-- Call get_page_content(pages="5-7") with tight ranges; never fetch the whole document.
-- Before each tool call, output one short sentence explaining the reason.
-Answer based only on tool output. Be concise.
-"""
 
-
-def query_agent(client: PageIndexClient, doc_id: str, prompt: str, verbose: bool = False) -> str:
+def query_agent(client: PageIndexLocalClient, doc_id: str, prompt: str, verbose: bool = False) -> str:
     """Run a document QA agent using the OpenAI Agents SDK.
 
     Streams text output token-by-token and returns the full answer string.
     Tool calls are always printed; verbose=True also prints arguments and output previews.
     """
-
-    @function_tool
-    def get_document() -> str:
-        """Get document metadata: status, page count, name, and description."""
-        return json.dumps(client.get_document(doc_id))
-
-    @function_tool
-    def get_document_structure() -> str:
-        """Get the document's full tree structure (without text) to find relevant sections."""
-        return json.dumps(client.get_document_structure(doc_id), ensure_ascii=False)
-
-    @function_tool
-    def get_page_content(pages: str) -> str:
-        """
-        Get the text content of specific pages.
-        Use tight ranges: e.g. '5-7' for pages 5 to 7, '3,8' for pages 3 and 8, '12' for page 12.
-        """
-        return json.dumps(client.get_page_content(doc_id, pages), ensure_ascii=False)
-
     agent = Agent(
         name="PageIndex",
-        instructions=AGENT_SYSTEM_PROMPT,
-        tools=[get_document, get_document_structure, get_page_content],
-        model=getattr(client, "retrieve_model", None),
+        instructions=client.agent_instructions(doc_id=doc_id),
+        tools=client.as_openai_tools(),
+        model=client.retrieve_model,
         # model_settings=ModelSettings(reasoning={"effort": "low", "summary": "auto"}),  # Uncomment to enable reasoning
     )
 
@@ -152,7 +124,7 @@ if __name__ == "__main__":
         print("Download complete.\n")
 
     # Setup: local mode — no PageIndex API key needed, your LLM key does the work
-    client = PageIndexClient(storage_path=str(STORAGE_PATH))
+    client = PageIndexLocalClient(storage_path=str(STORAGE_PATH))
 
     # Step 1: Index PDF and view tree structure
     print("=" * 60)
@@ -166,7 +138,7 @@ if __name__ == "__main__":
     if doc_id:
         print(f"\nLoaded cached doc_id: {doc_id}")
     else:
-        doc_id = client.submit_document(str(PDF_PATH))["doc_id"]
+        doc_id = client.submit_document(str(PDF_PATH), wait=True)["doc_id"]
         print(f"\nIndexed. doc_id: {doc_id}")
     print("\nTree Structure (top-level sections):")
     structure = client.get_tree(doc_id, node_summary=True)["result"]
