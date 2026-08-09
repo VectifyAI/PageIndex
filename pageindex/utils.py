@@ -574,32 +574,39 @@ def check_token_limit(structure, limit=110000):
             print("\n")
 
 
+_PHYSICAL_INDEX_MARKER_RE = re.compile(r"^<physical_index_(\d+)>$")
+_PHYSICAL_INDEX_LOOSE_RE = re.compile(r"^<*physical_index_(\d+)>*$")
+
+
+def _parse_physical_index(raw):
+    """Parse any supported physical_index shape to a positive int, else None."""
+    if raw is None or isinstance(raw, bool):
+        return None
+    if isinstance(raw, str):
+        text = raw.strip()
+        marker_match = _PHYSICAL_INDEX_LOOSE_RE.match(text)
+        if marker_match:
+            value = int(marker_match.group(1))
+        elif re.fullmatch(r"\d+", text):
+            value = int(text)
+        else:
+            return None
+    elif isinstance(raw, int):
+        value = raw
+    elif isinstance(raw, float) and raw.is_integer():
+        value = int(raw)
+    else:
+        return None
+    return value if value >= 1 else None
+
+
 def convert_physical_index_to_int(data):
     if isinstance(data, list):
-        for i in range(len(data)):
-            # Check if item is a dictionary and has 'physical_index' key
-            if isinstance(data[i], dict) and 'physical_index' in data[i]:
-                if isinstance(data[i]['physical_index'], str):
-                    value = data[i]['physical_index']
-                    if value.startswith('<physical_index_'):
-                        value = value.split('_')[-1].rstrip('>').strip()
-                    elif value.startswith('physical_index_'):
-                        value = value.split('_')[-1].strip()
-                    try:
-                        data[i]['physical_index'] = int(value)
-                    except ValueError:
-                        pass
-    elif isinstance(data, str):
-        value = data
-        if value.startswith('<physical_index_'):
-            value = value.split('_')[-1].rstrip('>').strip()
-        elif value.startswith('physical_index_'):
-            value = value.split('_')[-1].strip()
-        try:
-            return int(value)
-        except ValueError:
-            return None
-    return data
+        for item in data:
+            if isinstance(item, dict) and 'physical_index' in item:
+                item['physical_index'] = _parse_physical_index(item['physical_index'])
+        return data
+    return _parse_physical_index(data)
 
 
 def convert_page_to_int(data):

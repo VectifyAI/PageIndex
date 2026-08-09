@@ -5,24 +5,10 @@ import math
 import random
 import re
 from .utils import *
+from .utils import _parse_physical_index, _PHYSICAL_INDEX_MARKER_RE
 from .tree_optimize import merge_tree
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
-_PHYSICAL_INDEX_MARKER_RE = re.compile(r"^<physical_index_(\d+)>$")
-
-def _parse_physical_index(raw):
-    if raw is None or isinstance(raw, bool):
-        return None
-    marker_match = _PHYSICAL_INDEX_MARKER_RE.match(str(raw).strip())
-    if marker_match:
-        return int(marker_match.group(1))
-    if isinstance(raw, float) and not raw.is_integer():
-        return None
-    try:
-        return int(raw)
-    except (TypeError, ValueError, OverflowError):
-        return None
 
 
 ################### check title in page #########################################################
@@ -251,12 +237,16 @@ def toc_extractor(page_list, toc_page_list, model):
 def _extract_chunk_marker_set(content: str) -> set:
     return {int(m) for m in re.findall(r"<physical_index_(\d+)>", content)}
 
-def _validate_chunk_physical_indices(toc: list, content: str) -> list:
+def _validate_chunk_physical_indices(toc, content: str) -> list:
     """
-    Nullify any physical_index that is not present in the supplied chunk.
-    This prevents the model from referencing markers that exist elsewhere
-    in the document but not in the current prompt.
+    Nullify any physical_index that is not an exact <physical_index_X> marker
+    pointing into the supplied chunk. Bare numbers are rejected here: they are
+    usually printed page numbers echoed back by the model, and one echoed pair
+    can shift the page offset for the whole document.
     """
+    if not isinstance(toc, list):
+        return []
+    toc = [entry for entry in toc if isinstance(entry, dict)]
     valid_indices = _extract_chunk_marker_set(content)
 
     for entry in toc:
@@ -264,11 +254,11 @@ def _validate_chunk_physical_indices(toc: list, content: str) -> list:
         if raw is None:
             continue
 
-        val = _parse_physical_index(raw)
-        if val is None or val not in valid_indices:
-            entry["physical_index"] = None
+        marker_match = _PHYSICAL_INDEX_MARKER_RE.match(str(raw).strip())
+        if marker_match and int(marker_match.group(1)) in valid_indices:
+            entry["physical_index"] = int(marker_match.group(1))
         else:
-            entry["physical_index"] = val
+            entry["physical_index"] = None
 
     return toc
 
@@ -395,7 +385,8 @@ def find_toc_pages(start_page_index, page_list, opt, logger=None):
 
 def remove_page_number(data):
     if isinstance(data, dict):
-        data.pop('page_number', None)  
+        data.pop('page', None)
+        data.pop('page_number', None)
         for key in list(data.keys()):
             if 'nodes' in key:
                 remove_page_number(data[key])
@@ -513,9 +504,12 @@ def add_page_number_to_toc(part, structure, model=None):
     prompt = fill_prompt_seq + f"\n\nCurrent Partial Document:\n{part_text}\n\nGiven Structure\n{json.dumps(structure, indent=2)}\n"
     current_json_raw = llm_completion(model=model, prompt=prompt)
     json_result = extract_json(current_json_raw)
-    
+    if isinstance(json_result, dict):
+        json_result = [json_result]
+    if not isinstance(json_result, list):
+        return []
     for item in json_result:
-        if 'start' in item:
+        if isinstance(item, dict) and 'start' in item:
             del item['start']
     return json_result
 
@@ -641,13 +635,16 @@ def process_toc_no_page_numbers(toc_content, toc_page_list, page_list,  start_in
 
         llm_result = add_page_number_to_toc(group_text, toc_with_page_number, model)
         if len(llm_result) != len(toc_with_page_number):
-            continue
+            raise ValueError(
+                "LLM returned a different number of TOC entries than expected."
+            )
         if any(
-            (update.get("structure"), update.get("title"))
+            not isinstance(update, dict)
+            or (update.get("structure"), update.get("title"))
             != (current.get("structure"), current.get("title"))
             for update, current in zip(llm_result, toc_with_page_number)
         ):
-            continue
+            raise ValueError("LLM returned reordered or modified TOC entries.")
         valid_indices = _extract_chunk_marker_set(group_text)
 
         for idx, current in enumerate(toc_with_page_number):
@@ -693,6 +690,10 @@ def process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_che
     offset = calculate_page_offset(matching_pairs)
     logger.info(f'offset: {offset}')
 
+    if offset is None:
+        logger.info('no reliable page offset found, falling back to process_toc_no_page_numbers')
+        return process_toc_no_page_numbers(toc_content, toc_page_list, page_list, model=model, logger=logger)
+
     toc_with_page_number = add_page_offset_to_toc_json(toc_with_page_number, offset)
     logger.info(f'toc_with_page_number: {toc_with_page_number}')
 
@@ -732,12 +733,18 @@ def process_none_page_numbers(toc_items, page_list, start_index=1, model=None):
                 else:
                     continue
 
+            if not page_contents:
+                continue
             item_copy = copy.deepcopy(item)
-            del item_copy['page']
+            item_copy.pop('page', None)
             result = add_page_number_to_toc(page_contents, item_copy, model)
-            if isinstance(result[0]['physical_index'], str) and result[0]['physical_index'].startswith('<physical_index'):
-                item['physical_index'] = int(result[0]['physical_index'].split('_')[-1].rstrip('>').strip())
-                del item['page']
+
+            fixed = None
+            if isinstance(result, list) and result and isinstance(result[0], dict):
+                fixed = _parse_physical_index(result[0].get('physical_index'))
+            if fixed is not None and fixed in _extract_chunk_marker_set(''.join(page_contents)):
+                item['physical_index'] = fixed
+                item.pop('page', None)
     
     return toc_items
 
@@ -894,33 +901,29 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
         for item in incorrect_results
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Update the toc_with_page_number with the fixed indices; route failures to invalid_results so they are retried
+    invalid_results = []
     for item, result in zip(incorrect_results, results):
         if isinstance(result, Exception):
             print(f"Processing item {item} generated an exception: {result}")
+            invalid_results.append({
+                'list_index': item['list_index'],
+                'title': item['title'],
+                'physical_index': item.get('physical_index'),
+            })
             continue
-    results = [result for result in results if not isinstance(result, Exception)]
-
-    # Update the toc_with_page_number with the fixed indices and check for any invalid results
-    invalid_results = []
-    for result in results:
         if result['is_valid']:
             # Add bounds checking to prevent IndexError
             list_idx = result['list_index']
             if 0 <= list_idx < len(toc_with_page_number):
                 toc_with_page_number[list_idx]['physical_index'] = result['physical_index']
-            else:
-                # Index is out of bounds, treat as invalid
-                invalid_results.append({
-                    'list_index': result['list_index'],
-                    'title': result['title'],
-                    'physical_index': result['physical_index'],
-                })
-        else:
-            invalid_results.append({
-                'list_index': result['list_index'],
-                'title': result['title'],
-                'physical_index': result['physical_index'],
-            })
+                continue
+        invalid_results.append({
+            'list_index': result['list_index'],
+            'title': result['title'],
+            'physical_index': result['physical_index'],
+        })
 
     logger.info(f'incorrect_results_and_range_logs: {incorrect_results_and_range_logs}')
     logger.info(f'invalid_results: {invalid_results}')
@@ -1017,18 +1020,22 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
     if mode == 'process_toc_with_page_numbers':
         toc_with_page_number = process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_check_page_num=opt.toc_check_page_num, model=opt.model, logger=logger)
     elif mode == 'process_toc_no_page_numbers':
-        toc_with_page_number = process_toc_no_page_numbers(toc_content, toc_page_list, page_list, model=opt.model, logger=logger)
+        toc_with_page_number = process_toc_no_page_numbers(toc_content, toc_page_list, page_list, start_index=start_index, model=opt.model, logger=logger)
     else:
         toc_with_page_number = process_no_toc(page_list, start_index=start_index, model=opt.model, logger=logger)
-            
-    toc_with_page_number = [item for item in toc_with_page_number if item.get('physical_index') is not None] 
-    
+
+    if not isinstance(toc_with_page_number, list):
+        toc_with_page_number = []
+    toc_with_page_number = [item for item in toc_with_page_number if isinstance(item, dict)]
+
     toc_with_page_number = validate_and_truncate_physical_indices(
-        toc_with_page_number, 
-        len(page_list), 
-        start_index=start_index, 
+        toc_with_page_number,
+        len(page_list),
+        start_index=start_index,
         logger=logger
     )
+
+    toc_with_page_number = [item for item in toc_with_page_number if item.get('physical_index') is not None]
     
     accuracy, incorrect_results = await verify_toc(page_list, toc_with_page_number, start_index=start_index, model=opt.model)
         
@@ -1187,11 +1194,11 @@ def validate_and_truncate_physical_indices(toc_with_page_number, page_list_lengt
     max_allowed_page = page_list_length + start_index - 1
     truncated_items = []
     
-    for i, item in enumerate(toc_with_page_number):
+    for item in toc_with_page_number:
         if item.get('physical_index') is not None:
             original_index = item['physical_index']
-            if (not isinstance(original_index, int) or isinstance(original_index, bool)
-                    or not (start_index <= original_index <= max_allowed_page)):
+            val = _parse_physical_index(original_index)
+            if val is None or not (start_index <= val <= max_allowed_page):
                 item['physical_index'] = None
                 truncated_items.append({
                     'title': item.get('title', 'Unknown'),
@@ -1199,6 +1206,8 @@ def validate_and_truncate_physical_indices(toc_with_page_number, page_list_lengt
                 })
                 if logger:
                     logger.info(f"Removed physical_index for '{item.get('title', 'Unknown')}' (was {original_index}, outside the document range)")
+            else:
+                item['physical_index'] = val
     
     if truncated_items and logger:
         logger.info(f"Total removed items: {len(truncated_items)}")
