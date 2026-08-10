@@ -111,7 +111,12 @@ class LocalAPI:
                 "Failed to submit document: only PDF files are supported in local mode."
             )
 
-        page_texts = self._extract_page_texts(file_path)
+        try:
+            page_texts = self._extract_page_texts(file_path)
+        except Exception as e:
+            raise PageIndexAPIError(
+                f"Failed to submit document: could not read PDF: {e}"
+            ) from e
         if not any(text.strip() for text in page_texts):
             raise PageIndexAPIError(
                 "Failed to submit document: PDF has no content. All pages are blank."

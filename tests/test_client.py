@@ -158,6 +158,27 @@ def test_submit_rejections(local_client, sample_pdf, tmp_path):
         local_client.submit_document(sample_pdf, beta_headers=["block_reference"])
 
 
+def test_corrupt_pdf_raises_api_error(local_client, tmp_path):
+    bad = tmp_path / "bad.pdf"
+    bad.write_bytes(b"%PDF-1.4 garbage with no xref or trailer")
+    with pytest.raises(PageIndexAPIError, match="could not read PDF"):
+        local_client.submit_document(str(bad))
+
+
+def test_encrypted_pdf_raises_api_error(local_client, sample_pdf, tmp_path):
+    from PyPDF2 import PdfReader, PdfWriter
+
+    writer = PdfWriter()
+    for page in PdfReader(sample_pdf).pages:
+        writer.add_page(page)
+    writer.encrypt("secret")
+    enc = tmp_path / "enc.pdf"
+    with open(enc, "wb") as f:
+        writer.write(f)
+    with pytest.raises(PageIndexAPIError, match="could not read PDF"):
+        local_client.submit_document(str(enc))
+
+
 def test_submit_explicit_standard_mode(local_client, sample_pdf, monkeypatch):
     calls = []
 
