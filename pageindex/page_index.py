@@ -1240,7 +1240,7 @@ def page_index_main(doc, opt=None):
         raise ValueError("Unsupported input type. Expected a PDF file path or BytesIO object.")
 
     print('Parsing PDF...')
-    page_list = get_page_tokens(doc, model=opt.model)
+    page_list = get_page_tokens(doc, model=opt.model, pdf_parser=getattr(opt, 'pdf_parser', 'PyPDF2'))
 
     logger.info({'total_page_number': len(page_list)})
     logger.info({'total_token': sum([page[1] for page in page_list])})
