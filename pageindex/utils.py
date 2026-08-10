@@ -20,6 +20,8 @@ import re
 # litellm is imported inside the functions that use it; eager import is slow
 # and fetches a remote model-cost map.
 
+_logger = logging.getLogger(__name__)
+
 # Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
 if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
     os.environ["OPENAI_API_KEY"] = os.getenv("CHATGPT_API_KEY")
@@ -154,38 +156,40 @@ def get_json_content(response):
     return json_content
          
 
-def extract_json(content):
+def _decode_embedded_json(content):
+    """Return the first JSON object or array embedded in a model response."""
+    decoder = json.JSONDecoder()
+    starts = [index for index in (content.find("{"), content.find("[")) if index >= 0]
+    if not starts:
+        return None
     try:
-        # First, try to extract JSON enclosed within ```json and ```
-        start_idx = content.find("```json")
-        if start_idx != -1:
-            start_idx += 7  # Adjust index to start after the delimiter
-            end_idx = content.rfind("```")
-            json_content = content[start_idx:end_idx].strip()
-        else:
-            # If no delimiters, assume entire content could be JSON
-            json_content = content.strip()
+        value, _ = decoder.raw_decode(content[min(starts):])
+    except json.JSONDecodeError:
+        return None
+    return value
 
-        # Clean up common issues that might cause parsing errors
-        json_content = json_content.replace('None', 'null')  # Replace Python None with JSON null
-        json_content = json_content.replace('\n', ' ').replace('\r', ' ')  # Remove newlines
-        json_content = ' '.join(json_content.split())  # Normalize whitespace
 
-        # Attempt to parse and return the JSON object
-        return json.loads(json_content)
-    except json.JSONDecodeError as e:
-        logging.error(f"Failed to extract JSON: {e}")
-        # Try to clean up the content further if initial parsing fails
-        try:
-            # Remove any trailing commas before closing brackets/braces
-            json_content = json_content.replace(',]', ']').replace(',}', '}')
-            return json.loads(json_content)
-        except:
-            logging.error("Failed to parse JSON even after cleanup")
-            return {}
-    except Exception as e:
-        logging.error(f"Unexpected error while extracting JSON: {e}")
+def extract_json(content):
+    if not isinstance(content, str):
+        _logger.error("Failed to extract JSON: response is not a string")
         return {}
+
+    # Prefer the fenced body, but also support providers that prepend or append prose.
+    json_content = get_json_content(content)
+    for candidate in (json_content, content):
+        parsed = _decode_embedded_json(candidate)
+        if parsed is not None:
+            return parsed
+
+    # Preserve the legacy repairs for models that emit Python's None or a trailing comma.
+    repaired = json_content.replace('None', 'null')
+    repaired = re.sub(r',\s*([}\]])', r'\1', repaired)
+    parsed = _decode_embedded_json(repaired)
+    if parsed is not None:
+        return parsed
+
+    _logger.error("Failed to parse JSON from model response")
+    return {}
 
 def write_node_id(data, node_id=0):
     if isinstance(data, dict):
@@ -974,4 +978,3 @@ def print_tree(tree, indent=0):
 def print_wrapped(text, width=100):
     for line in text.splitlines():
         print(textwrap.fill(line, width=width))
-
