@@ -15,6 +15,16 @@ from .utils import ConfigLoader, remove_fields
 META_INDEX = "_meta.json"
 
 
+def _provider_environment(model: str) -> tuple[str, str]:
+    """Return the LiteLLM credential and base URL variables for a model."""
+    normalized_model = (model or "").removeprefix("litellm/")
+    if normalized_model.startswith("anthropic/"):
+        return "ANTHROPIC_API_KEY", "ANTHROPIC_API_BASE"
+    if normalized_model.startswith("minimax/"):
+        return "MINIMAX_API_KEY", "MINIMAX_API_BASE"
+    return "OPENAI_API_KEY", "OPENAI_API_BASE"
+
+
 def _normalize_retrieve_model(model: str) -> str:
     """Preserve supported Agents SDK prefixes and route other provider paths via LiteLLM."""
     passthrough_prefixes = ("litellm/", "openai/")
@@ -32,12 +42,14 @@ class PageIndexClient:
 
     For agent-based QA, see examples/agentic_vectorless_rag_demo.py.
     """
-    def __init__(self, api_key: str = None, model: str = None, retrieve_model: str = None, workspace: str = None):
-        if api_key:
-            os.environ["OPENAI_API_KEY"] = api_key
-        elif not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
-            os.environ["OPENAI_API_KEY"] = os.getenv("CHATGPT_API_KEY")
-        self.workspace = Path(workspace).expanduser() if workspace else None
+    def __init__(
+        self,
+        api_key: str = None,
+        model: str = None,
+        retrieve_model: str = None,
+        workspace: str = None,
+        api_base: str = None,
+    ):
         overrides = {}
         if model:
             overrides["model"] = model
@@ -46,6 +58,18 @@ class PageIndexClient:
         opt = ConfigLoader().load(overrides or None)
         self.model = opt.model
         self.retrieve_model = _normalize_retrieve_model(opt.retrieve_model or self.model)
+        api_key_env, api_base_env = _provider_environment(self.model)
+        if api_key:
+            os.environ[api_key_env] = api_key
+        elif (
+            api_key_env == "OPENAI_API_KEY"
+            and not os.getenv(api_key_env)
+            and os.getenv("CHATGPT_API_KEY")
+        ):
+            os.environ[api_key_env] = os.getenv("CHATGPT_API_KEY")
+        if api_base:
+            os.environ[api_base_env] = api_base
+        self.workspace = Path(workspace).expanduser() if workspace else None
         if self.workspace:
             self.workspace.mkdir(parents=True, exist_ok=True)
         self.documents = {}

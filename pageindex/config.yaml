@@ -2,6 +2,12 @@
 # For other providers, use "provider/model" format (e.g. "anthropic/claude-sonnet-4-6").
 model: "gpt-4o-2024-11-20"
 # model: "anthropic/claude-sonnet-4-6"
+# MiniMax OpenAI-compatible examples:
+# model: "minimax/MiniMax-M3"
+# retrieve_model: "minimax/MiniMax-M2.7"
+# MiniMax Anthropic-compatible examples:
+# model: "anthropic/MiniMax-M3"
+# retrieve_model: "anthropic/MiniMax-M2.7"
 summary_model: "gpt-5.6-luna"
 retrieve_model: "gpt-5.4"  # defaults to `model` if not set
 toc_check_page_num: 20
