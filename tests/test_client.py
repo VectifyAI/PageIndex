@@ -70,6 +70,16 @@ def test_local_client_does_not_touch_disk(tmp_path):
     assert not storage.exists()
 
 
+def test_retrieve_model_carries_agents_sdk_prefix(tmp_path):
+    def resolved(retrieve_model):
+        return PageIndexClient(retrieve_model=retrieve_model,
+                               storage_path=str(tmp_path / "s")).retrieve_model
+
+    assert resolved("anthropic/claude-sonnet-4-6") == "litellm/anthropic/claude-sonnet-4-6"
+    for already_routable in ("gpt-4o", "openai/gpt-4o", "litellm/anthropic/claude-sonnet-4-6"):
+        assert resolved(already_routable) == already_routable
+
+
 def test_explicit_mode_clients(tmp_path):
     from pageindex import PageIndexCloudClient, PageIndexLocalClient
 

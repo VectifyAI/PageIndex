@@ -6,6 +6,16 @@ from typing import Any, Iterator, Optional, Union
 from .errors import PageIndexAPIError
 
 
+def _normalize_retrieve_model(model: str) -> str:
+    """Preserve supported Agents SDK prefixes and route other provider paths via LiteLLM."""
+    passthrough_prefixes = ("litellm/", "openai/")
+    if not model or "/" not in model:
+        return model
+    if model.startswith(passthrough_prefixes):
+        return model
+    return f"litellm/{model}"
+
+
 class PageIndexClient:
     """
     Python SDK client for PageIndex.
@@ -78,7 +88,8 @@ class PageIndexClient:
             opt = ConfigLoader().load(overrides or None)
             self.model = opt.model
             self.summary_model = getattr(opt, "summary_model", None) or opt.model
-            self.retrieve_model = getattr(opt, "retrieve_model", None) or opt.model
+            self.retrieve_model = _normalize_retrieve_model(
+                getattr(opt, "retrieve_model", None) or opt.model)
             self.storage_path = storage_path or ".pageindex"
             from .local_api import LocalAPI
             self._api = LocalAPI(
