@@ -1129,7 +1129,7 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
     if mode == 'process_toc_with_page_numbers':
         toc_with_page_number = process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_check_page_num=opt.toc_check_page_num, model=opt.model, logger=logger)
     elif mode == 'process_toc_no_page_numbers':
-        toc_with_page_number = process_toc_no_page_numbers(toc_content, toc_page_list, page_list, model=opt.model, logger=logger)
+        toc_with_page_number = process_toc_no_page_numbers(toc_content, toc_page_list, page_list,start_index=start_index, model=opt.model, logger=logger)
     else:
         toc_with_page_number = process_no_toc(page_list, start_index=start_index, model=opt.model, logger=logger)
             
@@ -1200,6 +1200,15 @@ async def tree_parser(page_list, opt, doc=None, logger=None):
         toc_with_page_number = await meta_processor(
             page_list, 
             mode='process_toc_with_page_numbers', 
+            start_index=1, 
+            toc_content=check_toc_result['toc_content'], 
+            toc_page_list=check_toc_result['toc_page_list'], 
+            opt=opt,
+            logger=logger)
+    elif check_toc_result.get("toc_content") and check_toc_result["toc_content"].strip() and check_toc_result["page_index_given_in_toc"] == "no":
+        toc_with_page_number = await meta_processor(
+            page_list, 
+            mode='process_toc_no_page_numbers', 
             start_index=1, 
             toc_content=check_toc_result['toc_content'], 
             toc_page_list=check_toc_result['toc_page_list'], 
