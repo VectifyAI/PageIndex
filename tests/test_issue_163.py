@@ -1,9 +1,15 @@
 import pytest
 import sys
 import os
+from importlib import import_module
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+# Patch attributes on the module object: the package exports a *function*
+# named page_index that shadows the submodule, and Python 3.10's mock
+# resolves the string "pageindex.page_index" to that function.
+page_index_module = import_module("pageindex.page_index")
 
 from pageindex.page_index import (
     check_if_toc_extraction_is_complete,
@@ -16,50 +22,50 @@ from pageindex.page_index import (
 
 
 class TestRobustKeyAccess:
-    @patch("pageindex.page_index.llm_completion", return_value="")
+    @patch.object(page_index_module, "llm_completion", return_value="")
     def test_toc_detector_empty_response(self, mock_llm):
         result = toc_detector_single_page("some content", model="test")
         assert result == "no"
 
-    @patch("pageindex.page_index.llm_completion", return_value='{"toc_detected": "yes"}')
+    @patch.object(page_index_module, "llm_completion", return_value='{"toc_detected": "yes"}')
     def test_toc_detector_valid_response(self, mock_llm):
         result = toc_detector_single_page("some content", model="test")
         assert result == "yes"
 
-    @patch("pageindex.page_index.llm_completion", return_value="not json at all")
+    @patch.object(page_index_module, "llm_completion", return_value="not json at all")
     def test_toc_detector_malformed_response(self, mock_llm):
         result = toc_detector_single_page("some content", model="test")
         assert result == "no"
 
-    @patch("pageindex.page_index.llm_completion", return_value="")
+    @patch.object(page_index_module, "llm_completion", return_value="")
     def test_extraction_complete_empty_response(self, mock_llm):
         result = check_if_toc_extraction_is_complete("doc", "toc", model="test")
         assert result == "no"
 
-    @patch("pageindex.page_index.llm_completion", return_value='{"completed": "yes"}')
+    @patch.object(page_index_module, "llm_completion", return_value='{"completed": "yes"}')
     def test_extraction_complete_valid_response(self, mock_llm):
         result = check_if_toc_extraction_is_complete("doc", "toc", model="test")
         assert result == "yes"
 
-    @patch("pageindex.page_index.llm_completion", return_value="")
+    @patch.object(page_index_module, "llm_completion", return_value="")
     def test_transformation_complete_empty_response(self, mock_llm):
         result = check_if_toc_transformation_is_complete("raw", "cleaned", model="test")
         assert result == "no"
 
-    @patch("pageindex.page_index.llm_completion", return_value='{"thinking": "looks fine", "completed": "yes"}')
+    @patch.object(page_index_module, "llm_completion", return_value='{"thinking": "looks fine", "completed": "yes"}')
     def test_transformation_complete_valid_response(self, mock_llm):
         result = check_if_toc_transformation_is_complete("raw", "cleaned", model="test")
         assert result == "yes"
 
-    @patch("pageindex.page_index.llm_completion", return_value="")
+    @patch.object(page_index_module, "llm_completion", return_value="")
     def test_detect_page_index_empty_response(self, mock_llm):
         result = detect_page_index("toc text", model="test")
         assert result == "no"
 
 
 class TestExtractTocContentRetryLoop:
-    @patch("pageindex.page_index.check_if_toc_transformation_is_complete")
-    @patch("pageindex.page_index.llm_completion")
+    @patch.object(page_index_module, "check_if_toc_transformation_is_complete")
+    @patch.object(page_index_module, "llm_completion")
     def test_completes_on_first_try(self, mock_llm, mock_check):
         mock_llm.return_value = ("full toc content", "finished")
         mock_check.return_value = "yes"
@@ -67,8 +73,8 @@ class TestExtractTocContentRetryLoop:
         assert result == "full toc content"
         assert mock_llm.call_count == 1
 
-    @patch("pageindex.page_index.check_if_toc_transformation_is_complete")
-    @patch("pageindex.page_index.llm_completion")
+    @patch.object(page_index_module, "check_if_toc_transformation_is_complete")
+    @patch.object(page_index_module, "llm_completion")
     def test_continues_on_incomplete(self, mock_llm, mock_check):
         mock_llm.side_effect = [
             ("partial toc", "max_output_reached"),
@@ -79,8 +85,8 @@ class TestExtractTocContentRetryLoop:
         assert result == "partial toc continued toc"
         assert mock_llm.call_count == 2
 
-    @patch("pageindex.page_index.check_if_toc_transformation_is_complete")
-    @patch("pageindex.page_index.llm_completion")
+    @patch.object(page_index_module, "check_if_toc_transformation_is_complete")
+    @patch.object(page_index_module, "llm_completion")
     def test_max_retries_raises_exception(self, mock_llm, mock_check):
         mock_llm.return_value = ("chunk", "max_output_reached")
         mock_check.return_value = "no"
@@ -88,8 +94,8 @@ class TestExtractTocContentRetryLoop:
             extract_toc_content("raw content", model="test")
         assert mock_llm.call_count == 6
 
-    @patch("pageindex.page_index.check_if_toc_transformation_is_complete")
-    @patch("pageindex.page_index.llm_completion")
+    @patch.object(page_index_module, "check_if_toc_transformation_is_complete")
+    @patch.object(page_index_module, "llm_completion")
     def test_chat_history_grows_incrementally(self, mock_llm, mock_check):
         call_count = [0]
 
@@ -114,8 +120,8 @@ class TestExtractTocContentRetryLoop:
 
 
 class TestTocTransformerRetryLoop:
-    @patch("pageindex.page_index.check_if_toc_transformation_is_complete")
-    @patch("pageindex.page_index.llm_completion")
+    @patch.object(page_index_module, "check_if_toc_transformation_is_complete")
+    @patch.object(page_index_module, "llm_completion")
     def test_completes_on_first_try(self, mock_llm, mock_check):
         mock_llm.return_value = (
             '{"table_of_contents": [{"structure": "1", "title": "Intro", "page": 1}]}',
@@ -126,8 +132,8 @@ class TestTocTransformerRetryLoop:
         assert len(result) == 1
         assert result[0]["title"] == "Intro"
 
-    @patch("pageindex.page_index.check_if_toc_transformation_is_complete")
-    @patch("pageindex.page_index.llm_completion")
+    @patch.object(page_index_module, "check_if_toc_transformation_is_complete")
+    @patch.object(page_index_module, "llm_completion")
     def test_handles_missing_table_of_contents_key(self, mock_llm, mock_check):
         mock_llm.return_value = ('{"other_key": "value"}', "finished")
         mock_check.return_value = "yes"

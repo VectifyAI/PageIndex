@@ -1,5 +1,11 @@
 import unittest
+from importlib import import_module
 from unittest.mock import Mock, patch
+
+# Patch attributes on the module object: the package exports a *function*
+# named page_index that shadows the submodule, and Python 3.10's mock
+# resolves the string "pageindex.page_index" to that function.
+page_index_module = import_module("pageindex.page_index")
 
 from pageindex.page_index import (
     _secure_doc_text,
@@ -19,10 +25,10 @@ class ProcessTocNoPageNumbersTest(unittest.TestCase):
             {"structure": "1", "title": "First", "physical_index": "<physical_index_1>"},
         ]
 
-        with patch("pageindex.page_index.toc_transformer", return_value=toc), \
-             patch("pageindex.page_index.count_tokens", return_value=1), \
-             patch("pageindex.page_index.page_list_to_group_text", return_value=["<physical_index_1> <physical_index_2>"]), \
-             patch("pageindex.page_index.add_page_number_to_toc", return_value=reordered):
+        with patch.object(page_index_module, "toc_transformer", return_value=toc), \
+             patch.object(page_index_module, "count_tokens", return_value=1), \
+             patch.object(page_index_module, "page_list_to_group_text", return_value=["<physical_index_1> <physical_index_2>"]), \
+             patch.object(page_index_module, "add_page_number_to_toc", return_value=reordered):
             with self.assertRaises(ValueError):
                 process_toc_no_page_numbers(
                     "toc",
@@ -32,17 +38,17 @@ class ProcessTocNoPageNumbersTest(unittest.TestCase):
                 )
 
     def test_process_no_toc_validates_continuation_chunks(self):
-        with patch("pageindex.page_index.count_tokens", return_value=1), \
-             patch(
-                 "pageindex.page_index.page_list_to_group_text",
+        with patch.object(page_index_module, "count_tokens", return_value=1), \
+             patch.object(
+                 page_index_module, "page_list_to_group_text",
                  return_value=["<physical_index_1>", "<physical_index_2>"],
              ), \
-             patch(
-                 "pageindex.page_index.generate_toc_init",
+             patch.object(
+                 page_index_module, "generate_toc_init",
                  return_value=[{"title": "First", "physical_index": "<physical_index_1>"}],
              ), \
-             patch(
-                 "pageindex.page_index.generate_toc_continue",
+             patch.object(
+                 page_index_module, "generate_toc_continue",
                  return_value=[{"title": "Second", "physical_index": "<physical_index_99>"}],
              ):
             result = process_no_toc(
