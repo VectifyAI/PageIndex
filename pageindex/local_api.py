@@ -190,6 +190,11 @@ class LocalAPI:
         add_node_text(structure, pdf_pages)
         return structure
 
+    def raw_tree(self, doc_id: str) -> list | None:
+        """Stored tree verbatim — keeps start_index/end_index, which
+        get_tree's cloud wire shape renames and drops."""
+        return self._store.get_tree(doc_id)
+
     def get_tree(self, doc_id: str, node_summary: bool = False,
                  include_text: bool = True) -> dict[str, Any]:
         meta = self._require_doc(doc_id, "Failed to get tree result")

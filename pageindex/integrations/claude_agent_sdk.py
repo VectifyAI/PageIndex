@@ -9,15 +9,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from .._version import sdk_version
 from ..errors import PageIndexAPIError
-
-
-def _sdk_version() -> str:
-    try:
-        from importlib.metadata import version
-        return version("pageindex")
-    except Exception:
-        return "0.0.0"
 
 
 def build_claude_mcp(client, include_management: bool = False):
@@ -63,5 +56,5 @@ def build_claude_mcp(client, include_management: bool = False):
              TOOL_CONTRACT[name]["schema"], **tool_kwargs(name))(make_handler(name))
         for name in tool_names(include_management)
     ]
-    return create_sdk_mcp_server(name="pageindex", version=_sdk_version(),
+    return create_sdk_mcp_server(name="pageindex", version=sdk_version(),
                                  tools=tools)

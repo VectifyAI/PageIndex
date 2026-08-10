@@ -630,6 +630,11 @@ def test_mcp_bridge_protocol(monkeypatch):
     assert text == "hello\nworld"
     methods = [p["payload"]["method"] for p in posts]
     assert methods.count("initialize") == 2
+    # The expired session's negotiated state must not leak into the new
+    # handshake.
+    reinit = [p for p in posts if p["payload"].get("method") == "initialize"][1]
+    assert "MCP-Protocol-Version" not in reinit["headers"]
+    assert "Mcp-Session-Id" not in reinit["headers"]
 
 
 # ── review-round regressions ──
@@ -728,6 +733,44 @@ def test_bridge_transport_error_is_pageindex_error(monkeypatch):
     bridge = McpBridge("https://api.pageindex.ai/mcp", {})
     with pytest.raises(PageIndexAPIError, match="Could not reach"):
         bridge.list_tools()
+
+
+def test_await_completion_preserves_metadata_over_null_refetch(monkeypatch):
+    """A status refetch that nulls out metadata must not clobber the
+    listing's copy (setdefault is a no-op on an existing None value)."""
+    import pageindex.agent_tools as agent_tools_mod
+    monkeypatch.setattr(agent_tools_mod.time, "sleep", lambda seconds: None)
+
+    class _Client:
+        def get_document(self, doc_id):
+            return {"id": doc_id, "status": "completed", "metadata": None}
+
+    entry = {"id": "pi-x", "status": "processing",
+             "metadata": {"team": "research"}}
+    merged = agent_tools_mod._await_completion(_Client(), entry, True)
+    assert merged["status"] == "completed"
+    assert merged["metadata"] == {"team": "research"}
+
+
+def test_browse_time_sort_uses_native_pagination(client, store_path, monkeypatch):
+    """Time-sorted browsing must page through list_documents directly, not
+    fetch the whole library to slice one window."""
+    for index in range(3):
+        seed_doc(store_path, f"pi-{index}", f"doc{index}.pdf",
+                 created_at=f"2026-08-0{index + 1}T10:00:00.000000")
+    calls = []
+    original = client.list_documents
+
+    def spy(**kwargs):
+        calls.append(kwargs)
+        return original(**kwargs)
+
+    monkeypatch.setattr(client, "list_documents", spy)
+    payload, is_error = run(client, "browse_documents", limit=2)
+    assert not is_error
+    assert calls == [{"limit": 2, "offset": 0}]
+    assert [d["name"] for d in payload["documents"]] == ["doc2.pdf", "doc1.pdf"]
+    assert payload["has_more"] is True and payload["next_offset"] == 2
 
 
 def test_failed_document_status_message(client, store_path):

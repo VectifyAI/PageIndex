@@ -10,7 +10,6 @@ JSON envelope the cloud emits ({"success": true, ...} / {"error": ...}).
 """
 from __future__ import annotations
 
-import copy
 import difflib
 import json
 import re
@@ -407,7 +406,10 @@ def _await_completion(client, entry: dict[str, Any], wait: bool) -> dict[str, An
         refreshed = _refetch_entry(client, doc_id)
         if refreshed is None:
             return current
-        refreshed.setdefault("metadata", current.get("metadata"))
+        if refreshed.get("metadata") is None:
+            # Status refetches omit (or null out) custom metadata; keep the
+            # listing's copy.
+            refreshed["metadata"] = current.get("metadata")
         current = {**current, **refreshed}
         if current.get("status") in ("completed", "failed"):
             return current
@@ -631,21 +633,23 @@ def _browse_documents(client, folder_id: str = "root", recursive: bool = False,
                          "options": ["Pass integer offset and limit values"]},
                         "INVALID_INPUT")
 
-    documents = _all_documents(client)
     if sort == "relevance":
         tokens = [token for token in (query or "").lower().split() if token]
         scored = []
-        for doc in documents:
+        for doc in _all_documents(client):
             haystack = f"{doc.get('name') or ''} {doc.get('description') or ''}".lower()
             score = sum(1 for token in tokens if token in haystack)
             if score:
                 scored.append((score, doc))
         # Stable sort: equal scores keep the newest-first listing order.
         scored.sort(key=lambda pair: pair[0], reverse=True)
-        documents = [doc for _, doc in scored]
-
-    window = documents[offset:offset + limit]
-    has_more = offset + limit < len(documents)
+        ranked = [doc for _, doc in scored]
+        window = ranked[offset:offset + limit]
+        has_more = offset + limit < len(ranked)
+    else:
+        listing = client.list_documents(limit=limit, offset=offset)
+        window = listing.get("documents") or []
+        has_more = offset + limit < listing.get("total", 0)
     next_offset = offset + limit if has_more else None
 
     page_has_processing = False
@@ -807,8 +811,8 @@ def _get_document_structure(client, doc_name: str,
         # Prefer the raw stored tree: its nodes carry start_index/end_index
         # like the cloud structure tool, where client.get_tree() drops
         # end_index and renames fields.
-        store = getattr(getattr(client, "_api", None), "_store", None)
-        tree = store.get_tree(entry["id"]) if store is not None else None
+        raw_tree = getattr(getattr(client, "_api", None), "raw_tree", None)
+        tree = raw_tree(entry["id"]) if raw_tree is not None else None
         if tree is None:
             tree = client.get_tree(entry["id"], node_summary=True).get("result")
     except PageIndexAPIError as exc:
@@ -840,7 +844,7 @@ def _get_document_structure(client, doc_name: str,
             "INTERNAL_ERROR",
         )
 
-    formatted = _format_structure(copy.deepcopy(tree))
+    formatted = _format_structure(tree)
     chunks = _split_structure(formatted, _CHAR_BUDGET)
     total_parts = max(1, len(chunks))
     try:

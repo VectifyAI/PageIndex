@@ -14,18 +14,11 @@ from typing import Any, Optional
 
 import requests
 
+from ._version import sdk_version
 from .errors import PageIndexAPIError
 
 _PROTOCOL_VERSION = "2025-06-18"
 _TIMEOUT = (10, 240)  # tools may wait server-side (wait_for_completion: 3 min)
-
-
-def _sdk_version() -> str:
-    try:
-        from importlib.metadata import version
-        return version("pageindex")
-    except Exception:
-        return "0.0.0"
 
 
 def _parse_sse(text: str) -> list[dict]:
@@ -51,21 +44,24 @@ class McpBridge:
         self._session_id: Optional[str] = None
         self._protocol_version: Optional[str] = None
         self._initialized = False
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._next_id = 0
 
     # ── JSON-RPC over streamable HTTP ──
 
     def _post(self, payload: dict) -> requests.Response:
+        with self._lock:
+            session_id = self._session_id
+            protocol_version = self._protocol_version
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
             **self._auth_headers,
         }
-        if self._session_id:
-            headers["Mcp-Session-Id"] = self._session_id
-        if self._protocol_version:
-            headers["MCP-Protocol-Version"] = self._protocol_version
+        if session_id:
+            headers["Mcp-Session-Id"] = session_id
+        if protocol_version:
+            headers["MCP-Protocol-Version"] = protocol_version
         try:
             return requests.post(self._url, json=payload, headers=headers,
                                  timeout=_TIMEOUT)
@@ -117,6 +113,7 @@ class McpBridge:
             with self._lock:
                 self._initialized = False
                 self._session_id = None
+                self._protocol_version = None
             return self._request(method, params, _retry=False)
         if response.status_code >= 400:
             raise PageIndexAPIError(
@@ -137,7 +134,7 @@ class McpBridge:
                     "protocolVersion": _PROTOCOL_VERSION,
                     "capabilities": {},
                     "clientInfo": {"name": "pageindex-python-sdk",
-                                   "version": _sdk_version()},
+                                   "version": sdk_version()},
                 },
             })
             if response.status_code >= 400:
