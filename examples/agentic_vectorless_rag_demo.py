@@ -29,7 +29,6 @@ import requests
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agents import Agent, Runner, set_tracing_disabled
-from agents.model_settings import ModelSettings
 from agents.stream_events import RawResponsesStreamEvent, RunItemStreamEvent
 from openai.types.responses import ResponseTextDeltaEvent, ResponseReasoningSummaryTextDeltaEvent
 
@@ -54,7 +53,7 @@ def query_agent(client: PageIndexLocalClient, doc_id: str, prompt: str, verbose:
         instructions=client.agent_instructions(doc_id=doc_id),
         tools=client.as_openai_tools(),
         model=client.retrieve_model,
-        # model_settings=ModelSettings(reasoning={"effort": "low", "summary": "auto"}),  # Uncomment to enable reasoning
+        # model_settings=ModelSettings(reasoning={"effort": "low", "summary": "auto"}),  # from agents.model_settings import ModelSettings
     )
 
     async def _run():

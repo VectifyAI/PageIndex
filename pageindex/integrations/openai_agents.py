@@ -1,8 +1,9 @@
 """OpenAI Agents SDK adapter for the Agent(tools=...) slot.
 
-Cloud clients get one hosted MCP tool (the model connects to the PageIndex
-cloud MCP server from OpenAI's side and discovers the full cloud tool set);
-local clients get the in-process tools wrapped as FunctionTools.
+Cloud clients default to the full live tool set as plain FunctionTools via
+the MCP bridge; pass hosted=True to use a single HostedMCPTool instead
+(the model connects to the PageIndex cloud MCP server from OpenAI's side).
+Local clients get the in-process tools wrapped as FunctionTools.
 """
 from __future__ import annotations
 

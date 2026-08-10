@@ -356,10 +356,12 @@ def _flat_metadata(value: Any) -> Optional[dict[str, Any]]:
 
 def _resolve_document(
     client, doc_name: str,
+    documents: Optional[list[dict[str, Any]]] = None,
 ) -> "tuple[Optional[dict[str, Any]], Optional[_ToolResult]]":
     """Resolve doc_name to a list entry. Same-name duplicates resolve to the
     newest match. Returns (entry, None) or (None, error_payload_pair)."""
-    documents = _all_documents(client)
+    if documents is None:
+        documents = _all_documents(client)
     matches = [doc for doc in documents if doc.get("name") == doc_name]
     if matches:
         return max(matches, key=lambda d: d.get("createdAt") or ""), None
@@ -756,8 +758,8 @@ def _get_document(client, doc_name: str, folder_id: Optional[str] = None,
             else:
                 suggestions.extend([
                     f"This is a large document with {page_num} pages.",
-                    f'Start with first few pages: get_page_content(doc_name: "{name}", pages: "1-3")',
-                    f'Or view structure first: get_document_structure(doc_name: "{name}")',
+                    f'First explore structure: get_document_structure(doc_name: "{name}")',
+                    f'Then target specific sections: get_page_content(doc_name: "{name}", pages: "1-3")',
                 ])
     else:
         suggestions.append("Document processing failed. Index the document "
@@ -794,10 +796,12 @@ def _get_document_structure(client, doc_name: str,
     if error is not None:
         return error
     assert entry is not None
+    waited = wait_for_completion and entry.get("status") not in ("completed", "failed")
     entry = _await_completion(client, entry, wait_for_completion)
     if entry.get("status") != "completed":
         return _not_ready_error(doc_name, entry.get("status"),
-                                "structure retrieval", wait_for_completion)
+                                "structure retrieval",
+                                waited and entry.get("status") != "failed")
 
     try:
         # Prefer the raw stored tree: its nodes carry start_index/end_index
@@ -897,10 +901,12 @@ def _get_page_content(client, doc_name: str, pages: str,
     if error is not None:
         return error
     assert entry is not None
+    waited = wait_for_completion and entry.get("status") not in ("completed", "failed")
     entry = _await_completion(client, entry, wait_for_completion)
     if entry.get("status") != "completed":
         return _not_ready_error(doc_name, entry.get("status"),
-                                "page content retrieval", wait_for_completion)
+                                "page content retrieval",
+                                waited and entry.get("status") != "failed")
 
     requested, error = _parse_page_spec(pages, doc_name)
     if error is not None:
@@ -1013,9 +1019,10 @@ def _remove_document(client, doc_names: list[str],
                         {"summary": "Too many documents in one call",
                          "options": ["Delete at most 10 documents per call"]},
                         "INVALID_INPUT")
+    documents = _all_documents(client)
     results = []
     for doc_name in doc_names:
-        entry, error = _resolve_document(client, doc_name)
+        entry, error = _resolve_document(client, doc_name, documents=documents)
         if error is not None or entry is None:
             results.append({"doc_name": doc_name, "status": "not_found"})
             continue
@@ -1051,7 +1058,16 @@ def tool_names(include_management: bool = False) -> tuple[str, ...]:
 def call_tool(client, name: str, arguments: dict[str, Any]) -> tuple[str, bool]:
     """Run one contract tool; returns (envelope_json, is_error). Never raises
     for tool-level failures — unexpected exceptions become error envelopes."""
-    implementation = _IMPLEMENTATIONS[name]
+    implementation = _IMPLEMENTATIONS.get(name)
+    if implementation is None:
+        payload, _ = _failure(
+            f"Unknown tool: {name}",
+            {"tool_name": name, "available_tools": list(_IMPLEMENTATIONS)},
+            {"summary": "Tool not found",
+             "options": [f"Available tools: {', '.join(_IMPLEMENTATIONS)}"]},
+            "INVALID_INPUT",
+        )
+        return json.dumps(payload), True
     try:
         payload, is_error = implementation(client, **arguments)
     except TypeError as exc:
