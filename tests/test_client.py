@@ -162,6 +162,30 @@ def test_submit_does_not_create_cwd_logs(local_client, sample_pdf, tmp_path, mon
     assert not (tmp_path / "logs").exists()
 
 
+def test_submit_duplicate_name_gets_suffix(local_client, sample_pdf, monkeypatch):
+    """Mirror the cloud upload: a second submit of the same file name is
+    stored as name_1, not as a same-name duplicate."""
+    def fake_page_index_main(doc, opt=None, logger=None):
+        return {"doc_name": "sample.pdf", "doc_description": "d",
+                "structure": json.loads(json.dumps(STRUCTURE))}
+    monkeypatch.setattr(page_index_module, "page_index_main", fake_page_index_main)
+    first = local_client.submit_document(sample_pdf)["doc_id"]
+    second = local_client.submit_document(sample_pdf)["doc_id"]
+    names = {d["id"]: d["name"]
+             for d in local_client.list_documents()["documents"]}
+    assert names[first] == "sample.pdf"
+    assert names[second] == "sample_1.pdf"
+
+
+def test_submit_duplicate_name_exhaustion(local_client, monkeypatch):
+    api = local_client._api
+    metas = ([{"name": "x.pdf"}]
+             + [{"name": f"x_{num}.pdf"} for num in range(1, 100)])
+    monkeypatch.setattr(api._store, "list_metas", lambda: metas)
+    with pytest.raises(PageIndexAPIError, match="Too many files"):
+        api._unique_doc_name("x.pdf")
+
+
 def test_submit_flash(local_client, sample_pdf, monkeypatch):
     calls = {}
     def fake_flash(pdf, summary=True, summary_model=None, **kwargs):

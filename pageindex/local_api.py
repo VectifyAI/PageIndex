@@ -115,7 +115,7 @@ class LocalAPI:
         doc_id = "pi-" + uuid.uuid4().hex
         meta = {
             "id": doc_id,
-            "name": os.path.basename(file_path),
+            "name": self._unique_doc_name(os.path.basename(file_path)),
             "description": description,
             "status": "completed",
             "createdAt": _now_iso(),
@@ -130,6 +130,22 @@ class LocalAPI:
         self._store.save_document(
             doc_id, meta, remove_fields(structure, fields=["text"]), pages)
         return {"doc_id": doc_id}
+
+    def _unique_doc_name(self, name: str) -> str:
+        """Mirror the cloud upload: a taken name gets _1.._99 appended,
+        beyond that the submit is rejected."""
+        taken = {meta.get("name") for meta in self._store.list_metas()}
+        if name not in taken:
+            return name
+        base, ext = os.path.splitext(name)
+        for num in range(1, 100):
+            candidate = f"{base}_{num}{ext}"
+            if candidate not in taken:
+                return candidate
+        raise PageIndexAPIError(
+            "Failed to submit document: Too many files with similar names. "
+            "Please use a different file name."
+        )
 
     @staticmethod
     def _extract_page_texts(file_path: str) -> list[str]:

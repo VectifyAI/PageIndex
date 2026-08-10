@@ -23,6 +23,7 @@ STRUCTURE_FIRST_PAGE_THRESHOLD = 20
 
 _CHAR_BUDGET = int(TOOL_RESPONSE_CHAR_LIMIT * 0.95)
 _PAGES_SPEC_RE = re.compile(r"^(\d+(-\d+)?)(,\s*\d+(-\d+)?)*$")
+_MAX_REQUESTED_PAGES = 10_000
 _SIMILAR_NAMES_LIMIT = 3
 _TOOL_WAIT_TIMEOUT = 180.0  # "up to 3 minutes", per the wait_for_completion schema
 _TOOL_WAIT_INTERVAL = 5.0
@@ -114,6 +115,7 @@ TOOL_CONTRACT: dict[str, dict[str, Any]] = {
                 "offset": {
                     "type": "integer",
                     "minimum": 0,
+                    "maximum": 9007199254740991,
                     "default": 0,
                     "description": (
                         "Zero-based pagination offset. Pass the value of "
@@ -152,7 +154,7 @@ TOOL_CONTRACT: dict[str, dict[str, Any]] = {
                     "description": _DOC_NAME_DESCRIPTION,
                 },
                 "folder_id": {
-                    "type": ["string", "null"],
+                    "anyOf": [{"type": "string"}, {"type": "null"}],
                     "description": _FOLDER_ID_DISAMBIGUATOR_DESCRIPTION,
                 },
                 "wait_for_completion": {
@@ -183,12 +185,13 @@ TOOL_CONTRACT: dict[str, dict[str, Any]] = {
                     "description": _DOC_NAME_DESCRIPTION,
                 },
                 "folder_id": {
-                    "type": ["string", "null"],
+                    "anyOf": [{"type": "string"}, {"type": "null"}],
                     "description": _FOLDER_ID_DISAMBIGUATOR_DESCRIPTION,
                 },
                 "part": {
                     "type": "integer",
                     "minimum": 1,
+                    "maximum": 9007199254740991,
                     "default": 1,
                     "description": (
                         "Part number for pagination (1-based, default 1). For "
@@ -224,7 +227,7 @@ TOOL_CONTRACT: dict[str, dict[str, Any]] = {
                     "description": _DOC_NAME_DESCRIPTION,
                 },
                 "folder_id": {
-                    "type": ["string", "null"],
+                    "anyOf": [{"type": "string"}, {"type": "null"}],
                     "description": _FOLDER_ID_DISAMBIGUATOR_DESCRIPTION,
                 },
                 "pages": {
@@ -273,7 +276,7 @@ TOOL_CONTRACT: dict[str, dict[str, Any]] = {
                     ),
                 },
                 "folder_id": {
-                    "type": ["string", "null"],
+                    "anyOf": [{"type": "string"}, {"type": "null"}],
                     "description": _FOLDER_ID_DISAMBIGUATOR_DESCRIPTION,
                 },
             },
@@ -492,15 +495,34 @@ def _parse_page_spec(
     if not isinstance(pages, str) or not _PAGES_SPEC_RE.match(pages.strip()):
         return None, invalid
     expanded: set[int] = set()
+    requested_total = 0
     for part in pages.split(","):
         part = part.strip()
         if "-" in part:
             start, end = (int(x) for x in part.split("-", 1))
             if start > end:
                 return None, invalid
-            expanded.update(range(start, end + 1))
         else:
-            expanded.add(int(part))
+            start = end = int(part)
+        # Bound the span arithmetically before materializing it: a spec like
+        # "1-1000000000" would otherwise expand to billions of integers
+        # inside the caller's process.
+        requested_total += end - start + 1
+        if requested_total > _MAX_REQUESTED_PAGES:
+            return None, _failure(
+                f"Too many pages requested (over {_MAX_REQUESTED_PAGES})",
+                {"doc_name": doc_name},
+                {
+                    "summary": "The page specification spans too many pages",
+                    "options": [
+                        "Request a narrower page range",
+                        "The response holds only a few pages per call - page "
+                        "through with several smaller requests",
+                    ],
+                },
+                "INVALID_INPUT",
+            )
+        expanded.update(range(start, end + 1))
     if any(page < 1 for page in expanded):
         return None, _failure(
             "Invalid page numbers. Page numbers must be positive integers",
@@ -1114,6 +1136,10 @@ _SCHEMA_TYPE_MAP = {"string": str, "integer": int, "number": float,
 
 def _annotation_for(spec: dict) -> Any:
     schema_type = spec.get("type")
+    if schema_type is None and isinstance(spec.get("anyOf"), list):
+        # Nullable unions arrive as anyOf: [{type: string}, {type: null}].
+        schema_type = [option.get("type") for option in spec["anyOf"]
+                       if isinstance(option, dict) and option.get("type")]
     if isinstance(schema_type, list):
         bases = [t for t in schema_type if t != "null"]
         base = _SCHEMA_TYPE_MAP.get(bases[0], Any) if bases else Any
@@ -1320,13 +1346,27 @@ AGENT_INSTRUCTIONS = "\n\n".join([
 
 def build_agent_instructions(client, doc_id=None) -> str:
     """Orchestration guidance for document QA agents; with doc_id, appends
-    the target documents and directs the agent to work within them."""
+    the target documents and directs the agent to work within them. Raises
+    when a doc_id's name is shadowed by a newer same-name document — the
+    name-addressed tools could not reach it."""
     if doc_id is None:
         return AGENT_INSTRUCTIONS
     doc_ids = [doc_id] if isinstance(doc_id, str) else list(doc_id)
     if not doc_ids:
         return AGENT_INSTRUCTIONS
     details = [client.get_document(one_id) for one_id in doc_ids]
+    documents = _all_documents(client)
+    for one_id, detail in zip(doc_ids, details):
+        entry, _ = _resolve_document(client, str(detail.get("name")),
+                                     documents=documents)
+        if entry is not None and entry.get("id") != one_id:
+            raise PageIndexAPIError(
+                f'Document "{detail.get("name")}" (doc_id: {one_id}) is '
+                "shadowed by a newer document with the same name (doc_id: "
+                f'{entry.get("id")}). The tools address documents by name '
+                "and would read the newer one. Rename or remove the "
+                "duplicate, or pass the newer doc_id."
+            )
     context = json.dumps(details, ensure_ascii=False)
     if len(details) == 1:
         block = (

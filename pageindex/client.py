@@ -172,6 +172,7 @@ class PageIndexClient:
         return result
 
     def _wait_until_ready(self, doc_id: str, timeout: float = 1800.0) -> None:
+        import requests
         interval = 2.0
         deadline = time.monotonic() + timeout
         poll_failures = 0
@@ -179,12 +180,16 @@ class PageIndexClient:
             try:
                 status = self.get_document(doc_id).get("status")
                 poll_failures = 0
-            except PageIndexAPIError:
+            except (PageIndexAPIError, requests.RequestException) as exc:
                 # Tolerate transient poll failures; a 30-minute wait should
-                # not die on one 502.
+                # not die on one 502 or dropped connection.
                 poll_failures += 1
                 if poll_failures >= 3:
-                    raise
+                    if isinstance(exc, PageIndexAPIError):
+                        raise
+                    raise PageIndexAPIError(
+                        f"Could not poll document status: {exc}"
+                    ) from exc
                 status = None
             if status == "completed":
                 return
@@ -500,7 +505,8 @@ class PageIndexClient:
         With ``doc_id`` (str or list, same shape as ``chat_completions``),
         appends the target documents' names and metadata and directs the
         agent to work within them. Raises PageIndexAPIError if a doc_id does
-        not exist.
+        not exist, or if its name is shadowed by a newer same-name document
+        (the name-addressed tools could not reach it).
         """
         from .agent_tools import build_agent_instructions
         return build_agent_instructions(self, doc_id)

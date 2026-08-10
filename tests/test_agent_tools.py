@@ -451,7 +451,8 @@ class _FakeBridge:
                     "type": "object",
                     "properties": {
                         "doc_name": {"type": "string"},
-                        "folder_id": {"type": ["string", "null"]},
+                        "folder_id": {"anyOf": [{"type": "string"},
+                                                {"type": "null"}]},
                     },
                     "required": ["doc_name"],
                 },
@@ -525,6 +526,10 @@ def test_cloud_agent_tools_signatures_from_schema(cloud_with_fake_bridge):
     assert search.__annotations__["query"] is str
     folder_param = inspect.signature(get_document).parameters["folder_id"]
     assert folder_param.default is None
+    # The live server encodes nullables as anyOf; the annotation must still
+    # come out Optional[str], not Any.
+    from typing import Optional
+    assert get_document.__annotations__["folder_id"] == Optional[str]
 
 
 def test_cloud_agent_tools_proxy_and_drop_none(cloud_with_fake_bridge):
@@ -693,6 +698,17 @@ def test_synth_escape_hatches():
     assert dashed("v") == "ok"
 
 
+def test_annotation_for_both_nullable_encodings():
+    """Servers have emitted nullables as type-arrays and as anyOf unions;
+    both must map to Optional, not degrade to Any."""
+    from typing import Optional
+    from pageindex.agent_tools import _annotation_for
+    assert _annotation_for({"type": "string"}) is str
+    assert _annotation_for({"type": ["string", "null"]}) == Optional[str]
+    assert (_annotation_for({"anyOf": [{"type": "string"}, {"type": "null"}]})
+            == Optional[str])
+
+
 def test_cloud_agent_tools_empty_filter_raises(monkeypatch):
     import pageindex.mcp_bridge as mcp_bridge
 
@@ -773,6 +789,43 @@ def test_browse_time_sort_uses_native_pagination(client, store_path, monkeypatch
     assert payload["has_more"] is True and payload["next_offset"] == 2
 
 
+def test_page_spec_span_bomb_rejected(client, store_path):
+    """An absurd range must be rejected arithmetically, not expanded into
+    billions of integers in the caller's process."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    payload, is_error = run(client, "get_page_content", doc_name="report.pdf",
+                            pages="1-1000000000")
+    assert is_error and payload["errorCode"] == "INVALID_INPUT"
+    assert "Too many pages" in payload["error"]
+
+
+def test_agent_instructions_shadowed_doc_id_raises(client, store_path):
+    seed_doc(store_path, "pi-old", "report.pdf",
+             created_at="2026-08-01T10:00:00.000000")
+    seed_doc(store_path, "pi-new", "report.pdf",
+             created_at="2026-08-02T10:00:00.000000")
+    with pytest.raises(PageIndexAPIError, match="shadowed"):
+        client.agent_instructions(doc_id="pi-old")
+    text = client.agent_instructions(doc_id="pi-new")
+    assert "report.pdf" in text
+
+
+def test_wait_tolerates_transient_network_failures(fake_cloud_client, monkeypatch):
+    import requests as requests_mod
+    cloud = fake_cloud_client(["processing", "completed"])
+    original = cloud._api.get_document
+    state = {"raised": False}
+
+    def flaky(doc_id):
+        if not state["raised"]:
+            state["raised"] = True
+            raise requests_mod.ConnectionError("network blip")
+        return original(doc_id)
+
+    monkeypatch.setattr(cloud._api, "get_document", flaky)
+    assert cloud.submit_document("x.pdf", wait=True) == {"doc_id": "pi-fake"}
+
+
 def test_failed_document_status_message(client, store_path):
     seed_doc(store_path, "pi-a", "broken.pdf")
     import pageindex.agent_tools as agent_tools_mod
@@ -828,9 +881,10 @@ def test_live_cloud_contract_parity():
         real_schema = real.get("inputSchema") or {}
         real_props = real_schema.get("properties") or {}
         assert set(real_props) == set(ours["schema"]["properties"]), name
+        # Full per-param equality: a drifted type, default, enum, or bound
+        # breaks calls just as surely as a renamed parameter.
         for param, spec in ours["schema"]["properties"].items():
-            assert (real_props[param].get("description")
-                    == spec.get("description")), (name, param)
+            assert real_props[param] == spec, (name, param)
         assert (sorted(real_schema.get("required") or [])
                 == sorted(ours["schema"].get("required", []))), name
         for key, value in (ours.get("annotations") or {}).items():
