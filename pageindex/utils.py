@@ -10,12 +10,18 @@ import asyncio
 import pymupdf
 from io import BytesIO
 from dotenv import load_dotenv
-load_dotenv()
 import logging
 import yaml
 from pathlib import Path
 from types import SimpleNamespace as config
 import re
+import instructor
+import re
+
+load_dotenv()
+
+sync_instructor_client = instructor.from_litellm(litellm.completion, mode=instructor.Mode.MD_JSON)
+async_instructor_client = instructor.from_litellm(litellm.acompletion, mode=instructor.Mode.MD_JSON)
 
 # litellm is imported inside the functions that use it; eager import is slow
 # and fetches a remote model-cost map.
@@ -29,6 +35,54 @@ def count_tokens(text, model=None):
         return 0
     import litellm
     return litellm.token_counter(model=model, text=text)
+
+def llm_structured(model, prompt, response_model, chat_history=None, max_tokens=4000):
+    if model:
+        model = model.removeprefix("litellm/")
+    messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
+
+    result, completion = sync_instructor_client.chat.completions.create_with_completion(
+        model=model,
+        messages=messages,
+        response_model=response_model,
+        temperature=0,
+        max_retries=1,
+        max_tokens=max_tokens,
+    )
+
+    finish_reason = completion.choices[0].finish_reason
+    if finish_reason == "length":
+        raise ValueError(
+            f"Response was truncated (finish_reason='length') before completing "
+            f"the {response_model.__name__} structure. Increase max_tokens (currently "
+            f"{max_tokens}) for this call."
+        )
+
+    return result
+
+async def llm_astructured(model, prompt, response_model, max_tokens=4000):
+    if model:
+        model = model.removeprefix("litellm/")
+    messages = [{"role": "user", "content": prompt}]
+
+    result, completion = await async_instructor_client.chat.completions.create_with_completion(
+        model=model,
+        messages=messages,
+        response_model=response_model,
+        temperature=0,
+        max_retries=1,
+        max_tokens=max_tokens,
+    )
+
+    finish_reason = completion.choices[0].finish_reason
+    if finish_reason == "length":
+        raise ValueError(
+            f"Response was truncated (finish_reason='length') before completing "
+            f"the {response_model.__name__} structure. Increase max_tokens (currently "
+            f"{max_tokens}) for this call."
+        )
+
+    return result
 
 
 def _is_openai_model(model):
@@ -138,54 +192,8 @@ async def llm_acompletion(model, prompt):
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
                 return ""
-            
-            
-def get_json_content(response):
-    start_idx = response.find("```json")
-    if start_idx != -1:
-        start_idx += 7
-        response = response[start_idx:]
-        
-    end_idx = response.rfind("```")
-    if end_idx != -1:
-        response = response[:end_idx]
-    
-    json_content = response.strip()
-    return json_content
-         
 
-def extract_json(content):
-    try:
-        # First, try to extract JSON enclosed within ```json and ```
-        start_idx = content.find("```json")
-        if start_idx != -1:
-            start_idx += 7  # Adjust index to start after the delimiter
-            end_idx = content.rfind("```")
-            json_content = content[start_idx:end_idx].strip()
-        else:
-            # If no delimiters, assume entire content could be JSON
-            json_content = content.strip()
 
-        # Clean up common issues that might cause parsing errors
-        json_content = json_content.replace('None', 'null')  # Replace Python None with JSON null
-        json_content = json_content.replace('\n', ' ').replace('\r', ' ')  # Remove newlines
-        json_content = ' '.join(json_content.split())  # Normalize whitespace
-
-        # Attempt to parse and return the JSON object
-        return json.loads(json_content)
-    except json.JSONDecodeError as e:
-        logging.error(f"Failed to extract JSON: {e}")
-        # Try to clean up the content further if initial parsing fails
-        try:
-            # Remove any trailing commas before closing brackets/braces
-            json_content = json_content.replace(',]', ']').replace(',}', '}')
-            return json.loads(json_content)
-        except:
-            logging.error("Failed to parse JSON even after cleanup")
-            return {}
-    except Exception as e:
-        logging.error(f"Unexpected error while extracting JSON: {e}")
-        return {}
 
 def write_node_id(data, node_id=0):
     if isinstance(data, dict):
