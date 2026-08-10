@@ -29,6 +29,19 @@ async def generate_summaries_for_structure_md(structure, summary_token_threshold
     return structure
 
 
+def split_summary_fields(tree_nodes):
+    """Apply the same leaf/parent convention as generate_summaries_for_structure_md.
+
+    For callers that attach `summary` to a flat node list before the tree is
+    built, so parent nodes end up with `prefix_summary` as index() produces.
+    """
+    for node in tree_nodes:
+        if node.get('nodes'):
+            node['prefix_summary'] = node.pop('summary', '')
+            split_summary_fields(node['nodes'])
+    return tree_nodes
+
+
 def extract_nodes_from_markdown(markdown_content):
     header_pattern = r'^(#{1,6})\s+(.+)$'
     bold_heading_pattern = r'^\*\*(.+?)\*\*\s*$'
@@ -77,7 +90,19 @@ def extract_node_text_content(node_list, markdown_lines):
             'level': node['level']
         }
         all_nodes.append(processed_node)
-    
+
+    # Build title_path per node using a level-keyed ancestor stack.
+    # Enables stable section identity across edits (incremental update).
+    ancestor_stack = {}
+    for node in all_nodes:
+        level = node['level']
+        for l in list(ancestor_stack.keys()):
+            if l >= level:
+                del ancestor_stack[l]
+        parts = [ancestor_stack[l] for l in sorted(ancestor_stack)] + [node['title']]
+        node['title_path'] = ' > '.join(parts)
+        ancestor_stack[level] = node['title']
+
     for i, node in enumerate(all_nodes):
         start_line = node['line_num'] - 1 
         if i + 1 < len(all_nodes):
@@ -207,6 +232,11 @@ def build_tree_from_nodes(node_list):
             'line_num': node['line_num'],
             'nodes': []
         }
+        # Callers that summarize or version nodes before building the tree
+        # (e.g. incremental update) would otherwise have those fields dropped.
+        for field in ('summary', 'text_version', 'summary_version'):
+            if field in node:
+                tree_node[field] = node[field]
         node_counter += 1
         
         while stack and stack[-1][1] >= current_level:
