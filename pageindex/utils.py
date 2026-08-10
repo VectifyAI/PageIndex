@@ -574,27 +574,39 @@ def check_token_limit(structure, limit=110000):
             print("\n")
 
 
-def convert_physical_index_to_int(data):
-    if isinstance(data, list):
-        for i in range(len(data)):
-            # Check if item is a dictionary and has 'physical_index' key
-            if isinstance(data[i], dict) and 'physical_index' in data[i]:
-                if isinstance(data[i]['physical_index'], str):
-                    if data[i]['physical_index'].startswith('<physical_index_'):
-                        data[i]['physical_index'] = int(data[i]['physical_index'].split('_')[-1].rstrip('>').strip())
-                    elif data[i]['physical_index'].startswith('physical_index_'):
-                        data[i]['physical_index'] = int(data[i]['physical_index'].split('_')[-1].strip())
-    elif isinstance(data, str):
-        if data.startswith('<physical_index_'):
-            data = int(data.split('_')[-1].rstrip('>').strip())
-        elif data.startswith('physical_index_'):
-            data = int(data.split('_')[-1].strip())
-        # Check data is int
-        if isinstance(data, int):
-            return data
+_PHYSICAL_INDEX_MARKER_RE = re.compile(r"^<physical_index_(\d+)>$")
+_PHYSICAL_INDEX_LOOSE_RE = re.compile(r"^<*physical_index_(\d+)>*$")
+
+
+def _parse_physical_index(raw):
+    """Parse any supported physical_index shape to a positive int, else None."""
+    if raw is None or isinstance(raw, bool):
+        return None
+    if isinstance(raw, str):
+        text = raw.strip()
+        marker_match = _PHYSICAL_INDEX_LOOSE_RE.match(text)
+        if marker_match:
+            value = int(marker_match.group(1))
+        elif re.fullmatch(r"\d+", text):
+            value = int(text)
         else:
             return None
-    return data
+    elif isinstance(raw, int):
+        value = raw
+    elif isinstance(raw, float) and raw.is_integer():
+        value = int(raw)
+    else:
+        return None
+    return value if value >= 1 else None
+
+
+def convert_physical_index_to_int(data):
+    if isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict) and 'physical_index' in item:
+                item['physical_index'] = _parse_physical_index(item['physical_index'])
+        return data
+    return _parse_physical_index(data)
 
 
 def convert_page_to_int(data):
