@@ -1,4 +1,7 @@
 """What `pip install pageindex` exposes: 0.2.8 helper compat and import cost."""
+import subprocess
+import sys
+
 from pageindex.utils import create_node_mapping, print_tree, remove_fields
 
 TREE = [
@@ -41,3 +44,19 @@ def test_print_tree_exclude_fields(capsys):
 
     print_tree(TREE)
     assert "[0000] Root" in capsys.readouterr().out
+
+
+# ── import cost: the SDK must not pay for the indexing stack ──
+
+def test_import_pageindex_is_lazy():
+    probe = (
+        "import sys; import pageindex; "
+        "heavy = [m for m in ('pageindex.page_index', 'pageindex.flash', "
+        "'pageindex.utils', 'pageindex.tree_optimize', 'numpy', 'PyPDF2') "
+        "if m in sys.modules]; "
+        "print(','.join(heavy) or 'clean'); "
+        "print(type(pageindex.page_index_main).__name__)"
+    )
+    out = subprocess.run([sys.executable, "-c", probe],
+                         capture_output=True, text=True, check=True)
+    assert out.stdout.split() == ["clean", "function"]

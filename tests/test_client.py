@@ -1,9 +1,9 @@
 """SDK surface tests: PageIndexClient in local and cloud mode."""
 import asyncio
+import importlib
 import json
 import re
 import shutil
-import sys
 import types
 
 import pytest
@@ -14,9 +14,9 @@ import pageindex.utils
 from pageindex import PageIndexClient, PageIndexAPIError
 from pageindex.local_api import CHAT_CONTEXT_TOKEN_LIMIT, LocalAPI
 
-# `from .page_index import *` shadows the submodule with the function of the
-# same name, so the module must come from sys.modules.
-page_index_module = sys.modules["pageindex.page_index"]
+# The package attribute `pageindex.page_index` resolves to the function of
+# that name (shadowing the submodule), so fetch the module explicitly.
+page_index_module = importlib.import_module("pageindex.page_index")
 
 
 STRUCTURE = [
