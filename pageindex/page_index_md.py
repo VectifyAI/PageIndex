@@ -77,7 +77,19 @@ def extract_node_text_content(node_list, markdown_lines):
             'level': node['level']
         }
         all_nodes.append(processed_node)
-    
+
+    # Build title_path per node using a level-keyed ancestor stack.
+    # Enables stable section identity across edits (incremental update).
+    ancestor_stack = {}
+    for node in all_nodes:
+        level = node['level']
+        for l in list(ancestor_stack.keys()):
+            if l >= level:
+                del ancestor_stack[l]
+        parts = [ancestor_stack[l] for l in sorted(ancestor_stack)] + [node['title']]
+        node['title_path'] = ' > '.join(parts)
+        ancestor_stack[level] = node['title']
+
     for i, node in enumerate(all_nodes):
         start_line = node['line_num'] - 1 
         if i + 1 < len(all_nodes):

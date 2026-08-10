@@ -4,6 +4,7 @@ import textwrap
 from datetime import datetime
 import time
 import json
+import hashlib
 import PyPDF2
 import copy
 import asyncio
@@ -974,4 +975,23 @@ def print_tree(tree, indent=0):
 def print_wrapped(text, width=100):
     for line in text.splitlines():
         print(textwrap.fill(line, width=width))
+
+
+# ---------------------------------------------------------------------------
+# Incremental update helpers
+# ---------------------------------------------------------------------------
+
+def hash_text(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def compute_section_hashes(node_list: list) -> dict:
+    """Build {title_path: sha256_of_own_text} from a flat node list."""
+    return {node["title_path"]: hash_text(node.get("text", "")) for node in node_list}
+
+
+def find_ancestors(title_path: str) -> list:
+    """Return ancestor title paths from root to immediate parent."""
+    parts = title_path.split(" > ")
+    return [" > ".join(parts[:i]) for i in range(1, len(parts))]
 
