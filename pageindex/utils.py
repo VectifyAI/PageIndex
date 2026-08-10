@@ -522,12 +522,14 @@ def clean_structure_post(data):
             clean_structure_post(section)
     return data
 
-def remove_fields(data, fields=['text']):
+def remove_fields(data, fields=['text'], max_len=None):
     if isinstance(data, dict):
-        return {k: remove_fields(v, fields)
+        return {k: remove_fields(v, fields, max_len)
             for k, v in data.items() if k not in fields}
     elif isinstance(data, list):
-        return [remove_fields(item, fields) for item in data]
+        return [remove_fields(item, fields, max_len) for item in data]
+    elif isinstance(data, str):
+        return data[:max_len] + '...' if max_len is not None and len(data) > max_len else data
     return data
 
 def print_toc(tree, indent=0):
@@ -951,19 +953,36 @@ class ConfigLoader:
         merged = {**self._default_dict, **user_dict}
         return config(**merged)
 
-def create_node_mapping(tree):
-    """Create a flat dict mapping node_id to node for quick lookup."""
+def create_node_mapping(tree, include_page_ranges=False, max_page=None):
+    """Map node_id to node; with include_page_ranges, to {"node", "start_index",
+    "end_index"} (end = next node's page_index, or max_page for the last node)."""
+    def get_all_nodes(tree):
+        if isinstance(tree, dict):
+            return [tree] + [node for child in tree.get('nodes', []) for node in get_all_nodes(child)]
+        elif isinstance(tree, list):
+            return [node for item in tree for node in get_all_nodes(item)]
+        return []
+
+    all_nodes = get_all_nodes(tree)
+    if not include_page_ranges:
+        return {node["node_id"]: node for node in all_nodes if node.get("node_id")}
     mapping = {}
-    def _traverse(nodes):
-        for node in nodes:
-            if node.get('node_id'):
-                mapping[node['node_id']] = node
-            if node.get('nodes'):
-                _traverse(node['nodes'])
-    _traverse(tree)
+    for i, node in enumerate(all_nodes):
+        if node.get("node_id"):
+            end_page = all_nodes[i + 1].get("page_index") if i + 1 < len(all_nodes) else max_page
+            mapping[node["node_id"]] = {
+                "node": node,
+                "start_index": node["page_index"],
+                "end_index": end_page,
+            }
     return mapping
 
-def print_tree(tree, indent=0):
+def print_tree(tree, indent=0, exclude_fields=None):
+    """Outline view; passing exclude_fields gives the 0.2.8 pprint view."""
+    if exclude_fields is not None:
+        from pprint import pprint
+        pprint(remove_fields(tree, exclude_fields, max_len=40), sort_dicts=False, width=100)
+        return
     for node in tree:
         summary = node.get('summary') or node.get('prefix_summary', '')
         summary_str = f"  —  {summary[:60]}..." if summary else ""
