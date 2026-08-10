@@ -1,6 +1,12 @@
 import unittest
+from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
+
+# Patch attributes on the module object: the package exports a *function*
+# named page_index that shadows the submodule, and Python 3.10's mock
+# resolves the string "pageindex.page_index" to that function.
+page_index_module = import_module("pageindex.page_index")
 
 from pageindex.page_index import (
     _parse_physical_index,
@@ -128,10 +134,10 @@ class ValidateAndTruncateTest(unittest.TestCase):
 
 class ProcessTocNoPageNumbersTest(unittest.TestCase):
     def _run(self, toc, llm_results, chunks):
-        with patch("pageindex.page_index.toc_transformer", return_value=toc), \
-             patch("pageindex.page_index.count_tokens", return_value=1), \
-             patch("pageindex.page_index.page_list_to_group_text", return_value=chunks), \
-             patch("pageindex.page_index.add_page_number_to_toc", side_effect=llm_results):
+        with patch.object(page_index_module, "toc_transformer", return_value=toc), \
+             patch.object(page_index_module, "count_tokens", return_value=1), \
+             patch.object(page_index_module, "page_list_to_group_text", return_value=chunks), \
+             patch.object(page_index_module, "add_page_number_to_toc", side_effect=llm_results):
             return process_toc_no_page_numbers(
                 "toc",
                 [],
@@ -197,7 +203,7 @@ class ProcessNonePageNumbersTest(unittest.TestCase):
     def test_fills_from_marker_answer_inside_window(self):
         toc = self._toc()
         answer = [{"title": "B", "physical_index": "<physical_index_3>"}]
-        with patch("pageindex.page_index.add_page_number_to_toc", return_value=answer):
+        with patch.object(page_index_module, "add_page_number_to_toc", return_value=answer):
             process_none_page_numbers(toc, make_page_list(5))
         self.assertEqual(toc[1]["physical_index"], 3)
         self.assertNotIn("page", toc[1])
@@ -205,7 +211,7 @@ class ProcessNonePageNumbersTest(unittest.TestCase):
     def test_ignores_malformed_or_out_of_window_answers(self):
         for bad in ("<physical_index_null>", "<physical_index_x>", "abc", None, "<physical_index_99>"):
             toc = self._toc()
-            with patch("pageindex.page_index.add_page_number_to_toc", return_value=[{"title": "B", "physical_index": bad}]):
+            with patch.object(page_index_module, "add_page_number_to_toc", return_value=[{"title": "B", "physical_index": bad}]):
                 process_none_page_numbers(toc, make_page_list(5))
             self.assertNotIn("physical_index", toc[1], msg=repr(bad))
             self.assertEqual(toc[1]["page"], "iv")
@@ -213,7 +219,7 @@ class ProcessNonePageNumbersTest(unittest.TestCase):
     def test_handles_empty_or_malformed_llm_results(self):
         for result in ([], {}, None, ["garbage"]):
             toc = self._toc()
-            with patch("pageindex.page_index.add_page_number_to_toc", return_value=result):
+            with patch.object(page_index_module, "add_page_number_to_toc", return_value=result):
                 process_none_page_numbers(toc, make_page_list(5))
             self.assertNotIn("physical_index", toc[1], msg=repr(result))
 
@@ -223,13 +229,13 @@ class ProcessNonePageNumbersTest(unittest.TestCase):
             {"title": "B"},
             {"title": "C", "physical_index": 4},
         ]
-        with patch("pageindex.page_index.add_page_number_to_toc", return_value=[{"title": "B", "physical_index": "<physical_index_2>"}]):
+        with patch.object(page_index_module, "add_page_number_to_toc", return_value=[{"title": "B", "physical_index": "<physical_index_2>"}]):
             process_none_page_numbers(toc, make_page_list(5))
         self.assertEqual(toc[1]["physical_index"], 2)
 
     def test_empty_window_skips_llm_call(self):
         toc = [{"title": "Z", "page": "iv"}]
-        with patch("pageindex.page_index.add_page_number_to_toc") as llm:
+        with patch.object(page_index_module, "add_page_number_to_toc") as llm:
             process_none_page_numbers(toc, make_page_list(5))
         llm.assert_not_called()
         self.assertNotIn("physical_index", toc[0])
@@ -237,7 +243,7 @@ class ProcessNonePageNumbersTest(unittest.TestCase):
 
 class AddPageNumberToTocTest(unittest.TestCase):
     def _call(self, raw_response):
-        with patch("pageindex.page_index.llm_completion", return_value=raw_response):
+        with patch.object(page_index_module, "llm_completion", return_value=raw_response):
             return add_page_number_to_toc("part", [{"title": "A"}], model=None)
 
     def test_normalizes_dict_and_non_list_results(self):
@@ -254,9 +260,9 @@ class ProcessTocWithPageNumbersTest(unittest.TestCase):
         sentinel = [{"title": "A", "physical_index": 2}]
         toc = [{"structure": "1", "title": "A", "page": 3}]
         extractor_result = [{"structure": "1", "title": "A", "physical_index": None}]
-        with patch("pageindex.page_index.toc_transformer", return_value=toc), \
-             patch("pageindex.page_index.toc_index_extractor", return_value=extractor_result), \
-             patch("pageindex.page_index.process_toc_no_page_numbers", return_value=sentinel) as fallback:
+        with patch.object(page_index_module, "toc_transformer", return_value=toc), \
+             patch.object(page_index_module, "toc_index_extractor", return_value=extractor_result), \
+             patch.object(page_index_module, "process_toc_no_page_numbers", return_value=sentinel) as fallback:
             result = process_toc_with_page_numbers(
                 "toc", [0], make_page_list(5), toc_check_page_num=2, logger=Mock()
             )
@@ -284,8 +290,8 @@ class FixIncorrectTocTest(unittest.IsolatedAsyncioTestCase):
             return {"list_index": item["list_index"], "answer": "yes",
                     "title": item["title"], "page_number": item["physical_index"]}
 
-        with patch("pageindex.page_index.single_toc_item_index_fixer", side_effect=fixer), \
-             patch("pageindex.page_index.check_title_appearance", side_effect=checker):
+        with patch.object(page_index_module, "single_toc_item_index_fixer", side_effect=fixer), \
+             patch.object(page_index_module, "check_title_appearance", side_effect=checker):
             result_toc, invalid = await fix_incorrect_toc(toc, make_page_list(10), incorrect, logger=Mock())
 
         self.assertEqual(result_toc[1]["physical_index"], 6)
@@ -301,8 +307,8 @@ class MetaProcessorTest(unittest.IsolatedAsyncioTestCase):
             "garbage",
         ]
         opt = SimpleNamespace(model=None, toc_check_page_num=20)
-        with patch("pageindex.page_index.process_no_toc", return_value=toc), \
-             patch("pageindex.page_index.verify_toc", new=AsyncMock(return_value=(1.0, []))):
+        with patch.object(page_index_module, "process_no_toc", return_value=toc), \
+             patch.object(page_index_module, "verify_toc", new=AsyncMock(return_value=(1.0, []))):
             result = await meta_processor(make_page_list(10), mode="process_no_toc", opt=opt, logger=Mock())
         self.assertEqual(result, [{"title": "Ch2", "physical_index": 7}])
 
