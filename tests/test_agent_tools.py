@@ -974,3 +974,12 @@ def test_submit_without_wait_does_not_poll(fake_cloud_client):
     cloud = fake_cloud_client(["processing"])
     assert cloud.submit_document("whatever.pdf") == {"doc_id": "pi-fake"}
     assert cloud._api.polls == 0
+
+
+def test_submit_warns_when_stored_name_differs(fake_cloud_client):
+    cloud = fake_cloud_client(["processing"])
+    cloud._api.submit_document = lambda **kwargs: {
+        "doc_id": "pi-fake", "name": "whatever_1.pdf"}
+    with pytest.warns(UserWarning, match='stored as "whatever_1.pdf"'):
+        result = cloud.submit_document("docs/whatever.pdf")
+    assert result["name"] == "whatever_1.pdf"

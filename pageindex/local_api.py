@@ -97,6 +97,9 @@ class LocalAPI:
             raise PageIndexAPIError(
                 "Failed to submit document: PDF has no content. All pages are blank."
             )
+        # Fail before paying for indexing when _1.._99 are all taken; the
+        # binding name resolution happens again at save.
+        self._unique_doc_name(os.path.basename(file_path))
 
         try:
             if mode == "flash":
@@ -129,7 +132,7 @@ class LocalAPI:
         from .utils import remove_fields
         self._store.save_document(
             doc_id, meta, remove_fields(structure, fields=["text"]), pages)
-        return {"doc_id": doc_id}
+        return {"doc_id": doc_id, "name": meta["name"]}
 
     def _unique_doc_name(self, name: str) -> str:
         """Mirror the cloud upload: a taken name gets _1.._99 appended,

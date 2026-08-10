@@ -1,7 +1,9 @@
 """PageIndex SDK client: the 0.2.x cloud surface, now with a local mode."""
 from __future__ import annotations
 
+import os
 import time
+import warnings
 from typing import Any, Callable, Iterator, Optional, Union
 
 from .errors import PageIndexAPIError
@@ -130,7 +132,7 @@ class PageIndexClient:
         wait: bool = False,
     ) -> dict[str, Any]:
         """
-        Submit a PDF document for processing. Returns {'doc_id': ...}.
+        Submit a PDF document for processing. Returns {'doc_id': ..., 'name': ...}.
 
         Cloud: uploads the file; processing is asynchronous. Pass
         ``wait=True`` to block until the document is ready, or poll
@@ -161,12 +163,21 @@ class PageIndexClient:
                 concurrently and poll afterwards.
 
         Returns:
-            dict: {'doc_id': ...}
+            dict: {'doc_id': ..., 'name': ...}. 'name' is the stored document
+                name: a taken name gains a numeric suffix (name_1..name_99)
+                and a UserWarning is emitted. Older cloud servers omit 'name'.
         """
         result = self._api.submit_document(
             file_path=file_path, mode=mode,
             beta_headers=beta_headers, folder_id=folder_id, metadata=metadata,
         )
+        stored = result.get("name")
+        if stored and stored != os.path.basename(file_path):
+            warnings.warn(
+                f'Document "{os.path.basename(file_path)}" was stored as '
+                f'"{stored}".',
+                stacklevel=2,
+            )
         if wait:
             self._wait_until_ready(result["doc_id"])
         return result

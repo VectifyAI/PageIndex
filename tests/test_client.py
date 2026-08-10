@@ -169,12 +169,15 @@ def test_submit_duplicate_name_gets_suffix(local_client, sample_pdf, monkeypatch
         return {"doc_name": "sample.pdf", "doc_description": "d",
                 "structure": json.loads(json.dumps(STRUCTURE))}
     monkeypatch.setattr(page_index_module, "page_index_main", fake_page_index_main)
-    first = local_client.submit_document(sample_pdf)["doc_id"]
-    second = local_client.submit_document(sample_pdf)["doc_id"]
+    first = local_client.submit_document(sample_pdf)
+    assert first["name"] == "sample.pdf"
+    with pytest.warns(UserWarning, match='stored as "sample_1.pdf"'):
+        second = local_client.submit_document(sample_pdf)
+    assert second["name"] == "sample_1.pdf"
     names = {d["id"]: d["name"]
              for d in local_client.list_documents()["documents"]}
-    assert names[first] == "sample.pdf"
-    assert names[second] == "sample_1.pdf"
+    assert names[first["doc_id"]] == "sample.pdf"
+    assert names[second["doc_id"]] == "sample_1.pdf"
 
 
 def test_submit_duplicate_name_exhaustion(local_client, monkeypatch):
@@ -184,6 +187,22 @@ def test_submit_duplicate_name_exhaustion(local_client, monkeypatch):
     monkeypatch.setattr(api._store, "list_metas", lambda: metas)
     with pytest.raises(PageIndexAPIError, match="Too many files"):
         api._unique_doc_name("x.pdf")
+
+
+def test_submit_name_exhaustion_rejects_before_indexing(
+    local_client, sample_pdf, monkeypatch,
+):
+    api = local_client._api
+    metas = ([{"name": "sample.pdf"}]
+             + [{"name": f"sample_{num}.pdf"} for num in range(1, 100)])
+    monkeypatch.setattr(api._store, "list_metas", lambda: metas)
+    monkeypatch.setattr(
+        page_index_module, "page_index_main",
+        lambda *args, **kwargs: pytest.fail(
+            "indexer ran despite name exhaustion"),
+    )
+    with pytest.raises(PageIndexAPIError, match="Too many files"):
+        local_client.submit_document(sample_pdf)
 
 
 def test_submit_flash(local_client, sample_pdf, monkeypatch):
@@ -456,7 +475,8 @@ def test_torn_delete_never_lists_ghost(local_client, indexed_doc, tmp_path):
 
 
 def test_corrupt_doc_json_is_contained(local_client, indexed_doc, sample_pdf, tmp_path):
-    second = local_client.submit_document(sample_pdf)["doc_id"]
+    with pytest.warns(UserWarning):  # same-name resubmit → stored as sample_1.pdf
+        second = local_client.submit_document(sample_pdf)["doc_id"]
     (tmp_path / "store" / "docs" / indexed_doc / "doc.json").write_text("{truncated")
 
     # manifest still holds a good copy of the meta — served consistently

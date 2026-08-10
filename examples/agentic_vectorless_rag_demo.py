@@ -32,13 +32,14 @@ from agents import Agent, Runner, set_tracing_disabled
 from agents.stream_events import RawResponsesStreamEvent, RunItemStreamEvent
 from openai.types.responses import ResponseTextDeltaEvent, ResponseReasoningSummaryTextDeltaEvent
 
-from pageindex import PageIndexLocalClient
+from pageindex import PageIndexAPIError, PageIndexLocalClient
 import pageindex.utils as utils
 
 PDF_URL = "https://arxiv.org/pdf/2603.15031"
 
 _EXAMPLES_DIR = Path(__file__).parent
 PDF_PATH = _EXAMPLES_DIR / "documents" / "attention-residuals.pdf"
+DOC_ID_PATH = _EXAMPLES_DIR / "documents" / "attention-residuals.doc_id"
 STORAGE_PATH = _EXAMPLES_DIR / ".pageindex"
 
 
@@ -129,15 +130,19 @@ if __name__ == "__main__":
     print("=" * 60)
     print("Step 1: Index PDF and view tree structure")
     print("=" * 60)
-    doc_id = next(
-        (doc["id"] for doc in client.list_documents(limit=100)["documents"]
-         if doc["name"] == PDF_PATH.name),
-        None,
-    )
+    doc_id = None
+    if DOC_ID_PATH.exists():
+        cached = DOC_ID_PATH.read_text().strip()
+        try:
+            client.get_document(cached)
+            doc_id = cached
+        except PageIndexAPIError:
+            DOC_ID_PATH.unlink()
     if doc_id:
         print(f"\nLoaded cached doc_id: {doc_id}")
     else:
         doc_id = client.submit_document(str(PDF_PATH), wait=True)["doc_id"]
+        DOC_ID_PATH.write_text(doc_id)
         print(f"\nIndexed. doc_id: {doc_id}")
     print("\nTree Structure (top-level sections):")
     structure = client.get_tree(doc_id, node_summary=True)["result"]

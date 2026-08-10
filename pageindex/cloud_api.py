@@ -55,7 +55,9 @@ class CloudAPI:
                 returned in get_tree/get_ocr responses and list_documents entries. Defaults to None.
 
         Returns:
-            dict: {'doc_id': ...}
+            dict: {'doc_id': ...} — plus 'name', the stored document name
+                (a taken name gains a numeric suffix), when the server
+                returns it.
         """
         data = {'if_retrieval': True}
         if mode is not None:
