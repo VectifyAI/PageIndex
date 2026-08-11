@@ -404,6 +404,9 @@ class LocalAPI:
         except PageIndexAPIError:
             raise
         except Exception as e:
+            import openai as _oai
+            if isinstance(e, _oai.OpenAIError):
+                raise
             raise PageIndexAPIError(f"{prefix}: {e}") from e
 
         chat_id = f"chatcmpl-{uuid.uuid4().hex}"
