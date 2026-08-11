@@ -207,37 +207,6 @@ python3 run_pageindex.py --md_path /path/to/your/document.md
 >
 > Add `--optimize` to refine the tree structure for more efficient retrieval (with an LLM expansion pass).
 
-## 🐍 Python SDK: Cloud & Local
-
-The `pageindex` package on PyPI is the Python SDK for the [PageIndex API](https://docs.pageindex.ai) — and the same client now also runs fully **locally**, powered by this repo's indexing pipeline (including Flash).
-
-```bash
-pip3 install --upgrade pageindex   # local mode ships in pageindex >= 0.2.9; earlier versions are cloud-only
-```
-
-```python
-from pageindex import PageIndexClient
-
-client = PageIndexClient(api_key="YOUR_PAGEINDEX_API_KEY")  # cloud: managed OCR, tree building, retrieval
-client = PageIndexClient()                                  # local: same methods on your machine, using your LLM key (e.g. OPENAI_API_KEY)
-
-doc_id = client.submit_document("doc.pdf")["doc_id"]        # local mode blocks until indexing finishes
-doc_id = client.submit_document("doc.pdf", mode="flash")["doc_id"]  # local mode with PageIndex Flash
-
-tree = client.get_tree(doc_id, node_summary=True)["result"]
-```
-
-`chat_completions` is cloud-only for now — agent-based local chat arrives in a later release:
-
-```python
-answer = client.chat_completions(
-    messages=[{"role": "user", "content": "Summarize the key findings"}],
-    doc_id=doc_id,
-)["choices"][0]["message"]["content"]
-```
-
-Local documents are stored as plain JSON under `./.pageindex` (configurable via `storage_path`). Local mode supports PDFs; `chat_completions` (until agent-based local chat lands in a later release), folders, `beta_headers`, and the deprecated retrieval API (`submit_query`/`get_retrieval`) remain cloud-only — each method's docstring spells out the differences. To pin the mode at construction instead of inferring it from `api_key`, use `PageIndexCloudClient` (fails without a real key) or `PageIndexLocalClient` (has no key parameter).
-
 ## 🚀 Agentic Vectorless RAG: An Example
 
 For a simple, end-to-end **agentic vectorless RAG** example using **self-hosted PageIndex** (with OpenAI Agents SDK), see [`examples/agentic_vectorless_rag_demo.py`](examples/agentic_vectorless_rag_demo.py).
