@@ -207,69 +207,13 @@ python3 run_pageindex.py --md_path /path/to/your/document.md
 >
 > Add `--optimize` to refine the tree structure for more efficient retrieval (with an LLM expansion pass).
 
-## 🐍 Python SDK: Cloud & Local
-
-The `pageindex` package on PyPI is the Python SDK for the [PageIndex API](https://docs.pageindex.ai) — and the same client now also runs fully **locally**, powered by this repo's indexing pipeline (including Flash).
-
-```bash
-pip3 install --upgrade pageindex   # local mode ships in pageindex >= 0.2.9; earlier versions are cloud-only
-```
-
-```python
-from pageindex import PageIndexClient
-
-client = PageIndexClient(api_key="YOUR_PAGEINDEX_API_KEY")  # cloud: managed OCR, tree building, retrieval
-client = PageIndexClient()                                  # local: same methods on your machine, using your LLM key (e.g. OPENAI_API_KEY)
-
-doc_id = client.submit_document("doc.pdf")["doc_id"]        # local mode blocks until indexing finishes
-doc_id = client.submit_document("doc.pdf", mode="flash")["doc_id"]  # local mode with PageIndex Flash
-
-tree = client.get_tree(doc_id, node_summary=True)["result"]
-
-answer = client.chat_completions(
-    messages=[{"role": "user", "content": "Summarize the key findings"}],
-    doc_id=doc_id,
-)["choices"][0]["message"]["content"]
-```
-
-Local documents are stored as plain JSON under `./.pageindex` (configurable via `storage_path`). Local mode supports PDFs; folders, `beta_headers`, `enable_citations`, and the deprecated retrieval API (`submit_query`/`get_retrieval`) remain cloud-only — each method's docstring spells out the differences. To pin the mode at construction instead of inferring it from `api_key`, use `PageIndexCloudClient` (fails without a real key) or `PageIndexLocalClient` (has no key parameter).
-
-### 🤖 Agent integration
-
-The client exposes its documents as **agent tools**, following one rule: **cloud clients always serve the live tool set of the [PageIndex MCP server](https://docs.pageindex.ai/mcp)** (search, folders, images — as enabled for your key, discovered dynamically; management tools like delete/upload sit behind `include_management=True` or the framework's approval layer), while local clients serve the same contract's built-in navigation subset (`browse_documents`, `get_document`, `get_document_structure`, `get_page_content`). Tool names and schemas are shared, so agent prompts port unchanged, and switching local ↔ cloud is just the client constructor line:
-
-```python
-client = PageIndexLocalClient()                        # or PageIndexCloudClient(api_key=...)
-client.submit_document("doc.pdf", wait=True)           # wait=True: return once the doc is ready (both modes)
-
-# OpenAI Agents SDK        (pip install "pageindex[openai]")
-agent = Agent(
-    name="PageIndex",
-    instructions=client.agent_instructions(),          # retrieval playbook for the agent's system prompt
-    tools=client.as_openai_tools(),                    # local: in-process tools; cloud: the full cloud MCP tool set (any model backend)
-)                                                      # cloud + OpenAI models: hosted=True runs tool calls server-side (fastest)
-
-# Claude Agent SDK         (pip install "pageindex[claude]")
-options = ClaudeAgentOptions(
-    system_prompt=client.agent_instructions(),
-    mcp_servers={"pageindex": client.as_claude_mcp()}, # local: in-process server; cloud: connects to api.pageindex.ai/mcp
-    allowed_tools=["mcp__pageindex__*"],
-)
-
-# Any other framework: plain functions, wrap with your framework's one-liner
-tools = client.agent_tools()                           # local: built-in tools; cloud: full live tool set over MCP
-                                                       # e.g. [StructuredTool.from_function(f) for f in tools]
-```
-
-Neither framework is a required dependency — each is imported only when its method is called. Claude Code / Cursor and other MCP hosts connect to cloud documents via the hosted MCP server directly (no SDK needed); see the [MCP docs](https://docs.pageindex.ai/mcp).
-
 ## 🚀 Agentic Vectorless RAG: An Example
 
 For a simple, end-to-end **agentic vectorless RAG** example using **self-hosted PageIndex** (with OpenAI Agents SDK), see [`examples/agentic_vectorless_rag_demo.py`](examples/agentic_vectorless_rag_demo.py).
 
 ```bash
-# Install with the OpenAI Agents SDK extra
-pip3 install "pageindex[openai]"
+# Install optional dependency
+pip3 install openai-agents
 
 # Run the demo
 python3 examples/agentic_vectorless_rag_demo.py
