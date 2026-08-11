@@ -665,7 +665,7 @@ def test_cloud_request_wiring(cloud, sample_pdf):
 
     fake.payload = {"status": "processing", "retrieval_ready": False}
     client.get_tree("pi-1", node_summary=True)
-    assert calls[-1]["url"].endswith("/doc/pi-1/?type=tree&summary=True")
+    assert calls[-1]["url"].endswith("/doc/pi-1/?type=tree&summary=True&include_text=true")
     assert calls[-1]["timeout"] == 30
     assert client.is_retrieval_ready("pi-1") is False
 

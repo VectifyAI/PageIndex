@@ -119,7 +119,8 @@ class CloudAPI:
             dict: API response with status and, if ready, tree structure.
         """
         response = requests.get(
-            f"{self.BASE_URL}/doc/{_enc(doc_id)}/?type=tree&summary={node_summary}",
+            f"{self.BASE_URL}/doc/{_enc(doc_id)}/?type=tree&summary={node_summary}"
+            f"&include_text={str(include_text).lower()}",
             headers=self._headers(),
             timeout=30
         )

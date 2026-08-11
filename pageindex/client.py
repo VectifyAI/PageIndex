@@ -193,7 +193,13 @@ class PageIndexClient:
             list: Matching entries from get_ocr (format='page').
         """
         wanted = set(_parse_pages(pages))
-        all_pages = self.get_ocr(doc_id, format="page")["result"]
+        result = self.get_ocr(doc_id, format="page")
+        all_pages = result["result"]
+        if all_pages is None:
+            raise PageIndexAPIError(
+                f"Document '{doc_id}' is not ready "
+                f"(status: {result.get('status', 'unknown')})"
+            )
         return [p for p in all_pages if p["page_index"] in wanted]
 
     # ---------- TREE GENERATION ----------
