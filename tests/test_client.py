@@ -448,7 +448,7 @@ def test_get_tree_fails_loud_on_broken_pages(local_client, indexed_doc, tmp_path
 def test_get_tree_fails_loud_on_empty_pages(local_client, indexed_doc, tmp_path):
     doc_dir = tmp_path / "store" / "docs" / indexed_doc
     (doc_dir / "pages.json").write_text("[]")
-    with pytest.raises(PageIndexAPIError, match="unreadable"):
+    with pytest.raises(PageIndexAPIError, match="no page content"):
         local_client.get_tree(indexed_doc)
 
 

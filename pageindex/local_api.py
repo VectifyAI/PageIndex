@@ -181,8 +181,7 @@ class LocalAPI:
         from .utils import add_node_text
         structure = self._require_data(
             self._store.get_tree(doc_id), error_prefix)
-        pages = self._require_data(
-            self._store.get_pages(doc_id) or None, error_prefix)
+        pages = self._require_pages(doc_id, error_prefix)
         pdf_pages = [(p.get("markdown", ""), 0) for p in pages]
         add_node_text(structure, pdf_pages)
         return structure
@@ -211,8 +210,7 @@ class LocalAPI:
             _walk(self._load_tree_with_text(doc_id,
                                            "Failed to get OCR result"), 1)
         else:
-            pages = self._require_data(self._store.get_pages(doc_id) or None,
-                                       "Failed to get OCR result")
+            pages = self._require_pages(doc_id, "Failed to get OCR result")
             if format == "page":
                 result = pages
             else:  # raw
@@ -226,6 +224,14 @@ class LocalAPI:
         if data is None:
             raise PageIndexAPIError(f"{error_prefix}: stored document data is unreadable.")
         return data
+
+    def _require_pages(self, doc_id: str, error_prefix: str) -> list:
+        """A stored document can never legitimately have zero pages."""
+        pages = self._require_data(self._store.get_pages(doc_id), error_prefix)
+        if not pages:
+            raise PageIndexAPIError(
+                f"{error_prefix}: stored document has no page content.")
+        return pages
 
     def _completed_envelope(self, doc_id: str, result, meta: dict) -> dict[str, Any]:
         return {
