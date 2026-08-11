@@ -77,10 +77,7 @@ def query_agent(client: PageIndexClient, doc_id: str, prompt: str, verbose: bool
         Get the text content of specific pages.
         Use tight ranges: e.g. '5-7' for pages 5 to 7, '3,8' for pages 3 and 8, '12' for page 12.
         """
-        try:
-            return json.dumps(client.get_page_content(doc_id, pages), ensure_ascii=False)
-        except (ValueError, KeyError):
-            return json.dumps({"error": f"Invalid pages format: {pages!r}. Use '5-7', '3,8', or '12'."})
+        return json.dumps(client.get_page_content(doc_id, pages), ensure_ascii=False)
 
     agent = Agent(
         name="PageIndex",
