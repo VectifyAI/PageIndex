@@ -288,7 +288,7 @@ def test_document_management(local_client, indexed_doc):
     assert indexed_doc.startswith("pi-")
     doc = local_client.get_document(indexed_doc)
     assert doc["id"] == indexed_doc
-    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3}000)?",
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}",
                         doc["createdAt"])
     assert doc["name"] == "sample.pdf"
     assert doc["description"] == "A test document."

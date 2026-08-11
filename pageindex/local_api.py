@@ -47,7 +47,7 @@ CHAT_CONTEXT_TOKEN_LIMIT = 100_000
 def _now_iso() -> str:
     """Naive UTC, millisecond precision."""
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    return now.replace(microsecond=now.microsecond // 1000 * 1000).isoformat()
+    return now.replace(microsecond=now.microsecond // 1000 * 1000).isoformat(timespec="milliseconds")
 
 
 def _run_indexer(func, *args, **kwargs):
@@ -522,7 +522,7 @@ class LocalAPI:
             kwargs["temperature"] = temperature
         if _is_openai_model(model):
             import openai as _openai_mod
-            import pageindex.utils as _utils_mod
+            from . import utils as _utils_mod
             if _utils_mod._openai_sync_client is None:
                 _utils_mod._openai_sync_client = _openai_mod.OpenAI(max_retries=0)
             model = _strip_prefix(model, "openai/")
@@ -600,8 +600,8 @@ class _SilentLogger:
 
 def _format_tree_node(node: dict, node_summary: bool) -> dict:
     """Reshape a stored tree node for the API: ``start_index`` becomes
-    ``page_index``, ``end_index`` is dropped, and a non-leaf node's
-    ``summary`` becomes ``prefix_summary``."""
+    ``page_index``, ``end_index`` is dropped.  When *node_summary* is true,
+    a non-leaf node's ``summary`` becomes ``prefix_summary``."""
     children = node.get("nodes") or []
     out = {
         "title": node.get("title", ""),
