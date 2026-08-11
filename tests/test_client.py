@@ -37,7 +37,7 @@ def local_client(tmp_path):
 @pytest.fixture
 def indexed_doc(local_client, sample_pdf, monkeypatch):
     """A document indexed through a stubbed standard pipeline."""
-    def fake_page_index_main(doc, opt=None, logger=None):
+    def fake_page_index_main(doc, opt=None, logger=None, page_list=None):
         assert opt.if_add_node_summary == "yes"
         assert opt.if_add_node_text == "yes"
         assert logger is not None
@@ -151,7 +151,7 @@ def test_get_page_content(local_client, indexed_doc):
 
 def test_submit_does_not_create_cwd_logs(local_client, sample_pdf, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    def fake_page_index_main(doc, opt=None, logger=None):
+    def fake_page_index_main(doc, opt=None, logger=None, page_list=None):
         logger.info({"probe": True})
         return {"doc_name": "sample.pdf", "doc_description": None,
                 "structure": json.loads(json.dumps(STRUCTURE))}
@@ -241,7 +241,7 @@ def test_encrypted_pdf_raises_api_error(local_client, sample_pdf, tmp_path):
 def test_submit_explicit_standard_mode(local_client, sample_pdf, monkeypatch):
     calls = []
 
-    def fake_page_index_main(doc, opt=None, logger=None):
+    def fake_page_index_main(doc, opt=None, logger=None, page_list=None):
         calls.append(doc)
         return {
             "doc_name": "sample.pdf",
@@ -276,7 +276,7 @@ def test_submit_from_running_event_loop(
 def test_submit_with_metadata(local_client, sample_pdf, monkeypatch):
     monkeypatch.setattr(
         page_index_module, "page_index_main",
-        lambda doc, opt=None, logger=None: {
+        lambda doc, opt=None, logger=None, page_list=None: {
             "doc_name": "sample.pdf", "doc_description": None,
             "structure": json.loads(json.dumps(STRUCTURE))})
     tags = {"project": "alpha", "year": 2026}

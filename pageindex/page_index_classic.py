@@ -1231,18 +1231,19 @@ async def tree_parser(page_list, opt, doc=None, logger=None):
     return toc_tree
 
 
-def page_index_main(doc, opt=None, logger=None):
+def page_index_main(doc, opt=None, logger=None, page_list=None):
     logger = logger or JsonLogger(doc)
-    
+
     is_valid_pdf = (
-        (isinstance(doc, str) and os.path.isfile(doc) and doc.lower().endswith(".pdf")) or 
+        (isinstance(doc, str) and os.path.isfile(doc) and doc.lower().endswith(".pdf")) or
         isinstance(doc, BytesIO)
     )
     if not is_valid_pdf:
         raise ValueError("Unsupported input type. Expected a PDF file path or BytesIO object.")
 
-    print('Parsing PDF...')
-    page_list = get_page_tokens(doc, model=opt.model)
+    if page_list is None:
+        print('Parsing PDF...')
+        page_list = get_page_tokens(doc, model=opt.model)
 
     logger.info({'total_page_number': len(page_list)})
     logger.info({'total_token': sum([page[1] for page in page_list])})

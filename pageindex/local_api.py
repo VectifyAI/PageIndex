@@ -138,8 +138,11 @@ class LocalAPI:
             reader = PyPDF2.PdfReader(f)
             return [page.extract_text() or "" for page in reader.pages]
 
-    def _index_standard(self, file_path: str, _page_texts: list[str]) -> tuple[list, str | None]:
+    def _index_standard(self, file_path: str, page_texts: list[str]) -> tuple[list, str | None]:
         from .page_index_classic import page_index_main
+        import litellm
+        page_list = [(text, litellm.token_counter(model=self._model, text=text))
+                     for text in page_texts]
         opt = self._config_loader.load({
             "model": self._model,
             "summary_model": self._summary_model,
@@ -148,7 +151,7 @@ class LocalAPI:
             "if_add_node_text": "yes",
             "if_add_doc_description": "yes",
         })
-        result = page_index_main(file_path, opt, logger=logger)
+        result = page_index_main(file_path, opt, logger=logger, page_list=page_list)
         structure = result.get("structure") or []
         if not structure:
             raise PageIndexAPIError(
