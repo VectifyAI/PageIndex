@@ -119,21 +119,20 @@ def test_browse_documents_pagination(client, store_path):
     assert second["has_more"] is False
 
 
-def test_browse_documents_relevance(client, store_path):
-    seed_doc(store_path, "pi-a", "annual-report.pdf",
-             description="Financial results for the year")
-    seed_doc(store_path, "pi-b", "attention.pdf",
+def test_browse_documents_relevance_unsupported(client, store_path):
+    """Semantic ranking is cloud-side; like folders, local answers with an
+    honest error instead of a keyword imitation."""
+    seed_doc(store_path, "pi-a", "attention.pdf",
              description="Transformers and attention mechanisms")
     payload, is_error = run(client, "browse_documents", sort="relevance",
                             query="attention transformers")
-    assert not is_error
-    assert [d["name"] for d in payload["documents"]] == ["attention.pdf"]
-    assert payload["sort"] == "relevance"
+    assert is_error and payload["errorCode"] == "INVALID_INPUT"
+    assert "not available" in payload["error"]
 
-    missing_query, is_error = run(client, "browse_documents", sort="relevance")
-    assert is_error and missing_query["errorCode"] == "INVALID_INPUT"
     stray_query, is_error = run(client, "browse_documents", query="x")
-    assert is_error and "relevance" in stray_query["error"]
+    assert is_error and "not available" in stray_query["error"]
+    bad_sort, is_error = run(client, "browse_documents", sort="banana")
+    assert is_error and bad_sort["errorCode"] == "INVALID_INPUT"
 
 
 def test_browse_documents_empty_and_folder_error(client):
@@ -916,6 +915,7 @@ def test_agent_instructions_default(client):
     assert "browse_documents" in text
     assert "search_documents" not in text
     assert "get_folder_structure" not in text
+    assert 'sort="relevance"' not in text  # cloud-side capability
 
 
 def test_agent_instructions_with_doc_id(client, store_path):

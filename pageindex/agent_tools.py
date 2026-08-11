@@ -636,16 +636,19 @@ def _browse_documents(client, folder_id: str = "root", recursive: bool = False,
                         {"summary": "Invalid sort mode",
                          "options": ['Use sort="time" or sort="relevance"']},
                         "INVALID_INPUT")
-    if sort == "relevance" and not query:
-        return _failure('query is required when sort is "relevance"', None,
-                        {"summary": "Missing query for relevance ranking",
-                         "options": ['Pass query alongside sort="relevance"']},
-                        "INVALID_INPUT")
-    if sort == "time" and query:
-        return _failure('query is only allowed when sort is "relevance"', None,
-                        {"summary": "query does not apply to the time sort",
-                         "options": ["Drop query, or set sort=\"relevance\""]},
-                        "INVALID_INPUT")
+    if sort == "relevance" or query:
+        # Semantic ranking is a cloud capability; like folders, it is not
+        # imitated here.
+        return _failure(
+            "Relevance ranking is not available here — use the default "
+            "time sort.", None,
+            {"summary": "Semantic ranking is not available in this library",
+             "options": ["Retry without sort/query and match the returned "
+                         "names and descriptions against the intent yourself",
+                         "Page through the full library with "
+                         "`offset: next_offset`"]},
+            "INVALID_INPUT",
+        )
     try:
         offset = max(int(offset), 0)
         limit = min(max(int(limit), 1), 50)
@@ -655,23 +658,9 @@ def _browse_documents(client, folder_id: str = "root", recursive: bool = False,
                          "options": ["Pass integer offset and limit values"]},
                         "INVALID_INPUT")
 
-    if sort == "relevance":
-        tokens = [token for token in (query or "").lower().split() if token]
-        scored = []
-        for doc in _all_documents(client):
-            haystack = f"{doc.get('name') or ''} {doc.get('description') or ''}".lower()
-            score = sum(1 for token in tokens if token in haystack)
-            if score:
-                scored.append((score, doc))
-        # Stable sort: equal scores keep the newest-first listing order.
-        scored.sort(key=lambda pair: pair[0], reverse=True)
-        ranked = [doc for _, doc in scored]
-        window = ranked[offset:offset + limit]
-        has_more = offset + limit < len(ranked)
-    else:
-        listing = client.list_documents(limit=limit, offset=offset)
-        window = listing.get("documents") or []
-        has_more = offset + limit < listing.get("total", 0)
+    listing = client.list_documents(limit=limit, offset=offset)
+    window = listing.get("documents") or []
+    has_more = offset + limit < listing.get("total", 0)
     next_offset = offset + limit if has_more else None
 
     page_has_processing = False
@@ -706,18 +695,9 @@ def _browse_documents(client, folder_id: str = "root", recursive: bool = False,
     if not items and offset == 0:
         next_steps = {
             "summary": "Nothing to show",
-            "options": (
-                ["No documents matched this query. Rephrase with synonyms or "
-                 "alternative terms and retry browse_documents(sort=\"relevance\")."]
-                if sort == "relevance"
-                else ["Nothing here. Index documents with "
-                      "PageIndexClient.submit_document() to get started."]
-            ),
-            "auto_retry": (
-                "Rephrase the query and retry browse_documents(sort=\"relevance\")"
-                if sort == "relevance"
-                else "Index a document with submit_document() to get started"
-            ),
+            "options": ["Nothing here. Index documents with "
+                        "PageIndexClient.submit_document() to get started."],
+            "auto_retry": "Index a document with submit_document() to get started",
         }
         return _success(data, next_steps)
 
@@ -727,9 +707,8 @@ def _browse_documents(client, folder_id: str = "root", recursive: bool = False,
         options.append(
             "Results returned ≠ correct results. Verify these documents match "
             "the user's actual intent (topic, time period, document type) "
-            "before proceeding. If they do not match, rephrase the query and "
-            "retry browse_documents(sort=\"relevance\"). Do NOT use general "
-            "knowledge as a substitute."
+            "before proceeding. If they do not match, page through the rest "
+            "of the library. Do NOT use general knowledge as a substitute."
         )
     if page_has_processing:
         options.append("Some documents on this page are still processing. "
@@ -1305,10 +1284,12 @@ def build_agent_tools(client, include_management: bool = False) -> list[Callable
 
 # ── agent instructions ──
 # Local subset of the cloud MCP server's initialize instructions (its
-# no-folders variant), trimmed to the tools that exist here: the
-# search_documents escalation steps, get_document_image, and the shared
-# read-only-folders block are removed. Cloud clients receive the server's
-# live instructions instead — see _base_instructions().
+# no-folders variant), trimmed to what exists here: the search_documents
+# escalation steps, get_document_image, and the shared read-only-folders
+# block are removed, and the sort="relevance" guidance is replaced with
+# name/description matching (semantic ranking is cloud-side). Cloud
+# clients receive the server's live instructions instead — see
+# _base_instructions().
 
 _INSTRUCTIONS_HEADER = (
     "PageIndex by Vectify AI is a document platform for uploading and "
@@ -1328,12 +1309,12 @@ TOOL USAGE RULES:
 
 _DISCOVERY = """\
 DOCUMENT DISCOVERY:
-- browse_documents() — DEFAULT discovery tool, first choice for any document-related question. The bare call returns your documents. Use sort="relevance" + query for semantic ranking."""
+- browse_documents() — DEFAULT discovery tool, first choice for any document-related question. It lists your documents newest first with names and descriptions; match them against the user's intent, and page through with `offset: next_offset` while has_more is true."""
 
 _DECISION = """\
 DECISION:
-- "What do I have / list / recent" → browse_documents (time)
-- ANY question that needs a document to answer (including "find THE paper about Y") → browse_documents(sort="relevance", query=…)"""
+- "What do I have / list / recent" → browse_documents()
+- ANY question that needs a document to answer (including "find THE paper about Y") → browse_documents(), then pick the documents whose name/description matches the question"""
 
 _AFTER_DISCOVERY = """\
 - Skip discovery ONLY for questions with NO possible document connection (e.g., "capital of France").
@@ -1343,9 +1324,9 @@ _AFTER_DISCOVERY = """\
 _PERSISTENCE = """\
 PERSISTENCE (before concluding the target document is not in the library):
 This protocol applies both when results are empty AND when results are returned but none match the user's intent. Do NOT give up after a single discovery attempt. Follow these steps in order:
-1. browse_documents(sort="relevance", query=…) with the original intent
-2. Rephrase the query with synonyms or alternative terms → browse_documents(sort="relevance") again
-3. browse_documents(recursive=true) to flatten the library into one list — MANDATORY, must be attempted at least once before concluding "not found"
+1. browse_documents() and compare every returned name/description against the user's intent
+2. Page through the ENTIRE library with `offset: next_offset` until has_more is false — MANDATORY, must be completed before concluding "not found"
+3. Re-scan for loose matches: synonyms, abbreviations, and partial titles in names/descriptions can identify the target
 Only after ALL three steps have been tried may you conclude the document is not in the library. Do NOT fall back to general knowledge — if the user's question references their own documents, exhaust every discovery path first."""
 
 AGENT_INSTRUCTIONS = "\n\n".join([
