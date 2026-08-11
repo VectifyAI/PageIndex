@@ -52,21 +52,6 @@ Answer based only on tool output. Be concise.
 """
 
 
-def _parse_pages(pages: str) -> list[int]:
-    """Parse a pages string like '5-7', '3,8', or '12' into a list of ints."""
-    result = []
-    for part in pages.split(","):
-        part = part.strip()
-        if "-" in part:
-            start, end = (int(x) for x in part.split("-", 1))
-            if start > end:
-                raise ValueError(f"Invalid range '{part}': start must be <= end")
-            result.extend(range(start, end + 1))
-        else:
-            result.append(int(part))
-    return sorted(set(result))
-
-
 def query_agent(client: PageIndexClient, doc_id: str, prompt: str, verbose: bool = False) -> str:
     """Run a document QA agent using the OpenAI Agents SDK.
 
@@ -82,8 +67,9 @@ def query_agent(client: PageIndexClient, doc_id: str, prompt: str, verbose: bool
     @function_tool
     def get_document_structure() -> str:
         """Get the document's full tree structure (without text) to find relevant sections."""
-        tree = client.get_tree(doc_id, node_summary=True)["result"]
-        return json.dumps(utils.remove_fields(tree, fields=["text"]), ensure_ascii=False)
+        return json.dumps(
+            client.get_tree(doc_id, node_summary=True, include_text=False)["result"],
+            ensure_ascii=False)
 
     @function_tool
     def get_page_content(pages: str) -> str:
@@ -92,13 +78,9 @@ def query_agent(client: PageIndexClient, doc_id: str, prompt: str, verbose: bool
         Use tight ranges: e.g. '5-7' for pages 5 to 7, '3,8' for pages 3 and 8, '12' for page 12.
         """
         try:
-            wanted = set(_parse_pages(pages))
-        except ValueError:
+            return json.dumps(client.get_page_content(doc_id, pages), ensure_ascii=False)
+        except (ValueError, KeyError):
             return json.dumps({"error": f"Invalid pages format: {pages!r}. Use '5-7', '3,8', or '12'."})
-        all_pages = client.get_ocr(doc_id, format="page")["result"]
-        return json.dumps(
-            [p for p in all_pages if p["page_index"] in wanted], ensure_ascii=False
-        )
 
     agent = Agent(
         name="PageIndex",

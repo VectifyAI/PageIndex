@@ -6,6 +6,20 @@ from typing import Any, Iterator, Optional, Union
 from .errors import PageIndexAPIError
 
 
+def _parse_pages(pages: str) -> list[int]:
+    result = []
+    for part in pages.split(","):
+        part = part.strip()
+        if "-" in part:
+            start, end = (int(x) for x in part.split("-", 1))
+            if start > end:
+                raise ValueError(f"Invalid range '{part}': start must be <= end")
+            result.extend(range(start, end + 1))
+        else:
+            result.append(int(part))
+    return sorted(set(result))
+
+
 def _normalize_retrieve_model(model: str) -> str:
     """Preserve supported Agents SDK prefixes and route other provider paths via LiteLLM."""
     passthrough_prefixes = ("litellm/", "openai/")
@@ -167,25 +181,45 @@ class PageIndexClient:
         """
         return self._api.get_ocr(doc_id=doc_id, format=format)
 
+    def get_page_content(self, doc_id: str, pages: str) -> list[dict[str, Any]]:
+        """
+        Get text content of specific pages.
+
+        Args:
+            doc_id (str): Document ID.
+            pages (str): Page specifier — '5-7', '3,8', or '12'.
+
+        Returns:
+            list: Matching entries from get_ocr (format='page').
+        """
+        wanted = set(_parse_pages(pages))
+        all_pages = self.get_ocr(doc_id, format="page")["result"]
+        return [p for p in all_pages if p["page_index"] in wanted]
+
     # ---------- TREE GENERATION ----------
 
-    def get_tree(self, doc_id: str, node_summary: bool = False) -> dict[str, Any]:
+    def get_tree(self, doc_id: str, node_summary: bool = False,
+                 include_text: bool = True) -> dict[str, Any]:
         """
         Get tree generation status and results.
 
         Args:
             doc_id (str): Document ID.
             node_summary (bool): Include node summaries in the tree.
+            include_text (bool): Include node text (default True).
+                False is useful for structure-only views (saves tokens).
 
         Returns:
             dict: {'doc_id', 'status', 'retrieval_ready', 'result', ...} where
             result nodes are {'title', 'node_id', 'page_index', ('summary' /
             'prefix_summary',) ('text',) 'nodes'}.
-
-        Local: status is always "completed" (indexing happened during
-        ``submit_document``) and nodes always carry 'text'.
         """
-        return self._api.get_tree(doc_id=doc_id, node_summary=node_summary)
+        tree = self._api.get_tree(doc_id=doc_id, node_summary=node_summary,
+                                  include_text=include_text)
+        if not include_text and tree.get("result"):
+            from .utils import remove_fields
+            tree["result"] = remove_fields(tree["result"], fields=["text"])
+        return tree
 
     def is_retrieval_ready(self, doc_id: str) -> bool:
         """

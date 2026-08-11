@@ -185,9 +185,14 @@ class LocalAPI:
         add_node_text(structure, pdf_pages)
         return structure
 
-    def get_tree(self, doc_id: str, node_summary: bool = False) -> dict[str, Any]:
+    def get_tree(self, doc_id: str, node_summary: bool = False,
+                 include_text: bool = True) -> dict[str, Any]:
         meta = self._require_doc(doc_id, "Failed to get tree result")
-        structure = self._load_tree_with_text(doc_id, "Failed to get tree result")
+        if include_text:
+            structure = self._load_tree_with_text(doc_id, "Failed to get tree result")
+        else:
+            structure = self._require_data(
+                self._store.get_tree(doc_id), "Failed to get tree result")
         result = [_format_tree_node(node, node_summary) for node in structure]
         return self._completed_envelope(doc_id, result, meta)
 

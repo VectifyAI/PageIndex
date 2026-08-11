@@ -106,7 +106,8 @@ class CloudAPI:
 
     # ---------- TREE GENERATION ----------
 
-    def get_tree(self, doc_id: str, node_summary: bool = False) -> Dict[str, Any]:
+    def get_tree(self, doc_id: str, node_summary: bool = False,
+                 include_text: bool = True) -> Dict[str, Any]:
         """
         Get tree generation status and results.
 
