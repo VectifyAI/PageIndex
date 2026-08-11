@@ -74,8 +74,63 @@ def test_retrieve_model_carries_agents_sdk_prefix(tmp_path):
                                storage_path=str(tmp_path / "s")).retrieve_model
 
     assert resolved("anthropic/claude-sonnet-4-6") == "litellm/anthropic/claude-sonnet-4-6"
-    for already_routable in ("gpt-4o", "openai/gpt-4o", "litellm/anthropic/claude-sonnet-4-6"):
+    for already_routable in ("gpt-4o", "openai/gpt-4o",
+                             "orcarouter/deepseek/deepseek-v4-pro",
+                             "orcarouter/orcarouter/auto",
+                             "litellm/anthropic/claude-sonnet-4-6"):
         assert resolved(already_routable) == already_routable
+
+
+def test_orcarouter_routing_helpers():
+    from pageindex.utils import (_api_key_env_for, _is_openai_model,
+                                 _is_orcarouter_model, _orcarouter_model_id)
+    # 'orcarouter/...' is OpenAI-SDK-routed (like 'openai/...'), not LiteLLM.
+    assert _is_openai_model("orcarouter/deepseek/deepseek-v4-pro")
+    assert _is_openai_model("orcarouter/orcarouter/auto")
+    assert not _is_openai_model("litellm/orcarouter/deepseek/deepseek-v4-pro")
+    assert _is_orcarouter_model("orcarouter/deepseek/deepseek-v4-pro")
+    assert not _is_orcarouter_model("openai/gpt-4o")
+    assert not _is_orcarouter_model("gpt-4o")
+    # The routing prefix is stripped; OrcaRouter's bare 'auto' alias is kept whole.
+    assert _orcarouter_model_id("orcarouter/deepseek/deepseek-v4-pro") == "deepseek/deepseek-v4-pro"
+    assert _orcarouter_model_id("orcarouter/orcarouter/auto") == "orcarouter/auto"
+    # CLI key gates resolve the right env var.
+    assert _api_key_env_for("orcarouter/deepseek/deepseek-v4-pro") == "ORCAROUTER_API_KEY"
+    assert _api_key_env_for("openai/gpt-4o") == "OPENAI_API_KEY"
+    assert _api_key_env_for("gpt-4o") == "OPENAI_API_KEY"
+
+
+def test_orcarouter_completion_missing_key_raises_immediately(monkeypatch):
+    import openai
+    monkeypatch.delenv("ORCAROUTER_API_KEY", raising=False)
+    monkeypatch.setattr(pageindex.utils, "_orcarouter_sync_client", None)
+    monkeypatch.setattr(pageindex.utils, "_orcarouter_async_client", None)
+    with pytest.raises(openai.OpenAIError):
+        pageindex.utils.llm_completion("orcarouter/deepseek/deepseek-v4-pro", "probe")
+    with pytest.raises(openai.OpenAIError):
+        asyncio.run(pageindex.utils.llm_acompletion("orcarouter/deepseek/deepseek-v4-pro", "probe"))
+
+
+def test_orcarouter_completion_routes_model_to_gateway(monkeypatch):
+    captured = {}
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured["model"] = kwargs["model"]
+            captured["messages"] = kwargs["messages"]
+            return types.SimpleNamespace(choices=[types.SimpleNamespace(
+                message=types.SimpleNamespace(content="ok"),
+                finish_reason="stop")])
+
+    class FakeClient:
+        chat = types.SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(pageindex.utils, "_sync_client", lambda orcarouter: FakeClient())
+    monkeypatch.setenv("ORCAROUTER_API_KEY", "sk-orca-test")
+    assert pageindex.utils.llm_completion(
+        "orcarouter/deepseek/deepseek-v4-pro", "hi") == "ok"
+    assert captured["model"] == "deepseek/deepseek-v4-pro"
+    assert captured["messages"] == [{"role": "user", "content": "hi"}]
 
 
 def test_explicit_mode_clients(tmp_path):

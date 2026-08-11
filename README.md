@@ -164,6 +164,18 @@ Create a `.env` file in the root directory with your LLM API key. Multi-LLM is s
 OPENAI_API_KEY=your_openai_key_here
 ```
 
+[OrcaRouter](https://www.orcarouter.ai) is also supported as a named OpenAI-compatible gateway. With one `ORCAROUTER_API_KEY` (keys start with `sk-orca-`) you get 150+ models from OpenAI, Anthropic, Google, DeepSeek, Qwen, MiniMax and xAI behind a single `https://api.orcarouter.ai/v1` endpoint. Pick it with an `orcarouter/`-prefixed model — e.g. `orcarouter/deepseek/deepseek-v4-pro`, or `orcarouter/orcarouter/auto` for OrcaRouter's auto-routing alias:
+
+```bash
+ORCAROUTER_API_KEY=sk-orca-your_key_here
+```
+
+Then set the model in `pageindex/config.yaml`:
+
+```yaml
+model: "orcarouter/deepseek/deepseek-v4-pro"
+```
+
 ### 3. Generate PageIndex structure for your PDF
 
 ```bash

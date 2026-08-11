@@ -61,8 +61,8 @@ import re
 import sys
 from types import SimpleNamespace
 
-from .utils import (ConfigLoader, _is_openai_model, _is_unrecoverable,
-                    llm_acompletion, strip_internal_keys)
+from .utils import (ConfigLoader, _api_key_env_for, _is_openai_model,
+                    _is_unrecoverable, llm_acompletion, strip_internal_keys)
 
 TRIGGER_PAGES = 5        # only look ahead on nodes larger than this
 ROUTING_COST = 1         # R(v), in pages
@@ -872,9 +872,10 @@ async def main():
     args = parser.parse_args()
 
     model = args.model or default_model()
-    if args.expand and not args.plan and _is_openai_model(model) \
-            and not os.getenv("OPENAI_API_KEY"):
-        sys.exit(f"OPENAI_API_KEY is not set (expand model: {model}).")
+    if args.expand and not args.plan and _is_openai_model(model):
+        key_env = _api_key_env_for(model)
+        if not os.getenv(key_env):
+            sys.exit(f"{key_env} is not set (expand model: {model}).")
 
     original = json.load(open(args.structure))
     structure = copy.deepcopy(original["structure"])

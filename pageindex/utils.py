@@ -23,6 +23,15 @@ import re
 if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
     os.environ["OPENAI_API_KEY"] = os.getenv("CHATGPT_API_KEY")
 
+# OrcaRouter is an OpenAI-compatible gateway. Models use the same
+# 'provider/model' shape as every other provider (e.g.
+# 'orcarouter/deepseek/deepseek-v4-pro'); the leading 'orcarouter/'
+# segment selects the OrcaRouter endpoint and is stripped before the
+# request is sent, mirroring how the 'openai/' prefix is handled.
+ORCAROUTER_BASE_URL = "https://api.orcarouter.ai/v1"
+ORCAROUTER_API_KEY_ENV = "ORCAROUTER_API_KEY"
+ORCAROUTER_MODEL_PREFIX = "orcarouter/"
+
 def count_tokens(text, model=None):
     if not text:
         return 0
@@ -38,14 +47,91 @@ def _strip_prefix(s, prefix):
 
 def _is_openai_model(model):
     """Models without a provider prefix (no '/') use the openai SDK directly.
-    For other providers, use 'provider/model' format (e.g. 'anthropic/claude-sonnet-4-6')."""
+    'openai/...' and 'orcarouter/...' are OpenAI-compatible and also use the
+    SDK (the latter through the OrcaRouter gateway). For other providers, use
+    'provider/model' format (e.g. 'anthropic/claude-sonnet-4-6')."""
     if not model or model.startswith('litellm/'):
         return False
-    return '/' not in model or model.startswith('openai/')
+    return '/' not in model or model.startswith(('openai/', ORCAROUTER_MODEL_PREFIX))
+
+
+def _is_orcarouter_model(model):
+    """True for 'orcarouter/...' models routed through the OrcaRouter gateway."""
+    return bool(model) and model.startswith(ORCAROUTER_MODEL_PREFIX)
+
+
+def _orcarouter_model_id(model):
+    """OrcaRouter model id for an 'orcarouter/...' routing string.
+
+    The leading 'orcarouter/' segment selects the gateway endpoint and is
+    stripped before the request (mirroring the 'openai/' prefix). The one
+    exception is OrcaRouter's own 'orcarouter/auto' alias, whose remainder
+    is a bare name: there the full string is the model id.
+    """
+    remainder = _strip_prefix(model, ORCAROUTER_MODEL_PREFIX)
+    return remainder if "/" in remainder else model
+
+
+def _require_orcarouter_key():
+    import openai
+    api_key = os.getenv(ORCAROUTER_API_KEY_ENV)
+    if not api_key:
+        raise openai.OpenAIError(
+            "The api_key client option must be set either by passing "
+            "api_key to the client or by setting the "
+            f"{ORCAROUTER_API_KEY_ENV} environment variable"
+        )
+    return api_key
+
+
+def _api_key_env_for(model):
+    """Environment variable that must hold the key for an OpenAI-SDK-routed
+    model ('OPENAI_API_KEY' or 'ORCAROUTER_API_KEY')."""
+    return ORCAROUTER_API_KEY_ENV if _is_orcarouter_model(model) else "OPENAI_API_KEY"
 
 
 _openai_sync_client = None
 _openai_async_client = None
+_orcarouter_sync_client = None
+_orcarouter_async_client = None
+
+
+def _sync_client(orcarouter):
+    """OpenAI-compatible sync client for the endpoint — OrcaRouter when
+    `orcarouter` is True, the default OpenAI endpoint otherwise."""
+    global _openai_sync_client, _orcarouter_sync_client
+    if orcarouter:
+        if _orcarouter_sync_client is None:
+            import openai
+            _orcarouter_sync_client = openai.OpenAI(
+                api_key=_require_orcarouter_key(),
+                base_url=ORCAROUTER_BASE_URL,
+                max_retries=0,
+            )
+        return _orcarouter_sync_client
+    if _openai_sync_client is None:
+        import openai
+        _openai_sync_client = openai.OpenAI(max_retries=0)
+    return _openai_sync_client
+
+
+def _async_client(orcarouter):
+    """OpenAI-compatible async client for the endpoint — OrcaRouter when
+    `orcarouter` is True, the default OpenAI endpoint otherwise."""
+    global _openai_async_client, _orcarouter_async_client
+    if orcarouter:
+        if _orcarouter_async_client is None:
+            import openai
+            _orcarouter_async_client = openai.AsyncOpenAI(
+                api_key=_require_orcarouter_key(),
+                base_url=ORCAROUTER_BASE_URL,
+                max_retries=0,
+            )
+        return _orcarouter_async_client
+    if _openai_async_client is None:
+        import openai
+        _openai_async_client = openai.AsyncOpenAI(max_retries=0)
+    return _openai_async_client
 
 
 # Misconfiguration: no retry can fix a rejected key or a model that does not
@@ -61,21 +147,18 @@ def _is_unrecoverable(exc: Exception) -> bool:
 
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
     use_openai_sdk = _is_openai_model(model)
+    use_orcarouter = _is_orcarouter_model(model)
     if model:
         model = _strip_prefix(model, "litellm/")
         if use_openai_sdk:
-            model = _strip_prefix(model, "openai/")
+            model = _orcarouter_model_id(model) if use_orcarouter else _strip_prefix(model, "openai/")
     max_retries = 10
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
-    if use_openai_sdk:
-        global _openai_sync_client
-        if _openai_sync_client is None:
-            import openai
-            _openai_sync_client = openai.OpenAI(max_retries=0)
+    client = _sync_client(use_orcarouter) if use_openai_sdk else None
     for i in range(max_retries):
         try:
             if use_openai_sdk:
-                response = _openai_sync_client.chat.completions.create(
+                response = client.chat.completions.create(
                     model=model,
                     messages=messages,
                 )
@@ -107,21 +190,18 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
 
 async def llm_acompletion(model, prompt):
     use_openai_sdk = _is_openai_model(model)
+    use_orcarouter = _is_orcarouter_model(model)
     if model:
         model = _strip_prefix(model, "litellm/")
         if use_openai_sdk:
-            model = _strip_prefix(model, "openai/")
+            model = _orcarouter_model_id(model) if use_orcarouter else _strip_prefix(model, "openai/")
     max_retries = 10
     messages = [{"role": "user", "content": prompt}]
-    if use_openai_sdk:
-        global _openai_async_client
-        if _openai_async_client is None:
-            import openai
-            _openai_async_client = openai.AsyncOpenAI(max_retries=0)
+    client = _async_client(use_orcarouter) if use_openai_sdk else None
     for i in range(max_retries):
         try:
             if use_openai_sdk:
-                response = await _openai_async_client.chat.completions.create(
+                response = await client.chat.completions.create(
                     model=model,
                     messages=messages,
                 )

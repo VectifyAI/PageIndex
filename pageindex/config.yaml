@@ -1,7 +1,11 @@
 # Models without a provider prefix use the OpenAI SDK directly.
 # For other providers, use "provider/model" format (e.g. "anthropic/claude-sonnet-4-6").
+# "orcarouter/..." routes through the OrcaRouter gateway (OpenAI-compatible,
+# https://api.orcarouter.ai/v1, key: ORCAROUTER_API_KEY) using your own key.
 model: "gpt-4o-2024-11-20"
 # model: "anthropic/claude-sonnet-4-6"
+# model: "orcarouter/deepseek/deepseek-v4-pro"
+# model: "orcarouter/orcarouter/auto"
 summary_model: "gpt-5.6-luna"
 retrieve_model: "gpt-5.4"  # defaults to `model` if not set
 toc_check_page_num: 20

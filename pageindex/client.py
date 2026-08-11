@@ -22,7 +22,7 @@ def _parse_pages(pages: str) -> list[int]:
 
 def _normalize_retrieve_model(model: str) -> str:
     """Preserve supported Agents SDK prefixes and route other provider paths via LiteLLM."""
-    passthrough_prefixes = ("litellm/", "openai/")
+    passthrough_prefixes = ("litellm/", "openai/", "orcarouter/")
     if not model or "/" not in model:
         return model
     if model.startswith(passthrough_prefixes):
