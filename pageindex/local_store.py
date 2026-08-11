@@ -1,24 +1,4 @@
-"""On-disk document store behind PageIndexClient's local mode.
-
-Layout under the storage directory:
-
-    manifest.json             all documents' metadata in one file
-    docs/<doc_id>/doc.json    document metadata (small; read by get)
-    docs/<doc_id>/tree.json   the PageIndex tree structure
-    docs/<doc_id>/pages.json  extracted page text: [{"page_index": 1, "markdown": ...}, ...]
-
-Every file is written atomically (temp file, fsync, os.replace). ``doc.json``
-is the existence marker in both directions: it is written last on save and
-unlinked first on delete, so a document exists exactly while it is present.
-Directories without it (a crashed save or delete) are ignored everywhere.
-
-The manifest is a cache, never a second source of truth: writers update it
-best-effort, and ``list_metas`` serves an entry only after confirming the
-document's ``doc.json`` still exists (documents are immutable, so presence
-implies the cached content is valid). Anything missing from the cache is
-re-read from the doc.json files and the manifest rewritten. No locks
-anywhere.
-"""
+"""On-disk document store behind PageIndexClient's local mode."""
 from __future__ import annotations
 
 import json
@@ -48,15 +28,11 @@ def _read_json(path: Path):
             PermissionError):
         return None
     except ValueError:
-        # Covers JSONDecodeError and the UnicodeDecodeError a torn multi-byte
-        # write produces.
         logger.warning("Unreadable JSON at %s; treating it as absent", path)
         return None
 
 
 def _is_safe_id(value: str) -> bool:
-    """Reject ids that could escape the store — callers pass arbitrary
-    strings, and delete_document removes a directory tree."""
     return (
         isinstance(value, str)
         and value not in ("", ".", "..")
@@ -107,7 +83,7 @@ class DocStore:
         try:
             _write_json_atomic(self._manifest, {"docs": docs})
         except OSError:
-            pass  # cache only — listings rebuild it from the doc.json files
+            pass
 
     # ── documents ──
     def save_document(self, doc_id: str, meta: dict, tree: list, pages: list) -> None:
@@ -134,8 +110,6 @@ class DocStore:
             return None
         meta = _read_json(doc_dir / "doc.json")
         if not _is_valid_meta(meta, doc_id):
-            # doc.json exists but is unreadable or invalid — the manifest may
-            # still hold a valid copy.
             meta = self._read_manifest().get(doc_id)
         return meta if _is_valid_meta(meta, doc_id) else None
 
@@ -176,7 +150,7 @@ class DocStore:
             existed = False
         except OSError:
             if not (doc_dir / "doc.json").is_dir():
-                raise  # a real unlink failure, e.g. permissions — stay loud
+                raise
             existed = False
         if doc_dir.is_dir():
             shutil.rmtree(doc_dir, ignore_errors=True)

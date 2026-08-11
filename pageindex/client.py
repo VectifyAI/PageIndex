@@ -274,8 +274,8 @@ class PageIndexClient:
     def get_document(self, doc_id: str) -> dict[str, Any]:
         """
         Get document metadata: {'id', 'name', 'description', 'status',
-        'createdAt', 'pageNum', 'folderId'}. Status is one of "pending",
-        "queued", "processing", "completed", "failed" (local documents are
+        'createdAt', 'pageNum', 'folderId'}. Status is one of "queued",
+        "processing", "completed", "failed" (local documents are
         always "completed"; local 'folderId' is always None).
 
         'createdAt' is UTC with no timezone marker, in both modes. To show
@@ -354,11 +354,7 @@ class PageIndexClient:
 
 
 class PageIndexCloudClient(PageIndexClient):
-    """
-    Cloud mode, explicitly: construction fails unless a real API key is
-    given, so a missing environment variable (``os.getenv(...) -> None``)
-    can never fall through to local mode.
-    """
+    """Cloud mode — requires a real API key at construction."""
 
     def __init__(self, api_key: str):
         if not api_key:
@@ -370,10 +366,7 @@ class PageIndexCloudClient(PageIndexClient):
 
 
 class PageIndexLocalClient(PageIndexClient):
-    """
-    Local mode, explicitly: there is no api_key parameter, so this client
-    can never talk to the cloud.
-    """
+    """Local mode — no api_key parameter, no cloud access."""
 
     def __init__(
         self,

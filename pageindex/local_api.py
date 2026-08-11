@@ -23,7 +23,6 @@ def _now_iso() -> str:
 
 
 def _run_indexer(func, *args, **kwargs):
-    """Run an indexer safely from synchronous or event-loop-hosted callers."""
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -219,14 +218,11 @@ class LocalAPI:
 
     @staticmethod
     def _require_data(data, error_prefix: str):
-        """Missing or unreadable data files under an intact doc.json must fail
-        loud, not serve an empty document."""
         if data is None:
             raise PageIndexAPIError(f"{error_prefix}: stored document data is unreadable.")
         return data
 
     def _require_pages(self, doc_id: str, error_prefix: str) -> list:
-        """A stored document can never legitimately have zero pages."""
         pages = self._require_data(self._store.get_pages(doc_id), error_prefix)
         if not pages:
             raise PageIndexAPIError(
@@ -299,9 +295,6 @@ class LocalAPI:
 
 
 def _format_tree_node(node: dict, node_summary: bool) -> dict:
-    """Reshape a stored tree node for the API: ``start_index`` becomes
-    ``page_index``, ``end_index`` is dropped.  When *node_summary* is true,
-    a non-leaf node's ``summary`` becomes ``prefix_summary``."""
     children = node.get("nodes") or []
     out = {
         "title": node.get("title", ""),

@@ -1,5 +1,4 @@
-"""Cloud mode of the PageIndex SDK — the pageindex 0.2.8 client code, kept
-line-for-line; don't restructure it."""
+"""Cloud mode of the PageIndex SDK, based on the 0.2.8 client."""
 import requests
 from typing import Optional, Dict, Any, List, Union, Iterator
 import json
@@ -19,8 +18,6 @@ class CloudAPI:
     """
 
     def __init__(self, client):
-        # Read through the owning client so reassigning client.BASE_URL or
-        # client.api_key after construction still takes effect.
         self._client = client
 
     @property
@@ -95,7 +92,6 @@ class CloudAPI:
         Returns:
             dict: API response with status and, if ready, OCR results.
         """
-        # Validate format parameter
         if format not in ["page", "node", "raw"]:
             raise ValueError("Format parameter must be 'page', 'node', or 'raw'")
 
@@ -116,6 +112,7 @@ class CloudAPI:
 
         Args:
             doc_id (str): Document ID.
+            node_summary (bool): Include node summaries (default False).
 
         Returns:
             dict: API response with status and, if ready, tree structure.
@@ -264,24 +261,12 @@ class CloudAPI:
                             if content:
                                 yield content
                         except json.JSONDecodeError:
-                            # Skip malformed chunks
                             continue
         finally:
             response.close()
 
     def _stream_chat_response_raw(self, response: requests.Response) -> Iterator[Dict[str, Any]]:
-        """
-        Parse streaming chat completion response with full metadata.
-
-        Yields all SSE chunks including citation events
-        (object="chat.completion.citations").
-
-        Args:
-            response: Streaming HTTP response
-
-        Yields:
-            Dict[str, Any]: Raw streaming response chunks with metadata
-        """
+        """Streaming chat completion with full metadata, including citation events."""
         try:
             for line in response.iter_lines():
                 if line:
@@ -295,7 +280,6 @@ class CloudAPI:
                             chunk = json.loads(data)
                             yield chunk
                         except json.JSONDecodeError:
-                            # Skip malformed chunks
                             continue
         finally:
             response.close()
@@ -344,8 +328,6 @@ class CloudAPI:
         )
         if response.status_code != 200:
             raise PageIndexAPIError(f"Failed to delete document: {response.text}")
-        # A successful DELETE may come back with an empty body; the document
-        # is already gone, so don't let json() raise.
         return response.json() if response.content else {}
 
     def list_documents(self, limit: int = 50, offset: int = 0, folder_id: Optional[str] = None) -> Dict[str, Any]:
@@ -365,7 +347,6 @@ class CloudAPI:
                 - limit (int): Applied limit
                 - offset (int): Applied offset
         """
-        # Validate parameters
         if limit < 1 or limit > 100:
             raise ValueError("limit must be between 1 and 100")
         if offset < 0:

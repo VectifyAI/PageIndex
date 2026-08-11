@@ -1,17 +1,10 @@
-"""Package surface: the SDK eagerly, the indexing stack lazily (PEP 562).
-
-`import pageindex` must stay cheap for cloud-only SDK use -- the indexing
-modules cost ~0.7s to import -- so every name beyond client/errors resolves
-on first attribute access. Don't add eager imports here.
-"""
+"""PageIndex SDK."""
 from typing import TYPE_CHECKING as _TYPE_CHECKING
 
 from .client import PageIndexClient, PageIndexCloudClient, PageIndexLocalClient
 from .errors import PageIndexAPIError
 
 if _TYPE_CHECKING:
-    # Static-only bindings for the lazily-resolved names below, so type
-    # checkers and IDEs see real signatures without the runtime import cost.
     from .flash import page_index_flash
     from .page_index_classic import page_index, page_index_main
     from .page_index_md import md_to_tree
@@ -29,7 +22,6 @@ _LAZY = {
     "optimize_tree": ".tree_optimize",
     "md_to_tree": ".page_index_md",
 }
-# "page_index" is absent: resolved via the default fallback to .page_index_classic.
 _SUBMODULES = {"client", "cloud_api", "errors", "flash", "local_api",
                "local_store", "page_index_classic", "page_index_md", "tree_optimize",
                "utils"}
@@ -37,8 +29,6 @@ _SUBMODULES = {"client", "cloud_api", "errors", "flash", "local_api",
 
 def __getattr__(name):
     if name.startswith("_"):
-        # Tooling probes dunders (pickle, IPython); never trigger the heavy
-        # import for them.
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     import importlib
     if name in _SUBMODULES:
