@@ -44,7 +44,8 @@ def _read_json(path: Path):
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
-    except (FileNotFoundError, NotADirectoryError, PermissionError):
+    except (FileNotFoundError, NotADirectoryError, IsADirectoryError,
+            PermissionError):
         return None
     except ValueError:
         # Covers JSONDecodeError and the UnicodeDecodeError a torn multi-byte
@@ -148,7 +149,8 @@ class DocStore:
         if not self._docs.is_dir():
             return []
         with os.scandir(self._docs) as entries:
-            dir_names = {entry.name for entry in entries if entry.is_dir()}
+            dir_names = {entry.name for entry in entries
+                         if entry.is_dir() and _is_safe_id(entry.name)}
         cached = self._read_manifest()
         fresh = {}
         for name in dir_names:

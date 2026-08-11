@@ -46,8 +46,9 @@ class PageIndexClient:
     instead of inferring it from api_key.
 
     Local mode differences (all documented per method): indexing is
-    synchronous, only PDFs are supported, and folders / ``beta_headers`` /
-    ``enable_citations`` / the deprecated retrieval API (``submit_query``,
+    synchronous, only PDFs are supported, and ``chat_completions`` (until
+    agent-based local chat lands in a later release) / folders /
+    ``beta_headers`` / the deprecated retrieval API (``submit_query``,
     ``get_retrieval``) are cloud-only.
     """
 
@@ -72,7 +73,7 @@ class PageIndexClient:
                           "retrieve_model": retrieve_model, "storage_path": storage_path}
             passed = [name for name, value in local_only.items() if value is not None]
             if passed:
-                raise ValueError(
+                raise PageIndexAPIError(
                     f"Local-mode arguments ({', '.join(passed)}) cannot be "
                     "combined with api_key — remove them, or omit api_key to "
                     "run locally."
@@ -204,11 +205,11 @@ class PageIndexClient:
 
         Cloud-only: the cloud API marks this endpoint deprecated in favor of
         chat completions, so local mode does not implement it — raises
-        PageIndexAPIError. Use ``chat_completions`` instead.
+        PageIndexAPIError. Use ``chat_completions`` (cloud) instead.
         """
         return self._require_cloud(
             "submit_query is cloud-only — the retrieval API is deprecated in "
-            "favor of chat completions; use chat_completions in local mode."
+            "favor of chat completions; use chat_completions in cloud mode."
         ).submit_query(doc_id=doc_id, query=query, thinking=thinking)
 
     def get_retrieval(self, retrieval_id: str) -> dict[str, Any]:
@@ -217,11 +218,11 @@ class PageIndexClient:
 
         Cloud-only: the cloud API marks this endpoint deprecated in favor of
         chat completions, so local mode does not implement it — raises
-        PageIndexAPIError. Use ``chat_completions`` instead.
+        PageIndexAPIError. Use ``chat_completions`` (cloud) instead.
         """
         return self._require_cloud(
             "get_retrieval is cloud-only — the retrieval API is deprecated in "
-            "favor of chat completions; use chat_completions in local mode."
+            "favor of chat completions; use chat_completions in cloud mode."
         ).get_retrieval(retrieval_id=retrieval_id)
 
     # ---------- CHAT COMPLETIONS ----------
@@ -242,11 +243,10 @@ class PageIndexClient:
             messages: Conversation messages with 'role' and 'content' keys.
             stream: Enable streaming responses.
             doc_id: Document ID or list of IDs to scope the conversation.
-                Required in local mode.
             temperature: Sampling temperature (0.0-1.0).
             stream_metadata: With stream=True, yield chunk dicts instead of
                 text pieces.
-            enable_citations: Cloud-only citation support; raises in local mode.
+            enable_citations: Enable citation instructions in responses.
 
         Returns:
             - stream=False: complete response dict ({'id', 'object', 'created',
@@ -254,10 +254,14 @@ class PageIndexClient:
             - stream=True, stream_metadata=False: iterator of text chunks
             - stream=True, stream_metadata=True: iterator of chunk dicts
 
-        Local: the question (last user message) is answered by tree-search
-        retrieval over the given documents plus a ``retrieve_model`` chat call.
+        Local: not yet supported — raises PageIndexAPIError. Agent-based
+        local chat arrives in a later release.
         """
-        return self._api.chat_completions(
+        return self._require_cloud(
+            "chat_completions is not yet supported in local mode — it arrives "
+            "in a later release. Create the client with an api_key to use "
+            "cloud chat."
+        ).chat_completions(
             messages=messages, stream=stream, doc_id=doc_id,
             temperature=temperature, stream_metadata=stream_metadata,
             enable_citations=enable_citations,

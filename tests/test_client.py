@@ -11,7 +11,6 @@ import pytest
 import pageindex.flash
 import pageindex.utils
 from pageindex import PageIndexClient, PageIndexAPIError
-from pageindex.local_api import CHAT_CONTEXT_TOKEN_LIMIT, LocalAPI
 
 page_index_module = importlib.import_module("pageindex.page_index_classic")
 
@@ -57,7 +56,7 @@ def test_empty_api_key_raises():
 
 
 def test_cloud_rejects_local_args():
-    with pytest.raises(ValueError, match="model, storage_path"):
+    with pytest.raises(PageIndexAPIError, match="model, storage_path"):
         PageIndexClient(api_key="k", model="m", storage_path="/tmp/x")
 
 
@@ -439,6 +438,13 @@ def test_corrupt_data_files_fail_loud(local_client, indexed_doc, tmp_path):
     assert local_client.list_documents()["total"] == 1
 
 
+def test_get_tree_fails_loud_on_broken_pages(local_client, indexed_doc, tmp_path):
+    doc_dir = tmp_path / "store" / "docs" / indexed_doc
+    (doc_dir / "pages.json").write_text("{broken")
+    with pytest.raises(PageIndexAPIError, match="unreadable"):
+        local_client.get_tree(indexed_doc)
+
+
 def test_delete_survives_marker_tamper(local_client, tmp_path):
     tampered = tmp_path / "store" / "docs" / "tampered" / "doc.json"
     tampered.mkdir(parents=True)
@@ -489,197 +495,10 @@ def test_retrieval_endpoints_cloud_only(local_client):
         local_client.get_retrieval("any")
 
 
-def test_chat_tree_search_failure(local_client, indexed_doc, monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "test")
-    monkeypatch.setattr(pageindex.utils, "llm_completion",
-                        lambda model, prompt, **kw: "")
-    with pytest.raises(PageIndexAPIError, match="no output"):
+def test_chat_completions_cloud_only(local_client):
+    with pytest.raises(PageIndexAPIError, match="not yet supported in local mode"):
         local_client.chat_completions(
-            messages=[{"role": "user", "content": "q"}], doc_id=indexed_doc)
-
-
-def test_parse_json_reply_invalid():
-    with pytest.raises(RuntimeError, match="not valid JSON"):
-        LocalAPI._parse_json_reply("not json at all")
-
-
-def test_chat_context_continues_after_oversized_node(
-    local_client, indexed_doc, monkeypatch
-):
-    monkeypatch.setattr(
-        LocalAPI, "_tree_search",
-        lambda self, doc_id, query, structure=None: ["0000", "0001"],
-    )
-    monkeypatch.setattr(
-        pageindex.utils, "count_tokens",
-        lambda text, model=None: (
-            CHAT_CONTEXT_TOKEN_LIMIT + 1 if "apples" in text else 2
-        ),
-    )
-
-    context = local_client._api._build_chat_context([indexed_doc], "q")
-
-    assert "apples" not in context
-    assert "bananas" in context
-
-
-# ── local: chat completions ──
-
-def _fake_completion(content="Bananas are on page two.", finish="stop"):
-    return types.SimpleNamespace(
-        choices=[types.SimpleNamespace(
-            message=types.SimpleNamespace(content=content),
-            finish_reason=finish)],
-        usage=types.SimpleNamespace(prompt_tokens=10, completion_tokens=5,
-                                    total_tokens=15),
-    )
-
-
-def _fake_stream():
-    def chunk(content=None, finish=None, usage=None):
-        return types.SimpleNamespace(
-            choices=[types.SimpleNamespace(
-                delta=types.SimpleNamespace(content=content),
-                finish_reason=finish)] if content or finish else [],
-            usage=usage)
-    return iter([
-        chunk(content="Bananas "),
-        chunk(content="page two."),
-        chunk(finish="stop",
-              usage=types.SimpleNamespace(prompt_tokens=10, completion_tokens=5,
-                                          total_tokens=15)),
-    ])
-
-
-@pytest.fixture
-def chat_ready(local_client, indexed_doc, monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "test")
-    monkeypatch.setattr(
-        pageindex.utils, "llm_completion",
-        lambda model, prompt, **kw: json.dumps({"thinking": "t", "node_list": ["0001"]}))
-    return indexed_doc
-
-
-def test_chat_completions(local_client, chat_ready, monkeypatch):
-    captured = {}
-    def fake_chat_llm(self, messages, temperature, stream):
-        captured["messages"] = messages
-        captured["temperature"] = temperature
-        return _fake_completion()
-    monkeypatch.setattr(LocalAPI, "_chat_llm", fake_chat_llm)
-
-    response = local_client.chat_completions(
-        messages=[{"role": "user", "content": "What about bananas?"}],
-        doc_id=chat_ready, temperature=0.2)
-    assert response["object"] == "chat.completion"
-    assert response["choices"][0]["message"]["content"] == "Bananas are on page two."
-    assert response["choices"][0]["finish_reason"] == "stop"
-    assert response["usage"]["total_tokens"] == 15
-    assert captured["temperature"] == 0.2
-    assert captured["messages"][0]["role"] == "system"
-    assert "Second page about bananas" in captured["messages"][0]["content"]
-    assert captured["messages"][-1] == {"role": "user", "content": "What about bananas?"}
-
-
-def test_chat_system_messages_merged(local_client, chat_ready, monkeypatch):
-    captured = {}
-    def fake_chat_llm(self, messages, temperature, stream):
-        captured["messages"] = messages
-        return _fake_completion()
-    monkeypatch.setattr(LocalAPI, "_chat_llm", fake_chat_llm)
-
-    local_client.chat_completions(
-        messages=[
-            {"role": "system", "content": "Be concise"},
-            {"role": "user", "content": "What about bananas?"},
-        ],
-        doc_id=chat_ready)
-    assert captured["messages"][0]["role"] == "system"
-    assert "Be concise" in captured["messages"][0]["content"]
-    assert "retrieved_context" in captured["messages"][0]["content"]
-    assert all(m["role"] != "system" for m in captured["messages"][1:])
-
-
-def test_chat_completions_stream(local_client, chat_ready, monkeypatch):
-    monkeypatch.setattr(LocalAPI, "_chat_llm",
-                        lambda self, messages, temperature, stream: _fake_stream())
-    pieces = list(local_client.chat_completions(
-        messages=[{"role": "user", "content": "q"}], doc_id=chat_ready, stream=True))
-    assert pieces == ["Bananas ", "page two."]
-
-    monkeypatch.setattr(LocalAPI, "_chat_llm",
-                        lambda self, messages, temperature, stream: _fake_stream())
-    chunks = list(local_client.chat_completions(
-        messages=[{"role": "user", "content": "q"}], doc_id=chat_ready,
-        stream=True, stream_metadata=True))
-    assert chunks[0]["object"] == "chat.completion.chunk"
-    assert chunks[0]["choices"][0]["delta"] == {"role": "assistant", "content": ""}
-    assert chunks[-1]["choices"][0]["finish_reason"] == "stop"
-    assert chunks[-1]["usage"]["total_tokens"] == 15
-
-
-class _ClosableStream:
-    def __init__(self, pieces):
-        self._it = iter(pieces)
-        self.closed = False
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        return next(self._it)
-
-    def close(self):
-        self.closed = True
-
-
-def test_stream_closes_provider_stream_when_consumed():
-    stream = _ClosableStream(_fake_stream())
-    chunks = list(LocalAPI._stream_chunks(stream, "chatcmpl-x", 1))
-    assert stream.closed
-    assert chunks[-1]["choices"][0]["finish_reason"] == "stop"
-
-
-def test_stream_closes_provider_stream_when_abandoned():
-    stream = _ClosableStream(_fake_stream())
-    gen = LocalAPI._stream_chunks(stream, "chatcmpl-x", 1)
-    next(gen)
-    gen.close()
-    assert stream.closed
-
-
-def test_stream_closes_provider_stream_on_error():
-    def pieces():
-        yield next(_fake_stream())
-        raise RuntimeError("provider hiccup")
-    stream = _ClosableStream(pieces())
-    with pytest.raises(PageIndexAPIError, match="provider hiccup"):
-        list(LocalAPI._stream_chunks(stream, "chatcmpl-x", 1))
-    assert stream.closed
-
-
-def test_chat_validation(local_client, chat_ready):
-    with pytest.raises(PageIndexAPIError, match="doc_id is required"):
-        local_client.chat_completions(messages=[{"role": "user", "content": "q"}])
-    with pytest.raises(PageIndexAPIError, match="cannot be empty"):
-        local_client.chat_completions(messages=[], doc_id=chat_ready)
-    with pytest.raises(PageIndexAPIError, match="First non-system message"):
-        local_client.chat_completions(
-            messages=[{"role": "assistant", "content": "hi"}], doc_id=chat_ready)
-    with pytest.raises(PageIndexAPIError, match="temperature"):
-        local_client.chat_completions(
-            messages=[{"role": "user", "content": "q"}], doc_id=chat_ready,
-            temperature=1.5)
-    with pytest.raises(PageIndexAPIError, match="enable_citations"):
-        local_client.chat_completions(
-            messages=[{"role": "user", "content": "q"}], doc_id=chat_ready,
-            enable_citations=True)
-    with pytest.raises(PageIndexAPIError, match="Document not found or access denied"):
-        local_client.chat_completions(
-            messages=[{"role": "user", "content": "q"}], doc_id=[chat_ready, "nope"])
-    with pytest.raises(PageIndexAPIError, match="cannot be empty"):
-        local_client.chat_completions(
-            messages=[{"role": "user", "content": "q"}], doc_id=[])
+            messages=[{"role": "user", "content": "q"}])
 
 
 # ── cloud mode: request wiring ──

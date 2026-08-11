@@ -887,7 +887,7 @@ def generate_doc_description(structure, model=None):
     """
     try:
         return llm_completion(model, prompt)
-    except Exception:
+    except RuntimeError:
         return ""
 
 

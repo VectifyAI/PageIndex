@@ -2,49 +2,18 @@
 from __future__ import annotations
 
 import asyncio
-import copy
 import json
 import logging
 import os
-import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from typing import Any, Iterator
+from typing import Any
 
 from .errors import PageIndexAPIError
 from .local_store import DocStore
 
 logger = logging.getLogger(__name__)
-
-TREE_SEARCH_PROMPT = """
-You are given a question and a tree structure of a document.
-Each node contains a node id, node title, and a corresponding summary.
-Your task is to find all nodes that are likely to contain the answer to the question.
-
-Question: {query}
-
-Document tree structure:
-{tree}
-
-Please reply in the following JSON format:
-{{
-    "thinking": "<Your thinking process on which nodes are relevant to the question>",
-    "node_list": ["node_id_1", "node_id_2", ..., "node_id_n"]
-}}
-Directly return the final JSON structure. Do not output anything else.
-"""
-
-CHAT_SYSTEM_PROMPT = """You are PageIndex Chat, a document question-answering assistant.
-Answer the user's question based on the retrieved document context below.
-If the context does not contain the information needed, say so instead of guessing.
-
-<retrieved_context>
-{context}
-</retrieved_context>"""
-
-# Cap the retrieved context to leave room for the conversation and the answer.
-CHAT_CONTEXT_TOKEN_LIMIT = 100_000
 
 
 def _now_iso() -> str:
@@ -212,7 +181,7 @@ class LocalAPI:
         from .utils import add_node_text
         structure = self._require_data(
             self._store.get_tree(doc_id), error_prefix)
-        pages = self._store.get_pages(doc_id)
+        pages = self._require_data(self._store.get_pages(doc_id), error_prefix)
         if pages:
             pdf_pages = [(p.get("markdown", ""), 0) for p in pages]
             add_node_text(structure, pdf_pages)
@@ -220,8 +189,7 @@ class LocalAPI:
 
     def get_tree(self, doc_id: str, node_summary: bool = False) -> dict[str, Any]:
         meta = self._require_doc(doc_id, "Failed to get tree result")
-        structure = copy.deepcopy(
-            self._load_tree_with_text(doc_id, "Failed to get tree result"))
+        structure = self._load_tree_with_text(doc_id, "Failed to get tree result")
         result = [_format_tree_node(node, node_summary) for node in structure]
         return self._completed_envelope(doc_id, result, meta)
 
@@ -322,269 +290,6 @@ class LocalAPI:
             "limit": limit,
             "offset": offset,
         }
-
-    # ── retrieval (internal: backs chat_completions) ──
-
-    def _tree_search(self, doc_id: str, query: str,
-                     structure: list | None = None) -> list[str]:
-        """Ask the retrieve model which tree nodes answer the query."""
-        from .utils import llm_completion, remove_fields
-        if structure is None:
-            structure = self._require_data(self._store.get_tree(doc_id),
-                                           "Failed to get chat completion")
-        tree_without_text = remove_fields(structure, fields=["text"])
-        prompt = TREE_SEARCH_PROMPT.format(
-            query=query, tree=json.dumps(tree_without_text, indent=2, ensure_ascii=False)
-        )
-        reply = llm_completion(self._retrieve_model, prompt)
-        if not reply:
-            raise RuntimeError("tree search model returned no output")
-        parsed = self._parse_json_reply(reply)
-        node_list = parsed.get("node_list") if isinstance(parsed, dict) else None
-        if not isinstance(node_list, list):
-            raise RuntimeError(f"tree search reply had no node_list: {reply[:200]}")
-        known = self._node_map(structure)
-        seen = set()
-        node_ids = []
-        for node_id in node_list:
-            node_id = str(node_id)
-            if node_id in known and node_id not in seen:
-                seen.add(node_id)
-                node_ids.append(node_id)
-        return node_ids
-
-    @staticmethod
-    def _parse_json_reply(reply: str) -> dict:
-        from .utils import _reply_json
-        parsed = _reply_json(reply)
-        if parsed is None:
-            raise RuntimeError(f"tree search reply was not valid JSON: {reply[:200]}")
-        return parsed
-
-    @staticmethod
-    def _node_map(structure: list) -> dict[str, dict]:
-        mapping = {}
-        def _walk(nodes):
-            for node in nodes:
-                if node.get("node_id") is not None:
-                    mapping[str(node["node_id"])] = node
-                _walk(node.get("nodes") or [])
-        _walk(structure)
-        return mapping
-
-    # ── chat completions ──
-
-    def chat_completions(
-        self,
-        messages: list[dict[str, str]],
-        stream: bool = False,
-        doc_id: str | list[str] | None = None,
-        temperature: float | None = None,
-        stream_metadata: bool = False,
-        enable_citations: bool = False,
-    ) -> dict[str, Any] | Iterator[str] | Iterator[dict[str, Any]]:
-        prefix = "Failed to get chat completion"
-        if enable_citations:
-            raise PageIndexAPIError(f"{prefix}: enable_citations is not supported in local mode.")
-        if doc_id is None:
-            raise PageIndexAPIError(
-                f"{prefix}: doc_id is required in local mode — pass a doc_id or a list of them."
-            )
-        self._validate_chat_messages(messages, prefix)
-        if temperature is not None and not 0.0 <= temperature <= 1.0:
-            raise PageIndexAPIError(f"{prefix}: temperature must be between 0.0 and 1.0.")
-
-        doc_ids = [doc_id] if isinstance(doc_id, str) else list(doc_id)
-        if not doc_ids:
-            raise PageIndexAPIError(f"{prefix}: doc_id list cannot be empty.")
-        metas: dict[str, dict] = {}
-        for one_id in doc_ids:
-            meta = self._store.get_meta(one_id)
-            if meta is None:
-                raise PageIndexAPIError(f"{prefix}: Document not found or access denied: {one_id}")
-            metas[one_id] = meta
-
-        query = next(m["content"] for m in reversed(messages) if m["role"] == "user")
-        try:
-            context = self._build_chat_context(doc_ids, query, metas=metas)
-            system_content = CHAT_SYSTEM_PROMPT.format(context=context)
-            user_system = [m["content"] for m in messages if m["role"] == "system"]
-            if user_system:
-                system_content = "\n\n".join(user_system) + "\n\n" + system_content
-            llm_messages = (
-                [{"role": "system", "content": system_content}]
-                + [{"role": m["role"], "content": m["content"]}
-                   for m in messages if m["role"] != "system"]
-            )
-            response = self._chat_llm(llm_messages, temperature=temperature, stream=stream)
-        except PageIndexAPIError:
-            raise
-        except RuntimeError as e:
-            raise PageIndexAPIError(f"{prefix}: {e}") from e
-
-        chat_id = f"chatcmpl-{uuid.uuid4().hex}"
-        created = int(time.time())
-        if stream:
-            chunks = self._stream_chunks(response, chat_id, created)
-            if stream_metadata:
-                return chunks
-            return (chunk["choices"][0]["delta"].get("content", "")
-                    for chunk in chunks
-                    if chunk.get("choices") and chunk["choices"][0]["delta"].get("content"))
-
-        if not response.choices:
-            raise PageIndexAPIError(
-                f"{prefix}: Model returned an empty response (no choices).")
-        choice = response.choices[0]
-        result = {
-            "id": chat_id,
-            "object": "chat.completion",
-            "created": created,
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": choice.message.content or ""},
-                "finish_reason": choice.finish_reason,
-            }],
-        }
-        usage = getattr(response, "usage", None)
-        if usage is not None:
-            result["usage"] = {
-                "prompt_tokens": usage.prompt_tokens,
-                "completion_tokens": usage.completion_tokens,
-                "total_tokens": usage.total_tokens,
-            }
-        return result
-
-    @staticmethod
-    def _validate_chat_messages(messages: list[dict[str, str]], prefix: str) -> None:
-        if not messages:
-            raise PageIndexAPIError(
-                f"{prefix}: Messages array cannot be empty. Please provide at least one message."
-            )
-        non_system = [m for m in messages if m.get("role") != "system"]
-        if not non_system or non_system[0].get("role") != "user":
-            raise PageIndexAPIError(f"{prefix}: First non-system message must be from 'user' role.")
-        for i, message in enumerate(messages):
-            role = message.get("role")
-            if role not in ("user", "assistant", "system"):
-                raise PageIndexAPIError(
-                    f"{prefix}: Message at index {i} has invalid role {role!r}. "
-                    "Valid roles are: system, user, assistant."
-                )
-            if not message.get("content"):
-                raise PageIndexAPIError(
-                    f"{prefix}: Message at index {i} has empty or missing 'content' field."
-                )
-
-    def _build_chat_context(self, doc_ids: list[str], query: str,
-                            metas: dict[str, dict] | None = None) -> str:
-        from .utils import count_tokens
-        sections = []
-        used_tokens = 0
-        truncated = False
-        for one_id in doc_ids:
-            meta = metas[one_id] if metas else self._store.get_meta(one_id)
-            structure = self._load_tree_with_text(
-                one_id, "Failed to get chat completion")
-            node_map = self._node_map(structure)
-            for node_id in self._tree_search(one_id, query, structure=structure):
-                node = node_map[node_id]
-                text = node.get("text", "")
-                block = (f"[{meta.get('name')} — {node.get('title', '')} "
-                         f"(pages {node.get('start_index')}-{node.get('end_index')})]\n{text}")
-                block_tokens = count_tokens(block, model=self._retrieve_model)
-                if used_tokens + block_tokens > CHAT_CONTEXT_TOKEN_LIMIT:
-                    truncated = True
-                    continue
-                used_tokens += block_tokens
-                sections.append(block)
-        if truncated:
-            print("PageIndex: retrieved context exceeded the token limit; "
-                  "some retrieved sections were dropped.")
-        if not sections:
-            return "(No relevant sections were retrieved for this question.)"
-        return "\n\n".join(sections)
-
-    def _chat_llm(self, messages: list[dict], temperature: float | None, stream: bool):
-        """One chat call against the retrieve model, OpenAI SDK or LiteLLM."""
-        from .utils import _is_openai_model, _strip_prefix
-        model = self._retrieve_model
-        kwargs: dict[str, Any] = {"messages": messages, "stream": stream}
-        if temperature is not None:
-            kwargs["temperature"] = temperature
-        if _is_openai_model(model):
-            import openai as _openai_mod
-            from . import utils as _utils_mod
-            if _utils_mod._openai_sync_client is None:
-                _utils_mod._openai_sync_client = _openai_mod.OpenAI(max_retries=3)
-            model = _strip_prefix(model, "openai/")
-            if stream:
-                kwargs["stream_options"] = {"include_usage": True}
-            return _utils_mod._openai_sync_client.chat.completions.create(model=model, **kwargs)
-        import litellm
-        model = _strip_prefix(model, "litellm/")
-        if stream:
-            kwargs["stream_options"] = {"include_usage": True}
-        return litellm.completion(model=model, drop_params=True, num_retries=3, **kwargs)
-
-    @staticmethod
-    def _stream_chunks(response, chat_id: str, created: int) -> Iterator[dict[str, Any]]:
-        """Adapt a provider stream into chat.completion.chunk dicts."""
-        def _generate():
-            finish_reason = None
-            usage = None
-            try:
-                yield {
-                    "id": chat_id,
-                    "object": "chat.completion.chunk",
-                    "created": created,
-                    "choices": [{"index": 0,
-                                 "delta": {"role": "assistant", "content": ""},
-                                 "finish_reason": None}],
-                }
-                for piece in response:
-                    if getattr(piece, "usage", None) is not None:
-                        usage = piece.usage
-                    if not piece.choices:
-                        continue
-                    choice = piece.choices[0]
-                    if choice.finish_reason is not None:
-                        finish_reason = choice.finish_reason
-                    content = getattr(choice.delta, "content", None)
-                    if content:
-                        yield {
-                            "id": chat_id,
-                            "object": "chat.completion.chunk",
-                            "created": created,
-                            "choices": [{"index": 0,
-                                         "delta": {"content": content},
-                                         "finish_reason": None}],
-                        }
-                final = {
-                    "id": chat_id,
-                    "object": "chat.completion.chunk",
-                    "created": created,
-                    "choices": [{"index": 0, "delta": {},
-                                 "finish_reason": finish_reason or "stop"}],
-                }
-                if usage is not None:
-                    final["usage"] = {
-                        "prompt_tokens": usage.prompt_tokens,
-                        "completion_tokens": usage.completion_tokens,
-                        "total_tokens": usage.total_tokens,
-                    }
-                yield final
-            except PageIndexAPIError:
-                raise
-            except Exception as e:
-                raise PageIndexAPIError(
-                    f"Failed to get chat completion: {e}") from e
-            finally:
-                close = getattr(response, "close", None)
-                if close is not None:
-                    close()
-        return _generate()
-
 
 
 def _format_tree_node(node: dict, node_summary: bool) -> dict:

@@ -226,13 +226,13 @@ doc_id = client.submit_document("doc.pdf", mode="flash")["doc_id"]  # local mode
 
 tree = client.get_tree(doc_id, node_summary=True)["result"]
 
-answer = client.chat_completions(
+answer = client.chat_completions(                                   # cloud only for now — local chat arrives in a later release
     messages=[{"role": "user", "content": "Summarize the key findings"}],
     doc_id=doc_id,
 )["choices"][0]["message"]["content"]
 ```
 
-Local documents are stored as plain JSON under `./.pageindex` (configurable via `storage_path`). Local mode supports PDFs; folders, `beta_headers`, `enable_citations`, and the deprecated retrieval API (`submit_query`/`get_retrieval`) remain cloud-only — each method's docstring spells out the differences. To pin the mode at construction instead of inferring it from `api_key`, use `PageIndexCloudClient` (fails without a real key) or `PageIndexLocalClient` (has no key parameter).
+Local documents are stored as plain JSON under `./.pageindex` (configurable via `storage_path`). Local mode supports PDFs; `chat_completions` (until agent-based local chat lands in a later release), folders, `beta_headers`, and the deprecated retrieval API (`submit_query`/`get_retrieval`) remain cloud-only — each method's docstring spells out the differences. To pin the mode at construction instead of inferring it from `api_key`, use `PageIndexCloudClient` (fails without a real key) or `PageIndexLocalClient` (has no key parameter).
 
 ## 🚀 Agentic Vectorless RAG: An Example
 
