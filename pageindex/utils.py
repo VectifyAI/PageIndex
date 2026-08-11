@@ -840,6 +840,16 @@ async def summarize_tree(structure, pdf_pages, model=None,
 
     await asyncio.gather(*(visit(root) for root in structure),
                          return_exceptions=True)
+
+    def _any_summary(nodes):
+        return any(n.get('summary') or _any_summary(n.get('nodes') or [])
+                   for n in nodes)
+    if not _any_summary(structure):
+        raise RuntimeError(
+            "Summary generation failed for all nodes "
+            "(check LLM credentials and model availability)"
+        )
+
     strip_internal_keys(structure)
     return structure
 

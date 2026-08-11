@@ -64,7 +64,8 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           echo "Publishing version: $VERSION"
           # Fail early on a malformed tag instead of publishing a junk version.
-          python -c "from packaging.version import Version; Version('$VERSION')"
+          export VERSION
+          python -c "import os; from packaging.version import Version; Version(os.environ['VERSION'])"
           # The git tag is the single source of truth; overwrite the static
           # placeholder in [tool.poetry] so the built artifacts carry $VERSION.
           sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
