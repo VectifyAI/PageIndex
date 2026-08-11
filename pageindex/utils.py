@@ -987,6 +987,8 @@ def create_node_mapping(tree, include_page_ranges=False, max_page=None):
 
 def print_tree(tree, indent=0, exclude_fields=None):
     """Outline view; passing exclude_fields gives the 0.2.8 pprint view."""
+    if isinstance(indent, list):
+        exclude_fields, indent = indent, 0
     if exclude_fields is not None:
         from pprint import pprint
         pprint(remove_fields(tree, exclude_fields, max_len=40), sort_dicts=False, width=100)
