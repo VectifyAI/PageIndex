@@ -26,9 +26,7 @@ import time
 import uuid
 from typing import Any, Iterator, Optional, Union
 
-from .agent_tools import (AGENT_INSTRUCTIONS, _local_description,
-                          _local_schema, call_tool, doc_targeting_block,
-                          tool_names)
+from .agent_tools import AGENT_INSTRUCTIONS, doc_targeting_block
 from .errors import PageIndexAPIError
 
 CHAT_HEADER = (
@@ -506,20 +504,6 @@ def _anthropic_client():
     return anthropic.Anthropic()
 
 
-def _runnable_tools(client) -> list:
-    from anthropic import beta_tool
-
-    def make(name: str):
-        def _fn(**kwargs: Any) -> str:
-            return call_tool(client, name, kwargs)[0]
-
-        _fn.__name__ = name
-        return beta_tool(_fn, name=name, description=_local_description(name),
-                         input_schema=_local_schema(name))
-
-    return [make(name) for name in tool_names()]
-
-
 def _anthropic_system(extra_system, block: Optional[str]) -> list[dict]:
     """System blocks: cache_control marks the stable managed prefix only
     (the API allows 4 breakpoints total — the varying doc block and caller
@@ -580,6 +564,8 @@ def run_messages(client, messages, model: str, max_tokens: int,
                  stop_sequences: Optional[list[str]] = None,
                  max_turns: Optional[int] = None,
                  ) -> Union[dict, Iterator[Any]]:
+    from .integrations.anthropic_sdk import build_anthropic_tools
+
     _require_anthropic()
     _validate_max_turns(max_turns)
     if (not isinstance(messages, list) or not messages
@@ -596,7 +582,7 @@ def run_messages(client, messages, model: str, max_tokens: int,
         max_tokens=max_tokens,
         messages=prepared,
         model=model,
-        tools=_runnable_tools(client),
+        tools=build_anthropic_tools(client),
         system=_anthropic_system(system, block),
         stream=stream,
         # Bounded like the OpenAI surfaces (their framework default is 10).

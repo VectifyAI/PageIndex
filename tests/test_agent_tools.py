@@ -484,9 +484,73 @@ def test_as_claude_mcp_local_when_installed(client):
         assert server.get("type") != "http"
 
 
+def test_as_anthropic_tools_missing_dependency(client, monkeypatch):
+    monkeypatch.setitem(sys.modules, "anthropic", None)
+    with pytest.raises(PageIndexAPIError, match="anthropic"):
+        client.as_anthropic_tools()
+
+
+def test_as_anthropic_tools_local_in_process(client, store_path):
+    pytest.importorskip("anthropic")
+    from pageindex.agent_tools import _local_description, _local_schema
+    tools = client.as_anthropic_tools()
+    assert [tool.name for tool in tools] == list(tool_names())
+    browse = {tool.name: tool for tool in tools}["browse_documents"]
+    assert browse.input_schema == _local_schema("browse_documents")
+    assert browse.description == _local_description("browse_documents")
+    seed_doc(store_path, "pi-a", "report.pdf")
+    assert "report.pdf" in browse.call({})
+
+
+def test_as_anthropic_tools_local_management_opt_in(client):
+    pytest.importorskip("anthropic")
+    names = [tool.name
+             for tool in client.as_anthropic_tools(include_management=True)]
+    assert names == list(tool_names(include_management=True))
+    assert "remove_document" in names
+
+
+def test_as_anthropic_tools_cloud_schemas_pass_through(cloud_with_fake_bridge):
+    pytest.importorskip("anthropic")
+    cloud, created = cloud_with_fake_bridge
+    tools = cloud.as_anthropic_tools()
+    assert [tool.name for tool in tools] == ["search_documents", "get_document"]
+    bridge = created["bridge"]
+    assert tools[0].input_schema == bridge.tools[0]["inputSchema"]
+    assert tools[0].description == bridge.tools[0]["description"]
+    # Calls route over the bridge; None-valued arguments mean "omitted".
+    out = tools[1].call({"doc_name": "x.pdf", "folder_id": None})
+    assert bridge.calls == [("get_document", {"doc_name": "x.pdf"})]
+    assert json.loads(out)["success"] is True
+
+
+def test_as_anthropic_tools_cloud_management_opt_in(cloud_with_fake_bridge):
+    pytest.importorskip("anthropic")
+    cloud, _ = cloud_with_fake_bridge
+    names = [tool.name
+             for tool in cloud.as_anthropic_tools(include_management=True)]
+    assert names == ["search_documents", "get_document",
+                     "remove_document", "unannotated_tool"]
+
+
+def test_as_anthropic_tools_cloud_contains_bridge_errors(cloud_with_fake_bridge):
+    pytest.importorskip("anthropic")
+    cloud, created = cloud_with_fake_bridge
+    tools = cloud.as_anthropic_tools()
+
+    def boom(name, arguments):
+        raise RuntimeError("bridge down")
+
+    created["bridge"].call_tool = boom
+    payload = json.loads(tools[0].call({"query": "q"}))
+    assert payload["errorCode"] == "INTERNAL_ERROR"
+    assert "bridge down" in payload["error"]
+
+
 def test_agent_tools_work_without_frameworks(client, store_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "agents", None)
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
+    monkeypatch.setitem(sys.modules, "anthropic", None)
     seed_doc(store_path, "pi-a", "report.pdf")
     browse = client.agent_tools()[0]
     assert "report.pdf" in browse()

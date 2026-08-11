@@ -618,6 +618,33 @@ class PageIndexClient:
         from .integrations.openai_agents import build_openai_tools
         return build_openai_tools(self, include_management, hosted)
 
+    def as_anthropic_tools(self, include_management: bool = False) -> list:
+        """
+        Runnable tools for the Anthropic SDK's tool runner — pass to
+        ``client.beta.messages.tool_runner(tools=...)``.
+
+        Cloud: the full live read tool set (search, folders, images — as
+        enabled for your key), discovered from the PageIndex MCP server
+        and executed from your process; the server's input schemas pass
+        through verbatim (MCP and the Messages API share the schema
+        shape). The Messages API's MCP connector (``mcp_servers=``
+        pointing at ``{BASE_URL}/mcp``) is the server-side alternative
+        with no client-side tools involved. Local: the in-process tools —
+        the same set ``messages()`` runs internally.
+
+        Requires ``anthropic>=0.68.0``
+        (``pip install 'pageindex[anthropic]'``), imported only when this
+        method is called.
+
+        Args:
+            include_management (bool): Also expose tools that modify the
+                library. Local: adds ``remove_document``. Cloud: by default
+                only tools the server marks read-only are exposed; True
+                exposes the server's complete list (upload, delete, ...).
+        """
+        from .integrations.anthropic_sdk import build_anthropic_tools
+        return build_anthropic_tools(self, include_management)
+
     def as_claude_mcp(self, include_management: bool = False):
         """
         ``mcp_servers`` entry for the Claude Agent SDK.

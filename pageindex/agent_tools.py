@@ -1220,18 +1220,11 @@ def _annotation_for(spec: dict) -> Any:
     return _SCHEMA_TYPE_MAP.get(schema_type, Any)
 
 
-def _make_bridge_function(bridge, meta: dict) -> Callable[..., str]:
-    """One plain function for a cloud tool: real signature and docstring from
-    the server's schema, invocation proxied over MCP, errors contained."""
-    import keyword
-
-    name = str(meta.get("name") or "")
-    schema = meta.get("inputSchema") or {}
-    properties: dict[str, Any] = schema.get("properties") or {}
-    required = set(schema.get("required") or [])
-
+def _bridge_invoker(bridge, name: str) -> Callable[[dict], str]:
+    """One cloud tool call proxied over MCP: None-valued arguments are
+    dropped (None ≡ omitted, matching the contract's "omit if ..."
+    semantics) and failures are contained in the error envelope."""
     def _invoke(arguments: dict[str, Any]) -> str:
-        # None ≡ omitted, matching the contract's "omit if ..." semantics.
         arguments = {key: value for key, value in arguments.items()
                      if value is not None}
         try:
@@ -1246,6 +1239,19 @@ def _make_bridge_function(bridge, meta: dict) -> Callable[..., str]:
                 "INTERNAL_ERROR",
             )
             return _dumps(payload)
+    return _invoke
+
+
+def _make_bridge_function(bridge, meta: dict) -> Callable[..., str]:
+    """One plain function for a cloud tool: real signature and docstring from
+    the server's schema, invocation proxied over MCP, errors contained."""
+    import keyword
+
+    name = str(meta.get("name") or "")
+    schema = meta.get("inputSchema") or {}
+    properties: dict[str, Any] = schema.get("properties") or {}
+    required = set(schema.get("required") or [])
+    _invoke = _bridge_invoker(bridge, name)
 
     params_usable = all(param.isidentifier() and not keyword.iskeyword(param)
                         and param != "_invoke"
@@ -1300,22 +1306,27 @@ def _cloud_bridge(client):
         return bridge
 
 
+def _read_only_tools(tools_meta: list[dict]) -> list[dict]:
+    """The management gate for consumers without a framework permission
+    layer: only tools the server marks read-only, guarded against a server
+    annotation regression silently disabling every tool."""
+    filtered = [meta for meta in tools_meta
+                if (meta.get("annotations") or {}).get("readOnlyHint") is True]
+    if tools_meta and not filtered:
+        raise PageIndexAPIError(
+            "The MCP server returned tools but none are annotated "
+            "read-only — a server annotation regression would otherwise "
+            "silently disable every tool. Pass include_management=True "
+            "to expose the unfiltered list."
+        )
+    return filtered
+
+
 def _build_cloud_agent_tools(client, include_management: bool) -> list[Callable[..., str]]:
     bridge = _cloud_bridge(client)
     tools_meta = bridge.list_tools()
     if not include_management:
-        # Plain functions have no framework permission layer, so the
-        # management gate lives here: only tools the server marks read-only.
-        filtered = [meta for meta in tools_meta
-                    if (meta.get("annotations") or {}).get("readOnlyHint") is True]
-        if tools_meta and not filtered:
-            raise PageIndexAPIError(
-                "The MCP server returned tools but none are annotated "
-                "read-only — a server annotation regression would otherwise "
-                "silently disable every tool. Pass include_management=True "
-                "to expose the unfiltered list."
-            )
-        tools_meta = filtered
+        tools_meta = _read_only_tools(tools_meta)
     return [_make_bridge_function(bridge, meta) for meta in tools_meta]
 
 
