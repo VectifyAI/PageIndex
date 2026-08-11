@@ -403,10 +403,7 @@ class LocalAPI:
             response = self._chat_llm(llm_messages, temperature=temperature, stream=stream)
         except PageIndexAPIError:
             raise
-        except Exception as e:
-            import openai as _oai
-            if isinstance(e, _oai.OpenAIError):
-                raise
+        except RuntimeError as e:
             raise PageIndexAPIError(f"{prefix}: {e}") from e
 
         chat_id = f"chatcmpl-{uuid.uuid4().hex}"
