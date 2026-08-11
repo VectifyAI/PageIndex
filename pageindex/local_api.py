@@ -47,7 +47,7 @@ CHAT_CONTEXT_TOKEN_LIMIT = 100_000
 def _now_iso() -> str:
     """Naive UTC, millisecond precision."""
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    return now.replace(microsecond=now.microsecond // 1000 * 1000).isoformat(timespec="milliseconds")
+    return now.replace(microsecond=now.microsecond // 1000 * 1000).isoformat()
 
 
 def _run_indexer(func, *args, **kwargs):
