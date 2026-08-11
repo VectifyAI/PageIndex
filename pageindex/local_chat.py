@@ -556,7 +556,7 @@ def _anthropic_usage(turns, final_usage: dict) -> dict:
     return totals
 
 
-def run_messages(client, messages, model: str, max_tokens: int = 4096,
+def run_messages(client, messages, model: str, max_tokens: int = 8192,
                  stream: bool = False, doc_id=None, system=None,
                  temperature: Optional[float] = None,
                  top_p: Optional[float] = None,

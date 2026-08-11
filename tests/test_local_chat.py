@@ -486,7 +486,7 @@ def test_messages_accepts_query_string(client, fake_anthropic):
     assert calls[0]["messages"] == [{"role": "user",
                                      "content": "What status?"}]
     # The wire-required budget is table-setting, not a user obligation.
-    assert calls[0]["max_tokens"] == 4096
+    assert calls[0]["max_tokens"] == 8192
     with pytest.raises(PageIndexAPIError, match="non-empty string"):
         client.messages("   ", model="claude-test")
 
