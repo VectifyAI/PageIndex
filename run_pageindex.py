@@ -72,10 +72,12 @@ if __name__ == "__main__":
             from pageindex.flash import page_index_flash
             if args.optimize == 'full':
                 from pageindex.tree_optimize import default_model
-                from pageindex.utils import _is_openai_model
+                from pageindex.utils import _is_openai_model, _api_key_env_for
                 expand_model = args.model or default_model()
-                if _is_openai_model(expand_model) and not os.getenv("OPENAI_API_KEY"):
-                    raise SystemExit(f"OPENAI_API_KEY is not set (expand model: {expand_model}).")
+                if _is_openai_model(expand_model):
+                    key_env = _api_key_env_for(expand_model)
+                    if not os.getenv(key_env):
+                        raise SystemExit(f"{key_env} is not set (expand model: {expand_model}).")
             toc_with_page_number = page_index_flash(
                 args.pdf_path,
                 optimize=args.optimize is not None,
