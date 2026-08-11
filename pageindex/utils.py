@@ -30,6 +30,12 @@ def count_tokens(text, model=None):
     return litellm.token_counter(model=model, text=text)
 
 
+def _strip_prefix(s, prefix):
+    if s.startswith(prefix):
+        return s[len(prefix):]
+    return s
+
+
 def _is_openai_model(model):
     """Models without a provider prefix (no '/') use the openai SDK directly.
     For other providers, use 'provider/model' format (e.g. 'anthropic/claude-sonnet-4-6')."""
@@ -56,18 +62,19 @@ def _is_unrecoverable(exc: Exception) -> bool:
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
     use_openai_sdk = _is_openai_model(model)
     if model:
-        model = model.removeprefix("litellm/")
+        model = _strip_prefix(model, "litellm/")
         if use_openai_sdk:
-            model = model.removeprefix("openai/")
+            model = _strip_prefix(model, "openai/")
     max_retries = 10
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
+    if use_openai_sdk:
+        global _openai_sync_client
+        if _openai_sync_client is None:
+            import openai
+            _openai_sync_client = openai.OpenAI(max_retries=0)
     for i in range(max_retries):
         try:
             if use_openai_sdk:
-                global _openai_sync_client
-                if _openai_sync_client is None:
-                    import openai
-                    _openai_sync_client = openai.OpenAI(max_retries=0)
                 response = _openai_sync_client.chat.completions.create(
                     model=model,
                     messages=messages,
@@ -93,27 +100,27 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
             if i < max_retries - 1:
                 time.sleep(1)
             else:
-                logging.error('Max retries reached for prompt: ' + prompt)
-                if return_finish_reason:
-                    return "", "error"
-                return ""
+                raise RuntimeError(
+                    f"LLM completion failed after {max_retries} retries"
+                ) from e
 
 
 async def llm_acompletion(model, prompt):
     use_openai_sdk = _is_openai_model(model)
     if model:
-        model = model.removeprefix("litellm/")
+        model = _strip_prefix(model, "litellm/")
         if use_openai_sdk:
-            model = model.removeprefix("openai/")
+            model = _strip_prefix(model, "openai/")
     max_retries = 10
     messages = [{"role": "user", "content": prompt}]
+    if use_openai_sdk:
+        global _openai_async_client
+        if _openai_async_client is None:
+            import openai
+            _openai_async_client = openai.AsyncOpenAI(max_retries=0)
     for i in range(max_retries):
         try:
             if use_openai_sdk:
-                global _openai_async_client
-                if _openai_async_client is None:
-                    import openai
-                    _openai_async_client = openai.AsyncOpenAI(max_retries=0)
                 response = await _openai_async_client.chat.completions.create(
                     model=model,
                     messages=messages,
@@ -135,10 +142,11 @@ async def llm_acompletion(model, prompt):
             if i < max_retries - 1:
                 await asyncio.sleep(1)
             else:
-                logging.error('Max retries reached for prompt: ' + prompt)
-                return ""
-            
-            
+                raise RuntimeError(
+                    f"LLM completion failed after {max_retries} retries"
+                ) from e
+
+
 def get_json_content(response):
     start_idx = response.find("```json")
     if start_idx != -1:
@@ -179,7 +187,7 @@ def extract_json(content):
             # Remove any trailing commas before closing brackets/braces
             json_content = json_content.replace(',]', ']').replace(',}', '}')
             return json.loads(json_content)
-        except:
+        except Exception:
             logging.error("Failed to parse JSON even after cleanup")
             return {}
     except Exception as e:

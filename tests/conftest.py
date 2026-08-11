@@ -1,6 +1,12 @@
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _llm_key(monkeypatch):
+    """Deterministic key presence for every test; missing-key tests delenv."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+
 def build_pdf(page_texts):
     """Build a minimal, uncompressed PDF (one Helvetica line per page) whose
     text PyPDF2 can extract. Returns the PDF file bytes."""

@@ -69,6 +69,8 @@ class LocalAPI:
         self._model = model
         self._summary_model = summary_model
         self._retrieve_model = retrieve_model
+        from .utils import ConfigLoader
+        self._config_loader = ConfigLoader()
 
     # ── indexing ──
 
@@ -129,7 +131,7 @@ class LocalAPI:
                 )
             else:
                 structure, description = _run_indexer(
-                    self._index_standard, file_path
+                    self._index_standard, file_path, page_texts
                 )
         except PageIndexAPIError:
             raise
@@ -160,10 +162,9 @@ class LocalAPI:
             reader = PyPDF2.PdfReader(f)
             return [page.extract_text() or "" for page in reader.pages]
 
-    def _index_standard(self, file_path: str) -> tuple[list, str | None]:
+    def _index_standard(self, file_path: str, _page_texts: list[str]) -> tuple[list, str | None]:
         from .page_index import page_index_main
-        from .utils import ConfigLoader
-        opt = ConfigLoader().load({
+        opt = self._config_loader.load({
             "model": self._model,
             "summary_model": self._summary_model,
             "if_add_node_id": "yes",
@@ -172,7 +173,12 @@ class LocalAPI:
             "if_add_doc_description": "yes",
         })
         result = page_index_main(file_path, opt, logger=_SilentLogger())
-        return result["structure"], result.get("doc_description")
+        structure = result.get("structure") or []
+        if not structure:
+            raise PageIndexAPIError(
+                "Failed to submit document: standard indexing produced no structure."
+            )
+        return structure, result.get("doc_description")
 
     def _index_flash(self, file_path: str, page_texts: list[str]) -> tuple[list, str | None]:
         from .flash import page_index_flash
@@ -303,21 +309,40 @@ class LocalAPI:
 
     # ── retrieval (internal: backs chat_completions) ──
 
+    _PROVIDER_KEY_MAP = {
+        "anthropic": "ANTHROPIC_API_KEY",
+        "gemini": "GEMINI_API_KEY",
+        "mistral": "MISTRAL_API_KEY",
+    }
+
     def _require_llm_key(self) -> None:
         from .utils import _is_openai_model
-        if _is_openai_model(self._retrieve_model) and not os.getenv("OPENAI_API_KEY"):
+        model = self._retrieve_model
+        if _is_openai_model(model):
+            if not os.getenv("OPENAI_API_KEY"):
+                raise PageIndexAPIError(
+                    f"OPENAI_API_KEY is not set (retrieve model: {model}). "
+                    "Local mode uses your own LLM provider key."
+                )
+            return
+        from .utils import _strip_prefix
+        prefix = _strip_prefix(model or "", "litellm/").split("/")[0]
+        env_var = self._PROVIDER_KEY_MAP.get(prefix)
+        if env_var and not os.getenv(env_var):
             raise PageIndexAPIError(
-                f"OPENAI_API_KEY is not set (retrieve model: {self._retrieve_model}). "
+                f"{env_var} is not set (retrieve model: {model}). "
                 "Local mode uses your own LLM provider key."
             )
 
-    def _tree_search(self, doc_id: str, query: str) -> list[str]:
+    def _tree_search(self, doc_id: str, query: str,
+                     structure: list | None = None) -> list[str]:
         """Ask the retrieve model which tree nodes answer the query."""
         from .utils import llm_completion, remove_fields
         self._require_llm_key()
-        structure = self._require_data(self._store.get_tree(doc_id),
-                                       "Failed to get chat completion")
-        tree_without_text = remove_fields(copy.deepcopy(structure), fields=["text"])
+        if structure is None:
+            structure = self._require_data(self._store.get_tree(doc_id),
+                                           "Failed to get chat completion")
+        tree_without_text = remove_fields(structure, fields=["text"])
         prompt = TREE_SEARCH_PROMPT.format(
             query=query, tree=json.dumps(tree_without_text, indent=2, ensure_ascii=False)
         )
@@ -340,11 +365,11 @@ class LocalAPI:
 
     @staticmethod
     def _parse_json_reply(reply: str) -> dict:
-        from .utils import extract_json
-        try:
-            return extract_json(reply)
-        except Exception as e:
-            raise RuntimeError(f"tree search reply was not valid JSON: {reply[:200]}") from e
+        from .utils import _reply_json
+        parsed = _reply_json(reply)
+        if parsed is None:
+            raise RuntimeError(f"tree search reply was not valid JSON: {reply[:200]}")
+        return parsed
 
     @staticmethod
     def _node_map(structure: list) -> dict[str, dict]:
@@ -382,16 +407,24 @@ class LocalAPI:
         doc_ids = [doc_id] if isinstance(doc_id, str) else list(doc_id)
         if not doc_ids:
             raise PageIndexAPIError(f"{prefix}: doc_id list cannot be empty.")
+        metas: dict[str, dict] = {}
         for one_id in doc_ids:
-            if self._store.get_meta(one_id) is None:
+            meta = self._store.get_meta(one_id)
+            if meta is None:
                 raise PageIndexAPIError(f"{prefix}: Document not found or access denied: {one_id}")
+            metas[one_id] = meta
 
         query = next(m["content"] for m in reversed(messages) if m["role"] == "user")
         try:
-            context = self._build_chat_context(doc_ids, query)
+            context = self._build_chat_context(doc_ids, query, metas=metas)
+            system_content = CHAT_SYSTEM_PROMPT.format(context=context)
+            user_system = [m["content"] for m in messages if m["role"] == "system"]
+            if user_system:
+                system_content = "\n\n".join(user_system) + "\n\n" + system_content
             llm_messages = (
-                [{"role": "system", "content": CHAT_SYSTEM_PROMPT.format(context=context)}]
-                + [{"role": m["role"], "content": m["content"]} for m in messages]
+                [{"role": "system", "content": system_content}]
+                + [{"role": m["role"], "content": m["content"]}
+                   for m in messages if m["role"] != "system"]
             )
             response = self._chat_llm(llm_messages, temperature=temperature, stream=stream)
         except PageIndexAPIError:
@@ -435,35 +468,33 @@ class LocalAPI:
             raise PageIndexAPIError(
                 f"{prefix}: Messages array cannot be empty. Please provide at least one message."
             )
-        if messages[0].get("role") != "user":
-            raise PageIndexAPIError(f"{prefix}: First message must be from 'user' role.")
+        non_system = [m for m in messages if m.get("role") != "system"]
+        if not non_system or non_system[0].get("role") != "user":
+            raise PageIndexAPIError(f"{prefix}: First non-system message must be from 'user' role.")
         for i, message in enumerate(messages):
             role = message.get("role")
-            if role == "system":
-                raise PageIndexAPIError(
-                    f"{prefix}: System messages are not allowed. "
-                    "The system prompt is managed internally."
-                )
-            if role not in ("user", "assistant"):
+            if role not in ("user", "assistant", "system"):
                 raise PageIndexAPIError(
                     f"{prefix}: Message at index {i} has invalid role {role!r}. "
-                    "Valid roles are: user, assistant."
+                    "Valid roles are: system, user, assistant."
                 )
             if not message.get("content"):
                 raise PageIndexAPIError(
                     f"{prefix}: Message at index {i} has empty or missing 'content' field."
                 )
 
-    def _build_chat_context(self, doc_ids: list[str], query: str) -> str:
+    def _build_chat_context(self, doc_ids: list[str], query: str,
+                            metas: dict[str, dict] | None = None) -> str:
         from .utils import count_tokens
         sections = []
         used_tokens = 0
         truncated = False
         for one_id in doc_ids:
-            meta = self._store.get_meta(one_id)
-            structure = self._store.get_tree(one_id) or []
+            meta = metas[one_id] if metas else self._store.get_meta(one_id)
+            structure = self._require_data(self._store.get_tree(one_id),
+                                           "Failed to get chat completion")
             node_map = self._node_map(structure)
-            for node_id in self._tree_search(one_id, query):
+            for node_id in self._tree_search(one_id, query, structure=structure):
                 node = node_map[node_id]
                 text = node.get("text", "")
                 block = (f"[{meta.get('name')} — {node.get('title', '')} "
@@ -483,20 +514,23 @@ class LocalAPI:
 
     def _chat_llm(self, messages: list[dict], temperature: float | None, stream: bool):
         """One chat call against the retrieve model, OpenAI SDK or LiteLLM."""
-        from .utils import _is_openai_model
+        from .utils import _is_openai_model, _strip_prefix
         self._require_llm_key()
         model = self._retrieve_model
         kwargs: dict[str, Any] = {"messages": messages, "stream": stream}
         if temperature is not None:
             kwargs["temperature"] = temperature
         if _is_openai_model(model):
-            import openai
-            model = model.removeprefix("openai/")
+            import openai as _openai_mod
+            import pageindex.utils as _utils_mod
+            if _utils_mod._openai_sync_client is None:
+                _utils_mod._openai_sync_client = _openai_mod.OpenAI(max_retries=0)
+            model = _strip_prefix(model, "openai/")
             if stream:
                 kwargs["stream_options"] = {"include_usage": True}
-            return openai.OpenAI().chat.completions.create(model=model, **kwargs)
+            return _utils_mod._openai_sync_client.chat.completions.create(model=model, **kwargs)
         import litellm
-        model = model.removeprefix("litellm/")
+        model = _strip_prefix(model, "litellm/")
         if stream:
             kwargs["stream_options"] = {"include_usage": True}
         return litellm.completion(model=model, drop_params=True, **kwargs)
@@ -505,48 +539,53 @@ class LocalAPI:
     def _stream_chunks(response, chat_id: str, created: int) -> Iterator[dict[str, Any]]:
         """Adapt a provider stream into chat.completion.chunk dicts."""
         def _generate():
-            yield {
-                "id": chat_id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "choices": [{"index": 0,
-                             "delta": {"role": "assistant", "content": ""},
-                             "finish_reason": None}],
-            }
             finish_reason = None
             usage = None
-            for piece in response:
-                if getattr(piece, "usage", None) is not None:
-                    usage = piece.usage
-                if not piece.choices:
-                    continue
-                choice = piece.choices[0]
-                if choice.finish_reason is not None:
-                    finish_reason = choice.finish_reason
-                content = getattr(choice.delta, "content", None)
-                if content:
-                    yield {
-                        "id": chat_id,
-                        "object": "chat.completion.chunk",
-                        "created": created,
-                        "choices": [{"index": 0,
-                                     "delta": {"content": content},
-                                     "finish_reason": None}],
-                    }
-            final = {
-                "id": chat_id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "choices": [{"index": 0, "delta": {},
-                             "finish_reason": finish_reason or "stop"}],
-            }
-            if usage is not None:
-                final["usage"] = {
-                    "prompt_tokens": usage.prompt_tokens,
-                    "completion_tokens": usage.completion_tokens,
-                    "total_tokens": usage.total_tokens,
+            try:
+                yield {
+                    "id": chat_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "choices": [{"index": 0,
+                                 "delta": {"role": "assistant", "content": ""},
+                                 "finish_reason": None}],
                 }
-            yield final
+                for piece in response:
+                    if getattr(piece, "usage", None) is not None:
+                        usage = piece.usage
+                    if not piece.choices:
+                        continue
+                    choice = piece.choices[0]
+                    if choice.finish_reason is not None:
+                        finish_reason = choice.finish_reason
+                    content = getattr(choice.delta, "content", None)
+                    if content:
+                        yield {
+                            "id": chat_id,
+                            "object": "chat.completion.chunk",
+                            "created": created,
+                            "choices": [{"index": 0,
+                                         "delta": {"content": content},
+                                         "finish_reason": None}],
+                        }
+                final = {
+                    "id": chat_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "choices": [{"index": 0, "delta": {},
+                                 "finish_reason": finish_reason or "stop"}],
+                }
+                if usage is not None:
+                    final["usage"] = {
+                        "prompt_tokens": usage.prompt_tokens,
+                        "completion_tokens": usage.completion_tokens,
+                        "total_tokens": usage.total_tokens,
+                    }
+                yield final
+            finally:
+                close = getattr(response, "close", None)
+                if close is not None:
+                    close()
         return _generate()
 
 
