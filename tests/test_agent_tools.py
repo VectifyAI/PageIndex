@@ -71,13 +71,23 @@ def test_contract_matches_snapshot():
 
 
 def test_tool_surface_and_docstrings(client):
+    import inspect
+    from pageindex.agent_tools import _LOCAL_HIDDEN_PARAMS, _local_schema
     tools = client.agent_tools()
     assert [tool.__name__ for tool in tools] == list(tool_names())
     with_management = client.agent_tools(include_management=True)
     assert [tool.__name__ for tool in with_management][-1] == "remove_document"
-    for tool in tools:
-        for param in TOOL_CONTRACT[tool.__name__]["schema"]["properties"]:
+    for tool in with_management:
+        exposed = list(_local_schema(tool.__name__)["properties"])
+        assert list(inspect.signature(tool).parameters) == exposed
+        for param in exposed:
             assert param in tool.__doc__
+        # Cloud-only params are hidden, not documented-then-retracted:
+        # strict-schema frameworks cannot express the dead-end calls at all.
+        # (The description may still mention them as cloud capabilities.)
+        args_section = tool.__doc__.split("Args:", 1)[1]
+        for hidden in _LOCAL_HIDDEN_PARAMS.get(tool.__name__, ()):
+            assert f"{hidden}:" not in args_section
     docs = {tool.__name__: tool.__doc__ for tool in tools}
     # Tools whose cloud description has no cloud-only content keep it
     # verbatim; browse_documents serves the localized guidance.
@@ -88,19 +98,26 @@ def test_tool_surface_and_docstrings(client):
 
 
 def test_local_schema_structure_matches_contract():
-    """The local guidance layer may localize description strings only —
-    names, types, defaults, bounds, and required stay byte-identical."""
+    """The local surface is the contract minus the documented cloud-only
+    params; the surviving params' names, types, defaults, bounds, and
+    required stay byte-identical — localization may only touch description
+    strings."""
     import copy
-    from pageindex.agent_tools import _local_schema
+    from pageindex.agent_tools import _LOCAL_HIDDEN_PARAMS, _local_schema
 
-    def stripped(schema):
+    def stripped(schema, drop=()):
         schema = copy.deepcopy(schema)
+        for param in drop:
+            schema["properties"].pop(param, None)
         for spec in schema["properties"].values():
             spec.pop("description", None)
         return schema
 
     for name, contract in TOOL_CONTRACT.items():
-        assert stripped(_local_schema(name)) == stripped(contract["schema"]), name
+        hidden = _LOCAL_HIDDEN_PARAMS.get(name, ())
+        assert not (set(hidden) & set(contract["schema"].get("required", []))), name
+        assert stripped(_local_schema(name)) == stripped(contract["schema"],
+                                                         drop=hidden), name
 
 
 def test_local_guidance_references_only_local_tools(client):

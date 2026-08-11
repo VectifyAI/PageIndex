@@ -1112,20 +1112,30 @@ def _tool_docstring(description: str, properties: dict[str, Any]) -> str:
 
 
 # Local guidance layer: schema STRUCTURE stays byte-identical to the cloud
-# contract, but description strings adapt to the local surface the same way
-# AGENT_INSTRUCTIONS does — guidance must not teach capabilities (folders,
-# semantic ranking) or tools (search_documents, get_document_image) that do
-# not exist here. Guard tests assert both properties; a contract refresh
-# that reintroduces a cloud-only reference fails the dead-reference test.
+# contract minus the hidden cloud-only parameters, and description strings
+# adapt to the local surface the same way AGENT_INSTRUCTIONS does — guidance
+# must not teach capabilities (folders, semantic ranking) or tools
+# (search_documents, get_document_image) that do not exist here. Guard tests
+# assert both properties; a contract refresh that reintroduces a cloud-only
+# reference fails the dead-reference test.
+
+#: Cloud-only parameters hidden from the local surface — strict-schema
+#: frameworks then make the dead-end calls inexpressible. The
+#: implementations still accept them and answer with the guided error
+#: envelope, for direct call_tool callers and hosts without schema
+#: enforcement.
+_LOCAL_HIDDEN_PARAMS: dict[str, tuple[str, ...]] = {
+    "browse_documents": ("folder_id", "recursive", "sort", "query"),
+    "get_document": ("folder_id",),
+    "get_document_structure": ("folder_id",),
+    "get_page_content": ("folder_id",),
+    "remove_document": ("folder_id",),
+}
 
 _LOCAL_DOC_NAME_DESCRIPTION = (
     'Copy the `name` field verbatim from a browse_documents() response '
     '(case-sensitive, include extension). Example: "Q3 Report.pdf". '
     "Document names are unique in a local library."
-)
-_LOCAL_FOLDER_ID_DESCRIPTION = (
-    "Not needed in local mode: document names are unique and folders are "
-    'not supported yet (they work on PageIndex cloud). Omit, or pass "root".'
 )
 
 _LOCAL_DESCRIPTIONS: dict[str, str] = {
@@ -1144,32 +1154,15 @@ _LOCAL_DESCRIPTIONS: dict[str, str] = {
 }
 
 _LOCAL_PARAM_DESCRIPTIONS: dict[tuple[str, str], str] = {
-    ("browse_documents", "folder_id"): _LOCAL_FOLDER_ID_DESCRIPTION,
-    ("browse_documents", "recursive"): (
-        "Kept for cloud compatibility; a local library has no folders, so "
-        "recursive and non-recursive return the same documents."
-    ),
-    ("browse_documents", "sort"): (
-        'Only "time" (newest first) is supported in local mode; '
-        '"relevance" is cloud-only for now.'
-    ),
-    ("browse_documents", "query"): (
-        'Cloud-only for now (semantic ranking with sort="relevance") — '
-        "omit in local mode."
-    ),
     ("get_document", "doc_name"): _LOCAL_DOC_NAME_DESCRIPTION,
-    ("get_document", "folder_id"): _LOCAL_FOLDER_ID_DESCRIPTION,
     ("get_document_structure", "doc_name"): _LOCAL_DOC_NAME_DESCRIPTION,
-    ("get_document_structure", "folder_id"): _LOCAL_FOLDER_ID_DESCRIPTION,
     ("get_page_content", "doc_name"): _LOCAL_DOC_NAME_DESCRIPTION,
-    ("get_page_content", "folder_id"): _LOCAL_FOLDER_ID_DESCRIPTION,
     ("remove_document", "doc_names"): (
         "Array of document names to delete. Each name must be copied "
         "verbatim from the `name` field of a browse_documents() response "
         '(case-sensitive, include extension). Example: ["Q3 Report.pdf", '
         '"draft.pdf"]. Max 10 per call.'
     ),
-    ("remove_document", "folder_id"): _LOCAL_FOLDER_ID_DESCRIPTION,
 }
 
 
@@ -1179,6 +1172,8 @@ def _local_description(name: str) -> str:
 
 def _local_schema(name: str) -> dict[str, Any]:
     schema = copy.deepcopy(TOOL_CONTRACT[name]["schema"])
+    for param in _LOCAL_HIDDEN_PARAMS.get(name, ()):
+        schema["properties"].pop(param, None)
     for (tool_name, param), text in _LOCAL_PARAM_DESCRIPTIONS.items():
         if tool_name == name and param in schema["properties"]:
             schema["properties"][param]["description"] = text
@@ -1311,41 +1306,34 @@ def build_agent_tools(client, include_management: bool = False) -> list[Callable
     if getattr(client, "api_key", None):
         return _build_cloud_agent_tools(client, include_management)
 
-    def browse_documents(folder_id: str = "root", recursive: bool = False,
-                         sort: str = "time", query: Optional[str] = None,
-                         offset: int = 0, limit: int = 10) -> str:
+    def browse_documents(offset: int = 0, limit: int = 10) -> str:
         return call_tool(client, "browse_documents", {
-            "folder_id": folder_id, "recursive": recursive, "sort": sort,
-            "query": query, "offset": offset, "limit": limit,
+            "offset": offset, "limit": limit,
         })[0]
 
-    def get_document(doc_name: str, folder_id: Optional[str] = None,
-                     wait_for_completion: bool = False) -> str:
+    def get_document(doc_name: str, wait_for_completion: bool = False) -> str:
         return call_tool(client, "get_document", {
-            "doc_name": doc_name, "folder_id": folder_id,
+            "doc_name": doc_name,
             "wait_for_completion": wait_for_completion,
         })[0]
 
-    def get_document_structure(doc_name: str, folder_id: Optional[str] = None,
-                               part: int = 1,
+    def get_document_structure(doc_name: str, part: int = 1,
                                wait_for_completion: bool = False) -> str:
         return call_tool(client, "get_document_structure", {
-            "doc_name": doc_name, "folder_id": folder_id, "part": part,
+            "doc_name": doc_name, "part": part,
             "wait_for_completion": wait_for_completion,
         })[0]
 
     def get_page_content(doc_name: str, pages: str,
-                         folder_id: Optional[str] = None,
                          wait_for_completion: bool = False) -> str:
         return call_tool(client, "get_page_content", {
-            "doc_name": doc_name, "pages": pages, "folder_id": folder_id,
+            "doc_name": doc_name, "pages": pages,
             "wait_for_completion": wait_for_completion,
         })[0]
 
-    def remove_document(doc_names: list[str],
-                        folder_id: Optional[str] = None) -> str:
+    def remove_document(doc_names: list[str]) -> str:
         return call_tool(client, "remove_document", {
-            "doc_names": doc_names, "folder_id": folder_id,
+            "doc_names": doc_names,
         })[0]
 
     functions = {
