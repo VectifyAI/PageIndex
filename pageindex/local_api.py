@@ -87,6 +87,8 @@ class LocalAPI:
 
         try:
             page_texts = self._extract_page_texts(file_path)
+        except PageIndexAPIError:
+            raise
         except Exception as e:
             raise PageIndexAPIError(
                 f"Failed to submit document: could not read PDF: {e}"
