@@ -131,11 +131,20 @@ def test_local_guidance_references_only_local_tools(client):
 
 
 def test_local_guidance_points_cloud_only_capabilities_at_cloud(client):
-    browse = client.agent_tools()[0].__doc__
+    tools = client.agent_tools(include_management=True)
+    browse = tools[0].__doc__
     assert "not supported in local mode yet" in browse
     assert "PageIndex cloud" in browse
-    assert "search_documents" not in browse
-    assert "get_folder_structure" not in browse
+    # Capability-phrase guard, all docstrings: cloud-only language must not
+    # drift back in via a contract refresh. browse alone keeps exactly one
+    # sort="relevance" mention — the sanctioned pointer to the cloud.
+    for tool in tools:
+        doc = tool.__doc__
+        for phrase in ("shared-with-me", "sub-folder", "get_folder_structure",
+                       "search_documents", "get_document_image"):
+            assert phrase not in doc, (tool.__name__, phrase)
+        expected = 1 if tool.__name__ == "browse_documents" else 0
+        assert doc.count('sort="relevance"') == expected, tool.__name__
 
 
 # ── browse_documents ──
@@ -170,9 +179,12 @@ def test_browse_documents_pagination(client, store_path):
     first, _ = run(client, "browse_documents", limit=2)
     assert [d["name"] for d in first["documents"]] == ["doc2.pdf", "doc1.pdf"]
     assert first["has_more"] is True and first["next_offset"] == 2
+    assert "page through the rest" in json.dumps(first["next_steps"])
     second, _ = run(client, "browse_documents", limit=2, offset=2)
     assert [d["name"] for d in second["documents"]] == ["doc0.pdf"]
     assert second["has_more"] is False
+    # No paging advice when there is nothing left to page through.
+    assert "page through the rest" not in json.dumps(second["next_steps"])
 
 
 def test_browse_documents_relevance_unsupported(client, store_path):
@@ -189,6 +201,9 @@ def test_browse_documents_relevance_unsupported(client, store_path):
     assert is_error and "not supported in local mode" in stray_query["error"]
     bad_sort, is_error = run(client, "browse_documents", sort="banana")
     assert is_error and bad_sort["errorCode"] == "INVALID_INPUT"
+    # The invalid-sort guidance must not prescribe the cloud-only value.
+    assert 'Use sort="relevance"' not in json.dumps(bad_sort)
+    assert "local mode" in bad_sort["error"]
 
 
 def test_browse_documents_empty_and_folder_error(client):
@@ -1015,6 +1030,56 @@ def test_cloud_agent_instructions_served_live(monkeypatch):
     cloud.agent_tools()
     assert cloud.agent_instructions() == "LIVE CLOUD GUIDANCE"
     assert len(created) == 1
+
+
+def test_cloud_bridge_cache_threadsafe_and_pickle_clean(monkeypatch):
+    """One bridge per client even under concurrent first calls, and the
+    bridge lives off the instance so cloud clients stay picklable."""
+    import pickle
+    import threading
+    import time as time_mod
+    import pageindex.mcp_bridge as mcp_bridge
+    created = []
+
+    class _Bridge(_FakeBridge):
+        def __init__(self, url, headers):
+            time_mod.sleep(0.01)  # widen the construction window
+            super().__init__(url, headers)
+            created.append(self)
+
+        def instructions(self):
+            return "LIVE"
+
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _Bridge)
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    workers = ([threading.Thread(target=cloud.agent_tools) for _ in range(4)]
+               + [threading.Thread(target=cloud.agent_instructions)
+                  for _ in range(4)])
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+    assert len(created) == 1
+    pickle.dumps(cloud)
+
+
+def test_cloud_agent_instructions_blank_or_nonstring_raises(monkeypatch):
+    """Whitespace-only or non-string initialize.instructions must hit the
+    same honest error as a missing one — never a blank system prompt."""
+    import pageindex.mcp_bridge as mcp_bridge
+
+    for bad in ("   \n\t  ", {"not": "a string"}):
+        class _SilentBridge:
+            def __init__(self, url, headers):
+                pass
+
+            def instructions(self, _value=bad):
+                return _value
+
+        monkeypatch.setattr(mcp_bridge, "McpBridge", _SilentBridge)
+        cloud = PageIndexCloudClient(api_key="pi-test-key")
+        with pytest.raises(PageIndexAPIError, match="no agent instructions"):
+            cloud.agent_instructions()
 
 
 def test_cloud_agent_instructions_empty_raises(monkeypatch):

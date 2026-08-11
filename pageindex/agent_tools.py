@@ -1,15 +1,19 @@
 """Agent tools: the cloud MCP tool contract, executed against a PageIndexClient.
 
-Tool names and input-schema structure match the PageIndex cloud MCP server,
-so agent prompts work unchanged across the cloud MCP connection and this
-in-process layer. Only the tools that exist in every mode are registered
-(no folders, search_documents, or get_document_image), and the guidance
-strings (tool descriptions) adapt to the local surface the same way the
-agent instructions do — they never teach capabilities that only exist on
-the cloud.
+Tool names and the surviving input-schema structure match the PageIndex
+cloud MCP server — the local surface hides the documented cloud-only
+parameters — so agent prompts port across the cloud MCP connection and
+this in-process layer. Only the tools that exist in every mode are
+registered (no folders, search_documents, or get_document_image), and the
+guidance strings (tool descriptions) adapt to the local surface the same
+way the agent instructions do — they never teach capabilities that only
+exist on the cloud.
 
-Tools never raise: every outcome, including errors, is returned as the same
-JSON envelope the cloud emits ({"success": true, ...} / {"error": ...}).
+Tools never raise for any invocation their signatures accept: every
+outcome, including errors, is returned as the same JSON envelope the cloud
+emits ({"success": true, ...} / {"error": ...}). Arguments outside a pruned
+local signature fail at the Python call boundary; the call_tool path
+answers them with the guided error envelope instead.
 """
 from __future__ import annotations
 
@@ -17,7 +21,9 @@ import copy
 import difflib
 import json
 import re
+import threading
 import time
+import weakref
 from typing import Any, Callable, Optional
 
 from .errors import PageIndexAPIError
@@ -638,10 +644,15 @@ def _browse_documents(client, folder_id: str = "root", recursive: bool = False,
     if folder_id != "root":
         return _folder_unsupported("folder_id")
     if sort not in ("time", "relevance"):
-        return _failure('sort must be "time" or "relevance"', None,
-                        {"summary": "Invalid sort mode",
-                         "options": ['Use sort="time" or sort="relevance"']},
-                        "INVALID_INPUT")
+        return _failure(
+            'Invalid sort mode — only the default "time" sort is available '
+            "in local mode.", None,
+            {"summary": "Invalid sort mode",
+             "options": ['Use sort="time" (newest first) or omit sort',
+                         "Semantic ranking is available on PageIndex cloud "
+                         "(PageIndexCloudClient with an API key)"]},
+            "INVALID_INPUT",
+        )
     if sort == "relevance" or query:
         # Semantic ranking is a cloud capability; like folders, it is not
         # imitated here.
@@ -715,8 +726,10 @@ def _browse_documents(client, folder_id: str = "root", recursive: bool = False,
         options.append(
             "Results returned ≠ correct results. Verify these documents match "
             "the user's actual intent (topic, time period, document type) "
-            "before proceeding. If they do not match, page through the rest "
-            "of the library. Do NOT use general knowledge as a substitute."
+            "before proceeding."
+            + (" If they do not match, page through the rest of the library."
+               if has_more else "")
+            + " Do NOT use general knowledge as a substitute."
         )
     if page_has_processing:
         options.append("Some documents on this page are still processing. "
@@ -1115,15 +1128,19 @@ def _tool_docstring(description: str, properties: dict[str, Any]) -> str:
 # contract minus the hidden cloud-only parameters, and description strings
 # adapt to the local surface the same way AGENT_INSTRUCTIONS does — guidance
 # must not teach capabilities (folders, semantic ranking) or tools
-# (search_documents, get_document_image) that do not exist here. Guard tests
-# assert both properties; a contract refresh that reintroduces a cloud-only
-# reference fails the dead-reference test.
+# (search_documents, get_document_image) that do not exist here. Guard
+# tests pin structure (contract-minus-hidden equality), tool references
+# (the dead-reference test), and capability phrases (the per-docstring
+# phrase test) — a contract refresh that reintroduces a cloud-only
+# reference fails loudly.
 
 #: Cloud-only parameters hidden from the local surface — strict-schema
-#: frameworks then make the dead-end calls inexpressible. The
-#: implementations still accept them and answer with the guided error
-#: envelope, for direct call_tool callers and hosts without schema
-#: enforcement.
+#: frameworks make the dead-end calls inexpressible, and lenient framework
+#: argument models drop them before the call (degrading to the bare call).
+#: The call_tool path still answers folder_id/sort/query with the guided
+#: error envelope; recursive is simply accepted (flattening a folderless
+#: library is the identity). Plain functions reject unknown parameters at
+#: the Python call boundary.
 _LOCAL_HIDDEN_PARAMS: dict[str, tuple[str, ...]] = {
     "browse_documents": ("folder_id", "recursive", "sort", "query"),
     "get_document": ("folder_id",),
@@ -1143,7 +1160,8 @@ _LOCAL_DESCRIPTIONS: dict[str, str] = {
         "Primary document retrieval tool — first choice for any "
         "document-related question. Lists your documents newest first with "
         "names and descriptions; match them against the user's intent and "
-        "page through with `offset: next_offset` while `has_more` is true. "
+        "page through with `offset: next_offset` (limit up to 50) while "
+        "`has_more` is true. "
         'Folder browsing and semantic ranking (sort="relevance") are not '
         "supported in local mode yet — they work on PageIndex cloud."
     ),
@@ -1262,18 +1280,24 @@ def _make_bridge_function(bridge, meta: dict) -> Callable[..., str]:
     return proxy
 
 
+_BRIDGES: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+_BRIDGES_LOCK = threading.Lock()
+
+
 def _cloud_bridge(client):
-    """One bridge per client instance: tool discovery and instructions share
-    a single MCP session."""
-    bridge = getattr(client, "_mcp_bridge", None)
-    if bridge is None:
-        from .mcp_bridge import McpBridge
-        bridge = McpBridge(
-            f"{client.BASE_URL}/mcp",
-            {"Authorization": f"Bearer {client.api_key}"},
-        )
-        client._mcp_bridge = bridge
-    return bridge
+    """One bridge per client: tool discovery and instructions share a single
+    MCP session. Weak-keyed off the instance so clients stay picklable; the
+    lock closes the check-then-set race under concurrent first calls."""
+    with _BRIDGES_LOCK:
+        bridge = _BRIDGES.get(client)
+        if bridge is None:
+            from .mcp_bridge import McpBridge
+            bridge = McpBridge(
+                f"{client.BASE_URL}/mcp",
+                {"Authorization": f"Bearer {client.api_key}"},
+            )
+            _BRIDGES[client] = bridge
+        return bridge
 
 
 def _build_cloud_agent_tools(client, include_management: bool) -> list[Callable[..., str]]:
@@ -1301,7 +1325,9 @@ def build_agent_tools(client, include_management: bool = False) -> list[Callable
     Cloud: one function per tool of the live cloud MCP tool set, signatures
     synthesized from the server's schemas, calls proxied over MCP. Local:
     the built-in contract tools over the local store. Every function returns
-    the JSON envelope as a string and never raises.
+    the JSON envelope as a string and never raises for arguments its
+    signature accepts (cloud-only parameters are absent from the local
+    signatures; the call_tool path answers them with the guided envelope).
     """
     if getattr(client, "api_key", None):
         return _build_cloud_agent_tools(client, include_management)
@@ -1394,7 +1420,7 @@ _PERSISTENCE = """\
 PERSISTENCE (before concluding the target document is not in the library):
 This protocol applies both when results are empty AND when results are returned but none match the user's intent. Do NOT give up after a single discovery attempt. Follow these steps in order:
 1. browse_documents() and compare every returned name/description against the user's intent
-2. Page through the ENTIRE library with `offset: next_offset` until has_more is false — MANDATORY, must be completed before concluding "not found"
+2. Page through the ENTIRE library with `limit: 50` and `offset: next_offset` until has_more is false — MANDATORY, must be completed before concluding "not found"
 3. Re-scan for loose matches: synonyms, abbreviations, and partial titles in names/descriptions can identify the target
 Only after ALL three steps have been tried may you conclude the document is not in the library. Do NOT fall back to general knowledge — if the user's question references their own documents, exhaust every discovery path first."""
 
@@ -1415,7 +1441,7 @@ def _base_instructions(client) -> str:
     if not getattr(client, "api_key", None):
         return AGENT_INSTRUCTIONS
     instructions = _cloud_bridge(client).instructions()
-    if not instructions:
+    if not isinstance(instructions, str) or not instructions.strip():
         raise PageIndexAPIError(
             "The MCP server returned no agent instructions — refusing to "
             "substitute the SDK's local-subset guidance, which does not "
