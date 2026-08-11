@@ -1450,17 +1450,17 @@ def _base_instructions(client) -> str:
     return instructions
 
 
-def build_agent_instructions(client, doc_id=None) -> str:
-    """Orchestration guidance for document QA agents; with doc_id, appends
-    the target documents and directs the agent to work within them. Raises
-    when a doc_id's name is shadowed by a newer same-name document — the
+def doc_targeting_block(client, doc_id) -> Optional[str]:
+    """The doc_id targeting text: names, metadata, and the directive to work
+    within those documents. Shared by agent_instructions and the local chat
+    surfaces (which place it as a leading conversation item). Raises when a
+    doc_id's name is shadowed by a newer same-name document — the
     name-addressed tools could not reach it."""
-    base = _base_instructions(client)
     if doc_id is None:
-        return base
+        return None
     doc_ids = [doc_id] if isinstance(doc_id, str) else list(doc_id)
     if not doc_ids:
-        return base
+        return None
     details = [client.get_document(one_id) for one_id in doc_ids]
     documents = _all_documents(client)
     for one_id, detail in zip(doc_ids, details):
@@ -1476,18 +1476,24 @@ def build_agent_instructions(client, doc_id=None) -> str:
             )
     context = json.dumps(details, ensure_ascii=False)
     if len(details) == 1:
-        block = (
+        return (
             f"The user has specified document: {details[0].get('name')}\n"
             f"Document metadata: {context}\n"
             "Use this document's name to retrieve its content with "
             "get_document_structure() and get_page_content()."
         )
-    else:
-        names = ", ".join(str(item.get("name")) for item in details)
-        block = (
-            f"The user has specified documents: {names}\n"
-            f"Documents metadata: {context}\n"
-            "Use these documents' names to retrieve their content with "
-            "get_document_structure() and get_page_content()."
-        )
-    return base + "\n\n" + block
+    names = ", ".join(str(item.get("name")) for item in details)
+    return (
+        f"The user has specified documents: {names}\n"
+        f"Documents metadata: {context}\n"
+        "Use these documents' names to retrieve their content with "
+        "get_document_structure() and get_page_content()."
+    )
+
+
+def build_agent_instructions(client, doc_id=None) -> str:
+    """Orchestration guidance for document QA agents; with doc_id, appends
+    the target documents and directs the agent to work within them."""
+    base = _base_instructions(client)
+    block = doc_targeting_block(client, doc_id)
+    return base if block is None else base + "\n\n" + block

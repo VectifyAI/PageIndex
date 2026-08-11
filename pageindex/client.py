@@ -344,36 +344,159 @@ class PageIndexClient:
         temperature: Optional[float] = None,
         stream_metadata: bool = False,
         enable_citations: bool = False,
+        model: Optional[str] = None,
+        max_turns: Optional[int] = None,
     ) -> Union[dict[str, Any], Iterator[str], Iterator[dict[str, Any]]]:
         """
-        PageIndex Chat Completions, scoped to specific PageIndex documents.
+        PageIndex Chat Completions: document QA in one call.
+
+        Cloud: the hosted chat endpoint. Local: a managed document-QA agent
+        run over the local tools against your own LLM backend's
+        /chat/completions (requires ``pageindex[openai]``; the OpenAI SDK's
+        usual env config — OPENAI_API_KEY, OPENAI_BASE_URL — selects the
+        backend, so any OpenAI-compatible server works). The response
+        carries the final answer only; for the tool-use process and
+        prompt-cache round-trip use ``responses()`` or ``messages()``.
 
         Args:
             messages: Conversation messages with 'role' and 'content' keys.
+                Local also accepts system/developer messages — their content
+                is appended to the managed system prompt.
             stream: Enable streaming responses.
             doc_id: Document ID or list of IDs to scope the conversation.
-            temperature: Sampling temperature (0.0-1.0).
+            temperature: Sampling temperature, passed through to the model.
             stream_metadata: With stream=True, yield chunk dicts instead of
                 text pieces.
-            enable_citations: Enable citation instructions in responses.
+            enable_citations: Cloud-only — local mode raises (citations need
+                block-level OCR data local mode does not store).
+            model: Local only — backend model name (defaults to
+                ``retrieve_model``). The cloud endpoint selects its own.
+            max_turns: Local only — cap on agent turns per call.
 
         Returns:
             - stream=False: complete response dict ({'id', 'object', 'created',
               'choices', 'usage'})
             - stream=True, stream_metadata=False: iterator of text chunks
             - stream=True, stream_metadata=True: iterator of chunk dicts
-
-        Local: not yet supported — raises PageIndexAPIError. Agent-based
-        local chat arrives in a later release.
         """
-        return self._require_cloud(
-            "chat_completions is not yet supported in local mode — it arrives "
-            "in a later release. Create the client with an api_key to use "
-            "cloud chat."
-        ).chat_completions(
+        from .cloud_api import CloudAPI
+        if not isinstance(self._api, CloudAPI):
+            from .local_chat import run_chat_completions
+            return run_chat_completions(
+                self, messages, stream=stream, doc_id=doc_id,
+                temperature=temperature, stream_metadata=stream_metadata,
+                enable_citations=enable_citations, model=model,
+                max_turns=max_turns,
+            )
+        if model is not None or max_turns is not None:
+            raise PageIndexAPIError(
+                "model and max_turns are local-mode parameters — the cloud "
+                "chat endpoint selects its own model."
+            )
+        return self._api.chat_completions(
             messages=messages, stream=stream, doc_id=doc_id,
             temperature=temperature, stream_metadata=stream_metadata,
             enable_citations=enable_citations,
+        )
+
+    def responses(
+        self,
+        input: Union[str, list[dict[str, Any]]],
+        model: Optional[str] = None,
+        stream: bool = False,
+        doc_id: Optional[Union[str, list[str]]] = None,
+        instructions: Optional[str] = None,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        max_turns: Optional[int] = None,
+    ) -> Union[dict[str, Any], Iterator[dict[str, Any]]]:
+        """
+        Document QA over the OpenAI Responses protocol — the agentic surface.
+
+        Local only for now. Drives your backend's /responses end to end (no
+        translation layer), so the ``output`` carries the whole process as
+        standard items — messages, function calls, and function outputs
+        (the SDK executes the tools). Append the returned ``output`` to your
+        next call's ``input`` verbatim to keep provider prompt-cache prefix
+        continuity and the agent's memory of what it already read.
+
+        Requires ``pageindex[openai]`` and a backend that supports the
+        Responses API; backends that only speak chat.completions should use
+        ``chat_completions()``.
+
+        Args:
+            input: A user message string, or a list of Responses input items
+                (round-trip prior ``output`` items here).
+            model: Backend model name (defaults to ``retrieve_model``).
+            stream: Yield native Responses stream events as dicts; tool
+                outputs are emitted as ``response.output_item.done`` events
+                and the final event is ``response.completed``.
+            doc_id: Document ID or list of IDs to scope the conversation.
+            instructions: Appended to the managed system prompt.
+            temperature / top_p: Passed through to the model.
+            max_turns: Cap on agent turns per call.
+        """
+        from .cloud_api import CloudAPI
+        if isinstance(self._api, CloudAPI):
+            raise PageIndexAPIError(
+                "responses is not available on PageIndex cloud yet — it is "
+                "a local-mode surface for now."
+            )
+        from .local_chat import run_responses
+        return run_responses(
+            self, input, model=model, stream=stream, doc_id=doc_id,
+            instructions=instructions, temperature=temperature, top_p=top_p,
+            max_turns=max_turns,
+        )
+
+    def messages(
+        self,
+        messages: list[dict[str, Any]],
+        model: str,
+        max_tokens: int,
+        stream: bool = False,
+        doc_id: Optional[Union[str, list[str]]] = None,
+        system: Optional[Union[str, list[dict[str, Any]]]] = None,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        top_k: Optional[int] = None,
+        stop_sequences: Optional[list[str]] = None,
+        max_turns: Optional[int] = None,
+    ) -> Union[dict[str, Any], Iterator[Any]]:
+        """
+        Document QA over the Anthropic Messages protocol — Claude-native.
+
+        Local only for now. Drives Anthropic's /v1/messages via the
+        Anthropic SDK's own tool runner (requires ``pageindex[anthropic]``;
+        ANTHROPIC_API_KEY selects the backend). ``tool_use``/``tool_result``
+        round-trip is the format's native behavior: the response is the
+        final message envelope with cross-turn aggregated ``usage`` plus a
+        ``messages`` field — the full new turn sequence, valid for verbatim
+        append to your history. The managed system prompt and the doc
+        targeting block carry ``cache_control`` breakpoints.
+
+        Args:
+            messages: Native Messages-format history (including prior
+                tool_use/tool_result blocks on round-trip).
+            model / max_tokens: Required by the Messages API; passed through.
+            stream: Yield the native event stream across turns, verbatim.
+            doc_id: Document ID or list of IDs to scope the conversation.
+            system: Appended after the managed system blocks.
+            temperature / top_p / top_k / stop_sequences: Passed through.
+            max_turns: Cap on agent turns per call.
+        """
+        from .cloud_api import CloudAPI
+        if isinstance(self._api, CloudAPI):
+            raise PageIndexAPIError(
+                "messages is not available on PageIndex cloud yet — it is "
+                "a local-mode surface for now."
+            )
+        from .local_chat import run_messages
+        return run_messages(
+            self, messages, model=model, max_tokens=max_tokens,
+            stream=stream, doc_id=doc_id, system=system,
+            temperature=temperature, top_p=top_p, top_k=top_k,
+            stop_sequences=stop_sequences, max_turns=max_turns,
         )
 
     # ---------- DOCUMENT MANAGEMENT ----------

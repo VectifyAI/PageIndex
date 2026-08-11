@@ -31,5 +31,5 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt pytest
       - if: matrix.agent-frameworks == 'with'
-        run: pip install openai-agents claude-agent-sdk
+        run: pip install openai-agents claude-agent-sdk anthropic
       - run: python -m pytest -q

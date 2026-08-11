@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pageindex"
-version = "0.2.9"
+version = "0.2.10"
 description = "Python SDK for PageIndex — reasoning-based, vectorless document retrieval, cloud and local"
 readme = "README.md"
 license = "MIT"
@@ -42,10 +42,14 @@ claude-agent-sdk = { version = ">=0.1.0", optional = true }
 # 0.8.0 offloads sync tools to a thread; older versions run them inline and
 # a blocking bridge call would freeze the agent event loop.
 openai-agents = { version = ">=0.8.0", optional = true }
+# messages() drives the SDK's beta tool runner; 0.68.0 is the first release
+# with tool_runner(stream/system/max_iterations) and beta_tool(input_schema).
+anthropic = { version = ">=0.68.0", optional = true }
 
 [tool.poetry.extras]
 claude = ["claude-agent-sdk"]
 openai = ["openai-agents"]
+anthropic = ["anthropic"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=7.0"

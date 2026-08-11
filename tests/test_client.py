@@ -643,8 +643,12 @@ def test_retrieval_endpoints_cloud_only(local_client):
         local_client.get_retrieval("any")
 
 
-def test_chat_completions_cloud_only(local_client):
-    with pytest.raises(PageIndexAPIError, match="not yet supported in local mode"):
+def test_chat_completions_local_needs_agents_extra(local_client, monkeypatch):
+    """Local chat is implemented (see test_local_chat.py); without the
+    openai-agents extra it raises the actionable install error."""
+    import sys
+    monkeypatch.setitem(sys.modules, "agents", None)
+    with pytest.raises(PageIndexAPIError, match="pageindex\\[openai\\]"):
         local_client.chat_completions(
             messages=[{"role": "user", "content": "q"}])
 
