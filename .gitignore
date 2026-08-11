@@ -6,3 +6,4 @@ __pycache__
 logs/
 .pageindex/
 dist/
+*.doc_id
