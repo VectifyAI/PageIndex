@@ -119,6 +119,16 @@ def test_browse_documents_pagination(client, store_path):
     assert second["has_more"] is False
 
 
+def test_local_docstrings_preannounce_cloud_only_capabilities(client):
+    """The cloud-verbatim description invites sort="relevance" and folder
+    drilling; the local registration appends a LOCAL MODE note so the agent
+    learns the dead ends before calling, not from the runtime error."""
+    browse = client.agent_tools()[0]
+    assert browse.__doc__.startswith(TOOL_CONTRACT["browse_documents"]["description"])
+    assert "LOCAL MODE" in browse.__doc__
+    assert "not supported yet" in browse.__doc__
+
+
 def test_browse_documents_relevance_unsupported(client, store_path):
     """Semantic ranking is cloud-side; like folders, local answers with an
     honest error instead of a keyword imitation."""

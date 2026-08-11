@@ -1107,10 +1107,27 @@ def _tool_docstring(description: str, properties: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+#: Appended to the cloud-verbatim description when a tool is served locally,
+#: so the agent learns what is cloud-only before calling instead of from the
+#: runtime error envelope.
+_LOCAL_DESCRIPTION_NOTES = {
+    "browse_documents": (
+        'LOCAL MODE: folder_id and sort="relevance"/query are not supported '
+        "yet (they work on PageIndex cloud) — use the default time sort and "
+        "page with offset."
+    ),
+}
+
+
+def _local_description(name: str) -> str:
+    description = TOOL_CONTRACT[name]["description"]
+    note = _LOCAL_DESCRIPTION_NOTES.get(name)
+    return f"{description}\n\n{note}" if note else description
+
+
 def _docstring(name: str) -> str:
-    contract = TOOL_CONTRACT[name]
-    return _tool_docstring(contract["description"],
-                           contract["schema"]["properties"])
+    return _tool_docstring(_local_description(name),
+                           TOOL_CONTRACT[name]["schema"]["properties"])
 
 
 _SCHEMA_TYPE_MAP = {"string": str, "integer": int, "number": float,
