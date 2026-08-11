@@ -498,6 +498,12 @@ class PageIndexClient:
         tools (requires ``claude-agent-sdk``;
         ``pip install 'pageindex[claude]'``).
 
+        Cloud hosts that surface MCP server instructions receive the same
+        guidance ``agent_instructions()`` returns natively — passing both
+        duplicates the text (harmless). ``system_prompt`` stays the
+        recommended channel: it is guaranteed delivery, carries ``doc_id``
+        targeting, and is the only channel local mode has.
+
         Usage::
 
             options = ClaudeAgentOptions(
