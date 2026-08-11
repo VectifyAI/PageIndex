@@ -205,6 +205,16 @@ def test_chat_completions_system_and_doc_block(client, store_path, fake_model):
 
 
 @needs_agents
+def test_chat_completions_accepts_query_string(client, store_path, fake_model):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([[_msg_item("Answer")]])
+    result = client.chat_completions("What status?")
+    assert result["choices"][0]["message"]["content"] == "Answer"
+    assert fake.inputs[0][-1] == {"role": "user", "content": "What status?"}
+    with pytest.raises(PageIndexAPIError, match="non-empty string"):
+        client.chat_completions("   ")
+
+
 def test_chat_completions_validation(client, store_path, fake_model):
     fake_model([[_msg_item("ok")]])
     with pytest.raises(PageIndexAPIError, match="cloud-only"):
@@ -464,6 +474,20 @@ def test_messages_stream_passthrough(client, store_path, fake_anthropic):
                                   stream=True))
     types = [event.type for event in events]
     assert "content_block_delta" in types and "message_stop" in types
+
+
+@needs_anthropic
+def test_messages_accepts_query_string(client, fake_anthropic):
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn"),
+    ])
+    result = client.messages("What status?", model="claude-test",
+                             max_tokens=100)
+    assert result["content"][0]["text"] == "ok"
+    assert calls[0]["messages"] == [{"role": "user",
+                                     "content": "What status?"}]
+    with pytest.raises(PageIndexAPIError, match="non-empty string"):
+        client.messages("   ", model="claude-test", max_tokens=100)
 
 
 @needs_anthropic

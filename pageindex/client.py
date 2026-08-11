@@ -338,7 +338,7 @@ class PageIndexClient:
 
     def chat_completions(
         self,
-        messages: list[dict[str, str]],
+        messages: Union[str, list[dict[str, str]]],
         stream: bool = False,
         doc_id: Optional[Union[str, list[str]]] = None,
         temperature: Optional[float] = None,
@@ -363,7 +363,8 @@ class PageIndexClient:
         ``responses()`` or ``messages()``.
 
         Args:
-            messages: Conversation messages with 'role' and 'content' keys.
+            messages: Conversation messages with 'role' and 'content' keys,
+                or a bare query string (it becomes a single user message).
                 Local also accepts system/developer messages — their content
                 is appended to the managed system prompt.
             stream: Enable streaming responses.
@@ -386,6 +387,12 @@ class PageIndexClient:
             - stream=True, stream_metadata=False: iterator of text chunks
             - stream=True, stream_metadata=True: iterator of chunk dicts
         """
+        if isinstance(messages, str):
+            if not messages.strip():
+                raise PageIndexAPIError(
+                    "messages must be a non-empty string or a list of "
+                    "message dicts.")
+            messages = [{"role": "user", "content": messages}]
         from .cloud_api import CloudAPI
         if not isinstance(self._api, CloudAPI):
             from .local_chat import run_chat_completions
@@ -463,7 +470,7 @@ class PageIndexClient:
 
     def messages(
         self,
-        messages: list[dict[str, Any]],
+        messages: Union[str, list[dict[str, Any]]],
         model: str,
         max_tokens: int,
         stream: bool = False,
@@ -489,7 +496,8 @@ class PageIndexClient:
 
         Args:
             messages: Native Messages-format history (including prior
-                tool_use/tool_result blocks on round-trip).
+                tool_use/tool_result blocks on round-trip), or a bare query
+                string (it becomes a single user message).
             model / max_tokens: Required by the Messages API; passed through.
             stream: Yield the Anthropic SDK's event stream across turns
                 (its native event objects, including SDK-synthesized

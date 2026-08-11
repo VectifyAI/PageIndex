@@ -758,3 +758,13 @@ def test_cloud_chat_stream_parsing(cloud, monkeypatch):
         messages=[{"role": "user", "content": "q"}], stream=True,
         stream_metadata=True))
     assert {"object": "chat.completion.citations", "citations": []} in chunks
+
+
+def test_cloud_chat_accepts_query_string(cloud):
+    client, calls, fake = cloud
+    fake.payload = {"choices": [{"message": {"content": "ok"}}]}
+    client.chat_completions("What status?")
+    assert calls[-1]["json"]["messages"] == [
+        {"role": "user", "content": "What status?"}]
+    with pytest.raises(PageIndexAPIError, match="non-empty string"):
+        client.chat_completions("   ")

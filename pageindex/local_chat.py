@@ -568,10 +568,12 @@ def run_messages(client, messages, model: str, max_tokens: int,
 
     _require_anthropic()
     _validate_max_turns(max_turns)
+    if isinstance(messages, str) and messages.strip():
+        messages = [{"role": "user", "content": messages}]
     if (not isinstance(messages, list) or not messages
             or not all(isinstance(message, dict) for message in messages)):
-        raise PageIndexAPIError("messages must be a non-empty list of "
-                                "message dicts.")
+        raise PageIndexAPIError("messages must be a non-empty string or a "
+                                "list of message dicts.")
     block = _doc_block(client, doc_id)
     prepared = [dict(message) for message in messages]
     passthrough = {key: value for key, value in {
