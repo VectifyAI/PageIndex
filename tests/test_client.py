@@ -484,6 +484,30 @@ def test_generate_doc_description_error_boundary(monkeypatch):
         pageindex.utils.generate_doc_description([])
 
 
+def test_generate_summaries_all_failed_raises(monkeypatch):
+    async def boom(model, prompt):
+        raise ValueError("bad key")
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", boom)
+    structure = [{"title": "A", "text": "t1",
+                  "nodes": [{"title": "B", "text": "t2"}]}]
+    with pytest.raises(RuntimeError, match="all nodes"):
+        asyncio.run(pageindex.utils.generate_summaries_for_structure(structure))
+
+
+def test_generate_summaries_partial_failure_absorbed(monkeypatch):
+    async def flaky(model, prompt):
+        if "t1" in prompt:
+            raise ValueError("transient")
+        return "ok"
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", flaky)
+    structure = [{"title": "A", "text": "t1",
+                  "nodes": [{"title": "B", "text": "t2"}]}]
+    result = asyncio.run(pageindex.utils.generate_summaries_for_structure(structure))
+    summaries = {n["title"]: n["summary"]
+                 for n in pageindex.utils.structure_to_list(result)}
+    assert summaries == {"A": "", "B": "ok"}
+
+
 def test_delete_survives_marker_tamper(local_client, tmp_path):
     tampered = tmp_path / "store" / "docs" / "tampered" / "doc.json"
     tampered.mkdir(parents=True)

@@ -662,6 +662,11 @@ async def generate_summaries_for_structure(structure, model=None):
 
     for node, summary in zip(nodes, summaries):
         node['summary'] = "" if isinstance(summary, BaseException) else summary
+    if nodes and not any(node['summary'] for node in nodes):
+        raise RuntimeError(
+            "Summary generation failed for all nodes "
+            "(check LLM credentials and model availability)"
+        )
     return structure
 
 
