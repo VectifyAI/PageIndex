@@ -1,15 +1,19 @@
 """Agent tools: the cloud MCP tool contract, executed against a PageIndexClient.
 
-Tool names, input schemas, and descriptions match the PageIndex cloud MCP
-server, so agent prompts work unchanged across the cloud MCP connection and
-this in-process layer. Only the tools that exist in every mode are registered
-(no folders, search_documents, or get_document_image).
+Tool names and input-schema structure match the PageIndex cloud MCP server,
+so agent prompts work unchanged across the cloud MCP connection and this
+in-process layer. Only the tools that exist in every mode are registered
+(no folders, search_documents, or get_document_image), and the guidance
+strings (tool descriptions) adapt to the local surface the same way the
+agent instructions do — they never teach capabilities that only exist on
+the cloud.
 
 Tools never raise: every outcome, including errors, is returned as the same
 JSON envelope the cloud emits ({"success": true, ...} / {"error": ...}).
 """
 from __future__ import annotations
 
+import copy
 import difflib
 import json
 import re
@@ -1107,27 +1111,83 @@ def _tool_docstring(description: str, properties: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-#: Appended to the cloud-verbatim description when a tool is served locally,
-#: so the agent learns what is cloud-only before calling instead of from the
-#: runtime error envelope.
-_LOCAL_DESCRIPTION_NOTES = {
+# Local guidance layer: schema STRUCTURE stays byte-identical to the cloud
+# contract, but description strings adapt to the local surface the same way
+# AGENT_INSTRUCTIONS does — guidance must not teach capabilities (folders,
+# semantic ranking) or tools (search_documents, get_document_image) that do
+# not exist here. Guard tests assert both properties; a contract refresh
+# that reintroduces a cloud-only reference fails the dead-reference test.
+
+_LOCAL_DOC_NAME_DESCRIPTION = (
+    'Copy the `name` field verbatim from a browse_documents() response '
+    '(case-sensitive, include extension). Example: "Q3 Report.pdf". '
+    "Document names are unique in a local library."
+)
+_LOCAL_FOLDER_ID_DESCRIPTION = (
+    "Not needed in local mode: document names are unique and folders are "
+    'not supported yet (they work on PageIndex cloud). Omit, or pass "root".'
+)
+
+_LOCAL_DESCRIPTIONS: dict[str, str] = {
     "browse_documents": (
-        'LOCAL MODE: folder_id and sort="relevance"/query are not supported '
-        "yet (they work on PageIndex cloud) — use the default time sort and "
-        "page with offset."
+        "Primary document retrieval tool — first choice for any "
+        "document-related question. Lists your documents newest first with "
+        "names and descriptions; match them against the user's intent and "
+        "page through with `offset: next_offset` while `has_more` is true. "
+        'Folder browsing and semantic ranking (sort="relevance") are not '
+        "supported in local mode yet — they work on PageIndex cloud."
     ),
+    # The image sentence points at a tool that is not registered locally.
+    "get_page_content": TOOL_CONTRACT["get_page_content"]["description"]
+    .replace(" Embedded image paths in the response feed into "
+             "`get_document_image()`.", ""),
+}
+
+_LOCAL_PARAM_DESCRIPTIONS: dict[tuple[str, str], str] = {
+    ("browse_documents", "folder_id"): _LOCAL_FOLDER_ID_DESCRIPTION,
+    ("browse_documents", "recursive"): (
+        "Kept for cloud compatibility; a local library has no folders, so "
+        "recursive and non-recursive return the same documents."
+    ),
+    ("browse_documents", "sort"): (
+        'Only "time" (newest first) is supported in local mode; '
+        '"relevance" is cloud-only for now.'
+    ),
+    ("browse_documents", "query"): (
+        'Cloud-only for now (semantic ranking with sort="relevance") — '
+        "omit in local mode."
+    ),
+    ("get_document", "doc_name"): _LOCAL_DOC_NAME_DESCRIPTION,
+    ("get_document", "folder_id"): _LOCAL_FOLDER_ID_DESCRIPTION,
+    ("get_document_structure", "doc_name"): _LOCAL_DOC_NAME_DESCRIPTION,
+    ("get_document_structure", "folder_id"): _LOCAL_FOLDER_ID_DESCRIPTION,
+    ("get_page_content", "doc_name"): _LOCAL_DOC_NAME_DESCRIPTION,
+    ("get_page_content", "folder_id"): _LOCAL_FOLDER_ID_DESCRIPTION,
+    ("remove_document", "doc_names"): (
+        "Array of document names to delete. Each name must be copied "
+        "verbatim from the `name` field of a browse_documents() response "
+        '(case-sensitive, include extension). Example: ["Q3 Report.pdf", '
+        '"draft.pdf"]. Max 10 per call.'
+    ),
+    ("remove_document", "folder_id"): _LOCAL_FOLDER_ID_DESCRIPTION,
 }
 
 
 def _local_description(name: str) -> str:
-    description = TOOL_CONTRACT[name]["description"]
-    note = _LOCAL_DESCRIPTION_NOTES.get(name)
-    return f"{description}\n\n{note}" if note else description
+    return _LOCAL_DESCRIPTIONS.get(name) or TOOL_CONTRACT[name]["description"]
+
+
+def _local_schema(name: str) -> dict[str, Any]:
+    schema = copy.deepcopy(TOOL_CONTRACT[name]["schema"])
+    for (tool_name, param), text in _LOCAL_PARAM_DESCRIPTIONS.items():
+        if tool_name == name and param in schema["properties"]:
+            schema["properties"][param]["description"] = text
+    return schema
 
 
 def _docstring(name: str) -> str:
     return _tool_docstring(_local_description(name),
-                           TOOL_CONTRACT[name]["schema"]["properties"])
+                           _local_schema(name)["properties"])
 
 
 _SCHEMA_TYPE_MAP = {"string": str, "integer": int, "number": float,

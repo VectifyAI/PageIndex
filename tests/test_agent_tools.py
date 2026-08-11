@@ -76,10 +76,49 @@ def test_tool_surface_and_docstrings(client):
     with_management = client.agent_tools(include_management=True)
     assert [tool.__name__ for tool in with_management][-1] == "remove_document"
     for tool in tools:
-        contract = TOOL_CONTRACT[tool.__name__]
-        assert tool.__doc__.startswith(contract["description"])
-        for param in contract["schema"]["properties"]:
+        for param in TOOL_CONTRACT[tool.__name__]["schema"]["properties"]:
             assert param in tool.__doc__
+    docs = {tool.__name__: tool.__doc__ for tool in tools}
+    # Tools whose cloud description has no cloud-only content keep it
+    # verbatim; browse_documents serves the localized guidance.
+    assert docs["get_document"].startswith(
+        TOOL_CONTRACT["get_document"]["description"])
+    assert docs["browse_documents"].startswith(
+        "Primary document retrieval tool")
+
+
+def test_local_schema_structure_matches_contract():
+    """The local guidance layer may localize description strings only —
+    names, types, defaults, bounds, and required stay byte-identical."""
+    import copy
+    from pageindex.agent_tools import _local_schema
+
+    def stripped(schema):
+        schema = copy.deepcopy(schema)
+        for spec in schema["properties"].values():
+            spec.pop("description", None)
+        return schema
+
+    for name, contract in TOOL_CONTRACT.items():
+        assert stripped(_local_schema(name)) == stripped(contract["schema"]), name
+
+
+def test_local_guidance_references_only_local_tools(client):
+    """Local descriptions must not send the agent to tools that are not
+    registered here (the cloud text names search_documents,
+    get_folder_structure, and get_document_image)."""
+    registered = set(tool_names(include_management=True))
+    for tool in client.agent_tools(include_management=True):
+        named = set(re.findall(r"\b(\w+)\(", tool.__doc__))
+        assert named <= registered, (tool.__name__, named - registered)
+
+
+def test_local_guidance_points_cloud_only_capabilities_at_cloud(client):
+    browse = client.agent_tools()[0].__doc__
+    assert "not supported in local mode yet" in browse
+    assert "PageIndex cloud" in browse
+    assert "search_documents" not in browse
+    assert "get_folder_structure" not in browse
 
 
 # ── browse_documents ──
@@ -117,16 +156,6 @@ def test_browse_documents_pagination(client, store_path):
     second, _ = run(client, "browse_documents", limit=2, offset=2)
     assert [d["name"] for d in second["documents"]] == ["doc0.pdf"]
     assert second["has_more"] is False
-
-
-def test_local_docstrings_preannounce_cloud_only_capabilities(client):
-    """The cloud-verbatim description invites sort="relevance" and folder
-    drilling; the local registration appends a LOCAL MODE note so the agent
-    learns the dead ends before calling, not from the runtime error."""
-    browse = client.agent_tools()[0]
-    assert browse.__doc__.startswith(TOOL_CONTRACT["browse_documents"]["description"])
-    assert "LOCAL MODE" in browse.__doc__
-    assert "not supported yet" in browse.__doc__
 
 
 def test_browse_documents_relevance_unsupported(client, store_path):

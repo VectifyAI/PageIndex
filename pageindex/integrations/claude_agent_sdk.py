@@ -28,8 +28,8 @@ def build_claude_mcp(client, include_management: bool = False):
             "as_claude_mcp in local mode requires the Claude Agent SDK — "
             "pip install claude-agent-sdk (or pip install 'pageindex[claude]')."
         ) from exc
-    from ..agent_tools import (TOOL_CONTRACT, _local_description, call_tool,
-                               tool_names)
+    from ..agent_tools import (TOOL_CONTRACT, _local_description,
+                               _local_schema, call_tool, tool_names)
 
     def make_handler(name: str):
         async def handler(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -54,7 +54,7 @@ def build_claude_mcp(client, include_management: bool = False):
 
     tools = [
         tool(name, _local_description(name),
-             TOOL_CONTRACT[name]["schema"], **tool_kwargs(name))(make_handler(name))
+             _local_schema(name), **tool_kwargs(name))(make_handler(name))
         for name in tool_names(include_management)
     ]
     return create_sdk_mcp_server(name="pageindex", version=sdk_version(),
