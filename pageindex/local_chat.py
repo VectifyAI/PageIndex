@@ -1,15 +1,18 @@
 """Managed local chat: document-QA agents over the local tools.
 
-Three methods, three wire protocols, 1:1 with the backend and no translation
-layer: ``chat_completions`` drives the backend's /chat/completions (any
-OpenAI-compatible backend, final answer only), ``responses`` drives
-/responses (process items are standard output; round-trip them for provider
-prompt-cache continuation and agent memory), ``messages`` drives Anthropic's
-/v1/messages via the SDK's own tool runner (tool_use/tool_result round-trip
-is the format's native behavior).
+Three methods, three backend protocols, routed 1:1: ``chat_completions``
+drives the backend's /chat/completions (any OpenAI-compatible backend,
+final answer only), ``responses`` drives /responses (process items are
+standard output; round-trip them for provider prompt-cache continuation and
+agent memory), ``messages`` drives Anthropic's /v1/messages via the SDK's
+own tool runner (tool_use/tool_result round-trip is the format's native
+behavior).
 
 Content passes through untouched — the caller's messages, the model's
-answers, tool outputs, finish/stop reasons. The SDK owns only gatekeeping
+answers, tool outputs. Native stop reasons pass through on ``messages``;
+the OpenAI engine's abstraction does not surface per-turn finish reasons,
+so ``chat_completions`` reports loop completion as ``"stop"`` and
+``responses`` as ``status: "completed"``. The SDK owns gatekeeping
 (structural validation), table-setting (managed instructions, tools, doc
 targeting), tool execution, and billing (usage aggregation, envelope ids).
 """
@@ -43,6 +46,9 @@ def _managed_instructions(extra_system: list[str]) -> str:
 def _doc_block(client, doc_id) -> Optional[str]:
     if doc_id is None:
         return None
+    if not isinstance(doc_id, (str, list)):
+        raise PageIndexAPIError("doc_id must be a string or a list of "
+                                "strings.")
     doc_ids = [doc_id] if isinstance(doc_id, str) else list(doc_id)
     missing = []
     for one_id in doc_ids:
@@ -118,29 +124,69 @@ _SENTINEL = object()
 
 
 def _stream_sync(agen_factory) -> Iterator[Any]:
-    """Drive an async generator from a background thread; yield synchronously."""
-    items: "queue.Queue[Any]" = queue.Queue()
+    """Drive an async generator from a background thread; yield synchronously.
+
+    Closing (or abandoning) the iterator cancels the run between items: the
+    pump stops, and the async generator's cleanup cancels the underlying
+    agent task, so no further model turns or tool executions start. An
+    in-flight backend request cannot be aborted mid-turn.
+    """
+    items: "queue.Queue[Any]" = queue.Queue(maxsize=32)
+    cancelled = threading.Event()
+
+    def deliver(item) -> bool:
+        while not cancelled.is_set():
+            try:
+                items.put(item, timeout=0.1)
+                return True
+            except queue.Full:
+                continue
+        return False
 
     def pump():
         async def consume():
-            async for item in agen_factory():
-                items.put(item)
+            agen = agen_factory()
+
+            async def drain():
+                async for item in agen:
+                    if not deliver(item):
+                        break
+
+            # The watchdog lets cancellation land even while drain() is
+            # awaiting the backend — a plain async-for would only notice
+            # between items.
+            task = asyncio.ensure_future(drain())
+            try:
+                while not task.done():
+                    if cancelled.is_set():
+                        task.cancel()
+                        break
+                    await asyncio.sleep(0.05)
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            finally:
+                await agen.aclose()
 
         try:
             asyncio.run(consume())
         except BaseException as exc:  # re-raised on the consumer thread
-            items.put(exc)
+            deliver(exc)
             return
-        items.put(_SENTINEL)
+        deliver(_SENTINEL)
 
     threading.Thread(target=pump, daemon=True).start()
-    while True:
-        item = items.get()
-        if item is _SENTINEL:
-            return
-        if isinstance(item, BaseException):
-            raise item
-        yield item
+    try:
+        while True:
+            item = items.get()
+            if item is _SENTINEL:
+                return
+            if isinstance(item, BaseException):
+                raise item
+            yield item
+    finally:
+        cancelled.set()
 
 
 # ── OpenAI engine (chat_completions / responses) ──
@@ -179,14 +225,52 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
     )
 
 
+def _validate_max_turns(max_turns) -> None:
+    if max_turns is not None and (not isinstance(max_turns, int)
+                                  or max_turns < 1):
+        raise PageIndexAPIError("max_turns must be a positive integer.")
+
+
 def _run_kwargs(max_turns) -> dict:
     # Managed runs never export traces — the caller opted into document QA,
-    # not telemetry.
+    # not telemetry. The stable group_id keys OpenAI's prompt-cache routing:
+    # without it openai-agents stamps every run with a fresh
+    # prompt_cache_key, tagging a round-tripped prefix as a different cache
+    # group.
     from agents import RunConfig
-    kwargs: dict = {"run_config": RunConfig(tracing_disabled=True)}
+    kwargs: dict = {"run_config": RunConfig(tracing_disabled=True,
+                                            group_id="pageindex-local-chat")}
     if max_turns is not None:
         kwargs["max_turns"] = max_turns
     return kwargs
+
+
+async def _aclose_backend(agent) -> None:
+    """Close the per-call AsyncOpenAI client before its event loop ends —
+    otherwise httpx tears down pooled connections on a closed loop and
+    emits 'Task exception was never retrieved' noise."""
+    backend = getattr(getattr(agent, "model", None), "_client", None)
+    close = getattr(backend, "close", None)
+    if close is not None:
+        try:
+            await close()
+        except Exception:
+            pass
+
+
+async def _run_closing(agent, coro):
+    try:
+        return await coro
+    finally:
+        await _aclose_backend(agent)
+
+
+def _wrap_max_turns(exc, max_turns) -> PageIndexAPIError:
+    limit = max_turns if max_turns is not None else "the default limit"
+    return PageIndexAPIError(
+        f"The agent did not finish within max_turns ({limit}). Raise "
+        "max_turns, or narrow the question."
+    )
 
 
 def _openai_usage(raw_responses) -> dict:
@@ -203,12 +287,13 @@ def run_chat_completions(client, messages, stream: bool = False,
                          model: Optional[str] = None,
                          max_turns: Optional[int] = None,
                          ) -> Union[dict, Iterator[str], Iterator[dict]]:
-    _require_openai_agents("chat_completions")
     if enable_citations:
         raise PageIndexAPIError(
             "enable_citations is cloud-only — citations need block-level OCR "
             "data that local mode does not store."
         )
+    _require_openai_agents("chat_completions")
+    _validate_max_turns(max_turns)
     system_texts, history = _split_chat_messages(messages)
     block = _doc_block(client, doc_id)
     items = ([{"role": "user", "content": block}] if block else []) + history
@@ -217,9 +302,13 @@ def run_chat_completions(client, messages, stream: bool = False,
                           _managed_instructions(system_texts),
                           temperature, None)
     from agents import Runner
+    from agents.exceptions import MaxTurnsExceeded
     if not stream:
-        result = _run_sync(
-            Runner.run(agent, input=items, **_run_kwargs(max_turns)))
+        try:
+            result = _run_sync(_run_closing(agent,
+                Runner.run(agent, input=items, **_run_kwargs(max_turns))))
+        except MaxTurnsExceeded as exc:
+            raise _wrap_max_turns(exc, max_turns) from exc
         return {
             "id": f"chatcmpl-{uuid.uuid4().hex}",
             "object": "chat.completion",
@@ -249,14 +338,20 @@ def run_chat_completions(client, messages, stream: bool = False,
         from openai.types.responses import ResponseTextDeltaEvent
         streamed = Runner.run_streamed(agent, input=items,
                                        **_run_kwargs(max_turns))
-        first = True
-        async for event in streamed.stream_events():
-            if (event.type == "raw_response_event"
-                    and isinstance(event.data, ResponseTextDeltaEvent)):
-                if first:
-                    yield chunk({"role": "assistant", "content": ""})
-                    first = False
-                yield chunk({"content": event.data.delta})
+        yield chunk({"role": "assistant", "content": ""})
+        completed = False
+        try:
+            async for event in streamed.stream_events():
+                if (event.type == "raw_response_event"
+                        and isinstance(event.data, ResponseTextDeltaEvent)):
+                    yield chunk({"content": event.data.delta})
+            completed = True
+        except MaxTurnsExceeded as exc:
+            raise _wrap_max_turns(exc, max_turns) from exc
+        finally:
+            if not completed and hasattr(streamed, "cancel"):
+                streamed.cancel()  # abandoned/failed: stop the agent task
+            await _aclose_backend(agent)
         yield chunk({}, finish="stop")
         yield {
             "id": chat_id, "object": "chat.completion.chunk",
@@ -281,7 +376,8 @@ def run_responses(client, input, model: Optional[str] = None,
                   max_turns: Optional[int] = None,
                   ) -> Union[dict, Iterator[dict]]:
     _require_openai_agents("responses")
-    if isinstance(input, str):
+    _validate_max_turns(max_turns)
+    if isinstance(input, str) and input.strip():
         items = [{"role": "user", "content": input}]
     elif (isinstance(input, list) and input
             and all(isinstance(item, dict) for item in input)):
@@ -294,9 +390,11 @@ def run_responses(client, input, model: Optional[str] = None,
         items = [{"role": "user", "content": block}] + items
     extra = [instructions] if instructions else []
     model_name = model or client.retrieve_model
-    agent = _openai_agent(client, "responses", model_name,
-                          _managed_instructions(extra), temperature, top_p)
+    managed = _managed_instructions(extra)
+    agent = _openai_agent(client, "responses", model_name, managed,
+                          temperature, top_p)
     from agents import Runner
+    from agents.exceptions import MaxTurnsExceeded
 
     def envelope(output: list, raw_responses) -> dict:
         usage = _openai_usage(raw_responses)
@@ -310,30 +408,74 @@ def run_responses(client, input, model: Optional[str] = None,
             "usage": {"input_tokens": usage["prompt_tokens"],
                       "output_tokens": usage["completion_tokens"],
                       "total_tokens": usage["total_tokens"]},
+            "instructions": managed,
+            "tools": [{"type": "function", "name": tool.name,
+                       "description": tool.description,
+                       "parameters": tool.params_json_schema,
+                       "strict": getattr(tool, "strict_json_schema", True)}
+                      for tool in agent.tools],
+            "tool_choice": "auto",
+            "parallel_tool_calls": True,
+            "temperature": temperature,
+            "top_p": top_p,
+            "max_output_tokens": None,
+            "error": None,
+            "incomplete_details": None,
+            "metadata": None,
         }
 
     if not stream:
-        result = _run_sync(
-            Runner.run(agent, input=[dict(item) for item in items],
-                       **_run_kwargs(max_turns)))
+        try:
+            result = _run_sync(_run_closing(agent,
+                Runner.run(agent, input=[dict(item) for item in items],
+                           **_run_kwargs(max_turns))))
+        except MaxTurnsExceeded as exc:
+            raise _wrap_max_turns(exc, max_turns) from exc
         output = result.to_input_list()[len(items):]
         return envelope(output, result.raw_responses)
+
+    # One logical response per call: per-turn backend lifecycle events
+    # (created/completed/...) are collapsed — forwarding them verbatim would
+    # end a canonical consumer at the first turn — and sequence numbers are
+    # reassigned monotonically across the whole run.
+    lifecycle = {"response.created", "response.in_progress",
+                 "response.completed", "response.failed",
+                 "response.incomplete", "response.queued"}
 
     async def agen():
         streamed = Runner.run_streamed(agent,
                                        input=[dict(item) for item in items],
                                        **_run_kwargs(max_turns))
-        async for event in streamed.stream_events():
-            if event.type == "raw_response_event":
-                yield event.data.model_dump(exclude_unset=True)
-            elif (event.type == "run_item_stream_event"
-                    and event.item.type == "tool_call_output_item"):
-                # We are the tool executor, so we emit the output item the
-                # way the platform streams its own server-side tools.
-                yield {"type": "response.output_item.done",
-                       "item": dict(event.item.to_input_item())}
+        sequence = 0
+        completed = False
+        try:
+            async for event in streamed.stream_events():
+                if event.type == "raw_response_event":
+                    data = event.data.model_dump(exclude_unset=True)
+                    if data.get("type") in lifecycle:
+                        continue
+                    sequence += 1
+                    data["sequence_number"] = sequence
+                    yield data
+                elif (event.type == "run_item_stream_event"
+                        and event.item.type == "tool_call_output_item"):
+                    # We are the tool executor, so we emit the output item
+                    # the way the platform streams its own server-side tools.
+                    sequence += 1
+                    yield {"type": "response.output_item.done",
+                           "output_index": sequence,
+                           "sequence_number": sequence,
+                           "item": dict(event.item.to_input_item())}
+            completed = True
+        except MaxTurnsExceeded as exc:
+            raise _wrap_max_turns(exc, max_turns) from exc
+        finally:
+            if not completed and hasattr(streamed, "cancel"):
+                streamed.cancel()  # abandoned/failed: stop the agent task
+            await _aclose_backend(agent)
         output = streamed.to_input_list()[len(items):]
-        yield {"type": "response.completed",
+        sequence += 1
+        yield {"type": "response.completed", "sequence_number": sequence,
                "response": envelope(output, streamed.raw_responses)}
 
     return _stream_sync(agen)
@@ -348,6 +490,13 @@ def _require_anthropic() -> None:
         raise PageIndexAPIError(
             "messages in local mode requires the Anthropic SDK — "
             "pip install anthropic (or pip install 'pageindex[anthropic]')."
+        ) from exc
+    try:
+        from anthropic import beta_tool  # noqa: F401
+    except ImportError as exc:
+        raise PageIndexAPIError(
+            "messages in local mode requires anthropic >= 0.68.0 (the tool "
+            "runner) — pip install -U anthropic."
         ) from exc
 
 
@@ -372,32 +521,54 @@ def _runnable_tools(client) -> list:
 
 
 def _anthropic_system(extra_system, block: Optional[str]) -> list[dict]:
-    """System blocks with cache_control on the stable managed prefix; the
-    doc block and caller system content follow as their own blocks."""
+    """System blocks: cache_control marks the stable managed prefix only
+    (the API allows 4 breakpoints total — the varying doc block and caller
+    blocks must not consume the budget); the doc block and caller system
+    content follow as their own blocks."""
     blocks = [{"type": "text",
                "text": CHAT_HEADER + "\n\n" + AGENT_INSTRUCTIONS,
                "cache_control": {"type": "ephemeral"}}]
     if block:
-        blocks.append({"type": "text", "text": block,
-                       "cache_control": {"type": "ephemeral"}})
+        blocks.append({"type": "text", "text": block})
     if extra_system is None:
         return blocks
     if isinstance(extra_system, str):
-        return blocks + [{"type": "text", "text": extra_system}]
+        if extra_system.strip():
+            blocks.append({"type": "text", "text": extra_system})
+        return blocks
     if isinstance(extra_system, list):
         return blocks + list(extra_system)
     raise PageIndexAPIError("system must be a string or a list of blocks.")
 
 
-def _anthropic_usage(turns) -> dict:
-    fields = ("input_tokens", "output_tokens",
-              "cache_creation_input_tokens", "cache_read_input_tokens")
-    totals = {field: 0 for field in fields}
-    for turn in turns:
-        for field in fields:
-            value = getattr(turn.usage, field, None)
-            if isinstance(value, int):
-                totals[field] += value
+def _dump_block(block) -> Any:
+    """A content block as a plain JSON dict, minus SDK-internal fields the
+    API rejects (ParsedBetaTextBlock.__api_exclude__, e.g. parsed_output)."""
+    if hasattr(block, "model_dump"):
+        exclude = getattr(type(block), "__api_exclude__", None)
+        return block.model_dump(mode="json",
+                                exclude=set(exclude) if exclude else None)
+    return block
+
+
+def _dump_message(message) -> dict:
+    message = dict(message)
+    content = message.get("content")
+    if isinstance(content, list):
+        message["content"] = [_dump_block(item) for item in content]
+    return message
+
+
+def _anthropic_usage(turns, final_usage: dict) -> dict:
+    """The final turn's native usage dict with the token counters replaced
+    by cross-turn sums (None-safe); all other native fields survive."""
+    totals = dict(final_usage)
+    for field in ("input_tokens", "output_tokens",
+                  "cache_creation_input_tokens", "cache_read_input_tokens"):
+        values = [getattr(turn.usage, field, None) for turn in turns]
+        counted = [value for value in values if isinstance(value, int)]
+        if counted:
+            totals[field] = sum(counted)
     return totals
 
 
@@ -410,8 +581,11 @@ def run_messages(client, messages, model: str, max_tokens: int,
                  max_turns: Optional[int] = None,
                  ) -> Union[dict, Iterator[Any]]:
     _require_anthropic()
-    if not isinstance(messages, list) or not messages:
-        raise PageIndexAPIError("messages must be a non-empty list.")
+    _validate_max_turns(max_turns)
+    if (not isinstance(messages, list) or not messages
+            or not all(isinstance(message, dict) for message in messages)):
+        raise PageIndexAPIError("messages must be a non-empty list of "
+                                "message dicts.")
     block = _doc_block(client, doc_id)
     prepared = [dict(message) for message in messages]
     passthrough = {key: value for key, value in {
@@ -425,7 +599,8 @@ def run_messages(client, messages, model: str, max_tokens: int,
         tools=_runnable_tools(client),
         system=_anthropic_system(system, block),
         stream=stream,
-        **({"max_iterations": max_turns} if max_turns is not None else {}),
+        # Bounded like the OpenAI surfaces (their framework default is 10).
+        max_iterations=max_turns if max_turns is not None else 10,
         **passthrough,
     )
 
@@ -449,16 +624,23 @@ def run_messages(client, messages, model: str, max_tokens: int,
     conversation = list(captured.get("messages") or [])
     final = turns[-1]
     envelope = final.model_dump(mode="json")
-    envelope["usage"] = _anthropic_usage(turns)
+    envelope["content"] = [_dump_block(item) for item in final.content]
+    envelope["usage"] = _anthropic_usage(turns, envelope.get("usage") or {})
     # The full turn sequence (assistant tool_use + user tool_result + final),
     # valid for verbatim append to the caller's history. The runner appends
-    # intermediate turns to its params but not the final assistant message.
-    new_messages = conversation[len(prepared):]
-    if not new_messages or new_messages[-1].get("role") != "assistant":
+    # a turn to its params only when it executed tools, so the final
+    # assistant message is missing exactly when the run ended naturally
+    # (stop_reason != "tool_use"); on a max_turns cut the last appended
+    # turn IS the final message and appending again would duplicate its
+    # tool_use ids.
+    new_messages = [_dump_message(message)
+                    for message in conversation[len(prepared):]]
+    if (final.stop_reason != "tool_use"
+            and (not new_messages
+                 or new_messages[-1].get("role") != "assistant")):
         new_messages = new_messages + [{
             "role": "assistant",
-            "content": [block.model_dump(mode="json")
-                        for block in final.content],
+            "content": [_dump_block(item) for item in final.content],
         }]
     envelope["messages"] = new_messages
     return envelope

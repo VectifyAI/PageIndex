@@ -354,9 +354,13 @@ class PageIndexClient:
         run over the local tools against your own LLM backend's
         /chat/completions (requires ``pageindex[openai]``; the OpenAI SDK's
         usual env config — OPENAI_API_KEY, OPENAI_BASE_URL — selects the
-        backend, so any OpenAI-compatible server works). The response
-        carries the final answer only; for the tool-use process and
-        prompt-cache round-trip use ``responses()`` or ``messages()``.
+        backend, so any OpenAI-compatible server works). The non-stream
+        response carries the final answer only; streaming yields the
+        agent's visible text as it is produced, including narration before
+        tool calls. ``finish_reason`` reports loop completion ("stop") —
+        the engine does not surface per-turn backend finish reasons. For
+        the tool-use process and prompt-cache round-trip use
+        ``responses()`` or ``messages()``.
 
         Args:
             messages: Conversation messages with 'role' and 'content' keys.
@@ -428,9 +432,11 @@ class PageIndexClient:
             input: A user message string, or a list of Responses input items
                 (round-trip prior ``output`` items here).
             model: Backend model name (defaults to ``retrieve_model``).
-            stream: Yield native Responses stream events as dicts; tool
-                outputs are emitted as ``response.output_item.done`` events
-                and the final event is ``response.completed``.
+            stream: Yield Responses stream events as dicts — one logical
+                response per call: per-turn backend lifecycle events are
+                collapsed and sequence numbers reassigned monotonically;
+                tool outputs are emitted as ``response.output_item.done``
+                events and the single final event is ``response.completed``.
             doc_id: Document ID or list of IDs to scope the conversation.
             instructions: Appended to the managed system prompt.
             temperature / top_p: Passed through to the model.
@@ -479,11 +485,16 @@ class PageIndexClient:
             messages: Native Messages-format history (including prior
                 tool_use/tool_result blocks on round-trip).
             model / max_tokens: Required by the Messages API; passed through.
-            stream: Yield the native event stream across turns, verbatim.
+            stream: Yield the Anthropic SDK's event stream across turns
+                (its native event objects, including SDK-synthesized
+                convenience events), one message sequence per turn.
             doc_id: Document ID or list of IDs to scope the conversation.
             system: Appended after the managed system blocks.
             temperature / top_p / top_k / stop_sequences: Passed through.
-            max_turns: Cap on agent turns per call.
+            max_turns: Cap on agent turns per call (default 10, like the
+                OpenAI surfaces). A truncated run reports
+                ``stop_reason: "tool_use"`` and its ``messages`` remain
+                valid for continuation.
         """
         from .cloud_api import CloudAPI
         if isinstance(self._api, CloudAPI):

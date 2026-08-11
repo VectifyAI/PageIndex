@@ -1453,9 +1453,9 @@ def _base_instructions(client) -> str:
 def doc_targeting_block(client, doc_id) -> Optional[str]:
     """The doc_id targeting text: names, metadata, and the directive to work
     within those documents. Shared by agent_instructions and the local chat
-    surfaces (which place it as a leading conversation item). Raises when a
-    doc_id's name is shadowed by a newer same-name document — the
-    name-addressed tools could not reach it."""
+    surfaces (a leading conversation item on the OpenAI surfaces, a system
+    block on messages()). Raises when a doc_id's name is shadowed by a newer
+    same-name document — the name-addressed tools could not reach it."""
     if doc_id is None:
         return None
     doc_ids = [doc_id] if isinstance(doc_id, str) else list(doc_id)
