@@ -181,10 +181,10 @@ class LocalAPI:
         from .utils import add_node_text
         structure = self._require_data(
             self._store.get_tree(doc_id), error_prefix)
-        pages = self._require_data(self._store.get_pages(doc_id), error_prefix)
-        if pages:
-            pdf_pages = [(p.get("markdown", ""), 0) for p in pages]
-            add_node_text(structure, pdf_pages)
+        pages = self._require_data(
+            self._store.get_pages(doc_id) or None, error_prefix)
+        pdf_pages = [(p.get("markdown", ""), 0) for p in pages]
+        add_node_text(structure, pdf_pages)
         return structure
 
     def get_tree(self, doc_id: str, node_summary: bool = False) -> dict[str, Any]:
@@ -211,7 +211,7 @@ class LocalAPI:
             _walk(self._load_tree_with_text(doc_id,
                                            "Failed to get OCR result"), 1)
         else:
-            pages = self._require_data(self._store.get_pages(doc_id),
+            pages = self._require_data(self._store.get_pages(doc_id) or None,
                                        "Failed to get OCR result")
             if format == "page":
                 result = pages

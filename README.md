@@ -225,8 +225,12 @@ doc_id = client.submit_document("doc.pdf")["doc_id"]        # local mode blocks 
 doc_id = client.submit_document("doc.pdf", mode="flash")["doc_id"]  # local mode with PageIndex Flash
 
 tree = client.get_tree(doc_id, node_summary=True)["result"]
+```
 
-answer = client.chat_completions(                                   # cloud only for now — local chat arrives in a later release
+`chat_completions` is cloud-only for now — agent-based local chat arrives in a later release:
+
+```python
+answer = client.chat_completions(
     messages=[{"role": "user", "content": "Summarize the key findings"}],
     doc_id=doc_id,
 )["choices"][0]["message"]["content"]

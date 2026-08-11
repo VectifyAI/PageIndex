@@ -33,8 +33,9 @@ class PageIndexClient:
             trees. Defaults to the packaged config (see pageindex/config.yaml).
         summary_model (str, optional): Local mode only — LLM used for node
             summaries and document descriptions.
-        retrieve_model (str, optional): Local mode only — LLM used for
-            retrieval tree search and chat completions.
+        retrieve_model (str, optional): Local mode only — LLM reserved for
+            chat completions once agent-based local chat lands in a later
+            release; unused until then.
         storage_path (str, optional): Local mode only — directory where
             indexed documents are stored. Defaults to ``./.pageindex``.
 

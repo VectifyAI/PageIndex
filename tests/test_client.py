@@ -445,6 +445,45 @@ def test_get_tree_fails_loud_on_broken_pages(local_client, indexed_doc, tmp_path
         local_client.get_tree(indexed_doc)
 
 
+def test_get_tree_fails_loud_on_empty_pages(local_client, indexed_doc, tmp_path):
+    doc_dir = tmp_path / "store" / "docs" / indexed_doc
+    (doc_dir / "pages.json").write_text("[]")
+    with pytest.raises(PageIndexAPIError, match="unreadable"):
+        local_client.get_tree(indexed_doc)
+
+
+def test_data_file_as_directory_fails_loud(local_client, indexed_doc, tmp_path):
+    tree_path = tmp_path / "store" / "docs" / indexed_doc / "tree.json"
+    tree_path.unlink()
+    tree_path.mkdir()
+    with pytest.raises(PageIndexAPIError, match="unreadable"):
+        local_client.get_tree(indexed_doc)
+
+
+def test_list_documents_skips_unsafe_directory_names(
+    local_client, indexed_doc, tmp_path
+):
+    bad_dir = tmp_path / "store" / "docs" / "bad\\name"
+    bad_dir.mkdir()
+    (bad_dir / "doc.json").write_text("{}")
+    listing = local_client.list_documents()
+    assert [d["id"] for d in listing["documents"]] == [indexed_doc]
+
+
+def test_generate_doc_description_error_boundary(monkeypatch):
+    def raiser(exc):
+        def _f(*args, **kwargs):
+            raise exc
+        return _f
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        raiser(RuntimeError("retries exhausted")))
+    assert pageindex.utils.generate_doc_description([]) == ""
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        raiser(ValueError("provider rejected the model")))
+    with pytest.raises(ValueError):
+        pageindex.utils.generate_doc_description([])
+
+
 def test_delete_survives_marker_tamper(local_client, tmp_path):
     tampered = tmp_path / "store" / "docs" / "tampered" / "doc.json"
     tampered.mkdir(parents=True)
