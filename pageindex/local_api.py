@@ -309,36 +309,10 @@ class LocalAPI:
 
     # ── retrieval (internal: backs chat_completions) ──
 
-    _PROVIDER_KEY_MAP = {
-        "anthropic": ("ANTHROPIC_API_KEY",),
-        "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
-        "mistral": ("MISTRAL_API_KEY",),
-    }
-
-    def _require_llm_key(self) -> None:
-        from .utils import _is_openai_model
-        model = self._retrieve_model
-        if _is_openai_model(model):
-            if not os.getenv("OPENAI_API_KEY"):
-                raise PageIndexAPIError(
-                    f"OPENAI_API_KEY is not set (retrieve model: {model}). "
-                    "Local mode uses your own LLM provider key."
-                )
-            return
-        from .utils import _strip_prefix
-        prefix = _strip_prefix(model or "", "litellm/").split("/")[0]
-        env_vars = self._PROVIDER_KEY_MAP.get(prefix)
-        if env_vars and not any(os.getenv(v) for v in env_vars):
-            raise PageIndexAPIError(
-                f"{' or '.join(env_vars)} is not set (retrieve model: {model}). "
-                "Local mode uses your own LLM provider key."
-            )
-
     def _tree_search(self, doc_id: str, query: str,
                      structure: list | None = None) -> list[str]:
         """Ask the retrieve model which tree nodes answer the query."""
         from .utils import llm_completion, remove_fields
-        self._require_llm_key()
         if structure is None:
             structure = self._require_data(self._store.get_tree(doc_id),
                                            "Failed to get chat completion")
@@ -515,7 +489,6 @@ class LocalAPI:
     def _chat_llm(self, messages: list[dict], temperature: float | None, stream: bool):
         """One chat call against the retrieve model, OpenAI SDK or LiteLLM."""
         from .utils import _is_openai_model, _strip_prefix
-        self._require_llm_key()
         model = self._retrieve_model
         kwargs: dict[str, Any] = {"messages": messages, "stream": stream}
         if temperature is not None:

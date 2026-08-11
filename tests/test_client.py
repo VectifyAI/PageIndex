@@ -487,32 +487,6 @@ def test_retrieval_endpoints_cloud_only(local_client):
         local_client.get_retrieval("any")
 
 
-def test_missing_llm_key_fails_fast(local_client, indexed_doc, monkeypatch):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    with pytest.raises(PageIndexAPIError, match="OPENAI_API_KEY is not set"):
-        local_client.chat_completions(
-            messages=[{"role": "user", "content": "q"}], doc_id=indexed_doc)
-
-
-def test_missing_anthropic_key_fails_fast(tmp_path, indexed_doc, monkeypatch):
-    client = PageIndexClient(retrieve_model="anthropic/claude-sonnet-4-6",
-                             storage_path=str(tmp_path / "store"))
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    with pytest.raises(PageIndexAPIError, match="ANTHROPIC_API_KEY"):
-        client._api._require_llm_key()
-
-
-def test_gemini_accepts_google_api_key(tmp_path, indexed_doc, monkeypatch):
-    client = PageIndexClient(retrieve_model="gemini/gemini-pro",
-                             storage_path=str(tmp_path / "store"))
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
-    with pytest.raises(PageIndexAPIError, match="GEMINI_API_KEY or GOOGLE_API_KEY"):
-        client._api._require_llm_key()
-    monkeypatch.setenv("GOOGLE_API_KEY", "test")
-    client._api._require_llm_key()
-
-
 def test_chat_tree_search_failure(local_client, indexed_doc, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test")
     monkeypatch.setattr(pageindex.utils, "llm_completion",
