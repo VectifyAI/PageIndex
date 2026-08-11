@@ -618,19 +618,26 @@ class PageIndexClient:
         from .integrations.openai_agents import build_openai_tools
         return build_openai_tools(self, include_management, hosted)
 
-    def as_anthropic_tools(self, include_management: bool = False) -> list:
+    def as_anthropic_tools(self, include_management: bool = False,
+                           asynchronous: bool = False) -> list:
         """
         Runnable tools for the Anthropic SDK's tool runner — pass to
-        ``client.beta.messages.tool_runner(tools=...)``.
+        ``client.beta.messages.tool_runner(tools=...)``. The default
+        flavor is for the sync ``Anthropic`` client; pass
+        ``asynchronous=True`` for ``AsyncAnthropic``. For a manual
+        ``messages.create`` loop, serialize with
+        ``[tool.to_dict() for tool in ...]``.
 
         Cloud: the full live read tool set (search, folders, images — as
         enabled for your key), discovered from the PageIndex MCP server
         and executed from your process; the server's input schemas pass
         through verbatim (MCP and the Messages API share the schema
-        shape). The Messages API's MCP connector (``mcp_servers=``
-        pointing at ``{BASE_URL}/mcp``) is the server-side alternative
-        with no client-side tools involved. Local: the in-process tools —
-        the same set ``messages()`` runs internally.
+        shape). The server-side alternative is the Messages API's beta
+        MCP connector — ``mcp_servers=[{"type": "url", "name":
+        "pageindex", "url": f"{BASE_URL}/mcp", "authorization_token":
+        <your PageIndex API key>}]`` — with no client-side tools
+        involved. Local: the in-process tools — the same set
+        ``messages()`` runs internally.
 
         Requires ``anthropic>=0.68.0``
         (``pip install 'pageindex[anthropic]'``), imported only when this
@@ -641,9 +648,13 @@ class PageIndexClient:
                 library. Local: adds ``remove_document``. Cloud: by default
                 only tools the server marks read-only are exposed; True
                 exposes the server's complete list (upload, delete, ...).
+            asynchronous (bool): Build ``beta_async_tool`` runnables for
+                ``AsyncAnthropic`` (each tool call runs in a worker
+                thread, keeping blocking I/O off your event loop). The
+                sync and async runners each accept only their own flavor.
         """
         from .integrations.anthropic_sdk import build_anthropic_tools
-        return build_anthropic_tools(self, include_management)
+        return build_anthropic_tools(self, include_management, asynchronous)
 
     def as_claude_mcp(self, include_management: bool = False):
         """

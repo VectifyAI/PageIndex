@@ -1,5 +1,6 @@
 """Agent tools layer: cloud-contract parity and behavior against a seeded
 local store (no LLM calls; one live parity test gated on PAGEINDEX_API_KEY)."""
+import asyncio
 import json
 import os
 import re
@@ -492,14 +493,29 @@ def test_as_anthropic_tools_missing_dependency(client, monkeypatch):
 
 def test_as_anthropic_tools_local_in_process(client, store_path):
     pytest.importorskip("anthropic")
+    from anthropic.lib.tools import BetaFunctionTool
     from pageindex.agent_tools import _local_description, _local_schema
     tools = client.as_anthropic_tools()
+    # The sync flavor is load-bearing: the sync runner (and messages())
+    # rejects async tools and vice versa.
+    assert all(isinstance(tool, BetaFunctionTool) for tool in tools)
     assert [tool.name for tool in tools] == list(tool_names())
     browse = {tool.name: tool for tool in tools}["browse_documents"]
     assert browse.input_schema == _local_schema("browse_documents")
     assert browse.description == _local_description("browse_documents")
     seed_doc(store_path, "pi-a", "report.pdf")
     assert "report.pdf" in browse.call({})
+
+
+def test_as_anthropic_tools_async_flavor(client, store_path):
+    pytest.importorskip("anthropic")
+    from anthropic.lib.tools import BetaAsyncFunctionTool
+    tools = client.as_anthropic_tools(asynchronous=True)
+    assert all(isinstance(tool, BetaAsyncFunctionTool) for tool in tools)
+    assert [tool.name for tool in tools] == list(tool_names())
+    seed_doc(store_path, "pi-a", "report.pdf")
+    browse = {tool.name: tool for tool in tools}["browse_documents"]
+    assert "report.pdf" in asyncio.run(browse.call({}))
 
 
 def test_as_anthropic_tools_local_management_opt_in(client):
@@ -517,10 +533,24 @@ def test_as_anthropic_tools_cloud_schemas_pass_through(cloud_with_fake_bridge):
     assert [tool.name for tool in tools] == ["search_documents", "get_document"]
     bridge = created["bridge"]
     assert tools[0].input_schema == bridge.tools[0]["inputSchema"]
+    # Equal but not aliased: beta_tool stores the dict by reference, so the
+    # builder must hand out copies of the bridge's cached metas.
+    assert tools[0].input_schema is not bridge.tools[0]["inputSchema"]
     assert tools[0].description == bridge.tools[0]["description"]
     # Calls route over the bridge; None-valued arguments mean "omitted".
     out = tools[1].call({"doc_name": "x.pdf", "folder_id": None})
     assert bridge.calls == [("get_document", {"doc_name": "x.pdf"})]
+    assert json.loads(out)["success"] is True
+
+
+def test_as_anthropic_tools_cloud_async_flavor(cloud_with_fake_bridge):
+    pytest.importorskip("anthropic")
+    from anthropic.lib.tools import BetaAsyncFunctionTool
+    cloud, created = cloud_with_fake_bridge
+    tools = cloud.as_anthropic_tools(asynchronous=True)
+    assert all(isinstance(tool, BetaAsyncFunctionTool) for tool in tools)
+    out = asyncio.run(tools[1].call({"doc_name": "x.pdf"}))
+    assert created["bridge"].calls == [("get_document", {"doc_name": "x.pdf"})]
     assert json.loads(out)["success"] is True
 
 
