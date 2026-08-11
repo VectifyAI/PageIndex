@@ -472,7 +472,7 @@ class PageIndexClient:
         self,
         messages: Union[str, list[dict[str, Any]]],
         model: str,
-        max_tokens: int,
+        max_tokens: int = 4096,
         stream: bool = False,
         doc_id: Optional[Union[str, list[str]]] = None,
         system: Optional[Union[str, list[dict[str, Any]]]] = None,
@@ -498,7 +498,10 @@ class PageIndexClient:
             messages: Native Messages-format history (including prior
                 tool_use/tool_result blocks on round-trip), or a bare query
                 string (it becomes a single user message).
-            model / max_tokens: Required by the Messages API; passed through.
+            model: Required — there is no cross-vendor default to guess.
+            max_tokens: Per-turn output budget the Messages API requires on
+                the wire; defaults to 4096 so the simple call needs only a
+                question. Passed through.
             stream: Yield the Anthropic SDK's event stream across turns
                 (its native event objects, including SDK-synthesized
                 convenience events), one message sequence per turn.

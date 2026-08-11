@@ -481,13 +481,14 @@ def test_messages_accepts_query_string(client, fake_anthropic):
     calls = fake_anthropic([
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn"),
     ])
-    result = client.messages("What status?", model="claude-test",
-                             max_tokens=100)
+    result = client.messages("What status?", model="claude-test")
     assert result["content"][0]["text"] == "ok"
     assert calls[0]["messages"] == [{"role": "user",
                                      "content": "What status?"}]
+    # The wire-required budget is table-setting, not a user obligation.
+    assert calls[0]["max_tokens"] == 4096
     with pytest.raises(PageIndexAPIError, match="non-empty string"):
-        client.messages("   ", model="claude-test", max_tokens=100)
+        client.messages("   ", model="claude-test")
 
 
 @needs_anthropic
