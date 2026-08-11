@@ -165,7 +165,7 @@ def test_submit_does_not_create_cwd_logs(local_client, sample_pdf, tmp_path, mon
 def test_submit_duplicate_name_gets_suffix(local_client, sample_pdf, monkeypatch):
     """Mirror the cloud upload: a second submit of the same file name is
     stored as name_1, not as a same-name duplicate."""
-    def fake_page_index_main(doc, opt=None, logger=None):
+    def fake_page_index_main(doc, opt=None, logger=None, page_list=None):
         return {"doc_name": "sample.pdf", "doc_description": "d",
                 "structure": json.loads(json.dumps(STRUCTURE))}
     monkeypatch.setattr(page_index_module, "page_index_main", fake_page_index_main)

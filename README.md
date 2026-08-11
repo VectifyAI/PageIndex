@@ -262,6 +262,7 @@ tools = client.agent_tools()                           # local: built-in tools; 
 ```
 
 Neither framework is a required dependency — each is imported only when its method is called. Claude Code / Cursor and other MCP hosts connect to cloud documents via the hosted MCP server directly (no SDK needed); see the [MCP docs](https://docs.pageindex.ai/mcp).
+
 ## 🚀 Agentic Vectorless RAG: An Example
 
 For a simple, end-to-end **agentic vectorless RAG** example using **self-hosted PageIndex** (with OpenAI Agents SDK), see [`examples/agentic_vectorless_rag_demo.py`](examples/agentic_vectorless_rag_demo.py).
