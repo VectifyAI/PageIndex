@@ -1207,12 +1207,22 @@ def _make_bridge_function(bridge, meta: dict) -> Callable[..., str]:
     return proxy
 
 
+def _cloud_bridge(client):
+    """One bridge per client instance: tool discovery and instructions share
+    a single MCP session."""
+    bridge = getattr(client, "_mcp_bridge", None)
+    if bridge is None:
+        from .mcp_bridge import McpBridge
+        bridge = McpBridge(
+            f"{client.BASE_URL}/mcp",
+            {"Authorization": f"Bearer {client.api_key}"},
+        )
+        client._mcp_bridge = bridge
+    return bridge
+
+
 def _build_cloud_agent_tools(client, include_management: bool) -> list[Callable[..., str]]:
-    from .mcp_bridge import McpBridge
-    bridge = McpBridge(
-        f"{client.BASE_URL}/mcp",
-        {"Authorization": f"Bearer {client.api_key}"},
-    )
+    bridge = _cloud_bridge(client)
     tools_meta = bridge.list_tools()
     if not include_management:
         # Plain functions have no framework permission layer, so the
@@ -1294,6 +1304,11 @@ def build_agent_tools(client, include_management: bool = False) -> list[Callable
 
 
 # ── agent instructions ──
+# Local subset of the cloud MCP server's initialize instructions (its
+# no-folders variant), trimmed to the tools that exist here: the
+# search_documents escalation steps, get_document_image, and the shared
+# read-only-folders block are removed. Cloud clients receive the server's
+# live instructions instead — see _base_instructions().
 
 _INSTRUCTIONS_HEADER = (
     "PageIndex by Vectify AI is a document platform for uploading and "
@@ -1344,16 +1359,32 @@ AGENT_INSTRUCTIONS = "\n\n".join([
 ])
 
 
+def _base_instructions(client) -> str:
+    """Cloud: the live instructions the MCP server serves for this key's
+    tool set. Local: the built-in subset instructions."""
+    if not getattr(client, "api_key", None):
+        return AGENT_INSTRUCTIONS
+    instructions = _cloud_bridge(client).instructions()
+    if not instructions:
+        raise PageIndexAPIError(
+            "The MCP server returned no agent instructions — refusing to "
+            "substitute the SDK's local-subset guidance, which does not "
+            "cover the cloud tool set."
+        )
+    return instructions
+
+
 def build_agent_instructions(client, doc_id=None) -> str:
     """Orchestration guidance for document QA agents; with doc_id, appends
     the target documents and directs the agent to work within them. Raises
     when a doc_id's name is shadowed by a newer same-name document — the
     name-addressed tools could not reach it."""
+    base = _base_instructions(client)
     if doc_id is None:
-        return AGENT_INSTRUCTIONS
+        return base
     doc_ids = [doc_id] if isinstance(doc_id, str) else list(doc_id)
     if not doc_ids:
-        return AGENT_INSTRUCTIONS
+        return base
     details = [client.get_document(one_id) for one_id in doc_ids]
     documents = _all_documents(client)
     for one_id, detail in zip(doc_ids, details):
@@ -1383,4 +1414,4 @@ def build_agent_instructions(client, doc_id=None) -> str:
             "Use these documents' names to retrieve their content with "
             "get_document_structure() and get_page_content()."
         )
-    return AGENT_INSTRUCTIONS + "\n\n" + block
+    return base + "\n\n" + block

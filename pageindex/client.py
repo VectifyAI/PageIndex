@@ -513,6 +513,12 @@ class PageIndexClient:
         Orchestration guidance for document QA agents — pass as the agent's
         system prompt (or append to your own).
 
+        Cloud: the live instructions the PageIndex MCP server serves for
+        your key's tool set, fetched over the same session as
+        ``agent_tools()`` — server-side guidance updates arrive without an
+        SDK release. Raises PageIndexAPIError if the server cannot be
+        reached. Local: the built-in guidance for the in-process tools.
+
         With ``doc_id`` (str or list, same shape as ``chat_completions``),
         appends the target documents' names and metadata and directs the
         agent to work within them. Raises PageIndexAPIError if a doc_id does

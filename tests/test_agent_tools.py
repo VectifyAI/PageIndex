@@ -2,6 +2,7 @@
 local store (no LLM calls; one live parity test gated on PAGEINDEX_API_KEY)."""
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -594,7 +595,8 @@ def test_mcp_bridge_protocol(monkeypatch):
         rid = json.get("id")
         if method == "initialize":
             return _Resp(200, {"jsonrpc": "2.0", "id": rid,
-                               "result": {"protocolVersion": "2025-06-18"}},
+                               "result": {"protocolVersion": "2025-06-18",
+                                          "instructions": "SERVER GUIDANCE"}},
                          {"Content-Type": "application/json",
                           "Mcp-Session-Id": "sess-1"})
         if method == "notifications/initialized":
@@ -625,6 +627,10 @@ def test_mcp_bridge_protocol(monkeypatch):
 
     tools = bridge.list_tools()
     assert tools == [{"name": "t1", "description": "reads — never writes"}]
+    # Captured during the handshake — serving it must not post again.
+    posts_before = len(posts)
+    assert bridge.instructions() == "SERVER GUIDANCE"
+    assert len(posts) == posts_before
     list_headers = posts[-1]["headers"]
     assert list_headers["Mcp-Session-Id"] == "sess-1"
     assert list_headers["MCP-Protocol-Version"] == "2025-06-18"
@@ -891,6 +897,16 @@ def test_live_cloud_contract_parity():
             assert (real.get("annotations") or {}).get(key) == value, (name, key)
 
 
+@pytest.mark.skipif(not LIVE_KEY, reason="PAGEINDEX_API_KEY not set")
+def test_live_cloud_instructions_nonempty():
+    """The empty-instructions guard raises for cloud clients; the real
+    server must actually serve instructions in its initialize result."""
+    from pageindex.mcp_bridge import McpBridge
+    bridge = McpBridge("https://api.pageindex.ai/mcp",
+                       {"Authorization": f"Bearer {LIVE_KEY}"})
+    assert bridge.instructions()
+
+
 # ── agent_instructions ──
 
 def test_agent_instructions_default(client):
@@ -914,6 +930,53 @@ def test_agent_instructions_with_doc_id(client, store_path):
 
     with pytest.raises(PageIndexAPIError):
         client.agent_instructions(doc_id="pi-missing")
+
+
+def test_local_instructions_name_only_local_tools():
+    """The local instructions are trimmed from the cloud server's; every
+    tool they name must exist in the local registry, or the trim drifted."""
+    named = set(re.findall(r"\b(\w+)\(", AGENT_INSTRUCTIONS))
+    assert named
+    assert named <= set(tool_names(include_management=True))
+
+
+def test_cloud_agent_instructions_served_live(monkeypatch):
+    """Cloud clients serve the server's live instructions from the MCP
+    initialize handshake — over the same bridge session as agent_tools()."""
+    import pageindex.mcp_bridge as mcp_bridge
+    created = []
+
+    class _Bridge(_FakeBridge):
+        def __init__(self, url, headers):
+            super().__init__(url, headers)
+            created.append(self)
+
+        def instructions(self):
+            return "LIVE CLOUD GUIDANCE"
+
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _Bridge)
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud.agent_tools()
+    assert cloud.agent_instructions() == "LIVE CLOUD GUIDANCE"
+    assert len(created) == 1
+
+
+def test_cloud_agent_instructions_empty_raises(monkeypatch):
+    """An empty server response must raise, not silently substitute the
+    subset guidance — same posture as the annotation-regression guard."""
+    import pageindex.mcp_bridge as mcp_bridge
+
+    class _SilentBridge:
+        def __init__(self, url, headers):
+            pass
+
+        def instructions(self):
+            return None
+
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _SilentBridge)
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    with pytest.raises(PageIndexAPIError, match="no agent instructions"):
+        cloud.agent_instructions()
 
 
 # ── submit_document(wait=True) ──

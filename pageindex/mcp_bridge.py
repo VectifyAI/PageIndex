@@ -1,7 +1,9 @@
 """Minimal MCP client (streamable HTTP) for the PageIndex cloud MCP server.
 
-Backs the cloud branch of ``client.agent_tools()``: ``tools/list`` discovers
-the live tool set, ``tools/call`` executes a tool. Synchronous, requests-only.
+Backs the cloud branches of ``client.agent_tools()`` and
+``client.agent_instructions()``: ``tools/list`` discovers the live tool set,
+``tools/call`` executes a tool, and the ``initialize`` handshake carries the
+server's agent instructions. Synchronous, requests-only.
 Works against both stateful and stateless servers: a session id returned by
 ``initialize`` is echoed back, and a request rejected after session expiry
 re-initializes once and retries.
@@ -43,6 +45,7 @@ class McpBridge:
         self._auth_headers = dict(headers)
         self._session_id: Optional[str] = None
         self._protocol_version: Optional[str] = None
+        self._instructions: Optional[str] = None
         self._initialized = False
         self._lock = threading.RLock()
         self._next_id = 0
@@ -147,6 +150,7 @@ class McpBridge:
             self._session_id = response.headers.get("Mcp-Session-Id")
             self._protocol_version = result.get("protocolVersion",
                                                 _PROTOCOL_VERSION)
+            self._instructions = result.get("instructions")
             self._initialized = True
         try:
             self._post({"jsonrpc": "2.0",
@@ -155,6 +159,11 @@ class McpBridge:
             pass  # advisory; a server that required it fails the next request
 
     # ── public surface ──
+
+    def instructions(self) -> Optional[str]:
+        """The server's agent instructions from the initialize handshake."""
+        self._ensure_initialized()
+        return self._instructions
 
     def list_tools(self) -> list[dict]:
         tools: list[dict] = []
