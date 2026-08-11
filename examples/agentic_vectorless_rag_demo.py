@@ -67,9 +67,7 @@ def query_agent(client: PageIndexClient, doc_id: str, prompt: str, verbose: bool
     @function_tool
     def get_document_structure() -> str:
         """Get the document's full tree structure (without text) to find relevant sections."""
-        return json.dumps(
-            client.get_tree(doc_id, node_summary=True, include_text=False)["result"],
-            ensure_ascii=False)
+        return json.dumps(client.get_document_structure(doc_id), ensure_ascii=False)
 
     @function_tool
     def get_page_content(pages: str) -> str:

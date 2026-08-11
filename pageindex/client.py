@@ -221,6 +221,15 @@ class PageIndexClient:
             tree["result"] = remove_fields(tree["result"], fields=["text"])
         return tree
 
+    def get_document_structure(self, doc_id: str) -> list[dict[str, Any]]:
+        """
+        Get the document's tree structure without text — summaries included.
+
+        Returns:
+            list: Tree nodes with titles, page ranges, and summaries.
+        """
+        return self.get_tree(doc_id, node_summary=True, include_text=False)["result"]
+
     def is_retrieval_ready(self, doc_id: str) -> bool:
         """
         Check if a document is ready for retrieval. API errors (including a
