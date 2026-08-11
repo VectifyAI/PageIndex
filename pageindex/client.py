@@ -368,6 +368,9 @@ class PageIndexClient:
                 is appended to the managed system prompt.
             stream: Enable streaming responses.
             doc_id: Document ID or list of IDs to scope the conversation.
+                Keep it identical across a conversation's calls — the
+                targeting block it adds is re-set each call and is part
+                of the cached prompt prefix.
             temperature: Sampling temperature, passed through to the model.
             stream_metadata: With stream=True, yield chunk dicts instead of
                 text pieces.
@@ -438,6 +441,9 @@ class PageIndexClient:
                 tool outputs are emitted as ``response.output_item.done``
                 events and the single final event is ``response.completed``.
             doc_id: Document ID or list of IDs to scope the conversation.
+                Keep it identical across a conversation's calls — the
+                targeting block it adds is re-set each call and is part
+                of the cached prompt prefix.
             instructions: Appended to the managed system prompt.
             temperature / top_p: Passed through to the model.
             max_turns: Cap on agent turns per call.
@@ -489,6 +495,9 @@ class PageIndexClient:
                 (its native event objects, including SDK-synthesized
                 convenience events), one message sequence per turn.
             doc_id: Document ID or list of IDs to scope the conversation.
+                Keep it identical across a conversation's calls — the
+                targeting block it adds is re-set each call and is part
+                of the cached prompt prefix.
             system: Appended after the managed system blocks.
             temperature / top_p / top_k / stop_sequences: Passed through.
             max_turns: Cap on agent turns per call (default 10, like the

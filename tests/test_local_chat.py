@@ -302,6 +302,25 @@ def test_responses_round_trip_extends_prefix(client, store_path, fake_model):
     assert second.inputs[0][:len(previous_final)] == previous_final
 
 
+def test_responses_round_trip_prefix_with_doc_id(client, store_path, fake_model):
+    """Same contract with doc targeting: re-passing the same doc_id re-sets
+    an identical leading block, so the prefix still extends item-for-item."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    first = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    result = client.responses("What status?", doc_id="pi-a")
+
+    second = fake_model([[_msg_item("Done")]])
+    follow_up = ([{"role": "user", "content": "What status?"}]
+                 + result["output"]
+                 + [{"role": "user", "content": "and now?"}])
+    client.responses(follow_up, doc_id="pi-a")
+    previous_final = first.inputs[-1]
+    assert second.inputs[0][:len(previous_final)] == previous_final
+
+
 @needs_agents
 def test_responses_stream_passthrough(client, store_path, fake_model):
     seed_doc(store_path, "pi-a", "report.pdf")
