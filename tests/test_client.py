@@ -41,6 +41,8 @@ def indexed_doc(local_client, sample_pdf, monkeypatch):
         assert opt.if_add_node_summary == "yes"
         assert opt.if_add_node_text == "yes"
         assert logger is not None
+        assert page_list is not None
+        assert all(isinstance(t, tuple) and len(t) == 2 for t in page_list)
         return {"doc_name": "sample.pdf",
                 "doc_description": "A test document.",
                 "structure": json.loads(json.dumps(STRUCTURE))}
