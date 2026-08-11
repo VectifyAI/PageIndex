@@ -4,17 +4,24 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
+  tests:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.13"]
-    name: test py${{ matrix.python-version }}
+        agent-frameworks: [without, with]
+    name: py${{ matrix.python-version }} (${{ matrix.agent-frameworks }} frameworks)
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
@@ -23,4 +30,6 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: pip install -r requirements.txt pytest
+      - if: matrix.agent-frameworks == 'with'
+        run: pip install openai-agents claude-agent-sdk
       - run: python -m pytest -q
