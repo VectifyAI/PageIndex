@@ -1100,19 +1100,21 @@ async def verify_toc(page_list, list_result, start_index=1, N=None, model=None):
         check_title_appearance(item, page_list, start_index, model)
         for item in indexed_sample_list
     ]
-    results = await asyncio.gather(*tasks)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
     
-    # Process results
+    # Process results (skip exceptions from failed LLM calls)
     correct_count = 0
     incorrect_results = []
     for result in results:
+        if isinstance(result, BaseException):
+            continue
         if result['answer'] == 'yes':
             correct_count += 1
         else:
             incorrect_results.append(result)
-    
+
     # Calculate accuracy
-    checked_count = len(results)
+    checked_count = sum(1 for r in results if not isinstance(r, BaseException))
     accuracy = correct_count / checked_count if checked_count > 0 else 0
     print(f"accuracy: {accuracy*100:.2f}%")
     return accuracy, incorrect_results

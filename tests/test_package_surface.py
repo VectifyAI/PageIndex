@@ -51,7 +51,7 @@ def test_print_tree_exclude_fields(capsys):
 def test_import_pageindex_is_lazy():
     probe = (
         "import sys; import pageindex; "
-        "heavy = [m for m in ('pageindex.page_index', 'pageindex.flash', "
+        "heavy = [m for m in ('pageindex.page_index_classic', 'pageindex.flash', "
         "'pageindex.utils', 'pageindex.tree_optimize', 'numpy', 'PyPDF2') "
         "if m in sys.modules]; "
         "print(','.join(heavy) or 'clean'); "

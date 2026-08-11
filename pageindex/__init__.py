@@ -13,7 +13,7 @@ if _TYPE_CHECKING:
     # Static-only bindings for the lazily-resolved names below, so type
     # checkers and IDEs see real signatures without the runtime import cost.
     from .flash import page_index_flash
-    from .page_index import page_index, page_index_main
+    from .page_index_classic import page_index, page_index_main
     from .page_index_md import md_to_tree
     from .tree_optimize import optimize_tree
 
@@ -29,10 +29,10 @@ _LAZY = {
     "optimize_tree": ".tree_optimize",
     "md_to_tree": ".page_index_md",
 }
-# "page_index" is absent: the function of that name shadows the submodule,
-# as it always did under `from .page_index import *`.
+# "page_index" is absent: resolved via the default fallback to .page_index_classic.
 _SUBMODULES = {"client", "cloud_api", "errors", "flash", "local_api",
-               "local_store", "page_index_md", "tree_optimize", "utils"}
+               "local_store", "page_index_classic", "page_index_md", "tree_optimize",
+               "utils"}
 
 
 def __getattr__(name):
@@ -43,7 +43,7 @@ def __getattr__(name):
     import importlib
     if name in _SUBMODULES:
         return importlib.import_module(f".{name}", __name__)
-    module = importlib.import_module(_LAZY.get(name, ".page_index"), __name__)
+    module = importlib.import_module(_LAZY.get(name, ".page_index_classic"), __name__)
     try:
         value = getattr(module, name)
     except AttributeError:

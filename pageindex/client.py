@@ -85,7 +85,7 @@ class PageIndexClient:
             overrides = {key: value for key, value in
                          {"model": model, "summary_model": summary_model,
                           "retrieve_model": retrieve_model}.items()
-                         if value is not None}
+                         if value}
             opt = ConfigLoader().load(overrides or None)
             self.model = opt.model
             self.summary_model = getattr(opt, "summary_model", None) or opt.model

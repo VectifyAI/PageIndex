@@ -13,7 +13,7 @@ import pageindex.utils
 from pageindex import PageIndexClient, PageIndexAPIError
 from pageindex.local_api import CHAT_CONTEXT_TOKEN_LIMIT, LocalAPI
 
-page_index_module = importlib.import_module("pageindex.page_index")
+page_index_module = importlib.import_module("pageindex.page_index_classic")
 
 
 STRUCTURE = [
@@ -105,7 +105,7 @@ def test_submit_and_get_tree(local_client, indexed_doc, tmp_path, monkeypatch):
     assert "summary" not in root
     child = root["nodes"][0]
     assert child["summary"] == "child summary"
-    assert child["text"] == "child text"
+    assert child["text"] == "Second page about bananas"
 
     no_summary = local_client.get_tree(indexed_doc)["result"][0]
     assert "summary" not in no_summary and "prefix_summary" not in no_summary
@@ -277,8 +277,10 @@ def test_get_ocr(local_client, indexed_doc):
                              "Second page about bananas")
     node = local_client.get_ocr(indexed_doc, format="node")
     assert node["result"] == [
-        {"title": "Root Section", "level": 1, "page_index": 1, "text": "root text"},
-        {"title": "Child Section", "level": 2, "page_index": 2, "text": "child text"},
+        {"title": "Root Section", "level": 1, "page_index": 1,
+         "text": "Hello page one about applesSecond page about bananas"},
+        {"title": "Child Section", "level": 2, "page_index": 2,
+         "text": "Second page about bananas"},
     ]
     with pytest.raises(ValueError):
         local_client.get_ocr(indexed_doc, format="bogus")
@@ -511,14 +513,14 @@ def test_chat_context_continues_after_oversized_node(
     monkeypatch.setattr(
         pageindex.utils, "count_tokens",
         lambda text, model=None: (
-            CHAT_CONTEXT_TOKEN_LIMIT + 1 if "root text" in text else 2
+            CHAT_CONTEXT_TOKEN_LIMIT + 1 if "apples" in text else 2
         ),
     )
 
     context = local_client._api._build_chat_context([indexed_doc], "q")
 
-    assert "root text" not in context
-    assert "child text" in context
+    assert "apples" not in context
+    assert "bananas" in context
 
 
 # ── local: chat completions ──
@@ -575,7 +577,7 @@ def test_chat_completions(local_client, chat_ready, monkeypatch):
     assert response["usage"]["total_tokens"] == 15
     assert captured["temperature"] == 0.2
     assert captured["messages"][0]["role"] == "system"
-    assert "child text" in captured["messages"][0]["content"]
+    assert "Second page about bananas" in captured["messages"][0]["content"]
     assert captured["messages"][-1] == {"role": "user", "content": "What about bananas?"}
 
 
@@ -651,7 +653,7 @@ def test_stream_closes_provider_stream_on_error():
         yield next(_fake_stream())
         raise RuntimeError("provider hiccup")
     stream = _ClosableStream(pieces())
-    with pytest.raises(RuntimeError, match="provider hiccup"):
+    with pytest.raises(PageIndexAPIError, match="provider hiccup"):
         list(LocalAPI._stream_chunks(stream, "chatcmpl-x", 1))
     assert stream.closed
 

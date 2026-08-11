@@ -658,10 +658,10 @@ async def generate_node_summary(node, model=None):
 async def generate_summaries_for_structure(structure, model=None):
     nodes = structure_to_list(structure)
     tasks = [generate_node_summary(node, model=model) for node in nodes]
-    summaries = await asyncio.gather(*tasks)
+    summaries = await asyncio.gather(*tasks, return_exceptions=True)
 
     for node, summary in zip(nodes, summaries):
-        node['summary'] = summary
+        node['summary'] = "" if isinstance(summary, BaseException) else summary
     return structure
 
 
@@ -829,12 +829,17 @@ async def summarize_tree(structure, pdf_pages, model=None,
     async def visit(node):
         children = node.get('nodes') or []
         if children:
-            await asyncio.gather(*(visit(child) for child in children))
+            await asyncio.gather(*(visit(child) for child in children),
+                                 return_exceptions=True)
         if node.get('summary'):
             return
-        node['summary'] = await (parent_summary(node) if children else leaf_summary(node))
+        try:
+            node['summary'] = await (parent_summary(node) if children else leaf_summary(node))
+        except Exception:
+            node['summary'] = ""
 
-    await asyncio.gather(*(visit(root) for root in structure))
+    await asyncio.gather(*(visit(root) for root in structure),
+                         return_exceptions=True)
     strip_internal_keys(structure)
     return structure
 
@@ -870,8 +875,10 @@ def generate_doc_description(structure, model=None):
     
     Directly return the description, do not include any other text.
     """
-    response = llm_completion(model, prompt)
-    return response
+    try:
+        return llm_completion(model, prompt)
+    except Exception:
+        return ""
 
 
 def reorder_dict(data, key_order):

@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import logging
 import os
 import time
 import uuid
@@ -13,6 +14,8 @@ from typing import Any, Iterator
 
 from .errors import PageIndexAPIError
 from .local_store import DocStore
+
+logger = logging.getLogger(__name__)
 
 TREE_SEARCH_PROMPT = """
 You are given a question and a tree structure of a document.
@@ -106,6 +109,7 @@ class LocalAPI:
                 f"Failed to submit document: unknown local processing mode {mode!r}. "
                 "Supported: None or 'standard' for standard indexing, or 'flash'."
             )
+        file_path = os.path.abspath(os.path.expanduser(str(file_path)))
         if not os.path.isfile(file_path):
             raise FileNotFoundError(f"No such file: {file_path}")
         if not file_path.lower().endswith(".pdf"):
@@ -152,7 +156,9 @@ class LocalAPI:
         }
         pages = [{"page_index": i + 1, "markdown": text}
                  for i, text in enumerate(page_texts)]
-        self._store.save_document(doc_id, meta, structure, pages)
+        from .utils import remove_fields
+        self._store.save_document(
+            doc_id, meta, remove_fields(structure, fields=["text"]), pages)
         return {"doc_id": doc_id}
 
     @staticmethod
@@ -163,7 +169,7 @@ class LocalAPI:
             return [page.extract_text() or "" for page in reader.pages]
 
     def _index_standard(self, file_path: str, _page_texts: list[str]) -> tuple[list, str | None]:
-        from .page_index import page_index_main
+        from .page_index_classic import page_index_main
         opt = self._config_loader.load({
             "model": self._model,
             "summary_model": self._summary_model,
@@ -172,7 +178,7 @@ class LocalAPI:
             "if_add_node_text": "yes",
             "if_add_doc_description": "yes",
         })
-        result = page_index_main(file_path, opt, logger=_SilentLogger())
+        result = page_index_main(file_path, opt, logger=logger)
         structure = result.get("structure") or []
         if not structure:
             raise PageIndexAPIError(
@@ -202,10 +208,20 @@ class LocalAPI:
 
     # ── tree / ocr ──
 
+    def _load_tree_with_text(self, doc_id: str, error_prefix: str) -> list:
+        from .utils import add_node_text
+        structure = self._require_data(
+            self._store.get_tree(doc_id), error_prefix)
+        pages = self._store.get_pages(doc_id)
+        if pages:
+            pdf_pages = [(p.get("markdown", ""), 0) for p in pages]
+            add_node_text(structure, pdf_pages)
+        return structure
+
     def get_tree(self, doc_id: str, node_summary: bool = False) -> dict[str, Any]:
         meta = self._require_doc(doc_id, "Failed to get tree result")
         structure = copy.deepcopy(
-            self._require_data(self._store.get_tree(doc_id), "Failed to get tree result"))
+            self._load_tree_with_text(doc_id, "Failed to get tree result"))
         result = [_format_tree_node(node, node_summary) for node in structure]
         return self._completed_envelope(doc_id, result, meta)
 
@@ -224,8 +240,8 @@ class LocalAPI:
                         "text": node.get("text", ""),
                     })
                     _walk(node.get("nodes") or [], level + 1)
-            _walk(self._require_data(self._store.get_tree(doc_id),
-                                     "Failed to get OCR result"), 1)
+            _walk(self._load_tree_with_text(doc_id,
+                                           "Failed to get OCR result"), 1)
         else:
             pages = self._require_data(self._store.get_pages(doc_id),
                                        "Failed to get OCR result")
@@ -416,6 +432,9 @@ class LocalAPI:
                     for chunk in chunks
                     if chunk.get("choices") and chunk["choices"][0]["delta"].get("content"))
 
+        if not response.choices:
+            raise PageIndexAPIError(
+                f"{prefix}: Model returned an empty response (no choices).")
         choice = response.choices[0]
         result = {
             "id": chat_id,
@@ -465,8 +484,8 @@ class LocalAPI:
         truncated = False
         for one_id in doc_ids:
             meta = metas[one_id] if metas else self._store.get_meta(one_id)
-            structure = self._require_data(self._store.get_tree(one_id),
-                                           "Failed to get chat completion")
+            structure = self._load_tree_with_text(
+                one_id, "Failed to get chat completion")
             node_map = self._node_map(structure)
             for node_id in self._tree_search(one_id, query, structure=structure):
                 node = node_map[node_id]
@@ -497,7 +516,7 @@ class LocalAPI:
             import openai as _openai_mod
             from . import utils as _utils_mod
             if _utils_mod._openai_sync_client is None:
-                _utils_mod._openai_sync_client = _openai_mod.OpenAI(max_retries=0)
+                _utils_mod._openai_sync_client = _openai_mod.OpenAI(max_retries=3)
             model = _strip_prefix(model, "openai/")
             if stream:
                 kwargs["stream_options"] = {"include_usage": True}
@@ -506,7 +525,7 @@ class LocalAPI:
         model = _strip_prefix(model, "litellm/")
         if stream:
             kwargs["stream_options"] = {"include_usage": True}
-        return litellm.completion(model=model, drop_params=True, **kwargs)
+        return litellm.completion(model=model, drop_params=True, num_retries=3, **kwargs)
 
     @staticmethod
     def _stream_chunks(response, chat_id: str, created: int) -> Iterator[dict[str, Any]]:
@@ -555,20 +574,17 @@ class LocalAPI:
                         "total_tokens": usage.total_tokens,
                     }
                 yield final
+            except PageIndexAPIError:
+                raise
+            except Exception as e:
+                raise PageIndexAPIError(
+                    f"Failed to get chat completion: {e}") from e
             finally:
                 close = getattr(response, "close", None)
                 if close is not None:
                     close()
         return _generate()
 
-
-class _SilentLogger:
-    """JsonLogger stand-in that keeps ./logs out of the caller's working directory."""
-
-    def log(self, *args, **kwargs):
-        pass
-
-    info = error = debug = exception = log
 
 
 def _format_tree_node(node: dict, node_summary: bool) -> dict:

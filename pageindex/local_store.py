@@ -44,7 +44,7 @@ def _read_json(path: Path):
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
-    except (FileNotFoundError, NotADirectoryError):
+    except (FileNotFoundError, NotADirectoryError, PermissionError):
         return None
     except ValueError:
         # Covers JSONDecodeError and the UnicodeDecodeError a torn multi-byte
