@@ -127,10 +127,10 @@ def test_browse_documents_relevance_unsupported(client, store_path):
     payload, is_error = run(client, "browse_documents", sort="relevance",
                             query="attention transformers")
     assert is_error and payload["errorCode"] == "INVALID_INPUT"
-    assert "not available" in payload["error"]
+    assert "not supported in local mode" in payload["error"]
 
     stray_query, is_error = run(client, "browse_documents", query="x")
-    assert is_error and "not available" in stray_query["error"]
+    assert is_error and "not supported in local mode" in stray_query["error"]
     bad_sort, is_error = run(client, "browse_documents", sort="banana")
     assert is_error and bad_sort["errorCode"] == "INVALID_INPUT"
 
