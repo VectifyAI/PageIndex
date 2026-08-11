@@ -968,6 +968,63 @@ def test_live_cloud_contract_parity():
 
 
 @pytest.mark.skipif(not LIVE_KEY, reason="PAGEINDEX_API_KEY not set")
+def test_live_cloud_envelope_field_parity(tmp_path):
+    """Response-envelope drift alarm: every field the local tools emit must
+    exist in the live cloud tool's response for the analogous call — a cloud
+    rename of a shared field (has_more, next_offset, content, ...) fails
+    here. Guidance wording is deliberately localized and not compared."""
+    from pageindex.mcp_bridge import McpBridge
+    bridge = McpBridge("https://api.pageindex.ai/mcp",
+                       {"Authorization": f"Bearer {LIVE_KEY}"})
+    cloud_browse = json.loads(bridge.call_tool("browse_documents", {"limit": 2}))
+    assert cloud_browse.get("success") is True and cloud_browse["documents"]
+    doc_name = cloud_browse["documents"][0]["name"]
+    cloud = {
+        "browse_documents": cloud_browse,
+        "get_document": json.loads(bridge.call_tool(
+            "get_document", {"doc_name": doc_name})),
+        "get_document_structure": json.loads(bridge.call_tool(
+            "get_document_structure", {"doc_name": doc_name})),
+        "get_page_content": json.loads(bridge.call_tool(
+            "get_page_content", {"doc_name": doc_name, "pages": "1"})),
+    }
+
+    store = str(tmp_path / "store")
+    local_client = PageIndexLocalClient(storage_path=store)
+    seed_doc(store, "pi-parity", "parity.pdf")
+    local = {
+        "browse_documents": run(local_client, "browse_documents")[0],
+        "get_document": run(local_client, "get_document",
+                            doc_name="parity.pdf")[0],
+        "get_document_structure": run(local_client, "get_document_structure",
+                                      doc_name="parity.pdf")[0],
+        "get_page_content": run(local_client, "get_page_content",
+                                doc_name="parity.pdf", pages="1")[0],
+    }
+
+    for name in cloud:
+        assert cloud[name].get("success") is True, name
+        missing = set(local[name]) - set(cloud[name])
+        assert not missing, (name, missing)
+        assert (set(local[name]["next_steps"])
+                <= set(cloud[name]["next_steps"]) | {"auto_retry"}), name
+
+    local_doc = local["browse_documents"]["documents"][0]
+    cloud_doc = cloud_browse["documents"][0]
+    assert set(local_doc) - set(cloud_doc) <= {"metadata"}
+
+    local_nodes = local["get_document_structure"]["structure"]
+    cloud_nodes = cloud["get_document_structure"]["structure"]
+    local_node = local_nodes[0] if isinstance(local_nodes, list) else local_nodes
+    cloud_node = cloud_nodes[0] if isinstance(cloud_nodes, list) else cloud_nodes
+    assert (set(local_node)
+            <= set(cloud_node) | {"page_index", "prefix_summary"})
+
+    assert (set(local["get_page_content"]["content"][0])
+            <= set(cloud["get_page_content"]["content"][0]))
+
+
+@pytest.mark.skipif(not LIVE_KEY, reason="PAGEINDEX_API_KEY not set")
 def test_live_cloud_instructions_nonempty():
     """The empty-instructions guard raises for cloud clients; the real
     server must actually serve instructions in its initialize result."""
