@@ -110,6 +110,45 @@ def test_submit_and_get_tree(local_client, indexed_doc, tmp_path, monkeypatch):
     assert "summary" not in no_summary and "prefix_summary" not in no_summary
 
 
+def test_get_tree_include_text_false(local_client, indexed_doc):
+    tree = local_client.get_tree(indexed_doc, include_text=False)
+    root = tree["result"][0]
+    assert "text" not in root
+    assert "text" not in root["nodes"][0]
+    assert root["page_index"] == 1
+
+    with_text = local_client.get_tree(indexed_doc)["result"][0]
+    assert "text" in with_text
+
+
+def test_get_document_structure(local_client, indexed_doc):
+    result = local_client.get_document_structure(indexed_doc)
+    assert isinstance(result, list)
+    root = result[0]
+    assert "text" not in root
+    assert "text" not in root["nodes"][0]
+    assert "prefix_summary" in root
+    assert root["nodes"][0]["summary"] == "child summary"
+
+
+def test_get_page_content(local_client, indexed_doc):
+    pages = local_client.get_page_content(indexed_doc, "1")
+    assert len(pages) == 1
+    assert pages[0]["page_index"] == 1
+    assert "Hello page one" in pages[0]["markdown"]
+
+    pages = local_client.get_page_content(indexed_doc, "1-2")
+    assert len(pages) == 2
+
+    pages = local_client.get_page_content(indexed_doc, "2,1")
+    assert [p["page_index"] for p in pages] == [1, 2]
+
+    assert local_client.get_page_content(indexed_doc, "99") == []
+
+    with pytest.raises(ValueError):
+        local_client.get_page_content(indexed_doc, "abc")
+
+
 def test_submit_does_not_create_cwd_logs(local_client, sample_pdf, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     def fake_page_index_main(doc, opt=None, logger=None):
