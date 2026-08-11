@@ -310,9 +310,9 @@ class LocalAPI:
     # ── retrieval (internal: backs chat_completions) ──
 
     _PROVIDER_KEY_MAP = {
-        "anthropic": "ANTHROPIC_API_KEY",
-        "gemini": "GEMINI_API_KEY",
-        "mistral": "MISTRAL_API_KEY",
+        "anthropic": ("ANTHROPIC_API_KEY",),
+        "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+        "mistral": ("MISTRAL_API_KEY",),
     }
 
     def _require_llm_key(self) -> None:
@@ -327,10 +327,10 @@ class LocalAPI:
             return
         from .utils import _strip_prefix
         prefix = _strip_prefix(model or "", "litellm/").split("/")[0]
-        env_var = self._PROVIDER_KEY_MAP.get(prefix)
-        if env_var and not os.getenv(env_var):
+        env_vars = self._PROVIDER_KEY_MAP.get(prefix)
+        if env_vars and not any(os.getenv(v) for v in env_vars):
             raise PageIndexAPIError(
-                f"{env_var} is not set (retrieve model: {model}). "
+                f"{' or '.join(env_vars)} is not set (retrieve model: {model}). "
                 "Local mode uses your own LLM provider key."
             )
 
