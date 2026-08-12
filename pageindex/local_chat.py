@@ -250,8 +250,11 @@ def _conversation_group_id(model_name: str, instructions: str, items) -> str:
     RunConfig.group_id into the OpenAI prompt_cache_key, and without one it
     stamps every run with a fresh key, tagging a round-tripped prefix as a
     different cache group. Keyed on the prefix identity — model,
-    instructions, first input item — so a conversation's continuations
-    share one route without pooling unrelated conversations."""
+    instructions, first conversation item — so a conversation's
+    continuations share one route without pooling unrelated conversations.
+    Callers pass the conversation's own items, never the SDK-prepended
+    doc-targeting block: that block is byte-identical for every
+    conversation about a document and would pool them all under one key."""
     seed = json.dumps([model_name, instructions,
                        items[0] if items else None],
                       sort_keys=True, default=str)
@@ -351,7 +354,8 @@ def run_chat_completions(client, messages, stream: bool = False,
     agent = _openai_agent(client, "chat", model_name, managed,
                           temperature, None, doc_ids=doc_id)
     run_kwargs = _run_kwargs(max_turns,
-                             _conversation_group_id(model_name, managed, items))
+                             _conversation_group_id(model_name, managed,
+                                                    history))
     from agents import Runner
     from agents.exceptions import AgentsException, MaxTurnsExceeded
     if not stream:
@@ -444,6 +448,7 @@ def run_responses(client, input, model: Optional[str] = None,
         raise PageIndexAPIError("input must be a non-empty string or list "
                                 "of item dicts.")
     block = _doc_block(client, doc_id)
+    conversation = items
     if block:
         items = [{"role": "user", "content": block}] + items
     extra = [instructions] if instructions else []
@@ -452,7 +457,8 @@ def run_responses(client, input, model: Optional[str] = None,
     agent = _openai_agent(client, "responses", model_name, managed,
                           temperature, top_p, doc_ids=doc_id)
     run_kwargs = _run_kwargs(max_turns,
-                             _conversation_group_id(model_name, managed, items))
+                             _conversation_group_id(model_name, managed,
+                                                    conversation))
     recorded: dict = {}
     from agents import Runner
     from agents.exceptions import AgentsException, MaxTurnsExceeded
@@ -723,19 +729,31 @@ def run_messages(client, messages, model: str,
     envelope["usage"] = _anthropic_usage(turns, envelope.get("usage") or {})
     # The full turn sequence (assistant tool_use + user tool_result + final),
     # valid for verbatim append to the caller's history. The runner appends
-    # a turn to its params only when it executed tools, so the final
-    # assistant message is missing exactly when the run ended naturally
-    # (stop_reason != "tool_use"); on a max_turns cut the last appended
-    # turn IS the final message and appending again would duplicate its
-    # tool_use ids.
+    # a turn to its params only when it executed tools from it — content
+    # carried tool_use blocks and the turn was not a refusal. stop_reason
+    # alone cannot tell: a max_tokens turn with complete tool_use blocks
+    # still executes. Whether final's tool_use ids already sit in the
+    # history is the ground truth for "already appended".
     new_messages = [_dump_message(message)
                     for message in conversation[len(prepared):]]
-    if (final.stop_reason != "tool_use"
-            and (not new_messages
-                 or new_messages[-1].get("role") != "assistant")):
-        new_messages = new_messages + [{
-            "role": "assistant",
-            "content": [_dump_block(item) for item in final.content],
-        }]
+    final_blocks = [_dump_block(item) for item in final.content]
+    final_ids = {block["id"] for block in final_blocks
+                 if block.get("type") == "tool_use"}
+    history_ids = {block.get("id")
+                   for message in new_messages
+                   if (message.get("role") == "assistant"
+                       and isinstance(message.get("content"), list))
+                   for block in message["content"]
+                   if (isinstance(block, dict)
+                       and block.get("type") == "tool_use")}
+    if not final_ids or not final_ids <= history_ids:
+        # Unexecuted tool_use blocks (refusal turns) have no tool_result,
+        # so they cannot enter an appendable history — strip them, as the
+        # SDK itself does when it rebuilds params around such a turn.
+        appendable = [block for block in final_blocks
+                      if block.get("type") != "tool_use"]
+        if appendable:
+            new_messages = new_messages + [
+                {"role": "assistant", "content": appendable}]
     envelope["messages"] = new_messages
     return envelope

@@ -49,7 +49,6 @@ except ImportError:
 
 needs_agents = pytest.mark.skipif(not _HAS_AGENTS,
                                   reason="openai-agents not installed")
-pytestmark_openai = needs_agents
 
 
 def _msg_item(text):
@@ -337,6 +336,43 @@ def test_responses_round_trip_prefix_with_doc_id(client, store_path, fake_model)
     client.responses(follow_up, doc_id="pi-a")
     previous_final = first.inputs[-1]
     assert second.inputs[0][:len(previous_final)] == previous_final
+
+
+@needs_agents
+def test_doc_id_conversations_get_distinct_cache_keys(client, store_path,
+                                                      fake_model,
+                                                      monkeypatch):
+    """The doc-targeting block is byte-identical for every conversation
+    about a document — seeding the cache key on items[0] pooled them all
+    under one prompt_cache_key."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    keys = []
+    real = local_chat._run_kwargs
+
+    def spy(max_turns, group_id):
+        keys.append(group_id)
+        return real(max_turns, group_id)
+
+    monkeypatch.setattr(local_chat, "_run_kwargs", spy)
+
+    fake_model([[_msg_item("a")]])
+    result = client.responses("What is the CAGR?", doc_id="pi-a")
+    fake_model([[_msg_item("b")]])
+    client.responses("Summarize section 3.", doc_id="pi-a")
+    assert keys[0] != keys[1]  # unrelated conversations never pool
+
+    fake_model([[_msg_item("c")]])
+    follow_up = ([{"role": "user", "content": "What is the CAGR?"}]
+                 + result["output"]
+                 + [{"role": "user", "content": "and now?"}])
+    client.responses(follow_up, doc_id="pi-a")
+    assert keys[2] == keys[0]  # a continuation keeps its conversation's key
+
+    fake_model([[_msg_item("d")]])
+    client.chat_completions("What is the CAGR?", doc_id="pi-a")
+    fake_model([[_msg_item("e")]])
+    client.chat_completions("Summarize section 3.", doc_id="pi-a")
+    assert keys[3] != keys[4]  # same property on the chat surface
 
 
 @needs_agents
@@ -928,6 +964,49 @@ def test_messages_max_turns_truncation_round_trippable(client, store_path,
         + json.dumps(result["messages"][1]).count('"tu_1"') \
         + json.dumps(result["content"]).count('"tu_1"')
     json.dumps(result)
+
+
+@needs_anthropic
+def test_messages_tool_use_cut_by_max_tokens_not_duplicated(client,
+                                                            store_path,
+                                                            fake_anthropic):
+    """A max_tokens turn with complete tool_use blocks still executes and
+    is appended by the runner — keying the re-append guard on stop_reason
+    duplicated the tool_use id and broke verbatim continuation."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    calls = fake_anthropic([
+        _anthropic_message([_anthropic_tool_use()], "max_tokens"),
+        _anthropic_message([_anthropic_tool_use("tu_2")], "tool_use"),
+    ])
+    result = client.messages([{"role": "user", "content": "q"}],
+                             model="claude-test", max_tokens=100, max_turns=1)
+    assert len(calls) == 1
+    assert result["stop_reason"] == "max_tokens"
+    roles = [message["role"] for message in result["messages"]]
+    assert roles == ["assistant", "user"]  # tool_use, tool_result — no dup
+    assert json.dumps(result["messages"]).count('"tu_1"') == 2  # use + result
+
+
+@needs_anthropic
+def test_messages_refusal_with_tool_use_stays_appendable(client, store_path,
+                                                         fake_anthropic):
+    """A refusal turn is never executed by the runner; its tool_use blocks
+    have no tool_result and must not enter the appendable history."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "I can't help."},
+                            _anthropic_tool_use()], "refusal"),
+    ])
+    result = client.messages([{"role": "user", "content": "q"}],
+                             model="claude-test", max_tokens=100)
+    assert result["stop_reason"] == "refusal"
+    message, = result["messages"]
+    assert message["role"] == "assistant"
+    assert [block["type"] for block in message["content"]] == ["text"]
+    assert message["content"][0]["text"] == "I can't help."
+    # The envelope's own content still carries the full turn verbatim.
+    assert [block["type"] for block in result["content"]] \
+        == ["text", "tool_use"]
 
 
 @needs_anthropic
