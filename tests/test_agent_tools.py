@@ -1348,6 +1348,84 @@ def test_mcp_bridge_400_is_an_error_not_session_expiry(monkeypatch):
     assert bridge._session_id == "sess-1"
 
 
+def test_mcp_bridge_init_notification_bars_concurrent_requests(monkeypatch):
+    """No thread may send a request between the initialize handshake and
+    notifications/initialized — strict servers reject such requests with
+    HTTP 400, which the bridge never replays. The notification's fake
+    transport stalls to hold that window open; a racing thread would post
+    its tools/list inside it."""
+    import threading
+    import requests as requests_mod
+    import pageindex.mcp_bridge as mcp_bridge
+    from pageindex.mcp_bridge import McpBridge
+
+    events = []
+    events_lock = threading.Lock()
+    in_notification = threading.Event()
+
+    class _Resp:
+        def __init__(self, status, body=None):
+            self.status_code = status
+            self._body = body
+            self.headers = {"Content-Type": "application/json"}
+            self.text = json.dumps(body) if body else ""
+            self.content = self.text.encode("utf-8")
+
+        def json(self):
+            if self._body is None:
+                raise ValueError("no body")
+            return self._body
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        method = json.get("method")
+        with events_lock:
+            events.append(("start", method))
+        if method == "notifications/initialized":
+            in_notification.set()
+            time.sleep(0.2)
+        rid = json.get("id")
+        if method == "initialize":
+            resp = _Resp(200, {"jsonrpc": "2.0", "id": rid,
+                               "result": {"protocolVersion": "2025-06-18"}})
+        elif method == "notifications/initialized":
+            resp = _Resp(202)
+        else:
+            resp = _Resp(200, {"jsonrpc": "2.0", "id": rid,
+                               "result": {"tools": [], "nextCursor": None}})
+        with events_lock:
+            events.append(("end", method))
+        return resp
+
+    monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
+        post=fake_post, RequestException=requests_mod.RequestException))
+    bridge = McpBridge("https://api.pageindex.ai/mcp",
+                       {"Authorization": "Bearer k"})
+
+    errors = []
+
+    def list_tools():
+        try:
+            bridge.list_tools()
+        except BaseException as exc:
+            errors.append(exc)
+
+    first = threading.Thread(target=list_tools)
+    first.start()
+    assert in_notification.wait(5), "handshake never reached the notification"
+    second = threading.Thread(target=list_tools)
+    second.start()
+    first.join(5)
+    second.join(5)
+    assert not first.is_alive() and not second.is_alive()
+    assert not errors
+
+    notified = events.index(("end", "notifications/initialized"))
+    first_list = events.index(("start", "tools/list"))
+    assert notified < first_list, (
+        f"tools/list overtook notifications/initialized: {events}")
+    assert events.count(("start", "initialize")) == 1
+
+
 def test_mcp_bridge_blob_blocks_become_stubs():
     """Non-text content used to be json.dumps'd wholesale, handing the
     model the raw base64 payload of an image tool's response."""

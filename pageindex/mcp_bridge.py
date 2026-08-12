@@ -160,14 +160,14 @@ class McpBridge:
                                                 _PROTOCOL_VERSION)
             self._instructions = result.get("instructions")
             self._initialized = True
-            session_id = self._session_id
-            protocol_version = self._protocol_version
-        try:
-            self._post({"jsonrpc": "2.0",
-                        "method": "notifications/initialized"},
-                       session_id, protocol_version)
-        except PageIndexAPIError:
-            pass  # advisory; a server that required it fails the next request
+            # Sent inside the lock so no concurrent thread can slip a
+            # request between the handshake and this notification.
+            try:
+                self._post({"jsonrpc": "2.0",
+                            "method": "notifications/initialized"},
+                           self._session_id, self._protocol_version)
+            except PageIndexAPIError:
+                pass  # advisory; a server that required it fails the next request
 
     # ── public surface ──
 

@@ -38,7 +38,10 @@ sortedcontainers = ">=2.4.0"
 regex = ">=2024.0.0"
 python-dotenv = ">=1.0.0"
 pyyaml = ">=6.0"
-claude-agent-sdk = { version = ">=0.1.0", optional = true }
+# 0.1.53 is the first release where string prompts work with SDK MCP
+# servers (invisible registration #597, deadlock #780) — the documented
+# local-mode flow.
+claude-agent-sdk = { version = ">=0.1.53", optional = true }
 # 0.14.0 is the first release that feeds RunConfig.group_id into the OpenAI
 # prompt_cache_key; below it the conversation cache group is inert.
 openai-agents = { version = ">=0.14.0", optional = true }
