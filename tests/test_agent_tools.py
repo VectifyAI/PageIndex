@@ -26,7 +26,7 @@ SNAPSHOT_PATH = Path(__file__).parent / "data" / "cloud_mcp_contract.json"
 
 def seed_doc(storage_path, doc_id, name, *, created_at="2026-08-01T10:00:00.123000",
              description="A test document", metadata=None, tree=None, pages=None,
-             page_num=None, folder_id=None):
+             page_num=None):
     pages = pages if pages is not None else [
         {"page_index": 1, "markdown": "Page one text about apples"},
         {"page_index": 2, "markdown": "Page two text about bananas"},
@@ -45,7 +45,7 @@ def seed_doc(storage_path, doc_id, name, *, created_at="2026-08-01T10:00:00.1230
         "id": doc_id, "name": name, "description": description,
         "status": "completed", "createdAt": created_at,
         "pageNum": page_num if page_num is not None else len(pages),
-        "folderId": folder_id, "metadata": metadata, "mode": "standard",
+        "folderId": None, "metadata": metadata, "mode": "standard",
     }
     DocStore(storage_path).save_document(doc_id, meta, tree, pages)
     return doc_id
@@ -1330,21 +1330,6 @@ def test_agent_instructions_shadowed_doc_id_raises(client, store_path):
         client.agent_instructions(doc_id="pi-old")
     text = client.agent_instructions(doc_id="pi-new")
     assert "report.pdf" in text
-
-
-def test_same_name_in_another_folder_directs_instead_of_refusing(client,
-                                                                 store_path):
-    """A same-name document in a different folder is the cloud contract's
-    supported case: the targeting block serves the call and directs the
-    agent to disambiguate with folder_id, instead of raising."""
-    seed_doc(store_path, "pi-old", "report.pdf", folder_id="f-reports",
-             created_at="2026-08-01T10:00:00.000000")
-    seed_doc(store_path, "pi-new", "report.pdf", folder_id="f-archive",
-             created_at="2026-08-02T10:00:00.000000")
-    text = client.agent_instructions(doc_id="pi-old")
-    assert 'pass folder_id "f-reports"' in text
-    newer = client.agent_instructions(doc_id="pi-new")
-    assert 'pass folder_id "f-archive"' in newer
 
 
 def test_wait_tolerates_transient_network_failures(fake_cloud_client, monkeypatch):

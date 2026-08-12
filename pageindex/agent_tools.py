@@ -1549,13 +1549,12 @@ def doc_targeting_block(client, doc_id, scoped: bool = False) -> Optional[str]:
     within those documents. Shared by agent_instructions and the local chat
     surfaces (a leading conversation item on the OpenAI surfaces, a system
     block on messages()). Raises when a doc_id's name is shadowed by a newer
-    same-name document in the same folder — the name-addressed tools could
-    not reach it. A same-name document in ANOTHER folder is the cloud
-    contract's supported case: no refusal, the block instead directs the
-    agent to pass folder_id (the documented disambiguator) on every call.
-    With ``scoped`` (the chat surfaces, whose tools resolve names inside
-    the doc_id allowlist) only a same-name duplicate within the targeted
-    set shadows."""
+    same-name document — the name-addressed tools could not reach it. Names
+    are unique per user space by upload-time dedup on both cloud surfaces
+    and locally, so a duplicate is an anomaly worth refusing loudly, not a
+    layout to accommodate. With ``scoped`` (the chat surfaces, whose tools
+    resolve names inside the doc_id allowlist) only a same-name duplicate
+    within the targeted set shadows."""
     if doc_id is None:
         return None
     doc_ids = [doc_id] if isinstance(doc_id, str) else list(doc_id)
@@ -1565,49 +1564,32 @@ def doc_targeting_block(client, doc_id, scoped: bool = False) -> Optional[str]:
     documents = ([{**detail, "id": one_id}
                   for one_id, detail in zip(doc_ids, details)]
                  if scoped else _all_documents(client))
-    folder_notes: list[str] = []
     for one_id, detail in zip(doc_ids, details):
-        name = str(detail.get("name"))
-        pool = (documents if scoped else
-                [doc for doc in documents
-                 if doc.get("folderId") == detail.get("folderId")])
-        entry, _ = _resolve_document(client, name, documents=pool)
+        entry, _ = _resolve_document(client, str(detail.get("name")),
+                                     documents=documents)
         if entry is not None and entry.get("id") != one_id:
             raise PageIndexAPIError(
-                f'Document "{name}" (doc_id: {one_id}) is '
+                f'Document "{detail.get("name")}" (doc_id: {one_id}) is '
                 "shadowed by a newer document with the same name (doc_id: "
                 f'{entry.get("id")}). The tools address documents by name '
                 "and would read the newer one. Rename or remove the "
                 "duplicate, or pass the newer doc_id."
             )
-        if not scoped and any(doc.get("name") == name
-                              and doc.get("id") != one_id
-                              for doc in documents):
-            folder = detail.get("folderId") or "root"
-            folder_notes.append(
-                f'A document named "{name}" also exists in another folder '
-                f'— pass folder_id "{folder}" together with doc_name in '
-                "every tool call to address the targeted one."
-            )
     context = json.dumps(details, ensure_ascii=False)
     if len(details) == 1:
-        block = (
+        return (
             f"The user has specified document: {details[0].get('name')}\n"
             f"Document metadata: {context}\n"
             "Use this document's name to retrieve its content with "
             "get_document_structure() and get_page_content()."
         )
-    else:
-        names = ", ".join(str(item.get("name")) for item in details)
-        block = (
-            f"The user has specified documents: {names}\n"
-            f"Documents metadata: {context}\n"
-            "Use these documents' names to retrieve their content with "
-            "get_document_structure() and get_page_content()."
-        )
-    if folder_notes:
-        block += "\n" + "\n".join(folder_notes)
-    return block
+    names = ", ".join(str(item.get("name")) for item in details)
+    return (
+        f"The user has specified documents: {names}\n"
+        f"Documents metadata: {context}\n"
+        "Use these documents' names to retrieve their content with "
+        "get_document_structure() and get_page_content()."
+    )
 
 
 def build_agent_instructions(client, doc_id=None) -> str:
