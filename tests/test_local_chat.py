@@ -895,6 +895,117 @@ def test_responses_stream_wraps_framework_errors(client, store_path,
         list(client.responses("q", stream=True))
 
 
+class _TerminalModel(FakeModel):
+    """Engine-faithful backend terminal: openai-agents yields the
+    response.failed/response.incomplete lifecycle event, then raises."""
+    terminal = "incomplete"
+
+    async def stream_response(self, system_instructions, input,
+                              model_settings, tools, output_schema,
+                              handoffs, tracing, **kwargs):
+        from agents.exceptions import ModelBehaviorError
+        from openai.types.responses import (Response, ResponseFailedEvent,
+                                            ResponseIncompleteEvent,
+                                            ResponseTextDeltaEvent)
+        from openai.types.responses.response import IncompleteDetails
+        from openai.types.responses.response_error import ResponseError
+        self._record(system_instructions, input)
+        yield ResponseTextDeltaEvent(
+            type="response.output_text.delta", delta="partial ",
+            content_index=0, item_id="item_x", output_index=0,
+            logprobs=[], sequence_number=1)
+        response = Response(
+            id="resp_fake", created_at=0.0, model="fake", object="response",
+            output=[], parallel_tool_calls=False, tool_choice="auto",
+            tools=[], status=self.terminal,
+            incomplete_details=(IncompleteDetails(reason="max_output_tokens")
+                                if self.terminal == "incomplete" else None),
+            error=(ResponseError(code="server_error", message="boom")
+                   if self.terminal == "failed" else None))
+        event_type = (ResponseIncompleteEvent if self.terminal == "incomplete"
+                      else ResponseFailedEvent)
+        yield event_type(type=f"response.{self.terminal}", response=response,
+                         sequence_number=2)
+        raise ModelBehaviorError(f"terminal: {self.terminal}")
+
+
+@needs_agents
+@pytest.mark.parametrize("terminal", ["incomplete", "failed"])
+def test_responses_stream_backend_terminal_states_are_events(
+        client, store_path, monkeypatch, terminal):
+    """response.failed / response.incomplete are protocol terminal states,
+    not engine failures: the stream must end with the honest terminal
+    event carrying the backend's status, not raise away the run."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = _TerminalModel([[]])
+    fake.terminal = terminal
+    monkeypatch.setattr(local_chat, "_openai_model",
+                        lambda protocol, model_name: fake)
+    events = list(client.responses("q", stream=True))
+    assert events[0]["type"] == "response.output_text.delta"
+    last = events[-1]
+    assert last["type"] == f"response.{terminal}"
+    assert last["response"]["status"] == terminal
+    if terminal == "incomplete":
+        assert (last["response"]["incomplete_details"]
+                == {"reason": "max_output_tokens"})
+    else:
+        assert last["response"]["error"]["message"] == "boom"
+    numbers = [event["sequence_number"] for event in events]
+    assert numbers == sorted(numbers) and len(set(numbers)) == len(numbers)
+
+
+@needs_agents
+def test_provider_errors_wrap_as_sdk_errors(client, store_path, fake_model,
+                                            monkeypatch):
+    """Raw provider exceptions (network, auth, rate limit) surface as
+    PageIndexAPIError on every OpenAI-engine path, never as openai types."""
+    import openai
+    seed_doc(store_path, "pi-a", "report.pdf")
+    request = httpx.Request("POST", "https://backend.test")
+
+    async def conn_err(*args, **kwargs):
+        raise openai.APIConnectionError(request=request)
+
+    async def conn_err_stream(*args, **kwargs):
+        raise openai.APIConnectionError(request=request)
+        yield  # unreached: makes this an async generator
+
+    fake = fake_model([[_msg_item("x")], [_msg_item("x")]])
+    monkeypatch.setattr(fake, "get_response", conn_err)
+    with pytest.raises(PageIndexAPIError, match="model backend failed"):
+        client.chat_completions("q")
+    with pytest.raises(PageIndexAPIError, match="model backend failed"):
+        client.responses("q")
+    monkeypatch.setattr(fake, "stream_response", conn_err_stream)
+    with pytest.raises(PageIndexAPIError, match="model backend failed"):
+        list(client.chat_completions("q", stream=True))
+    with pytest.raises(PageIndexAPIError, match="model backend failed"):
+        list(client.responses("q", stream=True))
+
+
+@needs_anthropic
+def test_messages_provider_errors_wrap_as_sdk_errors(client, store_path,
+                                                     monkeypatch):
+    """Anthropic transport errors surface as PageIndexAPIError on both
+    messages() paths, never as anthropic types."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+
+    def handler(request):
+        return httpx.Response(429, json={
+            "type": "error",
+            "error": {"type": "rate_limit_error", "message": "slow down"}})
+
+    fake = anthropic.Anthropic(
+        api_key="test", max_retries=0,
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+    monkeypatch.setattr(local_chat, "_anthropic_client", lambda: fake)
+    with pytest.raises(PageIndexAPIError, match="model backend failed"):
+        client.messages("q", model="claude-test")
+    with pytest.raises(PageIndexAPIError, match="model backend failed"):
+        list(client.messages("q", model="claude-test", stream=True))
+
+
 @needs_agents
 def test_chat_stream_close_at_opening_chunk_cancels_run(client, store_path,
                                                         fake_model,

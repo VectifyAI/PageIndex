@@ -380,6 +380,7 @@ def run_chat_completions(client, messages, stream: bool = False,
     run_kwargs = _run_kwargs(max_turns,
                              _conversation_group_id(model_name, managed,
                                                     history))
+    import openai
     from agents import Runner
     from agents.exceptions import AgentsException, MaxTurnsExceeded
     if not stream:
@@ -391,6 +392,9 @@ def run_chat_completions(client, messages, stream: bool = False,
         except AgentsException as exc:
             raise PageIndexAPIError(
                 f"The agent backend failed: {exc}") from exc
+        except openai.OpenAIError as exc:
+            raise PageIndexAPIError(
+                f"The model backend failed: {exc}") from exc
         return {
             "id": f"chatcmpl-{uuid.uuid4().hex}",
             "object": "chat.completion",
@@ -434,6 +438,9 @@ def run_chat_completions(client, messages, stream: bool = False,
         except AgentsException as exc:
             raise PageIndexAPIError(
                 f"The agent backend failed: {exc}") from exc
+        except openai.OpenAIError as exc:
+            raise PageIndexAPIError(
+                f"The model backend failed: {exc}") from exc
         finally:
             if not completed and hasattr(streamed, "cancel"):
                 streamed.cancel()  # abandoned/failed: stop the agent task
@@ -484,6 +491,7 @@ def run_responses(client, input, model: Optional[str] = None,
                              _conversation_group_id(model_name, managed,
                                                     conversation))
     recorded: dict = {}
+    import openai
     from agents import Runner
     from agents.exceptions import AgentsException, MaxTurnsExceeded
 
@@ -526,6 +534,9 @@ def run_responses(client, input, model: Optional[str] = None,
         except AgentsException as exc:
             raise PageIndexAPIError(
                 f"The agent backend failed: {exc}") from exc
+        except openai.OpenAIError as exc:
+            raise PageIndexAPIError(
+                f"The model backend failed: {exc}") from exc
         output = result.to_input_list()[len(items):]
         return envelope(output, result.raw_responses)
 
@@ -585,8 +596,16 @@ def run_responses(client, input, model: Optional[str] = None,
         except MaxTurnsExceeded as exc:
             raise _wrap_max_turns(exc, max_turns) from exc
         except AgentsException as exc:
+            if recorded.get("status") not in ("failed", "incomplete"):
+                raise PageIndexAPIError(
+                    f"The agent backend failed: {exc}") from exc
+            # response.failed / response.incomplete: the engine re-raises
+            # the backend's terminal state as an exception — it is a
+            # protocol event, emitted as the terminal event below.
+            completed = True
+        except openai.OpenAIError as exc:
             raise PageIndexAPIError(
-                f"The agent backend failed: {exc}") from exc
+                f"The model backend failed: {exc}") from exc
         finally:
             if not completed and hasattr(streamed, "cancel"):
                 streamed.cancel()  # abandoned/failed: stop the agent task
@@ -703,6 +722,7 @@ def run_messages(client, messages, model: str,
     from .integrations.anthropic_sdk import build_anthropic_tools
 
     _require_anthropic()
+    import anthropic
     _validate_max_turns(max_turns)
     if isinstance(messages, str) and messages.strip():
         messages = [{"role": "user", "content": messages}]
@@ -731,12 +751,20 @@ def run_messages(client, messages, model: str,
 
     if stream:
         def events() -> Iterator[Any]:
-            for turn_stream in runner:
-                for event in turn_stream:
-                    yield event
+            try:
+                for turn_stream in runner:
+                    for event in turn_stream:
+                        yield event
+            except anthropic.AnthropicError as exc:
+                raise PageIndexAPIError(
+                    f"The model backend failed: {exc}") from exc
         return events()
 
-    turns = [turn for turn in runner]
+    try:
+        turns = [turn for turn in runner]
+    except anthropic.AnthropicError as exc:
+        raise PageIndexAPIError(
+            f"The model backend failed: {exc}") from exc
     if not turns:
         raise PageIndexAPIError("The model returned no response.")
     captured: dict = {}
