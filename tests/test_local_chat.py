@@ -281,7 +281,7 @@ def test_cloud_guards():
 @needs_agents
 def test_responses_end_to_end(client, store_path, fake_model):
     seed_doc(store_path, "pi-a", "report.pdf")
-    fake = fake_model([
+    fake_model([
         [_call_item("get_document", {"doc_name": "report.pdf"})],
         [_msg_item("The answer")],
     ])

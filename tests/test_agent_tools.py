@@ -1700,7 +1700,6 @@ def test_wait_tolerates_transient_network_failures(fake_cloud_client, monkeypatc
 def test_failed_document_status_message(client, store_path):
     seed_doc(store_path, "pi-a", "broken.pdf")
     import pageindex.agent_tools as agent_tools_mod
-    entry = {"id": "pi-a", "name": "broken.pdf", "status": "failed"}
     payload, is_error = agent_tools_mod._not_ready_error(
         "broken.pdf", "failed", "structure retrieval", timed_out=False)
     assert is_error

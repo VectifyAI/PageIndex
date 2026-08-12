@@ -494,8 +494,7 @@ def _folder_unsupported(param: str) -> tuple[dict, bool]:
             "summary": "This local library does not have folders yet",
             "options": ["Retry the call without a folder_id",
                         "Use browse_documents() to list the library root",
-                        "Folders are available on PageIndex cloud "
-                        "(PageIndexCloudClient with an API key)"],
+                        "Folders are available on PageIndex cloud (PageIndexCloudClient with an API key)"],
         },
         "INVALID_INPUT",
     )
@@ -528,8 +527,7 @@ def _parse_page_spec(
             "summary": "The page specification spans too many pages",
             "options": [
                 "Request a narrower page range",
-                "The response holds only a few pages per call - page "
-                "through with several smaller requests",
+                "The response holds only a few pages per call - page through with several smaller requests",
             ],
         },
         "INVALID_INPUT",
@@ -674,8 +672,7 @@ def _browse_documents(client, folder_id: str = "root", recursive: bool = False,
             "in local mode.", None,
             {"summary": "Invalid sort mode",
              "options": ['Use sort="time" (newest first) or omit sort',
-                         "Semantic ranking is available on PageIndex cloud "
-                         "(PageIndexCloudClient with an API key)"]},
+                         "Semantic ranking is available on PageIndex cloud (PageIndexCloudClient with an API key)"]},
             "INVALID_INPUT",
         )
     if sort == "relevance" or query:
@@ -685,12 +682,9 @@ def _browse_documents(client, folder_id: str = "root", recursive: bool = False,
             "Relevance ranking is not supported in local mode yet — use "
             "the default time sort.", None,
             {"summary": "This local library does not have semantic ranking yet",
-             "options": ["Retry without sort/query and match the returned "
-                         "names and descriptions against the intent yourself",
-                         "Page through the full library with "
-                         "`offset: next_offset`",
-                         "Semantic ranking is available on PageIndex cloud "
-                         "(PageIndexCloudClient with an API key)"]},
+             "options": ["Retry without sort/query and match the returned names and descriptions against the intent yourself",
+                         "Page through the full library with `offset: next_offset`",
+                         "Semantic ranking is available on PageIndex cloud (PageIndexCloudClient with an API key)"]},
             "INVALID_INPUT",
         )
     try:
@@ -895,8 +889,7 @@ def _get_document_structure(client, doc_name: str,
             {
                 "summary": "Structure not available for this document",
                 "options": [
-                    "The document may not have been processed correctly or "
-                    "structure extraction may have failed",
+                    "The document may not have been processed correctly or structure extraction may have failed",
                     "Try processing the document again if possible",
                 ],
             },
