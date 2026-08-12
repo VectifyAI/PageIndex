@@ -534,7 +534,7 @@ def test_as_openai_tools_cloud_hosted_opt_in():
     assert len(tools) == 1
     assert isinstance(tools[0], HostedMCPTool)
     config = tools[0].tool_config
-    assert config["server_url"] == "https://api.pageindex.ai/mcp"
+    assert config["server_url"] == "https://api.pageindex.ai/mcp?tools=read"
     assert config["headers"] == {"Authorization": "Bearer pi-test-key"}
     assert config["server_label"] == "pageindex"
 
@@ -610,12 +610,15 @@ def test_as_openai_tools_cloud_object_params_survive(monkeypatch):
 def test_as_claude_mcp_cloud_needs_no_framework(monkeypatch):
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
     cloud = PageIndexCloudClient(api_key="pi-test-key")
-    config = cloud.as_claude_mcp()
-    assert config == {
+    # The URL is the gate: default → read-only endpoint, management opt-in
+    # → the full tool set.
+    assert cloud.as_claude_mcp() == {
         "type": "http",
-        "url": "https://api.pageindex.ai/mcp",
+        "url": "https://api.pageindex.ai/mcp?tools=read",
         "headers": {"Authorization": "Bearer pi-test-key"},
     }
+    assert (cloud.as_claude_mcp(include_management=True)["url"]
+            == "https://api.pageindex.ai/mcp")
 
 
 def test_as_claude_mcp_local_missing_dependency(client, monkeypatch):
@@ -632,55 +635,21 @@ def test_as_claude_mcp_local_when_installed(client):
         assert server.get("type") != "http"
 
 
-def test_claude_allowed_tools_reads_keys_from_registration(client, monkeypatch):
-    """The registration key is data in the caller's mcp_servers map — the
-    gate entries derive from it, it is never spelled a second time. Needs
-    no framework installed."""
-    monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
-    servers = {
-        "docs": {"type": "sdk", "name": "pageindex", "instance": object()},
-        "other": {"type": "http", "url": "https://example.com/mcp"},
-    }
-    assert (client.claude_allowed_tools(servers)
-            == [f"mcp__docs__{name}" for name in tool_names()])
-    managed = client.claude_allowed_tools(servers, include_management=True)
-    assert "mcp__docs__remove_document" in managed
-    with pytest.raises(PageIndexAPIError, match="No PageIndex server"):
-        client.claude_allowed_tools(
-            {"other": {"type": "http", "url": "https://example.com/mcp"}})
-    with pytest.raises(PageIndexAPIError, match="mcp_servers dict"):
-        client.claude_allowed_tools("path/to/.mcp.json")
-
-
-def test_claude_allowed_tools_recognizes_real_local_server(client):
-    pytest.importorskip("claude_agent_sdk")
-    servers = {"pi": client.as_claude_mcp()}
-    assert (client.claude_allowed_tools(servers)
-            == [f"mcp__pi__{name}" for name in tool_names()])
-
-
-def test_claude_allowed_tools_cloud_from_registration(cloud_with_fake_bridge):
-    cloud, _ = cloud_with_fake_bridge
-    servers = {"docs": cloud.as_claude_mcp(),
-               "other": {"type": "http", "url": "https://example.com/mcp"}}
-    assert cloud.claude_allowed_tools(servers) == [
-        "mcp__docs__search_documents", "mcp__docs__get_document"]
-    assert ("mcp__docs__remove_document"
-            in cloud.claude_allowed_tools(servers, include_management=True))
-
-
 def test_claude_agent_config_is_sugar_over_the_explicit_form(
         cloud_with_fake_bridge):
     cloud, _ = cloud_with_fake_bridge
     config = cloud.claude_agent_config()
     assert config["system_prompt"] == "SERVER GUIDANCE"
-    assert config["mcp_servers"]["pageindex"]["type"] == "http"
-    assert config["allowed_tools"] == cloud.claude_allowed_tools(
-        config["mcp_servers"])
+    server = config["mcp_servers"]["pageindex"]
+    assert server["type"] == "http"
+    assert server["url"] == "https://api.pageindex.ai/mcp?tools=read"
+    # Pre-approval only: the URL is the gate.
+    assert config["allowed_tools"] == ["mcp__pageindex"]
     renamed = cloud.claude_agent_config(server_name="docs",
                                         include_management=True)
     assert set(renamed["mcp_servers"]) == {"docs"}
-    assert "mcp__docs__remove_document" in renamed["allowed_tools"]
+    assert renamed["mcp_servers"]["docs"]["url"] == "https://api.pageindex.ai/mcp"
+    assert renamed["allowed_tools"] == ["mcp__docs"]
 
 
 def test_claude_agent_config_local(client, store_path):
@@ -688,8 +657,7 @@ def test_claude_agent_config_local(client, store_path):
     seed_doc(store_path, "pi-a", "report.pdf")
     config = client.claude_agent_config(doc_id="pi-a")
     assert "report.pdf" in config["system_prompt"]
-    assert (config["allowed_tools"]
-            == [f"mcp__pageindex__{name}" for name in tool_names()])
+    assert config["allowed_tools"] == ["mcp__pageindex"]
 
 
 def test_openai_agent_config_local(client, store_path):
@@ -1392,13 +1360,17 @@ def test_failed_document_status_message(client, store_path):
                for option in payload["next_steps"]["options"])
 
 
-def test_hosted_approval_gate():
+def test_hosted_gate_is_the_endpoint():
+    """The URL is the gate on hosted mode too — no approval-flow gating,
+    the read-only endpoint simply has no write tools."""
     pytest.importorskip("agents")
     cloud = PageIndexCloudClient(api_key="pi-test-key")
     gated = cloud.as_openai_tools(hosted=True)[0].tool_config
-    assert gated["require_approval"] == {"never": {"read_only": True}}
+    assert gated["server_url"] == "https://api.pageindex.ai/mcp?tools=read"
+    assert gated["require_approval"] == "never"
     open_config = cloud.as_openai_tools(hosted=True,
                                         include_management=True)[0].tool_config
+    assert open_config["server_url"] == "https://api.pageindex.ai/mcp"
     assert open_config["require_approval"] == "never"
 
 

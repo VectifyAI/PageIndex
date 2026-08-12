@@ -631,10 +631,10 @@ class PageIndexClient:
 
         Args:
             include_management (bool): Also expose tools that modify the
-                library (delete, upload). Default off: the cloud default
-                serves only server-annotated read-only tools, and
-                ``hosted=True`` routes non-read-only tools through the
-                Responses API approval flow instead.
+                library (delete, upload). Default off: the in-process
+                cloud default serves only server-annotated read-only
+                tools, and ``hosted=True`` connects OpenAI to the
+                read-only endpoint (``/mcp?tools=read``) instead.
             hosted (bool): Cloud only — hand the MCP connection to OpenAI
                 for server-side tool execution (OpenAI models only).
         """
@@ -694,9 +694,10 @@ class PageIndexClient:
         through verbatim (MCP and the Messages API share the schema
         shape). The server-side alternative is the Messages API's beta
         MCP connector — ``mcp_servers=[{"type": "url", "name":
-        "pageindex", "url": f"{BASE_URL}/mcp", "authorization_token":
-        <your PageIndex API key>}]`` — with no client-side tools
-        involved. Local: the in-process tools — the same set
+        "pageindex", "url": f"{BASE_URL}/mcp?tools=read",
+        "authorization_token": <your PageIndex API key>}]`` (drop
+        ``?tools=read`` for the full tool set) — with no client-side
+        tools involved. Local: the in-process tools — the same set
         ``messages()`` runs internally.
 
         Requires ``anthropic>=0.84.0``
@@ -769,13 +770,13 @@ class PageIndexClient:
         """
         ``mcp_servers`` entry for the Claude Agent SDK.
 
-        Cloud: returns the remote PageIndex MCP config — the framework
-        connects to api.pageindex.ai/mcp directly and discovers the full
-        cloud tool set. A remote server cannot be filtered client-side,
-        so ``include_management`` has no effect there — the gate is
-        ``allowed_tools``, built from your registration map by
-        ``claude_allowed_tools()``. Local: returns an in-process SDK MCP
-        server exposing the agent tools (requires ``claude-agent-sdk``;
+        Cloud: returns the remote PageIndex MCP config.
+        ``include_management`` picks the endpoint, so the URL itself is
+        the gate — the default connects to the read-only endpoint
+        (``/mcp?tools=read``: the server registers only read-only tools),
+        ``True`` connects to the full tool set. Local: returns an
+        in-process SDK MCP server exposing the agent tools, gated the
+        same way at registration (requires ``claude-agent-sdk``;
         ``pip install 'pageindex[claude]'``).
 
         Cloud hosts that surface MCP server instructions receive the same
@@ -787,42 +788,15 @@ class PageIndexClient:
         Usage (or ``claude_agent_config()`` for all three slots in one
         call)::
 
-            servers = {"pageindex": client.as_claude_mcp()}
             options = ClaudeAgentOptions(
                 system_prompt=client.agent_instructions(),
-                mcp_servers=servers,
-                allowed_tools=client.claude_allowed_tools(servers),
+                mcp_servers={"pageindex": client.as_claude_mcp()},
+                # Pre-approval only — the server itself is already gated.
+                allowed_tools=["mcp__pageindex"],
             )
         """
         from .integrations.claude_agent_sdk import build_claude_mcp
         return build_claude_mcp(self, include_management)
-
-    def claude_allowed_tools(self, mcp_servers: dict[str, Any],
-                             include_management: bool = False) -> list[str]:
-        """
-        ``allowed_tools`` entries for the PageIndex servers in your
-        ``mcp_servers`` map — pass the same dict you hand to
-        ``ClaudeAgentOptions``. The framework bakes the registration key
-        into every tool id (``mcp__<key>__<tool>``), so the keys are read
-        from the map rather than spelled a second time, and the tool
-        names are the read-only gate every other adapter applies — live
-        server annotations on cloud, the tool contract locally. Nothing
-        is hand-maintained, and no framework install is needed.
-
-        Raises PageIndexAPIError when the map holds no PageIndex entry —
-        a gate list that silently matched nothing would disable every
-        tool.
-
-        Args:
-            mcp_servers: The registration map; non-PageIndex entries are
-                ignored.
-            include_management (bool): Also allow tools that modify the
-                library (``remove_document``, and on cloud the server's
-                full management list).
-        """
-        from .integrations.claude_agent_sdk import build_claude_allowed_tools
-        return build_claude_allowed_tools(self, mcp_servers,
-                                          include_management)
 
     def claude_agent_config(
         self,
@@ -836,12 +810,11 @@ class PageIndexClient:
             options = ClaudeAgentOptions(**client.claude_agent_config())
 
         Sugar over the explicit form — the managed system prompt
-        (``agent_instructions``), the server entry (``as_claude_mcp``),
-        and the matching ``allowed_tools`` gate
-        (``claude_allowed_tools``), with one ``include_management`` and
-        ``server_name`` applied everywhere. To customize (your own
-        system prompt, extra servers), switch to those three methods
-        directly.
+        (``agent_instructions``) and the server entry (``as_claude_mcp``,
+        itself the tool gate) with its ``allowed_tools`` pre-approval,
+        one ``include_management`` and ``server_name`` applied
+        everywhere. To customize (your own system prompt, extra
+        servers), switch to those methods directly.
 
         Args:
             doc_id: Document ID or list of IDs to target, as in
@@ -850,12 +823,12 @@ class PageIndexClient:
                 library.
             server_name (str): Key the server is registered under.
         """
-        servers = {server_name: self.as_claude_mcp(include_management)}
         return {
             "system_prompt": self.agent_instructions(doc_id=doc_id),
-            "mcp_servers": servers,
-            "allowed_tools": self.claude_allowed_tools(servers,
-                                                       include_management),
+            "mcp_servers": {server_name: self.as_claude_mcp(include_management)},
+            # Pre-approval only — the server itself is already gated (the
+            # read-only endpoint on cloud, the registered set locally).
+            "allowed_tools": [f"mcp__{server_name}"],
         }
 
     def agent_instructions(self, doc_id: Optional[Union[str, list[str]]] = None) -> str:

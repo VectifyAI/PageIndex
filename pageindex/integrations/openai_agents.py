@@ -1,13 +1,13 @@
 """OpenAI Agents SDK adapter for the Agent(tools=...) slot.
 
-Cloud clients default to the full live tool set as plain FunctionTools via
+Cloud clients default to the live read tool set as plain FunctionTools via
 the MCP bridge; pass hosted=True to use a single HostedMCPTool instead
-(the model connects to the PageIndex cloud MCP server from OpenAI's side).
-Local clients get the in-process tools wrapped as FunctionTools. Tools are
-built as FunctionTool directly so the contract/server JSON schema goes to
-the model verbatim — function_tool() would regenerate it from a Python
-signature, dropping items/enum/pattern/bounds and rejecting object-typed
-parameters.
+(the model connects to the PageIndex cloud MCP server from OpenAI's side —
+the read-only ``?tools=read`` endpoint by default). Local clients get the
+in-process tools wrapped as FunctionTools. Tools are built as FunctionTool
+directly so the contract/server JSON schema goes to the model verbatim —
+function_tool() would regenerate it from a Python signature, dropping
+items/enum/pattern/bounds and rejecting object-typed parameters.
 """
 from __future__ import annotations
 
@@ -28,17 +28,16 @@ def build_openai_tools(client, include_management: bool = False,
             "pip install openai-agents (or pip install 'pageindex[openai]')."
         ) from exc
     if getattr(client, "api_key", None) and hosted:
-        # Same gate as the in-process path, enforced by OpenAI: tools the
-        # server annotates read-only run freely, everything else goes
-        # through the Responses API approval flow.
-        require_approval = ("never" if include_management
-                            else {"never": {"read_only": True}})
+        # include_management picks the endpoint — the URL itself is the
+        # gate (?tools=read serves only readOnlyHint-annotated tools), so
+        # nothing needs the Responses API approval flow.
+        suffix = "" if include_management else "?tools=read"
         return [HostedMCPTool(tool_config={
             "type": "mcp",
             "server_label": "pageindex",
-            "server_url": f"{client.BASE_URL}/mcp",
+            "server_url": f"{client.BASE_URL}/mcp{suffix}",
             "headers": {"Authorization": f"Bearer {client.api_key}"},
-            "require_approval": require_approval,
+            "require_approval": "never",
         })]
     from ..agent_tools import _tool_specs
 
