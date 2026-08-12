@@ -376,8 +376,27 @@ def test_page_content_char_budget(client, store_path):
                             pages="1-2")
     assert not is_error
     assert payload["returned_pages"] == "1"
+    assert "size limits" in payload["next_steps"]["summary"]
     assert any("For remaining pages, request: 2" in option
                for option in payload["next_steps"]["options"])
+
+
+def test_page_content_reports_truncation_and_out_of_range_together(
+        client, store_path):
+    """Size truncation must not hide behind the out-of-range report (or
+    vice versa) — the agent otherwise believes it holds every in-range
+    page."""
+    pages = [
+        {"page_index": 1, "markdown": "x" * 96_000},
+        {"page_index": 2, "markdown": "short"},
+    ]
+    seed_doc(store_path, "pi-a", "huge.pdf", pages=pages)
+    payload, is_error = run(client, "get_page_content", doc_name="huge.pdf",
+                            pages="1-2,99")
+    assert not is_error
+    assert payload["returned_pages"] == "1"
+    summary = payload["next_steps"]["summary"]
+    assert "size limits" in summary and "out of range" in summary
 
 
 # ── remove_document (management-gated) ──
@@ -1221,6 +1240,44 @@ def test_bridge_call_tool_surfaces_iserror(monkeypatch):
         post=fake_post, RequestException=requests_mod.RequestException))
     bridge = McpBridge("https://api.pageindex.ai/mcp", {})
     assert bridge.call_tool("t", {}) == ('{"error": "denied"}', True)
+
+
+def test_bridge_rejects_mismatched_reply_id(monkeypatch):
+    """A result-bearing message with the wrong id must not be returned as
+    this call's reply."""
+    import requests as requests_mod
+    import pageindex.mcp_bridge as mcp_bridge
+    from pageindex.mcp_bridge import McpBridge
+
+    class _Resp:
+        def __init__(self, status, body=None):
+            self.status_code = status
+            self._body = body
+            self.headers = {"Content-Type": "application/json"}
+            self.text = json.dumps(body) if body else ""
+            self.content = self.text.encode("utf-8")
+
+        def json(self):
+            if self._body is None:
+                raise ValueError("no body")
+            return self._body
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        method = json.get("method")
+        rid = json.get("id")
+        if method == "initialize":
+            return _Resp(200, {"jsonrpc": "2.0", "id": rid, "result": {}})
+        if method == "notifications/initialized":
+            return _Resp(202)
+        return _Resp(200, {"jsonrpc": "2.0", "id": rid - 1,  # stale reply
+                           "result": {"content": [{"type": "text",
+                                                   "text": "old"}]}})
+
+    monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
+        post=fake_post, RequestException=requests_mod.RequestException))
+    bridge = McpBridge("https://api.pageindex.ai/mcp", {})
+    with pytest.raises(PageIndexAPIError, match="no reply matching"):
+        bridge.call_tool("t", {})
 
 
 def test_sse_crlf_multi_message():

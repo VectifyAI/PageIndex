@@ -442,9 +442,11 @@ class PageIndexClient:
             model: Backend model name (defaults to ``retrieve_model``).
             stream: Yield Responses stream events as dicts — one logical
                 response per call: per-turn backend lifecycle events are
-                collapsed and sequence numbers reassigned monotonically;
-                tool outputs are emitted as ``response.output_item.done``
-                events and the single final event is ``response.completed``.
+                collapsed, sequence numbers are reassigned monotonically,
+                and ``output_index`` is re-based onto the single logical
+                ``output``; tool outputs are emitted as
+                ``response.output_item.done`` events and the single final
+                event is the terminal ``response.*`` for the run's status.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call and is part

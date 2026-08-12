@@ -358,6 +358,15 @@ def test_responses_stream_passthrough(client, store_path, fake_model):
     final = events[-1]["response"]
     assert final["status"] == "completed"
     assert final["usage"]["total_tokens"] == 30
+    # output_index addresses the logical response.output: the tool output
+    # slots in after turn 1's item, and turn 2's deltas are re-based past
+    # both instead of restarting at 0.
+    assert (final["output"][tool_events[0]["output_index"]]["type"]
+            == "function_call_output")
+    last_delta = [event for event in events
+                  if event.get("type") == "response.output_text.delta"][-1]
+    assert (final["output"][last_delta["output_index"]]
+            .get("type", "message") == "message")
 
 
 # ── messages (Anthropic engine) ──

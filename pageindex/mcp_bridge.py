@@ -88,11 +88,13 @@ class McpBridge:
                     f"MCP server returned a non-JSON response "
                     f"(HTTP {response.status_code})."
                 ) from exc
-        reply = next((m for m in messages if m.get("id") == request_id),
-                     next((m for m in messages
-                           if "result" in m or "error" in m), None))
+        # Strict id correlation only — accepting any result-bearing message
+        # would return a stale or mis-correlated reply as this call's.
+        reply = next((m for m in messages if m.get("id") == request_id), None)
         if reply is None:
-            raise PageIndexAPIError("MCP server response contained no reply.")
+            raise PageIndexAPIError(
+                "MCP server response contained no reply matching the request."
+            )
         if "error" in reply:
             error = reply["error"] or {}
             raise PageIndexAPIError(

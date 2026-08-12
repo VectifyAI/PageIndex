@@ -1028,16 +1028,21 @@ def _get_page_content(client, doc_name: str, pages: str,
     if out_of_range:
         options.insert(0, f"Document has {max_page} pages total - request "
                           f"pages 1-{max_page}")
-    summary = (
-        f"Retrieved {len(included)} pages. Pages "
-        f"{', '.join(map(str, out_of_range))} were out of range."
-        if out_of_range
-        else f"Returned {len(included)} of {len(requested)} requested pages "
-             "due to response size limits."
-        if remaining
-        else f"Successfully retrieved content for {len(content)} "
-             f"page{'' if len(content) == 1 else 's'}."
-    )
+    # Additive, not either/or: a call can both truncate for size and have
+    # out-of-range pages — hiding either would misreport what was returned.
+    if remaining or out_of_range:
+        parts = [f"Retrieved {len(included)} of {len(requested)} "
+                 "requested pages."]
+        if remaining:
+            parts.append(f"Pages {_format_page_spec(remaining)} were "
+                         "omitted due to response size limits.")
+        if out_of_range:
+            parts.append(f"Pages {', '.join(map(str, out_of_range))} "
+                         "were out of range.")
+        summary = " ".join(parts)
+    else:
+        summary = (f"Successfully retrieved content for {len(content)} "
+                   f"page{'' if len(content) == 1 else 's'}.")
     return _success(
         {
             "doc_name": doc_name,

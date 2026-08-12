@@ -506,6 +506,13 @@ def run_responses(client, input, model: Optional[str] = None,
                                        input=[dict(item) for item in items],
                                        **run_kwargs)
         sequence = 0
+        # output_index addresses an item's position in the logical
+        # response.output (the final envelope's list). Backend events
+        # carry per-turn indexes that restart at 0 each turn, so they are
+        # re-based by the count of items already committed by prior turns
+        # — and the tool outputs the SDK injects between turns take the
+        # next slot on that same axis.
+        output_offset = 0
         completed = False
         try:
             async for event in streamed.stream_events():
@@ -521,7 +528,10 @@ def run_responses(client, input, model: Optional[str] = None,
                             for field in ("status", "incomplete_details",
                                           "error"):
                                 recorded[field] = state.get(field)
+                            output_offset += len(state.get("output") or [])
                         continue
+                    if isinstance(data.get("output_index"), int):
+                        data["output_index"] += output_offset
                     sequence += 1
                     data["sequence_number"] = sequence
                     yield data
@@ -531,9 +541,10 @@ def run_responses(client, input, model: Optional[str] = None,
                     # the way the platform streams its own server-side tools.
                     sequence += 1
                     yield {"type": "response.output_item.done",
-                           "output_index": sequence,
+                           "output_index": output_offset,
                            "sequence_number": sequence,
                            "item": dict(event.item.to_input_item())}
+                    output_offset += 1
             completed = True
         except MaxTurnsExceeded as exc:
             raise _wrap_max_turns(exc, max_turns) from exc
