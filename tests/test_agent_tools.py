@@ -1289,6 +1289,24 @@ def test_mcp_bridge_400_is_an_error_not_session_expiry(monkeypatch):
     assert bridge._session_id == "sess-1"
 
 
+def test_mcp_bridge_blob_blocks_become_stubs():
+    """Non-text content used to be json.dumps'd wholesale, handing the
+    model the raw base64 payload of an image tool's response."""
+    from pageindex.mcp_bridge import McpBridge
+
+    bridge = McpBridge("https://api.pageindex.ai/mcp", {})
+    blob = "A" * 8192  # ~6 KB decoded
+    bridge._request = lambda method, params: {"content": [
+        {"type": "text", "text": "Page 3 of report.pdf"},
+        {"type": "image", "mimeType": "image/png", "data": blob},
+    ]}
+    text, is_error = bridge.call_tool("get_document_image", {})
+    assert not is_error
+    assert "Page 3 of report.pdf" in text
+    assert "AAAA" not in text
+    assert "[image/png content omitted: ~6 KB]" in text
+
+
 # ── review-round regressions ──
 
 def test_synth_optional_no_default_param_is_nullable():
@@ -1306,6 +1324,38 @@ def test_synth_optional_no_default_param_is_nullable():
             "inputSchema": TOOL_CONTRACT["browse_documents"]["schema"]}
     fn = _make_bridge_function(_Bridge(), meta)
     assert type(None) in get_args(fn.__annotations__["query"])
+
+
+def test_synth_array_params_keep_their_item_type():
+    """The schema→annotation round-trip flattened arrays to bare `list`;
+    function_tool then emits {"type": "array", "items": {}}, which strict
+    function calling rejects."""
+    from typing import Optional
+    from pageindex.agent_tools import _make_bridge_function
+
+    class _Bridge:
+        def call_tool(self, name, args):
+            return json.dumps(args), False
+
+    meta = {"name": "remove_documents", "description": "d",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "doc_ids": {"type": "array", "items": {"type": "string"}},
+                    "tags": {"anyOf": [{"type": "array",
+                                        "items": {"type": "integer"}},
+                                       {"type": "null"}]},
+                    "mixed": {"type": "array",
+                              "items": {"type": ["string", "null"]}},
+                },
+                "required": ["doc_ids", "mixed"],
+            }}
+    fn = _make_bridge_function(_Bridge(), meta)
+    assert fn.__annotations__["doc_ids"] == list[str]
+    assert fn.__annotations__["tags"] == Optional[list[int]]
+    # A type-array in items (nullable elements) degrades to bare list —
+    # it must not crash the build on an unhashable dict key.
+    assert fn.__annotations__["mixed"] == list
 
 
 def test_synth_escape_hatches():
@@ -1538,6 +1588,17 @@ def test_all_documents_survives_short_pages_and_missing_total():
     exact = make_client(120, 100)   # well-behaved server:
     assert _all_documents(exact) == docs
     assert type(exact).calls == 2   # ...total still saves the empty page
+
+
+def test_null_arguments_mean_omitted(client, store_path):
+    """Adapters that forward the model's null values verbatim (the Claude
+    MCP handler) used to trip parameter validation — None ≡ omitted is
+    enforced once, in call_tool."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    payload, is_error = run(client, "browse_documents", folder_id=None,
+                            sort=None, query=None)
+    assert not is_error
+    assert [doc["name"] for doc in payload["documents"]] == ["report.pdf"]
 
 
 def test_page_spec_span_bomb_rejected(client, store_path):

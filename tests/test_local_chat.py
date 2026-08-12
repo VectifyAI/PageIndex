@@ -555,6 +555,23 @@ def test_messages_validation(client, fake_anthropic):
                         model="claude-test", max_tokens=100, doc_id="ghost")
 
 
+@needs_anthropic
+def test_messages_raises_when_runner_params_unreadable(client, fake_anthropic,
+                                                       monkeypatch):
+    """The conversation is read back through set_messages_params (a mutator
+    used as a reader); if a vendor change stops it delivering params, the
+    envelope silently lost every tool turn — it must raise instead."""
+    from anthropic.lib.tools import BetaToolRunner
+    fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn"),
+    ])
+    monkeypatch.setattr(BetaToolRunner, "set_messages_params",
+                        lambda self, params: None)
+    with pytest.raises(PageIndexAPIError, match="anthropic version"):
+        client.messages([{"role": "user", "content": "hi"}],
+                        model="claude-test", max_tokens=100)
+
+
 def test_messages_missing_framework(client, monkeypatch):
     monkeypatch.setitem(sys.modules, "anthropic", None)
     with pytest.raises(PageIndexAPIError, match="pageindex\\[anthropic\\]"):

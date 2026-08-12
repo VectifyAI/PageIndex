@@ -151,6 +151,16 @@ def test_get_page_content(local_client, indexed_doc):
         local_client.get_page_content(indexed_doc, "abc")
 
 
+def test_get_page_content_span_bomb_rejected(local_client, indexed_doc):
+    """An absurd range must be rejected arithmetically, not expanded into
+    a billion integers in the caller's process (the tool layer already
+    refused; the public client method did not)."""
+    with pytest.raises(ValueError, match="spans more than 10000"):
+        local_client.get_page_content(indexed_doc, "1-1000001")
+    # At the bound itself the spec still parses.
+    assert local_client.get_page_content(indexed_doc, "5-10004") == []
+
+
 def test_submit_does_not_create_cwd_logs(local_client, sample_pdf, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     def fake_page_index_main(doc, opt=None, logger=None, page_list=None):

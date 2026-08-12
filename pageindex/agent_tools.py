@@ -1145,9 +1145,10 @@ def call_tool(client, name: str, arguments: dict[str, Any],
         )
         return _dumps(payload), True
     # Underscore-prefixed keys are the SDK's private channel (the scope
-    # below), never model arguments.
+    # below), never model arguments. None ≡ omitted (the contract's
+    # "omit if ..." semantics, same as the cloud bridge invoker).
     kwargs = {key: value for key, value in arguments.items()
-              if not key.startswith("_")}
+              if not key.startswith("_") and value is not None}
     if doc_ids is not None:
         ids = [doc_ids] if isinstance(doc_ids, str) else doc_ids
         kwargs["_allowed_ids"] = frozenset(str(one_id) for one_id in ids)
@@ -1271,13 +1272,28 @@ def _annotation_for(spec: dict) -> Any:
     schema_type = spec.get("type")
     if schema_type is None and isinstance(spec.get("anyOf"), list):
         # Nullable unions arrive as anyOf: [{type: string}, {type: null}].
-        schema_type = [option.get("type") for option in spec["anyOf"]
-                       if isinstance(option, dict) and option.get("type")]
+        options = [option for option in spec["anyOf"]
+                   if isinstance(option, dict) and option.get("type")]
+        schema_type = [option["type"] for option in options]
+        # `items` lives on the array option, not the union shell.
+        spec = next((option for option in options
+                     if option["type"] == "array"), spec)
+    nullable = False
     if isinstance(schema_type, list):
+        nullable = "null" in schema_type
         bases = [t for t in schema_type if t != "null"]
-        base = _SCHEMA_TYPE_MAP.get(bases[0], Any) if bases else Any
-        return Optional[base] if "null" in schema_type else base
-    return _SCHEMA_TYPE_MAP.get(schema_type, Any)
+        schema_type = bases[0] if bases else None
+    base = _SCHEMA_TYPE_MAP.get(schema_type or "", Any)
+    if base is list:
+        # Strict function calling rejects arrays whose item type was lost
+        # in the annotation round-trip; parameterize when it is known.
+        item_type = (spec["items"].get("type")
+                     if isinstance(spec.get("items"), dict) else None)
+        element = (_SCHEMA_TYPE_MAP.get(item_type)
+                   if isinstance(item_type, str) else None)
+        if element is not None:
+            base = list[element]
+    return Optional[base] if nullable else base
 
 
 def _bridge_invoker(bridge, name: str) -> "Callable[[dict], tuple[str, bool]]":

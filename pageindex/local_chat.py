@@ -722,7 +722,16 @@ def run_messages(client, messages, model: str,
         return params
 
     runner.set_messages_params(capture)
-    conversation = list(captured.get("messages") or [])
+    if not captured.get("messages"):
+        # The conversation is read back through a mutator; if a vendor
+        # change stops it delivering params, the envelope would silently
+        # lose the tool turns — fail loudly instead.
+        raise PageIndexAPIError(
+            "Could not read the conversation back from the anthropic tool "
+            "runner — the installed anthropic version is incompatible with "
+            "this pageindex release."
+        )
+    conversation = list(captured["messages"])
     final = turns[-1]
     envelope = final.model_dump(mode="json")
     envelope["content"] = [_dump_block(item) for item in final.content]

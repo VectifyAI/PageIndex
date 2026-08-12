@@ -194,9 +194,17 @@ class McpBridge:
         result = self._request("tools/call",
                                {"name": name, "arguments": arguments}) or {}
         is_error = bool(result.get("isError"))
-        blocks = result.get("content") or []
-        texts = [block.get("text", "") for block in blocks
-                 if isinstance(block, dict) and block.get("type") == "text"]
-        if len(texts) == len(blocks):
-            return "\n".join(texts), is_error
-        return json.dumps(blocks, ensure_ascii=False), is_error
+        texts = []
+        for block in result.get("content") or []:
+            if isinstance(block, dict) and block.get("type") == "text":
+                texts.append(block.get("text", ""))
+            elif isinstance(block, dict) and isinstance(block.get("data"), str):
+                # Base64 payloads (image/audio) become a metadata stub —
+                # dumped verbatim they hand the model the raw blob. Revisit
+                # if tool results ever pass through as real multimodal input.
+                kind = block.get("mimeType") or block.get("type") or "binary"
+                size_kb = max(1, len(block["data"]) * 3 // 4096)
+                texts.append(f"[{kind} content omitted: ~{size_kb} KB]")
+            else:
+                texts.append(json.dumps(block, ensure_ascii=False))
+        return "\n".join(texts), is_error

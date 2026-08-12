@@ -11,15 +11,22 @@ from .errors import PageIndexAPIError
 
 def _parse_pages(pages: str) -> list[int]:
     result = []
+    total = 0
     for part in pages.split(","):
         part = part.strip()
         if "-" in part:
             start, end = (int(x) for x in part.split("-", 1))
             if start > end:
                 raise ValueError(f"Invalid range '{part}': start must be <= end")
-            result.extend(range(start, end + 1))
         else:
-            result.append(int(part))
+            start = end = int(part)
+        # Bound the span arithmetically before materializing it — a spec
+        # like "1-999999999" would otherwise expand to a billion integers.
+        total += end - start + 1
+        if total > 10_000:
+            raise ValueError(f"Page specification '{pages}' spans more than "
+                             "10000 pages; request a narrower range")
+        result.extend(range(start, end + 1))
     return sorted(set(result))
 
 
