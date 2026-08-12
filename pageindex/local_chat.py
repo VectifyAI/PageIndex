@@ -212,8 +212,11 @@ def _openai_model(protocol: str, model_name: str):
     ``litellm/<provider>/<model>`` (the client's normalized retrieve_model
     form) and bare ``<provider>/<model>`` paths drive the provider through
     LiteLLM — chat.completions only, so the responses protocol refuses them
-    instead of silently downgrading; an ``openai/`` prefix strips to the
-    OpenAI SDK; bare names go to the OpenAI SDK as-is."""
+    instead of silently downgrading; a first segment LiteLLM does not know
+    (a HuggingFace repo id like ``Qwen/...``) is refused with the
+    ``openai/`` escape instead of failing inside LiteLLM at request time;
+    an ``openai/`` prefix strips to the OpenAI SDK; bare names go to the
+    OpenAI SDK as-is."""
     if "/" in model_name and not model_name.startswith("openai/"):
         if protocol == "responses":
             raise PageIndexAPIError(
@@ -226,7 +229,18 @@ def _openai_model(protocol: str, model_name: str):
                 "'openai/'-prefixed model name."
             )
         from agents.extensions.models.litellm_model import LitellmModel
-        return LitellmModel(model_name.removeprefix("litellm/"))
+        import litellm
+        wire = model_name.removeprefix("litellm/")
+        providers = getattr(litellm, "provider_list", None)
+        if providers and wire.split("/", 1)[0] not in providers:
+            raise PageIndexAPIError(
+                f"'{wire}' routes through LiteLLM, but "
+                f"'{wire.split('/', 1)[0]}' is not a LiteLLM provider. For an "
+                "OpenAI-compatible server (vLLM, TGI, Ollama) serving this "
+                f"model id, use 'openai/{wire}' and point OPENAI_BASE_URL "
+                "at the server."
+            )
+        return LitellmModel(wire)
     import openai
     model_name = model_name.removeprefix("openai/")
     try:

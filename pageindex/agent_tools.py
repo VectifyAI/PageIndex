@@ -1167,6 +1167,16 @@ def call_tool(client, name: str, arguments: dict[str, Any],
             "INVALID_INPUT",
         )
         return _dumps(payload), True
+    if arguments is not None and not isinstance(arguments, dict):
+        payload, is_error = _failure(
+            f"Invalid arguments for {name}: expected a JSON object, got "
+            f"{type(arguments).__name__}", None,
+            {"summary": "Invalid tool arguments",
+             "options": [f"Pass {name}() arguments as a JSON object of its "
+                         "parameters"]},
+            "INVALID_INPUT",
+        )
+        return _dumps(payload), is_error
     # Underscore-prefixed keys are the SDK's private channel (the scope
     # below), never model arguments. None ≡ omitted (the contract's
     # "omit if ..." semantics, same as the cloud bridge invoker).

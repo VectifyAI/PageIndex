@@ -2071,6 +2071,15 @@ def test_call_tool_coerces_string_booleans(client, store_path, monkeypatch):
     assert seen["wait"] is True
 
 
+def test_call_tool_rejects_non_object_arguments(client):
+    """A non-dict arguments value must come back as the guided envelope,
+    never raise into the agent loop."""
+    for bad in ([1, 2], "doc_name=a.pdf"):
+        text, is_error = call_tool(client, "browse_documents", bad)
+        payload = json.loads(text)
+        assert is_error and payload["errorCode"] == "INVALID_INPUT"
+
+
 def test_remove_document_repeated_name_deletes_once(client, store_path):
     seed_doc(store_path, "pi-1", "a.pdf")
     payload, is_error = run(client, "remove_document",

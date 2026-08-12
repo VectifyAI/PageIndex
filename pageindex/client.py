@@ -63,6 +63,9 @@ class PageIndexClient:
         retrieve_model (str, optional): Local mode only — the model the
             local chat surfaces (``chat_completions``, ``responses``)
             default to, exposed as ``client.retrieve_model``.
+            ``provider/model`` names route through LiteLLM; for an
+            OpenAI-compatible server that itself serves slashed model ids
+            (vLLM, TGI), prefix ``openai/`` (e.g. ``openai/Qwen/...``).
         storage_path (str, optional): Local mode only — directory where
             indexed documents are stored. Defaults to ``./.pageindex``.
 
@@ -362,7 +365,10 @@ class PageIndexClient:
         run over the local tools against your own LLM backend's
         /chat/completions (requires ``pageindex[openai]``; the OpenAI SDK's
         usual env config — OPENAI_API_KEY, OPENAI_BASE_URL — selects the
-        backend, so any OpenAI-compatible server works). The non-stream
+        backend, so any OpenAI-compatible server works; a ``/`` in the
+        model name means LiteLLM provider routing, so prefix ``openai/``
+        when the backend itself serves slashed ids, e.g.
+        ``openai/Qwen/...`` on vLLM). The non-stream
         response carries the final answer only; streaming yields the
         agent's visible text as it is produced, including narration before
         tool calls. ``finish_reason`` reports loop completion ("stop") —

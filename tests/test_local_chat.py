@@ -759,6 +759,16 @@ def test_openai_model_resolves_provider_prefixes():
 
 
 @needs_agents
+def test_chat_refuses_unknown_litellm_provider():
+    """A HuggingFace-style id (vLLM serving Qwen/...) must fail at build
+    time with the openai/ escape, not inside LiteLLM at request time."""
+    pytest.importorskip("litellm")
+    for name in ("Qwen/Qwen2.5-7B-Instruct", "litellm/Qwen/Qwen2.5-7B-Instruct"):
+        with pytest.raises(PageIndexAPIError, match="openai/Qwen"):
+            local_chat._openai_model("chat", name)
+
+
+@needs_agents
 def test_responses_refuses_litellm_routed_models(store_path):
     """LiteLLM speaks chat.completions, not /responses — the responses
     protocol must refuse the silent downgrade, at agent-build time and
