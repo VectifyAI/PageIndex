@@ -13,6 +13,40 @@ from .._version import sdk_version
 from ..errors import PageIndexAPIError
 
 
+def build_claude_allowed_tools(client, mcp_servers,
+                               include_management: bool = False) -> list[str]:
+    """``allowed_tools`` entries for the PageIndex entries of an
+    mcp_servers map. The framework scopes every tool id by the map key
+    (``mcp__<key>__<tool>``), so the keys are read from the map instead of
+    being spelled a second time; tool names are the gated set — live
+    server annotations on cloud, the contract locally. Needs no framework
+    import."""
+    from ..agent_tools import _tool_specs
+    if not isinstance(mcp_servers, dict) or not mcp_servers:
+        raise PageIndexAPIError(
+            "claude_allowed_tools takes the mcp_servers dict you register "
+            "with the framework (the {name: server} map)."
+        )
+
+    def is_pageindex(value) -> bool:
+        get = (value.get if isinstance(value, dict)
+               else lambda key, default=None: getattr(value, key, default))
+        url = get("url")
+        if isinstance(url, str):
+            return url.startswith(f"{client.BASE_URL}/mcp")
+        return get("type") == "sdk" and get("name") == "pageindex"
+
+    keys = [key for key, value in mcp_servers.items() if is_pageindex(value)]
+    if not keys:
+        raise PageIndexAPIError(
+            "No PageIndex server found in mcp_servers — register "
+            "client.as_claude_mcp() under a key first (an allowed_tools "
+            "list built from this map would match nothing)."
+        )
+    names = [spec[0] for spec in _tool_specs(client, include_management)]
+    return [f"mcp__{key}__{name}" for key in keys for name in names]
+
+
 def build_claude_mcp(client, include_management: bool = False):
     if getattr(client, "api_key", None):
         return {

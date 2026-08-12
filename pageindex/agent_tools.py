@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import copy
 import difflib
+import inspect
 import json
 import re
 import threading
@@ -366,14 +367,23 @@ def _flat_metadata(value: Any) -> Optional[dict[str, Any]]:
     return flat or None
 
 
+def _scope_documents(documents: list[dict[str, Any]],
+                     allowed_ids: Optional[frozenset]) -> list[dict[str, Any]]:
+    if allowed_ids is None:
+        return documents
+    return [doc for doc in documents if doc.get("id") in allowed_ids]
+
+
 def _resolve_document(
     client, doc_name: str,
     documents: Optional[list[dict[str, Any]]] = None,
+    allowed_ids: Optional[frozenset] = None,
 ) -> "tuple[Optional[dict[str, Any]], Optional[_ToolResult]]":
     """Resolve doc_name to a list entry. Same-name duplicates resolve to the
     newest match. Returns (entry, None) or (None, error_payload_pair)."""
     if documents is None:
         documents = _all_documents(client)
+    documents = _scope_documents(documents, allowed_ids)
     matches = [doc for doc in documents if doc.get("name") == doc_name]
     if matches:
         return max(matches, key=lambda d: d.get("createdAt") or ""), None
@@ -640,7 +650,8 @@ def _split_oversized_node(node: Any, budget: int) -> list[Any]:
 
 def _browse_documents(client, folder_id: str = "root", recursive: bool = False,
                       sort: str = "time", query: Optional[str] = None,
-                      offset: int = 0, limit: int = 10) -> tuple[dict, bool]:
+                      offset: int = 0, limit: int = 10,
+                      _allowed_ids: Optional[frozenset] = None) -> tuple[dict, bool]:
     if folder_id != "root":
         return _folder_unsupported("folder_id")
     if sort not in ("time", "relevance"):
@@ -677,9 +688,14 @@ def _browse_documents(client, folder_id: str = "root", recursive: bool = False,
                          "options": ["Pass integer offset and limit values"]},
                         "INVALID_INPUT")
 
-    listing = client.list_documents(limit=limit, offset=offset)
-    window = listing.get("documents") or []
-    has_more = offset + limit < listing.get("total", 0)
+    if _allowed_ids is None:
+        listing = client.list_documents(limit=limit, offset=offset)
+        window = listing.get("documents") or []
+        total = listing.get("total", 0)
+    else:
+        scoped = _scope_documents(_all_documents(client), _allowed_ids)
+        window, total = scoped[offset:offset + limit], len(scoped)
+    has_more = offset + limit < total
     next_offset = offset + limit if has_more else None
 
     page_has_processing = False
@@ -747,10 +763,11 @@ def _browse_documents(client, folder_id: str = "root", recursive: bool = False,
 
 
 def _get_document(client, doc_name: str, folder_id: Optional[str] = None,
-                  wait_for_completion: bool = False) -> tuple[dict, bool]:
+                  wait_for_completion: bool = False,
+                  _allowed_ids: Optional[frozenset] = None) -> tuple[dict, bool]:
     if folder_id not in (None, "root"):
         return _folder_unsupported("folder_id")
-    entry, error = _resolve_document(client, doc_name)
+    entry, error = _resolve_document(client, doc_name, allowed_ids=_allowed_ids)
     if error is not None:
         return error
     assert entry is not None
@@ -815,10 +832,11 @@ def _get_document(client, doc_name: str, folder_id: Optional[str] = None,
 
 def _get_document_structure(client, doc_name: str,
                             folder_id: Optional[str] = None, part: int = 1,
-                            wait_for_completion: bool = False) -> tuple[dict, bool]:
+                            wait_for_completion: bool = False,
+                            _allowed_ids: Optional[frozenset] = None) -> tuple[dict, bool]:
     if folder_id not in (None, "root"):
         return _folder_unsupported("folder_id")
-    entry, error = _resolve_document(client, doc_name)
+    entry, error = _resolve_document(client, doc_name, allowed_ids=_allowed_ids)
     if error is not None:
         return error
     assert entry is not None
@@ -920,10 +938,11 @@ def _get_document_structure(client, doc_name: str,
 
 def _get_page_content(client, doc_name: str, pages: str,
                       folder_id: Optional[str] = None,
-                      wait_for_completion: bool = False) -> tuple[dict, bool]:
+                      wait_for_completion: bool = False,
+                      _allowed_ids: Optional[frozenset] = None) -> tuple[dict, bool]:
     if folder_id not in (None, "root"):
         return _folder_unsupported("folder_id")
-    entry, error = _resolve_document(client, doc_name)
+    entry, error = _resolve_document(client, doc_name, allowed_ids=_allowed_ids)
     if error is not None:
         return error
     assert entry is not None
@@ -1032,7 +1051,8 @@ def _get_page_content(client, doc_name: str, pages: str,
 
 
 def _remove_document(client, doc_names: list[str],
-                     folder_id: Optional[str] = None) -> tuple[dict, bool]:
+                     folder_id: Optional[str] = None,
+                     _allowed_ids: Optional[frozenset] = None) -> tuple[dict, bool]:
     if folder_id not in (None, "root"):
         return _folder_unsupported("folder_id")
     if not isinstance(doc_names, list) or not doc_names:
@@ -1040,6 +1060,16 @@ def _remove_document(client, doc_names: list[str],
                         {"summary": "No document names provided",
                          "options": ["Pass doc_names as a non-empty array"]},
                         "INVALID_INPUT")
+    # Validate every element before deleting anything: a rejection envelope
+    # must mean nothing was destroyed.
+    if not all(isinstance(name, str) and name.strip() for name in doc_names):
+        return _failure(
+            "doc_names must be an array of non-empty document name strings",
+            None,
+            {"summary": "Invalid document names",
+             "options": ["Copy each name verbatim from a browse_documents() "
+                         "response"]},
+            "INVALID_INPUT")
     if len(doc_names) > 10:
         return _failure("Maximum 10 documents can be deleted at once", None,
                         {"summary": "Too many documents in one call",
@@ -1048,7 +1078,8 @@ def _remove_document(client, doc_names: list[str],
     documents = _all_documents(client)
     results = []
     for doc_name in doc_names:
-        entry, error = _resolve_document(client, doc_name, documents=documents)
+        entry, error = _resolve_document(client, doc_name, documents=documents,
+                                         allowed_ids=_allowed_ids)
         if error is not None or entry is None:
             results.append({"doc_name": doc_name, "status": "not_found"})
             continue
@@ -1081,9 +1112,12 @@ def tool_names(include_management: bool = False) -> tuple[str, ...]:
     return _READ_TOOLS + (_MANAGEMENT_TOOLS if include_management else ())
 
 
-def call_tool(client, name: str, arguments: dict[str, Any]) -> tuple[str, bool]:
+def call_tool(client, name: str, arguments: dict[str, Any],
+              doc_ids=None) -> tuple[str, bool]:
     """Run one contract tool; returns (envelope_json, is_error). Never raises
-    for tool-level failures — unexpected exceptions become error envelopes."""
+    for tool-level failures — unexpected exceptions become error envelopes.
+    ``doc_ids`` restricts every document lookup to that allowlist (the local
+    chat surfaces' doc_id scope)."""
     implementation = _IMPLEMENTATIONS.get(name)
     if implementation is None:
         payload, _ = _failure(
@@ -1093,9 +1127,16 @@ def call_tool(client, name: str, arguments: dict[str, Any]) -> tuple[str, bool]:
              "options": [f"Available tools: {', '.join(_IMPLEMENTATIONS)}"]},
             "INVALID_INPUT",
         )
-        return json.dumps(payload), True
+        return _dumps(payload), True
+    # Underscore-prefixed keys are the SDK's private channel (the scope
+    # below), never model arguments.
+    kwargs = {key: value for key, value in arguments.items()
+              if not key.startswith("_")}
+    if doc_ids is not None:
+        ids = [doc_ids] if isinstance(doc_ids, str) else doc_ids
+        kwargs["_allowed_ids"] = frozenset(str(one_id) for one_id in ids)
     try:
-        payload, is_error = implementation(client, **arguments)
+        bound = inspect.signature(implementation).bind(client, **kwargs)
     except TypeError as exc:
         payload, is_error = _failure(
             f"Invalid arguments for {name}: {exc}", None,
@@ -1103,6 +1144,9 @@ def call_tool(client, name: str, arguments: dict[str, Any]) -> tuple[str, bool]:
              "options": [f"Check the {name}() parameter names and types"]},
             "INVALID_INPUT",
         )
+        return _dumps(payload), is_error
+    try:
+        payload, is_error = implementation(*bound.args, **bound.kwargs)
     except Exception as exc:  # tool calls must never raise into the agent loop
         payload, is_error = _failure(
             f"{name} failed: {exc}", None,
@@ -1220,11 +1264,12 @@ def _annotation_for(spec: dict) -> Any:
     return _SCHEMA_TYPE_MAP.get(schema_type, Any)
 
 
-def _bridge_invoker(bridge, name: str) -> Callable[[dict], str]:
+def _bridge_invoker(bridge, name: str) -> "Callable[[dict], tuple[str, bool]]":
     """One cloud tool call proxied over MCP: None-valued arguments are
     dropped (None ≡ omitted, matching the contract's "omit if ..."
-    semantics) and failures are contained in the error envelope."""
-    def _invoke(arguments: dict[str, Any]) -> str:
+    semantics) and failures are contained in the error envelope. Returns
+    (envelope_text, is_error), like call_tool."""
+    def _invoke(arguments: dict[str, Any]) -> tuple[str, bool]:
         arguments = {key: value for key, value in arguments.items()
                      if value is not None}
         try:
@@ -1238,7 +1283,7 @@ def _bridge_invoker(bridge, name: str) -> Callable[[dict], str]:
                                "try the request again"},
                 "INTERNAL_ERROR",
             )
-            return _dumps(payload)
+            return _dumps(payload), True
     return _invoke
 
 
@@ -1258,7 +1303,7 @@ def _make_bridge_function(bridge, meta: dict) -> Callable[..., str]:
                         for param in properties)
     if not params_usable:
         def proxy(**kwargs: Any) -> str:
-            return _invoke(kwargs)
+            return _invoke(kwargs)[0]
     else:
         ordered = ([p for p in properties if p in required]
                    + [p for p in properties if p not in required])
@@ -1269,7 +1314,7 @@ def _make_bridge_function(bridge, meta: dict) -> Callable[..., str]:
         args_literal = "{" + ", ".join(f"'{p}': {p}" for p in ordered) + "}"
         namespace: dict[str, Any] = {"_invoke": _invoke}
         exec(f"def _synthesized({rendered}):\n"
-             f"    return _invoke({args_literal})", namespace)
+             f"    return _invoke({args_literal})[0]", namespace)
         proxy = namespace["_synthesized"]
         annotations: dict[str, Any] = {}
         for p in ordered:
@@ -1328,6 +1373,39 @@ def _build_cloud_agent_tools(client, include_management: bool) -> list[Callable[
     if not include_management:
         tools_meta = _read_only_tools(tools_meta)
     return [_make_bridge_function(bridge, meta) for meta in tools_meta]
+
+
+def _tool_specs(client, include_management: bool = False, doc_ids=None,
+                ) -> "list[tuple[str, str, dict, Callable[[dict], tuple[str, bool]]]]":
+    """(name, description, schema, invoke) per tool, for adapters that take
+    the wire schema verbatim. ``invoke`` returns (envelope_text, is_error).
+    Schemas are copies (frameworks keep the dict by reference). ``doc_ids``
+    is the local chat scope; cloud scoping is server-side."""
+    if getattr(client, "api_key", None):
+        if doc_ids is not None:
+            raise PageIndexAPIError(
+                "doc_ids scoping applies to local tools only — cloud calls "
+                "are scoped server-side."
+            )
+        bridge = _cloud_bridge(client)
+        tools_meta = bridge.list_tools()
+        if not include_management:
+            tools_meta = _read_only_tools(tools_meta)
+        return [(str(meta.get("name") or "tool"),
+                 meta.get("description") or "",
+                 copy.deepcopy(meta.get("inputSchema"))
+                 or {"type": "object", "properties": {}},
+                 _bridge_invoker(bridge, str(meta.get("name") or "tool")))
+                for meta in tools_meta]
+
+    def local_invoke(name: str) -> "Callable[[dict], tuple[str, bool]]":
+        def invoke(arguments: dict) -> tuple[str, bool]:
+            return call_tool(client, name, arguments, doc_ids=doc_ids)
+        return invoke
+
+    return [(name, _local_description(name), _local_schema(name),
+             local_invoke(name))
+            for name in tool_names(include_management)]
 
 
 def build_agent_tools(client, include_management: bool = False) -> list[Callable[..., str]]:
@@ -1461,19 +1539,24 @@ def _base_instructions(client) -> str:
     return instructions
 
 
-def doc_targeting_block(client, doc_id) -> Optional[str]:
+def doc_targeting_block(client, doc_id, scoped: bool = False) -> Optional[str]:
     """The doc_id targeting text: names, metadata, and the directive to work
     within those documents. Shared by agent_instructions and the local chat
     surfaces (a leading conversation item on the OpenAI surfaces, a system
     block on messages()). Raises when a doc_id's name is shadowed by a newer
-    same-name document — the name-addressed tools could not reach it."""
+    same-name document — the name-addressed tools could not reach it. With
+    ``scoped`` (the chat surfaces, whose tools resolve names inside the
+    doc_id allowlist) only a same-name duplicate within the targeted set
+    shadows."""
     if doc_id is None:
         return None
     doc_ids = [doc_id] if isinstance(doc_id, str) else list(doc_id)
     if not doc_ids:
         return None
     details = [client.get_document(one_id) for one_id in doc_ids]
-    documents = _all_documents(client)
+    documents = ([{**detail, "id": one_id}
+                  for one_id, detail in zip(doc_ids, details)]
+                 if scoped else _all_documents(client))
     for one_id, detail in zip(doc_ids, details):
         entry, _ = _resolve_document(client, str(detail.get("name")),
                                      documents=documents)

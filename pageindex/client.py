@@ -50,10 +50,9 @@ class PageIndexClient:
             trees. Defaults to the packaged config (see pageindex/config.yaml).
         summary_model (str, optional): Local mode only — LLM used for node
             summaries and document descriptions.
-        retrieve_model (str, optional): Local mode only — exposed as
-            ``client.retrieve_model`` (the agent demo reads it); the SDK
-            itself consumes it once agent-based local chat lands in a
-            later release.
+        retrieve_model (str, optional): Local mode only — the model the
+            local chat surfaces (``chat_completions``, ``responses``)
+            default to, exposed as ``client.retrieve_model``.
         storage_path (str, optional): Local mode only — directory where
             indexed documents are stored. Defaults to ``./.pageindex``.
 
@@ -65,10 +64,9 @@ class PageIndexClient:
     instead of inferring it from api_key.
 
     Local mode differences (all documented per method): indexing is
-    synchronous, only PDFs are supported, and ``chat_completions`` (until
-    agent-based local chat lands in a later release) / folders /
-    ``beta_headers`` / the deprecated retrieval API (``submit_query``,
-    ``get_retrieval``) are cloud-only.
+    synchronous, only PDFs are supported, and folders / ``beta_headers`` /
+    the deprecated retrieval API (``submit_query``, ``get_retrieval``) are
+    cloud-only.
     """
 
     BASE_URL = "https://api.pageindex.ai"
@@ -314,11 +312,11 @@ class PageIndexClient:
 
         Cloud-only: the cloud API marks this endpoint deprecated in favor of
         chat completions, so local mode does not implement it — raises
-        PageIndexAPIError. Use ``chat_completions`` (cloud) instead.
+        PageIndexAPIError. Use ``chat_completions`` instead.
         """
         return self._require_cloud(
             "submit_query is cloud-only — the retrieval API is deprecated in "
-            "favor of chat completions; use chat_completions in cloud mode."
+            "favor of chat completions; use chat_completions instead."
         ).submit_query(doc_id=doc_id, query=query, thinking=thinking)
 
     def get_retrieval(self, retrieval_id: str) -> dict[str, Any]:
@@ -327,11 +325,11 @@ class PageIndexClient:
 
         Cloud-only: the cloud API marks this endpoint deprecated in favor of
         chat completions, so local mode does not implement it — raises
-        PageIndexAPIError. Use ``chat_completions`` (cloud) instead.
+        PageIndexAPIError. Use ``chat_completions`` instead.
         """
         return self._require_cloud(
             "get_retrieval is cloud-only — the retrieval API is deprecated in "
-            "favor of chat completions; use chat_completions in cloud mode."
+            "favor of chat completions; use chat_completions instead."
         ).get_retrieval(retrieval_id=retrieval_id)
 
     # ---------- CHAT COMPLETIONS ----------
@@ -472,7 +470,7 @@ class PageIndexClient:
         self,
         messages: Union[str, list[dict[str, Any]]],
         model: str,
-        max_tokens: int = 8192,
+        max_tokens: Optional[int] = None,
         stream: bool = False,
         doc_id: Optional[Union[str, list[str]]] = None,
         system: Optional[Union[str, list[dict[str, Any]]]] = None,
@@ -500,8 +498,9 @@ class PageIndexClient:
                 string (it becomes a single user message).
             model: Required — there is no cross-vendor default to guess.
             max_tokens: Per-turn output budget the Messages API requires on
-                the wire; defaults to 8192 — the ceiling every current model
-                accepts — so the simple call needs only a question. Passed through.
+                the wire; the default is resolved per model (8192, or 4096
+                for the claude-3 generation whose ceiling is lower) so the
+                simple call needs only a question. Passed through.
             stream: Yield the Anthropic SDK's event stream across turns
                 (its native event objects, including SDK-synthesized
                 convenience events), one message sequence per turn.
@@ -659,7 +658,7 @@ class PageIndexClient:
         involved. Local: the in-process tools — the same set
         ``messages()`` runs internally.
 
-        Requires ``anthropic>=0.68.0``
+        Requires ``anthropic>=0.84.0``
         (``pip install 'pageindex[anthropic]'``), imported only when this
         method is called.
 
@@ -682,12 +681,11 @@ class PageIndexClient:
 
         Cloud: returns the remote PageIndex MCP config — the framework
         connects to api.pageindex.ai/mcp directly and discovers the full
-        cloud tool set. ``include_management`` has no effect there; gate
-        destructive tools with the framework's permission layer (e.g. list
-        read tools in ``allowed_tools`` instead of the ``*`` wildcard, or
-        add ``disallowed_tools=["mcp__pageindex__remove_document"]``).
-        Local: returns an in-process SDK MCP server exposing the agent
-        tools (requires ``claude-agent-sdk``;
+        cloud tool set. A remote server cannot be filtered client-side,
+        so ``include_management`` has no effect there — the gate is
+        ``allowed_tools``, built from your registration map by
+        ``claude_allowed_tools()``. Local: returns an in-process SDK MCP
+        server exposing the agent tools (requires ``claude-agent-sdk``;
         ``pip install 'pageindex[claude]'``).
 
         Cloud hosts that surface MCP server instructions receive the same
@@ -696,15 +694,79 @@ class PageIndexClient:
         recommended channel: it is guaranteed delivery, carries ``doc_id``
         targeting, and is the only channel local mode has.
 
-        Usage::
+        Usage (or ``claude_agent_config()`` for all three slots in one
+        call)::
 
+            servers = {"pageindex": client.as_claude_mcp()}
             options = ClaudeAgentOptions(
-                mcp_servers={"pageindex": client.as_claude_mcp()},
-                allowed_tools=["mcp__pageindex__*"],
+                system_prompt=client.agent_instructions(),
+                mcp_servers=servers,
+                allowed_tools=client.claude_allowed_tools(servers),
             )
         """
         from .integrations.claude_agent_sdk import build_claude_mcp
         return build_claude_mcp(self, include_management)
+
+    def claude_allowed_tools(self, mcp_servers: dict[str, Any],
+                             include_management: bool = False) -> list[str]:
+        """
+        ``allowed_tools`` entries for the PageIndex servers in your
+        ``mcp_servers`` map — pass the same dict you hand to
+        ``ClaudeAgentOptions``. The framework bakes the registration key
+        into every tool id (``mcp__<key>__<tool>``), so the keys are read
+        from the map rather than spelled a second time, and the tool
+        names are the read-only gate every other adapter applies — live
+        server annotations on cloud, the tool contract locally. Nothing
+        is hand-maintained, and no framework install is needed.
+
+        Raises PageIndexAPIError when the map holds no PageIndex entry —
+        a gate list that silently matched nothing would disable every
+        tool.
+
+        Args:
+            mcp_servers: The registration map; non-PageIndex entries are
+                ignored.
+            include_management (bool): Also allow tools that modify the
+                library (``remove_document``, and on cloud the server's
+                full management list).
+        """
+        from .integrations.claude_agent_sdk import build_claude_allowed_tools
+        return build_claude_allowed_tools(self, mcp_servers,
+                                          include_management)
+
+    def claude_agent_config(
+        self,
+        doc_id: Optional[Union[str, list[str]]] = None,
+        include_management: bool = False,
+        server_name: str = "pageindex",
+    ) -> dict[str, Any]:
+        """
+        Document QA ``ClaudeAgentOptions`` kwargs in one call::
+
+            options = ClaudeAgentOptions(**client.claude_agent_config())
+
+        Sugar over the explicit form — the managed system prompt
+        (``agent_instructions``), the server entry (``as_claude_mcp``),
+        and the matching ``allowed_tools`` gate
+        (``claude_allowed_tools``), with one ``include_management`` and
+        ``server_name`` applied everywhere. To customize (your own
+        system prompt, extra servers), switch to those three methods
+        directly.
+
+        Args:
+            doc_id: Document ID or list of IDs to target, as in
+                ``agent_instructions``.
+            include_management (bool): Also allow tools that modify the
+                library.
+            server_name (str): Key the server is registered under.
+        """
+        servers = {server_name: self.as_claude_mcp(include_management)}
+        return {
+            "system_prompt": self.agent_instructions(doc_id=doc_id),
+            "mcp_servers": servers,
+            "allowed_tools": self.claude_allowed_tools(servers,
+                                                       include_management),
+        }
 
     def agent_instructions(self, doc_id: Optional[Union[str, list[str]]] = None) -> str:
         """

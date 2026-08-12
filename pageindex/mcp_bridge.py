@@ -176,12 +176,16 @@ class McpBridge:
             if not cursor:
                 return tools
 
-    def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+    def call_tool(self, name: str, arguments: dict[str, Any]) -> "tuple[str, bool]":
+        """Returns (text, is_error) — is_error is the server's MCP isError
+        marking, which callers must carry to their framework's own error
+        channel."""
         result = self._request("tools/call",
                                {"name": name, "arguments": arguments}) or {}
+        is_error = bool(result.get("isError"))
         blocks = result.get("content") or []
         texts = [block.get("text", "") for block in blocks
                  if isinstance(block, dict) and block.get("type") == "text"]
         if len(texts) == len(blocks):
-            return "\n".join(texts)
-        return json.dumps(blocks, ensure_ascii=False)
+            return "\n".join(texts), is_error
+        return json.dumps(blocks, ensure_ascii=False), is_error

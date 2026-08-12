@@ -1,8 +1,9 @@
 """Local chat surfaces: three protocols over fake backends — no network,
 no LLM keys. Tool execution runs for real against a seeded local store."""
+import asyncio
 import json
 import sys
-from pathlib import Path
+import types
 
 import pytest
 
@@ -11,8 +12,6 @@ from pageindex import (PageIndexAPIError, PageIndexCloudClient,
                        PageIndexLocalClient)
 from pageindex.local_chat import CHAT_HEADER
 from pageindex.local_store import DocStore
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 def seed_doc(storage_path, doc_id, name):
@@ -102,6 +101,11 @@ class FakeModel(Model):
                            **kwargs):
         from agents.items import ModelResponse
         self._record(system_instructions, input)
+        # Mimic the real model's transport hop when a test attaches one, so
+        # the transport-level status recorder sees each turn.
+        transport = getattr(getattr(self, "_client", None), "responses", None)
+        if transport is not None:
+            await transport.create()
         return ModelResponse(output=self.turns.pop(0), usage=_usage(),
                              response_id=None)
 
@@ -130,6 +134,8 @@ class FakeModel(Model):
                         type="response.output_text.delta", delta=piece,
                         content_index=0, item_id=item.id, output_index=0,
                         logprobs=[], sequence_number=sequence)
+        if getattr(self, "no_terminal", False):
+            return  # backend died mid-stream: no terminal event
         sequence += 1
         yield ResponseCompletedEvent(
             type="response.completed", sequence_number=sequence,
@@ -598,10 +604,23 @@ def test_responses_envelope_fields_and_cache_group(client, store_path,
     assert result["instructions"].startswith(CHAT_HEADER)
     assert result["parallel_tool_calls"] is True
     assert result["tool_choice"] == "auto"
-    # Stable cache group: without it openai-agents stamps each run with a
-    # fresh prompt_cache_key, defeating round-trip cache routing.
-    assert (local_chat._run_kwargs(None)["run_config"].group_id
-            == "pageindex-local-chat")
+
+
+def test_conversation_group_id_stable_per_conversation():
+    """Cache-routing key: openai-agents hashes group_id into the OpenAI
+    prompt_cache_key. A conversation's continuations must share one key
+    (same model/instructions/first item), and unrelated conversations must
+    not pool under it."""
+    turn1 = [{"role": "user", "content": "q"}]
+    continuation = turn1 + [{"role": "assistant", "content": "a"},
+                            {"role": "user", "content": "and?"}]
+    key = local_chat._conversation_group_id("m", "sys", turn1)
+    assert key == local_chat._conversation_group_id("m", "sys", continuation)
+    assert key != local_chat._conversation_group_id(
+        "m", "sys", [{"role": "user", "content": "other"}])
+    assert key != local_chat._conversation_group_id("m2", "sys", turn1)
+    assert key != local_chat._conversation_group_id("m", "sys2", turn1)
+    assert (local_chat._run_kwargs(None, key)["run_config"].group_id == key)
 
 
 @needs_agents
@@ -610,6 +629,149 @@ def test_responses_input_validation(client, fake_model):
     for bad in ("", "   ", [], [1], None):
         with pytest.raises(PageIndexAPIError, match="input must be"):
             client.responses(bad)
+
+
+@needs_agents
+def test_doc_id_scopes_tools_to_targeted_documents(client, store_path,
+                                                   fake_model):
+    """doc_id is enforcement, not just a prompt: name-addressed reads of
+    out-of-scope documents fail and browse lists only the targeted set."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    seed_doc(store_path, "pi-b", "payroll.pdf")
+    fake = fake_model([
+        [_call_item("get_page_content",
+                    {"doc_name": "payroll.pdf", "pages": "1"})],
+        [_call_item("browse_documents", {}, "call_2")],
+        [_msg_item("done")],
+    ])
+    client.chat_completions("q", doc_id="pi-a")
+
+    def tool_outputs(items):
+        return [item["output"] for item in items
+                if item.get("type") == "function_call_output"]
+
+    assert "NOT_FOUND" in tool_outputs(fake.inputs[1])[-1]
+    browse = json.loads(tool_outputs(fake.inputs[2])[-1])
+    assert [doc["name"] for doc in browse["documents"]] == ["report.pdf"]
+
+
+@needs_agents
+def test_openai_model_resolves_provider_prefixes():
+    """retrieve_model arrives normalized (litellm/<provider>/<model>); the
+    OpenAI SDK must never see that prefix as a wire model name."""
+    pytest.importorskip("litellm")
+    from agents.extensions.models.litellm_model import LitellmModel
+    from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+    from agents.models.openai_responses import OpenAIResponsesModel
+
+    model = local_chat._openai_model("chat", "litellm/anthropic/claude-x")
+    assert isinstance(model, LitellmModel) and model.model == "anthropic/claude-x"
+    model = local_chat._openai_model("responses", "anthropic/claude-x")
+    assert isinstance(model, LitellmModel) and model.model == "anthropic/claude-x"
+    model = local_chat._openai_model("chat", "openai/gpt-5.2")
+    assert isinstance(model, OpenAIChatCompletionsModel)
+    assert str(model.model) == "gpt-5.2"
+    model = local_chat._openai_model("responses", "gpt-5.2")
+    assert isinstance(model, OpenAIResponsesModel)
+    assert str(model.model) == "gpt-5.2"
+
+
+@needs_agents
+def test_record_response_status_captures_last_status():
+    class _Dumpable:
+        def __init__(self, data):
+            self._data = data
+
+        def model_dump(self, mode=None):
+            return dict(self._data)
+
+    async def create(*args, **kwargs):
+        return types.SimpleNamespace(
+            status="incomplete",
+            incomplete_details=_Dumpable({"reason": "max_output_tokens"}),
+            error=None)
+
+    agent = types.SimpleNamespace(model=types.SimpleNamespace(
+        _client=types.SimpleNamespace(
+            responses=types.SimpleNamespace(create=create))))
+    recorded = {}
+    local_chat._record_response_status(agent, recorded)
+    asyncio.run(agent.model._client.responses.create())
+    assert recorded == {"status": "incomplete",
+                        "incomplete_details": {"reason": "max_output_tokens"},
+                        "error": None}
+
+
+@needs_agents
+def test_responses_envelope_reports_backend_truncation(client, store_path,
+                                                       fake_model):
+    """A final turn the backend reports as status "incomplete" must not be
+    dressed up as a clean completion."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([[_msg_item("cut off mid-answer")]])
+
+    async def create(*args, **kwargs):
+        return types.SimpleNamespace(
+            status="incomplete",
+            incomplete_details={"reason": "max_output_tokens"},
+            error=None)
+
+    fake._client = types.SimpleNamespace(
+        responses=types.SimpleNamespace(create=create))
+    result = client.responses("q")
+    assert result["status"] == "incomplete"
+    assert result["incomplete_details"] == {"reason": "max_output_tokens"}
+    assert result["error"] is None
+
+
+@needs_agents
+def test_responses_stream_wraps_framework_errors(client, store_path,
+                                                 fake_model):
+    """A backend stream that dies without a terminal event surfaces as the
+    SDK's own error type, not a raw openai-agents exception."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([[_msg_item("never terminal")]])
+    fake.no_terminal = True
+    with pytest.raises(PageIndexAPIError, match="agent backend failed"):
+        list(client.responses("q", stream=True))
+
+
+@needs_agents
+def test_chat_stream_close_at_opening_chunk_cancels_run(client, store_path,
+                                                        fake_model,
+                                                        monkeypatch):
+    """GeneratorExit at the opening chunk must still cancel the agent task:
+    the first yield sits inside the generator's try/finally."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([[_msg_item("never")]])
+    fake.block_from = 1  # turn 1 hangs until cancelled
+    captured = {}
+
+    def capture(agen_factory):
+        captured["factory"] = agen_factory
+        return iter(())  # drive the async generator by hand instead
+
+    monkeypatch.setattr(local_chat, "_stream_sync", capture)
+    client.chat_completions("q", stream=True, stream_metadata=True)
+
+    async def drive():
+        agen = captured["factory"]()
+        first = await agen.__anext__()
+        assert first["choices"][0]["delta"] == {"role": "assistant",
+                                                "content": ""}
+        await agen.aclose()
+        deadline = asyncio.get_running_loop().time() + 2.0
+        pending = []
+        while asyncio.get_running_loop().time() < deadline:
+            pending = [task for task in asyncio.all_tasks()
+                       if task is not asyncio.current_task()
+                       and not task.done()]
+            if not pending:
+                break
+            await asyncio.sleep(0.01)
+        return pending
+
+    assert asyncio.run(drive()) == []
 
 
 @needs_agents
@@ -637,6 +799,46 @@ def test_stream_abandonment_cancels_pending_turn(client, store_path,
         time_mod.sleep(0.05)
     assert threading.active_count() <= baseline
     assert fake.deltas_emitted == 0  # turn 2 never produced output
+
+
+@needs_anthropic
+def test_messages_max_tokens_default_resolves_per_model(client, fake_anthropic):
+    """The wire-required budget must not exceed the model's ceiling: the
+    claude-3 generation caps output at 4096."""
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
+    client.messages("q", model="claude-3-opus-20240229")
+    assert calls[0]["max_tokens"] == 4096
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
+    client.messages("q", model="claude-sonnet-4-5")
+    assert calls[0]["max_tokens"] == 8192
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
+    client.messages("q", model="claude-3-opus-20240229", max_tokens=1234)
+    assert calls[0]["max_tokens"] == 1234
+
+
+@needs_anthropic
+def test_messages_tool_error_flagged_and_scoped(client, store_path,
+                                                fake_anthropic):
+    """Through the real runner: a failed call reaches Claude as a
+    tool_result with is_error true, and doc_id scoping makes out-of-scope
+    documents unreachable by name."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    seed_doc(store_path, "pi-b", "secret.pdf")
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "tool_use", "id": "tu_1",
+                             "name": "get_document",
+                             "input": {"doc_name": "secret.pdf"}}],
+                           "tool_use"),
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn"),
+    ])
+    client.messages("q", model="claude-test", doc_id="pi-a")
+    tool_result = calls[1]["messages"][-1]["content"][0]
+    assert tool_result["type"] == "tool_result"
+    assert tool_result.get("is_error") is True
+    assert "NOT_FOUND" in json.dumps(tool_result["content"])
 
 
 @needs_anthropic

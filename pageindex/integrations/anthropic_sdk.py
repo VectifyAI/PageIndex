@@ -3,76 +3,57 @@
 Cloud clients get one runnable tool per live cloud MCP tool — the server's
 input schemas pass through verbatim (MCP inputSchema and Messages API
 input_schema are the same shape), calls proxied over MCP. Local clients get
-the in-process tools — the same set messages() runs internally.
+the in-process tools — the same set messages() runs internally. Failed
+calls raise ToolError so the runner emits the tool_result with
+``is_error: true`` and the envelope as its content.
 """
 from __future__ import annotations
 
 import asyncio
-import copy
-from typing import Any, Callable
+from typing import Any
 
 from ..errors import PageIndexAPIError
 
 
 def build_anthropic_tools(client, include_management: bool = False,
-                          asynchronous: bool = False) -> list:
+                          asynchronous: bool = False, doc_ids=None) -> list:
     try:
         from anthropic import beta_async_tool, beta_tool
+        from anthropic.lib.tools import ToolError
     except ImportError as exc:
         raise PageIndexAPIError(
             "as_anthropic_tools requires the Anthropic SDK tool runner "
-            "(anthropic>=0.68.0) — pip install -U anthropic (or pip install "
+            "(anthropic>=0.84.0) — pip install -U anthropic (or pip install "
             "'pageindex[anthropic]')."
         ) from exc
+    from ..agent_tools import _tool_specs
 
-    def wrap(name: str, description: str, schema: dict,
-             invoke: Callable[[dict], str]):
+    def wrap(name, description, schema, invoke):
         """One runnable tool in the caller's flavor: the sync runner and the
         async runner each accept only their own kind, and the async variant
         moves the blocking bridge/store call into a worker thread so it
         never blocks the caller's event loop."""
+        def run(kwargs: dict) -> str:
+            text, is_error = invoke(kwargs)
+            if is_error:
+                raise ToolError(text)
+            return text
+
         if asynchronous:
             async def _afn(**kwargs: Any) -> str:
-                return await asyncio.to_thread(invoke, kwargs)
+                return await asyncio.to_thread(run, kwargs)
 
             _afn.__name__ = name
             return beta_async_tool(_afn, name=name, description=description,
                                    input_schema=schema)
 
         def _fn(**kwargs: Any) -> str:
-            return invoke(kwargs)
+            return run(kwargs)
 
         _fn.__name__ = name
         return beta_tool(_fn, name=name, description=description,
                          input_schema=schema)
 
-    if getattr(client, "api_key", None):
-        from ..agent_tools import (_bridge_invoker, _cloud_bridge,
-                                   _read_only_tools)
-        bridge = _cloud_bridge(client)
-        tools_meta = bridge.list_tools()
-        if not include_management:
-            tools_meta = _read_only_tools(tools_meta)
-
-        def make_cloud(meta: dict):
-            name = str(meta.get("name") or "tool")
-            # beta_tool keeps the schema dict by reference — hand out a copy,
-            # as _local_schema already does for the local contract.
-            schema = (copy.deepcopy(meta.get("inputSchema"))
-                      or {"type": "object", "properties": {}})
-            return wrap(name, meta.get("description", ""), schema,
-                        _bridge_invoker(bridge, name))
-
-        return [make_cloud(meta) for meta in tools_meta]
-
-    from ..agent_tools import (_local_description, _local_schema, call_tool,
-                               tool_names)
-
-    def local_invoke(name: str) -> Callable[[dict], str]:
-        def invoke(arguments: dict) -> str:
-            return call_tool(client, name, arguments)[0]
-        return invoke
-
-    return [wrap(name, _local_description(name), _local_schema(name),
-                 local_invoke(name))
-            for name in tool_names(include_management)]
+    return [wrap(*spec)
+            for spec in _tool_specs(client, include_management,
+                                    doc_ids=doc_ids)]

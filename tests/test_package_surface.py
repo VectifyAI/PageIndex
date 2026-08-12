@@ -60,3 +60,24 @@ def test_import_pageindex_is_lazy():
     out = subprocess.run([sys.executable, "-c", probe],
                          capture_output=True, text=True, check=True)
     assert out.stdout.split() == ["clean", "function"]
+
+
+def test_sdk_submodules_reachable_and_unknown_names_stay_lazy():
+    """The 0.2.10 modules resolve as attributes, and an unknown name raises
+    AttributeError without dragging in the indexing stack."""
+    probe = (
+        "import sys, pageindex\n"
+        "pageindex.agent_tools; pageindex.local_chat\n"
+        "pageindex.mcp_bridge; pageindex.integrations\n"
+        "try:\n"
+        "    pageindex.definitely_missing\n"
+        "    raise SystemExit('no AttributeError')\n"
+        "except AttributeError:\n"
+        "    pass\n"
+        "heavy = [m for m in ('pageindex.page_index_classic', "
+        "'pageindex.flash', 'pageindex.utils') if m in sys.modules]\n"
+        "print(','.join(heavy) or 'clean')\n"
+    )
+    out = subprocess.run([sys.executable, "-c", probe],
+                         capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "clean"

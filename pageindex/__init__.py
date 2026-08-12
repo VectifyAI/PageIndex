@@ -18,26 +18,27 @@ __all__ = [
 ]
 
 _LAZY = {
+    "page_index": ".page_index_classic",
+    "page_index_main": ".page_index_classic",
     "page_index_flash": ".flash",
     "optimize_tree": ".tree_optimize",
     "md_to_tree": ".page_index_md",
 }
-_SUBMODULES = {"client", "cloud_api", "errors", "flash", "local_api",
-               "local_store", "page_index_classic", "page_index_md", "tree_optimize",
-               "utils"}
+_SUBMODULES = {"agent_tools", "client", "cloud_api", "errors", "flash",
+               "integrations", "local_api", "local_chat", "local_store",
+               "mcp_bridge", "page_index_classic", "page_index_md",
+               "tree_optimize", "utils"}
 
 
 def __getattr__(name):
-    if name.startswith("_"):
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     import importlib
     if name in _SUBMODULES:
         return importlib.import_module(f".{name}", __name__)
-    module = importlib.import_module(_LAZY.get(name, ".page_index_classic"), __name__)
-    try:
-        value = getattr(module, name)
-    except AttributeError:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
+    if name not in _LAZY:
+        # Unknown names must not fall through to an eager import of the
+        # heavy indexing stack.
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(importlib.import_module(_LAZY[name], __name__), name)
     globals()[name] = value
     return value
 

@@ -43,9 +43,11 @@ claude-agent-sdk = { version = ">=0.1.0", optional = true }
 # a blocking bridge call would freeze the agent event loop.
 openai-agents = { version = ">=0.8.0", optional = true }
 # messages() and as_anthropic_tools() need the SDK's beta tool runner;
-# 0.68.0 is the first release with tool_runner(stream/system/max_iterations)
-# and beta_tool(input_schema).
-anthropic = { version = ">=0.68.0", optional = true }
+# 0.84.0 is the first release with ToolError (failed tool calls flagged
+# is_error) whose runner also executes the final turn's tools on a
+# max_iterations cut (0.75.0 ordering) — older runners return truncated
+# histories with no tool_result.
+anthropic = { version = ">=0.84.0", optional = true }
 
 [tool.poetry.extras]
 claude = ["claude-agent-sdk"]

@@ -53,7 +53,9 @@ def query_agent(client: PageIndexLocalClient, doc_id: str, prompt: str, verbose:
         name="PageIndex",
         instructions=client.agent_instructions(doc_id=doc_id),
         tools=client.as_openai_tools(),
-        model=client.retrieve_model,
+        # retrieve_model is a local-mode attribute; cloud clients fall back
+        # to the framework's default model.
+        model=getattr(client, "retrieve_model", None),
         # model_settings=ModelSettings(reasoning={"effort": "low", "summary": "auto"}),  # from agents.model_settings import ModelSettings
     )
 
@@ -138,7 +140,15 @@ if __name__ == "__main__":
             doc_id = cached
         except PageIndexAPIError:
             DOC_ID_PATH.unlink()
+    if doc_id is None:
+        # The .doc_id cache is gitignored — on a fresh clone with an
+        # existing store, find the already-indexed copy by name instead of
+        # re-indexing it.
+        doc_id = next(
+            (doc["id"] for doc in client.list_documents(limit=100)["documents"]
+             if doc["name"] == PDF_PATH.name), None)
     if doc_id:
+        DOC_ID_PATH.write_text(doc_id)
         print(f"\nLoaded cached doc_id: {doc_id}")
     else:
         doc_id = client.submit_document(str(PDF_PATH), wait=True)["doc_id"]

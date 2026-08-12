@@ -5,6 +5,8 @@ import json
 import os
 import re
 import sys
+import time
+import types
 from pathlib import Path
 
 import pytest
@@ -392,8 +394,53 @@ def test_remove_document(client, store_path):
     assert client.list_documents()["total"] == 0
 
 
+def test_remove_document_rejects_non_string_names_before_deleting(client,
+                                                                  store_path):
+    """A rejection envelope must mean nothing was destroyed — the bad
+    element is caught before the delete loop starts."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    payload, is_error = run(client, "remove_document",
+                            doc_names=["report.pdf", 123])
+    assert is_error and payload["errorCode"] == "INVALID_INPUT"
+    assert client.list_documents()["total"] == 1
+
+
 def test_management_tools_hidden_by_default(client):
     assert "remove_document" not in [t.__name__ for t in client.agent_tools()]
+
+
+# ── doc_id scope (the local chat surfaces' allowlist) ──
+
+def test_call_tool_doc_scope_limits_every_lookup(client, store_path):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    seed_doc(store_path, "pi-b", "payroll.pdf",
+             created_at="2026-08-02T10:00:00.123000")
+
+    text, is_error = call_tool(client, "browse_documents", {},
+                               doc_ids=["pi-a"])
+    browse = json.loads(text)
+    assert not is_error
+    assert [doc["name"] for doc in browse["documents"]] == ["report.pdf"]
+    assert browse["has_more"] is False
+
+    text, is_error = call_tool(client, "get_page_content",
+                               {"doc_name": "payroll.pdf", "pages": "1"},
+                               doc_ids="pi-a")
+    assert is_error and json.loads(text)["errorCode"] == "NOT_FOUND"
+
+    text, is_error = call_tool(client, "get_document",
+                               {"doc_name": "report.pdf"}, doc_ids="pi-a")
+    assert not is_error
+
+
+def test_call_tool_scope_channel_not_injectable(client, store_path):
+    """Model arguments cannot smuggle an allowlist: underscore keys are
+    stripped before binding."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    text, is_error = call_tool(client, "browse_documents",
+                               {"_allowed_ids": ["pi-none"]})
+    assert not is_error
+    assert json.loads(text)["documents"]
 
 
 # ── error containment ──
@@ -413,6 +460,26 @@ def test_unknown_argument_becomes_error_envelope(client, store_path):
     payload, is_error = run(client, "get_document", doc_name="report.pdf",
                             bogus=True)
     assert is_error and payload["errorCode"] == "INVALID_INPUT"
+
+
+def test_execution_type_error_is_internal_not_invalid_input(client, store_path,
+                                                            monkeypatch):
+    """Only bind-time TypeErrors are argument errors; a TypeError raised
+    mid-execution must not masquerade as an input rejection."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    monkeypatch.setattr(client._api._store, "get_tree",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            TypeError("wrong shape")))
+    payload, is_error = run(client, "get_document_structure",
+                            doc_name="report.pdf")
+    assert is_error and payload["errorCode"] == "INTERNAL_ERROR"
+    assert "wrong shape" in payload["error"]
+
+
+def test_unknown_tool_envelope_uses_standard_formatting(client):
+    text, is_error = call_tool(client, "nope", {})
+    assert is_error
+    assert text == json.dumps(json.loads(text), indent=2, ensure_ascii=False)
 
 
 # ── framework adapters ──
@@ -460,6 +527,67 @@ def test_as_openai_tools_local_ignores_hosted(client):
             == list(tool_names()))
 
 
+def test_as_openai_tools_schemas_pass_through_verbatim(client):
+    """The contract schema goes to the model as-is — regenerating it from a
+    Python signature dropped items/enum/pattern/bounds."""
+    pytest.importorskip("agents")
+    from pageindex.agent_tools import _local_schema
+    tools = {tool.name: tool
+             for tool in client.as_openai_tools(include_management=True)}
+    assert (tools["remove_document"].params_json_schema
+            == _local_schema("remove_document"))
+    pages = tools["get_page_content"].params_json_schema["properties"]["pages"]
+    assert pages["pattern"] and pages["minLength"] == 1
+    assert all(tool.strict_json_schema is False for tool in tools.values())
+
+
+def test_as_openai_tools_invocation_runs_call_tool(client, store_path):
+    pytest.importorskip("agents")
+    seed_doc(store_path, "pi-a", "report.pdf")
+    tool = {t.name: t for t in client.as_openai_tools()}["get_document"]
+    out = asyncio.run(tool.on_invoke_tool(
+        None, json.dumps({"doc_name": "report.pdf", "folder_id": None})))
+    payload = json.loads(out)
+    assert payload["success"] is True and payload["name"] == "report.pdf"
+
+
+def test_as_openai_tools_cloud_object_params_survive(monkeypatch):
+    """An object-typed server parameter used to abort the whole build with
+    agents.exceptions.UserError; array items used to degrade to {}."""
+    pytest.importorskip("agents")
+    import pageindex.mcp_bridge as mcp_bridge
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "filters": {"type": "object", "additionalProperties": False},
+            "paths": {"type": "array",
+                      "items": {"type": "string", "minLength": 1}},
+        },
+        "required": ["paths"],
+    }
+
+    class _ObjBridge:
+        def __init__(self, url, headers):
+            pass
+
+        def list_tools(self):
+            return [{"name": "get_document_image",
+                     "description": "d",
+                     "annotations": {"readOnlyHint": True},
+                     "inputSchema": schema}]
+
+        def call_tool(self, name, arguments):
+            return json.dumps({"success": True}), False
+
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _ObjBridge)
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    tools = cloud.as_openai_tools()
+    assert len(tools) == 1
+    assert tools[0].params_json_schema == schema
+    assert tools[0].params_json_schema is not schema  # copied, not aliased
+
+
 def test_as_claude_mcp_cloud_needs_no_framework(monkeypatch):
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
     cloud = PageIndexCloudClient(api_key="pi-test-key")
@@ -483,6 +611,66 @@ def test_as_claude_mcp_local_when_installed(client):
     assert server is not None
     if isinstance(server, dict):
         assert server.get("type") != "http"
+
+
+def test_claude_allowed_tools_reads_keys_from_registration(client, monkeypatch):
+    """The registration key is data in the caller's mcp_servers map — the
+    gate entries derive from it, it is never spelled a second time. Needs
+    no framework installed."""
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
+    servers = {
+        "docs": {"type": "sdk", "name": "pageindex", "instance": object()},
+        "other": {"type": "http", "url": "https://example.com/mcp"},
+    }
+    assert (client.claude_allowed_tools(servers)
+            == [f"mcp__docs__{name}" for name in tool_names()])
+    managed = client.claude_allowed_tools(servers, include_management=True)
+    assert "mcp__docs__remove_document" in managed
+    with pytest.raises(PageIndexAPIError, match="No PageIndex server"):
+        client.claude_allowed_tools(
+            {"other": {"type": "http", "url": "https://example.com/mcp"}})
+    with pytest.raises(PageIndexAPIError, match="mcp_servers dict"):
+        client.claude_allowed_tools("path/to/.mcp.json")
+
+
+def test_claude_allowed_tools_recognizes_real_local_server(client):
+    pytest.importorskip("claude_agent_sdk")
+    servers = {"pi": client.as_claude_mcp()}
+    assert (client.claude_allowed_tools(servers)
+            == [f"mcp__pi__{name}" for name in tool_names()])
+
+
+def test_claude_allowed_tools_cloud_from_registration(cloud_with_fake_bridge):
+    cloud, _ = cloud_with_fake_bridge
+    servers = {"docs": cloud.as_claude_mcp(),
+               "other": {"type": "http", "url": "https://example.com/mcp"}}
+    assert cloud.claude_allowed_tools(servers) == [
+        "mcp__docs__search_documents", "mcp__docs__get_document"]
+    assert ("mcp__docs__remove_document"
+            in cloud.claude_allowed_tools(servers, include_management=True))
+
+
+def test_claude_agent_config_is_sugar_over_the_explicit_form(
+        cloud_with_fake_bridge):
+    cloud, _ = cloud_with_fake_bridge
+    config = cloud.claude_agent_config()
+    assert config["system_prompt"] == "SERVER GUIDANCE"
+    assert config["mcp_servers"]["pageindex"]["type"] == "http"
+    assert config["allowed_tools"] == cloud.claude_allowed_tools(
+        config["mcp_servers"])
+    renamed = cloud.claude_agent_config(server_name="docs",
+                                        include_management=True)
+    assert set(renamed["mcp_servers"]) == {"docs"}
+    assert "mcp__docs__remove_document" in renamed["allowed_tools"]
+
+
+def test_claude_agent_config_local(client, store_path):
+    pytest.importorskip("claude_agent_sdk")
+    seed_doc(store_path, "pi-a", "report.pdf")
+    config = client.claude_agent_config(doc_id="pi-a")
+    assert "report.pdf" in config["system_prompt"]
+    assert (config["allowed_tools"]
+            == [f"mcp__pageindex__{name}" for name in tool_names()])
 
 
 def test_as_anthropic_tools_missing_dependency(client, monkeypatch):
@@ -526,6 +714,34 @@ def test_as_anthropic_tools_local_management_opt_in(client):
     assert "remove_document" in names
 
 
+def test_as_anthropic_tools_local_failures_raise_toolerror(client, store_path):
+    """Error envelopes surface as ToolError so the runner marks the
+    tool_result is_error: true — a bare return would read as success."""
+    pytest.importorskip("anthropic")
+    from anthropic.lib.tools import ToolError
+    seed_doc(store_path, "pi-a", "report.pdf")
+    tools = {tool.name: tool for tool in client.as_anthropic_tools()}
+    with pytest.raises(ToolError) as excinfo:
+        tools["get_document"].call({"doc_name": "ghost.pdf"})
+    assert json.loads(excinfo.value.content)["errorCode"] == "NOT_FOUND"
+    assert "report.pdf" in tools["browse_documents"].call({})
+
+
+def test_as_anthropic_tools_cloud_iserror_raises_toolerror(
+        cloud_with_fake_bridge):
+    """The server's MCP isError marking must reach the runner's error
+    channel, not arrive as a successful tool_result."""
+    pytest.importorskip("anthropic")
+    from anthropic.lib.tools import ToolError
+    cloud, created = cloud_with_fake_bridge
+    tools = cloud.as_anthropic_tools()
+    created["bridge"].call_tool = lambda name, arguments: (
+        '{"error": "denied"}', True)
+    with pytest.raises(ToolError) as excinfo:
+        tools[0].call({"query": "q"})
+    assert json.loads(excinfo.value.content)["error"] == "denied"
+
+
 def test_as_anthropic_tools_cloud_schemas_pass_through(cloud_with_fake_bridge):
     pytest.importorskip("anthropic")
     cloud, created = cloud_with_fake_bridge
@@ -564,7 +780,11 @@ def test_as_anthropic_tools_cloud_management_opt_in(cloud_with_fake_bridge):
 
 
 def test_as_anthropic_tools_cloud_contains_bridge_errors(cloud_with_fake_bridge):
+    """Bridge failures become error envelopes raised as ToolError — the
+    runner turns that into a tool_result with is_error: true and the
+    envelope as content."""
     pytest.importorskip("anthropic")
+    from anthropic.lib.tools import ToolError
     cloud, created = cloud_with_fake_bridge
     tools = cloud.as_anthropic_tools()
 
@@ -572,7 +792,9 @@ def test_as_anthropic_tools_cloud_contains_bridge_errors(cloud_with_fake_bridge)
         raise RuntimeError("bridge down")
 
     created["bridge"].call_tool = boom
-    payload = json.loads(tools[0].call({"query": "q"}))
+    with pytest.raises(ToolError) as excinfo:
+        tools[0].call({"query": "q"})
+    payload = json.loads(excinfo.value.content)
     assert payload["errorCode"] == "INTERNAL_ERROR"
     assert "bridge down" in payload["error"]
 
@@ -643,9 +865,13 @@ class _FakeBridge:
     def list_tools(self):
         return self.tools
 
+    def instructions(self):
+        return "SERVER GUIDANCE"
+
     def call_tool(self, name, arguments):
         self.calls.append((name, arguments))
-        return json.dumps({"success": True, "tool": name, "args": arguments})
+        return json.dumps({"success": True, "tool": name,
+                           "args": arguments}), False
 
 
 @pytest.fixture
@@ -733,6 +959,7 @@ def test_cloud_agent_tools_list_failure_raises(monkeypatch):
 
 
 def test_mcp_bridge_protocol(monkeypatch):
+    import requests as requests_mod
     from pageindex.mcp_bridge import McpBridge
     import pageindex.mcp_bridge as mcp_bridge
 
@@ -785,7 +1012,10 @@ def test_mcp_bridge_protocol(monkeypatch):
                             {"type": "text", "text": "world"}]}})
         raise AssertionError(f"unexpected method {method}")
 
-    monkeypatch.setattr(mcp_bridge.requests, "post", fake_post)
+    # Replace the module's own `requests` binding — patching the shared
+    # requests module would leak the fake process-wide.
+    monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
+        post=fake_post, RequestException=requests_mod.RequestException))
     bridge = McpBridge("https://api.pageindex.ai/mcp",
                        {"Authorization": "Bearer k"})
 
@@ -801,8 +1031,8 @@ def test_mcp_bridge_protocol(monkeypatch):
     assert list_headers["Authorization"] == "Bearer k"
 
     # First tools/call 404s (expired session) → re-initialize → retry succeeds.
-    text = bridge.call_tool("t1", {"a": 1})
-    assert text == "hello\nworld"
+    text, is_error = bridge.call_tool("t1", {"a": 1})
+    assert (text, is_error) == ("hello\nworld", False)
     methods = [p["payload"]["method"] for p in posts]
     assert methods.count("initialize") == 2
     # The expired session's negotiated state must not leak into the new
@@ -822,7 +1052,7 @@ def test_synth_optional_no_default_param_is_nullable():
 
     class _Bridge:
         def call_tool(self, name, args):
-            return json.dumps(args)
+            return json.dumps(args), False
 
     meta = {"name": "browse_documents",
             "description": "d",
@@ -839,7 +1069,7 @@ def test_synth_escape_hatches():
     class _Bridge:
         def call_tool(self, name, args):
             calls.append((name, args))
-            return "ok"
+            return "ok", False
 
     # Tool named "_invoke" must not recurse into itself.
     invoke_named = _make_bridge_function(_Bridge(), {
@@ -898,6 +1128,41 @@ def test_cloud_agent_tools_empty_filter_raises(monkeypatch):
     assert len(cloud.agent_tools(include_management=True)) == 1
 
 
+def test_bridge_call_tool_surfaces_iserror(monkeypatch):
+    import requests as requests_mod
+    import pageindex.mcp_bridge as mcp_bridge
+    from pageindex.mcp_bridge import McpBridge
+
+    class _Resp:
+        def __init__(self, status, body=None):
+            self.status_code = status
+            self._body = body
+            self.headers = {"Content-Type": "application/json"}
+            self.text = json.dumps(body) if body else ""
+            self.content = self.text.encode("utf-8")
+
+        def json(self):
+            if self._body is None:
+                raise ValueError("no body")
+            return self._body
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        method = json.get("method")
+        rid = json.get("id")
+        if method == "initialize":
+            return _Resp(200, {"jsonrpc": "2.0", "id": rid, "result": {}})
+        if method == "notifications/initialized":
+            return _Resp(202)
+        return _Resp(200, {"jsonrpc": "2.0", "id": rid, "result": {
+            "isError": True,
+            "content": [{"type": "text", "text": '{"error": "denied"}'}]}})
+
+    monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
+        post=fake_post, RequestException=requests_mod.RequestException))
+    bridge = McpBridge("https://api.pageindex.ai/mcp", {})
+    assert bridge.call_tool("t", {}) == ('{"error": "denied"}', True)
+
+
 def test_sse_crlf_multi_message():
     from pageindex.mcp_bridge import _parse_sse
     body = ('event: message\r\ndata: {"jsonrpc":"2.0","method":"notifications/progress"}\r\n\r\n'
@@ -915,7 +1180,8 @@ def test_bridge_transport_error_is_pageindex_error(monkeypatch):
     def dead_post(*args, **kwargs):
         raise requests_mod.ConnectionError("dns down")
 
-    monkeypatch.setattr(mcp_bridge.requests, "post", dead_post)
+    monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
+        post=dead_post, RequestException=requests_mod.RequestException))
     bridge = McpBridge("https://api.pageindex.ai/mcp", {})
     with pytest.raises(PageIndexAPIError, match="Could not reach"):
         bridge.list_tools()
@@ -925,7 +1191,8 @@ def test_await_completion_preserves_metadata_over_null_refetch(monkeypatch):
     """A status refetch that nulls out metadata must not clobber the
     listing's copy (setdefault is a no-op on an existing None value)."""
     import pageindex.agent_tools as agent_tools_mod
-    monkeypatch.setattr(agent_tools_mod.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(agent_tools_mod, "time", types.SimpleNamespace(
+        monotonic=time.monotonic, sleep=lambda seconds: None))
 
     class _Client:
         def get_document(self, doc_id):
@@ -1070,17 +1337,18 @@ def test_live_cloud_envelope_field_parity(tmp_path):
     from pageindex.mcp_bridge import McpBridge
     bridge = McpBridge("https://api.pageindex.ai/mcp",
                        {"Authorization": f"Bearer {LIVE_KEY}"})
-    cloud_browse = json.loads(bridge.call_tool("browse_documents", {"limit": 2}))
+    cloud_browse = json.loads(
+        bridge.call_tool("browse_documents", {"limit": 2})[0])
     assert cloud_browse.get("success") is True and cloud_browse["documents"]
     doc_name = cloud_browse["documents"][0]["name"]
     cloud = {
         "browse_documents": cloud_browse,
         "get_document": json.loads(bridge.call_tool(
-            "get_document", {"doc_name": doc_name})),
+            "get_document", {"doc_name": doc_name})[0]),
         "get_document_structure": json.loads(bridge.call_tool(
-            "get_document_structure", {"doc_name": doc_name})),
+            "get_document_structure", {"doc_name": doc_name})[0]),
         "get_page_content": json.loads(bridge.call_tool(
-            "get_page_content", {"doc_name": doc_name, "pages": "1"})),
+            "get_page_content", {"doc_name": doc_name, "pages": "1"})[0]),
     }
 
     store = str(tmp_path / "store")
@@ -1270,7 +1538,8 @@ class _FakeCloudAPI:
 
 @pytest.fixture
 def fake_cloud_client(tmp_path, monkeypatch):
-    monkeypatch.setattr(client_module.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(client_module, "time", types.SimpleNamespace(
+        monotonic=time.monotonic, sleep=lambda seconds: None))
 
     def build(statuses):
         cloud = PageIndexLocalClient(storage_path=str(tmp_path / "unused"))
@@ -1299,7 +1568,8 @@ def test_submit_wait_times_out(fake_cloud_client, monkeypatch):
         clock["now"] += 700.0
         return clock["now"]
 
-    monkeypatch.setattr(client_module.time, "monotonic", fake_monotonic)
+    monkeypatch.setattr(client_module, "time", types.SimpleNamespace(
+        monotonic=fake_monotonic, sleep=lambda seconds: None))
     cloud = fake_cloud_client(["processing"])
     with pytest.raises(PageIndexAPIError, match="Timed out"):
         cloud.submit_document("whatever.pdf", wait=True)
