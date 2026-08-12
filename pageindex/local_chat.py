@@ -228,8 +228,14 @@ def _openai_model(protocol: str, model_name: str):
                 "Responses-capable backend and use a bare or "
                 "'openai/'-prefixed model name."
             )
-        from agents.extensions.models.litellm_model import LitellmModel
-        import litellm
+        try:
+            from agents.extensions.models.litellm_model import LitellmModel
+            import litellm
+        except ImportError:
+            raise PageIndexAPIError(
+                f"'{model_name}' routes through LiteLLM, but litellm is not "
+                "installed. Run:  pip install 'litellm>=1.30'"
+            )
         wire = model_name.removeprefix("litellm/")
         providers = getattr(litellm, "provider_list", None)
         if providers and wire.split("/", 1)[0] not in providers:
