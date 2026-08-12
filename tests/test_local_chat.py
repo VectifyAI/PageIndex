@@ -5,6 +5,7 @@ import json
 import sys
 import types
 
+import httpx  # via the hard `openai` dependency
 import pytest
 
 import pageindex.local_chat as local_chat
@@ -409,7 +410,6 @@ def test_responses_stream_passthrough(client, store_path, fake_model):
 
 try:
     import anthropic
-    import httpx
     _HAS_ANTHROPIC = True
 except ImportError:
     _HAS_ANTHROPIC = False

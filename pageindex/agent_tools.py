@@ -323,7 +323,9 @@ def _failure(error: str, details: Optional[dict[str, Any]],
 
 
 def _dumps(payload: dict[str, Any]) -> str:
-    return json.dumps(payload, indent=2, ensure_ascii=False)
+    # Compact, matching _serialized_size — so the size budget measures
+    # what is actually emitted.
+    return json.dumps(payload, ensure_ascii=False)
 
 
 # ── document listing / name resolution ──
@@ -453,7 +455,8 @@ def _not_ready_error(doc_name: str, status: Any, operation: str,
             {
                 "summary": "Document processing has failed",
                 "options": [
-                    "Index the document again with submit_document()",
+                    "Index the document again with "
+                    "PageIndexClient.submit_document()",
                     "Use browse_documents() to work with other documents",
                 ],
             },
@@ -745,7 +748,8 @@ def _browse_documents(client, folder_id: str = "root", recursive: bool = False,
             "summary": "Nothing to show",
             "options": ["Nothing here. Index documents with "
                         "PageIndexClient.submit_document() to get started."],
-            "auto_retry": "Index a document with submit_document() to get started",
+            "auto_retry": "Index a document with "
+                          "PageIndexClient.submit_document() to get started",
         }
         return _success(data, next_steps)
 
@@ -819,7 +823,7 @@ def _get_document(client, doc_name: str, folder_id: Optional[str] = None,
                 ])
     else:
         suggestions.append("Document processing failed. Index the document "
-                           "again with submit_document().")
+                           "again with PageIndexClient.submit_document().")
 
     data: dict[str, Any] = {
         "name": name,
@@ -1176,10 +1180,10 @@ def call_tool(client, name: str, arguments: dict[str, Any],
     kwargs = {key: value for key, value in (arguments or {}).items()
               if not key.startswith("_") and value is not None}
     _coerce_bool_args(name, kwargs)
-    if doc_ids is not None:
-        ids = [doc_ids] if isinstance(doc_ids, str) else doc_ids
-        kwargs["_allowed_ids"] = frozenset(str(one_id) for one_id in ids)
     try:
+        if doc_ids is not None:
+            ids = [doc_ids] if isinstance(doc_ids, str) else doc_ids
+            kwargs["_allowed_ids"] = frozenset(str(one_id) for one_id in ids)
         bound = inspect.signature(implementation).bind(client, **kwargs)
     except TypeError as exc:
         payload, is_error = _failure(
@@ -1329,9 +1333,9 @@ def _bridge_invoker(bridge, name: str) -> "Callable[[dict], tuple[str, bool]]":
     semantics) and failures are contained in the error envelope. Returns
     (envelope_text, is_error), like call_tool."""
     def _invoke(arguments: dict[str, Any]) -> tuple[str, bool]:
-        arguments = {key: value for key, value in arguments.items()
-                     if value is not None}
         try:
+            arguments = {key: value for key, value in arguments.items()
+                         if value is not None}
             return bridge.call_tool(name, arguments)
         except Exception as exc:
             payload, _ = _failure(

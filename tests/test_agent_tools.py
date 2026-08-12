@@ -565,7 +565,7 @@ def test_execution_type_error_is_internal_not_invalid_input(client, store_path,
 def test_unknown_tool_envelope_uses_standard_formatting(client):
     text, is_error = call_tool(client, "nope", {})
     assert is_error
-    assert text == json.dumps(json.loads(text), indent=2, ensure_ascii=False)
+    assert text == json.dumps(json.loads(text), ensure_ascii=False)
 
 
 # ── framework adapters ──
