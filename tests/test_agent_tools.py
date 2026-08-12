@@ -673,6 +673,66 @@ def test_claude_agent_config_local(client, store_path):
             == [f"mcp__pageindex__{name}" for name in tool_names()])
 
 
+def test_openai_agent_config_local(client, store_path):
+    pytest.importorskip("agents")
+    from agents import Agent
+    seed_doc(store_path, "pi-a", "report.pdf")
+    config = client.openai_agent_config(doc_id="pi-a")
+    assert config["name"] == "PageIndex"
+    assert "report.pdf" in config["instructions"]
+    assert [tool.name for tool in config["tools"]] == list(tool_names())
+    assert config["model"] == client.retrieve_model
+    assert client.openai_agent_config(model="gpt-x")["model"] == "gpt-x"
+    assert Agent(**client.openai_agent_config()).name == "PageIndex"
+
+
+def test_openai_agent_config_cloud_omits_model(cloud_with_fake_bridge):
+    pytest.importorskip("agents")
+    cloud, _ = cloud_with_fake_bridge
+    config = cloud.openai_agent_config()
+    assert "model" not in config
+    assert config["instructions"] == "SERVER GUIDANCE"
+    assert [tool.name for tool in config["tools"]] == ["search_documents",
+                                                       "get_document"]
+
+
+def test_anthropic_runner_config_shapes(client, store_path):
+    pytest.importorskip("anthropic")
+    import anthropic
+    from anthropic.lib.tools import BetaAsyncFunctionTool
+    seed_doc(store_path, "pi-a", "report.pdf")
+    config = client.anthropic_runner_config(model="claude-3-opus-20240229",
+                                            doc_id="pi-a")
+    assert config["max_tokens"] == 4096
+    assert config["max_iterations"] == 10
+    assert "report.pdf" in config["system"]
+    assert [tool.name for tool in config["tools"]] == list(tool_names())
+    assert (client.anthropic_runner_config(model="claude-sonnet-4-5")
+            ["max_tokens"] == 8192)
+    override = client.anthropic_runner_config(model="claude-sonnet-4-5",
+                                              max_tokens=99, max_turns=3)
+    assert override["max_tokens"] == 99 and override["max_iterations"] == 3
+    async_tools = client.anthropic_runner_config(
+        model="claude-sonnet-4-5", asynchronous=True)["tools"]
+    assert all(isinstance(tool, BetaAsyncFunctionTool)
+               for tool in async_tools)
+    # The kwargs must construct a real runner (construction is offline —
+    # requests start on iteration), pinning tool_runner's parameter names.
+    runner = anthropic.Anthropic(api_key="test").beta.messages.tool_runner(
+        **client.anthropic_runner_config(model="claude-sonnet-4-5"),
+        messages=[{"role": "user", "content": "q"}])
+    assert runner is not None
+
+
+def test_anthropic_runner_config_cloud(cloud_with_fake_bridge):
+    pytest.importorskip("anthropic")
+    cloud, _ = cloud_with_fake_bridge
+    config = cloud.anthropic_runner_config(model="claude-sonnet-4-5")
+    assert config["system"] == "SERVER GUIDANCE"
+    assert [tool.name for tool in config["tools"]] == ["search_documents",
+                                                       "get_document"]
+
+
 def test_as_anthropic_tools_missing_dependency(client, monkeypatch):
     monkeypatch.setitem(sys.modules, "anthropic", None)
     with pytest.raises(PageIndexAPIError, match="anthropic"):

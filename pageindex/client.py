@@ -607,7 +607,9 @@ class PageIndexClient:
     def as_openai_tools(self, include_management: bool = False,
                         hosted: bool = False) -> list:
         """
-        Tools for the OpenAI Agents SDK — pass to ``Agent(tools=...)``.
+        Tools for the OpenAI Agents SDK — pass to ``Agent(tools=...)``
+        (or ``openai_agent_config()`` for all the Agent slots in one
+        call).
 
         Cloud (default): the full live read tool set (search, folders,
         images — as enabled for your key) as plain function tools,
@@ -637,12 +639,49 @@ class PageIndexClient:
         from .integrations.openai_agents import build_openai_tools
         return build_openai_tools(self, include_management, hosted)
 
+    def openai_agent_config(
+        self,
+        doc_id: Optional[Union[str, list[str]]] = None,
+        include_management: bool = False,
+        model: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """
+        Document QA ``Agent`` kwargs for the OpenAI Agents SDK in one
+        call::
+
+            agent = Agent(**client.openai_agent_config())
+
+        Sugar over the explicit form — ``agent_instructions`` (with
+        ``doc_id`` targeting) as the instructions and
+        ``as_openai_tools`` as the tools; local clients also carry their
+        configured ``retrieve_model`` (cloud omits ``model`` so the
+        framework default applies). To customize further, switch to
+        those methods directly.
+
+        Args:
+            doc_id: Document ID or list of IDs to target, as in
+                ``agent_instructions``.
+            include_management (bool): Also expose tools that modify the
+                library.
+            model: Backend model name; overrides the local default.
+        """
+        config: dict[str, Any] = {
+            "name": "PageIndex",
+            "instructions": self.agent_instructions(doc_id=doc_id),
+            "tools": self.as_openai_tools(include_management),
+        }
+        model = model or getattr(self, "retrieve_model", None)
+        if model:
+            config["model"] = model
+        return config
+
     def as_anthropic_tools(self, include_management: bool = False,
                            asynchronous: bool = False) -> list:
         """
         Runnable tools for the Anthropic SDK's tool runner — pass to
-        ``client.beta.messages.tool_runner(tools=...)``. The default
-        flavor is for the sync ``Anthropic`` client; pass
+        ``client.beta.messages.tool_runner(tools=...)`` (or
+        ``anthropic_runner_config()`` for the whole setup in one call).
+        The default flavor is for the sync ``Anthropic`` client; pass
         ``asynchronous=True`` for ``AsyncAnthropic``. For a manual
         ``messages.create`` loop, serialize with
         ``[tool.to_dict() for tool in ...]``.
@@ -674,6 +713,55 @@ class PageIndexClient:
         """
         from .integrations.anthropic_sdk import build_anthropic_tools
         return build_anthropic_tools(self, include_management, asynchronous)
+
+    def anthropic_runner_config(
+        self,
+        model: str,
+        doc_id: Optional[Union[str, list[str]]] = None,
+        include_management: bool = False,
+        asynchronous: bool = False,
+        max_tokens: Optional[int] = None,
+        max_turns: Optional[int] = None,
+    ) -> dict[str, Any]:
+        """
+        Document QA ``tool_runner`` kwargs for the Anthropic SDK in one
+        call — only your ``messages`` remain::
+
+            runner = anthropic_client.beta.messages.tool_runner(
+                **client.anthropic_runner_config(model="claude-sonnet-4-5"),
+                messages=[{"role": "user", "content": "..."}],
+            )
+
+        Sugar over the explicit form — ``agent_instructions`` (with
+        ``doc_id`` targeting) as the system prompt and
+        ``as_anthropic_tools`` as the tools — plus the same defaults
+        ``messages()`` applies: a per-model ``max_tokens`` and a
+        ``max_iterations`` bound of 10. To customize further, switch to
+        those methods directly.
+
+        Args:
+            model: Backend model name (also resolves the ``max_tokens``
+                default).
+            doc_id: Document ID or list of IDs to target, as in
+                ``agent_instructions``.
+            include_management (bool): Also expose tools that modify the
+                library.
+            asynchronous (bool): Build async runnables for
+                ``AsyncAnthropic``.
+            max_tokens: Per-turn output budget; default resolved per
+                model.
+            max_turns: Agent-loop bound; default 10.
+        """
+        from .local_chat import _default_max_tokens
+        return {
+            "model": model,
+            "max_tokens": (max_tokens if max_tokens is not None
+                           else _default_max_tokens(model)),
+            "system": self.agent_instructions(doc_id=doc_id),
+            "tools": self.as_anthropic_tools(include_management,
+                                             asynchronous),
+            "max_iterations": max_turns if max_turns is not None else 10,
+        }
 
     def as_claude_mcp(self, include_management: bool = False):
         """

@@ -50,12 +50,7 @@ def query_agent(client: PageIndexLocalClient, doc_id: str, prompt: str, verbose:
     Tool calls are always printed; verbose=True also prints arguments and output previews.
     """
     agent = Agent(
-        name="PageIndex",
-        instructions=client.agent_instructions(doc_id=doc_id),
-        tools=client.as_openai_tools(),
-        # retrieve_model is a local-mode attribute; cloud clients fall back
-        # to the framework's default model.
-        model=getattr(client, "retrieve_model", None),
+        **client.openai_agent_config(doc_id=doc_id),
         # model_settings=ModelSettings(reasoning={"effort": "low", "summary": "auto"}),  # from agents.model_settings import ModelSettings
     )
 
