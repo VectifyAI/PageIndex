@@ -289,15 +289,32 @@ def test_structure_multipart_pagination(client, store_path):
     for part in range(1, first["total_parts"] + 1):
         payload, _ = run(client, "get_document_structure", doc_name="big.pdf",
                          part=part)
-        chunk = payload["structure"]
-        nodes = chunk if isinstance(chunk, list) else [chunk]
-        titles.extend(node["title"] for node in nodes)
+        # Every part of one paginated response is a list — a consumer that
+        # iterates part 1 must not silently iterate dict keys on part 2.
+        assert isinstance(payload["structure"], list)
+        titles.extend(node["title"] for node in payload["structure"])
         assert payload["pagination"]["has_more"] == (part < first["total_parts"])
     assert titles == [f"Chapter {index}" for index in range(60)]
 
     clamped, _ = run(client, "get_document_structure", doc_name="big.pdf",
                      part=999)
     assert clamped["pagination"]["part"] == first["total_parts"]
+
+
+def test_split_structure_chunks_never_change_type():
+    """A single-node group used to come out as a bare dict while its
+    sibling parts were lists — same response sequence, flipping JSON type."""
+    from pageindex.agent_tools import _split_structure
+    small = {"title": "s", "node_id": "0001"}
+    big = {"title": "b", "node_id": "0002",
+           "nodes": [{"title": f"c{index}", "summary": "x" * 40}
+                     for index in range(10)]}
+    chunks = _split_structure([small, small, big], 200)
+    assert len(chunks) > 1
+    assert all(isinstance(chunk, list) for chunk in chunks)
+    # Unsplit structures keep their natural shape (cloud fallback parity).
+    assert _split_structure(small, 10_000) == [small]
+    assert _split_structure([small], 10_000) == [[small]]
 
 
 # ── get_page_content ──
@@ -592,6 +609,20 @@ def test_as_openai_tools_invocation_runs_call_tool(client, store_path):
         None, json.dumps({"doc_name": "report.pdf", "folder_id": None})))
     payload = json.loads(out)
     assert payload["success"] is True and payload["name"] == "report.pdf"
+
+
+def test_as_openai_tools_malformed_args_answer_the_model(client, store_path):
+    """strict_json_schema is off, so a truncated or non-object argument
+    string is reachable; raising here aborted the caller's whole run —
+    the model must get the guided envelope back and retry instead."""
+    pytest.importorskip("agents")
+    seed_doc(store_path, "pi-a", "report.pdf")
+    tool = {t.name: t for t in client.as_openai_tools()}["get_document"]
+    for bad in ('{not json', '[1, 2]', '"x"', 'null'):
+        out = asyncio.run(tool.on_invoke_tool(None, bad))
+        payload = json.loads(out)
+        assert payload["errorCode"] == "INVALID_INPUT"
+        assert "JSON object" in payload["error"]
 
 
 def test_as_openai_tools_cloud_object_params_survive(monkeypatch):
@@ -1079,6 +1110,27 @@ def test_cloud_agent_tools_proxy_and_drop_none(cloud_with_fake_bridge):
     assert created["bridge"].calls == [("get_document", {"doc_name": "report.pdf"})]
 
 
+def test_cloud_agent_tools_null_description_survives():
+    """A server may send description: null — .get(key, default) does not
+    apply the default to it, and agent_tools() died with a TypeError while
+    the _tool_specs path handled the same payload fine."""
+    from pageindex.agent_tools import _make_bridge_function
+
+    class _Bridge:
+        def call_tool(self, name, arguments):
+            return json.dumps({"success": True}), False
+
+    tool = _make_bridge_function(_Bridge(), {
+        "name": "search_documents",
+        "description": None,
+        "inputSchema": {"type": "object",
+                        "properties": {"query": {"type": "string"}},
+                        "required": ["query"]},
+    })
+    assert tool.__name__ == "search_documents"
+    assert json.loads(tool(query="x"))["success"] is True
+
+
 def test_cloud_agent_tools_call_errors_contained(cloud_with_fake_bridge):
     cloud, created = cloud_with_fake_bridge
     search, _ = cloud.agent_tools()
@@ -1187,6 +1239,54 @@ def test_mcp_bridge_protocol(monkeypatch):
     reinit = [p for p in posts if p["payload"].get("method") == "initialize"][1]
     assert "MCP-Protocol-Version" not in reinit["headers"]
     assert "Mcp-Session-Id" not in reinit["headers"]
+
+
+def test_mcp_bridge_400_is_an_error_not_session_expiry(monkeypatch):
+    """The spec's expired-session status is 404; a 400 is an ordinary bad
+    request — treating it as expiry replayed the rejected call (running a
+    management tool's side effect twice) behind a spurious re-initialize."""
+    import requests as requests_mod
+    import pageindex.mcp_bridge as mcp_bridge
+    from pageindex.mcp_bridge import McpBridge
+
+    posts = []
+
+    class _Resp:
+        def __init__(self, status, body=None, headers=None, text=""):
+            self.status_code = status
+            self._body = body
+            self.headers = headers or {"Content-Type": "application/json"}
+            self.text = text or (json.dumps(body) if body else "")
+            self.content = self.text.encode("utf-8")
+
+        def json(self):
+            if self._body is None:
+                raise ValueError("no body")
+            return self._body
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        posts.append(json.get("method"))
+        rid = json.get("id")
+        if json.get("method") == "initialize":
+            return _Resp(200, {"jsonrpc": "2.0", "id": rid,
+                               "result": {"protocolVersion": "2025-06-18"}},
+                         {"Content-Type": "application/json",
+                          "Mcp-Session-Id": "sess-1"})
+        if json.get("method") == "notifications/initialized":
+            return _Resp(202)
+        return _Resp(400, text="unknown tool")
+
+    monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
+        post=fake_post, RequestException=requests_mod.RequestException))
+    bridge = McpBridge("https://api.pageindex.ai/mcp",
+                       {"Authorization": "Bearer k"})
+    with pytest.raises(PageIndexAPIError, match="HTTP 400"):
+        bridge.call_tool("nope", {})
+    # Exactly one call attempt, no replay, no re-initialize; the live
+    # session survives for the next request.
+    assert posts.count("tools/call") == 1
+    assert posts.count("initialize") == 1
+    assert bridge._session_id == "sess-1"
 
 
 # ── review-round regressions ──
@@ -1409,6 +1509,35 @@ def test_browse_time_sort_uses_native_pagination(client, store_path, monkeypatch
     assert calls == [{"limit": 2, "offset": 0}]
     assert [d["name"] for d in payload["documents"]] == ["doc2.pdf", "doc1.pdf"]
     assert payload["has_more"] is True and payload["next_offset"] == 2
+
+
+def test_all_documents_survives_short_pages_and_missing_total():
+    """The full-library walk behind every name resolution must trust what
+    actually arrives: a server capping page size, omitting `total`, or
+    sending total: null silently truncated the library (or raised)."""
+    from pageindex.agent_tools import _all_documents
+
+    docs = [{"id": f"pi-{index}"} for index in range(120)]
+
+    def make_client(total_field, page_cap):
+        class _Client:
+            calls = 0
+
+            def list_documents(self, limit, offset):
+                type(self).calls += 1
+                page = {"documents": docs[offset:offset + min(limit,
+                                                              page_cap)]}
+                if total_field != "omit":
+                    page["total"] = total_field
+                return page
+        return _Client()
+
+    assert _all_documents(make_client(120, 50)) == docs     # short pages
+    assert _all_documents(make_client("omit", 100)) == docs  # no total
+    assert _all_documents(make_client(None, 100)) == docs   # total: null
+    exact = make_client(120, 100)   # well-behaved server:
+    assert _all_documents(exact) == docs
+    assert type(exact).calls == 2   # ...total still saves the empty page
 
 
 def test_page_spec_span_bomb_rejected(client, store_path):

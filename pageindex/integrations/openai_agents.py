@@ -27,7 +27,8 @@ def build_openai_tools(client, include_management: bool = False,
             "as_openai_tools requires the OpenAI Agents SDK — "
             "pip install openai-agents (or pip install 'pageindex[openai]')."
         ) from exc
-    from ..agent_tools import _require_local_scope, _tool_specs
+    from ..agent_tools import (_dumps, _failure, _require_local_scope,
+                               _tool_specs)
     # The hosted branch returns before _tool_specs — reject cloud doc_ids
     # here so they are never silently dropped.
     _require_local_scope(client, doc_ids)
@@ -46,8 +47,25 @@ def build_openai_tools(client, include_management: bool = False,
 
     def wrap(name, description, schema, invoke):
         async def on_invoke_tool(ctx: Any, args_json: str) -> str:
-            arguments = {key: value for key, value
-                         in (json.loads(args_json) if args_json else {}).items()
+            # strict_json_schema is off, so the provider never validates the
+            # payload; a malformed or non-object argument string must come
+            # back as the guided error envelope — raising here aborts the
+            # caller's whole run (hand-built FunctionTools have no
+            # failure_error_function to hand the error back to the model).
+            try:
+                parsed = json.loads(args_json) if args_json else {}
+            except ValueError:
+                parsed = None
+            if not isinstance(parsed, dict):
+                payload, _ = _failure(
+                    f"Invalid arguments for {name}: expected a JSON object, "
+                    f"got: {(args_json or '')[:200]!r}", None,
+                    {"summary": "Malformed tool arguments",
+                     "options": [f"Re-send the {name} call with a JSON "
+                                 "object of its parameters"]},
+                    "INVALID_INPUT")
+                return _dumps(payload)
+            arguments = {key: value for key, value in parsed.items()
                          if value is not None}
             text, _ = await asyncio.to_thread(invoke, arguments)
             return text

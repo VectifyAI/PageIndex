@@ -62,22 +62,42 @@ def test_import_pageindex_is_lazy():
     assert out.stdout.split() == ["clean", "function"]
 
 
-def test_sdk_submodules_reachable_and_unknown_names_stay_lazy():
-    """The 0.2.10 modules resolve as attributes, and an unknown name raises
-    AttributeError without dragging in the indexing stack."""
+def test_sdk_submodules_reachable_and_dunder_probes_stay_lazy():
+    """The 0.2.10 modules resolve as attributes, and underscore probes (the
+    frequent unknown names: copy/pickle/inspect dunders) raise without
+    dragging in the indexing stack. A non-underscore unknown name still
+    raises AttributeError — after the compat fallthrough's one classic
+    import, which is the pre-0.2.10 behavior."""
     probe = (
         "import sys, pageindex\n"
         "pageindex.agent_tools; pageindex.local_chat\n"
         "pageindex.mcp_bridge; pageindex.integrations\n"
+        "assert not hasattr(pageindex, '__wrapped__')\n"
+        "heavy = [m for m in ('pageindex.page_index_classic', "
+        "'pageindex.flash', 'pageindex.utils') if m in sys.modules]\n"
+        "print(','.join(heavy) or 'clean')\n"
         "try:\n"
         "    pageindex.definitely_missing\n"
         "    raise SystemExit('no AttributeError')\n"
         "except AttributeError:\n"
         "    pass\n"
-        "heavy = [m for m in ('pageindex.page_index_classic', "
-        "'pageindex.flash', 'pageindex.utils') if m in sys.modules]\n"
-        "print(','.join(heavy) or 'clean')\n"
     )
     out = subprocess.run([sys.executable, "-c", probe],
                          capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "clean"
+
+
+def test_classic_compat_surface_still_reachable():
+    """The pre-0.2.10 catch-all made every classic/utils public name a
+    package attribute; dropping it broke `from pageindex import
+    ConfigLoader` on upgrade with no deprecation path."""
+    probe = (
+        "import pageindex\n"
+        "assert callable(pageindex.count_tokens)\n"
+        "assert isinstance(pageindex.ConfigLoader, type)\n"
+        "from pageindex import check_toc  # noqa: F401\n"
+        "print('ok')\n"
+    )
+    out = subprocess.run([sys.executable, "-c", probe],
+                         capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "ok"

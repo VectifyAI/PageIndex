@@ -5,8 +5,9 @@ Backs the cloud branches of ``client.agent_tools()`` and
 ``tools/call`` executes a tool, and the ``initialize`` handshake carries the
 server's agent instructions. Synchronous, requests-only.
 Works against both stateful and stateless servers: a session id returned by
-``initialize`` is echoed back, and a request rejected after session expiry
-re-initializes once and retries.
+``initialize`` is echoed back, and a session-carrying request rejected with
+HTTP 404 (the spec's expired-session status) re-initializes once and
+retries; a 400 is an ordinary bad request and is never replayed.
 """
 from __future__ import annotations
 
@@ -52,10 +53,8 @@ class McpBridge:
 
     # ── JSON-RPC over streamable HTTP ──
 
-    def _post(self, payload: dict) -> requests.Response:
-        with self._lock:
-            session_id = self._session_id
-            protocol_version = self._protocol_version
+    def _post(self, payload: dict, session_id: Optional[str] = None,
+              protocol_version: Optional[str] = None) -> requests.Response:
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
@@ -108,17 +107,24 @@ class McpBridge:
         with self._lock:
             self._next_id += 1
             request_id = self._next_id
+            session_id = self._session_id
+            protocol_version = self._protocol_version
         payload: dict[str, Any] = {"jsonrpc": "2.0", "id": request_id,
                                    "method": method}
         if params is not None:
             payload["params"] = params
-        response = self._post(payload)
-        if response.status_code in (400, 404) and self._initialized and _retry:
-            # Session expired (stateful servers): start over, retry once.
+        response = self._post(payload, session_id, protocol_version)
+        if response.status_code == 404 and session_id and _retry:
+            # Session expired (stateful servers; the spec's 404): the server
+            # refused the request at session validation, so replaying it is
+            # safe. 400 is an ordinary bad request — replaying one would
+            # re-run side effects. Reset only if no other thread has already
+            # re-initialized, then retry once on the fresh session.
             with self._lock:
-                self._initialized = False
-                self._session_id = None
-                self._protocol_version = None
+                if self._session_id == session_id:
+                    self._initialized = False
+                    self._session_id = None
+                    self._protocol_version = None
             return self._request(method, params, _retry=False)
         if response.status_code >= 400:
             raise PageIndexAPIError(
@@ -154,9 +160,12 @@ class McpBridge:
                                                 _PROTOCOL_VERSION)
             self._instructions = result.get("instructions")
             self._initialized = True
+            session_id = self._session_id
+            protocol_version = self._protocol_version
         try:
             self._post({"jsonrpc": "2.0",
-                        "method": "notifications/initialized"})
+                        "method": "notifications/initialized"},
+                       session_id, protocol_version)
         except PageIndexAPIError:
             pass  # advisory; a server that required it fails the next request
 

@@ -337,8 +337,13 @@ def _all_documents(client) -> list[dict[str, Any]]:
         page = client.list_documents(limit=100, offset=offset)
         batch = page.get("documents") or []
         documents.extend(batch)
-        offset += 100
-        if not batch or offset >= page.get("total", 0):
+        # Advance by what actually arrived — stepping by the requested
+        # limit skips documents whenever a server caps its page size.
+        offset += len(batch)
+        total = page.get("total")
+        # An empty page is the reliable terminator; `total` (absent or
+        # None on some backends) only saves the final empty-page request.
+        if not batch or (isinstance(total, int) and offset >= total):
             return documents
 
 
@@ -606,8 +611,11 @@ def _serialized_size(value: Any) -> int:
 
 def _split_structure(structure: Any, budget: int) -> list[Any]:
     """Split a formatted structure into chunks of at most ~budget serialized
-    chars. The paginated response shape matches the cloud tool; chunk
-    boundaries are implementation-defined."""
+    chars. The paginated response shape matches the cloud tool (its chunk
+    type admits node-or-list); chunk boundaries are implementation-defined.
+    An unsplit structure keeps its natural shape; once split, every chunk
+    is a list of nodes — the `structure` field must not change JSON type
+    between parts of one paginated response."""
     if _serialized_size(structure) <= budget:
         return [structure]
     nodes = structure if isinstance(structure, list) else [structure]
@@ -618,17 +626,18 @@ def _split_structure(structure: Any, budget: int) -> list[Any]:
         size = _serialized_size(node)
         if size > budget:
             if group:
-                chunks.append(group if len(group) > 1 else group[0])
+                chunks.append(group)
                 group, group_size = [], 0
-            chunks.extend(_split_oversized_node(node, budget))
+            chunks.extend([part]
+                          for part in _split_oversized_node(node, budget))
             continue
         if group and group_size + size > budget:
-            chunks.append(group if len(group) > 1 else group[0])
+            chunks.append(group)
             group, group_size = [], 0
         group.append(node)
         group_size += size
     if group:
-        chunks.append(group if len(group) > 1 else group[0])
+        chunks.append(group)
     return chunks or [structure]
 
 
@@ -641,6 +650,8 @@ def _split_oversized_node(node: Any, budget: int) -> list[Any]:
     child_budget = max(budget - shell_size, budget // 2)
     parts = []
     for chunk in _split_structure(children, child_budget):
+        # A recursive result is either the unsplit children (natural shape)
+        # or always-list chunks; normalize for the shell's "nodes".
         parts.append({**shell,
                       "nodes": chunk if isinstance(chunk, list) else [chunk]})
     return parts
@@ -1332,7 +1343,7 @@ def _make_bridge_function(bridge, meta: dict) -> Callable[..., str]:
         annotations["return"] = str
         proxy.__annotations__ = annotations
     proxy.__name__ = proxy.__qualname__ = name or "tool"
-    proxy.__doc__ = _tool_docstring(meta.get("description", ""), properties)
+    proxy.__doc__ = _tool_docstring(meta.get("description") or "", properties)
     return proxy
 
 
