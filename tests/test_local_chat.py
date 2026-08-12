@@ -587,26 +587,28 @@ def _anthropic_tool_use(tool_use_id="tu_1"):
 
 
 @needs_agents
-def test_chat_completions_max_turns_wrapped(client, store_path, fake_model):
+@pytest.mark.parametrize("surface", ["chat_completions", "responses"])
+@pytest.mark.parametrize("streaming", [False, True])
+def test_max_turns_wrapped(client, store_path, fake_model, surface, streaming):
     """MaxTurnsExceeded is an engine-internal type; callers get the SDK's
-    own error — on both the non-stream and stream paths."""
+    own error, with the engine exception kept as the cause — on every
+    surface and both the non-stream and stream paths."""
     seed_doc(store_path, "pi-a", "report.pdf")
     fake_model([
         [_call_item("get_document", {"doc_name": "report.pdf"})],
         [_call_item("get_document", {"doc_name": "report.pdf"}, "call_2")],
         [_msg_item("never reached")],
     ])
-    with pytest.raises(PageIndexAPIError, match="max_turns"):
-        client.chat_completions([{"role": "user", "content": "q"}],
-                                max_turns=1)
-    fake_model([
-        [_call_item("get_document", {"doc_name": "report.pdf"})],
-        [_call_item("get_document", {"doc_name": "report.pdf"}, "call_2")],
-        [_msg_item("never reached")],
-    ])
-    with pytest.raises(PageIndexAPIError, match="max_turns"):
-        list(client.chat_completions([{"role": "user", "content": "q"}],
-                                     stream=True, max_turns=1))
+    with pytest.raises(PageIndexAPIError, match=r"max_turns \(1\)") as caught:
+        result = getattr(client, surface)("q", max_turns=1, stream=streaming)
+        if streaming:
+            list(result)
+    assert type(caught.value.__cause__).__name__ == "MaxTurnsExceeded"
+
+
+@needs_agents
+def test_max_turns_rejects_non_positive(client, store_path, fake_model):
+    seed_doc(store_path, "pi-a", "report.pdf")
     with pytest.raises(PageIndexAPIError, match="positive integer"):
         client.chat_completions([{"role": "user", "content": "q"}],
                                 max_turns=0)
