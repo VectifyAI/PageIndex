@@ -131,10 +131,10 @@ _SENTINEL = object()
 def _stream_sync(agen_factory) -> Iterator[Any]:
     """Drive an async generator from a background thread; yield synchronously.
 
-    Closing (or abandoning) the iterator cancels the run between items: the
-    pump stops, and the async generator's cleanup cancels the underlying
-    agent task, so no further model turns or tool executions start. An
-    in-flight backend request cannot be aborted mid-turn.
+    Closing the iterator cancels the run between items: the pump stops, and
+    the async generator's cleanup cancels the underlying agent task, so no
+    further model turns or tool executions start. An in-flight backend
+    request cannot be aborted mid-turn.
     """
     items: "queue.Queue[Any]" = queue.Queue(maxsize=32)
     cancelled = threading.Event()
