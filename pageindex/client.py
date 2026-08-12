@@ -491,8 +491,8 @@ class PageIndexClient:
         round-trip is the format's native behavior: the response is the
         final message envelope with cross-turn aggregated ``usage`` plus a
         ``messages`` field — the full new turn sequence, valid for verbatim
-        append to your history. The managed system prompt and the doc
-        targeting block carry ``cache_control`` breakpoints.
+        append to your history. The managed system prompt carries a
+        ``cache_control`` breakpoint.
 
         Args:
             messages: Native Messages-format history (including prior
@@ -508,8 +508,7 @@ class PageIndexClient:
                 convenience events), one message sequence per turn.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
-                targeting block it adds is re-set each call and is part
-                of the cached prompt prefix.
+                targeting block it adds is re-set each call.
             system: Appended after the managed system blocks.
             temperature / top_p / top_k / stop_sequences: Passed through.
             max_turns: Cap on agent turns per call (default 10, like the
