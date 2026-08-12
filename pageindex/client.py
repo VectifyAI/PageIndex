@@ -629,12 +629,15 @@ class PageIndexClient:
         process — works with any model backend. Pass ``hosted=True`` to
         hand the connection to OpenAI instead: one hosted MCP tool, tool
         calls executed server-side (lowest latency; requires an
-        OpenAI-hosted model on the Responses API).
+        OpenAI-hosted model on the Responses API). The framework's own
+        ``MCPServerStreamableHttp`` — ``params={"url":
+        f"{BASE_URL}/mcp?tools=read", "headers": {"Authorization":
+        "Bearer <your PageIndex API key>"}}`` (drop ``?tools=read`` for
+        the full tool set) — is the async-native alternative for its
+        ``mcp_servers=`` slot.
 
         Local: the in-process tools, any model backend; ``hosted`` does
-        not apply. (The framework's own ``MCPServerStreamableHttp``
-        against ``{BASE_URL}/mcp`` is the async-native alternative for
-        its ``mcp_servers=`` slot.)
+        not apply.
 
         Requires ``openai-agents`` (``pip install 'pageindex[openai]'``),
         imported only when this method is called.
