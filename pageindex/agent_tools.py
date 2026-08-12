@@ -1549,12 +1549,10 @@ def doc_targeting_block(client, doc_id, scoped: bool = False) -> Optional[str]:
     within those documents. Shared by agent_instructions and the local chat
     surfaces (a leading conversation item on the OpenAI surfaces, a system
     block on messages()). Raises when a doc_id's name is shadowed by a newer
-    same-name document — the name-addressed tools could not reach it. Names
-    are unique per library in both modes (uploads deduplicate a taken name
-    with _1.._99 suffixes), so a duplicate is an anomaly worth refusing
-    loudly, not a layout to accommodate. With ``scoped`` (the chat
-    surfaces, whose tools resolve names inside the doc_id allowlist) only
-    a same-name duplicate within the targeted set shadows."""
+    same-name document — the name-addressed tools could not reach it. With
+    ``scoped`` (the chat surfaces, whose tools resolve names inside the
+    doc_id allowlist) only a same-name duplicate within the targeted set
+    shadows."""
     if doc_id is None:
         return None
     doc_ids = [doc_id] if isinstance(doc_id, str) else list(doc_id)
