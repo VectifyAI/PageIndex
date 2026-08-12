@@ -778,3 +778,11 @@ def test_cloud_chat_accepts_query_string(cloud):
         {"role": "user", "content": "What status?"}]
     with pytest.raises(PageIndexAPIError, match="non-empty string"):
         client.chat_completions("   ")
+
+
+def test_parse_pages_overlap_counts_union():
+    from pageindex.client import _parse_pages
+    pages = _parse_pages("1-5000,2000-9000")
+    assert len(pages) == 9000 and pages[0] == 1 and pages[-1] == 9000
+    with pytest.raises(ValueError, match="spans more than"):
+        _parse_pages("1-10001")

@@ -521,8 +521,20 @@ def _parse_page_spec(
     )
     if not isinstance(pages, str) or not _PAGES_SPEC_RE.match(pages.strip()):
         return None, invalid
+    too_many = _failure(
+        f"Too many pages requested (over {_MAX_REQUESTED_PAGES})",
+        {"doc_name": doc_name},
+        {
+            "summary": "The page specification spans too many pages",
+            "options": [
+                "Request a narrower page range",
+                "The response holds only a few pages per call - page "
+                "through with several smaller requests",
+            ],
+        },
+        "INVALID_INPUT",
+    )
     expanded: set[int] = set()
-    requested_total = 0
     for part in pages.split(","):
         part = part.strip()
         if "-" in part:
@@ -531,25 +543,16 @@ def _parse_page_spec(
                 return None, invalid
         else:
             start = end = int(part)
-        # Bound the span arithmetically before materializing it: a spec like
+        # Bound each part arithmetically before materializing it: a spec like
         # "1-1000000000" would otherwise expand to billions of integers
-        # inside the caller's process.
-        requested_total += end - start + 1
-        if requested_total > _MAX_REQUESTED_PAGES:
-            return None, _failure(
-                f"Too many pages requested (over {_MAX_REQUESTED_PAGES})",
-                {"doc_name": doc_name},
-                {
-                    "summary": "The page specification spans too many pages",
-                    "options": [
-                        "Request a narrower page range",
-                        "The response holds only a few pages per call - page "
-                        "through with several smaller requests",
-                    ],
-                },
-                "INVALID_INPUT",
-            )
+        # inside the caller's process. The cap is on distinct pages, so
+        # overlapping parts (a parent section plus its children) don't
+        # double-count.
+        if end - start + 1 > _MAX_REQUESTED_PAGES:
+            return None, too_many
         expanded.update(range(start, end + 1))
+        if len(expanded) > _MAX_REQUESTED_PAGES:
+            return None, too_many
     if any(page < 1 for page in expanded):
         return None, _failure(
             "Invalid page numbers. Page numbers must be positive integers",
@@ -702,12 +705,17 @@ def _browse_documents(client, folder_id: str = "root", recursive: bool = False,
     if _allowed_ids is None:
         listing = client.list_documents(limit=limit, offset=offset)
         window = listing.get("documents") or []
-        total = listing.get("total", 0)
+        total = listing.get("total")
     else:
         scoped = _scope_documents(_all_documents(client), _allowed_ids)
         window, total = scoped[offset:offset + limit], len(scoped)
-    has_more = offset + limit < total
-    next_offset = offset + limit if has_more else None
+    # Advance by what actually arrived — a server may cap its page size —
+    # and treat an absent/None total like _all_documents does: a full
+    # window means there may be more.
+    window_end = offset + len(window)
+    has_more = bool(window) and (window_end < total if isinstance(total, int)
+                                 else len(window) == limit)
+    next_offset = window_end if has_more else None
 
     page_has_processing = False
     page_has_failed = False
@@ -1086,6 +1094,8 @@ def _remove_document(client, doc_names: list[str],
              "options": ["Copy each name verbatim from a browse_documents() "
                          "response"]},
             "INVALID_INPUT")
+    # A repeated name is one deletion, not a second "failed" row.
+    doc_names = list(dict.fromkeys(doc_names))
     if len(doc_names) > 10:
         return _failure("Maximum 10 documents can be deleted at once", None,
                         {"summary": "Too many documents in one call",
@@ -1130,6 +1140,17 @@ def tool_names(include_management: bool = False) -> tuple[str, ...]:
     return _READ_TOOLS + (_MANAGEMENT_TOOLS if include_management else ())
 
 
+def _coerce_bool_args(name: str, kwargs: dict[str, Any]) -> None:
+    """Models routinely send booleans as JSON strings ("false"); the bare
+    truthiness tests downstream would read those as True."""
+    properties = TOOL_CONTRACT.get(name, {}).get("schema", {}).get(
+        "properties", {})
+    for key, spec in properties.items():
+        value = kwargs.get(key)
+        if spec.get("type") == "boolean" and isinstance(value, str):
+            kwargs[key] = value.strip().lower() not in ("false", "no", "0", "")
+
+
 def call_tool(client, name: str, arguments: dict[str, Any],
               doc_ids=None) -> tuple[str, bool]:
     """Run one contract tool; returns (envelope_json, is_error). Never raises
@@ -1149,8 +1170,9 @@ def call_tool(client, name: str, arguments: dict[str, Any],
     # Underscore-prefixed keys are the SDK's private channel (the scope
     # below), never model arguments. None ≡ omitted (the contract's
     # "omit if ..." semantics, same as the cloud bridge invoker).
-    kwargs = {key: value for key, value in arguments.items()
+    kwargs = {key: value for key, value in (arguments or {}).items()
               if not key.startswith("_") and value is not None}
+    _coerce_bool_args(name, kwargs)
     if doc_ids is not None:
         ids = [doc_ids] if isinstance(doc_ids, str) else doc_ids
         kwargs["_allowed_ids"] = frozenset(str(one_id) for one_id in ids)
@@ -1594,9 +1616,10 @@ def doc_targeting_block(client, doc_id, scoped: bool = False) -> Optional[str]:
     if not doc_ids:
         return None
     details = [client.get_document(one_id) for one_id in doc_ids]
+    listing = _all_documents(client)
     documents = ([{**detail, "id": one_id}
                   for one_id, detail in zip(doc_ids, details)]
-                 if scoped else _all_documents(client))
+                 if scoped else listing)
     for one_id, detail in zip(doc_ids, details):
         entry, _ = _resolve_document(client, str(detail.get("name")),
                                      documents=documents)
@@ -1608,6 +1631,15 @@ def doc_targeting_block(client, doc_id, scoped: bool = False) -> Optional[str]:
                 "and would read the newer one. Rename or remove the "
                 "duplicate, or pass the newer doc_id."
             )
+    # get_document keeps the cloud detail wire shape, which local mode
+    # serves without the user's metadata tags; the listing carries them
+    # in both modes.
+    by_id = {doc.get("id"): doc for doc in listing}
+    for one_id, detail in zip(doc_ids, details):
+        if detail.get("metadata") is None:
+            tags = _flat_metadata(by_id.get(one_id, {}).get("metadata"))
+            if tags is not None:
+                detail["metadata"] = tags
     context = json.dumps(details, ensure_ascii=False)
     if len(details) == 1:
         return (

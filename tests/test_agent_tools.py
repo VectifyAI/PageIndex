@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+import pageindex.agent_tools as agent_tools_module
 import pageindex.client as client_module
 from pageindex import PageIndexAPIError, PageIndexCloudClient, PageIndexLocalClient
 from pageindex.agent_tools import (
@@ -2025,3 +2026,101 @@ def test_submit_warns_when_stored_name_differs(fake_cloud_client):
     with pytest.warns(UserWarning, match='stored as "whatever_1.pdf"'):
         result = cloud.submit_document("docs/whatever.pdf")
     assert result["name"] == "whatever_1.pdf"
+
+
+def test_submit_wait_poll_error_carries_doc_id(fake_cloud_client, monkeypatch):
+    """A poll that dies on transient errors must keep the uploaded doc_id
+    recoverable, like the timeout and failed branches do."""
+    cloud = fake_cloud_client(["processing"])
+
+    def boom(doc_id):
+        raise PageIndexAPIError("Failed to get document metadata: 502")
+
+    monkeypatch.setattr(cloud, "get_document", boom)
+    with pytest.raises(PageIndexAPIError, match="pi-fake"):
+        cloud.submit_document("whatever.pdf", wait=True)
+
+
+def test_config_helpers_reject_empty_doc_id_on_cloud():
+    """An explicitly empty scope must not silently widen to the whole
+    library — cloud has no tool-layer allowlist to enforce it."""
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
+        cloud.openai_agent_config(doc_id=[])
+    with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
+        cloud.anthropic_runner_config(model="claude-sonnet-4-5", doc_id=[])
+    with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
+        cloud.claude_agent_config(doc_id=[])
+
+
+def test_call_tool_coerces_string_booleans(client, store_path, monkeypatch):
+    """Models routinely send booleans as JSON strings — "false" must not
+    read as True (a full wait_for_completion stall)."""
+    seed_doc(store_path, "pi-1", "a.pdf")
+    seen = {}
+    real = agent_tools_module._await_completion
+
+    def spy(spy_client, entry, wait):
+        seen["wait"] = wait
+        return real(spy_client, entry, wait)
+
+    monkeypatch.setattr(agent_tools_module, "_await_completion", spy)
+    run(client, "get_document", doc_name="a.pdf", wait_for_completion="false")
+    assert seen["wait"] is False
+    run(client, "get_document", doc_name="a.pdf", wait_for_completion="true")
+    assert seen["wait"] is True
+
+
+def test_remove_document_repeated_name_deletes_once(client, store_path):
+    seed_doc(store_path, "pi-1", "a.pdf")
+    payload, is_error = run(client, "remove_document",
+                            doc_names=["a.pdf", "a.pdf"])
+    assert not is_error
+    assert payload["results"] == [{"doc_name": "a.pdf", "status": "deleted"}]
+    assert "1 of 1" in payload["next_steps"]["summary"]
+
+
+def test_page_spec_cap_counts_distinct_pages():
+    """Overlapping parts are normal tree output (a parent section plus its
+    children) — the cap is on the union, not the sum."""
+    pages, error = agent_tools_module._parse_page_spec("1-5000,2000-9000",
+                                                       "a.pdf")
+    assert error is None and pages is not None and len(pages) == 9000
+    pages, error = agent_tools_module._parse_page_spec("1-10001", "a.pdf")
+    assert pages is None and "Too many pages" in error[0]["error"]
+
+
+def test_browse_documents_pages_by_rows_returned():
+    """A backend that caps its page size must not make the cursor skip
+    documents, and a null total must not crash (same guards as
+    _all_documents)."""
+    class _Capping:
+        def list_documents(self, limit, offset):
+            docs = [{"id": f"pi-{i}", "name": f"d{i}.pdf",
+                     "status": "completed"}
+                    for i in range(offset, min(offset + 5, 30))]
+            return {"documents": docs, "total": 30}
+
+    payload, is_error = agent_tools_module._browse_documents(_Capping(),
+                                                             limit=10)
+    assert not is_error
+    assert payload["has_more"] is True and payload["next_offset"] == 5
+
+    class _NullTotal:
+        def list_documents(self, limit, offset):
+            return {"documents": [{"name": "d.pdf", "status": "completed"}],
+                    "total": None}
+
+    payload, is_error = agent_tools_module._browse_documents(_NullTotal(),
+                                                             limit=10)
+    assert not is_error
+    assert payload["has_more"] is False and payload["next_offset"] is None
+
+
+def test_agent_instructions_carry_user_metadata(client, store_path):
+    """The targeting block promises names and metadata; local get_document
+    keeps the 7-key detail wire shape, so the tags come from the listing."""
+    seed_doc(store_path, "pi-1", "report.pdf",
+             metadata={"quarter": "Q3", "year": 2025})
+    text = client.agent_instructions(doc_id="pi-1")
+    assert '"quarter": "Q3"' in text and '"year": 2025' in text

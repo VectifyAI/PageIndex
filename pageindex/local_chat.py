@@ -227,14 +227,24 @@ def _openai_model(protocol: str, model_name: str):
             )
         from agents.extensions.models.litellm_model import LitellmModel
         return LitellmModel(model_name.removeprefix("litellm/"))
-    from openai import AsyncOpenAI
+    import openai
     model_name = model_name.removeprefix("openai/")
+    try:
+        backend = openai.AsyncOpenAI()
+    except openai.OpenAIError as exc:
+        raise PageIndexAPIError(
+            f"The OpenAI backend is not configured: {exc}") from exc
     if protocol == "chat":
         from agents.models.openai_chatcompletions import (
             OpenAIChatCompletionsModel)
-        return OpenAIChatCompletionsModel(model_name, AsyncOpenAI())
+        return OpenAIChatCompletionsModel(model_name, backend)
     from agents.models.openai_responses import OpenAIResponsesModel
-    return OpenAIResponsesModel(model_name, openai_client=AsyncOpenAI())
+    return OpenAIResponsesModel(model_name, openai_client=backend)
+
+
+def _reported_model(model_name: str) -> str:
+    """The name the provider actually serves — routing prefixes stripped."""
+    return model_name.removeprefix("litellm/").removeprefix("openai/")
 
 
 def _openai_agent(client, protocol: str, model_name: str, instructions: str,
@@ -361,9 +371,9 @@ def run_chat_completions(client, messages, stream: bool = False,
     block = _doc_block(client, doc_id)
     items = ([{"role": "user", "content": block}] if block else []) + history
     model_name = model or client.retrieve_model
-    # litellm/ is the SDK's routing marker, not a model name — report the
-    # name the provider actually serves.
-    reported_model = model_name.removeprefix("litellm/")
+    # litellm/ and openai/ are the SDK's routing markers, not model names —
+    # report the name the provider actually serves.
+    reported_model = _reported_model(model_name)
     managed = _managed_instructions(system_texts)
     agent = _openai_agent(client, "chat", model_name, managed,
                           temperature, None, doc_ids=doc_id)
@@ -483,7 +493,7 @@ def run_responses(client, input, model: Optional[str] = None,
             "id": f"resp_{uuid.uuid4().hex}",
             "object": "response",
             "created_at": int(time.time()),
-            "model": model_name,
+            "model": _reported_model(model_name),
             "status": recorded.get("status") or "completed",
             "output": output,
             "usage": {"input_tokens": usage["prompt_tokens"],

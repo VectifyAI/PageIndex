@@ -790,6 +790,30 @@ def test_envelope_model_strips_litellm_routing_prefix(store_path, fake_model):
 
 
 @needs_agents
+def test_envelope_model_strips_openai_routing_prefix(store_path, fake_model):
+    """openai/ is the other routing marker — both OpenAI-shaped envelopes
+    must report the name the provider actually serves."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    client = PageIndexLocalClient(storage_path=store_path,
+                                  retrieve_model="openai/gpt-5.2")
+    fake_model([[_msg_item("ok")]])
+    result = client.chat_completions("q")
+    assert result["model"] == "gpt-5.2"
+    fake_model([[_msg_item("ok")]])
+    result = client.responses("q")
+    assert result["model"] == "gpt-5.2"
+
+
+@needs_agents
+def test_chat_missing_openai_key_fails_loud(monkeypatch):
+    """A missing backend credential surfaces as the SDK's own error type,
+    like every other precondition on the chat surfaces."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with pytest.raises(PageIndexAPIError, match="OPENAI_API_KEY"):
+        local_chat._openai_model("chat", "gpt-4o")
+
+
+@needs_agents
 def test_record_response_status_captures_last_status():
     class _Dumpable:
         def __init__(self, data):
