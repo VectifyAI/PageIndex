@@ -606,7 +606,8 @@ class PageIndexClient:
         return build_agent_tools(self, include_management)
 
     def as_openai_tools(self, include_management: bool = False,
-                        hosted: bool = False) -> list:
+                        hosted: bool = False,
+                        doc_id: Optional[Union[str, list[str]]] = None) -> list:
         """
         Tools for the OpenAI Agents SDK — pass to ``Agent(tools=...)``
         (or ``openai_agent_config()`` for all the Agent slots in one
@@ -636,9 +637,20 @@ class PageIndexClient:
                 read-only endpoint (``/mcp?tools=read``) instead.
             hosted (bool): Cloud only — hand the MCP connection to OpenAI
                 for server-side tool execution (OpenAI models only).
+            doc_id: Local only — restrict the tools to this document ID
+                (or list of IDs), enforced at the tool layer: out-of-scope
+                lookups return NOT_FOUND. Raises on cloud, where scoping
+                is server-side.
         """
         from .integrations.openai_agents import build_openai_tools
-        return build_openai_tools(self, include_management, hosted)
+        return build_openai_tools(self, include_management, hosted,
+                                  doc_ids=doc_id)
+
+    def _local_doc_scope(self, doc_id):
+        """doc_id for the tool layer: passed through locally (structural
+        allowlist), dropped on cloud where scoping is server-side and the
+        config helpers keep prompt-level targeting."""
+        return None if getattr(self, "api_key", None) else doc_id
 
     def openai_agent_config(
         self,
@@ -661,7 +673,9 @@ class PageIndexClient:
 
         Args:
             doc_id: Document ID or list of IDs to target, as in
-                ``agent_instructions``.
+                ``agent_instructions``. Local: also enforced at the tool
+                layer, not just prompted. Cloud: prompt-level targeting
+                (tool scoping is server-side).
             include_management (bool): Also expose tools that modify the
                 library.
             model: Backend model name; overrides the local default.
@@ -669,7 +683,8 @@ class PageIndexClient:
         config: dict[str, Any] = {
             "name": "PageIndex",
             "instructions": self.agent_instructions(doc_id=doc_id),
-            "tools": self.as_openai_tools(include_management),
+            "tools": self.as_openai_tools(include_management,
+                                          doc_id=self._local_doc_scope(doc_id)),
         }
         model = model or getattr(self, "retrieve_model", None)
         if model:
@@ -677,7 +692,9 @@ class PageIndexClient:
         return config
 
     def as_anthropic_tools(self, include_management: bool = False,
-                           asynchronous: bool = False) -> list:
+                           asynchronous: bool = False,
+                           doc_id: Optional[Union[str, list[str]]] = None,
+                           ) -> list:
         """
         Runnable tools for the Anthropic SDK's tool runner — pass to
         ``client.beta.messages.tool_runner(tools=...)`` (or
@@ -712,9 +729,14 @@ class PageIndexClient:
                 ``AsyncAnthropic`` (each tool call runs in a worker
                 thread, keeping blocking I/O off your event loop). The
                 sync and async runners each accept only their own flavor.
+            doc_id: Local only — restrict the tools to this document ID
+                (or list of IDs), enforced at the tool layer: out-of-scope
+                lookups return NOT_FOUND. Raises on cloud, where scoping
+                is server-side.
         """
         from .integrations.anthropic_sdk import build_anthropic_tools
-        return build_anthropic_tools(self, include_management, asynchronous)
+        return build_anthropic_tools(self, include_management, asynchronous,
+                                     doc_ids=doc_id)
 
     def anthropic_runner_config(
         self,
@@ -745,7 +767,9 @@ class PageIndexClient:
             model: Backend model name (also resolves the ``max_tokens``
                 default).
             doc_id: Document ID or list of IDs to target, as in
-                ``agent_instructions``.
+                ``agent_instructions``. Local: also enforced at the tool
+                layer, not just prompted. Cloud: prompt-level targeting
+                (tool scoping is server-side).
             include_management (bool): Also expose tools that modify the
                 library.
             asynchronous (bool): Build async runnables for
@@ -760,12 +784,13 @@ class PageIndexClient:
             "max_tokens": (max_tokens if max_tokens is not None
                            else _default_max_tokens(model)),
             "system": self.agent_instructions(doc_id=doc_id),
-            "tools": self.as_anthropic_tools(include_management,
-                                             asynchronous),
+            "tools": self.as_anthropic_tools(include_management, asynchronous,
+                                             doc_id=self._local_doc_scope(doc_id)),
             "max_iterations": max_turns if max_turns is not None else 10,
         }
 
-    def as_claude_mcp(self, include_management: bool = False):
+    def as_claude_mcp(self, include_management: bool = False,
+                      doc_id: Optional[Union[str, list[str]]] = None):
         """
         ``mcp_servers`` entry for the Claude Agent SDK.
 
@@ -776,7 +801,9 @@ class PageIndexClient:
         ``True`` connects to the full tool set. Local: returns an
         in-process SDK MCP server exposing the agent tools, gated the
         same way at registration (requires ``claude-agent-sdk``;
-        ``pip install 'pageindex[claude]'``).
+        ``pip install 'pageindex[claude]'``). ``doc_id`` (local only)
+        restricts those tools to that document ID (or list), enforced at
+        the tool layer; it raises on cloud, where scoping is server-side.
 
         Cloud hosts that surface MCP server instructions receive the same
         guidance ``agent_instructions()`` returns natively — passing both
@@ -795,7 +822,7 @@ class PageIndexClient:
             )
         """
         from .integrations.claude_agent_sdk import build_claude_mcp
-        return build_claude_mcp(self, include_management)
+        return build_claude_mcp(self, include_management, doc_ids=doc_id)
 
     def claude_agent_config(
         self,
@@ -817,14 +844,17 @@ class PageIndexClient:
 
         Args:
             doc_id: Document ID or list of IDs to target, as in
-                ``agent_instructions``.
+                ``agent_instructions``. Local: also enforced at the tool
+                layer, not just prompted. Cloud: prompt-level targeting
+                (tool scoping is server-side).
             include_management (bool): Also allow tools that modify the
                 library.
             server_name (str): Key the server is registered under.
         """
         return {
             "system_prompt": self.agent_instructions(doc_id=doc_id),
-            "mcp_servers": {server_name: self.as_claude_mcp(include_management)},
+            "mcp_servers": {server_name: self.as_claude_mcp(
+                include_management, doc_id=self._local_doc_scope(doc_id))},
             # Pre-approval only — the server itself is already gated (the
             # read-only endpoint on cloud, the registered set locally).
             "allowed_tools": [f"mcp__{server_name}"],

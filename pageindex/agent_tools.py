@@ -1380,18 +1380,24 @@ def _build_cloud_agent_tools(client, include_management: bool) -> list[Callable[
     return [_make_bridge_function(bridge, meta) for meta in tools_meta]
 
 
+def _require_local_scope(client, doc_ids) -> None:
+    """The allowlist is enforced in-process; cloud lookups run server-side,
+    so accepting doc_ids there would be advisory-only — refuse loudly."""
+    if doc_ids is not None and getattr(client, "api_key", None):
+        raise PageIndexAPIError(
+            "doc_ids scoping applies to local tools only — cloud calls "
+            "are scoped server-side."
+        )
+
+
 def _tool_specs(client, include_management: bool = False, doc_ids=None,
                 ) -> "list[tuple[str, str, dict, Callable[[dict], tuple[str, bool]]]]":
     """(name, description, schema, invoke) per tool, for adapters that take
     the wire schema verbatim. ``invoke`` returns (envelope_text, is_error).
     Schemas are copies (frameworks keep the dict by reference). ``doc_ids``
     is the local chat scope; cloud scoping is server-side."""
+    _require_local_scope(client, doc_ids)
     if getattr(client, "api_key", None):
-        if doc_ids is not None:
-            raise PageIndexAPIError(
-                "doc_ids scoping applies to local tools only — cloud calls "
-                "are scoped server-side."
-            )
         bridge = _cloud_bridge(client)
         tools_meta = bridge.list_tools()
         if not include_management:

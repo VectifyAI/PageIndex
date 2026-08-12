@@ -349,7 +349,7 @@ def run_chat_completions(client, messages, stream: bool = False,
     model_name = model or client.retrieve_model
     managed = _managed_instructions(system_texts)
     agent = _openai_agent(client, "chat", model_name, managed,
-                          temperature, None, doc_ids=doc_id or None)
+                          temperature, None, doc_ids=doc_id)
     run_kwargs = _run_kwargs(max_turns,
                              _conversation_group_id(model_name, managed, items))
     from agents import Runner
@@ -450,7 +450,7 @@ def run_responses(client, input, model: Optional[str] = None,
     model_name = model or client.retrieve_model
     managed = _managed_instructions(extra)
     agent = _openai_agent(client, "responses", model_name, managed,
-                          temperature, top_p, doc_ids=doc_id or None)
+                          temperature, top_p, doc_ids=doc_id)
     run_kwargs = _run_kwargs(max_turns,
                              _conversation_group_id(model_name, managed, items))
     recorded: dict = {}
@@ -691,7 +691,7 @@ def run_messages(client, messages, model: str,
                     else _default_max_tokens(model)),
         messages=prepared,
         model=model,
-        tools=build_anthropic_tools(client, doc_ids=doc_id or None),
+        tools=build_anthropic_tools(client, doc_ids=doc_id),
         system=_anthropic_system(system, block),
         stream=stream,
         # Bounded like the OpenAI surfaces (their framework default is 10).

@@ -27,6 +27,10 @@ def build_openai_tools(client, include_management: bool = False,
             "as_openai_tools requires the OpenAI Agents SDK — "
             "pip install openai-agents (or pip install 'pageindex[openai]')."
         ) from exc
+    from ..agent_tools import _require_local_scope, _tool_specs
+    # The hosted branch returns before _tool_specs — reject cloud doc_ids
+    # here so they are never silently dropped.
+    _require_local_scope(client, doc_ids)
     if getattr(client, "api_key", None) and hosted:
         # include_management picks the endpoint — the URL itself is the
         # gate (?tools=read serves only readOnlyHint-annotated tools), so
@@ -39,7 +43,6 @@ def build_openai_tools(client, include_management: bool = False,
             "headers": {"Authorization": f"Bearer {client.api_key}"},
             "require_approval": "never",
         })]
-    from ..agent_tools import _tool_specs
 
     def wrap(name, description, schema, invoke):
         async def on_invoke_tool(ctx: Any, args_json: str) -> str:

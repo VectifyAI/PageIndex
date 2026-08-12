@@ -471,6 +471,10 @@ def test_call_tool_doc_scope_limits_every_lookup(client, store_path):
                                {"doc_name": "report.pdf"}, doc_ids="pi-a")
     assert not is_error
 
+    # An empty allowlist scopes to nothing — it must not read as "unscoped".
+    text, is_error = call_tool(client, "browse_documents", {}, doc_ids=[])
+    assert not is_error and json.loads(text)["documents"] == []
+
 
 def test_call_tool_scope_channel_not_injectable(client, store_path):
     """Model arguments cannot smuggle an allowlist: underscore keys are
@@ -738,6 +742,82 @@ def test_anthropic_runner_config_cloud(cloud_with_fake_bridge):
     assert config["system"] == "SERVER GUIDANCE"
     assert [tool.name for tool in config["tools"]] == ["search_documents",
                                                        "get_document"]
+
+
+# ── config helpers: doc_id is structural in the tools, not just prompted ──
+
+def test_openai_agent_config_doc_scope_enforced_in_tools(client, store_path):
+    pytest.importorskip("agents")
+    seed_doc(store_path, "pi-a", "report.pdf")
+    seed_doc(store_path, "pi-b", "payroll.pdf",
+             created_at="2026-08-02T10:00:00.123000")
+    tools = {tool.name: tool
+             for tool in client.openai_agent_config(doc_id="pi-a")["tools"]}
+    out = asyncio.run(tools["get_page_content"].on_invoke_tool(
+        None, json.dumps({"doc_name": "payroll.pdf", "pages": "1"})))
+    assert json.loads(out)["errorCode"] == "NOT_FOUND"
+    out = asyncio.run(tools["browse_documents"].on_invoke_tool(None, "{}"))
+    assert [doc["name"]
+            for doc in json.loads(out)["documents"]] == ["report.pdf"]
+
+
+def test_anthropic_runner_config_doc_scope_enforced_in_tools(client,
+                                                             store_path):
+    pytest.importorskip("anthropic")
+    from anthropic.lib.tools import ToolError
+    seed_doc(store_path, "pi-a", "report.pdf")
+    seed_doc(store_path, "pi-b", "payroll.pdf",
+             created_at="2026-08-02T10:00:00.123000")
+    config = client.anthropic_runner_config(model="claude-sonnet-4-5",
+                                            doc_id="pi-a")
+    tools = {tool.name: tool for tool in config["tools"]}
+    with pytest.raises(ToolError, match="NOT_FOUND"):
+        tools["get_page_content"].call({"doc_name": "payroll.pdf",
+                                        "pages": "1"})
+    browse = json.loads(tools["browse_documents"].call({}))
+    assert [doc["name"] for doc in browse["documents"]] == ["report.pdf"]
+
+
+def test_claude_agent_config_doc_scope_enforced_in_tools(client, store_path):
+    pytest.importorskip("claude_agent_sdk")
+    from mcp.types import CallToolRequest, CallToolRequestParams
+    seed_doc(store_path, "pi-a", "report.pdf")
+    seed_doc(store_path, "pi-b", "payroll.pdf",
+             created_at="2026-08-02T10:00:00.123000")
+    config = client.claude_agent_config(doc_id="pi-a")
+    server = config["mcp_servers"]["pageindex"]
+    handler = server["instance"].request_handlers[CallToolRequest]
+    result = asyncio.run(handler(CallToolRequest(
+        method="tools/call",
+        params=CallToolRequestParams(
+            name="get_page_content",
+            arguments={"doc_name": "payroll.pdf", "pages": "1"}))))
+    payload = json.loads(result.root.content[0].text)
+    assert payload["errorCode"] == "NOT_FOUND"
+
+
+def test_doc_scope_rejected_on_cloud_openai():
+    pytest.importorskip("agents")
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    with pytest.raises(PageIndexAPIError, match="server-side"):
+        cloud.as_openai_tools(doc_id="pi-a")
+    # The hosted branch returns before _tool_specs — it must reject too,
+    # not silently drop the allowlist.
+    with pytest.raises(PageIndexAPIError, match="server-side"):
+        cloud.as_openai_tools(hosted=True, doc_id="pi-a")
+
+
+def test_doc_scope_rejected_on_cloud_anthropic():
+    pytest.importorskip("anthropic")
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    with pytest.raises(PageIndexAPIError, match="server-side"):
+        cloud.as_anthropic_tools(doc_id="pi-a")
+
+
+def test_doc_scope_rejected_on_cloud_claude():
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    with pytest.raises(PageIndexAPIError, match="server-side"):
+        cloud.as_claude_mcp(doc_id="pi-a")
 
 
 def test_as_anthropic_tools_missing_dependency(client, monkeypatch):

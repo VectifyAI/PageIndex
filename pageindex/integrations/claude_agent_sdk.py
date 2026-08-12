@@ -14,7 +14,11 @@ from .._version import sdk_version
 from ..errors import PageIndexAPIError
 
 
-def build_claude_mcp(client, include_management: bool = False):
+def build_claude_mcp(client, include_management: bool = False, doc_ids=None):
+    from ..agent_tools import _require_local_scope
+    # The cloud branch returns a URL config — reject cloud doc_ids so they
+    # are never silently dropped.
+    _require_local_scope(client, doc_ids)
     if getattr(client, "api_key", None):
         # include_management picks the endpoint — the URL itself is the
         # gate (?tools=read serves only readOnlyHint-annotated tools).
@@ -38,7 +42,7 @@ def build_claude_mcp(client, include_management: bool = False):
     def make_handler(name: str):
         async def handler(arguments: dict[str, Any]) -> dict[str, Any]:
             text, is_error = await asyncio.to_thread(
-                call_tool, client, name, arguments or {}
+                call_tool, client, name, arguments or {}, doc_ids
             )
             result: dict[str, Any] = {"content": [{"type": "text", "text": text}]}
             if is_error:

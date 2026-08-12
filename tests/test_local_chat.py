@@ -629,6 +629,11 @@ def test_conversation_group_id_stable_per_conversation():
         "m", "sys", [{"role": "user", "content": "other"}])
     assert key != local_chat._conversation_group_id("m2", "sys", turn1)
     assert key != local_chat._conversation_group_id("m", "sys2", turn1)
+
+
+@needs_agents
+def test_run_kwargs_sets_conversation_group_id():
+    key = "pageindex-test"
     assert (local_chat._run_kwargs(None, key)["run_config"].group_id == key)
 
 
@@ -662,6 +667,21 @@ def test_doc_id_scopes_tools_to_targeted_documents(client, store_path,
     assert "NOT_FOUND" in tool_outputs(fake.inputs[1])[-1]
     browse = json.loads(tool_outputs(fake.inputs[2])[-1])
     assert [doc["name"] for doc in browse["documents"]] == ["report.pdf"]
+
+
+@needs_agents
+def test_empty_doc_id_is_an_empty_allowlist(client, store_path, fake_model):
+    """doc_id=[] scopes the agent to nothing; `or None` used to wash it
+    into unscoped full-library access."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_call_item("browse_documents", {})],
+        [_msg_item("done")],
+    ])
+    client.chat_completions("q", doc_id=[])
+    outputs = [item["output"] for item in fake.inputs[1]
+               if item.get("type") == "function_call_output"]
+    assert json.loads(outputs[-1])["documents"] == []
 
 
 @needs_agents
