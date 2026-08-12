@@ -358,7 +358,7 @@ async def _run_closing(agent, coro):
         await _aclose_backend(agent)
 
 
-def _wrap_max_turns(exc, max_turns) -> PageIndexAPIError:
+def _wrap_max_turns(max_turns) -> PageIndexAPIError:
     limit = max_turns if max_turns is not None else "the default limit"
     return PageIndexAPIError(
         f"The agent did not finish within max_turns ({limit}). Raise "
@@ -408,7 +408,7 @@ def run_chat_completions(client, messages, stream: bool = False,
             result = _run_sync(_run_closing(agent,
                 Runner.run(agent, input=items, **run_kwargs)))
         except MaxTurnsExceeded as exc:
-            raise _wrap_max_turns(exc, max_turns) from exc
+            raise _wrap_max_turns(max_turns) from exc
         except AgentsException as exc:
             raise PageIndexAPIError(
                 f"The agent backend failed: {exc}") from exc
@@ -454,7 +454,7 @@ def run_chat_completions(client, messages, stream: bool = False,
                     yield chunk({"content": event.data.delta})
             completed = True
         except MaxTurnsExceeded as exc:
-            raise _wrap_max_turns(exc, max_turns) from exc
+            raise _wrap_max_turns(max_turns) from exc
         except AgentsException as exc:
             raise PageIndexAPIError(
                 f"The agent backend failed: {exc}") from exc
@@ -550,7 +550,7 @@ def run_responses(client, input, model: Optional[str] = None,
                 Runner.run(agent, input=[dict(item) for item in items],
                            **run_kwargs)))
         except MaxTurnsExceeded as exc:
-            raise _wrap_max_turns(exc, max_turns) from exc
+            raise _wrap_max_turns(max_turns) from exc
         except AgentsException as exc:
             raise PageIndexAPIError(
                 f"The agent backend failed: {exc}") from exc
@@ -614,7 +614,7 @@ def run_responses(client, input, model: Optional[str] = None,
                     output_offset += 1
             completed = True
         except MaxTurnsExceeded as exc:
-            raise _wrap_max_turns(exc, max_turns) from exc
+            raise _wrap_max_turns(max_turns) from exc
         except AgentsException as exc:
             if recorded.get("status") not in ("failed", "incomplete"):
                 raise PageIndexAPIError(
