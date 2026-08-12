@@ -734,6 +734,28 @@ def test_responses_envelope_reports_backend_truncation(client, store_path,
 
 
 @needs_agents
+def test_chat_completions_wraps_framework_errors(client, store_path,
+                                                 fake_model, monkeypatch):
+    """Both chat_completions paths surface engine failures as the SDK's
+    own error type, like responses()."""
+    from agents.exceptions import ModelBehaviorError
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([[_msg_item("never terminal")]])
+    fake.no_terminal = True
+    with pytest.raises(PageIndexAPIError, match="agent backend failed"):
+        list(client.chat_completions("q", stream=True))
+
+    fake = fake_model([[_msg_item("x")]])
+
+    async def boom(*args, **kwargs):
+        raise ModelBehaviorError("backend broke")
+
+    monkeypatch.setattr(fake, "get_response", boom)
+    with pytest.raises(PageIndexAPIError, match="agent backend failed"):
+        client.chat_completions("q")
+
+
+@needs_agents
 def test_responses_stream_wraps_framework_errors(client, store_path,
                                                  fake_model):
     """A backend stream that dies without a terminal event surfaces as the

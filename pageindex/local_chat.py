@@ -353,13 +353,16 @@ def run_chat_completions(client, messages, stream: bool = False,
     run_kwargs = _run_kwargs(max_turns,
                              _conversation_group_id(model_name, managed, items))
     from agents import Runner
-    from agents.exceptions import MaxTurnsExceeded
+    from agents.exceptions import AgentsException, MaxTurnsExceeded
     if not stream:
         try:
             result = _run_sync(_run_closing(agent,
                 Runner.run(agent, input=items, **run_kwargs)))
         except MaxTurnsExceeded as exc:
             raise _wrap_max_turns(exc, max_turns) from exc
+        except AgentsException as exc:
+            raise PageIndexAPIError(
+                f"The agent backend failed: {exc}") from exc
         return {
             "id": f"chatcmpl-{uuid.uuid4().hex}",
             "object": "chat.completion",
@@ -400,6 +403,9 @@ def run_chat_completions(client, messages, stream: bool = False,
             completed = True
         except MaxTurnsExceeded as exc:
             raise _wrap_max_turns(exc, max_turns) from exc
+        except AgentsException as exc:
+            raise PageIndexAPIError(
+                f"The agent backend failed: {exc}") from exc
         finally:
             if not completed and hasattr(streamed, "cancel"):
                 streamed.cancel()  # abandoned/failed: stop the agent task
