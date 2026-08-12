@@ -330,6 +330,26 @@ def test_page_content_out_of_range(client, store_path):
     assert all_out["max_pages"] == 2
 
 
+def test_out_of_range_pages_reported_as_ranges(client, store_path):
+    """Spans compress — enumerating them one by one buries the response."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    partial, is_error = run(client, "get_page_content", doc_name="report.pdf",
+                            pages="1,5-9")
+    assert not is_error
+    assert "Pages 5-9 were out of range" in partial["next_steps"]["summary"]
+
+    spread, is_error = run(client, "get_page_content", doc_name="report.pdf",
+                           pages="1,5,9")
+    assert not is_error
+    assert "Pages 5,9 were out of range" in spread["next_steps"]["summary"]
+
+    all_out, is_error = run(client, "get_page_content", doc_name="report.pdf",
+                            pages="5-9")
+    assert is_error
+    assert all_out["error"].endswith("you requested pages: 5-9")
+    assert all_out["requested_pages"] == "5-9"
+
+
 @pytest.mark.parametrize("bad_spec", ["abc", "5-3", "1,,2", "-3", ""])
 def test_page_content_invalid_spec(client, store_path, bad_spec):
     seed_doc(store_path, "pi-a", "report.pdf")

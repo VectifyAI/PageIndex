@@ -987,7 +987,7 @@ def _get_page_content(client, doc_name: str, pages: str,
     if out_of_range and not valid_pages:
         return _failure(
             f"All requested pages are out of range. Document has {max_page} "
-            f"pages, but you requested pages: {', '.join(map(str, out_of_range))}",
+            f"pages, but you requested pages: {_format_page_spec(out_of_range)}",
             {
                 "doc_name": doc_name,
                 "max_pages": max_page,
@@ -1037,7 +1037,7 @@ def _get_page_content(client, doc_name: str, pages: str,
             parts.append(f"Pages {_format_page_spec(remaining)} were "
                          "omitted due to response size limits.")
         if out_of_range:
-            parts.append(f"Pages {', '.join(map(str, out_of_range))} "
+            parts.append(f"Pages {_format_page_spec(out_of_range)} "
                          "were out of range.")
         summary = " ".join(parts)
     else:
