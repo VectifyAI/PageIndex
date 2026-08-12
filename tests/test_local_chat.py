@@ -748,7 +748,7 @@ def test_openai_model_resolves_provider_prefixes():
 
     model = local_chat._openai_model("chat", "litellm/anthropic/claude-x")
     assert isinstance(model, LitellmModel) and model.model == "anthropic/claude-x"
-    model = local_chat._openai_model("responses", "anthropic/claude-x")
+    model = local_chat._openai_model("chat", "anthropic/claude-x")
     assert isinstance(model, LitellmModel) and model.model == "anthropic/claude-x"
     model = local_chat._openai_model("chat", "openai/gpt-5.2")
     assert isinstance(model, OpenAIChatCompletionsModel)
@@ -756,6 +756,37 @@ def test_openai_model_resolves_provider_prefixes():
     model = local_chat._openai_model("responses", "gpt-5.2")
     assert isinstance(model, OpenAIResponsesModel)
     assert str(model.model) == "gpt-5.2"
+
+
+@needs_agents
+def test_responses_refuses_litellm_routed_models(store_path):
+    """LiteLLM speaks chat.completions, not /responses — the responses
+    protocol must refuse the silent downgrade, at agent-build time and
+    before any backend call."""
+    for name in ("anthropic/claude-x", "litellm/anthropic/claude-x"):
+        with pytest.raises(PageIndexAPIError, match="Responses API"):
+            local_chat._openai_model("responses", name)
+    client = PageIndexLocalClient(storage_path=store_path,
+                                  retrieve_model="anthropic/claude-x")
+    with pytest.raises(PageIndexAPIError, match="chat_completions"):
+        client.responses("q")
+
+
+@needs_agents
+def test_envelope_model_strips_litellm_routing_prefix(store_path, fake_model):
+    """litellm/ is the SDK's routing marker, not a model name — the
+    OpenAI-shaped envelopes must report the model the provider serves."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    client = PageIndexLocalClient(storage_path=store_path,
+                                  retrieve_model="anthropic/claude-x")
+    assert client.retrieve_model == "litellm/anthropic/claude-x"
+    fake_model([[_msg_item("ok")]])
+    result = client.chat_completions("q")
+    assert result["model"] == "anthropic/claude-x"
+    fake_model([[_msg_item("ok")]])
+    chunks = list(client.chat_completions("q", stream=True,
+                                          stream_metadata=True))
+    assert {c["model"] for c in chunks} == {"anthropic/claude-x"}
 
 
 @needs_agents

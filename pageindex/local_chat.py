@@ -211,9 +211,20 @@ def _openai_model(protocol: str, model_name: str):
 
     ``litellm/<provider>/<model>`` (the client's normalized retrieve_model
     form) and bare ``<provider>/<model>`` paths drive the provider through
-    LiteLLM; an ``openai/`` prefix strips to the OpenAI SDK; bare names go
-    to the OpenAI SDK as-is."""
+    LiteLLM — chat.completions only, so the responses protocol refuses them
+    instead of silently downgrading; an ``openai/`` prefix strips to the
+    OpenAI SDK; bare names go to the OpenAI SDK as-is."""
     if "/" in model_name and not model_name.startswith("openai/"):
+        if protocol == "responses":
+            raise PageIndexAPIError(
+                f"responses() cannot drive "
+                f"'{model_name.removeprefix('litellm/')}': provider-prefixed "
+                "models route through LiteLLM, which speaks chat.completions, "
+                "not the Responses API. Use chat_completions() (or messages() "
+                "for Anthropic models), or point OPENAI_BASE_URL at a "
+                "Responses-capable backend and use a bare or "
+                "'openai/'-prefixed model name."
+            )
         from agents.extensions.models.litellm_model import LitellmModel
         return LitellmModel(model_name.removeprefix("litellm/"))
     from openai import AsyncOpenAI
@@ -350,6 +361,9 @@ def run_chat_completions(client, messages, stream: bool = False,
     block = _doc_block(client, doc_id)
     items = ([{"role": "user", "content": block}] if block else []) + history
     model_name = model or client.retrieve_model
+    # litellm/ is the SDK's routing marker, not a model name — report the
+    # name the provider actually serves.
+    reported_model = model_name.removeprefix("litellm/")
     managed = _managed_instructions(system_texts)
     agent = _openai_agent(client, "chat", model_name, managed,
                           temperature, None, doc_ids=doc_id)
@@ -371,7 +385,7 @@ def run_chat_completions(client, messages, stream: bool = False,
             "id": f"chatcmpl-{uuid.uuid4().hex}",
             "object": "chat.completion",
             "created": int(time.time()),
-            "model": model_name,
+            "model": reported_model,
             "choices": [{
                 "index": 0,
                 "message": {"role": "assistant",
@@ -387,7 +401,7 @@ def run_chat_completions(client, messages, stream: bool = False,
     def chunk(delta: dict, finish=None) -> dict:
         return {
             "id": chat_id, "object": "chat.completion.chunk",
-            "created": created, "model": model_name,
+            "created": created, "model": reported_model,
             "choices": [{"index": 0, "delta": delta,
                          "finish_reason": finish}],
         }
@@ -417,7 +431,7 @@ def run_chat_completions(client, messages, stream: bool = False,
         yield chunk({}, finish="stop")
         yield {
             "id": chat_id, "object": "chat.completion.chunk",
-            "created": created, "model": model_name, "choices": [],
+            "created": created, "model": reported_model, "choices": [],
             "usage": _openai_usage(streamed.raw_responses),
         }
 

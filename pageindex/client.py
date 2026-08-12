@@ -441,7 +441,10 @@ class PageIndexClient:
 
         Requires ``pageindex[openai]`` and a backend that supports the
         Responses API; backends that only speak chat.completions should use
-        ``chat_completions()``.
+        ``chat_completions()``. Provider-prefixed models (``anthropic/…``)
+        route through LiteLLM's chat.completions adapter and are therefore
+        refused here — use ``chat_completions()`` or ``messages()`` for
+        those.
 
         Args:
             input: A user message string, or a list of Responses input items

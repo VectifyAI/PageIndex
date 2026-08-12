@@ -461,6 +461,31 @@ def test_remove_document_rejects_non_string_names_before_deleting(client,
     assert client.list_documents()["total"] == 1
 
 
+def test_remove_document_partial_failure_keeps_results(client, store_path,
+                                                       monkeypatch):
+    """A non-API error mid-batch must not discard the entries for documents
+    already irreversibly deleted — a generic INTERNAL_ERROR envelope would
+    tell the agent nothing was removed and to retry."""
+    seed_doc(store_path, "pi-a", "a.pdf")
+    seed_doc(store_path, "pi-b", "b.pdf")
+    real = client.delete_document
+
+    def flaky(doc_id):
+        if doc_id == "pi-b":
+            raise OSError(13, "Permission denied")
+        return real(doc_id)
+
+    monkeypatch.setattr(client, "delete_document", flaky)
+    payload, is_error = run(client, "remove_document",
+                            doc_names=["a.pdf", "b.pdf"])
+    assert not is_error
+    assert payload["results"] == [
+        {"doc_name": "a.pdf", "status": "deleted"},
+        {"doc_name": "b.pdf", "status": "failed",
+         "error": "[Errno 13] Permission denied"},
+    ]
+
+
 def test_management_tools_hidden_by_default(client):
     assert "remove_document" not in [t.__name__ for t in client.agent_tools()]
 

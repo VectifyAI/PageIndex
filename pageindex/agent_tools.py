@@ -1102,7 +1102,9 @@ def _remove_document(client, doc_names: list[str],
         try:
             client.delete_document(entry["id"])
             results.append({"doc_name": doc_name, "status": "deleted"})
-        except PageIndexAPIError as exc:
+        except Exception as exc:
+            # Any escape here (OSError, transport errors) would discard the
+            # entries for documents already irreversibly deleted.
             results.append({"doc_name": doc_name, "status": "failed",
                             "error": str(exc)})
     deleted = sum(1 for item in results if item["status"] == "deleted")
