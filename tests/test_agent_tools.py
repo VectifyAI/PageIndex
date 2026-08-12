@@ -852,6 +852,39 @@ def test_claude_agent_config_doc_scope_enforced_in_tools(client, store_path):
     assert payload["errorCode"] == "NOT_FOUND"
 
 
+def test_openai_agent_config_scoped_shadow_check(client, store_path):
+    """The bundles' tools resolve names inside the allowlist, so a same-name
+    document outside the target set must not block — only an in-set
+    duplicate shadows."""
+    pytest.importorskip("agents")
+    seed_doc(store_path, "pi-old", "report.pdf")
+    seed_doc(store_path, "pi-new", "report.pdf",
+             created_at="2026-08-02T10:00:00.123000")
+    config = client.openai_agent_config(doc_id="pi-old")
+    assert "report.pdf" in config["instructions"]
+    with pytest.raises(PageIndexAPIError, match="shadowed"):
+        client.openai_agent_config(doc_id=["pi-old", "pi-new"])
+
+
+def test_anthropic_runner_config_scoped_shadow_check(client, store_path):
+    pytest.importorskip("anthropic")
+    seed_doc(store_path, "pi-old", "report.pdf")
+    seed_doc(store_path, "pi-new", "report.pdf",
+             created_at="2026-08-02T10:00:00.123000")
+    config = client.anthropic_runner_config(model="claude-sonnet-4-5",
+                                            doc_id="pi-old")
+    assert "report.pdf" in config["system"]
+
+
+def test_claude_agent_config_scoped_shadow_check(client, store_path):
+    pytest.importorskip("claude_agent_sdk")
+    seed_doc(store_path, "pi-old", "report.pdf")
+    seed_doc(store_path, "pi-new", "report.pdf",
+             created_at="2026-08-02T10:00:00.123000")
+    config = client.claude_agent_config(doc_id="pi-old")
+    assert "report.pdf" in config["system_prompt"]
+
+
 def test_doc_scope_rejected_on_cloud_openai():
     pytest.importorskip("agents")
     cloud = PageIndexCloudClient(api_key="pi-test-key")

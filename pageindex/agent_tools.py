@@ -1585,8 +1585,8 @@ def doc_targeting_block(client, doc_id, scoped: bool = False) -> Optional[str]:
     surfaces (a leading conversation item on the OpenAI surfaces, a system
     block on messages()). Raises when a doc_id's name is shadowed by a newer
     same-name document — the name-addressed tools could not reach it. With
-    ``scoped`` (the chat surfaces, whose tools resolve names inside the
-    doc_id allowlist) only a same-name duplicate within the targeted set
+    ``scoped`` (surfaces whose tools resolve names inside the doc_id
+    allowlist) only a same-name duplicate within the targeted set
     shadows."""
     if doc_id is None:
         return None
@@ -1625,9 +1625,9 @@ def doc_targeting_block(client, doc_id, scoped: bool = False) -> Optional[str]:
     )
 
 
-def build_agent_instructions(client, doc_id=None) -> str:
+def build_agent_instructions(client, doc_id=None, scoped: bool = False) -> str:
     """Orchestration guidance for document QA agents; with doc_id, appends
     the target documents and directs the agent to work within them."""
     base = _base_instructions(client)
-    block = doc_targeting_block(client, doc_id)
+    block = doc_targeting_block(client, doc_id, scoped=scoped)
     return base if block is None else base + "\n\n" + block

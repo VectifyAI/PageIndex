@@ -690,11 +690,13 @@ class PageIndexClient:
                 library.
             model: Backend model name; overrides the local default.
         """
+        from .agent_tools import build_agent_instructions
+        scope = self._local_doc_scope(doc_id)
         config: dict[str, Any] = {
             "name": "PageIndex",
-            "instructions": self.agent_instructions(doc_id=doc_id),
-            "tools": self.as_openai_tools(include_management,
-                                          doc_id=self._local_doc_scope(doc_id)),
+            "instructions": build_agent_instructions(self, doc_id,
+                                                     scoped=scope is not None),
+            "tools": self.as_openai_tools(include_management, doc_id=scope),
         }
         model = model or getattr(self, "retrieve_model", None)
         if model:
@@ -788,14 +790,17 @@ class PageIndexClient:
                 model.
             max_turns: Agent-loop bound; default 10.
         """
+        from .agent_tools import build_agent_instructions
         from .local_chat import _default_max_tokens
+        scope = self._local_doc_scope(doc_id)
         return {
             "model": model,
             "max_tokens": (max_tokens if max_tokens is not None
                            else _default_max_tokens(model)),
-            "system": self.agent_instructions(doc_id=doc_id),
+            "system": build_agent_instructions(self, doc_id,
+                                               scoped=scope is not None),
             "tools": self.as_anthropic_tools(include_management, asynchronous,
-                                             doc_id=self._local_doc_scope(doc_id)),
+                                             doc_id=scope),
             "max_iterations": max_turns if max_turns is not None else 10,
         }
 
@@ -861,10 +866,13 @@ class PageIndexClient:
                 library.
             server_name (str): Key the server is registered under.
         """
+        from .agent_tools import build_agent_instructions
+        scope = self._local_doc_scope(doc_id)
         return {
-            "system_prompt": self.agent_instructions(doc_id=doc_id),
+            "system_prompt": build_agent_instructions(self, doc_id,
+                                                      scoped=scope is not None),
             "mcp_servers": {server_name: self.as_claude_mcp(
-                include_management, doc_id=self._local_doc_scope(doc_id))},
+                include_management, doc_id=scope)},
             # Pre-approval only — the server itself is already gated (the
             # read-only endpoint on cloud, the registered set locally).
             "allowed_tools": [f"mcp__{server_name}"],
