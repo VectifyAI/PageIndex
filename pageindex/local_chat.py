@@ -303,8 +303,7 @@ def _conversation_group_id(model_name: str, instructions: str, items) -> str:
 
 
 def _run_kwargs(max_turns, group_id: str) -> dict:
-    # Managed runs never export traces — the caller opted into document QA,
-    # not telemetry.
+    # No traces — the caller opted into QA, not telemetry.
     from agents import RunConfig
     kwargs: dict = {"run_config": RunConfig(tracing_disabled=True,
                                             group_id=group_id)}
@@ -418,8 +417,7 @@ def run_chat_completions(client, messages, stream: bool = False,
     block = _doc_block(client, doc_id)
     items = ([{"role": "user", "content": block}] if block else []) + history
     model_name = model or client.retrieve_model
-    # litellm/ and openai/ are the SDK's routing markers, not model names —
-    # report the name the provider actually serves.
+    # Strip routing prefixes — report the name the provider serves.
     reported_model = _reported_model(model_name)
     managed = _managed_instructions(system_texts)
     agent = _openai_agent(client, "chat", model_name, managed,
@@ -543,8 +541,6 @@ def run_responses(client, input, model: Optional[str] = None,
     from agents.exceptions import AgentsException, MaxTurnsExceeded
 
     def envelope(transcript: list, raw_responses) -> dict:
-        # The official output shape admits no function_call_output; the
-        # round-trip transcript rides in items.
         return {
             "id": f"resp_{uuid.uuid4().hex}",
             "object": "response",

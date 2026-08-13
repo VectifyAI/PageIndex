@@ -395,7 +395,6 @@ def test_responses_stream_passthrough(client, store_path, fake_model):
     events = list(client.responses("q", stream=True))
     types = [event.get("type") for event in events]
     assert "response.output_text.delta" in types
-    # Tool outputs arrive only in the terminal envelope's items.
     assert not [event for event in events
                 if event.get("item", {}).get("type") == "function_call_output"]
     assert types[-1] == "response.completed"

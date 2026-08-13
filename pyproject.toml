@@ -25,7 +25,6 @@ include = [
 exclude = ["pageindex/flash/assets"]
 
 [tool.poetry.dependencies]
-# litellm's stable channel and both agent extras require 3.10.
 python = ">=3.10"
 requests = ">=2.28.0"
 openai = ">=1.70.0"
