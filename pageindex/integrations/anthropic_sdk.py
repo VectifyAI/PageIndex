@@ -23,7 +23,7 @@ def build_anthropic_tools(client, include_management: bool = False,
     except ImportError as exc:
         raise PageIndexAPIError(
             "as_anthropic_tools requires the Anthropic SDK tool runner "
-            "(anthropic>=0.84.0) — pip install -U anthropic (or pip install "
+            "(anthropic>=0.108.0) — pip install -U anthropic (or pip install "
             "'pageindex[anthropic]')."
         ) from exc
     from ..agent_tools import _tool_specs
