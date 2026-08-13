@@ -543,10 +543,8 @@ def run_responses(client, input, model: Optional[str] = None,
     from agents.exceptions import AgentsException, MaxTurnsExceeded
 
     def envelope(transcript: list, raw_responses) -> dict:
-        # function_call_output is input vocabulary — the official response
-        # shape does not admit it in ``output``. The conformant ``output``
-        # keeps the model-produced items; the full transcript (the
-        # round-trip payload) rides in ``items``.
+        # The official output shape admits no function_call_output; the
+        # round-trip transcript rides in items.
         return {
             "id": f"resp_{uuid.uuid4().hex}",
             "object": "response",
@@ -607,8 +605,6 @@ def run_responses(client, input, model: Optional[str] = None,
         # response.output (the final envelope's list). Backend events
         # carry per-turn indexes that restart at 0 each turn, so they are
         # re-based by the count of items already committed by prior turns.
-        # Tool outputs are not output items — they ride only in the
-        # envelope's ``items``.
         output_offset = 0
         completed = False
         try:

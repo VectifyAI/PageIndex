@@ -300,7 +300,6 @@ def test_responses_end_to_end(client, store_path, fake_model):
         "output_tokens_details": {"reasoning_tokens": 0},
         "total_tokens": 30}
     assert fake_model.state["protocols"][0][0] == "responses"
-    # Conformant output (model items only); the full transcript in items.
     assert [item.get("type", "message") for item in result["output"]] == [
         "function_call", "message"]
     assert [item.get("type", "message") for item in result["items"]] == [
@@ -396,8 +395,7 @@ def test_responses_stream_passthrough(client, store_path, fake_model):
     events = list(client.responses("q", stream=True))
     types = [event.get("type") for event in events]
     assert "response.output_text.delta" in types
-    # Tool outputs are not stream events (official vocabulary only) — they
-    # arrive in the terminal envelope's items.
+    # Tool outputs arrive only in the terminal envelope's items.
     assert not [event for event in events
                 if event.get("item", {}).get("type") == "function_call_output"]
     assert types[-1] == "response.completed"
