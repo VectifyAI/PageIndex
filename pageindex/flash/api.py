@@ -96,15 +96,24 @@ def _optimize(structure, page_texts, do_expand, model):
 
 
 def page_index_flash(pdf, summary=True, summary_model=None,
-                     optimize=False, optimize_expand=True,
+                     optimize: str | bool = "full", optimize_expand=None,
                      optimize_model=None, summary_concurrency=None,
                      use_embedded_toc=True) -> dict:
-    """Build a PageIndex tree structure from a PDF using layout statistics, without an LLM. Args: pdf: path to a PDF file (``str`` or ``pathlib.Path``) or an in-memory binary stream (``io.BytesIO``). summary: if True, generate LLM summaries for each node (requires ``summary_model``). summary_model: the LLM model identifier to use for summary generation. optimize: if True, refine the tree for search cost before summaries: a deterministic merge collapses subtrees whose structure does not beat a linear scan, keeping the removed titles on the parent as ``key_items``, then an LLM pass expands oversized sections. Without it the extracted tree is returned unchanged. optimize_expand: if False, run the merge but skip the LLM expansion. optimize_model: the LLM model for expand (defaults to the summary model). summary_concurrency: maximum simultaneous summary model calls; None uses the library default. use_embedded_toc: if True, consume the PDF's embedded bookmarks when trustworthy: deep bookmarks become the frame and the detected sections they lack are grafted back in after noise filtering, coarse ones become the chapter frame with detected nodes re-hung under them (deeper sparse entries are filled in when the page text confirms them, and garbled extracted titles are repaired from the bookmark strings), garbage ones are ignored; adds a ``toc_source`` key to the result. On by default; pass False for the pure detected structure. Returns: dict with keys ``doc_name``, ``doc_title``, ``structure`` (a list of nested ``{"title", "start_index", "end_index", "nodes"}`` dicts; page indexes are 1-based) and ``has_abstract_or_references_section`` (True when a top-level entry is an abstract or references heading). With ``optimize`` an ``optimize`` key reports merge/expand counts and before/after search-cost metrics. """
+    """Build a PageIndex tree structure from a PDF using layout statistics, without an LLM. Args: pdf: path to a PDF file (``str`` or ``pathlib.Path``) or an in-memory binary stream (``io.BytesIO``). summary: if True, generate LLM summaries for each node (requires ``summary_model``). summary_model: the LLM model identifier to use for summary generation. optimize: ``"full"`` for merge + LLM expand, ``"merge"`` for deterministic merge only, ``False`` to disable. ``True`` is accepted as ``"full"`` for backward compatibility. optimize_model: the LLM model for expand (defaults to the summary model). summary_concurrency: maximum simultaneous summary model calls; None uses the library default. use_embedded_toc: if True, consume the PDF's embedded bookmarks when trustworthy: deep bookmarks become the frame and the detected sections they lack are grafted back in after noise filtering, coarse ones become the chapter frame with detected nodes re-hung under them (deeper sparse entries are filled in when the page text confirms them, and garbled extracted titles are repaired from the bookmark strings), garbage ones are ignored; adds a ``toc_source`` key to the result. On by default; pass False for the pure detected structure. Returns: dict with keys ``doc_name``, ``doc_title``, ``structure`` (a list of nested ``{"title", "start_index", "end_index", "nodes"}`` dicts; page indexes are 1-based) and ``has_abstract_or_references_section`` (True when a top-level entry is an abstract or references heading). With ``optimize`` an ``optimize`` key reports merge/expand counts and before/after search-cost metrics. """
+    if optimize is True:
+        optimize = "full"
+    if not optimize:
+        optimize = False
+    elif optimize not in ("full", "merge"):
+        raise ValueError(
+            f"optimize must be 'full', 'merge', or False, got {optimize!r}")
+    if optimize_expand is not None and optimize:
+        optimize = "full" if optimize_expand else "merge"
     result = extract_toc(_validate_pdf(pdf), use_embedded_toc=use_embedded_toc)
     structure = result.get("structure", [])
     if optimize and structure:
         result["optimize"] = _optimize(structure, result.get("page_texts") or [],
-                                       optimize_expand,
+                                       optimize == "full",
                                        optimize_model or summary_model)
     if summary and structure:
         import asyncio

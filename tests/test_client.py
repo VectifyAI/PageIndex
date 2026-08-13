@@ -47,7 +47,7 @@ def indexed_doc(local_client, sample_pdf, monkeypatch):
                 "doc_description": "A test document.",
                 "structure": json.loads(json.dumps(STRUCTURE))}
     monkeypatch.setattr(page_index_module, "page_index_main", fake_page_index_main)
-    return local_client.submit_document(sample_pdf)["doc_id"]
+    return local_client.submit_document(sample_pdf, mode="standard")["doc_id"]
 
 
 # ── constructor ──
@@ -168,7 +168,7 @@ def test_submit_does_not_create_cwd_logs(local_client, sample_pdf, tmp_path, mon
         return {"doc_name": "sample.pdf", "doc_description": None,
                 "structure": json.loads(json.dumps(STRUCTURE))}
     monkeypatch.setattr(page_index_module, "page_index_main", fake_page_index_main)
-    local_client.submit_document(sample_pdf)
+    local_client.submit_document(sample_pdf, mode="standard")
     assert not (tmp_path / "logs").exists()
 
 
@@ -179,10 +179,10 @@ def test_submit_duplicate_name_gets_suffix(local_client, sample_pdf, monkeypatch
         return {"doc_name": "sample.pdf", "doc_description": "d",
                 "structure": json.loads(json.dumps(STRUCTURE))}
     monkeypatch.setattr(page_index_module, "page_index_main", fake_page_index_main)
-    first = local_client.submit_document(sample_pdf)
+    first = local_client.submit_document(sample_pdf, mode="standard")
     assert first["name"] == "sample.pdf"
     with pytest.warns(UserWarning, match='stored as "sample_1.pdf"'):
-        second = local_client.submit_document(sample_pdf)
+        second = local_client.submit_document(sample_pdf, mode="standard")
     assert second["name"] == "sample_1.pdf"
     names = {d["id"]: d["name"]
              for d in local_client.list_documents()["documents"]}
@@ -212,7 +212,7 @@ def test_submit_name_exhaustion_rejects_before_indexing(
             "indexer ran despite name exhaustion"),
     )
     with pytest.raises(PageIndexAPIError, match="Too many files"):
-        local_client.submit_document(sample_pdf)
+        local_client.submit_document(sample_pdf, mode="standard")
 
 
 def test_submit_flash(local_client, sample_pdf, monkeypatch):
@@ -220,6 +220,8 @@ def test_submit_flash(local_client, sample_pdf, monkeypatch):
     def fake_flash(pdf, summary=True, summary_model=None, **kwargs):
         calls["summary"] = summary
         calls["summary_model"] = summary_model
+        calls["optimize"] = kwargs.get("optimize")
+        calls["optimize_model"] = kwargs.get("optimize_model")
         return {"doc_name": "sample.pdf",
                 "structure": [{"title": "Flash Root", "start_index": 1,
                                "end_index": 2, "summary": "s", "nodes": []}]}
@@ -227,11 +229,32 @@ def test_submit_flash(local_client, sample_pdf, monkeypatch):
     monkeypatch.setattr(pageindex.utils, "llm_completion",
                         lambda model, prompt, **kw: "Flash description.")
     doc_id = local_client.submit_document(sample_pdf, mode="flash")["doc_id"]
-    assert calls == {"summary": True, "summary_model": local_client.summary_model}
+    assert calls == {"summary": True, "summary_model": local_client.summary_model,
+                     "optimize": "full",
+                     "optimize_model": local_client.summary_model}
     root = local_client.get_tree(doc_id)["result"][0]
     assert root["node_id"] == "0000"
     assert "Hello page one" in root["text"]
     assert local_client.get_document(doc_id)["description"] == "Flash description."
+
+
+def test_submit_defaults_to_flash(local_client, sample_pdf, monkeypatch):
+    monkeypatch.setattr(
+        pageindex.flash, "page_index_flash",
+        lambda pdf, **kwargs: {
+            "doc_name": "sample.pdf",
+            "structure": [{"title": "Flash Root", "start_index": 1,
+                           "end_index": 2, "summary": "s", "nodes": []}]})
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda model, prompt, **kw: "Flash description.")
+    doc_id = local_client.submit_document(sample_pdf)["doc_id"]
+    assert local_client._api._store.get_meta(doc_id)["mode"] == "flash"
+
+
+def test_page_index_flash_rejects_unknown_optimize():
+    from pageindex.flash import page_index_flash
+    with pytest.raises(ValueError, match="optimize must be"):
+        page_index_flash("never-opened.pdf", optimize="off")
 
 
 def test_llm_completion_missing_key_raises_immediately(monkeypatch):
@@ -335,7 +358,7 @@ def test_submit_with_metadata(local_client, sample_pdf, monkeypatch):
             "doc_name": "sample.pdf", "doc_description": None,
             "structure": json.loads(json.dumps(STRUCTURE))})
     tags = {"project": "alpha", "year": 2026}
-    doc_id = local_client.submit_document(sample_pdf, metadata=tags)["doc_id"]
+    doc_id = local_client.submit_document(sample_pdf, mode="standard", metadata=tags)["doc_id"]
     assert local_client.get_tree(doc_id)["metadata"] == tags
     assert local_client.get_ocr(doc_id)["metadata"] == tags
     assert local_client.list_documents()["documents"][0]["metadata"] == tags
@@ -486,7 +509,7 @@ def test_torn_delete_never_lists_ghost(local_client, indexed_doc, tmp_path):
 
 def test_corrupt_doc_json_is_contained(local_client, indexed_doc, sample_pdf, tmp_path):
     with pytest.warns(UserWarning):  # same-name resubmit → stored as sample_1.pdf
-        second = local_client.submit_document(sample_pdf)["doc_id"]
+        second = local_client.submit_document(sample_pdf, mode="standard")["doc_id"]
     (tmp_path / "store" / "docs" / indexed_doc / "doc.json").write_text("{truncated")
 
     # manifest still holds a good copy of the meta — served consistently

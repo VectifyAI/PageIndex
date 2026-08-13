@@ -149,19 +149,19 @@ class PageIndexClient:
         ``wait=True`` to block until the document is ready, or poll
         ``get_document(doc_id)['status']`` yourself.
 
-        Local: indexes the document in this call (it blocks while your LLM
-        builds the tree — minutes for a standard index of a long document),
-        then stores it under ``storage_path``. Pass ``mode="flash"`` to build
-        the tree with PageIndex Flash (layout-based extraction, no LLM calls
-        for the structure; node summaries and the document description still
-        use ``summary_model``). ``beta_headers`` and ``folder_id`` are
+        Local: indexes the document in this call and stores it under
+        ``storage_path``. Defaults to Flash indexing: layout-based extraction,
+        refined for retrieval (a deterministic merge, then an LLM expansion
+        pass); node summaries, the expansion pass, and the document
+        description use ``summary_model``. Pass ``mode="standard"`` for a
+        full LLM-built tree (slower). ``beta_headers`` and ``folder_id`` are
         cloud-only.
 
         Args:
             file_path (str): Path to the PDF file.
-            mode (str, optional): Processing mode. Local mode supports
-                "standard" and "flash"; omit it for standard indexing. Cloud
-                modes are passed through (e.g. "mcp").
+            mode (str, optional): Processing mode. Local defaults to "flash";
+                pass "standard" for a full LLM-built tree. Cloud modes are
+                passed through (e.g. "mcp").
             beta_headers (list[str], optional): Cloud-only beta feature headers.
             folder_id (str, optional): Cloud-only folder (workspace) ID.
             metadata (dict, optional): Your own JSON-serializable tags for the
