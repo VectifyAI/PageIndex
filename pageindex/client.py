@@ -637,7 +637,9 @@ class PageIndexClient:
         Cloud (default): the full live read tool set (search, folders,
         images — as enabled for your key) as plain function tools,
         discovered from the PageIndex MCP server and executed from your
-        process — works with any model backend. Pass ``hosted=True`` to
+        process — works with any model backend. Binary tool results
+        (e.g. ``get_document_image``) arrive as text placeholder stubs
+        on this in-process path. Pass ``hosted=True`` to
         hand the connection to OpenAI instead: one hosted MCP tool, tool
         calls executed server-side (lowest latency; requires an
         OpenAI-hosted model on the Responses API). The framework's own
@@ -742,7 +744,9 @@ class PageIndexClient:
         enabled for your key), discovered from the PageIndex MCP server
         and executed from your process; the server's input schemas pass
         through verbatim (MCP and the Messages API share the schema
-        shape). The server-side alternative is the Messages API's beta
+        shape), and binary tool results (e.g. ``get_document_image``)
+        arrive as text placeholder stubs on this in-process path. The
+        server-side alternative is the Messages API's beta
         MCP connector — ``mcp_servers=[{"type": "url", "name":
         "pageindex", "url": f"{BASE_URL}/mcp?tools=read",
         "authorization_token": <your PageIndex API key>}]`` (drop
