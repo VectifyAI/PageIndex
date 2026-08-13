@@ -75,8 +75,10 @@ class LocalAPI:
         if mode not in (None, "standard", "flash"):
             raise PageIndexAPIError(
                 f"Failed to submit document: unknown local processing mode {mode!r}. "
-                "Supported: None or 'standard' for standard indexing, or 'flash'."
+                "Supported: 'flash' (default) or 'standard'."
             )
+        if mode is None:
+            mode = "flash"
         file_path = os.path.abspath(os.path.expanduser(str(file_path)))
         if not os.path.isfile(file_path):
             raise FileNotFoundError(f"No such file: {file_path}")
@@ -123,7 +125,7 @@ class LocalAPI:
             "pageNum": len(page_texts),
             "folderId": None,
             "metadata": metadata,
-            "mode": mode or "standard",
+            "mode": mode,
         }
         pages = [{"page_index": i + 1, "markdown": text}
                  for i, text in enumerate(page_texts)]
@@ -180,8 +182,16 @@ class LocalAPI:
         from .flash import page_index_flash
         from .utils import (add_node_text, create_clean_structure_for_description,
                             generate_doc_description, write_node_id)
+        import litellm
+        env = litellm.validate_environment(self._summary_model)
+        if not env["keys_in_environment"]:
+            raise PageIndexAPIError(
+                f"Failed to submit document: missing API key for "
+                f"{self._summary_model}: {', '.join(env['missing_keys'])}")
         result = page_index_flash(file_path, summary=True,
-                                  summary_model=self._summary_model)
+                                  summary_model=self._summary_model,
+                                  optimize="full",
+                                  optimize_model=self._summary_model)
         structure = result.get("structure", [])
         if not structure:
             raise PageIndexAPIError(

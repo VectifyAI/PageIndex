@@ -10,15 +10,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Process PDF or Markdown document and generate structure')
     parser.add_argument('--pdf_path', type=str, help='Path to the PDF file')
     parser.add_argument('--md_path', type=str, help='Path to the Markdown file')
-    parser.add_argument('--flash', action='store_true', help='Use PageIndex Flash (with --pdf_path)')
+    parser.add_argument('--mode', choices=['flash', 'standard'], default='flash',
+                      help='Processing mode (default: flash)')
+    parser.add_argument('--flash', action='store_true', default=False,
+                      help=argparse.SUPPRESS)
     parser.add_argument('--embedded-toc', action=argparse.BooleanOptionalAction, default=None,
-                      help='Use the PDF\'s embedded bookmarks when trustworthy (default: on with --flash)')
+                      help='Use the PDF\'s embedded bookmarks when trustworthy (default: on in flash mode)')
     parser.add_argument('--summary', action=argparse.BooleanOptionalAction, default=None,
-                      help='Generate node summaries with an LLM (default: on with --flash)')
-    parser.add_argument('--optimize', nargs='?', const='full', choices=['full', 'merge'],
+                      help='Generate node summaries with an LLM (default: on in flash mode)')
+    parser.add_argument('--optimize', nargs='?', const='full', choices=['full', 'merge', 'off'],
                       default=None,
-                      help='Refine the tree for search cost: a deterministic merge, then an '
-                           'LLM expansion pass; pass `merge` to run the merge alone (PDF only)')
+                      help='Refine the tree for search cost (default: full in flash mode). '
+                           '`merge` for deterministic merge only; `off` to disable')
 
     parser.add_argument('--model', type=str, default=None, help='Model to use (overrides config.yaml)')
     parser.add_argument('--summary-model', type=str, default=None,
@@ -48,18 +51,32 @@ if __name__ == "__main__":
     parser.add_argument('--summary-token-threshold', type=int, default=200,
                       help='Token threshold for generating summaries (markdown only)')
     args = parser.parse_args()
-    
+    if args.flash:
+        args.mode = 'flash'
+
     # Validate that exactly one file type is specified
     if not args.pdf_path and not args.md_path:
         raise ValueError("Either --pdf_path or --md_path must be specified")
     if args.pdf_path and args.md_path:
         raise ValueError("Only one of --pdf_path or --md_path can be specified")
-    if args.optimize and not (args.pdf_path and args.flash):
-        raise ValueError("--optimize requires --flash with --pdf_path")
-    if args.embedded_toc is not None and not (args.pdf_path and args.flash):
-        raise ValueError("--embedded-toc requires --flash with --pdf_path")
-    if args.summary is not None and not (args.pdf_path and args.flash):
-        raise ValueError("--summary requires --flash with --pdf_path")
+    if args.optimize in ('full', 'merge') and not (args.pdf_path and args.mode == 'flash'):
+        raise ValueError("--optimize requires Flash mode with --pdf_path")
+    if args.optimize is None:
+        args.optimize = 'full' if args.mode == 'flash' else 'off'
+    if args.embedded_toc is not None and not (args.pdf_path and args.mode == 'flash'):
+        raise ValueError("--embedded-toc requires Flash mode with --pdf_path")
+    if args.summary is not None and not (args.pdf_path and args.mode == 'flash'):
+        raise ValueError("--summary requires Flash mode with --pdf_path")
+    if args.pdf_path and args.mode == 'flash':
+        for flag, value in (('--toc-check-pages', args.toc_check_pages),
+                            ('--max-pages-per-node', args.max_pages_per_node),
+                            ('--max-tokens-per-node', args.max_tokens_per_node),
+                            ('--if-add-node-id', args.if_add_node_id),
+                            ('--if-add-node-summary', args.if_add_node_summary),
+                            ('--if-add-doc-description', args.if_add_doc_description),
+                            ('--if-add-node-text', args.if_add_node_text)):
+            if value is not None:
+                raise ValueError(f"{flag} is not supported in flash mode; use --mode standard")
 
     if args.pdf_path:
         # Validate PDF file
@@ -68,22 +85,23 @@ if __name__ == "__main__":
         if not os.path.isfile(args.pdf_path):
             raise ValueError(f"PDF file not found: {args.pdf_path}")
             
-        if args.flash:
+        if args.mode == 'flash':
             from pageindex.flash import page_index_flash
-            if args.optimize == 'full':
-                from pageindex.tree_optimize import default_model
-                from pageindex.utils import _is_openai_model
-                expand_model = args.model or default_model()
-                if _is_openai_model(expand_model) and not os.getenv("OPENAI_API_KEY"):
-                    raise SystemExit(f"OPENAI_API_KEY is not set (expand model: {expand_model}).")
+            summary_model = args.summary_model or args.model
+            will_summarize = args.summary if args.summary is not None else True
+            if summary_model and (will_summarize or args.optimize == 'full'):
+                import litellm
+                env = litellm.validate_environment(summary_model)
+                if not env["keys_in_environment"]:
+                    raise SystemExit(
+                        f"Missing API key for {summary_model}: {', '.join(env['missing_keys'])}")
             toc_with_page_number = page_index_flash(
                 args.pdf_path,
-                optimize=args.optimize is not None,
-                optimize_expand=args.optimize == 'full',
-                optimize_model=args.model,
-                summary_model=args.summary_model or args.model,
+                optimize=args.optimize if args.optimize != 'off' else False,
+                optimize_model=summary_model,
+                summary_model=summary_model,
                 use_embedded_toc=args.embedded_toc if args.embedded_toc is not None else True,
-                summary=args.summary if args.summary is not None else True,
+                summary=will_summarize,
             )
             if 'optimize' in toc_with_page_number:
                 o = toc_with_page_number['optimize']
@@ -110,7 +128,7 @@ if __name__ == "__main__":
 
         # Save results
         pdf_name = os.path.splitext(os.path.basename(args.pdf_path))[0]
-        suffix = '_structure_flash' if args.flash else '_structure'
+        suffix = '_structure'
         output_dir = './results'
         output_file = f'{output_dir}/{pdf_name}{suffix}.json'
         os.makedirs(output_dir, exist_ok=True)
