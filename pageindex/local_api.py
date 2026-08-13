@@ -97,8 +97,6 @@ class LocalAPI:
             raise PageIndexAPIError(
                 "Failed to submit document: PDF has no content. All pages are blank."
             )
-        # Fail before paying for indexing when _1.._99 are all taken; the
-        # binding name resolution happens again at save.
         self._unique_doc_name(os.path.basename(file_path))
 
         try:

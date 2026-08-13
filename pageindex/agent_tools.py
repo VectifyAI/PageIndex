@@ -323,8 +323,6 @@ def _failure(error: str, details: Optional[dict[str, Any]],
 
 
 def _dumps(payload: dict[str, Any]) -> str:
-    # Compact, matching _serialized_size — so the size budget measures
-    # what is actually emitted.
     return json.dumps(payload, ensure_ascii=False)
 
 
@@ -706,9 +704,6 @@ def _browse_documents(client, folder_id: str = "root", recursive: bool = False,
     else:
         scoped = _scope_documents(_all_documents(client), _allowed_ids)
         window, total = scoped[offset:offset + limit], len(scoped)
-    # Advance by what actually arrived — a server may cap its page size —
-    # and treat an absent/None total like _all_documents does: a full
-    # window means there may be more.
     window_end = offset + len(window)
     has_more = bool(window) and (window_end < total if isinstance(total, int)
                                  else len(window) == limit)
@@ -865,9 +860,6 @@ def _get_document_structure(client, doc_name: str,
                                 waited and entry.get("status") != "failed")
 
     try:
-        # Prefer the raw stored tree: its nodes carry start_index/end_index
-        # like the cloud structure tool, where client.get_tree() drops
-        # end_index and renames fields.
         raw_tree = getattr(getattr(client, "_api", None), "raw_tree", None)
         tree = raw_tree(entry["id"]) if raw_tree is not None else None
         if tree is None:
@@ -1044,8 +1036,6 @@ def _get_page_content(client, doc_name: str, pages: str,
     if out_of_range:
         options.insert(0, f"Document has {max_page} pages total - request "
                           f"pages 1-{max_page}")
-    # Additive, not either/or: a call can both truncate for size and have
-    # out-of-range pages — hiding either would misreport what was returned.
     if remaining or out_of_range:
         parts = [f"Retrieved {len(included)} of {len(requested)} "
                  "requested pages."]
@@ -1091,7 +1081,6 @@ def _remove_document(client, doc_names: list[str],
              "options": ["Copy each name verbatim from a browse_documents() "
                          "response"]},
             "INVALID_INPUT")
-    # A repeated name is one deletion, not a second "failed" row.
     doc_names = list(dict.fromkeys(doc_names))
     if len(doc_names) > 10:
         return _failure("Maximum 10 documents can be deleted at once", None,
@@ -1216,23 +1205,6 @@ def _tool_docstring(description: str, properties: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-# Local guidance layer: schema STRUCTURE stays byte-identical to the cloud
-# contract minus the hidden cloud-only parameters, and description strings
-# adapt to the local surface the same way AGENT_INSTRUCTIONS does — guidance
-# must not teach capabilities (folders, semantic ranking) or tools
-# (search_documents, get_document_image) that do not exist here. Guard
-# tests pin structure (contract-minus-hidden equality), tool references
-# (the dead-reference test), and capability phrases (the per-docstring
-# phrase test) — a contract refresh that reintroduces a cloud-only
-# reference fails loudly.
-
-#: Cloud-only parameters hidden from the local surface — strict-schema
-#: frameworks make the dead-end calls inexpressible, and lenient framework
-#: argument models drop them before the call (degrading to the bare call).
-#: The call_tool path still answers folder_id/sort/query with the guided
-#: error envelope; recursive is simply accepted (flattening a folderless
-#: library is the identity). Plain functions reject unknown parameters at
-#: the Python call boundary.
 _LOCAL_HIDDEN_PARAMS: dict[str, tuple[str, ...]] = {
     "browse_documents": ("folder_id", "recursive", "sort", "query"),
     "get_document": ("folder_id",),
@@ -1257,7 +1229,6 @@ _LOCAL_DESCRIPTIONS: dict[str, str] = {
         'Folder browsing and semantic ranking (sort="relevance") are not '
         "supported in local mode yet — they work on PageIndex cloud."
     ),
-    # The image sentence points at a tool that is not registered locally.
     "get_page_content": TOOL_CONTRACT["get_page_content"]["description"]
     .replace(" Embedded image paths in the response feed into "
              "`get_document_image()`.", ""),
@@ -1536,13 +1507,6 @@ def build_agent_tools(client, include_management: bool = False) -> list[Callable
 
 
 # ── agent instructions ──
-# Local subset of the cloud MCP server's initialize instructions (its
-# no-folders variant), trimmed to what exists here: the search_documents
-# escalation steps, get_document_image, and the shared read-only-folders
-# block are removed, and the sort="relevance" guidance is replaced with
-# name/description matching (semantic ranking is cloud-side). Cloud
-# clients receive the server's live instructions instead — see
-# _base_instructions().
 
 _INSTRUCTIONS_HEADER = (
     "PageIndex by Vectify AI is a document platform for uploading and "
@@ -1638,9 +1602,6 @@ def doc_targeting_block(client, doc_id, scoped: bool = False) -> Optional[str]:
                 "and would read the newer one. Rename or remove the "
                 "duplicate, or pass the newer doc_id."
             )
-    # get_document keeps the cloud detail wire shape, which local mode
-    # serves without the user's metadata tags; the listing carries them
-    # in both modes.
     by_id = {doc.get("id"): doc for doc in listing}
     for one_id, detail in zip(doc_ids, details):
         if detail.get("metadata") is None:
