@@ -2,11 +2,11 @@
 
 Three methods, three backend protocols, routed 1:1: ``chat_completions``
 drives the backend's /chat/completions (any OpenAI-compatible backend,
-final answer only), ``responses`` drives /responses (process items are
-standard output; round-trip them for provider prompt-cache continuation and
-agent memory), ``messages`` drives Anthropic's /v1/messages via the SDK's
-own tool runner (tool_use/tool_result round-trip is the format's native
-behavior).
+final answer only), ``responses`` drives /responses (official-shape
+envelope; the full process transcript rides in ``items`` — round-trip it
+for provider prompt-cache continuation and agent memory), ``messages``
+drives Anthropic's /v1/messages via the SDK's own tool runner
+(tool_use/tool_result round-trip is the format's native behavior).
 
 Content passes through untouched — the caller's messages, the model's
 answers, tool outputs. Native stop reasons pass through on ``messages``;
@@ -366,10 +366,37 @@ def _wrap_max_turns(max_turns) -> PageIndexAPIError:
     )
 
 
+def _usage_sums(raw_responses) -> "tuple[int, int, int, int, int]":
+    prompt = completion = cached = cache_write = reasoning = 0
+    for r in raw_responses:
+        prompt += r.usage.input_tokens
+        completion += r.usage.output_tokens
+        details = getattr(r.usage, "input_tokens_details", None)
+        cached += getattr(details, "cached_tokens", 0) or 0
+        cache_write += getattr(details, "cache_write_tokens", 0) or 0
+        details = getattr(r.usage, "output_tokens_details", None)
+        reasoning += getattr(details, "reasoning_tokens", 0) or 0
+    return prompt, completion, cached, cache_write, reasoning
+
+
 def _openai_usage(raw_responses) -> dict:
-    prompt = sum(r.usage.input_tokens for r in raw_responses)
-    completion = sum(r.usage.output_tokens for r in raw_responses)
+    """Cross-turn sums, chat.completions dialect."""
+    prompt, completion, cached, _, reasoning = _usage_sums(raw_responses)
     return {"prompt_tokens": prompt, "completion_tokens": completion,
+            "total_tokens": prompt + completion,
+            "prompt_tokens_details": {"cached_tokens": cached},
+            "completion_tokens_details": {"reasoning_tokens": reasoning}}
+
+
+def _responses_usage(raw_responses) -> dict:
+    """Cross-turn sums, Responses dialect."""
+    prompt, completion, cached, cache_write, reasoning = (
+        _usage_sums(raw_responses))
+    return {"input_tokens": prompt,
+            "input_tokens_details": {"cached_tokens": cached,
+                                     "cache_write_tokens": cache_write},
+            "output_tokens": completion,
+            "output_tokens_details": {"reasoning_tokens": reasoning},
             "total_tokens": prompt + completion}
 
 
@@ -515,18 +542,21 @@ def run_responses(client, input, model: Optional[str] = None,
     from agents import Runner
     from agents.exceptions import AgentsException, MaxTurnsExceeded
 
-    def envelope(output: list, raw_responses) -> dict:
-        usage = _openai_usage(raw_responses)
+    def envelope(transcript: list, raw_responses) -> dict:
+        # function_call_output is input vocabulary — the official response
+        # shape does not admit it in ``output``. The conformant ``output``
+        # keeps the model-produced items; the full transcript (the
+        # round-trip payload) rides in ``items``.
         return {
             "id": f"resp_{uuid.uuid4().hex}",
             "object": "response",
             "created_at": int(time.time()),
             "model": _reported_model(model_name),
             "status": recorded.get("status") or "completed",
-            "output": output,
-            "usage": {"input_tokens": usage["prompt_tokens"],
-                      "output_tokens": usage["completion_tokens"],
-                      "total_tokens": usage["total_tokens"]},
+            "output": [item for item in transcript
+                       if item.get("type") != "function_call_output"],
+            "items": transcript,
+            "usage": _responses_usage(raw_responses),
             "instructions": managed,
             "tools": [{"type": "function", "name": tool.name,
                        "description": tool.description,
@@ -557,8 +587,8 @@ def run_responses(client, input, model: Optional[str] = None,
         except openai.OpenAIError as exc:
             raise PageIndexAPIError(
                 f"The model backend failed: {exc}") from exc
-        output = result.to_input_list()[len(items):]
-        return envelope(output, result.raw_responses)
+        transcript = result.to_input_list()[len(items):]
+        return envelope(transcript, result.raw_responses)
 
     # One logical response per call: per-turn backend lifecycle events
     # (created/completed/...) are collapsed — forwarding them verbatim would
@@ -576,9 +606,9 @@ def run_responses(client, input, model: Optional[str] = None,
         # output_index addresses an item's position in the logical
         # response.output (the final envelope's list). Backend events
         # carry per-turn indexes that restart at 0 each turn, so they are
-        # re-based by the count of items already committed by prior turns
-        # — and the tool outputs the SDK injects between turns take the
-        # next slot on that same axis.
+        # re-based by the count of items already committed by prior turns.
+        # Tool outputs are not output items — they ride only in the
+        # envelope's ``items``.
         output_offset = 0
         completed = False
         try:
@@ -602,16 +632,6 @@ def run_responses(client, input, model: Optional[str] = None,
                     sequence += 1
                     data["sequence_number"] = sequence
                     yield data
-                elif (event.type == "run_item_stream_event"
-                        and event.item.type == "tool_call_output_item"):
-                    # We are the tool executor, so we emit the output item
-                    # the way the platform streams its own server-side tools.
-                    sequence += 1
-                    yield {"type": "response.output_item.done",
-                           "output_index": output_offset,
-                           "sequence_number": sequence,
-                           "item": dict(event.item.to_input_item())}
-                    output_offset += 1
             completed = True
         except MaxTurnsExceeded as exc:
             raise _wrap_max_turns(max_turns) from exc
@@ -630,14 +650,14 @@ def run_responses(client, input, model: Optional[str] = None,
             if not completed and hasattr(streamed, "cancel"):
                 streamed.cancel()  # abandoned/failed: stop the agent task
             await _aclose_backend(agent)
-        output = streamed.to_input_list()[len(items):]
+        transcript = streamed.to_input_list()[len(items):]
         sequence += 1
         status = recorded.get("status") or "completed"
         terminal = {"incomplete": "response.incomplete",
                     "failed": "response.failed"}.get(status,
                                                      "response.completed")
         yield {"type": terminal, "sequence_number": sequence,
-               "response": envelope(output, streamed.raw_responses)}
+               "response": envelope(transcript, streamed.raw_responses)}
 
     return _stream_sync(agen)
 

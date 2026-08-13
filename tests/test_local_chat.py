@@ -187,7 +187,10 @@ def test_chat_completions_end_to_end(client, store_path, fake_model):
                                                "content": "The answer"}
     assert result["choices"][0]["finish_reason"] == "stop"
     assert result["usage"] == {"prompt_tokens": 20, "completion_tokens": 10,
-                               "total_tokens": 30}
+                               "total_tokens": 30,
+                               "prompt_tokens_details": {"cached_tokens": 0},
+                               "completion_tokens_details":
+                                   {"reasoning_tokens": 0}}
     assert fake_model.state["protocols"][0][0] == "chat"
     # The tool ran for real: turn 2's input carries its output.
     turn2 = json.dumps(fake.inputs[1])
@@ -290,11 +293,18 @@ def test_responses_end_to_end(client, store_path, fake_model):
     assert result["id"].startswith("resp_")
     assert result["object"] == "response"
     assert result["status"] == "completed"
-    assert result["usage"] == {"input_tokens": 20, "output_tokens": 10,
-                               "total_tokens": 30}
+    assert result["usage"] == {
+        "input_tokens": 20,
+        "input_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+        "output_tokens": 10,
+        "output_tokens_details": {"reasoning_tokens": 0},
+        "total_tokens": 30}
     assert fake_model.state["protocols"][0][0] == "responses"
-    types = [item.get("type", "message") for item in result["output"]]
-    assert "function_call" in types and "function_call_output" in types
+    # Conformant output (model items only); the full transcript in items.
+    assert [item.get("type", "message") for item in result["output"]] == [
+        "function_call", "message"]
+    assert [item.get("type", "message") for item in result["items"]] == [
+        "function_call", "function_call_output", "message"]
     # The final item is the assistant answer.
     assert "The answer" in json.dumps(result["output"][-1])
 
@@ -312,7 +322,7 @@ def test_responses_round_trip_extends_prefix(client, store_path, fake_model):
 
     second = fake_model([[_msg_item("Done")]])
     follow_up = ([{"role": "user", "content": "What status?"}]
-                 + result["output"]
+                 + result["items"]
                  + [{"role": "user", "content": "and now?"}])
     client.responses(follow_up)
     previous_final = first.inputs[-1]
@@ -332,7 +342,7 @@ def test_responses_round_trip_prefix_with_doc_id(client, store_path, fake_model)
 
     second = fake_model([[_msg_item("Done")]])
     follow_up = ([{"role": "user", "content": "What status?"}]
-                 + result["output"]
+                 + result["items"]
                  + [{"role": "user", "content": "and now?"}])
     client.responses(follow_up, doc_id="pi-a")
     previous_final = first.inputs[-1]
@@ -364,7 +374,7 @@ def test_doc_id_conversations_get_distinct_cache_keys(client, store_path,
 
     fake_model([[_msg_item("c")]])
     follow_up = ([{"role": "user", "content": "What is the CAGR?"}]
-                 + result["output"]
+                 + result["items"]
                  + [{"role": "user", "content": "and now?"}])
     client.responses(follow_up, doc_id="pi-a")
     assert keys[2] == keys[0]  # a continuation keeps its conversation's key
@@ -386,24 +396,61 @@ def test_responses_stream_passthrough(client, store_path, fake_model):
     events = list(client.responses("q", stream=True))
     types = [event.get("type") for event in events]
     assert "response.output_text.delta" in types
-    tool_events = [event for event in events
-                   if event.get("type") == "response.output_item.done"
-                   and event.get("item", {}).get("type")
-                   == "function_call_output"]
-    assert tool_events, types
+    # Tool outputs are not stream events (official vocabulary only) — they
+    # arrive in the terminal envelope's items.
+    assert not [event for event in events
+                if event.get("item", {}).get("type") == "function_call_output"]
     assert types[-1] == "response.completed"
     final = events[-1]["response"]
     assert final["status"] == "completed"
     assert final["usage"]["total_tokens"] == 30
-    # output_index addresses the logical response.output: the tool output
-    # slots in after turn 1's item, and turn 2's deltas are re-based past
-    # both instead of restarting at 0.
-    assert (final["output"][tool_events[0]["output_index"]]["type"]
-            == "function_call_output")
+    assert [item.get("type", "message") for item in final["output"]] == [
+        "function_call", "message"]
+    assert [item.get("type", "message") for item in final["items"]] == [
+        "function_call", "function_call_output", "message"]
+    # output_index addresses the logical response.output: turn 2's deltas
+    # are re-based past turn 1's item instead of restarting at 0.
     last_delta = [event for event in events
                   if event.get("type") == "response.output_text.delta"][-1]
     assert (final["output"][last_delta["output_index"]]
             .get("type", "message") == "message")
+
+
+@needs_agents
+def test_responses_envelope_validates_as_official_response(client, store_path,
+                                                           fake_model):
+    """The conformance contract: the envelope parses with the official
+    openai SDK types, and the transcript survives in the extension field."""
+    from openai.types.responses import Response
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    result = client.responses("What status?")
+    parsed = Response.model_validate(result)
+    assert [item.type for item in parsed.output] == ["function_call",
+                                                     "message"]
+    assert parsed.model_dump()["items"] == result["items"]
+
+
+@needs_agents
+def test_responses_stream_events_validate_as_official_events(
+        client, store_path, fake_model):
+    """Every stream event, terminal envelope included, parses with the
+    official event union."""
+    from pydantic import TypeAdapter
+    from openai.types.responses import ResponseStreamEvent
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    adapter = TypeAdapter(ResponseStreamEvent)
+    events = list(client.responses("q", stream=True))
+    assert events
+    for event in events:
+        adapter.validate_python(event)
 
 
 # ── messages (Anthropic engine) ──
@@ -649,10 +696,6 @@ def test_responses_stream_single_completed_monotonic_sequence(
                  if "sequence_number" in event]
     assert sequences == sorted(sequences)
     assert len(set(sequences)) == len(sequences)
-    tool_done = next(event for event in events
-                     if event.get("type") == "response.output_item.done"
-                     and event["item"]["type"] == "function_call_output")
-    assert "sequence_number" in tool_done and "output_index" in tool_done
 
 
 @needs_agents

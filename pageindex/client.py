@@ -442,11 +442,13 @@ class PageIndexClient:
         Document QA over the OpenAI Responses protocol — the agentic surface.
 
         Local only for now. Drives your backend's /responses end to end (no
-        translation layer), so the ``output`` carries the whole process as
-        standard items — messages, function calls, and function outputs
-        (the SDK executes the tools). Append the returned ``output`` to your
-        next call's ``input`` verbatim to keep provider prompt-cache prefix
-        continuity and the agent's memory of what it already read.
+        translation layer). The envelope is official Responses shape —
+        ``output`` carries the model-produced items and parses with the
+        openai SDK types — and the whole process transcript (including the
+        tool outputs the SDK executed) rides in the extra ``items`` field.
+        Append the returned ``items`` to your next call's ``input`` verbatim
+        to keep provider prompt-cache prefix continuity and the agent's
+        memory of what it already read.
 
         Requires ``pageindex[openai]`` and a backend that supports the
         Responses API; backends that only speak chat.completions should use
@@ -457,15 +459,15 @@ class PageIndexClient:
 
         Args:
             input: A user message string, or a list of Responses input items
-                (round-trip prior ``output`` items here).
+                (round-trip prior ``items`` here).
             model: Backend model name (defaults to ``retrieve_model``).
             stream: Yield Responses stream events as dicts — one logical
                 response per call: per-turn backend lifecycle events are
                 collapsed, sequence numbers are reassigned monotonically,
                 and ``output_index`` is re-based onto the single logical
-                ``output``; tool outputs are emitted as
-                ``response.output_item.done`` events and the single final
-                event is the terminal ``response.*`` for the run's status.
+                ``output``. The single final event is the terminal
+                ``response.*`` for the run's status; its ``response``
+                carries the tool outputs in ``items``.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call and is part
