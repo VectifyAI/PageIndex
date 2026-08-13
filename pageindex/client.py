@@ -750,7 +750,7 @@ class PageIndexClient:
         tools involved. Local: the in-process tools — the same set
         ``messages()`` runs internally.
 
-        Requires ``anthropic>=0.84.0``
+        Requires ``anthropic>=0.108.0``
         (``pip install 'pageindex[anthropic]'``), imported only when this
         method is called.
 
