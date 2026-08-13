@@ -417,7 +417,6 @@ def run_chat_completions(client, messages, stream: bool = False,
     block = _doc_block(client, doc_id)
     items = ([{"role": "user", "content": block}] if block else []) + history
     model_name = model or client.retrieve_model
-    # Strip routing prefixes — report the name the provider serves.
     reported_model = _reported_model(model_name)
     managed = _managed_instructions(system_texts)
     agent = _openai_agent(client, "chat", model_name, managed,
@@ -584,10 +583,6 @@ def run_responses(client, input, model: Optional[str] = None,
         transcript = result.to_input_list()[len(items):]
         return envelope(transcript, result.raw_responses)
 
-    # One logical response per call: per-turn backend lifecycle events
-    # (created/completed/...) are collapsed — forwarding them verbatim would
-    # end a canonical consumer at the first turn — and sequence numbers are
-    # reassigned monotonically across the whole run.
     lifecycle = {"response.created", "response.in_progress",
                  "response.completed", "response.failed",
                  "response.incomplete", "response.queued"}
@@ -631,9 +626,6 @@ def run_responses(client, input, model: Optional[str] = None,
             if recorded.get("status") not in ("failed", "incomplete"):
                 raise PageIndexAPIError(
                     f"The agent backend failed: {exc}") from exc
-            # response.failed / response.incomplete: the engine re-raises
-            # the backend's terminal state as an exception — it is a
-            # protocol event, emitted as the terminal event below.
             completed = True
         except openai.OpenAIError as exc:
             raise PageIndexAPIError(
