@@ -120,6 +120,10 @@ def _run_sync(coro):
     try:
         asyncio.get_running_loop()
     except RuntimeError:
+        has_loop = False
+    else:
+        has_loop = True
+    if not has_loop:
         return asyncio.run(coro)
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         return pool.submit(asyncio.run, coro).result()
