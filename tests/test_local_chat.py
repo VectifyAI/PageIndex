@@ -299,6 +299,64 @@ def test_anthropic_routed_models_mark_managed_prefix_for_cache(
         assert agent.model_settings.extra_args is None
 
 
+@needs_agents
+def test_status_recorder_attaches_to_the_real_responses_model(monkeypatch):
+    # Guards the private-attribute chain the recorder rides
+    # (agent.model._client.responses.create): a vendor rename turns the
+    # recorder into a silent no-op and truncation reports as completion.
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    import openai
+    from agents.models.openai_responses import OpenAIResponsesModel
+    backend = openai.AsyncOpenAI()
+    model = OpenAIResponsesModel("gpt-test", openai_client=backend)
+    original = backend.responses.create
+    local_chat._record_response_status(types.SimpleNamespace(model=model), {})
+    assert backend.responses.create is not original
+    asyncio.run(backend.close())
+
+
+@needs_agents
+def test_cache_marker_reaches_the_anthropic_wire(client, store_path,
+                                                 monkeypatch):
+    # End-to-end guard for the injection flag: through the real
+    # LitellmModel and litellm's request build, the marker must appear in
+    # the HTTP body — a regression in either vendor hop silently reverts
+    # anthropic-routed calls to full price.
+    pytest.importorskip("litellm")
+    from litellm.llms.custom_httpx.http_handler import (AsyncHTTPHandler,
+                                                        HTTPHandler)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    captured = {}
+    reply = {"id": "msg_01", "type": "message", "role": "assistant",
+             "model": "claude-3-5-sonnet-20240620",
+             "content": [{"type": "text", "text": "ok"}],
+             "stop_reason": "end_turn", "stop_sequence": None,
+             "usage": {"input_tokens": 10, "output_tokens": 2}}
+
+    def _capture(url, kwargs):
+        body = kwargs.get("json")
+        if body is None and kwargs.get("data") is not None:
+            body = json.loads(kwargs["data"])
+        captured["url"] = str(url)
+        captured["body"] = body
+        return httpx.Response(200, json=reply,
+                              request=httpx.Request("POST", str(url)))
+
+    async def fake_apost(self, url=None, *args, **kwargs):
+        return _capture(url, kwargs)
+
+    def fake_post(self, url=None, *args, **kwargs):
+        return _capture(url, kwargs)
+
+    monkeypatch.setattr(AsyncHTTPHandler, "post", fake_apost)
+    monkeypatch.setattr(HTTPHandler, "post", fake_post)
+    result = client.chat_completions(
+        "hi", model="anthropic/claude-3-5-sonnet-20240620")
+    assert "/v1/messages" in captured["url"]
+    assert '"cache_control"' in json.dumps(captured["body"])
+    assert result["choices"][0]["message"]["content"] == "ok"
+
+
 # ── chat (front door) ──
 
 @needs_agents

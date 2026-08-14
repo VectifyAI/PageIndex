@@ -206,7 +206,8 @@ def _require_openai_agents(method: str) -> None:
     except ImportError as exc:
         raise PageIndexAPIError(
             f"{method} in local mode requires the OpenAI Agents SDK — "
-            "pip install openai-agents (or pip install 'pageindex[openai]')."
+            "pip install openai-agents (or pip install 'pageindex[openai]'). "
+            "messages() runs on the anthropic extra instead."
         ) from exc
 
 
