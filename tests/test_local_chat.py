@@ -263,7 +263,7 @@ def test_chat_completions_stream_modes(client, store_path, fake_model):
 
 def test_chat_completions_missing_framework(client, monkeypatch):
     monkeypatch.setitem(sys.modules, "agents", None)
-    with pytest.raises(PageIndexAPIError, match="pageindex\\[openai\\]"):
+    with pytest.raises(PageIndexAPIError, match="pip install openai-agents"):
         client.chat_completions([{"role": "user", "content": "x"}])
 
 

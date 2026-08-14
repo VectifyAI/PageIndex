@@ -18,7 +18,7 @@ Steps:
   2 — View document metadata
   3 — Ask a question (agent reasons over the index and auto-calls tools)
 
-Requirements: pip install "pageindex[openai]"; OPENAI_API_KEY in the environment.
+Requirements: pip install pageindex; OPENAI_API_KEY in the environment.
 """
 import sys
 import asyncio

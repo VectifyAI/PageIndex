@@ -676,12 +676,12 @@ def test_retrieval_endpoints_cloud_only(local_client):
         local_client.get_retrieval("any")
 
 
-def test_chat_completions_local_needs_agents_extra(local_client, monkeypatch):
-    """Local chat is implemented (see test_local_chat.py); without the
-    openai-agents extra it raises the actionable install error."""
+def test_chat_completions_local_needs_openai_agents(local_client, monkeypatch):
+    """Local chat is implemented (see test_local_chat.py); without
+    openai-agents installed it raises the actionable install error."""
     import sys
     monkeypatch.setitem(sys.modules, "agents", None)
-    with pytest.raises(PageIndexAPIError, match="pageindex\\[openai\\]"):
+    with pytest.raises(PageIndexAPIError, match="pip install openai-agents"):
         local_client.chat_completions(
             messages=[{"role": "user", "content": "q"}])
 

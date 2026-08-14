@@ -25,7 +25,7 @@ def build_openai_tools(client, include_management: bool = False,
     except ImportError as exc:
         raise PageIndexAPIError(
             "as_openai_tools requires the OpenAI Agents SDK — "
-            "pip install openai-agents (or pip install 'pageindex[openai]')."
+            "pip install openai-agents."
         ) from exc
     from ..agent_tools import (_dumps, _failure, _require_local_scope,
                                _tool_specs)
