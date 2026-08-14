@@ -280,6 +280,50 @@ def test_cloud_guards():
                        max_tokens=10)
 
 
+# ── chat (front door) ──
+
+@needs_agents
+def test_chat_returns_answer_string(client, store_path, fake_model):
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    assert client.chat("What status?", doc_id=doc_id) == "The answer"
+    first_item = fake.inputs[0][0]
+    assert "The user has specified document: report.pdf" in first_item["content"]
+
+
+@needs_agents
+def test_chat_stream_yields_text_chunks(client, store_path, fake_model):
+    fake_model([[_msg_item("The answer")]])
+    assert list(client.chat("q", stream=True)) == ["The ", "answer"]
+
+
+@needs_agents
+def test_chat_multi_turn_history(client, store_path, fake_model):
+    fake = fake_model([[_msg_item("Chapter 4 covers pears")]])
+    history = [
+        {"role": "user", "content": "What about chapter 3?"},
+        {"role": "assistant", "content": "Chapter 3 covers apples"},
+        {"role": "user", "content": "And chapter 4?"},
+    ]
+    assert client.chat(history) == "Chapter 4 covers pears"
+    assert fake.inputs[0][-3:] == history
+
+
+def test_chat_cloud_unwraps_envelope(monkeypatch):
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+
+    def fake_cc(**kwargs):
+        assert kwargs["messages"] == [{"role": "user", "content": "q"}]
+        return {"choices": [{"message": {"role": "assistant",
+                                        "content": "cloud answer"}}]}
+
+    monkeypatch.setattr(cloud._api, "chat_completions", fake_cc)
+    assert cloud.chat("q") == "cloud answer"
+
+
 # ── responses ──
 
 @needs_agents

@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import time
 import warnings
-from typing import Any, Callable, Iterator, Optional, Union
+from typing import Any, Callable, Iterator, Optional, Union, cast
 
 from .errors import PageIndexAPIError
 
@@ -345,7 +345,44 @@ class PageIndexClient:
             "favor of chat completions; use chat_completions instead."
         ).get_retrieval(retrieval_id=retrieval_id)
 
-    # ---------- CHAT COMPLETIONS ----------
+    # ---------- CHAT ----------
+
+    def chat(
+        self,
+        messages: Union[str, list[dict[str, str]]],
+        doc_id: Optional[Union[str, list[str]]] = None,
+        stream: bool = False,
+        model: Optional[str] = None,
+    ) -> Union[str, Iterator[str]]:
+        """
+        Ask a question about your documents, get the answer.
+
+        Thin sugar over ``chat_completions()`` in both modes — same
+        engine, same wire, minus the envelope. Multi-turn: keep your own
+        role/content list of the visible conversation (append each answer
+        as an assistant message) and pass it back. For usage accounting,
+        streaming metadata, or the tool-use process, use the protocol
+        surfaces: ``chat_completions()``, ``responses()``, ``messages()``.
+
+        Args:
+            messages: A question string, or role/content conversation
+                history.
+            doc_id: Document ID or list of IDs to scope the conversation.
+                Keep it identical across a conversation's calls.
+            stream: Yield the answer as text chunks as it is produced.
+            model: Local only — backend model name (defaults to
+                ``retrieve_model``).
+
+        Returns:
+            - stream=False: the answer string
+            - stream=True: iterator of text chunks
+        """
+        result = self.chat_completions(messages, stream=stream,
+                                       doc_id=doc_id, model=model)
+        if stream:
+            return cast(Iterator[str], result)
+        envelope = cast(dict[str, Any], result)
+        return envelope["choices"][0]["message"]["content"] or ""
 
     def chat_completions(
         self,
