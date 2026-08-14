@@ -400,7 +400,7 @@ class PageIndexClient:
 
         Cloud: the hosted chat endpoint. Local: a managed document-QA agent
         run over the local tools against your own LLM backend's
-        /chat/completions (requires ``pageindex[openai]``; the OpenAI SDK's
+        /chat/completions (the OpenAI SDK's
         usual env config — OPENAI_API_KEY, OPENAI_BASE_URL — selects the
         backend, so any OpenAI-compatible server works; a ``/`` in the
         model name means LiteLLM provider routing, so prefix ``openai/``
@@ -492,7 +492,7 @@ class PageIndexClient:
         to keep provider prompt-cache prefix continuity and the agent's
         memory of what it already read.
 
-        Requires ``pageindex[openai]`` and a backend that supports the
+        Requires a backend that supports the
         Responses API; backends that only speak chat.completions should use
         ``chat_completions()``. Provider-prefixed models (``anthropic/…``)
         route through LiteLLM's chat.completions adapter and are therefore
@@ -694,8 +694,7 @@ class PageIndexClient:
         Local: the in-process tools, any model backend; ``hosted`` does
         not apply.
 
-        Requires ``openai-agents`` (``pip install 'pageindex[openai]'``),
-        imported only when this method is called.
+        ``openai-agents`` is imported only when this method is called.
 
         Args:
             include_management (bool): Also expose tools that modify the

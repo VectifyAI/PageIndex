@@ -1,7 +1,7 @@
 litellm==1.84.0
 openai>=1.70.0
 requests>=2.28.0
-# openai-agents  # optional
+openai-agents>=0.18.1
 # pymupdf  # optional
 PyPDF2==3.0.1
 pypdfium2==4.30.0

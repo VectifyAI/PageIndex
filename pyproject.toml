@@ -28,6 +28,8 @@ exclude = ["pageindex/flash/assets"]
 python = ">=3.10"
 requests = ">=2.28.0"
 openai = ">=1.70.0"
+# Older releases crash on current openai before the request is sent.
+openai-agents = ">=0.18.1"
 litellm = ">=1.84.0"
 PyPDF2 = ">=3.0.0"
 pypdfium2 = ">=4.30.0"
@@ -37,14 +39,13 @@ python-dotenv = ">=1.0.0"
 pyyaml = ">=6.0"
 # Older releases break string prompts with SDK MCP servers (#597, #780).
 claude-agent-sdk = { version = ">=0.1.53", optional = true }
-# Older releases crash on current openai before the request is sent.
-openai-agents = { version = ">=0.18.1", optional = true }
 # Older releases execute a refusal turn's tool_use blocks.
 anthropic = { version = ">=0.108.0", optional = true }
 
 [tool.poetry.extras]
 claude = ["claude-agent-sdk"]
-openai = ["openai-agents"]
+# Empty on purpose: keeps pip install "pageindex[openai]" valid.
+openai = []
 anthropic = ["anthropic"]
 
 [tool.poetry.group.dev.dependencies]
