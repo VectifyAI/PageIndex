@@ -287,12 +287,14 @@ def test_anthropic_routed_models_mark_managed_prefix_for_cache(
     from pageindex.local_chat import _openai_agent
     marked = {"cache_control_injection_points": [
         {"location": "message", "role": "system"}]}
-    for name in ("anthropic/claude-x", "litellm/anthropic/claude-x"):
+    for name in ("anthropic/claude-x", "litellm/anthropic/claude-x",
+                 "bedrock/us.anthropic.claude-sonnet-5",
+                 "vertex_ai/claude-sonnet-4-5"):
         agent = _openai_agent(client, "chat", name, "sys", None, None)
         assert agent.model_settings.extra_args == marked
-    # bedrock/vertex Claude stay unmarked until verified live
     for name in ("gpt-5", "openai/Qwen/x", "litellm/groq/x",
-                 "bedrock/anthropic.claude-v1", "vertex_ai/claude-x"):
+                 "bedrock/meta.llama3-70b-instruct-v1:0",
+                 "vertex_ai/gemini-2.5-pro"):
         agent = _openai_agent(client, "chat", name, "sys", None, None)
         assert agent.model_settings.extra_args is None
 
