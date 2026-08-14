@@ -290,7 +290,9 @@ def test_anthropic_routed_models_mark_managed_prefix_for_cache(
     for name in ("anthropic/claude-x", "litellm/anthropic/claude-x"):
         agent = _openai_agent(client, "chat", name, "sys", None, None)
         assert agent.model_settings.extra_args == marked
-    for name in ("gpt-5", "openai/Qwen/x", "litellm/groq/x"):
+    # bedrock/vertex Claude stay unmarked until verified live
+    for name in ("gpt-5", "openai/Qwen/x", "litellm/groq/x",
+                 "bedrock/anthropic.claude-v1", "vertex_ai/claude-x"):
         agent = _openai_agent(client, "chat", name, "sys", None, None)
         assert agent.model_settings.extra_args is None
 
