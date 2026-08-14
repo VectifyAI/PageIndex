@@ -759,7 +759,9 @@ _CLAUDE_4096_MODELS = ("claude-3-opus", "claude-3-sonnet", "claude-3-haiku",
 
 def _default_max_tokens(model: str) -> int:
     """The wire-required per-turn budget when the caller sets none: 8192,
-    except the claude-3 generation whose output ceiling is 4096."""
+    except the claude-3 generation whose output ceiling is 4096 — a
+    closed historical set (every later model supports >=8192), so the
+    table needs no new entries and no live capability source."""
     return 4096 if model.startswith(_CLAUDE_4096_MODELS) else 8192
 
 
