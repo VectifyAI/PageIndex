@@ -405,7 +405,8 @@ class PageIndexClient:
         backend, so any OpenAI-compatible server works; a ``/`` in the
         model name means LiteLLM provider routing, so prefix ``openai/``
         when the backend itself serves slashed ids, e.g.
-        ``openai/Qwen/...`` on vLLM). The non-stream
+        ``openai/Qwen/...`` on vLLM; Anthropic-routed models get the
+        managed prompt prefix cache-marked automatically). The non-stream
         response carries the final answer only; streaming yields the
         agent's visible text as it is produced, including narration before
         tool calls. ``finish_reason`` reports loop completion ("stop") —

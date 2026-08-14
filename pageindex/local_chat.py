@@ -271,6 +271,19 @@ def _reported_model(model_name: str) -> str:
     return model_name.removeprefix("litellm/").removeprefix("openai/")
 
 
+def _cache_extra_args(model_name: str) -> Optional[dict]:
+    """Anthropic's prompt caching is opt-in per request: on
+    anthropic-routed LiteLLM models, mark the managed system prefix via
+    LiteLLM's injection param so the loop's later turns and a
+    conversation's next calls read it instead of repaying full price."""
+    wire = model_name.removeprefix("litellm/")
+    if ("/" in model_name and not model_name.startswith("openai/")
+            and wire.split("/", 1)[0] == "anthropic"):
+        return {"cache_control_injection_points": [
+            {"location": "message", "role": "system"}]}
+    return None
+
+
 def _openai_agent(client, protocol: str, model_name: str, instructions: str,
                   temperature, top_p, doc_ids=None):
     from agents import Agent, ModelSettings
@@ -280,7 +293,8 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
         instructions=instructions,
         tools=build_openai_tools(client, doc_ids=doc_ids),
         model=_openai_model(protocol, model_name),
-        model_settings=ModelSettings(temperature=temperature, top_p=top_p),
+        model_settings=ModelSettings(temperature=temperature, top_p=top_p,
+                                     extra_args=_cache_extra_args(model_name)),
     )
 
 
