@@ -419,7 +419,10 @@ class PageIndexClient:
             messages: Conversation messages with 'role' and 'content' keys,
                 or a bare query string (it becomes a single user message).
                 Local also accepts system/developer messages — their content
-                is appended to the managed system prompt.
+                is appended to the managed system prompt. Local takes text
+                history only: tool-role turns are rejected (the cloud
+                endpoint forwards them verbatim), and message fields beyond
+                role/content are dropped.
             stream: Enable streaming responses.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
