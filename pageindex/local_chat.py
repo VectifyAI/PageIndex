@@ -272,21 +272,23 @@ def _reported_model(model_name: str) -> str:
 
 
 def _cache_extra_args(model_name: str) -> Optional[dict]:
-    """Anthropic's prompt caching is opt-in per request: on
-    anthropic-routed LiteLLM models, mark the managed system prefix via
-    LiteLLM's injection param so the loop's later turns and a
-    conversation's next calls read it instead of repaying full price.
-    Provider resolution is LiteLLM's own, so this predicate can never
-    disagree with where the request actually routes."""
+    """Claude's prompt caching is opt-in per request: on Claude models
+    routed through LiteLLM (Anthropic direct, Bedrock, Vertex — each
+    channel live-verified), mark the managed system prefix via LiteLLM's
+    injection param so the loop's later turns and a conversation's next
+    calls read it instead of repaying full price. Provider resolution is
+    LiteLLM's own, so this predicate can never disagree with where the
+    request actually routes."""
     if "/" not in model_name or model_name.startswith("openai/"):
         return None
     try:
         from litellm import get_llm_provider
-        _, provider, _, _ = get_llm_provider(
+        model, provider, _, _ = get_llm_provider(
             model=model_name.removeprefix("litellm/"))
     except Exception:
         return None
-    if provider == "anthropic":
+    if provider == "anthropic" or (provider in ("bedrock", "vertex_ai")
+                                   and "claude" in model.lower()):
         return {"cache_control_injection_points": [
             {"location": "message", "role": "system"}]}
     return None
