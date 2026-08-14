@@ -280,6 +280,21 @@ def test_cloud_guards():
                        max_tokens=10)
 
 
+@needs_agents
+def test_anthropic_routed_models_mark_managed_prefix_for_cache(
+        client, store_path, fake_model):
+    fake_model([[_msg_item("ok")]])
+    from pageindex.local_chat import _openai_agent
+    marked = {"cache_control_injection_points": [
+        {"location": "message", "role": "system"}]}
+    for name in ("anthropic/claude-x", "litellm/anthropic/claude-x"):
+        agent = _openai_agent(client, "chat", name, "sys", None, None)
+        assert agent.model_settings.extra_args == marked
+    for name in ("gpt-5", "openai/Qwen/x", "litellm/groq/x"):
+        agent = _openai_agent(client, "chat", name, "sys", None, None)
+        assert agent.model_settings.extra_args is None
+
+
 # ── chat (front door) ──
 
 @needs_agents
