@@ -424,6 +424,7 @@ class PageIndexClient:
         model: Optional[str] = None,
         max_turns: Optional[int] = None,
         reasoning_effort: Optional[str] = None,
+        extra_body: Optional[dict[str, Any]] = None,
     ) -> Union[dict[str, Any], Iterator[str], Iterator[dict[str, Any]]]:
         """
         PageIndex Chat Completions: document QA in one call.
@@ -471,6 +472,11 @@ class PageIndexClient:
                 its own thinking control, and the values mean what the
                 backend says they mean. Unset sends nothing (the
                 backend's default applies).
+            extra_body: Local only — extra request fields beyond this
+                method's parameters, merged last so they win.
+                OpenAI-compatible backends take them verbatim in the
+                request body; LiteLLM-routed providers take them as
+                LiteLLM's own params (mapped or refused per provider).
 
         Returns:
             - stream=False: complete response dict ({'id', 'object', 'created',
@@ -492,12 +498,14 @@ class PageIndexClient:
                 temperature=temperature, stream_metadata=stream_metadata,
                 enable_citations=enable_citations, model=model,
                 max_turns=max_turns, reasoning_effort=reasoning_effort,
+                extra_body=extra_body,
             )
         if (model is not None or max_turns is not None
-                or reasoning_effort is not None):
+                or reasoning_effort is not None or extra_body is not None):
             raise PageIndexAPIError(
-                "model, max_turns and reasoning_effort are local-mode "
-                "parameters — the cloud chat endpoint selects its own model."
+                "model, max_turns, reasoning_effort and extra_body are "
+                "local-mode parameters — the cloud chat endpoint selects "
+                "its own model."
             )
         return self._api.chat_completions(
             messages=messages, stream=stream, doc_id=doc_id,
@@ -516,6 +524,7 @@ class PageIndexClient:
         top_p: Optional[float] = None,
         max_turns: Optional[int] = None,
         reasoning: Optional[dict[str, Any]] = None,
+        extra_body: Optional[dict[str, Any]] = None,
     ) -> Union[dict[str, Any], Iterator[dict[str, Any]]]:
         """
         Document QA over the OpenAI Responses protocol — the agentic surface.
@@ -558,6 +567,9 @@ class PageIndexClient:
                 (e.g. ``{"effort": "low", "summary": "auto"}``) — the
                 values mean what the backend says they mean. Unset sends
                 nothing (the backend's default applies).
+            extra_body: Extra request fields beyond this method's
+                parameters, merged verbatim into the request body (last,
+                so they win).
         """
         from .cloud_api import CloudAPI
         if isinstance(self._api, CloudAPI):
@@ -569,7 +581,7 @@ class PageIndexClient:
         return run_responses(
             self, input, model=model, stream=stream, doc_id=doc_id,
             instructions=instructions, temperature=temperature, top_p=top_p,
-            max_turns=max_turns, reasoning=reasoning,
+            max_turns=max_turns, reasoning=reasoning, extra_body=extra_body,
         )
 
     def messages(
@@ -586,6 +598,7 @@ class PageIndexClient:
         stop_sequences: Optional[list[str]] = None,
         max_turns: Optional[int] = None,
         thinking: Optional[dict[str, Any]] = None,
+        extra_body: Optional[dict[str, Any]] = None,
     ) -> Union[dict[str, Any], Iterator[Any]]:
         """
         Document QA over the Anthropic Messages protocol — Claude-native.
@@ -623,6 +636,8 @@ class PageIndexClient:
             thinking: Anthropic thinking configuration, forwarded verbatim
                 (e.g. ``{"type": "adaptive"}``) — the values and their
                 constraints are the backend's. Unset sends nothing.
+            extra_body: Extra request fields beyond this method's
+                parameters, merged verbatim into each request body.
         """
         from .cloud_api import CloudAPI
         if isinstance(self._api, CloudAPI):
@@ -636,7 +651,7 @@ class PageIndexClient:
             stream=stream, doc_id=doc_id, system=system,
             temperature=temperature, top_p=top_p, top_k=top_k,
             stop_sequences=stop_sequences, max_turns=max_turns,
-            thinking=thinking,
+            thinking=thinking, extra_body=extra_body,
         )
 
     # ---------- DOCUMENT MANAGEMENT ----------
