@@ -423,6 +423,8 @@ class PageIndexClient:
         enable_citations: bool = False,
         model: Optional[str] = None,
         max_turns: Optional[int] = None,
+        top_p: Optional[float] = None,
+        max_tokens: Optional[int] = None,
         reasoning_effort: Optional[str] = None,
         extra_body: Optional[dict[str, Any]] = None,
     ) -> Union[dict[str, Any], Iterator[str], Iterator[dict[str, Any]]]:
@@ -467,6 +469,11 @@ class PageIndexClient:
             model: Local only — backend model name (defaults to
                 ``chat_model``). The cloud endpoint selects its own.
             max_turns: Local only — cap on agent turns per call.
+            top_p: Local only — nucleus sampling, passed through to the
+                model.
+            max_tokens: Local only — per-call output cap, passed through;
+                it bounds each backend call in the agent loop (the way
+                max_turns bounds the loop), not the whole run.
             reasoning_effort: Local only — passed through verbatim as
                 LiteLLM's ``reasoning_effort``; each provider maps it to
                 its own thinking control, and the values mean what the
@@ -497,15 +504,16 @@ class PageIndexClient:
                 self, messages, stream=stream, doc_id=doc_id,
                 temperature=temperature, stream_metadata=stream_metadata,
                 enable_citations=enable_citations, model=model,
-                max_turns=max_turns, reasoning_effort=reasoning_effort,
-                extra_body=extra_body,
+                max_turns=max_turns, top_p=top_p, max_tokens=max_tokens,
+                reasoning_effort=reasoning_effort, extra_body=extra_body,
             )
-        if (model is not None or max_turns is not None
-                or reasoning_effort is not None or extra_body is not None):
+        if (model is not None or max_turns is not None or top_p is not None
+                or max_tokens is not None or reasoning_effort is not None
+                or extra_body is not None):
             raise PageIndexAPIError(
-                "model, max_turns, reasoning_effort and extra_body are "
-                "local-mode parameters — the cloud chat endpoint selects "
-                "its own model."
+                "model, max_turns, top_p, max_tokens, reasoning_effort and "
+                "extra_body are local-mode parameters — the cloud chat "
+                "endpoint selects its own model."
             )
         return self._api.chat_completions(
             messages=messages, stream=stream, doc_id=doc_id,
@@ -523,6 +531,7 @@ class PageIndexClient:
         temperature: Optional[float] = None,
         top_p: Optional[float] = None,
         max_turns: Optional[int] = None,
+        max_output_tokens: Optional[int] = None,
         reasoning: Optional[dict[str, Any]] = None,
         extra_body: Optional[dict[str, Any]] = None,
     ) -> Union[dict[str, Any], Iterator[dict[str, Any]]]:
@@ -563,6 +572,10 @@ class PageIndexClient:
             instructions: Appended to the managed system prompt.
             temperature / top_p: Passed through to the model.
             max_turns: Cap on agent turns per call.
+            max_output_tokens: Per-call output cap, passed through; it
+                bounds each backend call in the agent loop (the way
+                max_turns bounds the loop), not the whole run. Echoed in
+                the envelope.
             reasoning: Responses reasoning options, forwarded verbatim
                 (e.g. ``{"effort": "low", "summary": "auto"}``) — the
                 values mean what the backend says they mean. Unset sends
@@ -581,7 +594,8 @@ class PageIndexClient:
         return run_responses(
             self, input, model=model, stream=stream, doc_id=doc_id,
             instructions=instructions, temperature=temperature, top_p=top_p,
-            max_turns=max_turns, reasoning=reasoning, extra_body=extra_body,
+            max_turns=max_turns, max_output_tokens=max_output_tokens,
+            reasoning=reasoning, extra_body=extra_body,
         )
 
     def messages(

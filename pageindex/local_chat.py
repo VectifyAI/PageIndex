@@ -306,7 +306,8 @@ def _cache_extra_args(model_name: str) -> Optional[dict]:
 
 def _openai_agent(client, protocol: str, model_name: str, instructions: str,
                   temperature, top_p, doc_ids=None, cache_key=None,
-                  reasoning=None, reasoning_effort=None, extra_body=None):
+                  reasoning=None, reasoning_effort=None, extra_body=None,
+                  max_tokens=None):
     from agents import Agent, ModelSettings
     from .integrations.openai_agents import build_openai_tools
     # ModelSettings.extra_body is the one channel all three engines put on
@@ -338,7 +339,7 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
         tools=build_openai_tools(client, doc_ids=doc_ids),
         model=_openai_model(protocol, model_name),
         model_settings=ModelSettings(
-            temperature=temperature, top_p=top_p,
+            temperature=temperature, top_p=top_p, max_tokens=max_tokens,
             reasoning=reasoning,
             extra_body=body,
             extra_args=extra_args),
@@ -484,6 +485,8 @@ def run_chat_completions(client, messages, stream: bool = False,
                          enable_citations: bool = False,
                          model: Optional[str] = None,
                          max_turns: Optional[int] = None,
+                         top_p: Optional[float] = None,
+                         max_tokens: Optional[int] = None,
                          reasoning_effort: Optional[str] = None,
                          extra_body: Optional[dict] = None,
                          ) -> Union[dict, Iterator[str], Iterator[dict]]:
@@ -501,11 +504,11 @@ def run_chat_completions(client, messages, stream: bool = False,
     reported_model = _reported_model(model_name)
     managed = _managed_instructions(system_texts)
     agent = _openai_agent(client, "chat", model_name, managed,
-                          temperature, None, doc_ids=doc_id,
+                          temperature, top_p, doc_ids=doc_id,
                           cache_key=_conversation_cache_key(model_name,
                                                             managed, history),
                           reasoning_effort=reasoning_effort,
-                          extra_body=extra_body)
+                          extra_body=extra_body, max_tokens=max_tokens)
     run_kwargs = _run_kwargs(max_turns)
     import openai
     from agents import Runner
@@ -592,6 +595,7 @@ def run_responses(client, input, model: Optional[str] = None,
                   temperature: Optional[float] = None,
                   top_p: Optional[float] = None,
                   max_turns: Optional[int] = None,
+                  max_output_tokens: Optional[int] = None,
                   reasoning: Optional[dict] = None,
                   extra_body: Optional[dict] = None,
                   ) -> Union[dict, Iterator[dict]]:
@@ -616,7 +620,8 @@ def run_responses(client, input, model: Optional[str] = None,
                           temperature, top_p, doc_ids=doc_id,
                           cache_key=_conversation_cache_key(model_name, managed,
                                                             conversation),
-                          reasoning=reasoning, extra_body=extra_body)
+                          reasoning=reasoning, extra_body=extra_body,
+                          max_tokens=max_output_tokens)
     run_kwargs = _run_kwargs(max_turns)
     recorded: dict = {}
     import openai
@@ -645,7 +650,7 @@ def run_responses(client, input, model: Optional[str] = None,
             "temperature": temperature,
             "top_p": top_p,
             "reasoning": reasoning,
-            "max_output_tokens": None,
+            "max_output_tokens": max_output_tokens,
             "error": recorded.get("error"),
             "incomplete_details": recorded.get("incomplete_details"),
             "metadata": None,
