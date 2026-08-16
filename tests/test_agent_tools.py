@@ -758,6 +758,7 @@ def test_openai_agent_config_model_speaks_the_agents_sdk_grammar(tmp_path):
     """The bundle's model string is resolved by the Agents SDK's own
     prefix grammar, which refuses unknown prefixes — the constructor's
     normalized litellm/ spelling is what must reach this door."""
+    pytest.importorskip("agents")
     client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
                                   retrieve_model="anthropic/claude-x")
     assert (client.openai_agent_config()["model"]
