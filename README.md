@@ -177,7 +177,7 @@ You can customize the processing with additional optional arguments (the structu
 
 ```
 --mode                  Processing mode: flash (default) or standard
---model                 LLM model to use (default: gpt-4o-2024-11-20)
+--index-model           LLM model used to index the document (default: gpt-5.6-luna)
 --toc-check-pages       Pages to check for table of contents (default: 20)
 --max-pages-per-node    Max pages per node (default: 10)
 --max-tokens-per-node   Max tokens per node (default: 20000)

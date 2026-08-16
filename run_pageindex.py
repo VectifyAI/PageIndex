@@ -23,9 +23,12 @@ if __name__ == "__main__":
                       help='Refine the tree for search cost (default: full in flash mode). '
                            '`merge` for deterministic merge only; `off` to disable')
 
-    parser.add_argument('--model', type=str, default=None, help='Model to use (overrides config.yaml)')
+    parser.add_argument('--index-model', type=str, default=None,
+                      help='Model used to index the document (overrides config.yaml)')
+    parser.add_argument('--model', type=str, default=None,
+                      help='(legacy) Same as --index-model')
     parser.add_argument('--summary-model', type=str, default=None,
-                      help='Model for node summaries (defaults to --model, then config.yaml)')
+                      help='Model for node summaries (defaults to --index-model, then --model, then config.yaml)')
 
     parser.add_argument('--toc-check-pages', type=int, default=None,
                       help='Number of pages to check for table of contents (PDF only)')
@@ -87,7 +90,7 @@ if __name__ == "__main__":
             
         if args.mode == 'flash':
             from pageindex.flash import page_index_flash
-            summary_model = args.summary_model or args.model
+            summary_model = args.summary_model or args.index_model or args.model
             will_summarize = args.summary if args.summary is not None else True
             if summary_model and (will_summarize or args.optimize == 'full'):
                 import litellm
@@ -112,7 +115,9 @@ if __name__ == "__main__":
         else:
             # Process PDF file
             user_opt = {
+                'index_model': args.index_model,
                 'model': args.model,
+                'summary_model': args.summary_model,
                 'toc_check_page_num': args.toc_check_pages,
                 'max_page_num_each_node': args.max_pages_per_node,
                 'max_token_num_each_node': args.max_tokens_per_node,
@@ -157,6 +162,7 @@ if __name__ == "__main__":
         
         # Create options dict with user args
         user_opt = {
+            'index_model': args.index_model,
             'model': args.model,
             'if_add_node_summary': args.if_add_node_summary,
             'if_add_doc_description': args.if_add_doc_description,
