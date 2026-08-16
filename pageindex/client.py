@@ -2,11 +2,19 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 import warnings
 from typing import Any, Callable, Iterator, Optional, Union, cast
 
 from .errors import PageIndexAPIError
+
+
+def _preload_litellm() -> None:
+    try:
+        import litellm  # noqa: F401
+    except Exception:
+        pass
 
 
 def _parse_pages(pages: str) -> list[int]:
@@ -62,10 +70,12 @@ class PageIndexClient:
             summaries and document descriptions.
         retrieve_model (str, optional): Local mode only — the model the
             local chat surfaces (``chat_completions``, ``responses``)
-            default to, exposed as ``client.retrieve_model``.
-            ``provider/model`` names route through LiteLLM; for an
-            OpenAI-compatible server that itself serves slashed model ids
-            (vLLM, TGI), prefix ``openai/`` (e.g. ``openai/Qwen/...``).
+            default to, exposed as ``client.retrieve_model``. On the chat
+            lane every name routes through LiteLLM (bare names are
+            OpenAI-compatible shorthand); prefix ``openai/`` to drive the
+            OpenAI SDK directly — also the form for an OpenAI-compatible
+            server that itself serves slashed model ids (vLLM, TGI,
+            e.g. ``openai/Qwen/...``).
         storage_path (str, optional): Local mode only — directory where
             indexed documents are stored. Defaults to ``./.pageindex``.
 
@@ -130,6 +140,9 @@ class PageIndexClient:
                 summary_model=self.summary_model,
                 retrieve_model=self.retrieve_model,
             )
+            # LiteLLM's multi-second import would otherwise land on the
+            # first chat call; failures resurface there with real context.
+            threading.Thread(target=_preload_litellm, daemon=True).start()
 
     # ---------- DOCUMENT SUBMISSION ----------
 
@@ -399,15 +412,15 @@ class PageIndexClient:
         PageIndex Chat Completions: document QA in one call.
 
         Cloud: the hosted chat endpoint. Local: a managed document-QA agent
-        run over the local tools against your own LLM backend's
-        /chat/completions (the OpenAI SDK's
-        usual env config — OPENAI_API_KEY, OPENAI_BASE_URL — selects the
-        backend, so any OpenAI-compatible server works; a ``/`` in the
-        model name means LiteLLM provider routing, so prefix ``openai/``
-        when the backend itself serves slashed ids, e.g.
-        ``openai/Qwen/...`` on vLLM; LiteLLM-routed Claude models —
-        Anthropic direct, Bedrock, Vertex — get the managed prompt
-        prefix cache-marked automatically). The non-stream
+        run over the local tools against your own LLM backend, routed
+        through LiteLLM (bare names are OpenAI-compatible shorthand: the
+        OpenAI SDK's usual env config — OPENAI_API_KEY, OPENAI_BASE_URL —
+        still selects the backend, so any OpenAI-compatible server works,
+        and prefixing ``openai/`` opts out of LiteLLM to the OpenAI SDK
+        directly, e.g. ``openai/Qwen/...`` on vLLM; provider-prefixed
+        names — ``anthropic/…``, ``bedrock/…`` — reach that provider, and
+        LiteLLM-routed Claude models get the managed prompt prefix
+        cache-marked automatically). The non-stream
         response carries the final answer only; streaming yields the
         agent's visible text as it is produced, including narration before
         tool calls. ``finish_reason`` reports loop completion ("stop") —
