@@ -382,6 +382,7 @@ class PageIndexClient:
         doc_id: Optional[Union[str, list[str]]] = None,
         stream: bool = False,
         model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
     ) -> Union[str, Iterator[str]]:
         """
         Ask a question about your documents, get the answer.
@@ -401,13 +402,18 @@ class PageIndexClient:
             stream: Yield the answer as text chunks as it is produced.
             model: Local only — backend model name (defaults to
                 ``chat_model``).
+            reasoning_effort: Local only — how hard the model thinks
+                (``"low"`` / ``"medium"`` / ``"high"``; what a backend
+                accepts is its own). Unset sends nothing — the model's
+                default behavior applies.
 
         Returns:
             - stream=False: the answer string
             - stream=True: iterator of text chunks
         """
         result = self.chat_completions(messages, stream=stream,
-                                       doc_id=doc_id, model=model)
+                                       doc_id=doc_id, model=model,
+                                       reasoning_effort=reasoning_effort)
         if stream:
             return cast(Iterator[str], result)
         envelope = cast(dict[str, Any], result)

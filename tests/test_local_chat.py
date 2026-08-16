@@ -282,6 +282,8 @@ def test_cloud_guards():
     with pytest.raises(PageIndexAPIError, match="local-mode"):
         cloud.chat_completions([{"role": "user", "content": "x"}],
                                max_tokens=256)
+    with pytest.raises(PageIndexAPIError, match="local-mode"):
+        cloud.chat("x", reasoning_effort="low")
     with pytest.raises(PageIndexAPIError, match="not available on PageIndex "
                                                 "cloud yet"):
         cloud.responses("x")
@@ -401,6 +403,28 @@ def test_chat_multi_turn_history(client, store_path, fake_model):
     ]
     assert client.chat(history) == "Chapter 4 covers pears"
     assert fake.inputs[0][-3:] == history
+
+
+@needs_agents
+def test_chat_reasoning_effort_reaches_the_engine(client, store_path,
+                                                  fake_model, monkeypatch):
+    """The business door's one thinking knob rides chat_completions'
+    channel unchanged; unset sends nothing."""
+    seen = {}
+    real = local_chat._openai_agent
+
+    def spy(*args, **kwargs):
+        agent = real(*args, **kwargs)
+        seen["settings"] = agent.model_settings
+        return agent
+
+    monkeypatch.setattr(local_chat, "_openai_agent", spy)
+    fake_model([[_msg_item("ok")]])
+    client.chat("q", reasoning_effort="low")
+    assert seen["settings"].extra_args["reasoning_effort"] == "low"
+    fake_model([[_msg_item("ok")]])
+    client.chat("q")
+    assert seen["settings"].extra_args is None
 
 
 def test_chat_cloud_unwraps_envelope(monkeypatch):
