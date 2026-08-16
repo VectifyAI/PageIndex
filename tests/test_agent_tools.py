@@ -754,6 +754,16 @@ def test_openai_agent_config_local(client, store_path):
     assert Agent(**client.openai_agent_config()).name == "PageIndex"
 
 
+def test_openai_agent_config_model_speaks_the_agents_sdk_grammar(tmp_path):
+    """The bundle's model string is resolved by the Agents SDK's own
+    prefix grammar, which refuses unknown prefixes — the constructor's
+    normalized litellm/ spelling is what must reach this door."""
+    client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
+                                  retrieve_model="anthropic/claude-x")
+    assert (client.openai_agent_config()["model"]
+            == "litellm/anthropic/claude-x")
+
+
 def test_openai_agent_config_cloud_omits_model(cloud_with_fake_bridge):
     pytest.importorskip("agents")
     cloud, _ = cloud_with_fake_bridge

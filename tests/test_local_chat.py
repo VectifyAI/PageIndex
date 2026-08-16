@@ -863,7 +863,7 @@ def test_conversation_cache_key_stable_per_conversation():
 
 
 @needs_agents
-def test_agent_carries_prompt_cache_key_in_extra_args(monkeypatch):
+def test_agent_carries_prompt_cache_key_in_extra_body(monkeypatch):
     """The key must reach the wire: openai-agents 0.20 dropped the
     RunConfig.group_id -> prompt_cache_key derivation, so the agent's
     ModelSettings.extra_body is the delivery channel. OpenAI destinations
