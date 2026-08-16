@@ -477,7 +477,7 @@ def run_chat_completions(client, messages, stream: bool = False,
     system_texts, history = _split_chat_messages(messages)
     block = _doc_block(client, doc_id)
     items = ([{"role": "user", "content": block}] if block else []) + history
-    model_name = model or client.retrieve_model
+    model_name = model or client.chat_model
     reported_model = _reported_model(model_name)
     managed = _managed_instructions(system_texts)
     agent = _openai_agent(client, "chat", model_name, managed,
@@ -586,7 +586,7 @@ def run_responses(client, input, model: Optional[str] = None,
     if block:
         items = [{"role": "user", "content": block}] + items
     extra = [instructions] if instructions else []
-    model_name = model or client.retrieve_model
+    model_name = model or client.chat_model
     managed = _managed_instructions(extra)
     agent = _openai_agent(client, "responses", model_name, managed,
                           temperature, top_p, doc_ids=doc_id,

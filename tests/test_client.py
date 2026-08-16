@@ -78,6 +78,32 @@ def test_retrieve_model_carries_agents_sdk_prefix(tmp_path):
         assert resolved(already_routable) == already_routable
 
 
+def test_model_resolution_covers_every_generation(tmp_path):
+    """New names win over old, specific over general, ``model`` sets every
+    role, and the built-in defaults close each chain. One row per released
+    surface: 0.2.8 (model only), 0.3.0.dev (model + retrieve_model),
+    0.2.10.dev (all three legacy names), the current pair, plus the
+    umbrella and mixed forms."""
+    from pageindex.utils import DEFAULT_CHAT_MODEL, DEFAULT_INDEX_MODEL
+    cases = [
+        ({}, DEFAULT_INDEX_MODEL, DEFAULT_INDEX_MODEL, DEFAULT_CHAT_MODEL),
+        ({"model": "m"}, "m", "m", "m"),
+        ({"model": "m", "retrieve_model": "r"}, "m", "m", "r"),
+        ({"model": "m", "summary_model": "s", "retrieve_model": "r"},
+         "m", "s", "r"),
+        ({"index_model": "i", "chat_model": "c"}, "i", "i", "c"),
+        ({"model": "m", "index_model": "i"}, "i", "i", "m"),
+        ({"summary_model": "s"},
+         DEFAULT_INDEX_MODEL, "s", DEFAULT_CHAT_MODEL),
+    ]
+    for kwargs, index, summary, chat in cases:
+        client = PageIndexClient(storage_path=str(tmp_path / "s"), **kwargs)
+        assert (client.index_model, client.model) == (index, index), kwargs
+        assert client.summary_model == summary, kwargs
+        assert client.chat_model == chat, kwargs
+        assert client.retrieve_model == client.chat_model, kwargs
+
+
 def test_explicit_mode_clients(tmp_path):
     from pageindex import PageIndexCloudClient, PageIndexLocalClient
 
