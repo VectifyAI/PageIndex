@@ -306,7 +306,7 @@ def _cache_extra_args(model_name: str) -> Optional[dict]:
 
 def _openai_agent(client, protocol: str, model_name: str, instructions: str,
                   temperature, top_p, doc_ids=None, cache_key=None,
-                  reasoning=None, reasoning_effort=None):
+                  reasoning=None, reasoning_effort=None, extra_body=None):
     from agents import Agent, ModelSettings
     from .integrations.openai_agents import build_openai_tools
     # ModelSettings.extra_body is the one channel all three engines put on
@@ -323,6 +323,15 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
     if reasoning_effort is not None:
         extra_args = {**(extra_args or {}),
                       "reasoning_effort": reasoning_effort}
+    body = ({"prompt_cache_key": cache_key}
+            if cache_key and openai_backend else None)
+    # Caller extras merge last, so they win over ours; non-OpenAI
+    # destinations take them as LiteLLM kwargs instead (see note above).
+    if extra_body:
+        if openai_backend:
+            body = {**(body or {}), **extra_body}
+        else:
+            extra_args = {**(extra_args or {}), **extra_body}
     return Agent(
         name="PageIndex",
         instructions=instructions,
@@ -331,8 +340,7 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
         model_settings=ModelSettings(
             temperature=temperature, top_p=top_p,
             reasoning=reasoning,
-            extra_body=({"prompt_cache_key": cache_key}
-                        if cache_key and openai_backend else None),
+            extra_body=body,
             extra_args=extra_args),
     )
 
@@ -477,6 +485,7 @@ def run_chat_completions(client, messages, stream: bool = False,
                          model: Optional[str] = None,
                          max_turns: Optional[int] = None,
                          reasoning_effort: Optional[str] = None,
+                         extra_body: Optional[dict] = None,
                          ) -> Union[dict, Iterator[str], Iterator[dict]]:
     if enable_citations:
         raise PageIndexAPIError(
@@ -495,7 +504,8 @@ def run_chat_completions(client, messages, stream: bool = False,
                           temperature, None, doc_ids=doc_id,
                           cache_key=_conversation_cache_key(model_name,
                                                             managed, history),
-                          reasoning_effort=reasoning_effort)
+                          reasoning_effort=reasoning_effort,
+                          extra_body=extra_body)
     run_kwargs = _run_kwargs(max_turns)
     import openai
     from agents import Runner
@@ -583,6 +593,7 @@ def run_responses(client, input, model: Optional[str] = None,
                   top_p: Optional[float] = None,
                   max_turns: Optional[int] = None,
                   reasoning: Optional[dict] = None,
+                  extra_body: Optional[dict] = None,
                   ) -> Union[dict, Iterator[dict]]:
     _require_openai_agents("responses")
     _validate_max_turns(max_turns)
@@ -605,7 +616,7 @@ def run_responses(client, input, model: Optional[str] = None,
                           temperature, top_p, doc_ids=doc_id,
                           cache_key=_conversation_cache_key(model_name, managed,
                                                             conversation),
-                          reasoning=reasoning)
+                          reasoning=reasoning, extra_body=extra_body)
     run_kwargs = _run_kwargs(max_turns)
     recorded: dict = {}
     import openai
@@ -817,6 +828,7 @@ def run_messages(client, messages, model: str,
                  stop_sequences: Optional[list[str]] = None,
                  max_turns: Optional[int] = None,
                  thinking: Optional[dict] = None,
+                 extra_body: Optional[dict] = None,
                  ) -> Union[dict, Iterator[Any]]:
     from .integrations.anthropic_sdk import build_anthropic_tools
 
@@ -834,6 +846,7 @@ def run_messages(client, messages, model: str,
     passthrough = {key: value for key, value in {
         "temperature": temperature, "top_p": top_p, "top_k": top_k,
         "stop_sequences": stop_sequences, "thinking": thinking,
+        "extra_body": extra_body,
     }.items() if value is not None}
     runner = _anthropic_client().beta.messages.tool_runner(
         max_tokens=(max_tokens if max_tokens is not None

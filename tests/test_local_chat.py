@@ -274,6 +274,9 @@ def test_cloud_guards():
     with pytest.raises(PageIndexAPIError, match="local-mode"):
         cloud.chat_completions([{"role": "user", "content": "x"}],
                                reasoning_effort="low")
+    with pytest.raises(PageIndexAPIError, match="local-mode"):
+        cloud.chat_completions([{"role": "user", "content": "x"}],
+                               extra_body={"service_tier": "auto"})
     with pytest.raises(PageIndexAPIError, match="not available on PageIndex "
                                                 "cloud yet"):
         cloud.responses("x")
@@ -929,6 +932,36 @@ def test_reasoning_passthrough_reaches_each_engine(monkeypatch):
 
 
 @needs_agents
+def test_extra_body_passthrough_reaches_each_engine(monkeypatch):
+    """Caller extras merge last — over the cache key on OpenAI
+    destinations — and ride LiteLLM's own kwargs elsewhere, where
+    extra_body would plant literal fields providers reject."""
+    pytest.importorskip("litellm")
+    monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
+    monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
+                        lambda *a, **k: [])
+    agent = local_chat._openai_agent(None, "chat", "gpt-test", "sys",
+                                     None, None, cache_key="pageindex-k",
+                                     extra_body={"logit_bias": {"1": 5},
+                                                 "prompt_cache_key": "mine"})
+    assert agent.model_settings.extra_body == {
+        "prompt_cache_key": "mine", "logit_bias": {"1": 5}}
+    assert agent.model_settings.extra_args is None
+    agent = local_chat._openai_agent(None, "chat", "anthropic/claude-x",
+                                     "sys", None, None,
+                                     reasoning_effort="low",
+                                     extra_body={"top_k": 20})
+    assert agent.model_settings.extra_body is None
+    assert agent.model_settings.extra_args["top_k"] == 20
+    assert agent.model_settings.extra_args["reasoning_effort"] == "low"
+    assert "cache_control_injection_points" in agent.model_settings.extra_args
+    agent = local_chat._openai_agent(None, "responses", "gpt-test", "sys",
+                                     None, None,
+                                     extra_body={"service_tier": "flex"})
+    assert agent.model_settings.extra_body == {"service_tier": "flex"}
+
+
+@needs_agents
 def test_responses_envelope_echoes_reasoning(client, store_path, fake_model):
     seed_doc(store_path, "pi-a", "report.pdf")
     fake_model([[_msg_item("ok")]])
@@ -1366,6 +1399,21 @@ def test_messages_thinking_passes_through(client, fake_anthropic):
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
     client.messages("q", model="claude-sonnet-4-5")
     assert "thinking" not in calls[0]
+
+
+@needs_anthropic
+def test_messages_extra_body_merges_into_the_wire_body(client, fake_anthropic):
+    """The anthropic SDK merges extra_body keys into the request JSON —
+    asserted on the captured wire body, not the SDK call."""
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
+    client.messages("q", model="claude-sonnet-4-5",
+                    extra_body={"service_tier": "auto"})
+    assert calls[0]["service_tier"] == "auto"
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
+    client.messages("q", model="claude-sonnet-4-5")
+    assert "service_tier" not in calls[0]
 
 
 @needs_anthropic
