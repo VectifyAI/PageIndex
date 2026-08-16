@@ -305,7 +305,8 @@ def _cache_extra_args(model_name: str) -> Optional[dict]:
 
 
 def _openai_agent(client, protocol: str, model_name: str, instructions: str,
-                  temperature, top_p, doc_ids=None, cache_key=None):
+                  temperature, top_p, doc_ids=None, cache_key=None,
+                  reasoning=None, reasoning_effort=None):
     from agents import Agent, ModelSettings
     from .integrations.openai_agents import build_openai_tools
     # ModelSettings.extra_body is the one channel all three engines put on
@@ -315,6 +316,13 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
     # other providers' request bodies, which Anthropic rejects as unknown.
     wire = model_name.removeprefix("litellm/")
     openai_backend = "/" not in wire or wire.startswith("openai/")
+    # Chat-lane effort rides extra_args: LiteLLM takes it as its own
+    # top-level kwarg on every supported openai-agents version, and the
+    # channel admits values outside the OpenAI enum ("none").
+    extra_args = _cache_extra_args(model_name)
+    if reasoning_effort is not None:
+        extra_args = {**(extra_args or {}),
+                      "reasoning_effort": reasoning_effort}
     return Agent(
         name="PageIndex",
         instructions=instructions,
@@ -322,9 +330,10 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
         model=_openai_model(protocol, model_name),
         model_settings=ModelSettings(
             temperature=temperature, top_p=top_p,
+            reasoning=reasoning,
             extra_body=({"prompt_cache_key": cache_key}
                         if cache_key and openai_backend else None),
-            extra_args=_cache_extra_args(model_name)),
+            extra_args=extra_args),
     )
 
 
@@ -358,7 +367,8 @@ def _model_backend_error(exc) -> PageIndexAPIError:
     if "Function tools with reasoning_effort" in str(exc):
         message += (
             " — this model runs tools on the Responses lane: upgrade "
-            "litellm (newer releases route it there automatically) or "
+            "litellm (newer releases route it there automatically), pass "
+            "reasoning_effort (older litellm routes explicit efforts), or "
             "call responses() instead."
         )
     return PageIndexAPIError(message)
@@ -466,6 +476,7 @@ def run_chat_completions(client, messages, stream: bool = False,
                          enable_citations: bool = False,
                          model: Optional[str] = None,
                          max_turns: Optional[int] = None,
+                         reasoning_effort: Optional[str] = None,
                          ) -> Union[dict, Iterator[str], Iterator[dict]]:
     if enable_citations:
         raise PageIndexAPIError(
@@ -483,7 +494,8 @@ def run_chat_completions(client, messages, stream: bool = False,
     agent = _openai_agent(client, "chat", model_name, managed,
                           temperature, None, doc_ids=doc_id,
                           cache_key=_conversation_cache_key(model_name,
-                                                            managed, history))
+                                                            managed, history),
+                          reasoning_effort=reasoning_effort)
     run_kwargs = _run_kwargs(max_turns)
     import openai
     from agents import Runner
@@ -570,6 +582,7 @@ def run_responses(client, input, model: Optional[str] = None,
                   temperature: Optional[float] = None,
                   top_p: Optional[float] = None,
                   max_turns: Optional[int] = None,
+                  reasoning: Optional[dict] = None,
                   ) -> Union[dict, Iterator[dict]]:
     _require_openai_agents("responses")
     _validate_max_turns(max_turns)
@@ -591,7 +604,8 @@ def run_responses(client, input, model: Optional[str] = None,
     agent = _openai_agent(client, "responses", model_name, managed,
                           temperature, top_p, doc_ids=doc_id,
                           cache_key=_conversation_cache_key(model_name, managed,
-                                                            conversation))
+                                                            conversation),
+                          reasoning=reasoning)
     run_kwargs = _run_kwargs(max_turns)
     recorded: dict = {}
     import openai
@@ -619,6 +633,7 @@ def run_responses(client, input, model: Optional[str] = None,
             "parallel_tool_calls": True,
             "temperature": temperature,
             "top_p": top_p,
+            "reasoning": reasoning,
             "max_output_tokens": None,
             "error": recorded.get("error"),
             "incomplete_details": recorded.get("incomplete_details"),
@@ -801,6 +816,7 @@ def run_messages(client, messages, model: str,
                  top_k: Optional[int] = None,
                  stop_sequences: Optional[list[str]] = None,
                  max_turns: Optional[int] = None,
+                 thinking: Optional[dict] = None,
                  ) -> Union[dict, Iterator[Any]]:
     from .integrations.anthropic_sdk import build_anthropic_tools
 
@@ -817,7 +833,7 @@ def run_messages(client, messages, model: str,
     prepared = [dict(message) for message in messages]
     passthrough = {key: value for key, value in {
         "temperature": temperature, "top_p": top_p, "top_k": top_k,
-        "stop_sequences": stop_sequences,
+        "stop_sequences": stop_sequences, "thinking": thinking,
     }.items() if value is not None}
     runner = _anthropic_client().beta.messages.tool_runner(
         max_tokens=(max_tokens if max_tokens is not None
