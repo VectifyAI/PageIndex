@@ -64,17 +64,27 @@ class PageIndexClient:
     Args:
         api_key (str, optional): PageIndex cloud API key
             (https://dash.pageindex.ai/api-keys). Omit for local mode.
-        model (str, optional): Local mode only — LLM used to build document
-            trees. Defaults to the packaged config (see pageindex/config.yaml).
-        summary_model (str, optional): Local mode only — LLM used for node
-            summaries and document descriptions.
-        retrieve_model (str, optional): Local mode only — the model the
-            local chat surfaces (``chat_completions``, ``responses``)
-            default to, exposed as ``client.retrieve_model``. Chat names
+        index_model (str, optional): Local mode only — LLM used to index
+            documents (structure and summaries). Defaults to the SDK
+            default (fast and cheap).
+        chat_model (str, optional): Local mode only — the model the chat
+            surfaces (``chat``, ``chat_completions``, ``responses``)
+            default to, exposed as ``client.chat_model``. Chat names
             route through LiteLLM and mean what LiteLLM says they mean;
             bare names are OpenAI-compatible shorthand, and
             ``openai/Qwen/...`` is the form for an OpenAI-compatible
             server that itself serves slashed model ids (vLLM, TGI).
+            Defaults to the SDK default (strong).
+        model (str, optional): Local mode only — one model for both roles:
+            sets the default for ``index_model`` and ``chat_model`` at
+            once. The role-specific arguments win over it. (Also the
+            0.2.8-era name for the indexing model — old configs keep
+            working unchanged.)
+        summary_model (str, optional): Local mode only — legacy: overrides
+            the model used for node summaries and document descriptions;
+            ``index_model`` covers this.
+        retrieve_model (str, optional): Local mode only — legacy name for
+            ``chat_model``.
         storage_path (str, optional): Local mode only — directory where
             indexed documents are stored. Defaults to ``./.pageindex``.
 
@@ -97,6 +107,8 @@ class PageIndexClient:
         self,
         api_key: Optional[str] = None,
         *,
+        index_model: Optional[str] = None,
+        chat_model: Optional[str] = None,
         model: Optional[str] = None,
         summary_model: Optional[str] = None,
         retrieve_model: Optional[str] = None,
@@ -107,9 +119,11 @@ class PageIndexClient:
                 "api_key is an empty string. Pass a real PageIndex API key for "
                 "cloud mode, or omit api_key entirely for local mode."
             )
+        model_args = {"index_model": index_model, "chat_model": chat_model,
+                      "model": model, "summary_model": summary_model,
+                      "retrieve_model": retrieve_model}
         if api_key is not None:
-            local_only = {"model": model, "summary_model": summary_model,
-                          "retrieve_model": retrieve_model, "storage_path": storage_path}
+            local_only = dict(model_args, storage_path=storage_path)
             passed = [name for name, value in local_only.items() if value is not None]
             if passed:
                 raise PageIndexAPIError(
@@ -122,26 +136,29 @@ class PageIndexClient:
             self._api = CloudAPI(self)
         else:
             from .utils import ConfigLoader
-            overrides = {key: value for key, value in
-                         {"model": model, "summary_model": summary_model,
-                          "retrieve_model": retrieve_model}.items()
+            overrides = {key: value for key, value in model_args.items()
                          if value}
             opt = ConfigLoader().load(overrides or None)
             self.model = opt.model
-            self.summary_model = getattr(opt, "summary_model", None) or opt.model
-            self.retrieve_model = _agents_sdk_model_name(
-                getattr(opt, "retrieve_model", None) or opt.model)
+            self.index_model = opt.index_model
+            self.summary_model = opt.summary_model
+            self.chat_model = _agents_sdk_model_name(opt.chat_model)
             self.storage_path = storage_path or ".pageindex"
             from .local_api import LocalAPI
             self._api = LocalAPI(
                 storage_path=self.storage_path,
                 model=self.model,
                 summary_model=self.summary_model,
-                retrieve_model=self.retrieve_model,
+                retrieve_model=self.chat_model,
             )
             # LiteLLM's multi-second import would otherwise land on the
             # first chat call; failures resurface there with real context.
             threading.Thread(target=_preload_litellm, daemon=True).start()
+
+    @property
+    def retrieve_model(self):
+        """Legacy name for ``chat_model``."""
+        return self.chat_model
 
     # ---------- DOCUMENT SUBMISSION ----------
 
@@ -383,7 +400,7 @@ class PageIndexClient:
                 Keep it identical across a conversation's calls.
             stream: Yield the answer as text chunks as it is produced.
             model: Local only — backend model name (defaults to
-                ``retrieve_model``).
+                ``chat_model``).
 
         Returns:
             - stream=False: the answer string
@@ -446,7 +463,7 @@ class PageIndexClient:
             enable_citations: Cloud-only — local mode raises (citations need
                 block-level OCR data local mode does not store).
             model: Local only — backend model name (defaults to
-                ``retrieve_model``). The cloud endpoint selects its own.
+                ``chat_model``). The cloud endpoint selects its own.
             max_turns: Local only — cap on agent turns per call.
 
         Returns:
@@ -514,7 +531,7 @@ class PageIndexClient:
         Args:
             input: A user message string, or a list of Responses input items
                 (round-trip prior ``items`` here).
-            model: Backend model name (defaults to ``retrieve_model``).
+            model: Backend model name (defaults to ``chat_model``).
             stream: Yield Responses stream events as dicts — one logical
                 response per call: per-turn backend lifecycle events are
                 collapsed, sequence numbers are reassigned monotonically,
@@ -754,7 +771,7 @@ class PageIndexClient:
         Sugar over the explicit form — ``agent_instructions`` (with
         ``doc_id`` targeting) as the instructions and
         ``as_openai_tools`` as the tools; local clients also carry their
-        configured ``retrieve_model`` (cloud omits ``model`` so the
+        configured ``chat_model`` (cloud omits ``model`` so the
         framework default applies). To customize further, switch to
         those methods directly.
 
@@ -775,7 +792,7 @@ class PageIndexClient:
                                                      scoped=scope is not None),
             "tools": self.as_openai_tools(include_management, doc_id=scope),
         }
-        model = model or getattr(self, "retrieve_model", None)
+        model = model or getattr(self, "chat_model", None)
         if model:
             config["model"] = model
         return config
@@ -1032,10 +1049,13 @@ class PageIndexLocalClient(PageIndexClient):
     def __init__(
         self,
         *,
+        index_model: Optional[str] = None,
+        chat_model: Optional[str] = None,
         model: Optional[str] = None,
         summary_model: Optional[str] = None,
         retrieve_model: Optional[str] = None,
         storage_path: Optional[str] = None,
     ):
-        super().__init__(None, model=model, summary_model=summary_model,
+        super().__init__(None, index_model=index_model, chat_model=chat_model,
+                         model=model, summary_model=summary_model,
                          retrieve_model=retrieve_model, storage_path=storage_path)

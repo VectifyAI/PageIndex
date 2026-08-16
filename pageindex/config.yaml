@@ -1,9 +1,11 @@
-# Models without a provider prefix use the OpenAI SDK directly.
-# For other providers, use "provider/model" format (e.g. "anthropic/claude-sonnet-4-6").
-model: "gpt-4o-2024-11-20"
-# model: "anthropic/claude-sonnet-4-6"
-summary_model: "gpt-5.6-luna"
-retrieve_model: "gpt-5.4"  # defaults to `model` if not set
+# Models — index_model indexes documents (structure and summaries),
+# chat_model answers questions on the chat surfaces; set model to use one
+# for both. Unset keys use the SDK defaults shown below. Legacy keys
+# (model, summary_model, retrieve_model) keep working.
+# Indexing names without a provider prefix use the OpenAI SDK directly;
+# for other providers, use "provider/model" (e.g. "anthropic/claude-sonnet-4-6").
+# index_model: "gpt-5.6-luna"
+# chat_model: "gpt-5.4"
 toc_check_page_num: 20
 max_page_num_each_node: 10
 max_token_num_each_node: 20000

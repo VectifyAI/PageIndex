@@ -954,6 +954,31 @@ def page_level_thinning(structure, thinning_threshold_node_num=20, min_pages_for
     return structure
 
 
+DEFAULT_INDEX_MODEL = "gpt-5.6-luna"
+DEFAULT_CHAT_MODEL = "gpt-5.4"
+
+# Every model name any released generation shipped: 0.2.8 (model),
+# 0.3.0.dev (model, retrieve_model), 0.2.10.dev (model, summary_model,
+# retrieve_model), plus the current pair (index_model, chat_model).
+_MODEL_KEYS = ("model", "summary_model", "retrieve_model",
+               "index_model", "chat_model")
+
+
+def _resolve_models(merged: dict) -> None:
+    """Fill the model roles from whichever names were given: new names win
+    over old, specific over general, ``model`` sets every role, and the
+    built-in defaults close each chain. Idempotent, so already-resolved
+    config objects can round-trip through load()."""
+    given = {key: merged.get(key) for key in _MODEL_KEYS}
+    index = given["index_model"] or given["model"] or DEFAULT_INDEX_MODEL
+    summary = (given["summary_model"] or given["index_model"]
+               or given["model"] or DEFAULT_INDEX_MODEL)
+    chat = (given["chat_model"] or given["retrieve_model"]
+            or given["model"] or DEFAULT_CHAT_MODEL)
+    merged.update(model=index, index_model=index, summary_model=summary,
+                  chat_model=chat, retrieve_model=chat)
+
+
 class ConfigLoader:
     def __init__(self, default_path: str = None):
         if default_path is None:
@@ -966,7 +991,8 @@ class ConfigLoader:
             return yaml.safe_load(f) or {}
 
     def _validate_keys(self, user_dict):
-        unknown_keys = set(user_dict) - set(self._default_dict)
+        unknown_keys = (set(user_dict) - set(self._default_dict)
+                        - set(_MODEL_KEYS))
         if unknown_keys:
             raise ValueError(f"Unknown config keys: {unknown_keys}")
 
@@ -985,6 +1011,7 @@ class ConfigLoader:
 
         self._validate_keys(user_dict)
         merged = {**self._default_dict, **user_dict}
+        _resolve_models(merged)
         return config(**merged)
 
 def create_node_mapping(tree, include_page_ranges=False, max_page=None):
