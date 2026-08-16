@@ -277,6 +277,11 @@ def test_cloud_guards():
     with pytest.raises(PageIndexAPIError, match="local-mode"):
         cloud.chat_completions([{"role": "user", "content": "x"}],
                                extra_body={"service_tier": "auto"})
+    with pytest.raises(PageIndexAPIError, match="local-mode"):
+        cloud.chat_completions([{"role": "user", "content": "x"}], top_p=0.9)
+    with pytest.raises(PageIndexAPIError, match="local-mode"):
+        cloud.chat_completions([{"role": "user", "content": "x"}],
+                               max_tokens=256)
     with pytest.raises(PageIndexAPIError, match="not available on PageIndex "
                                                 "cloud yet"):
         cloud.responses("x")
@@ -959,6 +964,35 @@ def test_extra_body_passthrough_reaches_each_engine(monkeypatch):
                                      None, None,
                                      extra_body={"service_tier": "flex"})
     assert agent.model_settings.extra_body == {"service_tier": "flex"}
+
+
+@needs_agents
+def test_sampling_knobs_ride_model_settings(client, store_path, fake_model,
+                                            monkeypatch):
+    """top_p/max_tokens ride ModelSettings fields — the one channel clean
+    on every lane (extra_body collides with LitellmModel's explicit
+    kwargs). responses' max_output_tokens is the same field's wire name,
+    echoed in the envelope."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    seen = {}
+    real = local_chat._openai_agent
+
+    def spy(*args, **kwargs):
+        agent = real(*args, **kwargs)
+        seen[args[1]] = agent.model_settings
+        return agent
+
+    monkeypatch.setattr(local_chat, "_openai_agent", spy)
+    fake_model([[_msg_item("ok")]])
+    client.chat_completions("q", top_p=0.9, max_tokens=256)
+    assert seen["chat"].top_p == 0.9
+    assert seen["chat"].max_tokens == 256
+    fake_model([[_msg_item("ok")]])
+    result = client.responses("q", max_output_tokens=321)
+    assert seen["responses"].max_tokens == 321
+    assert result["max_output_tokens"] == 321
+    fake_model([[_msg_item("ok")]])
+    assert client.responses("q")["max_output_tokens"] is None
 
 
 @needs_agents
