@@ -957,9 +957,7 @@ def page_level_thinning(structure, thinning_threshold_node_num=20, min_pages_for
 DEFAULT_INDEX_MODEL = "gpt-5.6-luna"
 DEFAULT_CHAT_MODEL = "gpt-5.6-sol"
 
-# Every model name any released generation shipped: 0.2.8 (model),
-# 0.3.0.dev (model, retrieve_model), 0.2.10.dev (model, summary_model,
-# retrieve_model), plus the current pair (index_model, chat_model).
+# Each of the five names has shipped in a release; all stay accepted.
 _MODEL_KEYS = ("model", "summary_model", "retrieve_model",
                "index_model", "chat_model")
 
