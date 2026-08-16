@@ -41,7 +41,7 @@ def _parse_pages(pages: str) -> list[int]:
     return sorted(result)
 
 
-def _normalize_retrieve_model(model: str) -> str:
+def _agents_sdk_model_name(model: str) -> str:
     """Preserve supported Agents SDK prefixes and route other provider paths via LiteLLM."""
     passthrough_prefixes = ("litellm/", "openai/")
     if not model or "/" not in model:
@@ -129,7 +129,7 @@ class PageIndexClient:
             opt = ConfigLoader().load(overrides or None)
             self.model = opt.model
             self.summary_model = getattr(opt, "summary_model", None) or opt.model
-            self.retrieve_model = _normalize_retrieve_model(
+            self.retrieve_model = _agents_sdk_model_name(
                 getattr(opt, "retrieve_model", None) or opt.model)
             self.storage_path = storage_path or ".pageindex"
             from .local_api import LocalAPI
