@@ -260,7 +260,8 @@ def _openai_model(protocol: str, model_name: str):
             raise PageIndexAPIError(
                 "The OpenAI backend is not configured: set the "
                 "OPENAI_API_KEY environment variable (any value works "
-                "for keyless OPENAI_BASE_URL servers)."
+                "for keyless OPENAI_BASE_URL servers), or point "
+                "chat_model at another provider (e.g. 'anthropic/...')."
             )
     if "/" not in wire:
         wire = f"openai/{wire}"
