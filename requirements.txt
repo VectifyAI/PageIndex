@@ -1,4 +1,4 @@
-litellm==1.84.0
+litellm==1.97.0
 openai>=1.70.0
 requests>=2.28.0
 openai-agents>=0.18.1

@@ -252,7 +252,7 @@ def _openai_model(protocol: str, model_name: str):
     except ImportError:
         raise PageIndexAPIError(
             f"'{model_name}' routes through LiteLLM, but litellm is not "
-            "installed. Run:  pip install 'litellm>=1.84'"
+            "installed. Run:  pip install 'litellm>=1.97'"
         )
     wire = model_name.removeprefix("litellm/")
     if "/" not in wire or wire.startswith("openai/"):
