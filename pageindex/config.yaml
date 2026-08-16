@@ -5,7 +5,7 @@
 # Indexing names without a provider prefix use the OpenAI SDK directly;
 # for other providers, use "provider/model" (e.g. "anthropic/claude-sonnet-4-6").
 # index_model: "gpt-5.6-luna"
-# chat_model: "gpt-5.4"
+# chat_model: "gpt-5.6-sol"
 toc_check_page_num: 20
 max_page_num_each_node: 10
 max_token_num_each_node: 20000
