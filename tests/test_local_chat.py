@@ -271,6 +271,9 @@ def test_cloud_guards():
     cloud = PageIndexCloudClient(api_key="pi-test-key")
     with pytest.raises(PageIndexAPIError, match="local-mode parameters"):
         cloud.chat_completions([{"role": "user", "content": "x"}], model="m")
+    with pytest.raises(PageIndexAPIError, match="local-mode"):
+        cloud.chat_completions([{"role": "user", "content": "x"}],
+                               reasoning_effort="low")
     with pytest.raises(PageIndexAPIError, match="not available on PageIndex "
                                                 "cloud yet"):
         cloud.responses("x")
@@ -837,11 +840,12 @@ def test_responses_envelope_fields_and_cache_group(client, store_path,
 
 def test_sol_class_refusal_names_its_exits():
     """The chatcmpl+tools-while-reasoning 400 is a lane problem, not a
-    retry problem — the wrapped error must name both exits."""
+    retry problem — the wrapped error must name every exit."""
     err = local_chat._model_backend_error(Exception(
         "Error code: 400 - Function tools with reasoning_effort are not "
         "supported for gpt-5.6-sol in /v1/chat/completions."))
     assert "responses()" in str(err) and "litellm" in str(err)
+    assert "pass reasoning_effort" in str(err)
     plain = local_chat._model_backend_error(Exception("rate limited"))
     assert "responses()" not in str(plain)
 
@@ -887,6 +891,51 @@ def test_agent_carries_prompt_cache_key_in_extra_body(monkeypatch):
         assert agent.model_settings.extra_body == {
             "prompt_cache_key": "pageindex-k2"}, name
         assert agent.model_settings.extra_args is None
+
+
+@needs_agents
+def test_reasoning_passthrough_reaches_each_engine(monkeypatch):
+    """Per-door native reasoning, forwarded verbatim. The chat door's
+    effort rides extra_args — LiteLLM's own top-level kwarg on every
+    supported openai-agents version, and the channel admits values outside
+    the OpenAI enum ("none") — coexisting with the Claude cache marker.
+    The responses door's object rides ModelSettings.reasoning, which the
+    Responses model forwards verbatim. Unset sends nothing."""
+    pytest.importorskip("litellm")
+    monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
+    monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
+                        lambda *a, **k: [])
+    agent = local_chat._openai_agent(None, "chat", "gpt-test", "sys",
+                                     None, None, reasoning_effort="low")
+    assert agent.model_settings.extra_args == {"reasoning_effort": "low"}
+    assert agent.model_settings.reasoning is None
+    agent = local_chat._openai_agent(None, "chat", "anthropic/claude-x",
+                                     "sys", None, None,
+                                     reasoning_effort="none")
+    assert agent.model_settings.extra_args["reasoning_effort"] == "none"
+    assert "cache_control_injection_points" in agent.model_settings.extra_args
+    agent = local_chat._openai_agent(None, "responses", "gpt-test", "sys",
+                                     None, None,
+                                     reasoning={"effort": "low",
+                                                "summary": "auto"})
+    # ModelSettings coerces the dict into the typed openai Reasoning object.
+    assert agent.model_settings.reasoning.effort == "low"
+    assert agent.model_settings.reasoning.summary == "auto"
+    assert agent.model_settings.extra_args is None
+    agent = local_chat._openai_agent(None, "chat", "gpt-test", "sys",
+                                     None, None)
+    assert agent.model_settings.reasoning is None
+    assert agent.model_settings.extra_args is None
+
+
+@needs_agents
+def test_responses_envelope_echoes_reasoning(client, store_path, fake_model):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([[_msg_item("ok")]])
+    result = client.responses("q", reasoning={"effort": "low"})
+    assert result["reasoning"] == {"effort": "low"}
+    fake_model([[_msg_item("ok")]])
+    assert client.responses("q")["reasoning"] is None
 
 
 @needs_agents
@@ -1302,6 +1351,21 @@ def test_messages_max_tokens_default_resolves_per_model(client, fake_anthropic):
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
     client.messages("q", model="claude-3-opus-20240229", max_tokens=1234)
     assert calls[0]["max_tokens"] == 1234
+
+
+@needs_anthropic
+def test_messages_thinking_passes_through(client, fake_anthropic):
+    """Anthropic-native thinking config, forwarded verbatim; unset sends
+    nothing so the backend default applies."""
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
+    client.messages("q", model="claude-sonnet-4-5",
+                    thinking={"type": "adaptive"})
+    assert calls[0]["thinking"] == {"type": "adaptive"}
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
+    client.messages("q", model="claude-sonnet-4-5")
+    assert "thinking" not in calls[0]
 
 
 @needs_anthropic
