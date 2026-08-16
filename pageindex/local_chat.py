@@ -24,6 +24,7 @@ import asyncio
 import concurrent.futures
 import hashlib
 import json
+import os
 import queue
 import threading
 import time
@@ -214,14 +215,18 @@ def _require_openai_agents(method: str) -> None:
 def _openai_model(protocol: str, model_name: str):
     """The backend protocol driver — the seam tests replace with a fake.
 
-    ``litellm/<provider>/<model>`` (the client's normalized retrieve_model
-    form) and bare ``<provider>/<model>`` paths drive the provider through
-    LiteLLM — chat.completions only, so the responses protocol refuses them
-    instead of silently downgrading; a first segment LiteLLM does not know
-    (a HuggingFace repo id like ``Qwen/...``) is refused with the
-    ``openai/`` escape instead of failing inside LiteLLM at request time;
-    an ``openai/`` prefix strips to the OpenAI SDK; bare names go to the
-    OpenAI SDK as-is."""
+    chat protocol: every model routes through LiteLLM. Bare names are
+    OpenAI-compatible shorthand (wire form ``openai/<name>``, so
+    OPENAI_API_KEY / OPENAI_BASE_URL keep selecting the backend), a
+    ``litellm/`` prefix strips, a first segment LiteLLM does not know (a
+    HuggingFace repo id like ``Qwen/...``) is refused with the ``openai/``
+    escape instead of failing inside LiteLLM at request time, and an
+    ``openai/`` prefix opts out to the OpenAI SDK directly.
+
+    responses protocol: the Responses API is OpenAI-SDK native — LiteLLM's
+    completion surface speaks the chat.completions format, so
+    provider-prefixed models are refused instead of silently downgrading;
+    bare and ``openai/`` names drive the OpenAI SDK."""
     if "/" in model_name and not model_name.startswith("openai/"):
         if protocol == "responses":
             raise PageIndexAPIError(
@@ -233,6 +238,7 @@ def _openai_model(protocol: str, model_name: str):
                 "Responses-capable backend and use a bare or "
                 "'openai/'-prefixed model name."
             )
+    if protocol == "chat" and not model_name.startswith("openai/"):
         try:
             from agents.extensions.models.litellm_model import LitellmModel
             import litellm
@@ -242,6 +248,14 @@ def _openai_model(protocol: str, model_name: str):
                 "installed. Run:  pip install 'litellm>=1.30'"
             )
         wire = model_name.removeprefix("litellm/")
+        if "/" not in wire:
+            if not os.environ.get("OPENAI_API_KEY"):
+                raise PageIndexAPIError(
+                    "The OpenAI backend is not configured: set the "
+                    "OPENAI_API_KEY environment variable (any value works "
+                    "for keyless OPENAI_BASE_URL servers)."
+                )
+            wire = f"openai/{wire}"
         providers = getattr(litellm, "provider_list", None)
         if providers and wire.split("/", 1)[0] not in providers:
             raise PageIndexAPIError(
@@ -296,16 +310,26 @@ def _cache_extra_args(model_name: str) -> Optional[dict]:
 
 
 def _openai_agent(client, protocol: str, model_name: str, instructions: str,
-                  temperature, top_p, doc_ids=None):
+                  temperature, top_p, doc_ids=None, cache_key=None):
     from agents import Agent, ModelSettings
     from .integrations.openai_agents import build_openai_tools
+    # ModelSettings.extra_body is the one channel all three engines put on
+    # the wire: LiteLLM drops the bare prompt_cache_key kwarg (wire-verified),
+    # and both OpenAI model classes pass extra_body through verbatim. OpenAI
+    # destinations only — LiteLLM plants extra_body as a literal field in
+    # other providers' request bodies, which Anthropic rejects as unknown.
+    wire = model_name.removeprefix("litellm/")
+    openai_backend = "/" not in wire or wire.startswith("openai/")
     return Agent(
         name="PageIndex",
         instructions=instructions,
         tools=build_openai_tools(client, doc_ids=doc_ids),
         model=_openai_model(protocol, model_name),
-        model_settings=ModelSettings(temperature=temperature, top_p=top_p,
-                                     extra_args=_cache_extra_args(model_name)),
+        model_settings=ModelSettings(
+            temperature=temperature, top_p=top_p,
+            extra_body=({"prompt_cache_key": cache_key}
+                        if cache_key and openai_backend else None),
+            extra_args=_cache_extra_args(model_name)),
     )
 
 
@@ -315,27 +339,40 @@ def _validate_max_turns(max_turns) -> None:
         raise PageIndexAPIError("max_turns must be a positive integer.")
 
 
-def _conversation_group_id(model_name: str, instructions: str, items) -> str:
-    """Stable per-conversation cache-routing key: openai-agents hashes
-    RunConfig.group_id into the OpenAI prompt_cache_key, and without one it
-    stamps every run with a fresh key, tagging a round-tripped prefix as a
-    different cache group. Keyed on the prefix identity — model,
-    instructions, first conversation item — so a conversation's
-    continuations share one route without pooling unrelated conversations.
-    Callers pass the conversation's own items, never the SDK-prepended
-    doc-targeting block: that block is byte-identical for every
-    conversation about a document and would pool them all under one key."""
+def _conversation_cache_key(model_name: str, instructions: str, items) -> str:
+    """Stable per-conversation cache-routing key, sent as the OpenAI
+    ``prompt_cache_key`` through ModelSettings.extra_args (openai-agents
+    0.20 no longer derives it from RunConfig.group_id — verified against a
+    captured wire). Keyed on the prefix identity — model, instructions,
+    first conversation item — so a conversation's continuations share one
+    route without pooling unrelated conversations. Callers pass the
+    conversation's own items, never the SDK-prepended doc-targeting block:
+    that block is byte-identical for every conversation about a document
+    and would pool them all under one key."""
     seed = json.dumps([model_name, instructions,
                        items[0] if items else None],
                       sort_keys=True, default=str)
     return "pageindex-" + hashlib.sha256(seed.encode()).hexdigest()[:16]
 
 
-def _run_kwargs(max_turns, group_id: str) -> dict:
+def _model_backend_error(exc) -> PageIndexAPIError:
+    """Wrap a provider failure; the sol-class refusal (chatcmpl rejects
+    function tools while reasoning is on) gets its two documented exits
+    appended, since the fix is a different lane, not a retry."""
+    message = f"The model backend failed: {exc}"
+    if "Function tools with reasoning_effort" in str(exc):
+        message += (
+            " — this model runs tools on the Responses lane: upgrade "
+            "litellm (newer releases route it there automatically) or "
+            "call responses() instead."
+        )
+    return PageIndexAPIError(message)
+
+
+def _run_kwargs(max_turns) -> dict:
     # No traces — the caller opted into QA, not telemetry.
     from agents import RunConfig
-    kwargs: dict = {"run_config": RunConfig(tracing_disabled=True,
-                                            group_id=group_id)}
+    kwargs: dict = {"run_config": RunConfig(tracing_disabled=True)}
     if max_turns is not None:
         kwargs["max_turns"] = max_turns
     return kwargs
@@ -449,10 +486,10 @@ def run_chat_completions(client, messages, stream: bool = False,
     reported_model = _reported_model(model_name)
     managed = _managed_instructions(system_texts)
     agent = _openai_agent(client, "chat", model_name, managed,
-                          temperature, None, doc_ids=doc_id)
-    run_kwargs = _run_kwargs(max_turns,
-                             _conversation_group_id(model_name, managed,
-                                                    history))
+                          temperature, None, doc_ids=doc_id,
+                          cache_key=_conversation_cache_key(model_name,
+                                                            managed, history))
+    run_kwargs = _run_kwargs(max_turns)
     import openai
     from agents import Runner
     from agents.exceptions import AgentsException, MaxTurnsExceeded
@@ -466,8 +503,7 @@ def run_chat_completions(client, messages, stream: bool = False,
             raise PageIndexAPIError(
                 f"The agent backend failed: {exc}") from exc
         except openai.OpenAIError as exc:
-            raise PageIndexAPIError(
-                f"The model backend failed: {exc}") from exc
+            raise _model_backend_error(exc) from exc
         return {
             "id": f"chatcmpl-{uuid.uuid4().hex}",
             "object": "chat.completion",
@@ -512,8 +548,7 @@ def run_chat_completions(client, messages, stream: bool = False,
             raise PageIndexAPIError(
                 f"The agent backend failed: {exc}") from exc
         except openai.OpenAIError as exc:
-            raise PageIndexAPIError(
-                f"The model backend failed: {exc}") from exc
+            raise _model_backend_error(exc) from exc
         finally:
             if not completed and hasattr(streamed, "cancel"):
                 streamed.cancel()  # abandoned/failed: stop the agent task
@@ -559,10 +594,10 @@ def run_responses(client, input, model: Optional[str] = None,
     model_name = model or client.retrieve_model
     managed = _managed_instructions(extra)
     agent = _openai_agent(client, "responses", model_name, managed,
-                          temperature, top_p, doc_ids=doc_id)
-    run_kwargs = _run_kwargs(max_turns,
-                             _conversation_group_id(model_name, managed,
-                                                    conversation))
+                          temperature, top_p, doc_ids=doc_id,
+                          cache_key=_conversation_cache_key(model_name, managed,
+                                                            conversation))
+    run_kwargs = _run_kwargs(max_turns)
     recorded: dict = {}
     import openai
     from agents import Runner
