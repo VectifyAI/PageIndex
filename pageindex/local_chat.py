@@ -215,20 +215,19 @@ def _require_openai_agents(method: str) -> None:
 def _openai_model(protocol: str, model_name: str):
     """The backend protocol driver — the seam tests replace with a fake.
 
-    chat protocol: every model routes through LiteLLM. Bare names are
-    OpenAI-compatible shorthand (wire form ``openai/<name>``, so
-    OPENAI_API_KEY / OPENAI_BASE_URL keep selecting the backend), a
-    ``litellm/`` prefix strips, a first segment LiteLLM does not know (a
-    HuggingFace repo id like ``Qwen/...``) is refused with the ``openai/``
-    escape instead of failing inside LiteLLM at request time, and an
-    ``openai/`` prefix opts out to the OpenAI SDK directly.
+    chat protocol: LiteLLM, full stop — model names mean what LiteLLM says
+    they mean. Bare names are OpenAI-compatible shorthand (wire form
+    ``openai/<name>``, so OPENAI_API_KEY / OPENAI_BASE_URL keep selecting
+    the backend), a ``litellm/`` prefix strips, and a first segment LiteLLM
+    does not know (a HuggingFace repo id like ``Qwen/...``) is refused with
+    the ``openai/`` form instead of failing inside LiteLLM at request time.
 
     responses protocol: the Responses API is OpenAI-SDK native — LiteLLM's
     completion surface speaks the chat.completions format, so
     provider-prefixed models are refused instead of silently downgrading;
     bare and ``openai/`` names drive the OpenAI SDK."""
-    if "/" in model_name and not model_name.startswith("openai/"):
-        if protocol == "responses":
+    if protocol == "responses":
+        if "/" in model_name and not model_name.startswith("openai/"):
             raise PageIndexAPIError(
                 f"responses() cannot drive "
                 f"'{model_name.removeprefix('litellm/')}': provider-prefixed "
@@ -238,47 +237,43 @@ def _openai_model(protocol: str, model_name: str):
                 "Responses-capable backend and use a bare or "
                 "'openai/'-prefixed model name."
             )
-    if protocol == "chat" and not model_name.startswith("openai/"):
+        import openai
+        model_name = model_name.removeprefix("openai/")
         try:
-            from agents.extensions.models.litellm_model import LitellmModel
-            import litellm
-        except ImportError:
+            backend = openai.AsyncOpenAI()
+        except openai.OpenAIError as exc:
             raise PageIndexAPIError(
-                f"'{model_name}' routes through LiteLLM, but litellm is not "
-                "installed. Run:  pip install 'litellm>=1.30'"
-            )
-        wire = model_name.removeprefix("litellm/")
-        if "/" not in wire:
-            if not os.environ.get("OPENAI_API_KEY"):
-                raise PageIndexAPIError(
-                    "The OpenAI backend is not configured: set the "
-                    "OPENAI_API_KEY environment variable (any value works "
-                    "for keyless OPENAI_BASE_URL servers)."
-                )
-            wire = f"openai/{wire}"
-        providers = getattr(litellm, "provider_list", None)
-        if providers and wire.split("/", 1)[0] not in providers:
-            raise PageIndexAPIError(
-                f"'{wire}' routes through LiteLLM, but "
-                f"'{wire.split('/', 1)[0]}' is not a LiteLLM provider. For an "
-                "OpenAI-compatible server (vLLM, TGI, Ollama) serving this "
-                f"model id, use 'openai/{wire}' and point OPENAI_BASE_URL "
-                "at the server."
-            )
-        return LitellmModel(wire)
-    import openai
-    model_name = model_name.removeprefix("openai/")
+                f"The OpenAI backend is not configured: {exc}") from exc
+        from agents.models.openai_responses import OpenAIResponsesModel
+        return OpenAIResponsesModel(model_name, openai_client=backend)
     try:
-        backend = openai.AsyncOpenAI()
-    except openai.OpenAIError as exc:
+        from agents.extensions.models.litellm_model import LitellmModel
+        import litellm
+    except ImportError:
         raise PageIndexAPIError(
-            f"The OpenAI backend is not configured: {exc}") from exc
-    if protocol == "chat":
-        from agents.models.openai_chatcompletions import (
-            OpenAIChatCompletionsModel)
-        return OpenAIChatCompletionsModel(model_name, backend)
-    from agents.models.openai_responses import OpenAIResponsesModel
-    return OpenAIResponsesModel(model_name, openai_client=backend)
+            f"'{model_name}' routes through LiteLLM, but litellm is not "
+            "installed. Run:  pip install 'litellm>=1.30'"
+        )
+    wire = model_name.removeprefix("litellm/")
+    if "/" not in wire or wire.startswith("openai/"):
+        if not os.environ.get("OPENAI_API_KEY"):
+            raise PageIndexAPIError(
+                "The OpenAI backend is not configured: set the "
+                "OPENAI_API_KEY environment variable (any value works "
+                "for keyless OPENAI_BASE_URL servers)."
+            )
+    if "/" not in wire:
+        wire = f"openai/{wire}"
+    providers = getattr(litellm, "provider_list", None)
+    if providers and wire.split("/", 1)[0] not in providers:
+        raise PageIndexAPIError(
+            f"'{wire}' routes through LiteLLM, but "
+            f"'{wire.split('/', 1)[0]}' is not a LiteLLM provider. For an "
+            "OpenAI-compatible server (vLLM, TGI, Ollama) serving this "
+            f"model id, use 'openai/{wire}' and point OPENAI_BASE_URL "
+            "at the server."
+        )
+    return LitellmModel(wire)
 
 
 def _reported_model(model_name: str) -> str:

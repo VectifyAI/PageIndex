@@ -938,12 +938,12 @@ def test_empty_doc_id_is_an_empty_allowlist(client, store_path, fake_model):
 
 @needs_agents
 def test_openai_model_resolves_provider_prefixes():
-    """The chat lane routes everything through LiteLLM — bare names as the
-    openai/ shorthand, routing prefixes never leak as wire model names.
-    openai/ opts out to the OpenAI SDK; responses stays OpenAI-SDK native."""
+    """The chat lane is LiteLLM, full stop — model names mean what LiteLLM
+    says they mean, bare names are the openai/ shorthand, and routing
+    prefixes never leak as wire model names. responses stays OpenAI-SDK
+    native."""
     pytest.importorskip("litellm")
     from agents.extensions.models.litellm_model import LitellmModel
-    from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
     from agents.models.openai_responses import OpenAIResponsesModel
 
     model = local_chat._openai_model("chat", "litellm/anthropic/claude-x")
@@ -953,9 +953,11 @@ def test_openai_model_resolves_provider_prefixes():
     model = local_chat._openai_model("chat", "gpt-5.2")
     assert isinstance(model, LitellmModel) and model.model == "openai/gpt-5.2"
     model = local_chat._openai_model("chat", "openai/gpt-5.2")
-    assert isinstance(model, OpenAIChatCompletionsModel)
-    assert str(model.model) == "gpt-5.2"
+    assert isinstance(model, LitellmModel) and model.model == "openai/gpt-5.2"
     model = local_chat._openai_model("responses", "gpt-5.2")
+    assert isinstance(model, OpenAIResponsesModel)
+    assert str(model.model) == "gpt-5.2"
+    model = local_chat._openai_model("responses", "openai/gpt-5.2")
     assert isinstance(model, OpenAIResponsesModel)
     assert str(model.model) == "gpt-5.2"
 
@@ -1021,8 +1023,9 @@ def test_chat_missing_openai_key_fails_loud(monkeypatch):
     """A missing backend credential surfaces as the SDK's own error type,
     like every other precondition on the chat surfaces."""
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    with pytest.raises(PageIndexAPIError, match="OPENAI_API_KEY"):
-        local_chat._openai_model("chat", "gpt-4o")
+    for name in ("gpt-4o", "openai/gpt-4o"):
+        with pytest.raises(PageIndexAPIError, match="OPENAI_API_KEY"):
+            local_chat._openai_model("chat", name)
 
 
 @needs_agents
