@@ -252,7 +252,7 @@ def _openai_model(protocol: str, model_name: str):
     except ImportError:
         raise PageIndexAPIError(
             f"'{model_name}' routes through LiteLLM, but litellm is not "
-            "installed. Run:  pip install 'litellm>=1.30'"
+            "installed. Run:  pip install 'litellm>=1.84'"
         )
     wire = model_name.removeprefix("litellm/")
     if "/" not in wire or wire.startswith("openai/"):
@@ -336,7 +336,7 @@ def _validate_max_turns(max_turns) -> None:
 
 def _conversation_cache_key(model_name: str, instructions: str, items) -> str:
     """Stable per-conversation cache-routing key, sent as the OpenAI
-    ``prompt_cache_key`` through ModelSettings.extra_args (openai-agents
+    ``prompt_cache_key`` through ModelSettings.extra_body (openai-agents
     0.20 no longer derives it from RunConfig.group_id — verified against a
     captured wire). Keyed on the prefix identity — model, instructions,
     first conversation item — so a conversation's continuations share one
