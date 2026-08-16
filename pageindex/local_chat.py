@@ -254,6 +254,8 @@ def _openai_model(protocol: str, model_name: str):
             f"'{model_name}' routes through LiteLLM, but litellm is not "
             "installed. Run:  pip install 'litellm>=1.97'"
         )
+    from .utils import _repair_litellm_types
+    _repair_litellm_types()
     wire = model_name.removeprefix("litellm/")
     if "/" not in wire or wire.startswith("openai/"):
         if not os.environ.get("OPENAI_API_KEY"):

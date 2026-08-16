@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 import textwrap
 from datetime import datetime
 import time
@@ -18,6 +19,23 @@ import re
 
 # litellm is imported inside the functions that use it; eager import is slow
 # and fetches a remote model-cost map.
+
+
+def _repair_litellm_types() -> None:
+    """litellm 1.97.0's Message/Delta annotations carry nested forward refs
+    Python 3.10 cannot resolve (BerriAI/litellm#36384), so every completion
+    dies constructing its response. Rebuild them once with the defining
+    modules' names; no-op on 3.11+ and on fixed litellm releases."""
+    if sys.version_info >= (3, 11):
+        return
+    try:
+        import litellm.types.llms.openai as openai_types
+        import litellm.types.utils as litellm_types
+        namespace = {**vars(openai_types), **vars(litellm_types)}
+        litellm_types.Message.model_rebuild(_types_namespace=namespace)
+        litellm_types.Delta.model_rebuild(_types_namespace=namespace)
+    except Exception:
+        pass  # best-effort: a failed repair leaves litellm's own error
 
 # Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
 if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
@@ -81,6 +99,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
                 )
             else:
                 import litellm
+                _repair_litellm_types()
                 response = litellm.completion(
                     model=model,
                     messages=messages,
@@ -127,6 +146,7 @@ async def llm_acompletion(model, prompt):
                 )
             else:
                 import litellm
+                _repair_litellm_types()
                 response = await litellm.acompletion(
                     model=model,
                     messages=messages,
