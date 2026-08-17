@@ -848,6 +848,9 @@ def test_parse_pages_overlap_counts_union():
     assert len(pages) == 9000 and pages[0] == 1 and pages[-1] == 9000
     with pytest.raises(ValueError, match="spans more than"):
         _parse_pages("1-10001")
+    # one parser with the tool layer now: page 0 is rejected, not passed on
+    with pytest.raises(ValueError, match="positive"):
+        _parse_pages("0-3")
 
 
 # ── backend: the indexing lane ──

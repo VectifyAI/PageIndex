@@ -33,7 +33,6 @@ TOOL_RESPONSE_CHAR_LIMIT = 100_000
 STRUCTURE_FIRST_PAGE_THRESHOLD = 20
 
 _CHAR_BUDGET = int(TOOL_RESPONSE_CHAR_LIMIT * 0.95)
-_PAGES_SPEC_RE = re.compile(r"^(\d+(-\d+)?)(,\s*\d+(-\d+)?)*$")
 _MAX_REQUESTED_PAGES = 10_000
 _SIMILAR_NAMES_LIMIT = 3
 _TOOL_WAIT_TIMEOUT = 180.0  # "up to 3 minutes", per the wait_for_completion schema
@@ -503,69 +502,102 @@ def _folder_unsupported(param: str) -> tuple[dict, bool]:
 
 # ── page spec handling ──
 
-def _parse_page_spec(
-    pages: str, doc_name: str,
-) -> "tuple[Optional[list[int]], Optional[_ToolResult]]":
-    """Expand '1-3,7' into a sorted, deduplicated page list, or an error."""
-    invalid = _failure(
-        "Invalid page specification format",
-        {"doc_name": doc_name},
-        {
-            "summary": "Failed to parse the pages parameter",
-            "options": [
-                'Use valid formats: "5", "3,7,10", "5-10", or "1-3,7,9-12"',
-                "Ensure page numbers are positive integers",
-            ],
-        },
-        "INVALID_INPUT",
-    )
-    if not isinstance(pages, str) or not _PAGES_SPEC_RE.match(pages.strip()):
-        return None, invalid
-    too_many = _failure(
-        f"Too many pages requested (over {_MAX_REQUESTED_PAGES})",
-        {"doc_name": doc_name},
-        {
-            "summary": "The page specification spans too many pages",
-            "options": [
-                "Request a narrower page range",
-                "The response holds only a few pages per call - page through with several smaller requests",
-            ],
-        },
-        "INVALID_INPUT",
-    )
+class _PageSpecError(ValueError):
+    """Shared page-spec rejection; ``code`` picks the caller's rendering."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def _expand_pages(pages) -> list[int]:
+    """Expand '1-3,7' into sorted distinct pages — the one parser for the
+    SDK surface and the tool layer. Raises _PageSpecError with code
+    'invalid', 'too_many', or 'nonpositive'."""
+    if not isinstance(pages, str):
+        raise _PageSpecError("invalid",
+                             f"Invalid page specification: {pages!r}")
+    too_many = (f"Page specification '{pages}' spans more than "
+                f"{_MAX_REQUESTED_PAGES} pages; request a narrower range")
     expanded: set[int] = set()
     for part in pages.split(","):
         part = part.strip()
-        if "-" in part:
-            start, end = (int(x) for x in part.split("-", 1))
-            if start > end:
-                return None, invalid
-        else:
-            start = end = int(part)
+        try:
+            if "-" in part:
+                start, end = (int(x) for x in part.split("-", 1))
+                if start > end:
+                    raise _PageSpecError(
+                        "invalid",
+                        f"Invalid range '{part}': start must be <= end")
+            else:
+                start = end = int(part)
+        except _PageSpecError:
+            raise
+        except ValueError as exc:
+            raise _PageSpecError(
+                "invalid", f"Invalid page specification '{pages}'") from exc
         # Bound each part arithmetically before materializing it: a spec like
         # "1-1000000000" would otherwise expand to billions of integers
         # inside the caller's process. The cap is on distinct pages, so
         # overlapping parts (a parent section plus its children) don't
         # double-count.
         if end - start + 1 > _MAX_REQUESTED_PAGES:
-            return None, too_many
+            raise _PageSpecError("too_many", too_many)
         expanded.update(range(start, end + 1))
         if len(expanded) > _MAX_REQUESTED_PAGES:
-            return None, too_many
-    if any(page < 1 for page in expanded):
+            raise _PageSpecError("too_many", too_many)
+    if min(expanded) < 1:
+        raise _PageSpecError(
+            "nonpositive",
+            "Invalid page numbers. Page numbers must be positive integers")
+    return sorted(expanded)
+
+
+def _parse_page_spec(
+    pages: str, doc_name: str,
+) -> "tuple[Optional[list[int]], Optional[_ToolResult]]":
+    """Expand '1-3,7' into a sorted, deduplicated page list, or an error."""
+    try:
+        return _expand_pages(pages), None
+    except _PageSpecError as exc:
+        if exc.code == "too_many":
+            return None, _failure(
+                f"Too many pages requested (over {_MAX_REQUESTED_PAGES})",
+                {"doc_name": doc_name},
+                {
+                    "summary": "The page specification spans too many pages",
+                    "options": [
+                        "Request a narrower page range",
+                        "The response holds only a few pages per call - page through with several smaller requests",
+                    ],
+                },
+                "INVALID_INPUT",
+            )
+        if exc.code == "nonpositive":
+            return None, _failure(
+                "Invalid page numbers. Page numbers must be positive integers",
+                {"doc_name": doc_name},
+                {
+                    "summary": "Invalid page numbers provided",
+                    "options": [
+                        "Page numbers must be positive integers (>= 1)",
+                        "Check the page specification format",
+                    ],
+                },
+                "INVALID_INPUT",
+            )
         return None, _failure(
-            "Invalid page numbers. Page numbers must be positive integers",
+            "Invalid page specification format",
             {"doc_name": doc_name},
             {
-                "summary": "Invalid page numbers provided",
+                "summary": "Failed to parse the pages parameter",
                 "options": [
-                    "Page numbers must be positive integers (>= 1)",
-                    "Check the page specification format",
+                    'Use valid formats: "5", "3,7,10", "5-10", or "1-3,7,9-12"',
+                    "Ensure page numbers are positive integers",
                 ],
             },
             "INVALID_INPUT",
         )
-    return sorted(expanded), None
 
 
 def _format_page_spec(pages: list[int]) -> str:
@@ -1265,9 +1297,6 @@ def _local_schema(name: str) -> dict[str, Any]:
     return schema
 
 
-def _docstring(name: str) -> str:
-    return _tool_docstring(_local_description(name),
-                           _local_schema(name)["properties"])
 
 
 _SCHEMA_TYPE_MAP = {"string": str, "integer": int, "number": float,
@@ -1325,16 +1354,16 @@ def _bridge_invoker(bridge, name: str) -> "Callable[[dict], tuple[str, bool]]":
     return _invoke
 
 
-def _make_bridge_function(bridge, meta: dict) -> Callable[..., str]:
-    """One plain function for a cloud tool: real signature and docstring from
-    the server's schema, invocation proxied over MCP, errors contained."""
+def _make_tool_function(name: str, description: str, schema: dict,
+                        invoke: "Callable[[dict], tuple[str, bool]]",
+                        ) -> Callable[..., str]:
+    """One plain function for a tool: real signature and docstring from the
+    schema, errors contained by the invoker."""
     import keyword
 
-    name = str(meta.get("name") or "")
-    schema = meta.get("inputSchema") or {}
     properties: dict[str, Any] = schema.get("properties") or {}
     required = set(schema.get("required") or [])
-    _invoke = _bridge_invoker(bridge, name)
+    _invoke = invoke
 
     params_usable = all(param.isidentifier() and not keyword.iskeyword(param)
                         and param != "_invoke"
@@ -1365,7 +1394,7 @@ def _make_bridge_function(bridge, meta: dict) -> Callable[..., str]:
         annotations["return"] = str
         proxy.__annotations__ = annotations
     proxy.__name__ = proxy.__qualname__ = name or "tool"
-    proxy.__doc__ = _tool_docstring(meta.get("description") or "", properties)
+    proxy.__doc__ = _tool_docstring(description or "", properties)
     return proxy
 
 
@@ -1405,14 +1434,6 @@ def _read_only_tools(tools_meta: list[dict]) -> list[dict]:
             "to expose the unfiltered list."
         )
     return filtered
-
-
-def _build_cloud_agent_tools(client, include_management: bool) -> list[Callable[..., str]]:
-    bridge = _cloud_bridge(client)
-    tools_meta = bridge.list_tools()
-    if not include_management:
-        tools_meta = _read_only_tools(tools_meta)
-    return [_make_bridge_function(bridge, meta) for meta in tools_meta]
 
 
 def _require_local_scope(client, doc_ids) -> None:
@@ -1470,52 +1491,9 @@ def build_agent_tools(client, include_management: bool = False) -> list[Callable
     signature accepts (cloud-only parameters are absent from the local
     signatures; the call_tool path answers them with the guided envelope).
     """
-    if getattr(client, "api_key", None):
-        return _build_cloud_agent_tools(client, include_management)
-
-    def browse_documents(offset: int = 0, limit: int = 10) -> str:
-        return call_tool(client, "browse_documents", {
-            "offset": offset, "limit": limit,
-        })[0]
-
-    def get_document(doc_name: str, wait_for_completion: bool = False) -> str:
-        return call_tool(client, "get_document", {
-            "doc_name": doc_name,
-            "wait_for_completion": wait_for_completion,
-        })[0]
-
-    def get_document_structure(doc_name: str, part: int = 1,
-                               wait_for_completion: bool = False) -> str:
-        return call_tool(client, "get_document_structure", {
-            "doc_name": doc_name, "part": part,
-            "wait_for_completion": wait_for_completion,
-        })[0]
-
-    def get_page_content(doc_name: str, pages: str,
-                         wait_for_completion: bool = False) -> str:
-        return call_tool(client, "get_page_content", {
-            "doc_name": doc_name, "pages": pages,
-            "wait_for_completion": wait_for_completion,
-        })[0]
-
-    def remove_document(doc_names: list[str]) -> str:
-        return call_tool(client, "remove_document", {
-            "doc_names": doc_names,
-        })[0]
-
-    functions = {
-        "browse_documents": browse_documents,
-        "get_document": get_document,
-        "get_document_structure": get_document_structure,
-        "get_page_content": get_page_content,
-        "remove_document": remove_document,
-    }
-    tools = []
-    for name in tool_names(include_management):
-        function = functions[name]
-        function.__doc__ = _docstring(name)
-        tools.append(function)
-    return tools
+    return [_make_tool_function(name, description, schema, invoke)
+            for name, description, schema, invoke
+            in _tool_specs(client, include_management)]
 
 
 # ── agent instructions ──

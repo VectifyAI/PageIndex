@@ -69,7 +69,10 @@ def run(client, name, **arguments):
 
 # ── contract parity ──
 
-def test_contract_matches_snapshot():
+def test_contract_edits_are_deliberate():
+    """The committed snapshot cannot detect drift from the live cloud
+    server — both copies live in this repo. It exists so a TOOL_CONTRACT
+    edit must touch two files in one change, never land by accident."""
     snapshot = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
     assert snapshot["tools"] == TOOL_CONTRACT
 
@@ -1189,13 +1192,12 @@ def test_cloud_agent_tools_null_description_survives():
     """A server may send description: null — .get(key, default) does not
     apply the default to it, and agent_tools() died with a TypeError while
     the _tool_specs path handled the same payload fine."""
-    from pageindex.agent_tools import _make_bridge_function
 
     class _Bridge:
         def call_tool(self, name, arguments):
             return json.dumps({"success": True}), False
 
-    tool = _make_bridge_function(_Bridge(), {
+    tool = _synth(_Bridge(), {
         "name": "search_documents",
         "description": None,
         "inputSchema": {"type": "object",
@@ -1494,10 +1496,20 @@ def test_mcp_bridge_blob_blocks_become_stubs():
 
 # ── review-round regressions ──
 
+def _synth(bridge, meta):
+    """Build a tool function the way the cloud lane does: signature
+    synthesis over a bridge invoker."""
+    from pageindex.agent_tools import _bridge_invoker, _make_tool_function
+    name = meta["name"]
+    return _make_tool_function(name, meta.get("description"),
+                               meta["inputSchema"],
+                               _bridge_invoker(bridge, name))
+
+
 def test_synth_optional_no_default_param_is_nullable():
     """A non-required, no-default schema param must annotate Optional, or
     strict schemas force the model to always send a value (browse.query)."""
-    from pageindex.agent_tools import _make_bridge_function, TOOL_CONTRACT
+    from pageindex.agent_tools import TOOL_CONTRACT
     from typing import get_args
 
     class _Bridge:
@@ -1507,7 +1519,7 @@ def test_synth_optional_no_default_param_is_nullable():
     meta = {"name": "browse_documents",
             "description": "d",
             "inputSchema": TOOL_CONTRACT["browse_documents"]["schema"]}
-    fn = _make_bridge_function(_Bridge(), meta)
+    fn = _synth(_Bridge(), meta)
     assert type(None) in get_args(fn.__annotations__["query"])
 
 
@@ -1516,7 +1528,6 @@ def test_synth_array_params_keep_their_item_type():
     function_tool then emits {"type": "array", "items": {}}, which strict
     function calling rejects."""
     from typing import Optional
-    from pageindex.agent_tools import _make_bridge_function
 
     class _Bridge:
         def call_tool(self, name, args):
@@ -1535,7 +1546,7 @@ def test_synth_array_params_keep_their_item_type():
                 },
                 "required": ["doc_ids", "mixed"],
             }}
-    fn = _make_bridge_function(_Bridge(), meta)
+    fn = _synth(_Bridge(), meta)
     assert fn.__annotations__["doc_ids"] == list[str]
     assert fn.__annotations__["tags"] == Optional[list[int]]
     # A type-array in items (nullable elements) degrades to bare list —
@@ -1544,7 +1555,6 @@ def test_synth_array_params_keep_their_item_type():
 
 
 def test_synth_escape_hatches():
-    from pageindex.agent_tools import _make_bridge_function
 
     calls = []
 
@@ -1554,7 +1564,7 @@ def test_synth_escape_hatches():
             return "ok", False
 
     # Tool named "_invoke" must not recurse into itself.
-    invoke_named = _make_bridge_function(_Bridge(), {
+    invoke_named = _synth(_Bridge(), {
         "name": "_invoke", "description": "d",
         "inputSchema": {"type": "object", "properties": {"x": {"type": "string"}},
                         "required": ["x"]}})
@@ -1562,7 +1572,7 @@ def test_synth_escape_hatches():
     assert calls[-1] == ("_invoke", {"x": "v"})
 
     # Param named "dict" must not shadow the builtin.
-    dict_param = _make_bridge_function(_Bridge(), {
+    dict_param = _synth(_Bridge(), {
         "name": "t", "description": "d",
         "inputSchema": {"type": "object", "properties": {"dict": {"type": "string"}},
                         "required": ["dict"]}})
@@ -1571,7 +1581,7 @@ def test_synth_escape_hatches():
 
     # Non-identifier tool name still gets a real signature.
     import inspect
-    dashed = _make_bridge_function(_Bridge(), {
+    dashed = _synth(_Bridge(), {
         "name": "page-content.v2", "description": "d",
         "inputSchema": {"type": "object", "properties": {"a": {"type": "string"}},
                         "required": ["a"]}})

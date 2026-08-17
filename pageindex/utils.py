@@ -65,6 +65,18 @@ def _strip_prefix(s, prefix):
     return s
 
 
+def run_off_loop(func, *args):
+    """Run func now, or on a worker thread when this thread already runs an
+    asyncio loop (func may itself call asyncio.run)."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return func(*args)
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(func, *args).result()
+
+
 def _litellm_model(model, backend):
     """Normalize to LiteLLM's grammar (``litellm/`` strips, bare names get
     the ``openai/`` wire form — same as the chat lane) and fail fast on a

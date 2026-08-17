@@ -31,27 +31,8 @@ def _preload_litellm() -> None:
 
 
 def _parse_pages(pages: str) -> list[int]:
-    result: set[int] = set()
-    too_many = (f"Page specification '{pages}' spans more than "
-                "10000 pages; request a narrower range")
-    for part in pages.split(","):
-        part = part.strip()
-        if "-" in part:
-            start, end = (int(x) for x in part.split("-", 1))
-            if start > end:
-                raise ValueError(f"Invalid range '{part}': start must be <= end")
-        else:
-            start = end = int(part)
-        # Bound each part arithmetically before materializing it — a spec
-        # like "1-999999999" would otherwise expand to a billion integers.
-        # The cap is on distinct pages, so overlapping parts (a parent
-        # section plus its children) don't double-count.
-        if end - start + 1 > 10_000:
-            raise ValueError(too_many)
-        result.update(range(start, end + 1))
-        if len(result) > 10_000:
-            raise ValueError(too_many)
-    return sorted(result)
+    from .agent_tools import _expand_pages
+    return _expand_pages(pages)
 
 
 def _agents_sdk_model_name(model: str) -> str:

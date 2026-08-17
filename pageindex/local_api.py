@@ -1,17 +1,16 @@
 """Local implementation of the PageIndex SDK surface."""
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any
 
 from .errors import PageIndexAPIError
 from .local_store import DocStore
+from .utils import run_off_loop
 
 logger = logging.getLogger(__name__)
 
@@ -22,13 +21,6 @@ def _now_iso() -> str:
     return now.replace(microsecond=now.microsecond // 1000 * 1000).isoformat()
 
 
-def _run_indexer(func, *args, **kwargs):
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return func(*args, **kwargs)
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(func, *args, **kwargs).result()
 
 
 class LocalAPI:
@@ -46,7 +38,7 @@ class LocalAPI:
 
     def _with_backend(self, func, *args):
         """Scope the indexing lane's connection overrides around one
-        operation — runs inside whatever thread _run_indexer picked."""
+        operation — runs inside whatever thread run_off_loop picked."""
         from .utils import _llm_backend
         token = _llm_backend.set(self._index_backend)
         try:
@@ -114,11 +106,11 @@ class LocalAPI:
 
         try:
             if mode == "flash":
-                structure, description = _run_indexer(
+                structure, description = run_off_loop(
                     self._with_backend, self._index_flash, file_path, page_texts
                 )
             else:
-                structure, description = _run_indexer(
+                structure, description = run_off_loop(
                     self._with_backend, self._index_standard, file_path,
                     page_texts
                 )
