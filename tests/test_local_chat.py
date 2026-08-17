@@ -905,9 +905,7 @@ def test_responses_envelope_fields_and_cache_group(client, store_path,
                      "get_document_structure", "get_page_content"}
     assert all(tool["type"] == "function" for tool in result["tools"])
     assert result["instructions"].startswith(CHAT_HEADER)
-    # No transport echo attached in this fixture, so these are the
-    # documented fallbacks (the OpenAI server defaults), not assertions
-    # about the request.
+    # No transport echo attached here, so these are the fallbacks.
     assert result["parallel_tool_calls"] is True
     assert result["tool_choice"] == "auto"
 

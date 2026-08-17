@@ -1376,10 +1376,7 @@ def _cloud_bridge(client):
     MCP session. Weak-keyed off the instance so clients stay picklable; the
     lock closes the check-then-set race under concurrent first calls."""
     with _BRIDGES_LOCK:
-        # Keyed by the connection identity too: CloudAPI re-reads
-        # client.api_key on every REST call, so a rotated key (or moved
-        # BASE_URL) must rebuild the bridge instead of serving the stale
-        # session's snapshot.
+        # A rotated api_key or moved BASE_URL rebuilds the bridge.
         auth = (client.BASE_URL, client.api_key)
         bridge, seen = _BRIDGES.get(client) or (None, None)
         if bridge is None or seen != auth:

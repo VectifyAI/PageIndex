@@ -445,8 +445,7 @@ def _record_response_status(agent, recorded: dict) -> None:
                 value = getattr(response, field, None)
                 recorded[field] = (value.model_dump(mode="json")
                                    if hasattr(value, "model_dump") else value)
-        # The backend's echo of what it actually ran with — the envelope
-        # must report these, not assumed values (the request sends neither).
+        # The backend's echo of what it actually ran with.
         for field in ("tool_choice", "parallel_tool_calls"):
             value = getattr(response, field, None)
             if value is not None:
@@ -695,9 +694,7 @@ def run_responses(client, input, model: Optional[str] = None,
                        "parameters": tool.params_json_schema,
                        "strict": getattr(tool, "strict_json_schema", True)}
                       for tool in agent.tools],
-            # The backend's own echo when captured (transport wrapper /
-            # terminal stream event); the request sends neither param, so
-            # without an echo the OpenAI server defaults apply.
+            # Backend echo when captured; the request sends neither param.
             "tool_choice": recorded.get("tool_choice", "auto"),
             "parallel_tool_calls": recorded.get("parallel_tool_calls", True),
             "temperature": temperature,
@@ -748,12 +745,11 @@ def run_responses(client, input, model: Optional[str] = None,
                     data = event.data.model_dump(exclude_unset=True)
                     if data.get("type") in lifecycle:
                         if data["type"] == "response.created" and not opened:
-                            # N per-turn openings collapse to one, not zero:
-                            # consumers key state off response.created, so
-                            # the logical stream must open with it, carrying
-                            # the same id the terminal event will report.
+                            # N per-turn openings collapse to one, carrying
+                            # the id the terminal event will report.
                             opened = True
-                            (data.get("response") or {})["id"] = response_id
+                            if data.get("response"):
+                                data["response"]["id"] = response_id
                             sequence += 1
                             data["sequence_number"] = sequence
                             yield data

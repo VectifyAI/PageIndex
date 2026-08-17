@@ -63,14 +63,10 @@ def _strip_prefix(s, prefix):
 
 
 def _litellm_model(model, backend):
-    """Normalize to LiteLLM's grammar — same as the chat lane: bare names
-    are OpenAI-compatible shorthand (wire form ``openai/<name>``), a
-    ``litellm/`` prefix strips — and fail fast on misconfiguration:
-    litellm reports a missing key as a retryable 500 and an unknown
-    provider as a 400, either of which would burn the whole retry loop.
-    A backend override carries its own credentials, so it skips the key
-    check; the 401/404 status codes make both errors unrecoverable to
-    the summary and optimize passes instead of silently absorbed."""
+    """Normalize to LiteLLM's grammar (``litellm/`` strips, bare names get
+    the ``openai/`` wire form — same as the chat lane) and fail fast on a
+    missing key or unknown provider, with status codes the retry loop and
+    the summary/optimize passes treat as unrecoverable."""
     if not model:
         return model
     model = _strip_prefix(model, "litellm/")

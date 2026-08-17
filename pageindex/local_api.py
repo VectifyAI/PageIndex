@@ -131,9 +131,8 @@ class LocalAPI:
         pages = [{"page_index": i + 1, "markdown": text}
                  for i, text in enumerate(page_texts)]
         from .utils import remove_fields
-        # Uniquing must observe concurrent submitters' saves, so the
-        # check-then-write runs under the store lock — the early pre-check
-        # above is advisory fail-fast only.
+        # Check-then-write under the store lock; the early pre-check above
+        # is advisory only.
         with self._store.lock():
             meta = {
                 "id": doc_id,

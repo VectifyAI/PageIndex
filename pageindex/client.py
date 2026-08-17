@@ -440,8 +440,6 @@ class PageIndexClient:
         try:
             return envelope["choices"][0]["message"]["content"] or ""
         except (KeyError, IndexError, TypeError) as exc:
-            # A cloud reply without answer choices (filtered / malformed)
-            # must surface as the SDK's error, not a bare builtin.
             raise PageIndexAPIError(
                 "The chat response carries no answer: "
                 f"{str(envelope)[:200]}") from exc
