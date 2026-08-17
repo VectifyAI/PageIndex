@@ -889,7 +889,9 @@ class PageIndexClient:
                 (tool scoping is server-side).
             include_management (bool): Also expose tools that modify the
                 library.
-            model: Backend model name; overrides the local default.
+            model: Backend model name; overrides the local default. Same
+                grammar as ``chat_model`` (LiteLLM names; bare names are
+                OpenAI-compatible shorthand).
         """
         from .agent_tools import build_agent_instructions
         scope = self._local_doc_scope(doc_id)
@@ -901,7 +903,7 @@ class PageIndexClient:
         }
         model = model or getattr(self, "chat_model", None)
         if model:
-            config["model"] = model
+            config["model"] = _agents_sdk_model_name(model)
         return config
 
     def as_anthropic_tools(self, include_management: bool = False,

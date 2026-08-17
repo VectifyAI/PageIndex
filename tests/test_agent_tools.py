@@ -763,6 +763,11 @@ def test_openai_agent_config_model_speaks_the_agents_sdk_grammar(tmp_path):
                                   retrieve_model="anthropic/claude-x")
     assert (client.openai_agent_config()["model"]
             == "litellm/anthropic/claude-x")
+    # The per-call override speaks the same grammar as chat_model.
+    assert (client.openai_agent_config(model="anthropic/claude-y")["model"]
+            == "litellm/anthropic/claude-y")
+    assert (client.openai_agent_config(model="litellm/groq/llama-x")["model"]
+            == "litellm/groq/llama-x")
 
 
 def test_openai_agent_config_cloud_omits_model(cloud_with_fake_bridge):
