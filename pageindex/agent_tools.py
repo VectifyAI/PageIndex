@@ -1411,7 +1411,13 @@ def _build_cloud_agent_tools(client, include_management: bool) -> list[Callable[
 
 def _require_local_scope(client, doc_ids) -> None:
     """The allowlist is enforced in-process; cloud lookups run server-side,
-    so accepting doc_ids there would be advisory-only — refuse loudly."""
+    so accepting doc_ids there would be advisory-only — refuse loudly.
+    An empty allowlist is refused too: it would scope the agent to
+    nothing, with no signal to the caller."""
+    if doc_ids is not None and not doc_ids:
+        raise PageIndexAPIError(
+            "doc_id is empty. Pass one or more document IDs, or omit "
+            "doc_id to give the agent the whole library.")
     if doc_ids is not None and getattr(client, "api_key", None):
         raise PageIndexAPIError(
             "doc_ids scoping applies to local tools only — cloud calls "
@@ -1585,7 +1591,11 @@ def doc_targeting_block(client, doc_id, scoped: bool = False) -> Optional[str]:
         return None
     doc_ids = [doc_id] if isinstance(doc_id, str) else list(doc_id)
     if not doc_ids:
-        return None
+        # An empty selection must fail loud: washing it to None would mean
+        # "everything", and the tool-layer allowlist would mean "nothing".
+        raise PageIndexAPIError(
+            "doc_id is empty. Pass one or more document IDs, or omit "
+            "doc_id to give the agent the whole library.")
     details = [client.get_document(one_id) for one_id in doc_ids]
     listing = _all_documents(client)
     documents = ([{**detail, "id": one_id}

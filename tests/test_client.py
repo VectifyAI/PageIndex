@@ -891,3 +891,15 @@ def test_backend_args_are_local_only():
         PageIndexClient(api_key="pi-k", chat_backend={"api_key": "x"})
     with pytest.raises(PageIndexAPIError, match="index_backend"):
         PageIndexClient(api_key="pi-k", index_backend={"api_key": "x"})
+
+
+def test_chat_wraps_answerless_cloud_reply(monkeypatch):
+    """A cloud reply without choices (filtered / malformed) surfaces as
+    the SDK's error, not a bare IndexError/KeyError."""
+    client = PageIndexClient(api_key="pi-k")
+    for reply in ({"id": "x", "object": "chat.completion", "choices": []},
+                  {"id": "x"}):
+        monkeypatch.setattr(client, "chat_completions",
+                            lambda *a, _r=reply, **k: _r)
+        with pytest.raises(PageIndexAPIError, match="carries no answer"):
+            client.chat("hi")

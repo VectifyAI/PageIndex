@@ -432,7 +432,14 @@ class PageIndexClient:
         if stream:
             return cast(Iterator[str], result)
         envelope = cast(dict[str, Any], result)
-        return envelope["choices"][0]["message"]["content"] or ""
+        try:
+            return envelope["choices"][0]["message"]["content"] or ""
+        except (KeyError, IndexError, TypeError) as exc:
+            # A cloud reply without answer choices (filtered / malformed)
+            # must surface as the SDK's error, not a bare builtin.
+            raise PageIndexAPIError(
+                "The chat response carries no answer: "
+                f"{str(envelope)[:200]}") from exc
 
     def chat_completions(
         self,
@@ -851,14 +858,14 @@ class PageIndexClient:
         """doc_id for the tool layer: passed through locally (structural
         allowlist), dropped on cloud where scoping is server-side and the
         config helpers keep prompt-level targeting."""
-        if not getattr(self, "api_key", None):
-            return doc_id
         if doc_id is not None and not doc_id:
-            # Cloud has no tool-layer allowlist to make an empty scope mean
-            # "nothing"; dropping it would silently mean "everything".
+            # An empty scope means "nothing" locally (empty allowlist) and
+            # cannot be represented on cloud; both refuse it loudly.
             raise PageIndexAPIError(
                 "doc_id is empty. Pass one or more document IDs, or omit "
                 "doc_id to give the agent the whole library.")
+        if not getattr(self, "api_key", None):
+            return doc_id
         return None
 
     def openai_agent_config(

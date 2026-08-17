@@ -1070,18 +1070,18 @@ def test_doc_id_scopes_tools_to_targeted_documents(client, store_path,
 
 
 @needs_agents
-def test_empty_doc_id_is_an_empty_allowlist(client, store_path, fake_model):
-    """doc_id=[] scopes the agent to nothing; `or None` used to wash it
-    into unscoped full-library access."""
+def test_empty_doc_id_is_refused(client, store_path):
+    """doc_id=[] fails loud on every local surface, like cloud already
+    did: washing it to None would mean "everything", and the empty
+    allowlist meant "nothing" — an agent confidently reporting the
+    documents don't exist, with no signal the scope was empty."""
     seed_doc(store_path, "pi-a", "report.pdf")
-    fake = fake_model([
-        [_call_item("browse_documents", {})],
-        [_msg_item("done")],
-    ])
-    client.chat_completions("q", doc_id=[])
-    outputs = [item["output"] for item in fake.inputs[1]
-               if item.get("type") == "function_call_output"]
-    assert json.loads(outputs[-1])["documents"] == []
+    with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
+        client.chat_completions("q", doc_id=[])
+    with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
+        client.as_openai_tools(doc_id=[])
+    with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
+        client.agent_instructions(doc_id=[])
 
 
 @needs_agents
@@ -1638,6 +1638,12 @@ def test_backend_connection_reaches_each_engine(monkeypatch):
     agent = local_chat._openai_agent(None, "responses", "gpt-test", "sys",
                                      None, None, backend={"api_key": "k2"})
     assert agent.model._client.api_key == "k2"
+    # the LiteLLM endpoint spelling works on the SDK-constructed door too
+    agent = local_chat._openai_agent(None, "responses", "gpt-test", "sys",
+                                     None, None,
+                                     backend={"api_key": "k3",
+                                              "api_base": "http://rb"})
+    assert str(agent.model._client.base_url).rstrip("/") == "http://rb"
 
 
 def test_merged_backend_precedence():
@@ -1655,6 +1661,9 @@ def test_messages_backend_merges_and_reaches_the_client(client, fake_anthropic,
                                          "base_url": "http://x"})
     assert real.api_key == "kk"
     assert str(real.base_url).rstrip("/") == "http://x"
+    real = local_chat._anthropic_client({"api_key": "kk",
+                                         "api_base": "http://y"})
+    assert str(real.base_url).rstrip("/") == "http://y"
 
     calls = fake_anthropic([
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])

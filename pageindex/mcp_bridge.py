@@ -179,13 +179,18 @@ class McpBridge:
     def list_tools(self) -> list[dict]:
         tools: list[dict] = []
         cursor: Optional[str] = None
-        while True:
+        # A server echoing its cursor (or cycling) must not hang the client:
+        # no-progress terminates, the page cap turns a cycle into an error.
+        for _ in range(50):
             params = {"cursor": cursor} if cursor else {}
             result = self._request("tools/list", params) or {}
             tools.extend(result.get("tools") or [])
-            cursor = result.get("nextCursor")
-            if not cursor:
+            next_cursor = result.get("nextCursor")
+            if not next_cursor or next_cursor == cursor:
                 return tools
+            cursor = next_cursor
+        raise PageIndexAPIError(
+            "MCP tools/list pagination did not terminate within 50 pages.")
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> "tuple[str, bool]":
         """Returns (text, is_error) — is_error is the server's MCP isError

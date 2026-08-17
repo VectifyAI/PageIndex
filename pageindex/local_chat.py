@@ -212,6 +212,13 @@ def _require_openai_agents(method: str) -> None:
         ) from exc
 
 
+def _sdk_backend(backend) -> dict:
+    """chat_backend for an SDK constructor: LiteLLM takes either endpoint
+    spelling, the openai and anthropic SDKs only ``base_url``."""
+    return {("base_url" if key == "api_base" else key): value
+            for key, value in (backend or {}).items()}
+
+
 def _openai_model(protocol: str, model_name: str, backend=None):
     """The backend protocol driver — the seam tests replace with a fake.
 
@@ -240,7 +247,7 @@ def _openai_model(protocol: str, model_name: str, backend=None):
         import openai
         model_name = model_name.removeprefix("openai/")
         try:
-            sdk_client = openai.AsyncOpenAI(**(backend or {}))
+            sdk_client = openai.AsyncOpenAI(**_sdk_backend(backend))
         except (openai.OpenAIError, TypeError) as exc:
             raise PageIndexAPIError(
                 f"The OpenAI backend is not configured: {exc}") from exc
@@ -793,7 +800,7 @@ def _anthropic_client(backend=None):
     """The backend client — the seam tests replace with a fake transport."""
     import anthropic
     try:
-        return anthropic.Anthropic(**(backend or {}))
+        return anthropic.Anthropic(**_sdk_backend(backend))
     except TypeError as exc:
         raise PageIndexAPIError(
             f"The Anthropic backend is not configured: {exc}") from exc

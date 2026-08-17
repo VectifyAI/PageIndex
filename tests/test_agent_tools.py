@@ -1232,6 +1232,25 @@ def test_cloud_agent_tools_list_failure_raises(monkeypatch):
         cloud.agent_tools()
 
 
+def test_list_tools_pagination_is_bounded():
+    """A server echoing its nextCursor terminates (no-progress guard);
+    a cycling one hits the page cap instead of hanging forever."""
+    from pageindex.mcp_bridge import McpBridge
+
+    bridge = McpBridge("http://x/mcp", {})
+    pages = {None: {"tools": [{"name": "a"}], "nextCursor": "c1"},
+             "c1": {"tools": [{"name": "b"}], "nextCursor": "c1"}}
+    bridge._request = lambda method, params=None: pages[
+        (params or {}).get("cursor")]
+    assert [t["name"] for t in bridge.list_tools()] == ["a", "b"]
+
+    bridge._request = lambda method, params=None: {
+        "tools": [],
+        "nextCursor": {"c1": "c2"}.get((params or {}).get("cursor"), "c1")}
+    with pytest.raises(PageIndexAPIError, match="did not terminate"):
+        bridge.list_tools()
+
+
 def test_mcp_bridge_protocol(monkeypatch):
     import requests as requests_mod
     from pageindex.mcp_bridge import McpBridge
