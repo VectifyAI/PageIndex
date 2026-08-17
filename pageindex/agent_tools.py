@@ -1231,9 +1231,11 @@ _LOCAL_DESCRIPTIONS: dict[str, str] = {
         'Folder browsing and semantic ranking (sort="relevance") are not '
         "supported in local mode yet — they work on PageIndex cloud."
     ),
-    "get_page_content": TOOL_CONTRACT["get_page_content"]["description"]
-    .replace(" Embedded image paths in the response feed into "
-             "`get_document_image()`.", ""),
+    # Drop the sentence naming the cloud-only image tool, whatever its
+    # wording; the contract-refresh test pins that something was removed.
+    "get_page_content": re.sub(
+        r"\s*[^.]*`get_document_image\(\)`[^.]*\.", "",
+        TOOL_CONTRACT["get_page_content"]["description"]),
 }
 
 _LOCAL_PARAM_DESCRIPTIONS: dict[tuple[str, str], str] = {
