@@ -194,13 +194,6 @@ class LocalAPI:
         from .flash import page_index_flash
         from .utils import (add_node_text, create_clean_structure_for_description,
                             generate_doc_description, write_node_id)
-        import litellm
-        if not self._index_backend:
-            env = litellm.validate_environment(self._summary_model)
-            if not env["keys_in_environment"]:
-                raise PageIndexAPIError(
-                    f"Failed to submit document: missing API key for "
-                    f"{self._summary_model}: {', '.join(env['missing_keys'])}")
         result = page_index_flash(file_path, summary=True,
                                   summary_model=self._summary_model,
                                   optimize="full",

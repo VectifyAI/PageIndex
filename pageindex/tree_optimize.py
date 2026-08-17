@@ -61,7 +61,7 @@ import re
 import sys
 from types import SimpleNamespace
 
-from .utils import (ConfigLoader, _is_openai_model, _is_unrecoverable,
+from .utils import (ConfigLoader, _is_unrecoverable,
                     llm_acompletion, strip_internal_keys)
 
 TRIGGER_PAGES = 5        # only look ahead on nodes larger than this
@@ -872,9 +872,12 @@ async def main():
     args = parser.parse_args()
 
     model = args.model or default_model()
-    if args.expand and not args.plan and _is_openai_model(model) \
-            and not os.getenv("OPENAI_API_KEY"):
-        sys.exit(f"OPENAI_API_KEY is not set (expand model: {model}).")
+    if args.expand and not args.plan:
+        import litellm
+        env = litellm.validate_environment(model)
+        if not env["keys_in_environment"]:
+            sys.exit(f"{', '.join(env['missing_keys'])} is not set "
+                     f"(expand model: {model}).")
 
     original = json.load(open(args.structure))
     structure = copy.deepcopy(original["structure"])

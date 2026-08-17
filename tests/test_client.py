@@ -285,17 +285,31 @@ def test_page_index_flash_rejects_unknown_optimize():
 
 def test_llm_completion_missing_key_raises_immediately(monkeypatch):
     import openai
+    import litellm  # first import may load a .env; delenv after it
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setattr(pageindex.utils, "_openai_clients", {})
-    with pytest.raises(openai.OpenAIError):
+    with pytest.raises(openai.OpenAIError, match="OPENAI_API_KEY"):
         pageindex.utils.llm_completion("gpt-4o", "probe")
-    with pytest.raises(openai.OpenAIError):
+    with pytest.raises(openai.OpenAIError, match="OPENAI_API_KEY"):
         asyncio.run(pageindex.utils.llm_acompletion("gpt-4o", "probe"))
+    # unknown bare names are OpenAI shorthand, so the same check applies
+    with pytest.raises(openai.OpenAIError, match="OPENAI_API_KEY"):
+        pageindex.utils.llm_completion("my-finetune-v2", "probe")
+
+
+def test_llm_completion_refuses_unknown_provider(monkeypatch):
+    """A first segment LiteLLM does not know (a HuggingFace repo id like
+    Qwen/...) is refused with the openai/ escape before the retry loop,
+    instead of burning it on per-call 400s."""
+    import litellm
+    monkeypatch.setattr(litellm, "completion",
+                        lambda **kw: pytest.fail("reached the wire"))
+    with pytest.raises(Exception, match="not a LiteLLM provider"):
+        pageindex.utils.llm_completion("Qwen/my-model", "probe")
 
 
 def test_submit_missing_llm_key_fails_loud(local_client, sample_pdf, monkeypatch):
+    import litellm  # first import may load a .env; delenv after it
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setattr(pageindex.utils, "_openai_clients", {})
     def first_llm_call(*args, **kwargs):
         return pageindex.utils.llm_completion("gpt-4o", "probe")
     monkeypatch.setattr(page_index_module, "page_index_main", first_llm_call)
@@ -839,12 +853,11 @@ def test_parse_pages_overlap_counts_union():
 # ── backend: the indexing lane ──
 
 def test_backend_scopes_the_index_lane(tmp_path, monkeypatch):
-    """index_backend reaches both gateway paths — LiteLLM's call kwargs
-    and the openai-SDK client — scoped to the operation, with the
-    endpoint spelling normalized for the openai SDK."""
+    """index_backend reaches the indexing lane's LiteLLM call kwargs
+    verbatim — bare and provider-prefixed models alike — scoped to the
+    operation, bypassing the env pre-check."""
     pytest.importorskip("litellm")
     import litellm
-    import openai
     from types import SimpleNamespace
     from pageindex.local_api import LocalAPI
     from pageindex.utils import _llm_backend, llm_completion
@@ -861,69 +874,16 @@ def test_backend_scopes_the_index_lane(tmp_path, monkeypatch):
     captured = {}
     monkeypatch.setattr(litellm, "completion",
                         lambda **kw: (captured.update(kw), reply)[1])
-    api._with_backend(lambda: llm_completion("anthropic/claude-x", "p"))
-    assert captured["api_key"] == "ik"
-    assert captured["api_base"] == "http://b"
-
-    seen = {}
-
-    class _FakeOpenAI:
-        def __init__(self, **kw):
-            seen.update(kw)
-            self.chat = SimpleNamespace(completions=SimpleNamespace(
-                create=lambda **_: reply))
-
-    monkeypatch.setattr(openai, "OpenAI", _FakeOpenAI)
-    monkeypatch.setattr(pageindex.utils, "_openai_clients", {})
-    api._with_backend(lambda: llm_completion("gpt-4o", "p"))
-    assert seen["api_key"] == "ik"
-    assert seen["base_url"] == "http://b"
-
-
-def test_openai_client_is_reused_per_backend(monkeypatch):
-    """One client per distinct backend, built once — the indexing lane calls
-    the gateway once per node, and rebuilding costs an SSL context each time."""
-    import openai
-    from pageindex.utils import _openai_client
-
-    built = []
-
-    class _FakeOpenAI:
-        def __init__(self, **kw):
-            built.append(kw)
-
-    monkeypatch.setattr(openai, "OpenAI", _FakeOpenAI)
-    monkeypatch.setattr(openai, "AsyncOpenAI", _FakeOpenAI)
-    monkeypatch.setattr(pageindex.utils, "_openai_clients", {})
-
-    one = _openai_client({"api_key": "k", "api_base": "http://b"})
-    assert _openai_client({"api_base": "http://b", "api_key": "k"}) is one
-    assert len(built) == 1 and built[0]["base_url"] == "http://b"
-
-    assert _openai_client({"api_key": "other"}) is not one
-    assert _openai_client({"api_key": "k", "api_base": "http://b"},
-                          is_async=True) is not one
-    assert _openai_client(None) is not one
-    assert len(built) == 4
-
-
-def test_index_backend_skips_the_env_precheck(tmp_path, monkeypatch):
-    """The missing-key pre-check reads environment variables only, so a
-    backend-supplied key must bypass it instead of being refused."""
-    pytest.importorskip("litellm")
-    import litellm
-    from pageindex.local_api import LocalAPI
-
-    api = LocalAPI(storage_path=str(tmp_path / "s"), model="m",
-                   summary_model="s", retrieve_model="r",
-                   index_backend={"api_key": "ik"})
     monkeypatch.setattr(litellm, "validate_environment",
                         lambda *a, **k: pytest.fail("env pre-check ran"))
-    monkeypatch.setattr(pageindex.flash, "page_index_flash",
-                        lambda *a, **k: (_ for _ in ()).throw(
-                            RuntimeError("reached-flash")))
-    with pytest.raises(RuntimeError, match="reached-flash"):
-        api._index_flash("f.pdf", ["text"])
+    for model, wire in (("anthropic/claude-x", "anthropic/claude-x"),
+                        ("gpt-4o", "openai/gpt-4o"),
+                        ("my-finetune-v2", "openai/my-finetune-v2")):
+        captured.clear()
+        api._with_backend(lambda: llm_completion(model, "p"))
+        assert captured["model"] == wire
+        assert captured["api_key"] == "ik"
+        assert captured["api_base"] == "http://b"
 
 
 def test_backend_args_are_local_only():

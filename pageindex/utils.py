@@ -29,13 +29,6 @@ _llm_backend: contextvars.ContextVar = contextvars.ContextVar(
     "pageindex_llm_backend", default=None)
 
 
-def _openai_sdk_kwargs(backend: dict) -> dict:
-    """The same backend dict works on both gateway paths: LiteLLM accepts
-    either endpoint spelling, the openai SDK only ``base_url``."""
-    return {("base_url" if key == "api_base" else key): value
-            for key, value in backend.items()}
-
-
 def _repair_litellm_types() -> None:
     """litellm 1.97.0's Message/Delta annotations carry nested forward refs
     Python 3.10 cannot resolve (BerriAI/litellm#36384), so every completion
@@ -69,30 +62,38 @@ def _strip_prefix(s, prefix):
     return s
 
 
-def _is_openai_model(model):
-    """Models without a provider prefix (no '/') use the openai SDK directly.
-    For other providers, use 'provider/model' format (e.g. 'anthropic/claude-sonnet-4-6')."""
-    if not model or model.startswith('litellm/'):
-        return False
-    return '/' not in model or model.startswith('openai/')
-
-
-_openai_clients: dict = {}
-
-
-def _openai_client(backend, *, is_async: bool = False):
-    """One client per distinct backend, reused: constructing one rebuilds the
-    SSL context and opens a fresh connection pool, and the indexing lane calls
-    this once per node. Capped, since a backend can carry per-tenant keys."""
-    import openai
-    key = (is_async, repr(sorted((backend or {}).items())))
-    if key not in _openai_clients:
-        if len(_openai_clients) >= 8:
-            _openai_clients.clear()
-        cls = openai.AsyncOpenAI if is_async else openai.OpenAI
-        _openai_clients[key] = cls(**{"max_retries": 0,
-                                      **_openai_sdk_kwargs(backend or {})})
-    return _openai_clients[key]
+def _litellm_model(model, backend):
+    """Normalize to LiteLLM's grammar — same as the chat lane: bare names
+    are OpenAI-compatible shorthand (wire form ``openai/<name>``), a
+    ``litellm/`` prefix strips — and fail fast on misconfiguration:
+    litellm reports a missing key as a retryable 500 and an unknown
+    provider as a 400, either of which would burn the whole retry loop.
+    A backend override carries its own credentials, so it skips the key
+    check; the 401/404 status codes make both errors unrecoverable to
+    the summary and optimize passes instead of silently absorbed."""
+    if not model:
+        return model
+    model = _strip_prefix(model, "litellm/")
+    if "/" not in model:
+        model = f"openai/{model}"
+    import litellm
+    provider = model.split("/", 1)[0]
+    providers = getattr(litellm, "provider_list", None)
+    if providers and provider not in providers:
+        raise litellm.NotFoundError(
+            f"'{model}' routes through LiteLLM, but '{provider}' is not a "
+            f"LiteLLM provider. For an OpenAI-compatible server serving "
+            f"this model id, use 'openai/{model}' and point "
+            f"OPENAI_BASE_URL at the server.",
+            llm_provider=None, model=model)
+    if not backend:
+        env = litellm.validate_environment(model)
+        if not env["keys_in_environment"]:
+            raise litellm.AuthenticationError(
+                f"missing API key for {model}: "
+                f"{', '.join(env['missing_keys'])}",
+                llm_provider=None, model=model)
+    return model
 
 
 # Misconfiguration: no retry can fix a rejected key or a model that does not
@@ -107,33 +108,20 @@ def _is_unrecoverable(exc: Exception) -> bool:
 
 
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
-    use_openai_sdk = _is_openai_model(model)
-    if model:
-        model = _strip_prefix(model, "litellm/")
-        if use_openai_sdk:
-            model = _strip_prefix(model, "openai/")
+    import litellm
     max_retries = 10
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
     backend = _llm_backend.get()
-    if use_openai_sdk:
-        oai_client = _openai_client(backend)
+    model = _litellm_model(model, backend)
+    _repair_litellm_types()
     for i in range(max_retries):
         try:
-            if use_openai_sdk:
-                response = oai_client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                )
-            else:
-                import litellm
-                _repair_litellm_types()
-                response = litellm.completion(
-                    model=model,
-                    messages=messages,
-                    temperature=0,
-                    drop_params=True,
-                    **(backend or {}),
-                )
+            response = litellm.completion(
+                model=model,
+                messages=messages,
+                drop_params=True,
+                **(backend or {}),
+            )
             content = response.choices[0].message.content
             if return_finish_reason:
                 finish_reason = "max_output_reached" if response.choices[0].finish_reason == "length" else "finished"
@@ -153,33 +141,20 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
 
 
 async def llm_acompletion(model, prompt):
-    use_openai_sdk = _is_openai_model(model)
-    if model:
-        model = _strip_prefix(model, "litellm/")
-        if use_openai_sdk:
-            model = _strip_prefix(model, "openai/")
+    import litellm
     max_retries = 10
     messages = [{"role": "user", "content": prompt}]
     backend = _llm_backend.get()
-    if use_openai_sdk:
-        oai_client = _openai_client(backend, is_async=True)
+    model = _litellm_model(model, backend)
+    _repair_litellm_types()
     for i in range(max_retries):
         try:
-            if use_openai_sdk:
-                response = await oai_client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                )
-            else:
-                import litellm
-                _repair_litellm_types()
-                response = await litellm.acompletion(
-                    model=model,
-                    messages=messages,
-                    temperature=0,
-                    drop_params=True,
-                    **(backend or {}),
-                )
+            response = await litellm.acompletion(
+                model=model,
+                messages=messages,
+                drop_params=True,
+                **(backend or {}),
+            )
             return response.choices[0].message.content
         except Exception as e:
             if _is_unrecoverable(e):
