@@ -77,8 +77,22 @@ def _is_openai_model(model):
     return '/' not in model or model.startswith('openai/')
 
 
-_openai_sync_client = None
-_openai_async_client = None
+_openai_clients: dict = {}
+
+
+def _openai_client(backend, *, is_async: bool = False):
+    """One client per distinct backend, reused: constructing one rebuilds the
+    SSL context and opens a fresh connection pool, and the indexing lane calls
+    this once per node. Capped, since a backend can carry per-tenant keys."""
+    import openai
+    key = (is_async, repr(sorted((backend or {}).items())))
+    if key not in _openai_clients:
+        if len(_openai_clients) >= 8:
+            _openai_clients.clear()
+        cls = openai.AsyncOpenAI if is_async else openai.OpenAI
+        _openai_clients[key] = cls(**{"max_retries": 0,
+                                      **_openai_sdk_kwargs(backend or {})})
+    return _openai_clients[key]
 
 
 # Misconfiguration: no retry can fix a rejected key or a model that does not
@@ -102,15 +116,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
     backend = _llm_backend.get()
     if use_openai_sdk:
-        import openai
-        if backend:
-            oai_client = openai.OpenAI(**{"max_retries": 0,
-                                          **_openai_sdk_kwargs(backend)})
-        else:
-            global _openai_sync_client
-            if _openai_sync_client is None:
-                _openai_sync_client = openai.OpenAI(max_retries=0)
-            oai_client = _openai_sync_client
+        oai_client = _openai_client(backend)
     for i in range(max_retries):
         try:
             if use_openai_sdk:
@@ -156,15 +162,7 @@ async def llm_acompletion(model, prompt):
     messages = [{"role": "user", "content": prompt}]
     backend = _llm_backend.get()
     if use_openai_sdk:
-        import openai
-        if backend:
-            oai_client = openai.AsyncOpenAI(**{"max_retries": 0,
-                                               **_openai_sdk_kwargs(backend)})
-        else:
-            global _openai_async_client
-            if _openai_async_client is None:
-                _openai_async_client = openai.AsyncOpenAI(max_retries=0)
-            oai_client = _openai_async_client
+        oai_client = _openai_client(backend, is_async=True)
     for i in range(max_retries):
         try:
             if use_openai_sdk:

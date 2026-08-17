@@ -286,8 +286,7 @@ def test_page_index_flash_rejects_unknown_optimize():
 def test_llm_completion_missing_key_raises_immediately(monkeypatch):
     import openai
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setattr(pageindex.utils, "_openai_sync_client", None)
-    monkeypatch.setattr(pageindex.utils, "_openai_async_client", None)
+    monkeypatch.setattr(pageindex.utils, "_openai_clients", {})
     with pytest.raises(openai.OpenAIError):
         pageindex.utils.llm_completion("gpt-4o", "probe")
     with pytest.raises(openai.OpenAIError):
@@ -296,7 +295,7 @@ def test_llm_completion_missing_key_raises_immediately(monkeypatch):
 
 def test_submit_missing_llm_key_fails_loud(local_client, sample_pdf, monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setattr(pageindex.utils, "_openai_sync_client", None)
+    monkeypatch.setattr(pageindex.utils, "_openai_clients", {})
     def first_llm_call(*args, **kwargs):
         return pageindex.utils.llm_completion("gpt-4o", "probe")
     monkeypatch.setattr(page_index_module, "page_index_main", first_llm_call)
@@ -841,7 +840,7 @@ def test_parse_pages_overlap_counts_union():
 
 def test_backend_scopes_the_index_lane(tmp_path, monkeypatch):
     """index_backend reaches both gateway paths — LiteLLM's call kwargs
-    and a fresh openai-SDK client — scoped to the operation, with the
+    and the openai-SDK client — scoped to the operation, with the
     endpoint spelling normalized for the openai SDK."""
     pytest.importorskip("litellm")
     import litellm
@@ -875,9 +874,37 @@ def test_backend_scopes_the_index_lane(tmp_path, monkeypatch):
                 create=lambda **_: reply))
 
     monkeypatch.setattr(openai, "OpenAI", _FakeOpenAI)
+    monkeypatch.setattr(pageindex.utils, "_openai_clients", {})
     api._with_backend(lambda: llm_completion("gpt-4o", "p"))
     assert seen["api_key"] == "ik"
     assert seen["base_url"] == "http://b"
+
+
+def test_openai_client_is_reused_per_backend(monkeypatch):
+    """One client per distinct backend, built once — the indexing lane calls
+    the gateway once per node, and rebuilding costs an SSL context each time."""
+    import openai
+    from pageindex.utils import _openai_client
+
+    built = []
+
+    class _FakeOpenAI:
+        def __init__(self, **kw):
+            built.append(kw)
+
+    monkeypatch.setattr(openai, "OpenAI", _FakeOpenAI)
+    monkeypatch.setattr(openai, "AsyncOpenAI", _FakeOpenAI)
+    monkeypatch.setattr(pageindex.utils, "_openai_clients", {})
+
+    one = _openai_client({"api_key": "k", "api_base": "http://b"})
+    assert _openai_client({"api_base": "http://b", "api_key": "k"}) is one
+    assert len(built) == 1 and built[0]["base_url"] == "http://b"
+
+    assert _openai_client({"api_key": "other"}) is not one
+    assert _openai_client({"api_key": "k", "api_base": "http://b"},
+                          is_async=True) is not one
+    assert _openai_client(None) is not one
+    assert len(built) == 4
 
 
 def test_index_backend_skips_the_env_precheck(tmp_path, monkeypatch):
