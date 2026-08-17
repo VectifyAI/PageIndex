@@ -90,9 +90,11 @@ if __name__ == "__main__":
             
         if args.mode == 'flash':
             from pageindex.flash import page_index_flash
-            summary_model = args.summary_model or args.index_model or args.model
+            summary_model = (args.summary_model or args.index_model
+                             or args.model
+                             or ConfigLoader().load().summary_model)
             will_summarize = args.summary if args.summary is not None else True
-            if summary_model and (will_summarize or args.optimize == 'full'):
+            if will_summarize or args.optimize == 'full':
                 import litellm
                 env = litellm.validate_environment(summary_model)
                 if not env["keys_in_environment"]:

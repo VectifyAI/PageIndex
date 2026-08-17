@@ -891,11 +891,16 @@ async def summarize_tree(structure, pdf_pages, model=None,
             return
         try:
             node['summary'] = await (parent_summary(node) if children else leaf_summary(node))
-        except Exception:
+        except Exception as e:
             node['summary'] = ""
+            if _is_unrecoverable(e):
+                raise
 
-    await asyncio.gather(*(visit(root) for root in structure),
-                         return_exceptions=True)
+    results = await asyncio.gather(*(visit(root) for root in structure),
+                                    return_exceptions=True)
+    for r in results:
+        if isinstance(r, Exception) and _is_unrecoverable(r):
+            raise r
 
     def _any_summary(nodes):
         return any(n.get('summary') or _any_summary(n.get('nodes') or [])
