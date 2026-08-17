@@ -855,6 +855,10 @@ def test_max_turns_rejects_non_positive(client, store_path, fake_model):
     with pytest.raises(PageIndexAPIError, match="positive integer"):
         client.chat_completions([{"role": "user", "content": "q"}],
                                 max_turns=0)
+    # every door that takes max_turns validates it, the runner config too
+    with pytest.raises(PageIndexAPIError, match="positive integer"):
+        client.anthropic_runner_config(model="claude-sonnet-4-5",
+                                       max_turns=-1)
 
 
 def test_enable_citations_rejected_before_framework_check(client, monkeypatch):

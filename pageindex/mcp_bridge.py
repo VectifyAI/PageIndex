@@ -44,6 +44,7 @@ class McpBridge:
     def __init__(self, url: str, headers: dict[str, str]):
         self._url = url
         self._auth_headers = dict(headers)
+        self._session = requests.Session()  # agent tool calls come in bursts
         self._session_id: Optional[str] = None
         self._protocol_version: Optional[str] = None
         self._instructions: Optional[str] = None
@@ -65,8 +66,8 @@ class McpBridge:
         if protocol_version:
             headers["MCP-Protocol-Version"] = protocol_version
         try:
-            return requests.post(self._url, json=payload, headers=headers,
-                                 timeout=_TIMEOUT)
+            return self._session.post(self._url, json=payload,
+                                      headers=headers, timeout=_TIMEOUT)
         except requests.RequestException as exc:
             raise PageIndexAPIError(
                 f"Could not reach the PageIndex MCP server: {exc}"

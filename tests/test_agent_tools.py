@@ -1232,6 +1232,16 @@ def test_cloud_agent_tools_list_failure_raises(monkeypatch):
         cloud.agent_tools()
 
 
+def test_local_description_edit_actually_removes_the_image_sentence():
+    """The local get_page_content description edits the contract text by
+    exact string replace — a contract wording change must fail here, not
+    silently ship the image-tool sentence to local models."""
+    from pageindex.agent_tools import TOOL_CONTRACT, _LOCAL_DESCRIPTIONS
+    local = _LOCAL_DESCRIPTIONS["get_page_content"]
+    assert "get_document_image" not in local
+    assert len(local) < len(TOOL_CONTRACT["get_page_content"]["description"])
+
+
 def test_list_tools_pagination_is_bounded():
     """A server echoing its nextCursor terminates (no-progress guard);
     a cycling one hits the page cap instead of hanging forever."""
@@ -1308,7 +1318,8 @@ def test_mcp_bridge_protocol(monkeypatch):
     # Replace the module's own `requests` binding — patching the shared
     # requests module would leak the fake process-wide.
     monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
-        post=fake_post, RequestException=requests_mod.RequestException))
+        Session=lambda: types.SimpleNamespace(post=fake_post),
+        RequestException=requests_mod.RequestException))
     bridge = McpBridge("https://api.pageindex.ai/mcp",
                        {"Authorization": "Bearer k"})
 
@@ -1371,7 +1382,8 @@ def test_mcp_bridge_400_is_an_error_not_session_expiry(monkeypatch):
         return _Resp(400, text="unknown tool")
 
     monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
-        post=fake_post, RequestException=requests_mod.RequestException))
+        Session=lambda: types.SimpleNamespace(post=fake_post),
+        RequestException=requests_mod.RequestException))
     bridge = McpBridge("https://api.pageindex.ai/mcp",
                        {"Authorization": "Bearer k"})
     with pytest.raises(PageIndexAPIError, match="HTTP 400"):
@@ -1432,7 +1444,8 @@ def test_mcp_bridge_init_notification_bars_concurrent_requests(monkeypatch):
         return resp
 
     monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
-        post=fake_post, RequestException=requests_mod.RequestException))
+        Session=lambda: types.SimpleNamespace(post=fake_post),
+        RequestException=requests_mod.RequestException))
     bridge = McpBridge("https://api.pageindex.ai/mcp",
                        {"Authorization": "Bearer k"})
 
@@ -1627,7 +1640,8 @@ def test_bridge_call_tool_surfaces_iserror(monkeypatch):
             "content": [{"type": "text", "text": '{"error": "denied"}'}]}})
 
     monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
-        post=fake_post, RequestException=requests_mod.RequestException))
+        Session=lambda: types.SimpleNamespace(post=fake_post),
+        RequestException=requests_mod.RequestException))
     bridge = McpBridge("https://api.pageindex.ai/mcp", {})
     assert bridge.call_tool("t", {}) == ('{"error": "denied"}', True)
 
@@ -1664,7 +1678,8 @@ def test_bridge_rejects_mismatched_reply_id(monkeypatch):
                                                    "text": "old"}]}})
 
     monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
-        post=fake_post, RequestException=requests_mod.RequestException))
+        Session=lambda: types.SimpleNamespace(post=fake_post),
+        RequestException=requests_mod.RequestException))
     bridge = McpBridge("https://api.pageindex.ai/mcp", {})
     with pytest.raises(PageIndexAPIError, match="no reply matching"):
         bridge.call_tool("t", {})
@@ -1688,7 +1703,8 @@ def test_bridge_transport_error_is_pageindex_error(monkeypatch):
         raise requests_mod.ConnectionError("dns down")
 
     monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
-        post=dead_post, RequestException=requests_mod.RequestException))
+        Session=lambda: types.SimpleNamespace(post=dead_post),
+        RequestException=requests_mod.RequestException))
     bridge = McpBridge("https://api.pageindex.ai/mcp", {})
     with pytest.raises(PageIndexAPIError, match="Could not reach"):
         bridge.list_tools()

@@ -10,11 +10,24 @@ from typing import Any, Callable, Iterator, Optional, Union, cast
 from .errors import PageIndexAPIError
 
 
+_litellm_preload_started = False
+
+
 def _preload_litellm() -> None:
-    try:
-        import litellm  # noqa: F401
-    except Exception:
-        pass
+    """Start litellm's multi-second import in the background, once per
+    process — a per-client thread would churn under per-request clients."""
+    global _litellm_preload_started
+    if _litellm_preload_started:
+        return
+    _litellm_preload_started = True
+
+    def _import() -> None:
+        try:
+            import litellm  # noqa: F401
+        except Exception:
+            pass
+
+    threading.Thread(target=_import, daemon=True).start()
 
 
 def _parse_pages(pages: str) -> list[int]:
@@ -168,7 +181,7 @@ class PageIndexClient:
             )
             # LiteLLM's multi-second import would otherwise land on the
             # first chat call; failures resurface there with real context.
-            threading.Thread(target=_preload_litellm, daemon=True).start()
+            _preload_litellm()
 
     @property
     def retrieve_model(self):
@@ -1007,7 +1020,8 @@ class PageIndexClient:
             max_turns: Agent-loop bound; default 10.
         """
         from .agent_tools import build_agent_instructions
-        from .local_chat import _default_max_tokens
+        from .local_chat import _default_max_tokens, _validate_max_turns
+        _validate_max_turns(max_turns)
         scope = self._local_doc_scope(doc_id)
         return {
             "model": model,
