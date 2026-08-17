@@ -7,3 +7,4 @@ logs/
 .pageindex/
 dist/
 *.doc_id
+results/
