@@ -47,6 +47,9 @@ def _repair_litellm_types() -> None:
 
 # Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
 if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
+    import warnings
+    warnings.warn("CHATGPT_API_KEY is deprecated — set OPENAI_API_KEY "
+                  "instead.", FutureWarning)
     os.environ["OPENAI_API_KEY"] = os.getenv("CHATGPT_API_KEY")
 
 def count_tokens(text, model=None):
