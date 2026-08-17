@@ -835,3 +835,72 @@ def test_parse_pages_overlap_counts_union():
     assert len(pages) == 9000 and pages[0] == 1 and pages[-1] == 9000
     with pytest.raises(ValueError, match="spans more than"):
         _parse_pages("1-10001")
+
+
+# ── backend: the indexing lane ──
+
+def test_backend_scopes_the_index_lane(tmp_path, monkeypatch):
+    """index_backend reaches both gateway paths — LiteLLM's call kwargs
+    and a fresh openai-SDK client — scoped to the operation, with the
+    endpoint spelling normalized for the openai SDK."""
+    pytest.importorskip("litellm")
+    import litellm
+    import openai
+    from types import SimpleNamespace
+    from pageindex.local_api import LocalAPI
+    from pageindex.utils import _llm_backend, llm_completion
+
+    api = LocalAPI(storage_path=str(tmp_path / "s"), model="m",
+                   summary_model="s", retrieve_model="r",
+                   index_backend={"api_key": "ik", "api_base": "http://b"})
+    assert api._with_backend(_llm_backend.get) == {"api_key": "ik",
+                                                   "api_base": "http://b"}
+    assert _llm_backend.get() is None
+
+    reply = SimpleNamespace(choices=[SimpleNamespace(
+        message=SimpleNamespace(content="ok"), finish_reason="stop")])
+    captured = {}
+    monkeypatch.setattr(litellm, "completion",
+                        lambda **kw: (captured.update(kw), reply)[1])
+    api._with_backend(lambda: llm_completion("anthropic/claude-x", "p"))
+    assert captured["api_key"] == "ik"
+    assert captured["api_base"] == "http://b"
+
+    seen = {}
+
+    class _FakeOpenAI:
+        def __init__(self, **kw):
+            seen.update(kw)
+            self.chat = SimpleNamespace(completions=SimpleNamespace(
+                create=lambda **_: reply))
+
+    monkeypatch.setattr(openai, "OpenAI", _FakeOpenAI)
+    api._with_backend(lambda: llm_completion("gpt-4o", "p"))
+    assert seen["api_key"] == "ik"
+    assert seen["base_url"] == "http://b"
+
+
+def test_index_backend_skips_the_env_precheck(tmp_path, monkeypatch):
+    """The missing-key pre-check reads environment variables only, so a
+    backend-supplied key must bypass it instead of being refused."""
+    pytest.importorskip("litellm")
+    import litellm
+    from pageindex.local_api import LocalAPI
+
+    api = LocalAPI(storage_path=str(tmp_path / "s"), model="m",
+                   summary_model="s", retrieve_model="r",
+                   index_backend={"api_key": "ik"})
+    monkeypatch.setattr(litellm, "validate_environment",
+                        lambda *a, **k: pytest.fail("env pre-check ran"))
+    monkeypatch.setattr(pageindex.flash, "page_index_flash",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            RuntimeError("reached-flash")))
+    with pytest.raises(RuntimeError, match="reached-flash"):
+        api._index_flash("f.pdf", ["text"])
+
+
+def test_backend_args_are_local_only():
+    with pytest.raises(PageIndexAPIError, match="chat_backend"):
+        PageIndexClient(api_key="pi-k", chat_backend={"api_key": "x"})
+    with pytest.raises(PageIndexAPIError, match="index_backend"):
+        PageIndexClient(api_key="pi-k", index_backend={"api_key": "x"})
