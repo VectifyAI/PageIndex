@@ -212,7 +212,7 @@ def _require_openai_agents(method: str) -> None:
         ) from exc
 
 
-def _openai_model(protocol: str, model_name: str):
+def _openai_model(protocol: str, model_name: str, backend=None):
     """The backend protocol driver — the seam tests replace with a fake.
 
     chat protocol: LiteLLM, full stop — model names mean what LiteLLM says
@@ -240,12 +240,12 @@ def _openai_model(protocol: str, model_name: str):
         import openai
         model_name = model_name.removeprefix("openai/")
         try:
-            backend = openai.AsyncOpenAI()
-        except openai.OpenAIError as exc:
+            sdk_client = openai.AsyncOpenAI(**(backend or {}))
+        except (openai.OpenAIError, TypeError) as exc:
             raise PageIndexAPIError(
                 f"The OpenAI backend is not configured: {exc}") from exc
         from agents.models.openai_responses import OpenAIResponsesModel
-        return OpenAIResponsesModel(model_name, openai_client=backend)
+        return OpenAIResponsesModel(model_name, openai_client=sdk_client)
     try:
         from agents.extensions.models.litellm_model import LitellmModel
         import litellm
@@ -258,7 +258,8 @@ def _openai_model(protocol: str, model_name: str):
     _repair_litellm_types()
     wire = model_name.removeprefix("litellm/")
     if "/" not in wire or wire.startswith("openai/"):
-        if not os.environ.get("OPENAI_API_KEY"):
+        if (not os.environ.get("OPENAI_API_KEY")
+                and not (backend or {}).get("api_key")):
             raise PageIndexAPIError(
                 "The OpenAI backend is not configured: set the "
                 "OPENAI_API_KEY environment variable (any value works "
@@ -276,7 +277,8 @@ def _openai_model(protocol: str, model_name: str):
             f"model id, use 'openai/{wire}' and point OPENAI_BASE_URL "
             "at the server."
         )
-    return LitellmModel(wire)
+    return LitellmModel(wire, api_key=(backend or {}).get("api_key"),
+                        base_url=(backend or {}).get("base_url"))
 
 
 def _reported_model(model_name: str) -> str:
@@ -307,10 +309,18 @@ def _cache_extra_args(model_name: str) -> Optional[dict]:
     return None
 
 
+def _merged_backend(client, backend):
+    """This call's connection overrides: the client's ``chat_backend``
+    under the per-call dict, per-call keys winning."""
+    merged = {**(getattr(client, "chat_backend", None) or {}),
+              **(backend or {})}
+    return merged or None
+
+
 def _openai_agent(client, protocol: str, model_name: str, instructions: str,
                   temperature, top_p, doc_ids=None, cache_key=None,
                   reasoning=None, reasoning_effort=None, extra_body=None,
-                  max_tokens=None):
+                  max_tokens=None, backend=None, extra_headers=None):
     from agents import Agent, ModelSettings
     from .integrations.openai_agents import build_openai_tools
     # ModelSettings.extra_body is the one channel all three engines put on
@@ -327,6 +337,16 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
     if reasoning_effort is not None:
         extra_args = {**(extra_args or {}),
                       "reasoning_effort": reasoning_effort}
+    conn = dict(backend) if backend else {}
+    if conn and protocol == "chat":
+        # LiteLLM takes connection params per call, except the two names
+        # LitellmModel pins as its own keywords — those ride its constructor.
+        lifted = {"api_key": conn.pop("api_key", None),
+                  "base_url": conn.pop("base_url", conn.pop("api_base", None))}
+        if conn:
+            extra_args = {**(extra_args or {}), **conn}
+        conn = {key: value for key, value in lifted.items()
+                if value is not None}
     body = ({"prompt_cache_key": cache_key}
             if cache_key and openai_backend else None)
     # Caller extras merge last, so they win over ours; non-OpenAI
@@ -340,11 +360,12 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
         name="PageIndex",
         instructions=instructions,
         tools=build_openai_tools(client, doc_ids=doc_ids),
-        model=_openai_model(protocol, model_name),
+        model=_openai_model(protocol, model_name, conn or None),
         model_settings=ModelSettings(
             temperature=temperature, top_p=top_p, max_tokens=max_tokens,
             reasoning=reasoning,
             extra_body=body,
+            extra_headers=extra_headers,
             extra_args=extra_args),
     )
 
@@ -492,6 +513,8 @@ def run_chat_completions(client, messages, stream: bool = False,
                          max_tokens: Optional[int] = None,
                          reasoning_effort: Optional[str] = None,
                          extra_body: Optional[dict] = None,
+                         extra_headers: Optional[dict] = None,
+                         backend: Optional[dict] = None,
                          ) -> Union[dict, Iterator[str], Iterator[dict]]:
     if enable_citations:
         raise PageIndexAPIError(
@@ -511,7 +534,9 @@ def run_chat_completions(client, messages, stream: bool = False,
                           cache_key=_conversation_cache_key(model_name,
                                                             managed, history),
                           reasoning_effort=reasoning_effort,
-                          extra_body=extra_body, max_tokens=max_tokens)
+                          extra_body=extra_body, max_tokens=max_tokens,
+                          backend=_merged_backend(client, backend),
+                          extra_headers=extra_headers)
     run_kwargs = _run_kwargs(max_turns)
     import openai
     from agents import Runner
@@ -601,6 +626,8 @@ def run_responses(client, input, model: Optional[str] = None,
                   max_output_tokens: Optional[int] = None,
                   reasoning: Optional[dict] = None,
                   extra_body: Optional[dict] = None,
+                  extra_headers: Optional[dict] = None,
+                  backend: Optional[dict] = None,
                   ) -> Union[dict, Iterator[dict]]:
     _require_openai_agents("responses")
     _validate_max_turns(max_turns)
@@ -624,7 +651,9 @@ def run_responses(client, input, model: Optional[str] = None,
                           cache_key=_conversation_cache_key(model_name, managed,
                                                             conversation),
                           reasoning=reasoning, extra_body=extra_body,
-                          max_tokens=max_output_tokens)
+                          max_tokens=max_output_tokens,
+                          backend=_merged_backend(client, backend),
+                          extra_headers=extra_headers)
     run_kwargs = _run_kwargs(max_turns)
     recorded: dict = {}
     import openai
@@ -759,10 +788,10 @@ def _require_anthropic() -> None:
         ) from exc
 
 
-def _anthropic_client():
+def _anthropic_client(backend=None):
     """The backend client — the seam tests replace with a fake transport."""
     import anthropic
-    return anthropic.Anthropic()
+    return anthropic.Anthropic(**(backend or {}))
 
 
 def _anthropic_system(extra_system, block: Optional[str]) -> list[dict]:
@@ -837,6 +866,8 @@ def run_messages(client, messages, model: str,
                  max_turns: Optional[int] = None,
                  thinking: Optional[dict] = None,
                  extra_body: Optional[dict] = None,
+                 extra_headers: Optional[dict] = None,
+                 backend: Optional[dict] = None,
                  ) -> Union[dict, Iterator[Any]]:
     from .integrations.anthropic_sdk import build_anthropic_tools
 
@@ -854,9 +885,10 @@ def run_messages(client, messages, model: str,
     passthrough = {key: value for key, value in {
         "temperature": temperature, "top_p": top_p, "top_k": top_k,
         "stop_sequences": stop_sequences, "thinking": thinking,
-        "extra_body": extra_body,
+        "extra_body": extra_body, "extra_headers": extra_headers,
     }.items() if value is not None}
-    runner = _anthropic_client().beta.messages.tool_runner(
+    runner = _anthropic_client(_merged_backend(client, backend)) \
+        .beta.messages.tool_runner(
         max_tokens=(max_tokens if max_tokens is not None
                     else _default_max_tokens(model)),
         messages=prepared,

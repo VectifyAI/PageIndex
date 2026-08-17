@@ -159,8 +159,9 @@ def fake_model(monkeypatch):
         fake = FakeModel(turns)
         state["protocols"] = []
 
-        def factory(protocol, model_name):
+        def factory(protocol, model_name, backend=None):
             state["protocols"].append((protocol, model_name))
+            state["backends"] = state.get("backends", []) + [backend]
             return fake
 
         monkeypatch.setattr(local_chat, "_openai_model", factory)
@@ -284,6 +285,12 @@ def test_cloud_guards():
                                max_tokens=256)
     with pytest.raises(PageIndexAPIError, match="local-mode"):
         cloud.chat("x", reasoning_effort="low")
+    with pytest.raises(PageIndexAPIError, match="local-mode"):
+        cloud.chat_completions([{"role": "user", "content": "x"}],
+                               backend={"api_key": "k"})
+    with pytest.raises(PageIndexAPIError, match="local-mode"):
+        cloud.chat_completions([{"role": "user", "content": "x"}],
+                               extra_headers={"x-beta": "1"})
     with pytest.raises(PageIndexAPIError, match="not available on PageIndex "
                                                 "cloud yet"):
         cloud.responses("x")
@@ -650,7 +657,8 @@ def fake_anthropic(monkeypatch):
         fake = anthropic.Anthropic(
             api_key="test",
             http_client=httpx.Client(transport=httpx.MockTransport(handler)))
-        monkeypatch.setattr(local_chat, "_anthropic_client", lambda: fake)
+        monkeypatch.setattr(local_chat, "_anthropic_client",
+                            lambda backend=None: fake)
         return state["calls"]
 
     return install
@@ -1295,7 +1303,7 @@ def test_responses_stream_backend_terminal_states_are_events(
     fake = _TerminalModel([[]])
     fake.terminal = terminal
     monkeypatch.setattr(local_chat, "_openai_model",
-                        lambda protocol, model_name: fake)
+                        lambda protocol, model_name, backend=None: fake)
     events = list(client.responses("q", stream=True))
     assert events[0]["type"] == "response.output_text.delta"
     last = events[-1]
@@ -1354,7 +1362,8 @@ def test_messages_provider_errors_wrap_as_sdk_errors(client, store_path,
     fake = anthropic.Anthropic(
         api_key="test", max_retries=0,
         http_client=httpx.Client(transport=httpx.MockTransport(handler)))
-    monkeypatch.setattr(local_chat, "_anthropic_client", lambda: fake)
+    monkeypatch.setattr(local_chat, "_anthropic_client",
+                        lambda backend=None: fake)
     with pytest.raises(PageIndexAPIError, match="model backend failed"):
         client.messages("q", model="claude-test")
     with pytest.raises(PageIndexAPIError, match="model backend failed"):
@@ -1604,3 +1613,97 @@ def test_messages_edge_validation(client, store_path, fake_anthropic):
     with pytest.raises(PageIndexAPIError, match="doc_id"):
         client.messages([{"role": "user", "content": "q"}],
                         model="claude-test", max_tokens=100, doc_id=123)
+
+
+# ── backend + extra_headers: the chat doors ──
+
+@needs_agents
+def test_backend_connection_reaches_each_engine(monkeypatch):
+    """api_key/base_url ride each engine's client construction; the
+    LiteLLM lane's remaining keys ride its call kwargs; a backend key
+    satisfies the responses lane's missing-key check."""
+    pytest.importorskip("litellm")
+    monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
+                        lambda *a, **k: [])
+    agent = local_chat._openai_agent(None, "chat", "anthropic/claude-x",
+                                     "sys", None, None,
+                                     backend={"api_key": "k1",
+                                              "api_base": "http://lb",
+                                              "api_version": "v9"})
+    assert agent.model.api_key == "k1"
+    assert agent.model.base_url == "http://lb"
+    assert agent.model_settings.extra_args["api_version"] == "v9"
+    assert "api_key" not in agent.model_settings.extra_args
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    agent = local_chat._openai_agent(None, "responses", "gpt-test", "sys",
+                                     None, None, backend={"api_key": "k2"})
+    assert agent.model._client.api_key == "k2"
+
+
+def test_merged_backend_precedence():
+    from types import SimpleNamespace
+    stub = SimpleNamespace(chat_backend={"api_key": "a", "api_version": "v1"})
+    assert local_chat._merged_backend(stub, {"api_key": "b"}) == {
+        "api_key": "b", "api_version": "v1"}
+    assert local_chat._merged_backend(SimpleNamespace(), None) is None
+
+
+@needs_anthropic
+def test_messages_backend_merges_and_reaches_the_client(client, fake_anthropic,
+                                                        monkeypatch):
+    real = local_chat._anthropic_client({"api_key": "kk",
+                                         "base_url": "http://x"})
+    assert real.api_key == "kk"
+    assert str(real.base_url).rstrip("/") == "http://x"
+
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
+    fixture_client = local_chat._anthropic_client
+    seen = {}
+    monkeypatch.setattr(
+        local_chat, "_anthropic_client",
+        lambda backend=None: (seen.setdefault("backend", backend),
+                              fixture_client())[1])
+    client.chat_backend = {"base_url": "http://cb"}
+    client.messages("q", model="claude-sonnet-4-5", backend={"api_key": "z"})
+    assert seen["backend"] == {"base_url": "http://cb", "api_key": "z"}
+
+
+@needs_agents
+def test_extra_headers_ride_model_settings(monkeypatch):
+    """Both openai-agents doors merge ModelSettings.extra_headers into
+    their requests (wire-probed: LiteLLM's chatcmpl adapters forward
+    custom headers; its anthropic adapter owns anthropic-beta only)."""
+    monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
+    monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
+                        lambda *a, **k: [])
+    agent = local_chat._openai_agent(None, "chat", "gpt-test", "sys",
+                                     None, None,
+                                     extra_headers={"x-beta": "1"})
+    assert agent.model_settings.extra_headers == {"x-beta": "1"}
+    agent = local_chat._openai_agent(None, "responses", "gpt-test", "sys",
+                                     None, None,
+                                     extra_headers={"x-beta": "2"})
+    assert agent.model_settings.extra_headers == {"x-beta": "2"}
+    agent = local_chat._openai_agent(None, "chat", "gpt-test", "sys",
+                                     None, None)
+    assert agent.model_settings.extra_headers is None
+
+
+@needs_anthropic
+def test_messages_extra_headers_reach_the_wire(client, monkeypatch):
+    import anthropic
+    seen = {}
+
+    def handler(request):
+        seen["beta"] = request.headers.get("anthropic-beta")
+        return httpx.Response(200, json=_anthropic_message(
+            [{"type": "text", "text": "ok"}], "end_turn"))
+
+    fake = anthropic.Anthropic(api_key="t", http_client=httpx.Client(
+        transport=httpx.MockTransport(handler)))
+    monkeypatch.setattr(local_chat, "_anthropic_client",
+                        lambda backend=None: fake)
+    client.messages("q", model="claude-sonnet-4-5",
+                    extra_headers={"anthropic-beta": "context-1m-2025"})
+    assert seen["beta"] == "context-1m-2025"

@@ -35,13 +35,24 @@ class LocalAPI:
     """Backs PageIndexClient's local mode. One instance per client."""
 
     def __init__(self, storage_path: str, model: str, summary_model: str,
-                 retrieve_model: str):
+                 retrieve_model: str, index_backend: dict | None = None):
         self._store = DocStore(storage_path)
         self._model = model
         self._summary_model = summary_model
         self._retrieve_model = retrieve_model
+        self._index_backend = index_backend
         from .utils import ConfigLoader
         self._config_loader = ConfigLoader()
+
+    def _with_backend(self, func, *args):
+        """Scope the indexing lane's connection overrides around one
+        operation — runs inside whatever thread _run_indexer picked."""
+        from .utils import _llm_backend
+        token = _llm_backend.set(self._index_backend)
+        try:
+            return func(*args)
+        finally:
+            _llm_backend.reset(token)
 
     # ── indexing ──
 
@@ -104,11 +115,12 @@ class LocalAPI:
         try:
             if mode == "flash":
                 structure, description = _run_indexer(
-                    self._index_flash, file_path, page_texts
+                    self._with_backend, self._index_flash, file_path, page_texts
                 )
             else:
                 structure, description = _run_indexer(
-                    self._index_standard, file_path, page_texts
+                    self._with_backend, self._index_standard, file_path,
+                    page_texts
                 )
         except PageIndexAPIError:
             raise
@@ -183,11 +195,12 @@ class LocalAPI:
         from .utils import (add_node_text, create_clean_structure_for_description,
                             generate_doc_description, write_node_id)
         import litellm
-        env = litellm.validate_environment(self._summary_model)
-        if not env["keys_in_environment"]:
-            raise PageIndexAPIError(
-                f"Failed to submit document: missing API key for "
-                f"{self._summary_model}: {', '.join(env['missing_keys'])}")
+        if not self._index_backend:
+            env = litellm.validate_environment(self._summary_model)
+            if not env["keys_in_environment"]:
+                raise PageIndexAPIError(
+                    f"Failed to submit document: missing API key for "
+                    f"{self._summary_model}: {', '.join(env['missing_keys'])}")
         result = page_index_flash(file_path, summary=True,
                                   summary_model=self._summary_model,
                                   optimize="full",
