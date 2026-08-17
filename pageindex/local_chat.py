@@ -262,8 +262,8 @@ def _openai_model(protocol: str, model_name: str, backend=None):
                 and not (backend or {}).get("api_key")):
             raise PageIndexAPIError(
                 "The OpenAI backend is not configured: set the "
-                "OPENAI_API_KEY environment variable or pass "
-                "backend={'api_key': ...} (any value works for keyless "
+                "OPENAI_API_KEY environment variable, pass an api_key "
+                "in chat_backend / backend (any value works for keyless "
                 "OPENAI_BASE_URL servers), or point chat_model at "
                 "another provider (e.g. 'anthropic/...')."
             )
@@ -794,7 +794,7 @@ def _anthropic_client(backend=None):
     import anthropic
     try:
         return anthropic.Anthropic(**(backend or {}))
-    except (anthropic.AnthropicError, TypeError) as exc:
+    except TypeError as exc:
         raise PageIndexAPIError(
             f"The Anthropic backend is not configured: {exc}") from exc
 
