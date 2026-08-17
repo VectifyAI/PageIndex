@@ -7,7 +7,6 @@ import re
 from .utils import *
 from .tree_optimize import merge_tree
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 ######################### Hardening for prompt injection patterns ####################################################
 _INJECTION_PATTERNS = re.compile(
