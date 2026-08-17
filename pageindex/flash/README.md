@@ -11,9 +11,9 @@ an LLM.
 ```python
 from pageindex.flash import page_index_flash
 
-tree = page_index_flash("paper.pdf")
-tree = page_index_flash("paper.pdf", summary=False)   # tree structure only, no LLM
-tree = page_index_flash("paper.pdf", optimize=True)   # refined tree for retrieval
+tree = page_index_flash("paper.pdf")                                 # optimized tree + summaries
+tree = page_index_flash("paper.pdf", summary=False, optimize=False)  # raw tree only, no LLM
+tree = page_index_flash("paper.pdf", optimize="merge")               # deterministic merge, no LLM expand
 ```
 
 Takes a file path or an `io.BytesIO` stream and returns the tree as a dict.
@@ -22,12 +22,11 @@ Summaries are on by default and need an LLM API key.
 ### Command line
 
 ```bash
-python3 run_pageindex.py --pdf_path document.pdf --flash
-python3 run_pageindex.py --pdf_path document.pdf --flash --no-summary  # tree structure only, no LLM
-python3 run_pageindex.py --pdf_path document.pdf --flash --optimize    # refined tree for retrieval
+python3 run_pageindex.py --mode flash --pdf_path document.pdf                             # optimized tree + summaries
+python3 run_pageindex.py --mode flash --pdf_path document.pdf --no-summary --optimize off # raw tree only, no LLM
 ```
 
-Writes the tree to `results/<name>_structure_flash.json`.
+Writes the tree to `results/<name>_structure.json`.
 
 ## Output
 

@@ -185,10 +185,11 @@ python3 run_pageindex.py --pdf_path /path/to/your/document.pdf
 <details>
 <summary>Optional parameters</summary>
 <br>
-You can customize the processing with additional optional arguments:
+You can customize the processing with additional optional arguments (the structure-tuning flags below require <code>--mode standard</code>):
 
 ```
---model                 LLM model to use (default: gpt-4o-2024-11-20)
+--mode                  Processing mode: flash (default) or standard
+--index-model           LLM model used to index the document (default: gpt-5.6-luna)
 --toc-check-pages       Pages to check for table of contents (default: 20)
 --max-pages-per-node    Max pages per node (default: 10)
 --max-tokens-per-node   Max tokens per node (default: 20000)
@@ -211,23 +212,19 @@ python3 run_pageindex.py --md_path /path/to/your/document.md
 </details>
 
 > ### ⚡ PageIndex Flash *(preview)*
-> **PageIndex Flash** ([`pageindex/flash`](pageindex/flash)) generates tree structures from PDFs in seconds. Structure extraction is purely heuristic-based, no LLM needed. LLM is only used to generate node summaries.
+> **PageIndex Flash** ([`pageindex/flash`](pageindex/flash)) generates tree structures from PDFs in seconds. Structure extraction is purely heuristic-based, no LLM needed. An LLM is used only for node summaries and the optimization's expansion pass.
 >
 > ```bash
-> python3 run_pageindex.py --flash --pdf_path /path/to/your/document.pdf
+> python3 run_pageindex.py --mode flash --pdf_path /path/to/your/document.pdf
 > ```
 >
-> Add `--optimize` to refine the tree structure for more efficient retrieval (with an LLM expansion pass).
+> Tree optimization for retrieval (a deterministic merge, then an LLM expansion pass) is on by default; pass `--optimize off` to disable.
 
 ## 🚀 Agentic Vectorless RAG: An Example
 
 For a simple, end-to-end **agentic vectorless RAG** example using **self-hosted PageIndex** (with OpenAI Agents SDK), see [`examples/agentic_vectorless_rag_demo.py`](examples/agentic_vectorless_rag_demo.py).
 
 ```bash
-# Install optional dependency
-pip3 install openai-agents
-
-# Run the demo
 python3 examples/agentic_vectorless_rag_demo.py
 ```
 

@@ -4,3 +4,6 @@ __pycache__
 .env*
 .venv/
 logs/
+.pageindex/
+dist/
+*.doc_id

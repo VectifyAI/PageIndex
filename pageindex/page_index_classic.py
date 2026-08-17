@@ -1100,19 +1100,21 @@ async def verify_toc(page_list, list_result, start_index=1, N=None, model=None):
         check_title_appearance(item, page_list, start_index, model)
         for item in indexed_sample_list
     ]
-    results = await asyncio.gather(*tasks)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
     
-    # Process results
+    # Process results (skip exceptions from failed LLM calls)
     correct_count = 0
     incorrect_results = []
     for result in results:
+        if isinstance(result, BaseException):
+            continue
         if result['answer'] == 'yes':
             correct_count += 1
         else:
             incorrect_results.append(result)
-    
+
     # Calculate accuracy
-    checked_count = len(results)
+    checked_count = sum(1 for r in results if not isinstance(r, BaseException))
     accuracy = correct_count / checked_count if checked_count > 0 else 0
     print(f"accuracy: {accuracy*100:.2f}%")
     return accuracy, incorrect_results
@@ -1229,18 +1231,19 @@ async def tree_parser(page_list, opt, doc=None, logger=None):
     return toc_tree
 
 
-def page_index_main(doc, opt=None):
-    logger = JsonLogger(doc)
-    
+def page_index_main(doc, opt=None, logger=None, page_list=None):
+    logger = logger or JsonLogger(doc)
+
     is_valid_pdf = (
-        (isinstance(doc, str) and os.path.isfile(doc) and doc.lower().endswith(".pdf")) or 
+        (isinstance(doc, str) and os.path.isfile(doc) and doc.lower().endswith(".pdf")) or
         isinstance(doc, BytesIO)
     )
     if not is_valid_pdf:
         raise ValueError("Unsupported input type. Expected a PDF file path or BytesIO object.")
 
-    print('Parsing PDF...')
-    page_list = get_page_tokens(doc, model=opt.model)
+    if page_list is None:
+        print('Parsing PDF...')
+        page_list = get_page_tokens(doc, model=opt.model)
 
     logger.info({'total_page_number': len(page_list)})
     logger.info({'total_token': sum([page[1] for page in page_list])})
