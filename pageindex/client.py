@@ -87,6 +87,15 @@ class PageIndexClient:
             ``chat_model``.
         storage_path (str, optional): Local mode only — directory where
             indexed documents are stored. Defaults to ``./.pageindex``.
+        index_backend (dict, optional): Local mode only — connection
+            overrides for the indexing lane's LLM calls. Keys are
+            LiteLLM's own connection params — ``api_key``, ``api_base``,
+            ``api_version``, ``aws_*``, … — passed through verbatim.
+        chat_backend (dict, optional): Local mode only — default
+            connection overrides for the chat surfaces; a call's own
+            ``backend`` keys win over it. The dict reaches whichever
+            door runs, in that door's vocabulary (see each method) —
+            ``api_key`` / ``base_url`` mean the same thing on all three.
 
     Usage:
         client = PageIndexClient(api_key="...")   # cloud
