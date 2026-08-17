@@ -262,9 +262,10 @@ def _openai_model(protocol: str, model_name: str, backend=None):
                 and not (backend or {}).get("api_key")):
             raise PageIndexAPIError(
                 "The OpenAI backend is not configured: set the "
-                "OPENAI_API_KEY environment variable (any value works "
-                "for keyless OPENAI_BASE_URL servers), or point "
-                "chat_model at another provider (e.g. 'anthropic/...')."
+                "OPENAI_API_KEY environment variable or pass "
+                "backend={'api_key': ...} (any value works for keyless "
+                "OPENAI_BASE_URL servers), or point chat_model at "
+                "another provider (e.g. 'anthropic/...')."
             )
     if "/" not in wire:
         wire = f"openai/{wire}"
@@ -791,7 +792,11 @@ def _require_anthropic() -> None:
 def _anthropic_client(backend=None):
     """The backend client — the seam tests replace with a fake transport."""
     import anthropic
-    return anthropic.Anthropic(**(backend or {}))
+    try:
+        return anthropic.Anthropic(**(backend or {}))
+    except (anthropic.AnthropicError, TypeError) as exc:
+        raise PageIndexAPIError(
+            f"The Anthropic backend is not configured: {exc}") from exc
 
 
 def _anthropic_system(extra_system, block: Optional[str]) -> list[dict]:

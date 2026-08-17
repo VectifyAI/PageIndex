@@ -1669,6 +1669,13 @@ def test_messages_backend_merges_and_reaches_the_client(client, fake_anthropic,
     assert seen["backend"] == {"base_url": "http://cb", "api_key": "z"}
 
 
+@needs_anthropic
+def test_messages_bad_backend_wraps_like_the_other_doors():
+    with pytest.raises(PageIndexAPIError,
+                       match="Anthropic backend is not configured"):
+        local_chat._anthropic_client({"no_such_param": 1})
+
+
 @needs_agents
 def test_extra_headers_ride_model_settings(monkeypatch):
     """Both openai-agents doors merge ModelSettings.extra_headers into
