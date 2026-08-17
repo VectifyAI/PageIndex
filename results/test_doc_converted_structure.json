@@ -1,0 +1,30 @@
+{
+  "doc_name": "test_doc_converted",
+  "line_count": 13,
+  "structure": [
+    {
+      "title": "Test Document",
+      "node_id": "0001",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "Section 1",
+          "node_id": "0002",
+          "line_num": 5,
+          "nodes": [
+            {
+              "title": "Subsection 1.1",
+              "node_id": "0003",
+              "line_num": 8
+            }
+          ]
+        },
+        {
+          "title": "Section 2",
+          "node_id": "0004",
+          "line_num": 11
+        }
+      ]
+    }
+  ]
+}

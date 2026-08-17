@@ -14,6 +14,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Process PDF or Markdown document and generate structure')
     parser.add_argument('--pdf_path', type=str, help='Path to the PDF file')
     parser.add_argument('--md_path', type=str, help='Path to the Markdown file')
+    parser.add_argument('--docx_path', type=str, help='Path to the DOCX file')
+    parser.add_argument('--html_path', type=str, help='Path to the HTML file')
+    parser.add_argument('--txt_path', type=str, help='Path to the TXT file')
     parser.add_argument('--mode', choices=['flash', 'standard'], default='flash',
                       help='Processing mode (default: flash)')
     parser.add_argument('--flash', action='store_true', default=False,
@@ -62,10 +65,40 @@ if __name__ == "__main__":
         args.mode = 'flash'
 
     # Validate that exactly one file type is specified
-    if not args.pdf_path and not args.md_path:
-        raise ValueError("Either --pdf_path or --md_path must be specified")
-    if args.pdf_path and args.md_path:
-        raise ValueError("Only one of --pdf_path or --md_path can be specified")
+    paths_provided = sum(x is not None for x in [args.pdf_path, args.md_path, args.docx_path, args.html_path, args.txt_path])
+    if paths_provided == 0:
+        raise ValueError("One of --pdf_path, --md_path, --docx_path, --html_path, or --txt_path must be specified")
+    if paths_provided > 1:
+        raise ValueError("Only one file path can be specified")
+
+    if args.docx_path or args.html_path or args.txt_path:
+        from pageindex.format_converter import convert_to_markdown
+        source_path = args.docx_path or args.html_path or args.txt_path
+        
+        if args.docx_path and not args.docx_path.lower().endswith('.docx'):
+            raise ValueError("DOCX file must have .docx extension")
+        if args.html_path and not args.html_path.lower().endswith(('.html', '.htm')):
+            raise ValueError("HTML file must have .html or .htm extension")
+        if args.txt_path and not args.txt_path.lower().endswith('.txt'):
+            raise ValueError("TXT file must have .txt extension")
+        if not os.path.isfile(source_path):
+            raise ValueError(f"File not found: {source_path}")
+            
+        print(f"Converting {source_path} to Markdown...")
+        md_content = convert_to_markdown(source_path)
+        
+        output_dir = './results'
+        os.makedirs(output_dir, exist_ok=True)
+        filename = os.path.splitext(os.path.basename(source_path))[0]
+        tmp_md_path = os.path.join(output_dir, f"{filename}_converted.md")
+        
+        with open(tmp_md_path, 'w', encoding='utf-8') as f:
+            f.write(md_content)
+            
+        print(f"Converted markdown saved to: {tmp_md_path}")
+        # Route to the markdown logic
+        args.md_path = tmp_md_path
+
     if args.optimize is not None and not (args.pdf_path and args.mode == 'flash'):
         raise ValueError("--optimize requires Flash mode with --pdf_path")
     if args.optimize is None:
