@@ -1,3 +1,4 @@
+import contextvars
 import logging
 import os
 import sys
@@ -19,6 +20,20 @@ import re
 
 # litellm is imported inside the functions that use it; eager import is slow
 # and fetches a remote model-cost map.
+
+
+# The indexing lane's connection overrides, scoped by LocalAPI around each
+# indexing operation — a contextvar, so the value reaches this module's
+# helpers and their asyncio tasks without threading it through every call.
+_llm_backend: contextvars.ContextVar = contextvars.ContextVar(
+    "pageindex_llm_backend", default=None)
+
+
+def _openai_sdk_kwargs(backend: dict) -> dict:
+    """The same backend dict works on both gateway paths: LiteLLM accepts
+    either endpoint spelling, the openai SDK only ``base_url``."""
+    return {("base_url" if key == "api_base" else key): value
+            for key, value in backend.items()}
 
 
 def _repair_litellm_types() -> None:
@@ -111,15 +126,22 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
         model = _strip_prefix(model, "openai/")
     max_retries = 10
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
+    backend = _llm_backend.get()
+    litellm_kwargs = {**provider_kwargs, **(backend or {})}
     if use_openai_sdk:
-        global _openai_sync_client
-        if _openai_sync_client is None:
-            import openai
-            _openai_sync_client = openai.OpenAI(max_retries=0)
+        import openai
+        if backend:
+            oai_client = openai.OpenAI(**{"max_retries": 0,
+                                          **_openai_sdk_kwargs(backend)})
+        else:
+            global _openai_sync_client
+            if _openai_sync_client is None:
+                _openai_sync_client = openai.OpenAI(max_retries=0)
+            oai_client = _openai_sync_client
     for i in range(max_retries):
         try:
             if use_openai_sdk:
-                response = _openai_sync_client.chat.completions.create(
+                response = oai_client.chat.completions.create(
                     model=model,
                     messages=messages,
                 )
@@ -131,7 +153,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
                     messages=messages,
                     temperature=0,
                     drop_params=True,
-                    **provider_kwargs,
+                    **litellm_kwargs,
                 )
             content = response.choices[0].message.content
             if return_finish_reason:
@@ -158,15 +180,22 @@ async def llm_acompletion(model, prompt):
         model = _strip_prefix(model, "openai/")
     max_retries = 10
     messages = [{"role": "user", "content": prompt}]
+    backend = _llm_backend.get()
+    litellm_kwargs = {**provider_kwargs, **(backend or {})}
     if use_openai_sdk:
-        global _openai_async_client
-        if _openai_async_client is None:
-            import openai
-            _openai_async_client = openai.AsyncOpenAI(max_retries=0)
+        import openai
+        if backend:
+            oai_client = openai.AsyncOpenAI(**{"max_retries": 0,
+                                               **_openai_sdk_kwargs(backend)})
+        else:
+            global _openai_async_client
+            if _openai_async_client is None:
+                _openai_async_client = openai.AsyncOpenAI(max_retries=0)
+            oai_client = _openai_async_client
     for i in range(max_retries):
         try:
             if use_openai_sdk:
-                response = await _openai_async_client.chat.completions.create(
+                response = await oai_client.chat.completions.create(
                     model=model,
                     messages=messages,
                 )
@@ -178,7 +207,7 @@ async def llm_acompletion(model, prompt):
                     messages=messages,
                     temperature=0,
                     drop_params=True,
-                    **provider_kwargs,
+                    **litellm_kwargs,
                 )
             return response.choices[0].message.content
         except Exception as e:

@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from pageindex.utils import (
     ATLASCLOUD_API_BASE,
+    _llm_backend,
     llm_acompletion,
     llm_completion,
     prepare_litellm_call,
@@ -84,6 +85,31 @@ def test_llm_completion_routes_atlascloud_through_litellm(monkeypatch):
         "model": "openai/qwen/qwen3.5-flash",
         "temperature": 0,
     }]
+
+
+def test_index_backend_overrides_atlascloud_defaults(monkeypatch):
+    calls = []
+
+    def completion(**kwargs):
+        calls.append(kwargs)
+        return completion_response("sync response")
+
+    monkeypatch.setenv("ATLASCLOUD_API_KEY", "environment-key")
+    monkeypatch.setitem(sys.modules, "litellm", SimpleNamespace(completion=completion))
+    token = _llm_backend.set({
+        "api_base": "https://backend.example/v1",
+        "api_key": "backend-key",
+        "timeout": 30,
+    })
+    try:
+        result = llm_completion("atlascloud/qwen/qwen3.5-flash", "hello")
+    finally:
+        _llm_backend.reset(token)
+
+    assert result == "sync response"
+    assert calls[0]["api_base"] == "https://backend.example/v1"
+    assert calls[0]["api_key"] == "backend-key"
+    assert calls[0]["timeout"] == 30
 
 
 def test_llm_acompletion_routes_atlascloud_through_litellm(monkeypatch):

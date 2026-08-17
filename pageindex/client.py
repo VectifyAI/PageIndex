@@ -87,6 +87,15 @@ class PageIndexClient:
             ``chat_model``.
         storage_path (str, optional): Local mode only — directory where
             indexed documents are stored. Defaults to ``./.pageindex``.
+        index_backend (dict, optional): Local mode only — connection
+            overrides for the indexing lane's LLM calls. Keys are
+            LiteLLM's own connection params — ``api_key``, ``api_base``,
+            ``api_version``, ``aws_*``, … — passed through verbatim.
+        chat_backend (dict, optional): Local mode only — default
+            connection overrides for the chat surfaces; a call's own
+            ``backend`` keys win over it. The dict reaches whichever
+            door runs, in that door's vocabulary (see each method) —
+            ``api_key`` / ``base_url`` mean the same thing on all three.
 
     Usage:
         client = PageIndexClient(api_key="...")   # cloud
@@ -113,6 +122,8 @@ class PageIndexClient:
         summary_model: Optional[str] = None,
         retrieve_model: Optional[str] = None,
         storage_path: Optional[str] = None,
+        index_backend: Optional[dict[str, Any]] = None,
+        chat_backend: Optional[dict[str, Any]] = None,
     ):
         if api_key == "":
             raise PageIndexAPIError(
@@ -123,7 +134,9 @@ class PageIndexClient:
                       "model": model, "summary_model": summary_model,
                       "retrieve_model": retrieve_model}
         if api_key is not None:
-            local_only = dict(model_args, storage_path=storage_path)
+            local_only = dict(model_args, storage_path=storage_path,
+                              index_backend=index_backend,
+                              chat_backend=chat_backend)
             passed = [name for name, value in local_only.items() if value is not None]
             if passed:
                 raise PageIndexAPIError(
@@ -143,6 +156,7 @@ class PageIndexClient:
             self.index_model = opt.index_model
             self.summary_model = opt.summary_model
             self.chat_model = _agents_sdk_model_name(opt.chat_model)
+            self.chat_backend = chat_backend
             self.storage_path = storage_path or ".pageindex"
             from .local_api import LocalAPI
             self._api = LocalAPI(
@@ -150,6 +164,7 @@ class PageIndexClient:
                 model=self.model,
                 summary_model=self.summary_model,
                 retrieve_model=self.chat_model,
+                index_backend=index_backend,
             )
             # LiteLLM's multi-second import would otherwise land on the
             # first chat call; failures resurface there with real context.
@@ -433,6 +448,8 @@ class PageIndexClient:
         max_tokens: Optional[int] = None,
         reasoning_effort: Optional[str] = None,
         extra_body: Optional[dict[str, Any]] = None,
+        extra_headers: Optional[dict[str, str]] = None,
+        backend: Optional[dict[str, Any]] = None,
     ) -> Union[dict[str, Any], Iterator[str], Iterator[dict[str, Any]]]:
         """
         PageIndex Chat Completions: document QA in one call.
@@ -490,6 +507,17 @@ class PageIndexClient:
                 OpenAI-compatible backends take them verbatim in the
                 request body; LiteLLM-routed providers take them as
                 LiteLLM's own params (mapped or refused per provider).
+                Credentials belong in ``backend``, never here.
+            extra_headers: Local only — extra HTTP headers merged into
+                each backend request; caller headers win. One exception:
+                LiteLLM's anthropic adapter owns the ``anthropic-beta``
+                header (your value is dropped there) — use ``messages()``
+                for Anthropic beta flags.
+            backend: Local only — connection overrides for this call's
+                backend, merged over the client's ``chat_backend``
+                (per-call keys win). Keys are LiteLLM's own connection
+                params — ``api_key``, ``base_url``, ``api_version``,
+                ``aws_*``, … — passed through verbatim.
 
         Returns:
             - stream=False: complete response dict ({'id', 'object', 'created',
@@ -512,14 +540,16 @@ class PageIndexClient:
                 enable_citations=enable_citations, model=model,
                 max_turns=max_turns, top_p=top_p, max_tokens=max_tokens,
                 reasoning_effort=reasoning_effort, extra_body=extra_body,
+                extra_headers=extra_headers, backend=backend,
             )
         if (model is not None or max_turns is not None or top_p is not None
                 or max_tokens is not None or reasoning_effort is not None
-                or extra_body is not None):
+                or extra_body is not None or extra_headers is not None
+                or backend is not None):
             raise PageIndexAPIError(
-                "model, max_turns, top_p, max_tokens, reasoning_effort and "
-                "extra_body are local-mode parameters — the cloud chat "
-                "endpoint selects its own model."
+                "model, max_turns, top_p, max_tokens, reasoning_effort, "
+                "extra_body, extra_headers and backend are local-mode "
+                "parameters — the cloud chat endpoint selects its own model."
             )
         return self._api.chat_completions(
             messages=messages, stream=stream, doc_id=doc_id,
@@ -540,6 +570,8 @@ class PageIndexClient:
         max_output_tokens: Optional[int] = None,
         reasoning: Optional[dict[str, Any]] = None,
         extra_body: Optional[dict[str, Any]] = None,
+        extra_headers: Optional[dict[str, str]] = None,
+        backend: Optional[dict[str, Any]] = None,
     ) -> Union[dict[str, Any], Iterator[dict[str, Any]]]:
         """
         Document QA over the OpenAI Responses protocol — the agentic surface.
@@ -588,7 +620,15 @@ class PageIndexClient:
                 nothing (the backend's default applies).
             extra_body: Extra request fields beyond this method's
                 parameters, merged verbatim into the request body (last,
-                so they win).
+                so they win). Credentials belong in ``backend``, never
+                here.
+            extra_headers: Extra HTTP headers merged into each request;
+                caller headers win over defaults.
+            backend: Connection overrides for this call's backend client,
+                merged over the client's ``chat_backend`` (per-call keys
+                win). Keys are the openai SDK's client params —
+                ``api_key``, ``base_url``, ``organization``, … — passed
+                verbatim; unknown keys raise.
         """
         from .cloud_api import CloudAPI
         if isinstance(self._api, CloudAPI):
@@ -602,6 +642,7 @@ class PageIndexClient:
             instructions=instructions, temperature=temperature, top_p=top_p,
             max_turns=max_turns, max_output_tokens=max_output_tokens,
             reasoning=reasoning, extra_body=extra_body,
+            extra_headers=extra_headers, backend=backend,
         )
 
     def messages(
@@ -619,6 +660,8 @@ class PageIndexClient:
         max_turns: Optional[int] = None,
         thinking: Optional[dict[str, Any]] = None,
         extra_body: Optional[dict[str, Any]] = None,
+        extra_headers: Optional[dict[str, str]] = None,
+        backend: Optional[dict[str, Any]] = None,
     ) -> Union[dict[str, Any], Iterator[Any]]:
         """
         Document QA over the Anthropic Messages protocol — Claude-native.
@@ -658,6 +701,15 @@ class PageIndexClient:
                 constraints are the backend's. Unset sends nothing.
             extra_body: Extra request fields beyond this method's
                 parameters, merged verbatim into each request body.
+                Credentials belong in ``backend``, never here.
+            extra_headers: Extra HTTP headers merged into each request
+                (e.g. ``anthropic-beta`` feature flags); caller headers
+                win over defaults.
+            backend: Connection overrides for this call's backend client,
+                merged over the client's ``chat_backend`` (per-call keys
+                win). Keys are the anthropic SDK's client params —
+                ``api_key``, ``base_url``, ``auth_token``, … — passed
+                verbatim; unknown keys raise.
         """
         from .cloud_api import CloudAPI
         if isinstance(self._api, CloudAPI):
@@ -672,6 +724,7 @@ class PageIndexClient:
             temperature=temperature, top_p=top_p, top_k=top_k,
             stop_sequences=stop_sequences, max_turns=max_turns,
             thinking=thinking, extra_body=extra_body,
+            extra_headers=extra_headers, backend=backend,
         )
 
     # ---------- DOCUMENT MANAGEMENT ----------
@@ -825,7 +878,9 @@ class PageIndexClient:
         ``as_openai_tools`` as the tools; local clients also carry their
         configured ``chat_model`` (cloud omits ``model`` so the
         framework default applies). To customize further, switch to
-        those methods directly.
+        those methods directly. You run this config in your own
+        environment, so its model auth comes from there —
+        ``chat_backend`` does not travel with it.
 
         Args:
             doc_id: Document ID or list of IDs to target, as in
@@ -1107,7 +1162,10 @@ class PageIndexLocalClient(PageIndexClient):
         summary_model: Optional[str] = None,
         retrieve_model: Optional[str] = None,
         storage_path: Optional[str] = None,
+        index_backend: Optional[dict[str, Any]] = None,
+        chat_backend: Optional[dict[str, Any]] = None,
     ):
         super().__init__(None, index_model=index_model, chat_model=chat_model,
                          model=model, summary_model=summary_model,
-                         retrieve_model=retrieve_model, storage_path=storage_path)
+                         retrieve_model=retrieve_model, storage_path=storage_path,
+                         index_backend=index_backend, chat_backend=chat_backend)
