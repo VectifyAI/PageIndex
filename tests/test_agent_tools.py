@@ -2032,6 +2032,31 @@ def test_cloud_bridge_cache_threadsafe_and_pickle_clean(monkeypatch):
     pickle.dumps(cloud)
 
 
+def test_cloud_bridge_rebuilds_on_credential_change(monkeypatch):
+    """CloudAPI re-reads client.api_key on every REST call; the MCP half
+    must not keep authenticating with a rotation-stale snapshot."""
+    import pageindex.mcp_bridge as mcp_bridge
+    from pageindex.agent_tools import _cloud_bridge
+    built = []
+
+    class _Bridge(_FakeBridge):
+        def __init__(self, url, headers):
+            super().__init__(url, headers)
+            built.append((url, dict(headers)))
+
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _Bridge)
+    cloud = PageIndexCloudClient(api_key="pi-old")
+    first = _cloud_bridge(cloud)
+    assert _cloud_bridge(cloud) is first  # unchanged credentials: cached
+    cloud.api_key = "pi-new"
+    second = _cloud_bridge(cloud)
+    assert second is not first
+    assert built[-1][1]["Authorization"] == "Bearer pi-new"
+    cloud.BASE_URL = "https://alt.example"
+    assert _cloud_bridge(cloud) is not second
+    assert built[-1][0] == "https://alt.example/mcp"
+
+
 def test_cloud_agent_instructions_blank_or_nonstring_raises(monkeypatch):
     """Whitespace-only or non-string initialize.instructions must hit the
     same honest error as a missing one — never a blank system prompt."""

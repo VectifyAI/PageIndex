@@ -232,12 +232,13 @@ def _openai_model(protocol: str, model_name: str, backend=None):
     responses protocol: the Responses API is OpenAI-SDK native — LiteLLM's
     completion surface speaks the chat.completions format, so
     provider-prefixed models are refused instead of silently downgrading;
-    bare and ``openai/`` names drive the OpenAI SDK."""
+    a ``litellm/`` prefix strips first (it is routing grammar, not a
+    provider), then bare and ``openai/`` names drive the OpenAI SDK."""
     if protocol == "responses":
+        model_name = model_name.removeprefix("litellm/")
         if "/" in model_name and not model_name.startswith("openai/"):
             raise PageIndexAPIError(
-                f"responses() cannot drive "
-                f"'{model_name.removeprefix('litellm/')}': provider-prefixed "
+                f"responses() cannot drive '{model_name}': provider-prefixed "
                 "models route through LiteLLM, which speaks chat.completions, "
                 "not the Responses API. Use chat_completions() (or messages() "
                 "for Anthropic models), or point OPENAI_BASE_URL at a "
@@ -442,6 +443,13 @@ def _record_response_status(agent, recorded: dict) -> None:
             recorded["status"] = response.status
             for field in ("incomplete_details", "error"):
                 value = getattr(response, field, None)
+                recorded[field] = (value.model_dump(mode="json")
+                                   if hasattr(value, "model_dump") else value)
+        # The backend's echo of what it actually ran with — the envelope
+        # must report these, not assumed values (the request sends neither).
+        for field in ("tool_choice", "parallel_tool_calls"):
+            value = getattr(response, field, None)
+            if value is not None:
                 recorded[field] = (value.model_dump(mode="json")
                                    if hasattr(value, "model_dump") else value)
         return response
@@ -668,9 +676,11 @@ def run_responses(client, input, model: Optional[str] = None,
     from agents import Runner
     from agents.exceptions import AgentsException, MaxTurnsExceeded
 
+    response_id = f"resp_{uuid.uuid4().hex}"
+
     def envelope(transcript: list, raw_responses) -> dict:
         return {
-            "id": f"resp_{uuid.uuid4().hex}",
+            "id": response_id,
             "object": "response",
             "created_at": int(time.time()),
             "model": _reported_model(model_name),
@@ -685,8 +695,11 @@ def run_responses(client, input, model: Optional[str] = None,
                        "parameters": tool.params_json_schema,
                        "strict": getattr(tool, "strict_json_schema", True)}
                       for tool in agent.tools],
-            "tool_choice": "auto",
-            "parallel_tool_calls": True,
+            # The backend's own echo when captured (transport wrapper /
+            # terminal stream event); the request sends neither param, so
+            # without an echo the OpenAI server defaults apply.
+            "tool_choice": recorded.get("tool_choice", "auto"),
+            "parallel_tool_calls": recorded.get("parallel_tool_calls", True),
             "temperature": temperature,
             "top_p": top_p,
             "reasoning": reasoning,
@@ -728,11 +741,23 @@ def run_responses(client, input, model: Optional[str] = None,
         # re-based by the count of items already committed by prior turns.
         output_offset = 0
         completed = False
+        opened = False
         try:
             async for event in streamed.stream_events():
                 if event.type == "raw_response_event":
                     data = event.data.model_dump(exclude_unset=True)
                     if data.get("type") in lifecycle:
+                        if data["type"] == "response.created" and not opened:
+                            # N per-turn openings collapse to one, not zero:
+                            # consumers key state off response.created, so
+                            # the logical stream must open with it, carrying
+                            # the same id the terminal event will report.
+                            opened = True
+                            (data.get("response") or {})["id"] = response_id
+                            sequence += 1
+                            data["sequence_number"] = sequence
+                            yield data
+                            continue
                         if data["type"] in ("response.completed",
                                             "response.incomplete",
                                             "response.failed"):
@@ -742,6 +767,10 @@ def run_responses(client, input, model: Optional[str] = None,
                             for field in ("status", "incomplete_details",
                                           "error"):
                                 recorded[field] = state.get(field)
+                            for field in ("tool_choice",
+                                          "parallel_tool_calls"):
+                                if state.get(field) is not None:
+                                    recorded[field] = state[field]
                             output_offset += len(state.get("output") or [])
                         continue
                     if isinstance(data.get("output_index"), int):

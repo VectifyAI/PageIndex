@@ -124,6 +124,15 @@ class FakeModel(Model):
         self._record(system_instructions, input)
         output = self.turns.pop(0)
         sequence = 0
+        if getattr(self, "emit_created", False):
+            from openai.types.responses import ResponseCreatedEvent
+            sequence += 1
+            yield ResponseCreatedEvent(
+                type="response.created", sequence_number=sequence,
+                response=Response(
+                    id="resp_backend_turn", created_at=0.0, model="fake",
+                    object="response", output=[], parallel_tool_calls=False,
+                    tool_choice="auto", tools=[], status="in_progress"))
         for item in output:
             if item.type == "message":
                 pieces = getattr(self, "pieces", ("The ", "answer"))
@@ -581,6 +590,28 @@ def test_responses_stream_passthrough(client, store_path, fake_model):
 
 
 @needs_agents
+def test_responses_stream_opens_with_created(client, store_path, fake_model):
+    """N per-turn openings collapse to one response.created, not zero —
+    the logical stream must open with a response object carrying the same
+    id the terminal event reports, and the terminal envelope reports the
+    backend's tool-param echo, not assumed values."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    fake.emit_created = True  # two turns emit two; one must pass through
+    events = list(client.responses("q", stream=True))
+    created = [e for e in events if e["type"] == "response.created"]
+    assert len(created) == 1 and events[0] is created[0]
+    assert events[0]["sequence_number"] == 1
+    terminal = events[-1]
+    assert terminal["type"] == "response.completed"
+    assert created[0]["response"]["id"] == terminal["response"]["id"]
+    assert terminal["response"]["parallel_tool_calls"] is False  # echo
+
+
+@needs_agents
 def test_responses_envelope_validates_as_official_response(client, store_path,
                                                            fake_model):
     """The conformance contract: the envelope parses with the official
@@ -874,6 +905,9 @@ def test_responses_envelope_fields_and_cache_group(client, store_path,
                      "get_document_structure", "get_page_content"}
     assert all(tool["type"] == "function" for tool in result["tools"])
     assert result["instructions"].startswith(CHAT_HEADER)
+    # No transport echo attached in this fixture, so these are the
+    # documented fallbacks (the OpenAI server defaults), not assertions
+    # about the request.
     assert result["parallel_tool_calls"] is True
     assert result["tool_choice"] == "auto"
 
@@ -1108,6 +1142,11 @@ def test_openai_model_resolves_provider_prefixes():
     model = local_chat._openai_model("responses", "openai/gpt-5.2")
     assert isinstance(model, OpenAIResponsesModel)
     assert str(model.model) == "gpt-5.2"
+    # litellm/ is routing grammar, not a provider: it strips before the
+    # provider-prefix guard, so an OpenAI model stays reachable.
+    model = local_chat._openai_model("responses", "litellm/gpt-5.2")
+    assert isinstance(model, OpenAIResponsesModel)
+    assert str(model.model) == "gpt-5.2"
 
 
 @needs_agents
@@ -1222,6 +1261,25 @@ def test_responses_envelope_reports_backend_truncation(client, store_path,
     assert result["status"] == "incomplete"
     assert result["incomplete_details"] == {"reason": "max_output_tokens"}
     assert result["error"] is None
+
+
+@needs_agents
+def test_responses_envelope_reports_backend_tool_params(client, store_path,
+                                                        fake_model):
+    """tool_choice / parallel_tool_calls come from the backend's echo —
+    the request sends neither, so the envelope must not assume values."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([[_msg_item("ok")]])
+
+    async def create(*args, **kwargs):
+        return types.SimpleNamespace(status=None, tool_choice="none",
+                                     parallel_tool_calls=False)
+
+    fake._client = types.SimpleNamespace(
+        responses=types.SimpleNamespace(create=create))
+    result = client.responses("q")
+    assert result["tool_choice"] == "none"
+    assert result["parallel_tool_calls"] is False
 
 
 @needs_agents
@@ -1410,14 +1468,24 @@ def test_chat_stream_close_at_opening_chunk_cancels_run(client, store_path,
 
 @needs_agents
 def test_stream_abandonment_cancels_pending_turn(client, store_path,
-                                                 fake_model):
+                                                 fake_model, monkeypatch):
     """Closing the iterator cancels the run even while it is awaiting the
     backend: the blocked turn is torn down (pump thread exits) instead of
-    running — and billing — to completion in the background."""
+    running — and billing — to completion in the background. The pump
+    thread is tracked directly — a process-global thread count would be
+    flaky against litellm's background threads."""
     import threading
-    import time as time_mod
     seed_doc(store_path, "pi-a", "report.pdf")
-    baseline = threading.active_count()
+    pumps = []
+    real_thread = threading.Thread
+
+    class _Tracking(real_thread):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            if getattr(kwargs.get("target"), "__name__", "") == "pump":
+                pumps.append(self)
+
+    monkeypatch.setattr(threading, "Thread", _Tracking)
     fake = fake_model([
         [_call_item("get_document", {"doc_name": "report.pdf"})],
         [_msg_item("The answer")],
@@ -1427,11 +1495,9 @@ def test_stream_abandonment_cancels_pending_turn(client, store_path,
                                      stream=True, stream_metadata=True)
     next(stream)  # the opening role chunk
     stream.close()
-    deadline = time_mod.monotonic() + 3.0
-    while (threading.active_count() > baseline
-           and time_mod.monotonic() < deadline):
-        time_mod.sleep(0.05)
-    assert threading.active_count() <= baseline
+    assert len(pumps) == 1
+    pumps[0].join(timeout=3.0)
+    assert not pumps[0].is_alive()
     assert fake.deltas_emitted == 0  # turn 2 never produced output
 
 

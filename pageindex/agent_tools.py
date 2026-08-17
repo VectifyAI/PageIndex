@@ -863,7 +863,9 @@ def _get_document_structure(client, doc_name: str,
         raw_tree = getattr(getattr(client, "_api", None), "raw_tree", None)
         tree = raw_tree(entry["id"]) if raw_tree is not None else None
         if tree is None:
-            tree = client.get_tree(entry["id"], node_summary=True).get("result")
+            # _format_structure strips text anyway — don't download it.
+            tree = client.get_tree(entry["id"], node_summary=True,
+                                   include_text=False).get("result")
     except PageIndexAPIError as exc:
         return _failure(
             f"Failed to retrieve document structure: {exc}",
@@ -1374,14 +1376,19 @@ def _cloud_bridge(client):
     MCP session. Weak-keyed off the instance so clients stay picklable; the
     lock closes the check-then-set race under concurrent first calls."""
     with _BRIDGES_LOCK:
-        bridge = _BRIDGES.get(client)
-        if bridge is None:
+        # Keyed by the connection identity too: CloudAPI re-reads
+        # client.api_key on every REST call, so a rotated key (or moved
+        # BASE_URL) must rebuild the bridge instead of serving the stale
+        # session's snapshot.
+        auth = (client.BASE_URL, client.api_key)
+        bridge, seen = _BRIDGES.get(client) or (None, None)
+        if bridge is None or seen != auth:
             from .mcp_bridge import McpBridge
             bridge = McpBridge(
-                f"{client.BASE_URL}/mcp",
-                {"Authorization": f"Bearer {client.api_key}"},
+                f"{auth[0]}/mcp",
+                {"Authorization": f"Bearer {auth[1]}"},
             )
-            _BRIDGES[client] = bridge
+            _BRIDGES[client] = (bridge, auth)
         return bridge
 
 

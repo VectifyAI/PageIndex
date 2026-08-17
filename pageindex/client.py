@@ -175,6 +175,11 @@ class PageIndexClient:
         """Legacy name for ``chat_model``."""
         return self.chat_model
 
+    @retrieve_model.setter
+    def retrieve_model(self, value):
+        # 0.2.9 allowed assignment; keep the write path working too.
+        self.chat_model = value
+
     # ---------- DOCUMENT SUBMISSION ----------
 
     def submit_document(
@@ -605,11 +610,12 @@ class PageIndexClient:
             model: Backend model name (defaults to ``chat_model``).
             stream: Yield Responses stream events as dicts — one logical
                 response per call: per-turn backend lifecycle events are
-                collapsed, sequence numbers are reassigned monotonically,
-                and ``output_index`` is re-based onto the single logical
-                ``output``. The single final event is the terminal
-                ``response.*`` for the run's status; its ``response``
-                carries the tool outputs in ``items``.
+                collapsed to one opening ``response.created`` and one
+                final terminal event, sequence numbers are reassigned
+                monotonically, and ``output_index`` is re-based onto the
+                single logical ``output``. The final event is the
+                terminal ``response.*`` for the run's status; its
+                ``response`` carries the tool outputs in ``items``.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call and is part

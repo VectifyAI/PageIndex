@@ -6,6 +6,7 @@ import logging
 import os
 import shutil
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,24 @@ class DocStore:
             _write_json_atomic(self._manifest, {"docs": docs})
         except OSError:
             pass
+
+    @contextmanager
+    def lock(self):
+        """Cross-process mutex for check-then-write sequences (name
+        uniquing before save). fcntl is absent on Windows, where the
+        pre-existing best-effort behavior stays."""
+        try:
+            import fcntl
+        except ImportError:
+            yield
+            return
+        self._root.mkdir(parents=True, exist_ok=True)
+        with open(self._root / ".lock", "w") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
 
     # ── documents ──
     def save_document(self, doc_id: str, meta: dict, tree: list, pages: list) -> None:

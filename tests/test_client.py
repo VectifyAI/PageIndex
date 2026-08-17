@@ -903,3 +903,39 @@ def test_chat_wraps_answerless_cloud_reply(monkeypatch):
                             lambda *a, _r=reply, **k: _r)
         with pytest.raises(PageIndexAPIError, match="carries no answer"):
             client.chat("hi")
+
+
+def test_retrieve_model_assignment_still_works(local_client):
+    """0.2.9 allowed `client.retrieve_model = ...`; the legacy property
+    keeps the write path as an alias for chat_model."""
+    local_client.retrieve_model = "gpt-x"
+    assert local_client.chat_model == "gpt-x"
+    assert local_client.retrieve_model == "gpt-x"
+
+
+def test_concurrent_same_name_submits_store_unique_names(local_client,
+                                                         sample_pdf,
+                                                         monkeypatch):
+    """Name uniquing runs under the store lock at save time, so two
+    clients indexing the same filename concurrently cannot both store it
+    — a stored duplicate would shadow the older doc_id forever."""
+    import threading
+    import time as time_mod
+
+    def slow_flash(pdf, **kwargs):
+        time_mod.sleep(0.1)  # both threads index before either saves
+        return {"structure": [{"title": "T", "start_index": 1,
+                               "end_index": 2, "summary": "s", "nodes": []}]}
+
+    monkeypatch.setattr(pageindex.flash, "page_index_flash", slow_flash)
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda *a, **k: "d")
+    results = []
+    workers = [threading.Thread(
+        target=lambda: results.append(local_client.submit_document(sample_pdf)))
+        for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+    assert {r["name"] for r in results} == {"sample.pdf", "sample_1.pdf"}

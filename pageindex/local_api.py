@@ -128,22 +128,26 @@ class LocalAPI:
             raise PageIndexAPIError(f"Failed to submit document: {e}") from e
 
         doc_id = "pi-" + uuid.uuid4().hex
-        meta = {
-            "id": doc_id,
-            "name": self._unique_doc_name(os.path.basename(file_path)),
-            "description": description,
-            "status": "completed",
-            "createdAt": _now_iso(),
-            "pageNum": len(page_texts),
-            "folderId": None,
-            "metadata": metadata,
-            "mode": mode,
-        }
         pages = [{"page_index": i + 1, "markdown": text}
                  for i, text in enumerate(page_texts)]
         from .utils import remove_fields
-        self._store.save_document(
-            doc_id, meta, remove_fields(structure, fields=["text"]), pages)
+        # Uniquing must observe concurrent submitters' saves, so the
+        # check-then-write runs under the store lock — the early pre-check
+        # above is advisory fail-fast only.
+        with self._store.lock():
+            meta = {
+                "id": doc_id,
+                "name": self._unique_doc_name(os.path.basename(file_path)),
+                "description": description,
+                "status": "completed",
+                "createdAt": _now_iso(),
+                "pageNum": len(page_texts),
+                "folderId": None,
+                "metadata": metadata,
+                "mode": mode,
+            }
+            self._store.save_document(
+                doc_id, meta, remove_fields(structure, fields=["text"]), pages)
         return {"doc_id": doc_id, "name": meta["name"]}
 
     def _unique_doc_name(self, name: str) -> str:
