@@ -123,13 +123,19 @@ def read_bookmarks(doc_handle: Union[str, Path, BytesIO]) -> list[dict]:
         doc = pdfium.PdfDocument(handle)
         entries = []
         for item in doc.get_toc():
-            if item.page_index is None:
+            if hasattr(item, "get_dest"):
+                dest = item.get_dest()
+                page_idx = dest.get_index() if dest else None
+                title = item.get_title()
+            else:
+                page_idx, title = item.page_index, item.title
+            if page_idx is None:
                 continue
-            title = (item.title or "").strip()
+            title = (title or "").strip()
             if not title:
                 continue
             entries.append(
-                {"title": title, "level": item.level + 1, "page": item.page_index + 1}
+                {"title": title, "level": item.level + 1, "page": page_idx + 1}
             )
         return entries
     except (pdfium.PdfiumError, OSError, ValueError, TypeError):
