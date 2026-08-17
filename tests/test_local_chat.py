@@ -1211,6 +1211,7 @@ def test_envelope_model_strips_openai_routing_prefix(store_path, fake_model):
 def test_chat_missing_openai_key_fails_loud(monkeypatch):
     """A missing backend credential surfaces as the SDK's own error type,
     like every other precondition on the chat surfaces."""
+    pytest.importorskip("litellm")  # first import may load a .env; delenv after
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     for name in ("gpt-4o", "openai/gpt-4o"):
         with pytest.raises(PageIndexAPIError, match="OPENAI_API_KEY"):
