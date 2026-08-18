@@ -59,7 +59,7 @@ class CloudAPI:
                 (a taken name gains a numeric suffix), when the server
                 returns it.
         """
-        data = {'if_retrieval': True}
+        data: Dict[str, Any] = {'if_retrieval': True}
         if mode is not None:
             data['mode'] = mode
         if beta_headers is not None:
@@ -356,7 +356,7 @@ class CloudAPI:
         if offset < 0:
             raise ValueError("offset must be non-negative")
 
-        params = {"limit": limit, "offset": offset}
+        params: Dict[str, Any] = {"limit": limit, "offset": offset}
         if folder_id is not None:
             params["folder_id"] = folder_id
 
