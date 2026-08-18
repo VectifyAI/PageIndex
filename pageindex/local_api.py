@@ -27,11 +27,10 @@ class LocalAPI:
     """Backs PageIndexClient's local mode. One instance per client."""
 
     def __init__(self, storage_path: str, model: str, summary_model: str,
-                 retrieve_model: str, index_backend: dict | None = None):
+                 index_backend: dict | None = None):
         self._store = DocStore(storage_path)
         self._model = model
         self._summary_model = summary_model
-        self._retrieve_model = retrieve_model
         self._index_backend = index_backend
         from .utils import ConfigLoader
         self._config_loader = ConfigLoader()

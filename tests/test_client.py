@@ -940,7 +940,7 @@ def test_backend_scopes_the_index_lane(tmp_path, monkeypatch):
     from pageindex.utils import _llm_backend, llm_completion
 
     api = LocalAPI(storage_path=str(tmp_path / "s"), model="m",
-                   summary_model="s", retrieve_model="r",
+                   summary_model="s",
                    index_backend={"api_key": "ik", "api_base": "http://b"})
     assert api._with_backend(_llm_backend.get) == {"api_key": "ik",
                                                    "api_base": "http://b"}

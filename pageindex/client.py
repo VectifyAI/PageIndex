@@ -157,7 +157,6 @@ class PageIndexClient:
                 storage_path=self.storage_path,
                 model=self.model,
                 summary_model=self.summary_model,
-                retrieve_model=self.chat_model,
                 index_backend=index_backend,
             )
             # LiteLLM's multi-second import would otherwise land on the
