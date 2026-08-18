@@ -889,6 +889,29 @@ def test_backend_scopes_the_index_lane(tmp_path, monkeypatch):
         assert captured["api_base"] == "http://b"
 
 
+def test_index_precheck_covers_only_openai_shaped(monkeypatch):
+    """The missing-key pre-check fires only for OpenAI-shaped names — other
+    providers resolve credentials at call time (IAM chains, ADC, Ollama's
+    localhost default), invisible to env inspection, so the lane must not
+    block them up front."""
+    pytest.importorskip("litellm")
+    import litellm
+    from types import SimpleNamespace
+    from pageindex.utils import llm_completion
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with pytest.raises(litellm.AuthenticationError, match="missing API key"):
+        llm_completion("my-finetune-v2", "p")
+
+    reply = SimpleNamespace(choices=[SimpleNamespace(
+        message=SimpleNamespace(content="ok"), finish_reason="stop")])
+    monkeypatch.setattr(litellm, "completion", lambda **kw: reply)
+    monkeypatch.setattr(litellm, "validate_environment",
+                        lambda *a, **k: pytest.fail("env pre-check ran"))
+    assert llm_completion("ollama/llama3", "p") == "ok"
+    assert llm_completion("bedrock/anthropic.claude-sonnet", "p") == "ok"
+
+
 def test_backend_args_are_local_only():
     with pytest.raises(PageIndexAPIError, match="chat_backend"):
         PageIndexClient(api_key="pi-k", chat_backend={"api_key": "x"})

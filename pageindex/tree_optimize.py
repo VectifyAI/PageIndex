@@ -61,7 +61,7 @@ import re
 import sys
 from types import SimpleNamespace
 
-from .utils import (ConfigLoader, _is_unrecoverable,
+from .utils import (ConfigLoader, _is_unrecoverable, _openai_missing_keys,
                     llm_acompletion, strip_internal_keys)
 
 TRIGGER_PAGES = 5        # only look ahead on nodes larger than this
@@ -873,10 +873,9 @@ async def main():
 
     model = args.model or default_model()
     if args.expand and not args.plan:
-        import litellm
-        env = litellm.validate_environment(model)
-        if not env["keys_in_environment"]:
-            sys.exit(f"{', '.join(env['missing_keys'])} is not set "
+        missing = _openai_missing_keys(model)
+        if missing:
+            sys.exit(f"{', '.join(missing)} is not set "
                      f"(expand model: {model}).")
 
     original = json.load(open(args.structure))

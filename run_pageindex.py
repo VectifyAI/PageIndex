@@ -3,7 +3,7 @@ import os
 import json
 from pageindex import *
 from pageindex.page_index_md import md_to_tree
-from pageindex.utils import ConfigLoader
+from pageindex.utils import ConfigLoader, _openai_missing_keys
 
 if __name__ == "__main__":
     # Set up argument parser
@@ -95,11 +95,10 @@ if __name__ == "__main__":
                              or ConfigLoader().load().summary_model)
             will_summarize = args.summary if args.summary is not None else True
             if will_summarize or args.optimize == 'full':
-                import litellm
-                env = litellm.validate_environment(summary_model)
-                if not env["keys_in_environment"]:
+                missing = _openai_missing_keys(summary_model)
+                if missing:
                     raise SystemExit(
-                        f"Missing API key for {summary_model}: {', '.join(env['missing_keys'])}")
+                        f"Missing API key for {summary_model}: {', '.join(missing)}")
             toc_with_page_number = page_index_flash(
                 args.pdf_path,
                 optimize=args.optimize if args.optimize != 'off' else False,
@@ -159,7 +158,7 @@ if __name__ == "__main__":
         import asyncio
         
         # Use ConfigLoader to get consistent defaults (matching PDF behavior)
-        from pageindex.utils import ConfigLoader
+        from pageindex.utils import ConfigLoader, _openai_missing_keys
         config_loader = ConfigLoader()
         
         # Create options dict with user args

@@ -77,6 +77,19 @@ def run_off_loop(func, *args):
         return pool.submit(func, *args).result()
 
 
+def _openai_missing_keys(model):
+    """Missing env keys for the pre-check, which covers only OpenAI-shaped
+    names (bare or ``openai/``): other providers resolve credentials their
+    own way at call time (IAM chains, ADC, Ollama's localhost default),
+    invisible to env inspection — the chat lane draws the same line."""
+    import litellm
+    wire = _strip_prefix(model, "litellm/")
+    if "/" in wire and not wire.startswith("openai/"):
+        return []
+    env = litellm.validate_environment(wire if "/" in wire else f"openai/{wire}")
+    return [] if env["keys_in_environment"] else env["missing_keys"]
+
+
 def _litellm_model(model, backend):
     """Normalize to LiteLLM's grammar (``litellm/`` strips, bare names get
     the ``openai/`` wire form — same as the chat lane) and fail fast on a
@@ -98,11 +111,10 @@ def _litellm_model(model, backend):
             f"OPENAI_BASE_URL at the server.",
             llm_provider=None, model=model)
     if not backend:
-        env = litellm.validate_environment(model)
-        if not env["keys_in_environment"]:
+        missing = _openai_missing_keys(model)
+        if missing:
             raise litellm.AuthenticationError(
-                f"missing API key for {model}: "
-                f"{', '.join(env['missing_keys'])}",
+                f"missing API key for {model}: {', '.join(missing)}",
                 llm_provider=None, model=model)
     return model
 
