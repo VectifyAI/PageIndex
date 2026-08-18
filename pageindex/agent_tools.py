@@ -9,11 +9,10 @@ guidance strings (tool descriptions) adapt to the local surface the same
 way the agent instructions do — they never teach capabilities that only
 exist on the cloud.
 
-Tools never raise for any invocation their signatures accept: every
-outcome, including errors, is returned as the same JSON envelope the cloud
-emits ({"success": true, ...} / {"error": ...}). Arguments outside a pruned
-local signature fail at the Python call boundary; the call_tool path
-answers them with the guided error envelope instead.
+Tools never raise: every outcome, including errors, is returned as the
+same JSON envelope the cloud emits ({"success": true, ...} /
+{"error": ...}) — arguments outside a pruned local signature come back as
+that envelope too, on the direct and the call_tool path alike.
 """
 from __future__ import annotations
 

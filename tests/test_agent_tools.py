@@ -902,23 +902,35 @@ def test_anthropic_runner_config_doc_scope_enforced_in_tools(client,
     assert [doc["name"] for doc in browse["documents"]] == ["report.pdf"]
 
 
-def test_claude_agent_config_doc_scope_enforced_in_tools(client, store_path):
+def test_claude_agent_config_doc_scope_enforced_in_tools(client, store_path,
+                                                         monkeypatch):
     """claude_agent_config(doc_id=...) must wire scope all the way into the
-    tool invoke callables — an out-of-scope document returns NOT_FOUND."""
-    pytest.importorskip("claude_agent_sdk")
-    from pageindex.agent_tools import _tool_specs
+    handlers it registers — an out-of-scope document returns NOT_FOUND. The
+    assertion has to drive those handlers, or build_claude_mcp's doc_ids
+    pass-through goes unguarded."""
+    claude_agent_sdk = pytest.importorskip("claude_agent_sdk")
     seed_doc(store_path, "pi-a", "report.pdf")
     seed_doc(store_path, "pi-b", "payroll.pdf",
              created_at="2026-08-02T10:00:00.123000")
+
+    registered = {}
+    create_server = claude_agent_sdk.create_sdk_mcp_server
+
+    def capture(**kwargs):
+        registered.update(kwargs)
+        return create_server(**kwargs)
+
+    monkeypatch.setattr(claude_agent_sdk, "create_sdk_mcp_server", capture)
     config = client.claude_agent_config(doc_id="pi-a")
     assert "report.pdf" in config["system_prompt"]
-    specs = dict((name, invoke)
-                 for name, _desc, _schema, invoke
-                 in _tool_specs(client, doc_ids=["pi-a"]))
-    text, is_error = specs["get_page_content"](
-        {"doc_name": "payroll.pdf", "pages": "1"})
-    assert is_error
-    assert json.loads(text)["errorCode"] == "NOT_FOUND"
+    handlers = {spec.name: spec.handler for spec in registered["tools"]}
+    result = asyncio.run(handlers["get_page_content"](
+        {"doc_name": "payroll.pdf", "pages": "1"}))
+    assert result.get("is_error")
+    assert json.loads(result["content"][0]["text"])["errorCode"] == "NOT_FOUND"
+    browse = asyncio.run(handlers["browse_documents"]({}))
+    listed = json.loads(browse["content"][0]["text"])["documents"]
+    assert [doc["name"] for doc in listed] == ["report.pdf"]
 
 
 def test_openai_agent_config_scoped_shadow_check(client, store_path):
