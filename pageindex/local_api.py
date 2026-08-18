@@ -106,7 +106,7 @@ class LocalAPI:
         try:
             if mode == "flash":
                 structure, description = run_off_loop(
-                    self._with_backend, self._index_flash, file_path, page_texts
+                    self._with_backend, self._index_flash, file_path
                 )
             else:
                 structure, description = run_off_loop(
@@ -184,9 +184,9 @@ class LocalAPI:
             )
         return structure, result.get("doc_description")
 
-    def _index_flash(self, file_path: str, page_texts: list[str]) -> tuple[list, str | None]:
+    def _index_flash(self, file_path: str) -> tuple[list, str | None]:
         from .flash import page_index_flash
-        from .utils import (add_node_text, create_clean_structure_for_description,
+        from .utils import (create_clean_structure_for_description,
                             generate_doc_description, write_node_id)
         result = page_index_flash(file_path, summary=True,
                                   summary_model=self._summary_model,
@@ -199,7 +199,6 @@ class LocalAPI:
                 "a structure from this PDF."
             )
         write_node_id(structure)
-        add_node_text(structure, [(text, 0) for text in page_texts])
         description = generate_doc_description(
             create_clean_structure_for_description(structure),
             model=self._summary_model,

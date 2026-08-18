@@ -327,15 +327,23 @@ def _dumps(payload: dict[str, Any]) -> str:
 
 # ── document listing / name resolution ──
 
-def _all_documents(client) -> list[dict[str, Any]]:
+def _all_documents(client, stop_ids=None) -> list[dict[str, Any]]:
     """Every document the client can list, newest first (both modes list
-    newest-first; paging preserves that order)."""
+    newest-first; paging preserves that order). With ``stop_ids``, paging
+    stops early once every one of those ids has been seen — for callers
+    that only need those entries; an id absent from the listing still
+    costs a full sweep."""
     documents: list[dict[str, Any]] = []
     offset = 0
+    remaining = {str(one_id) for one_id in stop_ids} if stop_ids else None
     while True:
         page = client.list_documents(limit=100, offset=offset)
         batch = page.get("documents") or []
         documents.extend(batch)
+        if remaining is not None:
+            remaining.difference_update(str(doc.get("id")) for doc in batch)
+            if not remaining:
+                return documents
         # Advance by what actually arrived — stepping by the requested
         # limit skips documents whenever a server caps its page size.
         offset += len(batch)
@@ -386,7 +394,7 @@ def _resolve_document(
     """Resolve doc_name to a list entry. Same-name duplicates resolve to the
     newest match. Returns (entry, None) or (None, error_payload_pair)."""
     if documents is None:
-        documents = _all_documents(client)
+        documents = _all_documents(client, stop_ids=allowed_ids)
     documents = _scope_documents(documents, allowed_ids)
     matches = [doc for doc in documents if doc.get("name") == doc_name]
     if matches:
@@ -734,7 +742,8 @@ def _browse_documents(client, folder_id: str = "root", recursive: bool = False,
         window = listing.get("documents") or []
         total = listing.get("total")
     else:
-        scoped = _scope_documents(_all_documents(client), _allowed_ids)
+        scoped = _scope_documents(_all_documents(client, stop_ids=_allowed_ids),
+                                  _allowed_ids)
         window, total = scoped[offset:offset + limit], len(scoped)
     window_end = offset + len(window)
     has_more = bool(window) and (window_end < total if isinstance(total, int)
@@ -1123,7 +1132,7 @@ def _remove_document(client, doc_names: list[str],
                         {"summary": "Too many documents in one call",
                          "options": ["Delete at most 10 documents per call"]},
                         "INVALID_INPUT")
-    documents = _all_documents(client)
+    documents = _all_documents(client, stop_ids=_allowed_ids)
     results = []
     for doc_name in doc_names:
         entry, error = _resolve_document(client, doc_name, documents=documents,
@@ -1162,11 +1171,11 @@ def tool_names(include_management: bool = False) -> tuple[str, ...]:
     return _READ_TOOLS + (_MANAGEMENT_TOOLS if include_management else ())
 
 
-def _coerce_bool_args(name: str, kwargs: dict[str, Any]) -> None:
+def _coerce_bool_args(schema: dict, kwargs: dict[str, Any]) -> None:
     """Models routinely send booleans as JSON strings ("false"); the bare
-    truthiness tests downstream would read those as True."""
-    properties = TOOL_CONTRACT.get(name, {}).get("schema", {}).get(
-        "properties", {})
+    truthiness tests downstream would read those as True. Runs on both
+    dispatch paths — call_tool and the cloud bridge invoker."""
+    properties = (schema or {}).get("properties", {})
     for key, spec in properties.items():
         value = kwargs.get(key)
         if spec.get("type") == "boolean" and isinstance(value, str):
@@ -1204,7 +1213,7 @@ def call_tool(client, name: str, arguments: dict[str, Any],
     # "omit if ..." semantics, same as the cloud bridge invoker).
     kwargs = {key: value for key, value in (arguments or {}).items()
               if not key.startswith("_") and value is not None}
-    _coerce_bool_args(name, kwargs)
+    _coerce_bool_args(TOOL_CONTRACT.get(name, {}).get("schema", {}), kwargs)
     try:
         if doc_ids is not None:
             ids = [doc_ids] if isinstance(doc_ids, str) else doc_ids
@@ -1333,15 +1342,18 @@ def _annotation_for(spec: dict) -> Any:
     return Optional[base] if nullable else base
 
 
-def _bridge_invoker(bridge, name: str) -> "Callable[[dict], tuple[str, bool]]":
-    """One cloud tool call proxied over MCP: None-valued arguments are
-    dropped (None ≡ omitted, matching the contract's "omit if ..."
-    semantics) and failures are contained in the error envelope. Returns
-    (envelope_text, is_error), like call_tool."""
+def _bridge_invoker(bridge, name: str, schema: dict,
+                    ) -> "Callable[[dict], tuple[str, bool]]":
+    """One cloud tool call proxied over MCP: string booleans are coerced
+    (same as call_tool), None-valued arguments are dropped (None ≡ omitted,
+    matching the contract's "omit if ..." semantics) and failures are
+    contained in the error envelope. Returns (envelope_text, is_error),
+    like call_tool."""
     def _invoke(arguments: dict[str, Any]) -> tuple[str, bool]:
         try:
             arguments = {key: value for key, value in arguments.items()
                          if value is not None}
+            _coerce_bool_args(schema, arguments)
             return bridge.call_tool(name, arguments)
         except Exception as exc:
             payload, _ = _failure(
@@ -1490,7 +1502,8 @@ def _tool_specs(client, include_management: bool = False, doc_ids=None,
                  meta.get("description") or "",
                  copy.deepcopy(meta.get("inputSchema"))
                  or {"type": "object", "properties": {}},
-                 _bridge_invoker(bridge, str(meta.get("name") or "tool")))
+                 _bridge_invoker(bridge, str(meta.get("name") or "tool"),
+                                 meta.get("inputSchema") or {}))
                 for meta in tools_meta]
 
     def local_invoke(name: str) -> "Callable[[dict], tuple[str, bool]]":
@@ -1612,7 +1625,10 @@ def doc_targeting_block(client, doc_id, scoped: bool = False) -> Optional[str]:
     if missing:
         raise PageIndexAPIError(
             "Documents not found or access denied: " + ", ".join(missing))
-    listing = _all_documents(client)
+    # Scoped: the listing only backfills the target docs' metadata (list
+    # entries carry it, get_document does not — cloud parity), so paging
+    # can stop at those ids. Unscoped needs it all for the shadow check.
+    listing = _all_documents(client, stop_ids=doc_ids if scoped else None)
     documents = ([{**detail, "id": one_id}
                   for one_id, detail in zip(doc_ids, details)]
                  if scoped else listing)

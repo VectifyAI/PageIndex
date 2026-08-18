@@ -23,6 +23,28 @@ def test_page_text_pins_pdfium5_semantics():
     assert "break loop\n5: if lbp" in page7  # pseudocode lines no longer glued
 
 
+def test_page_mode_walk_uses_merged_surrogate_census():
+    """The page-mode unicode walk must consume the char census char_extract
+    built (astral chars merged to one entry at the high-surrogate slot).
+    Re-reading the textpage split them back into two lone-surrogate slots,
+    desynced the walk against their one-char cmap targets, and silently
+    dropped every patch on any page containing an astral char."""
+    from pageindex.flash.parser_pdfium_charlevel.unicode_apply import (
+        _apply_font_unicode)
+
+    astral = {"i": 0, "ch": "\U0001d44e", "is_gen": False}   # slots 0-1 merged
+    unmapped = {"i": 2, "ch": "\x00", "is_gen": False}       # PDFium found no unicode
+    raw_chars = [astral, unmapped]
+    show_codes = [(7, (5, 6), 100.0)]
+    map_cache = {7: (1, {5: "\U0001d44e", 6: "β"})}
+
+    # objects vs show ops count differs -> page mode.
+    _apply_font_unicode(raw_chars, [], show_codes, None, map_cache)
+
+    assert astral["ch"] == "\U0001d44e"
+    assert unmapped["ch"] == "β"
+
+
 def test_optimize_full_fails_fast_without_a_key(tmp_path, monkeypatch):
     """optimize='full' runs LLM expand: with no key configured it must be
     an instant, guided PageIndexAPIError — raised before any PDF work (a

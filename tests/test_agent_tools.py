@@ -1551,7 +1551,27 @@ def _synth(bridge, meta):
     name = meta["name"]
     return _make_tool_function(name, meta.get("description"),
                                meta["inputSchema"],
-                               _bridge_invoker(bridge, name))
+                               _bridge_invoker(bridge, name,
+                                               meta["inputSchema"]))
+
+
+def test_bridge_invoker_coerces_string_booleans():
+    """Identical model output must behave the same on both dispatch paths:
+    call_tool coerced "false" but the cloud bridge forwarded it verbatim,
+    turning "don't wait" into a 3-minute wait on lenient servers."""
+    from pageindex.agent_tools import TOOL_CONTRACT, _bridge_invoker
+
+    seen = {}
+
+    class _Bridge:
+        def call_tool(self, name, args):
+            seen.update(args)
+            return "{}", False
+
+    invoke = _bridge_invoker(_Bridge(), "get_document",
+                             TOOL_CONTRACT["get_document"]["schema"])
+    invoke({"doc_name": "q.pdf", "wait_for_completion": "false"})
+    assert seen["wait_for_completion"] is False
 
 
 def test_synth_optional_no_default_param_is_nullable():
@@ -1834,6 +1854,17 @@ def test_all_documents_survives_short_pages_and_missing_total():
     exact = make_client(120, 100)   # well-behaved server:
     assert _all_documents(exact) == docs
     assert type(exact).calls == 2   # ...total still saves the empty page
+
+    # stop_ids ends the walk once every wanted id has been seen — a
+    # doc-scoped chat turn must not page the whole library...
+    early = make_client(120, 100)
+    listed = _all_documents(early, stop_ids=frozenset({"pi-3"}))
+    assert type(early).calls == 1
+    assert any(doc["id"] == "pi-3" for doc in listed)
+    # ...while an id the listing lacks still costs the full sweep.
+    full = make_client(120, 100)
+    assert _all_documents(full, stop_ids=frozenset({"pi-missing"})) == docs
+    assert type(full).calls == 2
 
 
 def test_null_arguments_mean_omitted(client, store_path):

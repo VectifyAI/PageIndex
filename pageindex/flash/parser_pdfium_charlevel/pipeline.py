@@ -95,7 +95,7 @@ def _page_pass1(pdf, pdf_doc, page_idx: int, type3_ext: dict, font_map_cache: di
                 # PDFium's output).
                 if raw_chars:
                     _apply_font_unicode(
-                        text_page.raw, raw_chars, objects, show_codes, pdf_doc,
+                        raw_chars, objects, show_codes, pdf_doc,
                         font_map_cache)
         except Exception:
             pass

@@ -5,7 +5,6 @@ from __future__ import annotations
 import bisect
 import difflib
 from collections import Counter
-import pypdfium2.raw as pdfium_c
 
 from .text_normalize import _is_whitespace
 from .font_unicode import _font_unicode_map
@@ -16,7 +15,6 @@ from .code_walk import (
 
 
 def _apply_font_unicode(
-    text_page,
     raw_chars: list[dict],
     objects: list[dict],
     show_codes: list[tuple[int | None, tuple[int, ...], float]],
@@ -287,14 +285,12 @@ def _apply_font_unicode(
                 _synthesize_dropped_glyphs(kept, raw_chars, chars_by_index)
         return
 
-    # Page mode.
-    seq: list[tuple[int, str]] = []
-    char_count = pdfium_c.FPDFText_CountChars(text_page)
-    for char_index in range(char_count):
-        if pdfium_c.FPDFText_IsGenerated(text_page, char_index) == 1:
-            continue
-        codepoint = pdfium_c.FPDFText_GetUnicode(text_page, char_index)
-        seq.append((char_index, chr(codepoint) if codepoint > 0 else "\x00"))
+    # Page mode. Walk the char census char_extract built (surrogate pairs
+    # already merged there): re-reading the textpage would split astral
+    # chars back into two lone-surrogate slots, desync the walk against
+    # their one-char cmap targets, and drop the whole page's patch.
+    seq = [(raw_char["i"], raw_char["ch"])
+           for raw_char in raw_chars if not raw_char["is_gen"]]
     targets: list[str] = []
     for font_index, encoded_text, _tz in show_codes:
         if not encoded_text:
