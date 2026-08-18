@@ -23,8 +23,6 @@ __all__ = [
 ]
 
 _LAZY = {
-    "page_index": ".page_index_classic",
-    "page_index_main": ".page_index_classic",
     "page_index_flash": ".flash",
     "optimize_tree": ".tree_optimize",
     "md_to_tree": ".page_index_md",
@@ -34,25 +32,18 @@ _SUBMODULES = {"agent_tools", "client", "cloud_api", "errors", "flash",
                "mcp_bridge", "page_index_classic", "page_index_md",
                "tree_optimize", "utils"}
 
+
 def __getattr__(name):
     if name.startswith("_"):
-        # Dunder probes (copy, pickle, inspect) are the frequent unknown
-        # names — they must not trigger the classic import below.
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     import importlib
     if name in _SUBMODULES:
         return importlib.import_module(f".{name}", __name__)
-    # Pre-0.2.10 compat: unknown names fall through to the classic module,
-    # whose public surface (ConfigLoader, count_tokens, ...) resolved as
-    # package attributes. A non-underscore typo pays one classic import
-    # before its AttributeError — not worth an allowlist.
-    module = importlib.import_module(_LAZY.get(name, ".page_index_classic"),
-                                     __name__)
+    module = importlib.import_module(_LAZY.get(name, ".page_index_classic"), __name__)
     try:
         value = getattr(module, name)
     except AttributeError:
-        raise AttributeError(
-            f"module {__name__!r} has no attribute {name!r}") from None
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
     globals()[name] = value
     return value
 
