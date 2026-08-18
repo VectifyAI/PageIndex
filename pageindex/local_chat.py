@@ -441,8 +441,8 @@ def _usage_sums(raw_responses) -> "tuple[int, int, int, int, int]":
     for r in raw_responses:
         if r.usage is None:
             continue
-        prompt += r.usage.input_tokens
-        completion += r.usage.output_tokens
+        prompt += r.usage.input_tokens or 0
+        completion += r.usage.output_tokens or 0
         details = getattr(r.usage, "input_tokens_details", None)
         cached += getattr(details, "cached_tokens", 0) or 0
         cache_write += getattr(details, "cache_write_tokens", 0) or 0
