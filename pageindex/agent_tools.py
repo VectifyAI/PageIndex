@@ -1600,7 +1600,16 @@ def doc_targeting_block(client, doc_id, scoped: bool = False) -> Optional[str]:
         raise PageIndexAPIError(
             "doc_id is empty. Pass one or more document IDs, or omit "
             "doc_id to give the agent the whole library.")
-    details = [client.get_document(one_id) for one_id in doc_ids]
+    details = []
+    missing = []
+    for one_id in doc_ids:
+        try:
+            details.append(client.get_document(one_id))
+        except PageIndexAPIError:
+            missing.append(str(one_id))
+    if missing:
+        raise PageIndexAPIError(
+            "Documents not found or access denied: " + ", ".join(missing))
     listing = _all_documents(client)
     documents = ([{**detail, "id": one_id}
                   for one_id, detail in zip(doc_ids, details)]

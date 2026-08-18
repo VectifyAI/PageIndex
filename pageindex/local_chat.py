@@ -1,23 +1,4 @@
-"""Managed local chat: document-QA agents over the local tools.
-
-Three methods, three backend protocols, routed 1:1: ``chat_completions``
-drives the backend's /chat/completions (any OpenAI-compatible backend,
-final answer only), ``responses`` drives /responses (official-shape
-envelope; the full process transcript rides in ``items`` — round-trip it
-for provider prompt-cache continuation and agent memory), ``messages``
-drives Anthropic's /v1/messages via the SDK's own tool runner
-(tool_use/tool_result round-trip is the format's native behavior).
-
-Content passes through untouched — the caller's messages, the model's
-answers, tool outputs. Native stop reasons pass through on ``messages``;
-the OpenAI engine's abstraction does not surface per-turn finish reasons,
-so ``chat_completions`` reports loop completion as ``"stop"``, while
-``responses`` reports the backend's terminal ``status`` where the wire
-surfaces one (recorded at the transport layer — the framework discards
-it). The SDK owns gatekeeping (structural validation), table-setting
-(managed instructions, tools, doc targeting), tool execution, and billing
-(usage aggregation, envelope ids).
-"""
+"""Managed local chat: document-QA agents over the local tools."""
 from __future__ import annotations
 
 import asyncio
@@ -51,17 +32,6 @@ def _doc_block(client, doc_id) -> Optional[str]:
     if not isinstance(doc_id, (str, list)):
         raise PageIndexAPIError("doc_id must be a string or a list of "
                                 "strings.")
-    doc_ids = [doc_id] if isinstance(doc_id, str) else list(doc_id)
-    missing = []
-    for one_id in doc_ids:
-        try:
-            client.get_document(one_id)
-        except PageIndexAPIError:
-            missing.append(str(one_id))
-    if missing:
-        raise PageIndexAPIError(
-            "Documents not found or access denied: " + ", ".join(missing)
-        )
     # scoped: the chat surfaces also pass doc_id into the tool layer, so
     # name resolution happens inside the allowlist — only a duplicate name
     # within the targeted set shadows.
@@ -211,20 +181,7 @@ def _sdk_backend(backend) -> dict:
 
 
 def _openai_model(protocol: str, model_name: str, backend=None):
-    """The backend protocol driver — the seam tests replace with a fake.
-
-    chat protocol: LiteLLM, full stop — model names mean what LiteLLM says
-    they mean. Bare names are OpenAI-compatible shorthand (wire form
-    ``openai/<name>``, so OPENAI_API_KEY / OPENAI_BASE_URL keep selecting
-    the backend), a ``litellm/`` prefix strips, and a first segment LiteLLM
-    does not know (a HuggingFace repo id like ``Qwen/...``) is refused with
-    the ``openai/`` form instead of failing inside LiteLLM at request time.
-
-    responses protocol: the Responses API is OpenAI-SDK native — LiteLLM's
-    completion surface speaks the chat.completions format, so
-    provider-prefixed models are refused instead of silently downgrading;
-    a ``litellm/`` prefix strips first (it is routing grammar, not a
-    provider), then bare and ``openai/`` names drive the OpenAI SDK."""
+    """The backend protocol driver — the seam tests replace with a fake."""
     if protocol == "responses":
         model_name = model_name.removeprefix("litellm/")
         if "/" in model_name and not model_name.startswith("openai/"):
@@ -482,6 +439,8 @@ def _wrap_max_turns(max_turns) -> PageIndexAPIError:
 def _usage_sums(raw_responses) -> "tuple[int, int, int, int, int]":
     prompt = completion = cached = cache_write = reasoning = 0
     for r in raw_responses:
+        if r.usage is None:
+            continue
         prompt += r.usage.input_tokens
         completion += r.usage.output_tokens
         details = getattr(r.usage, "input_tokens_details", None)
@@ -1002,7 +961,7 @@ def run_messages(client, messages, model: str,
     new_messages = [_dump_message(message)
                     for message in conversation[len(prepared):]]
     final_blocks = [_dump_block(item) for item in final.content]
-    final_ids = {block["id"] for block in final_blocks
+    final_ids = {block.get("id") for block in final_blocks
                  if block.get("type") == "tool_use"}
     history_ids = {block.get("id")
                    for message in new_messages
