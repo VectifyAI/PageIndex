@@ -173,7 +173,7 @@ python3 run_pageindex.py --pdf_path /path/to/your/document.pdf
 <details>
 <summary>Optional parameters</summary>
 <br>
-You can customize the processing with additional optional arguments (the structure-tuning flags below require <code>--mode standard</code>):
+You can customize the processing with additional optional arguments (the structure-tuning flags from <code>--toc-check-pages</code> down require <code>--mode standard</code>):
 
 ```
 --mode                  Processing mode: flash (default) or standard

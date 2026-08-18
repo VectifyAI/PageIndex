@@ -789,7 +789,7 @@ class PageIndexClient:
         For the OpenAI / Claude Agent SDKs, prefer ``as_openai_tools()`` /
         ``as_claude_mcp()``.
 
-        Cloud: the full cloud tool set, discovered live from the PageIndex
+        Cloud: the full live read tool set, discovered from the PageIndex
         MCP server when this method is called — one function per tool,
         signature and docstring synthesized from the server's schemas, calls
         executed from your process over MCP. Raises PageIndexAPIError if the
