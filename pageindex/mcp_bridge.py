@@ -211,6 +211,14 @@ class McpBridge:
                 kind = block.get("mimeType") or block.get("type") or "binary"
                 size_kb = max(1, len(block["data"]) * 3 // 4096)
                 texts.append(f"[{kind} content omitted: ~{size_kb} KB]")
+            elif (isinstance(block, dict)
+                  and isinstance(block.get("resource"), dict)
+                  and isinstance(block["resource"].get("blob"), str)):
+                # EmbeddedResource nests its base64 one level down.
+                resource = block["resource"]
+                kind = resource.get("mimeType") or "binary"
+                size_kb = max(1, len(resource["blob"]) * 3 // 4096)
+                texts.append(f"[{kind} content omitted: ~{size_kb} KB]")
             else:
                 texts.append(json.dumps(block, ensure_ascii=False))
         return "\n".join(texts), is_error

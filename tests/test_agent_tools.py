@@ -1534,12 +1534,15 @@ def test_mcp_bridge_blob_blocks_become_stubs():
     bridge._request = lambda method, params: {"content": [
         {"type": "text", "text": "Page 3 of report.pdf"},
         {"type": "image", "mimeType": "image/png", "data": blob},
+        {"type": "resource",
+         "resource": {"mimeType": "image/jpeg", "blob": blob}},
     ]}
     text, is_error = bridge.call_tool("get_document_image", {})
     assert not is_error
     assert "Page 3 of report.pdf" in text
     assert "AAAA" not in text
     assert "[image/png content omitted: ~6 KB]" in text
+    assert "[image/jpeg content omitted: ~6 KB]" in text
 
 
 # ── review-round regressions ──
@@ -1553,6 +1556,24 @@ def _synth(bridge, meta):
                                meta["inputSchema"],
                                _bridge_invoker(bridge, name,
                                                meta["inputSchema"]))
+
+
+def test_synth_binding_error_names_the_tool():
+    """Binding TypeErrors quote the function's __qualname__; the model used
+    to see \"_synthesized() got an unexpected keyword argument\" and had no
+    tool name to correct against."""
+    from pageindex.agent_tools import TOOL_CONTRACT
+
+    class _Bridge:
+        def call_tool(self, name, args):
+            return json.dumps(args), False
+
+    meta = {"name": "browse_documents", "description": "d",
+            "inputSchema": TOOL_CONTRACT["browse_documents"]["schema"]}
+    fn = _synth(_Bridge(), meta)
+    payload = json.loads(fn(bogus_param=1))
+    assert "browse_documents" in payload["error"]
+    assert "_synthesized" not in payload["error"]
 
 
 def test_bridge_invoker_coerces_string_booleans():
@@ -1955,6 +1976,7 @@ def test_wait_tolerates_transient_poll_failures(fake_cloud_client, monkeypatch):
     assert cloud.submit_document("x.pdf", wait=True) == {"doc_id": "pi-fake"}
 
 
+import pageindex.utils  # noqa: F401 — its import loads .env
 LIVE_KEY = os.getenv("PAGEINDEX_API_KEY")
 
 

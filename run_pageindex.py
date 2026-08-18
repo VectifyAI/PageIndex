@@ -62,7 +62,7 @@ if __name__ == "__main__":
         raise ValueError("Either --pdf_path or --md_path must be specified")
     if args.pdf_path and args.md_path:
         raise ValueError("Only one of --pdf_path or --md_path can be specified")
-    if args.optimize in ('full', 'merge') and not (args.pdf_path and args.mode == 'flash'):
+    if args.optimize is not None and not (args.pdf_path and args.mode == 'flash'):
         raise ValueError("--optimize requires Flash mode with --pdf_path")
     if args.optimize is None:
         args.optimize = 'full' if args.mode == 'flash' else 'off'
@@ -158,7 +158,7 @@ if __name__ == "__main__":
         import asyncio
         
         # Use ConfigLoader to get consistent defaults (matching PDF behavior)
-        from pageindex.utils import ConfigLoader, _openai_missing_keys
+        from pageindex.utils import ConfigLoader
         config_loader = ConfigLoader()
         
         # Create options dict with user args
@@ -172,7 +172,7 @@ if __name__ == "__main__":
         }
         
         # Load config with defaults from config.yaml
-        opt = config_loader.load(user_opt)
+        opt = config_loader.load({k: v for k, v in user_opt.items() if v is not None})
         
         toc_with_page_number = asyncio.run(md_to_tree(
             md_path=args.md_path,

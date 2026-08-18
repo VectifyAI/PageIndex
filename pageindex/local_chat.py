@@ -897,8 +897,8 @@ def run_messages(client, messages, model: str,
     cached: dict[str, Any] = (
         {"cache_control": {"type": "ephemeral"}}
         if _cache_marks(system_blocks, prepared) < 4 else {})
-    runner = _anthropic_client(_merged_backend(client, backend)) \
-        .beta.messages.tool_runner(
+    backend_client = _anthropic_client(_merged_backend(client, backend))
+    runner = backend_client.beta.messages.tool_runner(
         max_tokens=(max_tokens if max_tokens is not None
                     else _default_max_tokens(model)),
         messages=prepared,
@@ -921,6 +921,9 @@ def run_messages(client, messages, model: str,
             except anthropic.AnthropicError as exc:
                 raise PageIndexAPIError(
                     f"The model backend failed: {exc}") from exc
+            finally:
+                # runs on exhaustion and abandonment (GeneratorExit) alike
+                backend_client.close()
         return events()
 
     try:
@@ -928,6 +931,9 @@ def run_messages(client, messages, model: str,
     except anthropic.AnthropicError as exc:
         raise PageIndexAPIError(
             f"The model backend failed: {exc}") from exc
+    finally:
+        # safe here: the params read-back below does no HTTP
+        backend_client.close()
     if not turns:
         raise PageIndexAPIError("The model returned no response.")
     captured: dict = {}

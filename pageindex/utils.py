@@ -156,7 +156,8 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
                 model=model,
                 messages=messages,
                 drop_params=True,
-                **_no_cache_seeding_kwargs(backend),
+                # the loop is the retry policy; the merge lets a backend override win
+                **{"max_retries": 0, **_no_cache_seeding_kwargs(backend)},
             )
             content = response.choices[0].message.content
             if return_finish_reason:
@@ -189,7 +190,7 @@ async def llm_acompletion(model, prompt):
                 model=model,
                 messages=messages,
                 drop_params=True,
-                **_no_cache_seeding_kwargs(backend),
+                **{"max_retries": 0, **_no_cache_seeding_kwargs(backend)},
             )
             return response.choices[0].message.content
         except Exception as e:

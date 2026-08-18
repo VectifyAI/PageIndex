@@ -54,6 +54,7 @@ def test_optimize_full_fails_fast_without_a_key(tmp_path, monkeypatch):
     from pageindex import PageIndexAPIError
     from pageindex.flash import page_index_flash
     from pageindex.utils import _llm_backend
+    import litellm  # noqa: F401 — first import may load a .env; delenv after it
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("CHATGPT_API_KEY", raising=False)
 

@@ -1398,6 +1398,8 @@ def _make_tool_function(name: str, description: str, schema: dict,
         exec(f"def _synthesized({rendered}):\n"
              f"    return _invoke({args_literal})[0]", namespace)
         inner = namespace["_synthesized"]
+        # binding TypeErrors quote __qualname__, not __name__
+        inner.__name__ = inner.__qualname__ = name or "tool"
         annotations: dict[str, Any] = {}
         for p in ordered:
             annotation = _annotation_for(properties[p])
