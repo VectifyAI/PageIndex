@@ -68,14 +68,19 @@ def test_local_client_does_not_touch_disk(tmp_path):
     assert not storage.exists()
 
 
-def test_retrieve_model_carries_agents_sdk_prefix(tmp_path):
+def test_retrieve_model_stays_as_configured(tmp_path):
+    """The public attribute keeps the caller's spelling — ``litellm/`` is
+    Agents SDK routing grammar, applied at the config door
+    (openai_agent_config), never baked into ``chat_model``: handed to the
+    Anthropic SDK or a raw request, the prefixed form is a 404."""
     def resolved(retrieve_model):
         return PageIndexClient(retrieve_model=retrieve_model,
                                storage_path=str(tmp_path / "s")).retrieve_model
 
-    assert resolved("anthropic/claude-sonnet-4-6") == "litellm/anthropic/claude-sonnet-4-6"
-    for already_routable in ("gpt-4o", "openai/gpt-4o", "litellm/anthropic/claude-sonnet-4-6"):
-        assert resolved(already_routable) == already_routable
+    for as_configured in ("anthropic/claude-sonnet-4-6", "gpt-4o",
+                          "openai/gpt-4o",
+                          "litellm/anthropic/claude-sonnet-4-6"):
+        assert resolved(as_configured) == as_configured
 
 
 def test_model_resolution_covers_every_generation(tmp_path):
@@ -294,6 +299,11 @@ def test_llm_completion_missing_key_raises_immediately(monkeypatch):
     # unknown bare names are OpenAI shorthand, so the same check applies
     with pytest.raises(openai.OpenAIError, match="OPENAI_API_KEY"):
         pageindex.utils.llm_completion("my-finetune-v2", "probe")
+    # a blank exported key is as missing as no key (litellm's
+    # validate_environment reports it present)
+    monkeypatch.setenv("OPENAI_API_KEY", "   ")
+    with pytest.raises(openai.OpenAIError, match="OPENAI_API_KEY"):
+        pageindex.utils.llm_completion("gpt-4o", "probe")
 
 
 def test_llm_completion_refuses_unknown_provider(monkeypatch):
@@ -663,6 +673,70 @@ def test_generate_summaries_partial_failure_absorbed(monkeypatch):
     summaries = {n["title"]: n["summary"]
                  for n in pageindex.utils.structure_to_list(result)}
     assert summaries == {"A": "", "B": "ok"}
+
+
+def test_generate_summaries_unrecoverable_raises(monkeypatch):
+    """A per-node 401 must abort, not store a blank node as completed."""
+    class Denied(Exception):
+        status_code = 401
+
+    async def deny_t1(model, prompt):
+        if "t1" in prompt:
+            raise Denied("key rejected")
+        return "ok"
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", deny_t1)
+    structure = [{"title": "A", "text": "t1",
+                  "nodes": [{"title": "B", "text": "t2"}]}]
+    with pytest.raises(Denied):
+        asyncio.run(pageindex.utils.generate_summaries_for_structure(structure))
+
+
+def test_summarize_tree_child_unrecoverable_raises(monkeypatch):
+    """A 401 on a leaf must abort the run, not store a blank subtree as
+    completed: the child gather's exceptions are checked, not discarded."""
+    class Denied(Exception):
+        status_code = 401
+
+    async def deny_alpha(model, prompt):
+        if "alpha" in prompt:
+            raise Denied("key rejected")
+        return '{"points": [], "summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", deny_alpha)
+    pdf_pages = [("alpha " * 5, 5), ("beta " * 5, 5)]
+    structure = [{"title": "R", "start_index": 1, "end_index": 2,
+                  "nodes": [
+                      {"title": "A", "start_index": 1, "end_index": 1},
+                      {"title": "B", "start_index": 2, "end_index": 2}]}]
+    with pytest.raises(Denied):
+        asyncio.run(pageindex.utils.summarize_tree(
+            structure, pdf_pages, small_node_tokens=0))
+
+
+def test_llm_completion_suppresses_litellm_cache_seeding(monkeypatch):
+    """Indexing prompts are single-shot: without an explicit injection
+    point litellm 1.97 seeds its own cache marks and every call pays the
+    write premium for nothing. Backend keys still override ours."""
+    import litellm
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured.clear()
+        captured.update(kwargs)
+        message = types.SimpleNamespace(content="ok")
+        choice = types.SimpleNamespace(message=message, finish_reason="stop")
+        return types.SimpleNamespace(choices=[choice])
+    monkeypatch.setattr(litellm, "completion", fake_completion)
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    assert pageindex.utils.llm_completion("gpt-4o", "probe") == "ok"
+    assert captured["cache_control_injection_points"] == [
+        {"location": "message", "role": "system"}]
+    token = pageindex.utils._llm_backend.set(
+        {"api_key": "x", "cache_control_injection_points": []})
+    try:
+        pageindex.utils.llm_completion("gpt-4o", "probe")
+    finally:
+        pageindex.utils._llm_backend.reset(token)
+    assert captured["cache_control_injection_points"] == []
 
 
 def test_delete_survives_marker_tamper(local_client, tmp_path):

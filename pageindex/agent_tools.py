@@ -392,8 +392,8 @@ def _resolve_document(
     if matches:
         return max(matches, key=lambda d: d.get("createdAt") or ""), None
     names = [str(doc.get("name")) for doc in documents if doc.get("name")]
-    similar = difflib.get_close_matches(doc_name, names, n=_SIMILAR_NAMES_LIMIT,
-                                        cutoff=0.5)
+    similar = difflib.get_close_matches(str(doc_name), names,
+                                        n=_SIMILAR_NAMES_LIMIT, cutoff=0.5)
     message = (
         "Document not found. Did you mean: "
         + ", ".join(f'"{name}"' for name in similar) + "?"
@@ -1358,7 +1358,8 @@ def _make_tool_function(name: str, description: str, schema: dict,
                         invoke: "Callable[[dict], tuple[str, bool]]",
                         ) -> Callable[..., str]:
     """One plain function for a tool: real signature and docstring from the
-    schema, errors contained by the invoker."""
+    schema, errors contained by the invoker; arguments the signature
+    rejects come back as the guided envelope instead of raising."""
     import keyword
 
     properties: dict[str, Any] = schema.get("properties") or {}
@@ -1369,7 +1370,7 @@ def _make_tool_function(name: str, description: str, schema: dict,
                         and param != "_invoke"
                         for param in properties)
     if not params_usable:
-        def proxy(**kwargs: Any) -> str:
+        def inner(**kwargs: Any) -> str:
             return _invoke(kwargs)[0]
     else:
         ordered = ([p for p in properties if p in required]
@@ -1382,7 +1383,7 @@ def _make_tool_function(name: str, description: str, schema: dict,
         namespace: dict[str, Any] = {"_invoke": _invoke}
         exec(f"def _synthesized({rendered}):\n"
              f"    return _invoke({args_literal})[0]", namespace)
-        proxy = namespace["_synthesized"]
+        inner = namespace["_synthesized"]
         annotations: dict[str, Any] = {}
         for p in ordered:
             annotation = _annotation_for(properties[p])
@@ -1392,7 +1393,26 @@ def _make_tool_function(name: str, description: str, schema: dict,
                 annotation = Optional[annotation]
             annotations[p] = annotation
         annotations["return"] = str
-        proxy.__annotations__ = annotations
+        inner.__annotations__ = annotations
+
+    def proxy(*args: Any, **kwargs: Any) -> str:
+        # The invoker never raises, so a TypeError here is the binding
+        # rejecting the arguments (e.g. cloud-only parameters pruned
+        # from the local signature) — answer with the same guided
+        # envelope call_tool returns for them.
+        try:
+            return inner(*args, **kwargs)
+        except TypeError as exc:
+            payload, _ = _failure(
+                f"Invalid arguments for {name}: {exc}", None,
+                {"summary": "Invalid tool arguments",
+                 "options": [f"Check the {name}() parameter names "
+                             "and types"]},
+                "INVALID_INPUT",
+            )
+            return _dumps(payload)
+    proxy.__signature__ = inspect.signature(inner)  # type: ignore[attr-defined]
+    proxy.__annotations__ = dict(inner.__annotations__)
     proxy.__name__ = proxy.__qualname__ = name or "tool"
     proxy.__doc__ = _tool_docstring(description or "", properties)
     return proxy

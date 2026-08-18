@@ -81,13 +81,14 @@ def _openai_missing_keys(model):
     """Missing env keys for the pre-check, which covers only OpenAI-shaped
     names (bare or ``openai/``): other providers resolve credentials their
     own way at call time (IAM chains, ADC, Ollama's localhost default),
-    invisible to env inspection — the chat lane draws the same line."""
-    import litellm
+    invisible to env inspection — the chat lane draws the same line.
+    Truthiness, not litellm's validate_environment, which reports a blank
+    exported key as present."""
     wire = _strip_prefix(model, "litellm/")
     if "/" in wire and not wire.startswith("openai/"):
         return []
-    env = litellm.validate_environment(wire if "/" in wire else f"openai/{wire}")
-    return [] if env["keys_in_environment"] else env["missing_keys"]
+    return ([] if (os.getenv("OPENAI_API_KEY") or "").strip()
+            else ["OPENAI_API_KEY"])
 
 
 def _litellm_model(model, backend):
@@ -130,6 +131,18 @@ def _is_unrecoverable(exc: Exception) -> bool:
     return getattr(exc, "status_code", None) in _UNRECOVERABLE_STATUS
 
 
+def _no_cache_seeding_kwargs(backend):
+    """litellm 1.97 auto-marks Claude requests for prompt caching (system +
+    last message); indexing prompts are single-shot and unique, so every call
+    would pay the cache-write premium with nothing ever read back. A
+    system-role-only injection point matches no indexing message, and its
+    presence stops litellm seeding its own defaults; backend keys still
+    win."""
+    return {"cache_control_injection_points":
+                [{"location": "message", "role": "system"}],
+            **(backend or {})}
+
+
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
     import litellm
     max_retries = 10
@@ -143,7 +156,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
                 model=model,
                 messages=messages,
                 drop_params=True,
-                **(backend or {}),
+                **_no_cache_seeding_kwargs(backend),
             )
             content = response.choices[0].message.content
             if return_finish_reason:
@@ -176,7 +189,7 @@ async def llm_acompletion(model, prompt):
                 model=model,
                 messages=messages,
                 drop_params=True,
-                **(backend or {}),
+                **_no_cache_seeding_kwargs(backend),
             )
             return response.choices[0].message.content
         except Exception as e:
@@ -710,6 +723,8 @@ async def generate_summaries_for_structure(structure, model=None):
     summaries = await asyncio.gather(*tasks, return_exceptions=True)
 
     for node, summary in zip(nodes, summaries):
+        if isinstance(summary, Exception) and _is_unrecoverable(summary):
+            raise summary
         node['summary'] = "" if isinstance(summary, BaseException) else summary
     if nodes and not any(node['summary'] for node in nodes):
         raise RuntimeError(
@@ -883,8 +898,11 @@ async def summarize_tree(structure, pdf_pages, model=None,
     async def visit(node):
         children = node.get('nodes') or []
         if children:
-            await asyncio.gather(*(visit(child) for child in children),
-                                 return_exceptions=True)
+            done = await asyncio.gather(*(visit(child) for child in children),
+                                        return_exceptions=True)
+            for result in done:
+                if isinstance(result, Exception) and _is_unrecoverable(result):
+                    raise result
         if node.get('summary'):
             return
         try:

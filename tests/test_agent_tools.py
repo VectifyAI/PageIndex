@@ -773,6 +773,49 @@ def test_openai_agent_config_model_speaks_the_agents_sdk_grammar(tmp_path):
             == "litellm/groq/llama-x")
 
 
+def test_plain_functions_answer_bad_arguments_with_the_envelope(client,
+                                                                store_path):
+    """agent_tools() functions must not raise into a framework loop:
+    cloud-only parameters pruned from the local signature come back as
+    the guided envelope, and the schema-bearing signature survives."""
+    import inspect
+    seed_doc(store_path, "pi-a", "report.pdf")
+    tools = {f.__name__: f for f in client.agent_tools()}
+    fn = tools["get_document"]
+    assert "doc_name" in inspect.signature(fn).parameters
+    payload = json.loads(fn(doc_name="report.pdf", folder_id="root"))
+    assert payload["errorCode"] == "INVALID_INPUT"
+    ok = json.loads(fn(doc_name="report.pdf"))
+    assert not ok.get("errorCode")
+
+
+def test_non_string_doc_name_stays_not_found(client, store_path):
+    """A type-loose model argument must not turn NOT_FOUND into the
+    retry-inviting INTERNAL_ERROR (strict_json_schema is off on the
+    OpenAI adapter, so nothing upstream validates the type)."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    payload, is_error = run(client, "get_document", doc_name=5)
+    assert is_error and payload["errorCode"] == "NOT_FOUND"
+
+
+def test_openai_agent_config_repairs_litellm_types(tmp_path, monkeypatch):
+    """The BYO path resolves its model through LiteLLM in the caller's
+    process, outside our completion helpers — the py3.10 type repair must
+    run at config time, and only for LiteLLM-routed models."""
+    pytest.importorskip("agents")
+    import pageindex.utils
+    calls = []
+    monkeypatch.setattr(pageindex.utils, "_repair_litellm_types",
+                        lambda: calls.append(True))
+    client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
+                                  chat_model="anthropic/claude-x")
+    client.openai_agent_config()
+    assert calls
+    calls.clear()
+    client.openai_agent_config(model="gpt-plain")
+    assert not calls
+
+
 def test_openai_agent_config_cloud_omits_model(cloud_with_fake_bridge):
     pytest.importorskip("agents")
     cloud, _ = cloud_with_fake_bridge
@@ -792,6 +835,7 @@ def test_anthropic_runner_config_shapes(client, store_path):
                                             doc_id="pi-a")
     assert config["max_tokens"] == 4096
     assert config["max_iterations"] == 10
+    assert config["cache_control"] == {"type": "ephemeral"}
     assert "report.pdf" in config["system"]
     assert [tool.name for tool in config["tools"]] == list(tool_names())
     assert (client.anthropic_runner_config(model="claude-sonnet-4-5")

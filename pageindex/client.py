@@ -149,7 +149,7 @@ class PageIndexClient:
             self.model = opt.model
             self.index_model = opt.index_model
             self.summary_model = opt.summary_model
-            self.chat_model = _agents_sdk_model_name(opt.chat_model)
+            self.chat_model = opt.chat_model
             self.chat_backend = chat_backend
             self.storage_path = storage_path or ".pageindex"
             from .local_api import LocalAPI
@@ -678,7 +678,10 @@ class PageIndexClient:
         final message envelope with cross-turn aggregated ``usage`` plus a
         ``messages`` field — the full new turn sequence, valid for verbatim
         append to your history. The managed system prompt carries a
-        ``cache_control`` breakpoint.
+        ``cache_control`` breakpoint, and the request sets the top-level
+        ``cache_control`` so each turn re-reads the growing conversation
+        from cache — skipped when your own blocks already use all four
+        breakpoints.
 
         Args:
             messages: Native Messages-format history (including prior
@@ -887,6 +890,16 @@ class PageIndexClient:
         environment, so its model auth comes from there —
         ``chat_backend`` does not travel with it.
 
+        Prompt caching configures itself for most destinations (OpenAI
+        server-side; Anthropic- and Bedrock-hosted Claude via LiteLLM's
+        defaults). Vertex-hosted Claude is the exception — pass the
+        injection points yourself::
+
+            Agent(**config, model_settings=ModelSettings(extra_args={
+                "cache_control_injection_points": [
+                    {"location": "message", "role": "system"},
+                    {"location": "message", "index": -1}]}))
+
         Args:
             doc_id: Document ID or list of IDs to target, as in
                 ``agent_instructions``. Local: also enforced at the tool
@@ -909,6 +922,11 @@ class PageIndexClient:
         model = model or getattr(self, "chat_model", None)
         if model:
             config["model"] = _agents_sdk_model_name(model)
+            if config["model"].startswith("litellm/"):
+                # The runner resolves this model through LiteLLM in the
+                # caller's process, outside our completion helpers.
+                from .utils import _repair_litellm_types
+                _repair_litellm_types()
         return config
 
     def as_anthropic_tools(self, include_management: bool = False,
@@ -980,10 +998,14 @@ class PageIndexClient:
 
         Sugar over the explicit form — ``agent_instructions`` (with
         ``doc_id`` targeting) as the system prompt and
-        ``as_anthropic_tools`` as the tools — plus the same defaults
-        ``messages()`` applies: a per-model ``max_tokens`` and a
-        ``max_iterations`` bound of 10. To customize further, switch to
-        those methods directly.
+        ``as_anthropic_tools`` as the tools — plus the ``max_tokens``
+        default and 10-turn ``max_iterations`` bound ``messages()`` uses,
+        and a top-level ``cache_control`` so each loop turn re-reads the
+        growing prompt from cache (pop the key if you place your own
+        breakpoints — the API allows four). Unlike ``messages()``,
+        ``system`` here is the bare instructions string, without the chat
+        header or its block-level breakpoint. To customize further,
+        switch to those methods directly.
 
         Args:
             model: Backend model name (also resolves the ``max_tokens``
@@ -1013,6 +1035,7 @@ class PageIndexClient:
             "tools": self.as_anthropic_tools(include_management, asynchronous,
                                              doc_id=scope),
             "max_iterations": max_turns if max_turns is not None else 10,
+            "cache_control": {"type": "ephemeral"},
         }
 
     def as_claude_mcp(self, include_management: bool = False,

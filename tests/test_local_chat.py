@@ -315,7 +315,8 @@ def test_anthropic_routed_models_mark_managed_prefix_for_cache(
     fake_model([[_msg_item("ok")]])
     from pageindex.local_chat import _openai_agent
     marked = {"cache_control_injection_points": [
-        {"location": "message", "role": "system"}]}
+        {"location": "message", "role": "system"},
+        {"location": "message", "index": -1}]}
     for name in ("anthropic/claude-x", "litellm/anthropic/claude-x",
                  "bedrock/us.anthropic.claude-sonnet-5",
                  "vertex_ai/claude-sonnet-4-5"):
@@ -960,6 +961,9 @@ def test_agent_carries_prompt_cache_key_in_extra_body(monkeypatch):
     settings = agent.model_settings
     assert settings.extra_body is None
     assert "cache_control_injection_points" in settings.extra_args
+    assert settings.extra_args["cache_control_injection_points"] == [
+        {"location": "message", "role": "system"},
+        {"location": "message", "index": -1}]
     for name in ("gpt-test", "openai/gpt-test", "litellm/openai/gpt-test"):
         agent = local_chat._openai_agent(
             None, "chat", name, "sys", None, None,
@@ -1182,7 +1186,7 @@ def test_envelope_model_strips_litellm_routing_prefix(store_path, fake_model):
     seed_doc(store_path, "pi-a", "report.pdf")
     client = PageIndexLocalClient(storage_path=store_path,
                                   retrieve_model="anthropic/claude-x")
-    assert client.retrieve_model == "litellm/anthropic/claude-x"
+    assert client.retrieve_model == "anthropic/claude-x"
     fake_model([[_msg_item("ok")]])
     result = client.chat_completions("q")
     assert result["model"] == "anthropic/claude-x"
@@ -1713,6 +1717,32 @@ def test_backend_connection_reaches_each_engine(monkeypatch):
                                      backend={"api_key": "k3",
                                               "api_base": "http://rb"})
     assert str(agent.model._client.base_url).rstrip("/") == "http://rb"
+    # both endpoint spellings on one merged dict: normalization keeps the
+    # later (per-call) key instead of the eager nested pop discarding it
+    agent = local_chat._openai_agent(
+        None, "chat", "anthropic/claude-x", "sys", None, None,
+        backend=local_chat._merged_backend(
+            types.SimpleNamespace(chat_backend={"base_url": "http://client"}),
+            {"api_base": "http://call"}))
+    assert agent.model.base_url == "http://call"
+
+
+@needs_anthropic
+def test_messages_top_level_cache_control(client, store_path, fake_anthropic):
+    """The moving breakpoint rides every request so each turn re-reads the
+    growing conversation; it stands down when the caller's own marks fill
+    the four-breakpoint budget (a fifth is a live-verified 400)."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
+    client.messages("q", model="claude-test", max_tokens=50)
+    assert calls[0]["cache_control"] == {"type": "ephemeral"}
+    marked = [{"type": "text", "text": f"b{i}",
+               "cache_control": {"type": "ephemeral"}} for i in range(3)]
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
+    client.messages("q", model="claude-test", max_tokens=50, system=marked)
+    assert "cache_control" not in calls[0]
 
 
 def test_merged_backend_precedence():

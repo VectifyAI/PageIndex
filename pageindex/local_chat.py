@@ -289,11 +289,11 @@ def _reported_model(model_name: str) -> str:
 def _cache_extra_args(model_name: str) -> Optional[dict]:
     """Claude's prompt caching is opt-in per request: on Claude models
     routed through LiteLLM (Anthropic direct, Bedrock, Vertex — each
-    channel live-verified), mark the managed system prefix via LiteLLM's
-    injection param so the loop's later turns and a conversation's next
-    calls read it instead of repaying full price. Provider resolution is
-    LiteLLM's own, so this predicate can never disagree with where the
-    request actually routes."""
+    channel live-verified), mark the managed system prefix and the newest
+    message via LiteLLM's injection param so the loop's later turns and a
+    conversation's next calls read them instead of repaying full price.
+    Provider resolution is LiteLLM's own, so this predicate can never
+    disagree with where the request actually routes."""
     if "/" not in model_name or model_name.startswith("openai/"):
         return None
     try:
@@ -304,8 +304,12 @@ def _cache_extra_args(model_name: str) -> Optional[dict]:
         return None
     if provider == "anthropic" or (provider in ("bedrock", "vertex_ai")
                                    and "claude" in model.lower()):
+        # The pair LiteLLM itself seeds for Anthropic and Bedrock: the
+        # stable prefix plus the newest message, so each turn re-reads
+        # the turns before it. Passing it explicitly extends it to Vertex.
         return {"cache_control_injection_points": [
-            {"location": "message", "role": "system"}]}
+            {"location": "message", "role": "system"},
+            {"location": "message", "index": -1}]}
     return None
 
 
@@ -337,12 +341,12 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
     if reasoning_effort is not None:
         extra_args = {**(extra_args or {}),
                       "reasoning_effort": reasoning_effort}
-    conn = dict(backend) if backend else {}
+    conn = _sdk_backend(backend) if backend else {}
     if conn and protocol == "chat":
         # LiteLLM takes connection params per call, except the two names
         # LitellmModel pins as its own keywords — those ride its constructor.
         lifted = {"api_key": conn.pop("api_key", None),
-                  "base_url": conn.pop("base_url", conn.pop("api_base", None))}
+                  "base_url": conn.pop("base_url", None)}
         if conn:
             extra_args = {**(extra_args or {}), **conn}
         conn = {key: value for key, value in lifted.items()
@@ -843,6 +847,18 @@ def _anthropic_system(extra_system, block: Optional[str]) -> list[dict]:
     raise PageIndexAPIError("system must be a string or a list of blocks.")
 
 
+def _cache_marks(system_blocks, messages) -> int:
+    """Breakpoints already on the request. The API allows 4 total; the
+    top-level moving breakpoint is only added when it fits."""
+    blocks = list(system_blocks)
+    for message in messages:
+        content = message.get("content")
+        if isinstance(content, list):
+            blocks += [b for b in content if isinstance(b, dict)]
+    return sum(1 for b in blocks
+               if isinstance(b, dict) and b.get("cache_control"))
+
+
 def _dump_block(block) -> Any:
     """A content block as a plain JSON dict, minus SDK-internal fields the
     API rejects (ParsedBetaTextBlock.__api_exclude__, e.g. parsed_output)."""
@@ -915,6 +931,13 @@ def run_messages(client, messages, model: str,
         "stop_sequences": stop_sequences, "thinking": thinking,
         "extra_body": extra_body, "extra_headers": extra_headers,
     }.items() if value is not None}
+    system_blocks = _anthropic_system(system, block)
+    # Top-level cache_control: the server re-marks the newest block each
+    # turn, so the loop re-reads the growing conversation from cache.
+    # Counts toward the 4-breakpoint limit (live-verified 400 past it).
+    cached: dict[str, Any] = (
+        {"cache_control": {"type": "ephemeral"}}
+        if _cache_marks(system_blocks, prepared) < 4 else {})
     runner = _anthropic_client(_merged_backend(client, backend)) \
         .beta.messages.tool_runner(
         max_tokens=(max_tokens if max_tokens is not None
@@ -922,11 +945,12 @@ def run_messages(client, messages, model: str,
         messages=prepared,
         model=model,
         tools=build_anthropic_tools(client, doc_ids=doc_id),
-        system=_anthropic_system(system, block),
+        system=system_blocks,
         stream=stream,
         # Bounded like the OpenAI surfaces (their framework default is 10).
         max_iterations=max_turns if max_turns is not None else 10,
         **passthrough,
+        **cached,
     )
 
     if stream:
