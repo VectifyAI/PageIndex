@@ -74,3 +74,71 @@ def test_optimize_full_fails_fast_without_a_key(tmp_path, monkeypatch):
             page_index_flash(str(tmp_path / "missing.pdf"), summary=False)
     finally:
         _llm_backend.reset(token)
+
+
+def test_bootstrap_reimport_is_not_swallowed(monkeypatch):
+    # An unguarded caller script re-imported by a spawn worker must die loudly,
+    # not fall back to a silent full sequential rerun in every worker.
+    import multiprocessing
+    import sys
+
+    from pageindex.flash import parser_pdfium_parallel as mod
+
+    class BoomExecutor:
+        def __init__(self, *a, **k):
+            pass
+
+        def map(self, *a, **k):
+            raise RuntimeError("start a new process before bootstrapping")
+
+        def shutdown(self, *a, **k):
+            pass
+
+    monkeypatch.setattr(mod, "ProcessPoolExecutor", BoomExecutor)
+    cur = multiprocessing.current_process()
+
+    monkeypatch.setattr(cur, "_inheriting", True, raising=False)
+    with pytest.raises(RuntimeError):
+        mod.parse_charlevel_meta_parallel(str(PDF), workers=2, min_pages=1)
+    assert hasattr(sys.modules["__main__"], "__file__")  # window restored on error
+
+    monkeypatch.delattr(cur, "_inheriting")
+    out, meta = mod.parse_charlevel_meta_parallel(str(PDF), workers=2, min_pages=1)
+    assert len(out) == len(meta) > 0  # normal failures still fall back sequentially
+
+
+def test_submit_document_refuses_during_bootstrap(tmp_path, monkeypatch):
+    import multiprocessing
+
+    from pageindex import PageIndexAPIError, PageIndexLocalClient
+
+    c = PageIndexLocalClient(storage_path=str(tmp_path))
+    monkeypatch.setattr(
+        multiprocessing.current_process(), "_inheriting", True, raising=False
+    )
+    with pytest.raises(PageIndexAPIError, match="__main__"):
+        c.submit_document("whatever.pdf")
+
+
+def test_unguarded_script_parses_parallel_without_reexecution(tmp_path):
+    # spawn workers must not re-run an unguarded caller script: one completion,
+    # no dead-worker noise (dying workers would trip the sequential fallback).
+    import os
+    import subprocess
+    import sys
+
+    marker = tmp_path / "runs.txt"
+    script = tmp_path / "unguarded.py"
+    script.write_text(
+        "from pageindex.flash.parser_pdfium_parallel import parse_charlevel_meta_parallel\n"
+        f"out, meta = parse_charlevel_meta_parallel({str(PDF)!r}, workers=2, min_pages=1)\n"
+        "assert len(out) == len(meta) > 0\n"
+        f"open({str(marker)!r}, 'a').write('ran\\n')\n"
+    )
+    env = {**os.environ, "PYTHONPATH": str(Path(__file__).parent.parent)}
+    res = subprocess.run(
+        [sys.executable, str(script)], capture_output=True, env=env, timeout=120
+    )
+    assert res.returncode == 0, res.stderr.decode()
+    assert marker.read_text() == "ran\n"
+    assert b"Traceback" not in res.stderr

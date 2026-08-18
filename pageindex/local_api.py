@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import multiprocessing
 import os
 import uuid
 from datetime import datetime, timezone
@@ -55,6 +56,12 @@ class LocalAPI:
         folder_id: str | None = None,
         metadata: dict | None = None,
     ) -> dict[str, Any]:
+        if getattr(multiprocessing.current_process(), "_inheriting", False):
+            raise PageIndexAPIError(
+                "Failed to submit document: called again while a spawned worker "
+                "process was importing your script. Put your top-level code under "
+                "if __name__ == '__main__': so worker processes do not re-run it."
+            )
         if beta_headers is not None:
             raise PageIndexAPIError(
                 "Failed to submit document: beta_headers is not supported in local mode."
