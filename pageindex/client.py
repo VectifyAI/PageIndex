@@ -679,8 +679,8 @@ class PageIndexClient:
         append to your history. The managed system prompt carries a
         ``cache_control`` breakpoint, and the request sets the top-level
         ``cache_control`` so each turn re-reads the growing conversation
-        from cache — skipped when your own blocks already use all four
-        breakpoints.
+        from cache — skipped when your own blocks already use the three
+        remaining breakpoints (the managed prompt holds the fourth).
 
         Args:
             messages: Native Messages-format history (including prior

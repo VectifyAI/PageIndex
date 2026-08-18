@@ -1054,10 +1054,12 @@ def _get_page_content(client, doc_name: str, pages: str,
         markdown = item.get("markdown") if item else None
         text = (markdown if isinstance(markdown, str)
                 else f"Page {page} content not available")
-        if not included or budget - len(text) >= 0:
-            content.append({"page": page, "text": text})
+        entry = {"page": page, "text": text}
+        size = _serialized_size(entry) + 2  # +2: json ", " item separator
+        if not included or budget - size >= 0:
+            content.append(entry)
             included.append(page)
-            budget -= len(text)
+            budget -= size
         else:
             remaining.append(page)
 

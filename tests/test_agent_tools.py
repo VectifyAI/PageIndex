@@ -408,9 +408,11 @@ def test_created_at_accepts_z_suffixed_input(client, store_path):
 
 
 def test_page_content_char_budget(client, store_path):
+    # Escape-dense pages: raw length fits the budget, JSON-serialized
+    # length does not — the budget must count emitted characters.
     pages = [
-        {"page_index": 1, "markdown": "x" * 96_000},
-        {"page_index": 2, "markdown": "short"},
+        {"page_index": 1, "markdown": '"' * 30_000},
+        {"page_index": 2, "markdown": '"' * 20_000},
     ]
     seed_doc(store_path, "pi-a", "huge.pdf", pages=pages)
     payload, is_error = run(client, "get_page_content", doc_name="huge.pdf",
@@ -420,6 +422,8 @@ def test_page_content_char_budget(client, store_path):
     assert "size limits" in payload["next_steps"]["summary"]
     assert any("For remaining pages, request: 2" in option
                for option in payload["next_steps"]["options"])
+    emitted = json.dumps(payload, ensure_ascii=False)
+    assert len(emitted) <= agent_tools_module.TOOL_RESPONSE_CHAR_LIMIT
 
 
 def test_page_content_reports_truncation_and_out_of_range_together(
