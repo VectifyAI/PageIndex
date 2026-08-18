@@ -225,7 +225,7 @@ class CloudAPI:
             headers=self._headers(),
             json=payload,
             stream=stream,
-            timeout=120 if stream else 300
+            timeout=120 if stream else 600
         )
 
         if response.status_code != 200:
