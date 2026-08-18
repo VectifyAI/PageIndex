@@ -903,21 +903,22 @@ def test_anthropic_runner_config_doc_scope_enforced_in_tools(client,
 
 
 def test_claude_agent_config_doc_scope_enforced_in_tools(client, store_path):
+    """claude_agent_config(doc_id=...) must wire scope all the way into the
+    tool invoke callables — an out-of-scope document returns NOT_FOUND."""
     pytest.importorskip("claude_agent_sdk")
-    from mcp.types import CallToolRequest, CallToolRequestParams
+    from pageindex.agent_tools import _tool_specs
     seed_doc(store_path, "pi-a", "report.pdf")
     seed_doc(store_path, "pi-b", "payroll.pdf",
              created_at="2026-08-02T10:00:00.123000")
     config = client.claude_agent_config(doc_id="pi-a")
-    server = config["mcp_servers"]["pageindex"]
-    handler = server["instance"].request_handlers[CallToolRequest]
-    result = asyncio.run(handler(CallToolRequest(
-        method="tools/call",
-        params=CallToolRequestParams(
-            name="get_page_content",
-            arguments={"doc_name": "payroll.pdf", "pages": "1"}))))
-    payload = json.loads(result.root.content[0].text)
-    assert payload["errorCode"] == "NOT_FOUND"
+    assert "report.pdf" in config["system_prompt"]
+    specs = dict((name, invoke)
+                 for name, _desc, _schema, invoke
+                 in _tool_specs(client, doc_ids=["pi-a"]))
+    text, is_error = specs["get_page_content"](
+        {"doc_name": "payroll.pdf", "pages": "1"})
+    assert is_error
+    assert json.loads(text)["errorCode"] == "NOT_FOUND"
 
 
 def test_openai_agent_config_scoped_shadow_check(client, store_path):
