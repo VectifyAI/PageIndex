@@ -312,7 +312,9 @@ class CloudAPI:
             timeout=30
         )
         if response.status_code != 200:
-            raise PageIndexAPIError(f"Failed to get document metadata: {response.text}")
+            raise PageIndexAPIError(
+                f"Failed to get document metadata: {response.text}",
+                status_code=response.status_code)
         return response.json()
 
     def delete_document(self, doc_id: str) -> Dict[str, Any]:

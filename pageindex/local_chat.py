@@ -337,17 +337,21 @@ def _validate_max_turns(max_turns) -> None:
         raise PageIndexAPIError("max_turns must be a positive integer.")
 
 
-def _conversation_cache_key(model_name: str, instructions: str, items) -> str:
+def _conversation_cache_key(model_name: str, instructions: str, doc_id,
+                            items) -> str:
     """Stable per-conversation cache-routing key, sent as the OpenAI
     ``prompt_cache_key`` through ModelSettings.extra_body (openai-agents
     0.20 no longer derives it from RunConfig.group_id — verified against a
     captured wire). Keyed on the prefix identity — model, instructions,
-    first conversation item — so a conversation's continuations share one
-    route without pooling unrelated conversations. Callers pass the
-    conversation's own items, never the SDK-prepended doc-targeting block:
-    that block is byte-identical for every conversation about a document
-    and would pool them all under one key."""
-    seed = json.dumps([model_name, instructions,
+    doc targeting, first conversation item — so a conversation's
+    continuations share one route without pooling unrelated conversations.
+    Callers pass the conversation's own items, never the SDK-prepended
+    doc-targeting block: that block is byte-identical for every
+    conversation about a document and would pool them all under one key.
+    doc_id carries the targeting identity instead — the same opening
+    question against different documents is different conversations."""
+    scope = [doc_id] if isinstance(doc_id, str) else doc_id
+    seed = json.dumps([model_name, instructions, scope,
                        items[0] if items else None],
                       sort_keys=True, default=str)
     return "pageindex-" + hashlib.sha256(seed.encode()).hexdigest()[:16]
@@ -500,8 +504,8 @@ def run_chat_completions(client, messages, stream: bool = False,
     managed = _managed_instructions(system_texts)
     agent = _openai_agent(client, "chat", model_name, managed,
                           temperature, top_p, doc_ids=doc_id,
-                          cache_key=_conversation_cache_key(model_name,
-                                                            managed, history),
+                          cache_key=_conversation_cache_key(
+                              model_name, managed, doc_id, history),
                           reasoning_effort=reasoning_effort,
                           extra_body=extra_body, max_tokens=max_tokens,
                           backend=_merged_backend(client, backend),
@@ -617,8 +621,8 @@ def run_responses(client, input, model: Optional[str] = None,
     managed = _managed_instructions(extra)
     agent = _openai_agent(client, "responses", model_name, managed,
                           temperature, top_p, doc_ids=doc_id,
-                          cache_key=_conversation_cache_key(model_name, managed,
-                                                            conversation),
+                          cache_key=_conversation_cache_key(
+                              model_name, managed, doc_id, conversation),
                           reasoning=reasoning, extra_body=extra_body,
                           max_tokens=max_output_tokens,
                           backend=_merged_backend(client, backend),
@@ -630,12 +634,13 @@ def run_responses(client, input, model: Optional[str] = None,
     from agents.exceptions import AgentsException, MaxTurnsExceeded
 
     response_id = f"resp_{uuid.uuid4().hex}"
+    created_at = int(time.time())
 
     def envelope(transcript: list, raw_responses) -> dict:
         return {
             "id": response_id,
             "object": "response",
-            "created_at": int(time.time()),
+            "created_at": created_at,
             "model": _reported_model(model_name),
             "status": recorded.get("status") or "completed",
             "output": [item for item in transcript
@@ -700,10 +705,12 @@ def run_responses(client, input, model: Optional[str] = None,
                     if data.get("type") in lifecycle:
                         if data["type"] == "response.created" and not opened:
                             # N per-turn openings collapse to one, carrying
-                            # the id the terminal event will report.
+                            # the id and created_at the terminal event will
+                            # report.
                             opened = True
                             if data.get("response"):
                                 data["response"]["id"] = response_id
+                                data["response"]["created_at"] = created_at
                             sequence += 1
                             data["sequence_number"] = sequence
                             yield data

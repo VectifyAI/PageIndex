@@ -2318,6 +2318,28 @@ def test_config_helpers_reject_empty_doc_id_on_cloud():
         cloud.claude_agent_config(doc_id=[])
 
 
+def test_doc_targeting_keeps_transport_errors_out_of_not_found():
+    """A cloud 429/5xx during the doc_id fetch is an outage, not a missing
+    document — only a definite not-found/denied batches into the
+    "Documents not found" message; anything else propagates raw."""
+    class Stub:
+        def __init__(self, status):
+            self.status = status
+
+        def get_document(self, doc_id):
+            raise PageIndexAPIError(
+                f"Failed to get document metadata: {self.status}",
+                status_code=self.status)
+
+    for status in (429, 500):
+        with pytest.raises(PageIndexAPIError, match=f"metadata: {status}"):
+            agent_tools_module.doc_targeting_block(Stub(status), "pi-a")
+    for status in (403, 404):
+        with pytest.raises(PageIndexAPIError,
+                           match="Documents not found or access denied: pi-a"):
+            agent_tools_module.doc_targeting_block(Stub(status), "pi-a")
+
+
 def test_call_tool_coerces_string_booleans(client, store_path, monkeypatch):
     """Models routinely send booleans as JSON strings — "false" must not
     read as True (a full wait_for_completion stall)."""

@@ -535,8 +535,8 @@ def test_doc_id_conversations_get_distinct_cache_keys(client, store_path,
     keys = []
     real = local_chat._conversation_cache_key
 
-    def spy(model_name, instructions, items):
-        key = real(model_name, instructions, items)
+    def spy(model_name, instructions, doc_id, items):
+        key = real(model_name, instructions, doc_id, items)
         keys.append(key)
         return key
 
@@ -560,6 +560,11 @@ def test_doc_id_conversations_get_distinct_cache_keys(client, store_path,
     fake_model([[_msg_item("e")]])
     client.chat_completions("Summarize section 3.", doc_id="pi-a")
     assert keys[3] != keys[4]  # same property on the chat surface
+
+    seed_doc(store_path, "pi-b", "contract.pdf")
+    fake_model([[_msg_item("f")]])
+    client.responses("What is the CAGR?", doc_id="pi-b")
+    assert keys[5] != keys[0]  # same opener, different doc: no pooling
 
 
 @needs_agents
@@ -609,6 +614,8 @@ def test_responses_stream_opens_with_created(client, store_path, fake_model):
     terminal = events[-1]
     assert terminal["type"] == "response.completed"
     assert created[0]["response"]["id"] == terminal["response"]["id"]
+    assert (created[0]["response"]["created_at"]
+            == terminal["response"]["created_at"])  # one timestamp, not two
     assert terminal["response"]["parallel_tool_calls"] is False  # echo
 
 
@@ -930,17 +937,22 @@ def test_sol_class_refusal_names_its_exits():
 def test_conversation_cache_key_stable_per_conversation():
     """Cache-routing key, sent as the OpenAI prompt_cache_key. A
     conversation's continuations must share one key (same model /
-    instructions / first item), and unrelated conversations must not pool
-    under it."""
+    instructions / doc targeting / first item), and unrelated
+    conversations must not pool under it."""
     turn1 = [{"role": "user", "content": "q"}]
     continuation = turn1 + [{"role": "assistant", "content": "a"},
                             {"role": "user", "content": "and?"}]
-    key = local_chat._conversation_cache_key("m", "sys", turn1)
-    assert key == local_chat._conversation_cache_key("m", "sys", continuation)
+    key = local_chat._conversation_cache_key("m", "sys", "d1", turn1)
+    assert key == local_chat._conversation_cache_key(
+        "m", "sys", "d1", continuation)
+    assert key == local_chat._conversation_cache_key(
+        "m", "sys", ["d1"], turn1)  # str and one-item list: same targeting
     assert key != local_chat._conversation_cache_key(
-        "m", "sys", [{"role": "user", "content": "other"}])
-    assert key != local_chat._conversation_cache_key("m2", "sys", turn1)
-    assert key != local_chat._conversation_cache_key("m", "sys2", turn1)
+        "m", "sys", "d1", [{"role": "user", "content": "other"}])
+    assert key != local_chat._conversation_cache_key("m2", "sys", "d1", turn1)
+    assert key != local_chat._conversation_cache_key("m", "sys2", "d1", turn1)
+    assert key != local_chat._conversation_cache_key("m", "sys", "d2", turn1)
+    assert key != local_chat._conversation_cache_key("m", "sys", None, turn1)
 
 
 @needs_agents
