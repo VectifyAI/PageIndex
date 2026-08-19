@@ -5,7 +5,8 @@ name: Publish to PyPI
 #   2. git push origin v0.2.9
 #   3. This workflow derives the version from the tag, injects it into
 #      pyproject.toml, builds, publishes to PyPI via OIDC trusted publishing
-#      (no stored secret), and creates a GitHub Release with generated notes.
+#      (no stored secret), and creates a GitHub Release with generated notes
+#      (dev tags publish to PyPI only — no GitHub Release).
 #
 # The tag must be a PEP 440 version with a leading `v`:
 #   v0.2.9   v0.2.9rc1   v0.2.9.dev1
@@ -76,6 +77,9 @@ jobs:
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # release/v1.14.0
 
       - name: Create GitHub Release
+        # dev builds need an explicit pin to install; a Release for them
+        # only doubles the feed next to the stable that follows.
+        if: ${{ !contains(github.ref_name, 'dev') }}
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b  # v3.0.1
         with:
           tag_name: ${{ github.ref_name }}
