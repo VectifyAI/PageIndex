@@ -1,10 +1,5 @@
 """PageIndex SDK."""
-import os as _os
 from typing import TYPE_CHECKING as _TYPE_CHECKING
-
-# LiteLLM's import otherwise fetches its model map over the network — seconds
-# of blocking (or a hang offline). setdefault, so an explicit user choice wins.
-_os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 from .client import PageIndexClient, PageIndexCloudClient, PageIndexLocalClient
 from .errors import PageIndexAPIError

@@ -5,6 +5,10 @@ from pageindex import *
 from pageindex.page_index_md import md_to_tree
 from pageindex.utils import ConfigLoader, _openai_missing_keys
 
+# Keep LiteLLM's import off the network (frozen bundled model-cost map);
+# an explicit user setting wins.
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
 if __name__ == "__main__":
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Process PDF or Markdown document and generate structure')
@@ -165,25 +169,24 @@ if __name__ == "__main__":
         user_opt = {
             'index_model': args.index_model,
             'model': args.model,
-            'if_add_node_summary': args.if_add_node_summary,
-            'if_add_doc_description': args.if_add_doc_description,
-            'if_add_node_text': args.if_add_node_text,
-            'if_add_node_id': args.if_add_node_id
         }
         
         # Load config with defaults from config.yaml
         opt = config_loader.load({k: v for k, v in user_opt.items() if v is not None})
         
+        # if_add_* pass through as given (absent = off, as before this CLI
+        # used config.yaml): the PDF defaults there must not switch on LLM
+        # passes the markdown CLI never ran.
         toc_with_page_number = asyncio.run(md_to_tree(
             md_path=args.md_path,
             if_thinning=args.if_thinning.lower() == 'yes',
             min_token_threshold=args.thinning_threshold,
-            if_add_node_summary=opt.if_add_node_summary,
+            if_add_node_summary=args.if_add_node_summary,
             summary_token_threshold=args.summary_token_threshold,
             model=opt.model,
-            if_add_doc_description=opt.if_add_doc_description,
-            if_add_node_text=opt.if_add_node_text,
-            if_add_node_id=opt.if_add_node_id
+            if_add_doc_description=args.if_add_doc_description,
+            if_add_node_text=args.if_add_node_text,
+            if_add_node_id=args.if_add_node_id
         ))
         
         print('Parsing done, saving to file...')

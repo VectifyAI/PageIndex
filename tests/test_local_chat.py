@@ -1834,3 +1834,127 @@ def test_messages_extra_headers_reach_the_wire(client, monkeypatch):
     client.messages("q", model="claude-sonnet-4-5",
                     extra_headers={"anthropic-beta": "context-1m-2025"})
     assert seen["beta"] == "context-1m-2025"
+
+
+@needs_agents
+def test_chat_model_settings_request_stream_usage(monkeypatch):
+    """Without include_usage the streamed run carries no usage at all and
+    the terminal chunk reports zeros (agents forwards it as
+    stream_options only on streaming calls)."""
+    monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
+    agent = local_chat._openai_agent(None, "chat", "gpt-test", "sys",
+                                     None, None)
+    assert agent.model_settings.include_usage is True
+
+
+@needs_anthropic
+def test_messages_default_max_tokens_clears_thinking_budget(client, fake_anthropic):
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "a"}], "end_turn"),
+    ])
+    client.messages("q", model="claude-test",
+                    thinking={"type": "enabled", "budget_tokens": 10000})
+    assert calls[0]["max_tokens"] == 10000 + 8192
+    assert calls[0]["thinking"] == {"type": "enabled",
+                                    "budget_tokens": 10000}
+    calls = fake_anthropic([  # fresh fake: each run closes its client
+        _anthropic_message([{"type": "text", "text": "b"}], "end_turn"),
+    ])
+    client.messages("q", model="claude-test", max_tokens=11000,
+                    thinking={"type": "enabled", "budget_tokens": 10000})
+    assert calls[0]["max_tokens"] == 11000  # explicit value passes through
+
+
+def test_record_chat_finish_records_and_delegates():
+    recorded = {}
+    closed = {"n": 0}
+
+    class Stream:
+        def __init__(self):
+            self.chunks = [
+                types.SimpleNamespace(choices=[]),
+                types.SimpleNamespace(choices=[types.SimpleNamespace(
+                    finish_reason="content_filter")]),
+            ]
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if not self.chunks:
+                raise StopAsyncIteration
+            return self.chunks.pop(0)
+
+        async def aclose(self):
+            closed["n"] += 1
+
+    async def fetch(*args, **kwargs):
+        return "shell", Stream()
+
+    model = types.SimpleNamespace(_fetch_response=fetch)
+    local_chat._record_chat_finish(types.SimpleNamespace(model=model),
+                                   recorded)
+
+    async def drive():
+        shell, tee = await model._fetch_response()
+        assert shell == "shell"
+        async for _chunk in tee:
+            pass
+        await tee.aclose()
+
+    asyncio.run(drive())
+    assert recorded == {"finish_reason": "content_filter"}
+    assert closed["n"] == 1
+    # A model without the seam: silently a no-op.
+    local_chat._record_chat_finish(
+        types.SimpleNamespace(model=types.SimpleNamespace()), {})
+
+
+@needs_agents
+def test_chat_completions_reports_native_finish_reason(client, store_path,
+                                                       monkeypatch):
+    seed_doc(store_path, "pi-a", "report.pdf")
+
+    class TruncatingModel(FakeModel):
+        async def _fetch_response(self, *args, **kwargs):
+            return types.SimpleNamespace(choices=[
+                types.SimpleNamespace(finish_reason="length")])
+
+        async def get_response(self, *args, **kwargs):
+            await self._fetch_response()
+            return await super().get_response(*args, **kwargs)
+
+        async def stream_response(self, *args, **kwargs):
+            await self._fetch_response()
+            async for event in super().stream_response(*args, **kwargs):
+                yield event
+
+    fake = TruncatingModel([[_msg_item("cut ")], [_msg_item("cut ")]])
+    monkeypatch.setattr(local_chat, "_openai_model", lambda *a: fake)
+    result = client.chat_completions("q")
+    assert result["choices"][0]["finish_reason"] == "length"
+    chunks = list(client.chat_completions("q", stream=True,
+                                          stream_metadata=True))
+    assert chunks[-2]["choices"][0]["finish_reason"] == "length"
+
+
+@needs_agents
+def test_chat_gate_honors_litellm_routing_and_custom_providers(monkeypatch):
+    """Mirrors the indexing lane: an explicit litellm/ prefix skips the env
+    key pre-check, and custom_provider_map providers pass the allowlist;
+    a name LiteLLM cannot route is still refused up front."""
+    pytest.importorskip("litellm")
+    import litellm  # first import may load a .env; delenv after it
+    from agents.extensions.models.litellm_model import LitellmModel
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    model = local_chat._openai_model("chat", "litellm/gpt-4o")
+    assert isinstance(model, LitellmModel) and model.model == "openai/gpt-4o"
+
+    monkeypatch.setattr(litellm, "custom_provider_map",
+                        [{"provider": "my-llm", "custom_handler": object()}])
+    model = local_chat._openai_model("chat", "my-llm/model-a")
+    assert isinstance(model, LitellmModel) and model.model == "my-llm/model-a"
+
+    with pytest.raises(PageIndexAPIError, match="not a LiteLLM provider"):
+        local_chat._openai_model("chat", "Qwen/my-model")

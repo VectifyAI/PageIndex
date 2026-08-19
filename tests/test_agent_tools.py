@@ -1922,17 +1922,6 @@ def test_page_spec_span_bomb_rejected(client, store_path):
     assert "Too many pages" in payload["error"]
 
 
-def test_agent_instructions_shadowed_doc_id_raises(client, store_path):
-    seed_doc(store_path, "pi-old", "report.pdf",
-             created_at="2026-08-01T10:00:00.000000")
-    seed_doc(store_path, "pi-new", "report.pdf",
-             created_at="2026-08-02T10:00:00.000000")
-    with pytest.raises(PageIndexAPIError, match="shadowed"):
-        client.agent_instructions(doc_id="pi-old")
-    text = client.agent_instructions(doc_id="pi-new")
-    assert "report.pdf" in text
-
-
 def test_wait_tolerates_transient_network_failures(fake_cloud_client, monkeypatch):
     import requests as requests_mod
     cloud = fake_cloud_client(["processing", "completed"])
@@ -2432,3 +2421,57 @@ def test_agent_instructions_carry_user_metadata(client, store_path):
              metadata={"quarter": "Q3", "year": 2025})
     text = client.agent_instructions(doc_id="pi-1")
     assert '"quarter": "Q3"' in text and '"year": 2025' in text
+
+
+# ── wait-poll resilience, instruction scoping, agent_tools doc_id ──
+
+def test_await_completion_polls_through_transient_refetch_failure(monkeypatch):
+    """A refetch that fails once must not end the wait early — the caller
+    would report that 5-second exit as the full 3-minute timeout."""
+    monkeypatch.setattr(agent_tools_module, "_TOOL_WAIT_INTERVAL", 0.0)
+    calls = {"n": 0}
+
+    class Flaky:
+        def get_document(self, doc_id):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise PageIndexAPIError("transient listing failure")
+            return {"id": doc_id, "status": "completed"}
+
+    result = agent_tools_module._await_completion(
+        Flaky(), {"id": "pi-x", "status": "processing"}, wait=True)
+    assert result["status"] == "completed"
+    assert calls["n"] == 2
+
+
+def test_agent_instructions_doc_id_ignores_out_of_scope_duplicates(client, store_path):
+    seed_doc(store_path, "pi-old", "report.pdf",
+             created_at="2026-08-01T10:00:00.123000")
+    seed_doc(store_path, "pi-new", "report.pdf",
+             created_at="2026-08-05T10:00:00.123000")
+    # The scoped tools reach pi-old by id, so a newer same-name document
+    # elsewhere in the library no longer shadows it...
+    text = client.agent_instructions(doc_id="pi-old")
+    assert "report.pdf" in text
+    # ...but a duplicate name inside the targeted set still does.
+    with pytest.raises(PageIndexAPIError, match="shadowed"):
+        client.agent_instructions(doc_id=["pi-old", "pi-new"])
+
+
+def test_agent_tools_doc_id_scopes_the_functions(client, store_path):
+    seed_doc(store_path, "pi-a", "alpha.pdf")
+    seed_doc(store_path, "pi-b", "secret.pdf")
+    funcs = {fn.__name__: fn for fn in client.agent_tools(doc_id="pi-a")}
+    blocked = json.loads(funcs["get_page_content"](doc_name="secret.pdf",
+                                                   pages="1"))
+    assert "success" not in blocked
+    assert blocked["errorCode"] == "NOT_FOUND"
+    allowed = json.loads(funcs["get_page_content"](doc_name="alpha.pdf",
+                                                   pages="1"))
+    assert allowed["success"] is True
+
+
+def test_agent_tools_doc_id_refused_on_cloud():
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    with pytest.raises(PageIndexAPIError, match="local tools only"):
+        cloud.agent_tools(doc_id="pi-a")

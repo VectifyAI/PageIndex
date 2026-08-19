@@ -439,7 +439,7 @@ def _await_completion(client, entry: dict[str, Any], wait: bool) -> dict[str, An
         time.sleep(_TOOL_WAIT_INTERVAL)
         refreshed = _refetch_entry(client, doc_id)
         if refreshed is None:
-            return current
+            continue  # transient refetch failure: poll on to the deadline
         if refreshed.get("metadata") is None:
             # Status refetches omit (or null out) custom metadata; keep the
             # listing's copy.
@@ -1517,7 +1517,8 @@ def _tool_specs(client, include_management: bool = False, doc_ids=None,
             for name in tool_names(include_management)]
 
 
-def build_agent_tools(client, include_management: bool = False) -> list[Callable[..., str]]:
+def build_agent_tools(client, include_management: bool = False,
+                      doc_ids=None) -> list[Callable[..., str]]:
     """Plain synchronous functions bound to `client`.
 
     Cloud: one function per tool of the live cloud MCP tool set, signatures
@@ -1526,10 +1527,11 @@ def build_agent_tools(client, include_management: bool = False) -> list[Callable
     the JSON envelope as a string and never raises for arguments its
     signature accepts (cloud-only parameters are absent from the local
     signatures; the call_tool path answers them with the guided envelope).
+    ``doc_ids`` is the local allowlist, as in ``_tool_specs``.
     """
     return [_make_tool_function(name, description, schema, invoke)
             for name, description, schema, invoke
-            in _tool_specs(client, include_management)]
+            in _tool_specs(client, include_management, doc_ids)]
 
 
 # ── agent instructions ──

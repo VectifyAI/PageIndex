@@ -178,7 +178,7 @@ def test_get_page_content(local_client, indexed_doc):
 
     assert local_client.get_page_content(indexed_doc, "99") == []
 
-    with pytest.raises(ValueError):
+    with pytest.raises(PageIndexAPIError):
         local_client.get_page_content(indexed_doc, "abc")
 
 
@@ -186,7 +186,7 @@ def test_get_page_content_span_bomb_rejected(local_client, indexed_doc):
     """An absurd range must be rejected arithmetically, not expanded into
     a billion integers in the caller's process (the tool layer already
     refused; the public client method did not)."""
-    with pytest.raises(ValueError, match="spans more than 10000"):
+    with pytest.raises(PageIndexAPIError, match="spans more than 10000"):
         local_client.get_page_content(indexed_doc, "1-1000001")
     # At the bound itself the spec still parses.
     assert local_client.get_page_content(indexed_doc, "5-10004") == []
@@ -920,10 +920,11 @@ def test_parse_pages_overlap_counts_union():
     from pageindex.client import _parse_pages
     pages = _parse_pages("1-5000,2000-9000")
     assert len(pages) == 9000 and pages[0] == 1 and pages[-1] == 9000
-    with pytest.raises(ValueError, match="spans more than"):
+    with pytest.raises(PageIndexAPIError, match="spans more than"):
         _parse_pages("1-10001")
-    # one parser with the tool layer now: page 0 is rejected, not passed on
-    with pytest.raises(ValueError, match="positive"):
+    # one parser with the tool layer now: page 0 is rejected, not passed
+    # on — surfaced as the documented SDK error type
+    with pytest.raises(PageIndexAPIError, match="positive"):
         _parse_pages("0-3")
 
 
@@ -986,6 +987,31 @@ def test_index_precheck_covers_only_openai_shaped(monkeypatch):
     assert llm_completion("bedrock/anthropic.claude-sonnet", "p") == "ok"
 
 
+def test_litellm_routing_prefix_skips_key_precheck(monkeypatch):
+    """litellm/-prefixed names are an explicit routing choice: litellm
+    resolves credentials beyond the environment (litellm.api_key, a
+    keyless OPENAI_BASE_URL server), so the env pre-check stands aside."""
+    pytest.importorskip("litellm")
+    import litellm  # noqa: F401 — first import may load a .env; delenv after
+    from pageindex.utils import _litellm_model, _openai_missing_keys
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert _openai_missing_keys("litellm/gpt-4o") == []
+    assert _litellm_model("litellm/gpt-4o", None) == "openai/gpt-4o"
+
+
+def test_custom_provider_map_passes_provider_precheck(monkeypatch):
+    """litellm appends custom_provider_map providers to provider_list only
+    at completion time, so the pre-check must consult the map itself."""
+    pytest.importorskip("litellm")
+    import litellm
+    from pageindex.utils import _litellm_model
+
+    monkeypatch.setattr(litellm, "custom_provider_map",
+                        [{"provider": "my-llm", "custom_handler": object()}])
+    assert _litellm_model("my-llm/model-a", None) == "my-llm/model-a"
+
+
 def test_backend_args_are_local_only():
     with pytest.raises(PageIndexAPIError, match="chat_backend"):
         PageIndexClient(api_key="pi-k", chat_backend={"api_key": "x"})
@@ -1039,3 +1065,4 @@ def test_concurrent_same_name_submits_store_unique_names(local_client,
     for worker in workers:
         worker.join()
     assert {r["name"] for r in results} == {"sample.pdf", "sample_1.pdf"}
+

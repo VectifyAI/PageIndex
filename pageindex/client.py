@@ -16,6 +16,11 @@ _litellm_preload_started = False
 def _preload_litellm() -> None:
     """Start litellm's multi-second import in the background, once per
     process — a per-client thread would churn under per-request clients."""
+    # LiteLLM's import otherwise fetches its model map over the network —
+    # seconds of blocking (or a hang offline). Stamped here, not at package
+    # import, so merely importing pageindex leaves the host process's own
+    # litellm untouched; setdefault, so an explicit user choice wins.
+    os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
     global _litellm_preload_started
     if _litellm_preload_started:
         return
@@ -31,8 +36,11 @@ def _preload_litellm() -> None:
 
 
 def _parse_pages(pages: str) -> list[int]:
-    from .agent_tools import _expand_pages
-    return _expand_pages(pages)
+    from .agent_tools import _PageSpecError, _expand_pages
+    try:
+        return _expand_pages(pages)
+    except _PageSpecError as exc:
+        raise PageIndexAPIError(str(exc)) from exc
 
 
 def _agents_sdk_model_name(model: str) -> str:
@@ -690,7 +698,9 @@ class PageIndexClient:
             max_tokens: Per-turn output budget the Messages API requires on
                 the wire; the default is resolved per model (8192, or 4096
                 for the claude-3 generation whose ceiling is lower) so the
-                simple call needs only a question. Passed through.
+                simple call needs only a question, and rises to
+                budget_tokens + 8192 when ``thinking`` is enabled (the wire
+                requires max_tokens above the budget). Passed through.
             stream: Yield the Anthropic SDK's event stream across turns
                 (its native event objects, including SDK-synthesized
                 convenience events), one message sequence per turn.
@@ -783,7 +793,10 @@ class PageIndexClient:
 
     # ---------- AGENT INTEGRATION ----------
 
-    def agent_tools(self, include_management: bool = False) -> list[Callable[..., str]]:
+    def agent_tools(
+        self, include_management: bool = False,
+        doc_id: Optional[Union[str, list[str]]] = None,
+    ) -> list[Callable[..., str]]:
         """
         Plain functions for any agent framework (LangChain, PydanticAI, ...).
         For the OpenAI / Claude Agent SDKs, prefer ``as_openai_tools()`` /
@@ -805,9 +818,13 @@ class PageIndexClient:
                 library. Local: adds ``remove_document``. Cloud: by default
                 only tools the server marks read-only are exposed; True
                 exposes the server's complete list (upload, delete, ...).
+            doc_id: Local only — restrict the tools to this document ID
+                (or list of IDs), enforced at the tool layer: out-of-scope
+                lookups return NOT_FOUND. Raises on cloud, where scoping
+                is server-side.
         """
         from .agent_tools import build_agent_tools
-        return build_agent_tools(self, include_management)
+        return build_agent_tools(self, include_management, doc_ids=doc_id)
 
     def as_openai_tools(self, include_management: bool = False,
                         hosted: bool = False,
@@ -1124,12 +1141,15 @@ class PageIndexClient:
 
         With ``doc_id`` (str or list, same shape as ``chat_completions``),
         appends the target documents' names and metadata and directs the
-        agent to work within them. Raises PageIndexAPIError if a doc_id does
-        not exist, or if its name is shadowed by a newer same-name document
-        (the name-addressed tools could not reach it).
+        agent to work within them. Raises PageIndexAPIError if a doc_id
+        does not exist. Cloud also raises if its name is shadowed by a
+        newer same-name document (the name-addressed tools could not reach
+        it); local tools carry the doc_id scope, so only a duplicate name
+        within the targeted set shadows.
         """
         from .agent_tools import build_agent_instructions
-        return build_agent_instructions(self, doc_id)
+        scope = self._local_doc_scope(doc_id)
+        return build_agent_instructions(self, doc_id, scoped=scope is not None)
 
     # ---------- FOLDER MANAGEMENT ----------
 

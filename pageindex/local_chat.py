@@ -213,7 +213,10 @@ def _openai_model(protocol: str, model_name: str, backend=None):
     from .utils import _repair_litellm_types
     _repair_litellm_types()
     wire = model_name.removeprefix("litellm/")
-    if "/" not in wire or wire.startswith("openai/"):
+    # A litellm/ prefix is an explicit routing choice: litellm resolves
+    # credentials beyond the environment, so the key pre-check stands aside.
+    if not model_name.startswith("litellm/") and (
+            "/" not in wire or wire.startswith("openai/")):
         if (not os.environ.get("OPENAI_API_KEY")
                 and not (backend or {}).get("api_key")):
             raise PageIndexAPIError(
@@ -226,10 +229,14 @@ def _openai_model(protocol: str, model_name: str, backend=None):
     if "/" not in wire:
         wire = f"openai/{wire}"
     providers = getattr(litellm, "provider_list", None)
-    if providers and wire.split("/", 1)[0] not in providers:
+    # custom_provider_map providers join provider_list only at call time.
+    custom = {entry.get("provider") for entry
+              in getattr(litellm, "custom_provider_map", None) or []}
+    provider = wire.split("/", 1)[0]
+    if providers and provider not in providers and provider not in custom:
         raise PageIndexAPIError(
             f"'{wire}' routes through LiteLLM, but "
-            f"'{wire.split('/', 1)[0]}' is not a LiteLLM provider. For an "
+            f"'{provider}' is not a LiteLLM provider. For an "
             "OpenAI-compatible server (vLLM, TGI, Ollama) serving this "
             f"model id, use 'openai/{wire}' and point OPENAI_BASE_URL "
             "at the server."
@@ -325,6 +332,9 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
         model_settings=ModelSettings(
             temperature=temperature, top_p=top_p, max_tokens=max_tokens,
             reasoning=reasoning,
+            # Streamed runs otherwise carry no usage at all (agents forwards
+            # this as stream_options only on streaming calls).
+            include_usage=True,
             extra_body=body,
             extra_headers=extra_headers,
             extra_args=extra_args),
@@ -410,6 +420,53 @@ def _record_response_status(agent, recorded: dict) -> None:
         return response
 
     responses.create = recording_create
+
+
+def _record_chat_finish(agent, recorded: dict) -> None:
+    """Capture each turn's native finish_reason from the raw LiteLLM
+    response: openai-agents' ModelResponse drops it, so a truncated or
+    content-filtered final turn would otherwise report as a clean "stop".
+    The chat protocol has no transport client to hook (cf.
+    _record_response_status), so this wraps the model's response fetch;
+    no-op if that private seam moves."""
+    model = getattr(agent, "model", None)
+    fetch = getattr(model, "_fetch_response", None)
+    if fetch is None:
+        return
+
+    def note(item) -> None:
+        choices = getattr(item, "choices", None)
+        finish = getattr(choices[0], "finish_reason", None) if choices else None
+        if finish:
+            recorded["finish_reason"] = finish
+
+    class _Tee:
+        """Iteration passthrough that notes each chunk; everything else
+        (aclose/close/...) delegates to the provider stream itself."""
+
+        def __init__(self, inner):
+            self._inner = inner
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            chunk = await self._inner.__anext__()
+            note(chunk)
+            return chunk
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    async def recording_fetch(*args, **kwargs):
+        result = await fetch(*args, **kwargs)
+        if isinstance(result, tuple):
+            response, stream = result
+            return response, _Tee(stream)
+        note(result)
+        return result
+
+    model._fetch_response = recording_fetch
 
 
 async def _aclose_backend(agent) -> None:
@@ -510,6 +567,8 @@ def run_chat_completions(client, messages, stream: bool = False,
                           extra_body=extra_body, max_tokens=max_tokens,
                           backend=_merged_backend(client, backend),
                           extra_headers=extra_headers)
+    recorded: dict = {}
+    _record_chat_finish(agent, recorded)
     run_kwargs = _run_kwargs(max_turns)
     import openai
     from agents import Runner
@@ -534,7 +593,7 @@ def run_chat_completions(client, messages, stream: bool = False,
                 "index": 0,
                 "message": {"role": "assistant",
                             "content": result.final_output or ""},
-                "finish_reason": "stop",
+                "finish_reason": recorded.get("finish_reason") or "stop",
             }],
             "usage": _openai_usage(result.raw_responses),
         }
@@ -574,7 +633,7 @@ def run_chat_completions(client, messages, stream: bool = False,
             if not completed and hasattr(streamed, "cancel"):
                 streamed.cancel()  # abandoned/failed: stop the agent task
             await _aclose_backend(agent)
-        yield chunk({}, finish="stop")
+        yield chunk({}, finish=recorded.get("finish_reason") or "stop")
         yield {
             "id": chat_id, "object": "chat.completion.chunk",
             "created": created, "model": reported_model, "choices": [],
@@ -905,9 +964,14 @@ def run_messages(client, messages, model: str,
         {"cache_control": {"type": "ephemeral"}}
         if _cache_marks(system_blocks, prepared) < 4 else {})
     backend_client = _anthropic_client(_merged_backend(client, backend))
+    if max_tokens is None:
+        budget = thinking.get("budget_tokens") if isinstance(thinking, dict) else None
+        # The wire requires max_tokens > thinking.budget_tokens; the flat
+        # default would 400 every thinking call with a budget >= 8192.
+        max_tokens = (budget + 8192 if isinstance(budget, int)
+                      else _default_max_tokens(model))
     runner = backend_client.beta.messages.tool_runner(
-        max_tokens=(max_tokens if max_tokens is not None
-                    else _default_max_tokens(model)),
+        max_tokens=max_tokens,
         messages=prepared,
         model=model,
         tools=build_anthropic_tools(client, doc_ids=doc_id),

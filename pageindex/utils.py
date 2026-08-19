@@ -82,10 +82,14 @@ def _openai_missing_keys(model):
     names (bare or ``openai/``): other providers resolve credentials their
     own way at call time (IAM chains, ADC, Ollama's localhost default),
     invisible to env inspection — the chat lane draws the same line.
+    ``litellm/``-prefixed names are exempt: the prefix is an explicit
+    routing choice, and litellm resolves credentials beyond the
+    environment (litellm.api_key, a keyless OPENAI_BASE_URL server).
     Truthiness, not litellm's validate_environment, which reports a blank
     exported key as present."""
-    wire = _strip_prefix(model, "litellm/")
-    if "/" in wire and not wire.startswith("openai/"):
+    if model.startswith("litellm/"):
+        return []
+    if "/" in model and not model.startswith("openai/"):
         return []
     return ([] if (os.getenv("OPENAI_API_KEY") or "").strip()
             else ["OPENAI_API_KEY"])
@@ -98,13 +102,17 @@ def _litellm_model(model, backend):
     the summary/optimize passes treat as unrecoverable."""
     if not model:
         return model
+    raw = model
     model = _strip_prefix(model, "litellm/")
     if "/" not in model:
         model = f"openai/{model}"
     import litellm
     provider = model.split("/", 1)[0]
     providers = getattr(litellm, "provider_list", None)
-    if providers and provider not in providers:
+    # custom_provider_map providers join provider_list only at call time.
+    custom = {entry.get("provider") for entry
+              in getattr(litellm, "custom_provider_map", None) or []}
+    if providers and provider not in providers and provider not in custom:
         raise litellm.NotFoundError(
             f"'{model}' routes through LiteLLM, but '{provider}' is not a "
             f"LiteLLM provider. For an OpenAI-compatible server serving "
@@ -112,7 +120,7 @@ def _litellm_model(model, backend):
             f"OPENAI_BASE_URL at the server.",
             llm_provider=None, model=model)
     if not backend:
-        missing = _openai_missing_keys(model)
+        missing = _openai_missing_keys(raw)
         if missing:
             raise litellm.AuthenticationError(
                 f"missing API key for {model}: {', '.join(missing)}",
