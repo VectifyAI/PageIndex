@@ -17,6 +17,11 @@ if __name__ == "__main__":
     parser.add_argument('--docx_path', type=str, help='Path to the DOCX file')
     parser.add_argument('--html_path', type=str, help='Path to the HTML file')
     parser.add_argument('--txt_path', type=str, help='Path to the TXT file')
+    
+    # Corpus specific arguments
+    parser.add_argument('--corpus_name', type=str, default='Corpus', help='Name of the unified corpus root node (used with --corpus_files)')
+    parser.add_argument('--corpus_files', nargs='+', help='List of *_structure.json files to merge into a single corpus')
+
     parser.add_argument('--mode', choices=['flash', 'standard'], default='flash',
                       help='Processing mode (default: flash)')
     parser.add_argument('--flash', action='store_true', default=False,
@@ -61,6 +66,24 @@ if __name__ == "__main__":
     parser.add_argument('--summary-token-threshold', type=int, default=200,
                       help='Token threshold for generating summaries (markdown only)')
     args = parser.parse_args()
+    
+    if args.corpus_files:
+        from pageindex.corpus_builder import build_corpus
+        print(f"Building corpus '{args.corpus_name}' from {len(args.corpus_files)} files...")
+        corpus_result = build_corpus(args.corpus_files, args.corpus_name)
+        
+        output_dir = './results'
+        os.makedirs(output_dir, exist_ok=True)
+        safe_name = args.corpus_name.replace(" ", "_").replace("/", "_")
+        output_file = f'{output_dir}/{safe_name}_structure.json'
+        
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(corpus_result, f, indent=2, ensure_ascii=False)
+            
+        print(f"Corpus structure saved to: {output_file}")
+        import sys
+        sys.exit(0)
+
     if args.flash:
         args.mode = 'flash'
 
