@@ -20,6 +20,7 @@
   <a href="https://chat.pageindex.ai">🖥️ Chat Platform</a>&nbsp; • &nbsp;
   <a href="https://pageindex.ai/developer">🔌 MCP & API</a>&nbsp; • &nbsp;
   <a href="https://docs.pageindex.ai">📖 Docs</a>&nbsp; • &nbsp;
+  <a href="https://discord.com/invite/VuXuf29EUj">💬 Discord</a>&nbsp; • &nbsp;
   <a href="https://ii2abc2jejf.typeform.com/to/tK3AXl8T">✉️ Contact</a>&nbsp;
 </h4>
   
@@ -45,6 +46,7 @@ No vector DB, no chunking, no embedding model — the whole thing runs on your m
 
 - 🔥 [**PageIndex SDK**](#-quickstart) — `pip install pageindex` now ships **local mode**: index, retrieve, and chat entirely on your machine with your own LLM key, or point the same client at PageIndex Cloud with an API key.
 - ⚡ [**PageIndex Flash**](#-step-1-build-the-tree-index) — tree structure generation from PDFs in seconds, with structure extracted heuristically instead of by an LLM.
+- [**Agentic Vectorless RAG**](examples/agentic_vectorless_rag_demo.py) — a simple agentic, vectorless RAG example with *self-hosted PageIndex*, using OpenAI Agents SDK.
 - [**Scale PageIndex to Millions of Documents**](https://pageindex.ai/blog/pageindex-filesystem) — *PageIndex File System* is a file-level tree indexing layer that lets PageIndex reason over an entire corpus, not just a single document.
 - [PageIndex Chat](https://chat.pageindex.ai) — Human-like document analysis agent [platform](https://chat.pageindex.ai) for professional long documents. Also available via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer).
 - [PageIndex Framework](https://pageindex.ai/blog/pageindex-intro) — Deep dive into PageIndex: an *agentic, in-context tree index* that enables LLMs to perform *reasoning-based, context-aware retrieval* over long documents.
@@ -55,7 +57,7 @@ No vector DB, no chunking, no embedding model — the whole thing runs on your m
 
 # 📑 What is PageIndex?
 
-Vector-based RAG retrieves by semantic **similarity**. But **similarity ≠ relevance** — what retrieval actually needs is relevance, and relevance requires **reasoning**. On professional documents that demand contextual understanding, domain expertise, and multi-step reasoning, similarity search misses what is relevant but not similar, and returns what is similar but not relevant.
+Are you frustrated with vector database retrieval accuracy for long professional documents? Vector-based RAG retrieves by semantic **similarity**. But **similarity ≠ relevance** — what retrieval actually needs is relevance, and relevance requires **reasoning**. On professional documents that demand contextual understanding, domain expertise, and multi-step reasoning, similarity search misses what is relevant but not similar, and returns what is similar but not relevant.
 
 Inspired by AlphaGo, **[PageIndex](https://vectify.ai/pageindex)** replaces the vector index with a **hierarchical tree index** and lets an LLM **reason** its way through it — the way a human expert flips to the right section of a long report. Retrieval happens in two steps:
 
@@ -71,6 +73,8 @@ Inspired by AlphaGo, **[PageIndex](https://vectify.ai/pageindex)** replaces the 
 
 ### 🎯 Why it works
 
+> PageIndex is a vectorless, reasoning-based RAG engine that mirrors how humans read, delivering traceable, explainable, and context-aware retrieval, without vector databases or chunking.
+
 | | Vector RAG | **PageIndex** |
 |---|---|---|
 | **Index** | embeddings in a vector DB | tree structure of the document itself |
@@ -80,6 +84,8 @@ Inspired by AlphaGo, **[PageIndex](https://vectify.ai/pageindex)** replaces the 
 | **Context** | query embedding only | full context: conversation history, domain knowledge |
 
 It is ideal for financial reports, legal documents, regulatory filings, technical manuals, medical literature, academic textbooks — any long, complex professional document.
+
+PageIndex achieved **state-of-the-art** [98.7% accuracy](https://github.com/VectifyAI/Mafin2.5-FinanceBench) on FinanceBench (financial document QA benchmark), vastly outperforming vector-based RAG — see [Benchmarks](#-benchmarks).
 
 
 
@@ -148,14 +154,14 @@ print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 ```
 
 
-# 🧭 Using PageIndex
+# 🛠️ Using PageIndex
 
 ## 🌲 Step 1: Build the tree index
 
 `submit_document` defaults to **Flash** indexing: the structure is extracted from the PDF's own layout (no LLM), and a model is called only for node summaries and the tree-optimization expansion pass. It takes seconds.
 
 ```python
-doc_id = client.submit_document("report.pdf")["doc_id"]                 
+doc_id = client.submit_document("report.pdf")["doc_id"]
 ```
 
 Inspect what you got:
@@ -235,12 +241,12 @@ python3 run_pageindex.py --md_path  /path/to/your/document.md   # markdown, by "
 <summary>Optional CLI parameters</summary>
 <br>
 
-The structure-tuning flags require `--mode standard`.
+The structure-tuning flags from `--toc-check-pages` down require `--mode standard`; `--optimize` requires Flash mode.
 
 ```
 --mode                  Processing mode: flash (default) or standard
 --index-model           LLM model used to index the document (default: gpt-5.6-luna)
---optimize              Tree optimization for retrieval: on (default) or off
+--optimize              Tree optimization for retrieval: full (default), merge, or off
 --toc-check-pages       Pages to check for table of contents (default: 20)
 --max-pages-per-node    Max pages per node (default: 10)
 --max-tokens-per-node   Max tokens per node (default: 20000)
@@ -314,13 +320,13 @@ The same `PageIndexClient` runs both. Omit `api_key` for local, pass one for clo
 | LLM | yours — bring a provider key (`OPENAI_API_KEY`, …) and pay that provider | managed, included with your PageIndex key |
 | Storage | `./.pageindex` on disk | hosted library, folders, search |
 | Where data goes | never leaves your machine | PageIndex Cloud |
-| Image retrieval & understanding | not supported — text layer only | image retreival supported|
+| Image retrieval & understanding | not supported — text layer only | supported |
 | Citations & references | page-level | line-level |
 | Extras | — | folders, hosted search, MCP server |
 
 `PageIndexCloudClient` / `PageIndexLocalClient` pin the mode explicitly if you would rather not infer it from `api_key`.
 
-For dedicated or private deployment (VPC, on-prem), [contact us](https://ii2abc2jejf.typeform.com/to/gVv7qkaN) or [book a demo](https://calendly.com/pageindex/meet).
+The cloud service is also available as a ChatGPT-style [chat platform](https://chat.pageindex.ai), or via [MCP](https://pageindex.ai/developer) and [API](https://pageindex.ai/developer). For dedicated or private deployment (VPC, on-prem), [contact us](https://ii2abc2jejf.typeform.com/to/gVv7qkaN) or [book a demo](https://calendly.com/pageindex/meet).
 
 
 
@@ -368,7 +374,7 @@ Explore the full [benchmark results](https://github.com/VectifyAI/Mafin2.5-Finan
 
 * 📝 [Blog](https://pageindex.ai/blog): technical articles, research insights, and product updates.
 * 🔧 [Developer](https://pageindex.ai/developer): MCP setup, API docs, and integration guides.
-* 🧪 [Cookbooks](https://docs.pageindex.ai/cookbook): hands-on, runnable examples and advanced use cases.
+* 🧪 [Cookbooks](https://docs.pageindex.ai/cookbook): hands-on, runnable examples and advanced use cases — try the [Vectorless RAG](https://colab.research.google.com/github/VectifyAI/PageIndex/blob/main/cookbook/pageindex_RAG_simple.ipynb) and the OCR-free, vision-based [Vision RAG](https://colab.research.google.com/github/VectifyAI/PageIndex/blob/main/cookbook/vision_RAG_pageindex.ipynb) notebooks in Colab.
 * 📖 [Tutorials](https://docs.pageindex.ai/tutorials): practical guides and strategies, including *Document Search* and *Tree Search*.
 
 ---
@@ -404,6 +410,10 @@ PageIndex Blog, Sep 2025.
 </details>
 
 
+### 🌐 Open-Source Ecosystem
+
+[PageIndex](https://github.com/VectifyAI/PageIndex) anchors a growing open-source [ecosystem](https://docs.pageindex.ai/open-source) of **long-context AI infra** — [OpenKB](https://github.com/VectifyAI/OpenKB) is an LLM knowledge base that compiles documents into an interlinked wiki. [ChatIndex](https://github.com/VectifyAI/ChatIndex) provides tree indexing and retrieval for long conversational histories and memory. [ConDB](https://github.com/VectifyAI/ConDB) is a KV-cache native context database for tree-based retrieval at scale. [PageIndex MCP](https://github.com/VectifyAI/pageindex-mcp) is PageIndex's MCP server.
+
 ### Connect with Us
 
 <div align="center">
@@ -411,6 +421,7 @@ PageIndex Blog, Sep 2025.
 [![Website](https://img.shields.io/badge/Website-2D72CF?style=for-the-badge&logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTEyIDEgMSAxMWgyLjV2MTJoNnYtN2g1djdoNlYxMUgyM3oiLz48L3N2Zz4%3D)](https://pageindex.ai)&nbsp;
 [![Twitter](https://img.shields.io/badge/Twitter-000000?style=for-the-badge&logo=x&logoColor=white)](https://x.com/PageIndexAI)&nbsp;
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=for-the-badge&logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTIwLjQ1IDIwLjQ1aC0zLjU1di01LjU3YzAtMS4zMy0uMDMtMy4wNC0xLjg1LTMuMDQtMS44NSAwLTIuMTQgMS40NS0yLjE0IDIuOTR2NS42N0g5LjM1VjloMy40MXYxLjU2aC4wNWMuNDgtLjkgMS42NC0xLjg1IDMuMzctMS44NSAzLjYgMCA0LjI3IDIuMzcgNC4yNyA1LjQ2djYuMjh6TTUuMzQgNy40M2EyLjA2IDIuMDYgMCAxIDEgMC00LjEzIDIuMDYgMi4wNiAwIDAgMSAwIDQuMTN6TTcuMTIgMjAuNDVIMy41NlY5aDMuNTZ2MTEuNDV6TTIyLjIyIDBIMS43N0MuNzkgMCAwIC43NyAwIDEuNzN2MjAuNTRDMCAyMy4yMy43OSAyNCAxLjc3IDI0aDIwLjQ1QzIzLjIgMjQgMjQgMjMuMjMgMjQgMjIuMjdWMS43M0MyNCAuNzcgMjMuMiAwIDIyLjIyIDB6Ii8%2BPC9zdmc%2B)](https://www.linkedin.com/company/vectify-ai/)&nbsp;
+[![Discord](https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/invite/VuXuf29EUj)&nbsp;
 [![Book a Demo](https://img.shields.io/badge/Book_a_Demo-6E7E96?style=for-the-badge&logo=googlecalendar&logoColor=white)](https://calendly.com/pageindex/meet)&nbsp;
 [![Contact Us](https://img.shields.io/badge/Contact_Us-3B82F6?style=for-the-badge&logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjIgNCAyMCAxNiI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTIwIDRINGMtMS4xIDAtMiAuOS0yIDJ2MTJjMCAxLjEuOSAyIDIgMmgxNmMxLjEgMCAyLS45IDItMlY2YzAtMS4xLS45LTItMi0yem0wIDQtOCA1LTgtNVY2bDggNSA4LTV6Ii8%2BPC9zdmc%2B)](https://ii2abc2jejf.typeform.com/to/tK3AXl8T)
 
