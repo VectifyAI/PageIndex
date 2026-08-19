@@ -931,8 +931,9 @@ class PageIndexClient:
         scope = self._local_doc_scope(doc_id)
         config: dict[str, Any] = {
             "name": "PageIndex",
-            "instructions": build_agent_instructions(self, doc_id,
-                                                     scoped=scope is not None),
+            "instructions": build_agent_instructions(
+                self, doc_id, scoped=scope is not None,
+                include_management=include_management),
             "tools": self.as_openai_tools(include_management, doc_id=scope),
         }
         model = model or getattr(self, "chat_model", None)
@@ -1002,6 +1003,7 @@ class PageIndexClient:
         asynchronous: bool = False,
         max_tokens: Optional[int] = None,
         max_turns: Optional[int] = None,
+        thinking: Optional[dict] = None,
     ) -> dict[str, Any]:
         """
         Document QA ``tool_runner`` kwargs for the Anthropic SDK in one
@@ -1037,6 +1039,10 @@ class PageIndexClient:
             max_tokens: Per-turn output budget; default resolved per
                 model.
             max_turns: Agent-loop bound; default 10.
+            thinking: Anthropic ``thinking`` config, included in the
+                kwargs; an enabled budget also lifts the ``max_tokens``
+                default above it. Pass it here, not alongside the
+                unpacked config, so the default stays valid.
         """
         from .agent_tools import build_agent_instructions
         from .local_chat import _default_max_tokens, _validate_max_turns
@@ -1045,12 +1051,14 @@ class PageIndexClient:
         return {
             "model": model,
             "max_tokens": (max_tokens if max_tokens is not None
-                           else _default_max_tokens(model)),
-            "system": build_agent_instructions(self, doc_id,
-                                               scoped=scope is not None),
+                           else _default_max_tokens(model, thinking)),
+            "system": build_agent_instructions(
+                self, doc_id, scoped=scope is not None,
+                include_management=include_management),
             "tools": self.as_anthropic_tools(include_management, asynchronous,
                                              doc_id=scope),
             "max_iterations": max_turns if max_turns is not None else 10,
+            **({"thinking": thinking} if thinking is not None else {}),
             "cache_control": {"type": "ephemeral"},
         }
 
@@ -1119,8 +1127,9 @@ class PageIndexClient:
         from .agent_tools import build_agent_instructions
         scope = self._local_doc_scope(doc_id)
         return {
-            "system_prompt": build_agent_instructions(self, doc_id,
-                                                      scoped=scope is not None),
+            "system_prompt": build_agent_instructions(
+                self, doc_id, scoped=scope is not None,
+                include_management=include_management),
             "mcp_servers": {server_name: self.as_claude_mcp(
                 include_management, doc_id=scope)},
             # Pre-approval only — the server itself is already gated (the
@@ -1128,7 +1137,10 @@ class PageIndexClient:
             "allowed_tools": [f"mcp__{server_name}"],
         }
 
-    def agent_instructions(self, doc_id: Optional[Union[str, list[str]]] = None) -> str:
+    def agent_instructions(
+        self, doc_id: Optional[Union[str, list[str]]] = None,
+        include_management: bool = False,
+    ) -> str:
         """
         Orchestration guidance for document QA agents — pass as the agent's
         system prompt (or append to your own).
@@ -1142,14 +1154,18 @@ class PageIndexClient:
         With ``doc_id`` (str or list, same shape as ``chat_completions``),
         appends the target documents' names and metadata and directs the
         agent to work within them. Raises PageIndexAPIError if a doc_id
-        does not exist. Cloud also raises if its name is shadowed by a
-        newer same-name document (the name-addressed tools could not reach
-        it); local tools carry the doc_id scope, so only a duplicate name
-        within the targeted set shadows.
+        does not exist, or if its name is shadowed by a newer same-name
+        document — the name-addressed tools could not reach it (the
+        ``*_agent_config`` bundles, whose tools carry the doc_id scope,
+        relax this to duplicates within the targeted set).
+
+        ``include_management``: fetch the guidance for the full tool set,
+        matching tools built with ``include_management=True`` (cloud;
+        local guidance is a single set).
         """
         from .agent_tools import build_agent_instructions
-        scope = self._local_doc_scope(doc_id)
-        return build_agent_instructions(self, doc_id, scoped=scope is not None)
+        return build_agent_instructions(
+            self, doc_id, include_management=include_management)
 
     # ---------- FOLDER MANAGEMENT ----------
 

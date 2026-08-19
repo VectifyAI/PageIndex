@@ -349,6 +349,8 @@ def _format_tree_node(node: dict, node_summary: bool) -> dict:
         "node_id": node.get("node_id"),
         "page_index": node.get("start_index"),
     }
+    if node.get("key_items"):
+        out["key_items"] = node["key_items"]
     if node_summary:
         summary = node.get("summary")
         if summary is not None:

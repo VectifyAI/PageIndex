@@ -65,6 +65,8 @@ def build_openai_tools(client, include_management: bool = False,
                 return _dumps(payload)
             arguments = {key: value for key, value in parsed.items()
                          if value is not None}
+            # is_error has no per-result channel on hand-built FunctionTools
+            # (raising aborts the run — see above); the text is the signal.
             text, _ = await asyncio.to_thread(invoke, arguments)
             return text
 

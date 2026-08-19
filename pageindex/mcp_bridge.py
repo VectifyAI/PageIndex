@@ -86,7 +86,8 @@ class McpBridge:
             except ValueError as exc:
                 raise PageIndexAPIError(
                     f"MCP server returned a non-JSON response "
-                    f"(HTTP {response.status_code})."
+                    f"(HTTP {response.status_code}).",
+                    status_code=response.status_code,
                 ) from exc
         # Strict id correlation only — accepting any result-bearing message
         # would return a stale or mis-correlated reply as this call's.
@@ -130,7 +131,8 @@ class McpBridge:
         if response.status_code >= 400:
             raise PageIndexAPIError(
                 f"MCP request failed: HTTP {response.status_code} "
-                f"({response.text[:200]})"
+                f"({response.text[:200]})",
+                status_code=response.status_code,
             )
         return self._extract_result(response, request_id)
 
@@ -153,7 +155,8 @@ class McpBridge:
                 raise PageIndexAPIError(
                     f"Could not connect to the PageIndex MCP server: HTTP "
                     f"{response.status_code} ({response.text[:200]}). Check "
-                    "your API key."
+                    "your API key.",
+                    status_code=response.status_code,
                 )
             result = self._extract_result(response, request_id) or {}
             self._session_id = response.headers.get("Mcp-Session-Id")

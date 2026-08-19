@@ -19,10 +19,6 @@ class ExtractNodesFromMarkdownTest(unittest.TestCase):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class MarkdownCliTest(unittest.TestCase):
     def test_md_cli_runs_without_llm_or_key(self):
         """--md_path with no flags makes zero LLM calls: config.yaml's PDF
@@ -49,3 +45,7 @@ class MarkdownCliTest(unittest.TestCase):
             out = Path(tmp) / "results" / "notes_structure.json"
             self.assertTrue(out.exists(), res.stdout.decode())
             json.loads(out.read_text())
+
+
+if __name__ == "__main__":
+    unittest.main()

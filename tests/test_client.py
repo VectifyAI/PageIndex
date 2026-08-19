@@ -1066,3 +1066,16 @@ def test_concurrent_same_name_submits_store_unique_names(local_client,
         worker.join()
     assert {r["name"] for r in results} == {"sample.pdf", "sample_1.pdf"}
 
+
+
+def test_format_tree_node_keeps_key_items():
+    """key_items from the merge optimization survive the get_tree formatter."""
+    from pageindex.local_api import _format_tree_node
+
+    node = {"title": "Chapter 1", "node_id": "0000", "start_index": 1,
+            "summary": "s",
+            "key_items": ["1.1 Alpha", "1.2 Beta", "1.3 Gamma"]}
+    out = _format_tree_node(node, node_summary=True)
+    assert out["key_items"] == ["1.1 Alpha", "1.2 Beta", "1.3 Gamma"]
+    assert "key_items" not in _format_tree_node(
+        {"title": "t", "node_id": "0001", "start_index": 1}, False)

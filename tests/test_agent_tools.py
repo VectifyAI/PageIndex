@@ -966,6 +966,60 @@ def test_claude_agent_config_scoped_shadow_check(client, store_path):
     assert "report.pdf" in config["system_prompt"]
 
 
+def test_anthropic_runner_config_thinking_lifts_max_tokens(client):
+    pytest.importorskip("anthropic")
+    config = client.anthropic_runner_config(
+        model="claude-sonnet-4-5",
+        thinking={"type": "enabled", "budget_tokens": 10000})
+    assert config["max_tokens"] == 10000 + 8192
+    assert config["thinking"] == {"type": "enabled", "budget_tokens": 10000}
+    assert "thinking" not in client.anthropic_runner_config(
+        model="claude-sonnet-4-5")
+
+
+def test_bridge_invoker_reraises_auth_failures():
+    class Revoked:
+        def call_tool(self, name, arguments):
+            raise PageIndexAPIError("HTTP 401", status_code=401)
+
+    invoke = agent_tools_module._bridge_invoker(Revoked(), "get_document", {})
+    with pytest.raises(PageIndexAPIError, match="401"):
+        invoke({})
+    # Transport blips stay contained in the retryable envelope.
+
+    class Down:
+        def call_tool(self, name, arguments):
+            raise PageIndexAPIError("HTTP 503", status_code=503)
+
+    text, is_error = agent_tools_module._bridge_invoker(
+        Down(), "get_document", {})({})
+    assert is_error
+    assert json.loads(text)["errorCode"] == "INTERNAL_ERROR"
+
+
+def test_cloud_bridge_gates_the_endpoint(monkeypatch):
+    """Instructions come from the same endpoint the tools register: the
+    read-gated URL by default, the full one with include_management."""
+    created = []
+
+    class FakeBridge:
+        def __init__(self, url, headers):
+            created.append(url)
+
+        def instructions(self):
+            return "SERVED"
+
+    monkeypatch.setattr("pageindex.mcp_bridge.McpBridge", FakeBridge)
+    cloud = PageIndexCloudClient(api_key="pi-k")
+    assert cloud.agent_instructions() == "SERVED"
+    assert created == [f"{cloud.BASE_URL}/mcp?tools=read"]
+    cloud.agent_instructions(include_management=True)
+    assert created[1:] == [f"{cloud.BASE_URL}/mcp"]
+    cloud.agent_instructions()
+    cloud.agent_instructions(include_management=True)
+    assert len(created) == 2  # cached per gate
+
+
 def test_doc_scope_rejected_on_cloud_openai():
     pytest.importorskip("agents")
     cloud = PageIndexCloudClient(api_key="pi-test-key")
@@ -1208,7 +1262,9 @@ def test_cloud_agent_tools_discover_live_tool_set(cloud_with_fake_bridge):
     cloud, created = cloud_with_fake_bridge
     tools = cloud.agent_tools()
     bridge = created["bridge"]
-    assert bridge.url == "https://api.pageindex.ai/mcp"
+    # Default discovery rides the read-gated endpoint, matching the
+    # instructions fetch and the hosted/MCP registrations.
+    assert bridge.url == "https://api.pageindex.ai/mcp?tools=read"
     assert bridge.headers == {"Authorization": "Bearer pi-test-key"}
     # Default: only tools the server marks read-only; unannotated tools are
     # treated as non-read-only.
@@ -2444,18 +2500,15 @@ def test_await_completion_polls_through_transient_refetch_failure(monkeypatch):
     assert calls["n"] == 2
 
 
-def test_agent_instructions_doc_id_ignores_out_of_scope_duplicates(client, store_path):
+def test_agent_instructions_doc_id_shadow_check(client, store_path):
     seed_doc(store_path, "pi-old", "report.pdf",
              created_at="2026-08-01T10:00:00.123000")
     seed_doc(store_path, "pi-new", "report.pdf",
              created_at="2026-08-05T10:00:00.123000")
-    # The scoped tools reach pi-old by id, so a newer same-name document
-    # elsewhere in the library no longer shadows it...
-    text = client.agent_instructions(doc_id="pi-old")
-    assert "report.pdf" in text
-    # ...but a duplicate name inside the targeted set still does.
+    # standalone instructions get the strict check; only the *_agent_config
+    # bundles (which build the tools too) relax it
     with pytest.raises(PageIndexAPIError, match="shadowed"):
-        client.agent_instructions(doc_id=["pi-old", "pi-new"])
+        client.agent_instructions(doc_id="pi-old")
 
 
 def test_agent_tools_doc_id_scopes_the_functions(client, store_path):

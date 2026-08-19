@@ -142,3 +142,29 @@ def test_unguarded_script_parses_parallel_without_reexecution(tmp_path):
     assert res.returncode == 0, res.stderr.decode()
     assert marker.read_text() == "ran\n"
     assert b"Traceback" not in res.stderr
+
+
+def test_optimize_wins_over_deprecated_optimize_expand(tmp_path, monkeypatch):
+    """Explicit optimize= beats optimize_expand; legacy True still honors it."""
+    from conftest import build_pdf
+    from pageindex.flash import page_index_flash
+    import litellm  # noqa: F401 — first import may load a .env; delenv after it
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("CHATGPT_API_KEY", raising=False)
+
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["1 Introduction", "Body text"]))
+    # resolved to "full" before the precedence fix (keyless → fail-fast)
+    with pytest.warns(DeprecationWarning):
+        result = page_index_flash(str(pdf), summary=False,
+                                  optimize="merge", optimize_expand=True)
+    assert "structure" in result
+    with pytest.warns(DeprecationWarning):
+        result = page_index_flash(str(pdf), summary=False,
+                                  optimize=True, optimize_expand=False)
+    assert "structure" in result
+    # optimize=None means unset ("full"), not off
+    from pageindex import PageIndexAPIError
+    with pytest.raises(PageIndexAPIError, match="optimize='merge'"):
+        page_index_flash(str(tmp_path / "missing.pdf"), summary=False,
+                         optimize=None)

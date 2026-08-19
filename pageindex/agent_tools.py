@@ -1346,8 +1346,8 @@ def _bridge_invoker(bridge, name: str, schema: dict,
     """One cloud tool call proxied over MCP: string booleans are coerced
     (same as call_tool), None-valued arguments are dropped (None ≡ omitted,
     matching the contract's "omit if ..." semantics) and failures are
-    contained in the error envelope. Returns (envelope_text, is_error),
-    like call_tool."""
+    contained in the error envelope — except 401/403, which re-raise.
+    Returns (envelope_text, is_error), like call_tool."""
     def _invoke(arguments: dict[str, Any]) -> tuple[str, bool]:
         try:
             arguments = {key: value for key, value in arguments.items()
@@ -1355,6 +1355,9 @@ def _bridge_invoker(bridge, name: str, schema: dict,
             _coerce_bool_args(schema, arguments)
             return bridge.call_tool(name, arguments)
         except Exception as exc:
+            if (isinstance(exc, PageIndexAPIError)
+                    and exc.status_code in (401, 403)):
+                raise
             payload, _ = _failure(
                 f"{name} failed: {exc}", None,
                 {"summary": "Unexpected error while running the tool",
@@ -1411,10 +1414,8 @@ def _make_tool_function(name: str, description: str, schema: dict,
         inner.__annotations__ = annotations
 
     def proxy(*args: Any, **kwargs: Any) -> str:
-        # The invoker never raises, so a TypeError here is the binding
-        # rejecting the arguments (e.g. cloud-only parameters pruned
-        # from the local signature) — answer with the same guided
-        # envelope call_tool returns for them.
+        # The invoker lets only 401/403 auth failures through, so a
+        # TypeError here is the binding rejecting the arguments.
         try:
             return inner(*args, **kwargs)
         except TypeError as exc:
@@ -1437,21 +1438,26 @@ _BRIDGES: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
 _BRIDGES_LOCK = threading.Lock()
 
 
-def _cloud_bridge(client):
-    """One bridge per client: tool discovery and instructions share a single
-    MCP session. Weak-keyed off the instance so clients stay picklable; the
+def _cloud_bridge(client, gated: bool = False):
+    """One bridge per client and endpoint gate (``gated`` = the read-only
+    ?tools=read endpoint); tool discovery and instructions share a session
+    per gate. Weak-keyed off the instance so clients stay picklable; the
     lock closes the check-then-set race under concurrent first calls."""
     with _BRIDGES_LOCK:
-        # A rotated api_key or moved BASE_URL rebuilds the bridge.
+        # A rotated api_key or moved BASE_URL rebuilds the bridges.
         auth = (client.BASE_URL, client.api_key)
-        bridge, seen = _BRIDGES.get(client) or (None, None)
-        if bridge is None or seen != auth:
+        bridges, seen = _BRIDGES.get(client) or ({}, None)
+        if seen != auth:
+            bridges = {}
+        bridge = bridges.get(gated)
+        if bridge is None:
             from .mcp_bridge import McpBridge
             bridge = McpBridge(
-                f"{auth[0]}/mcp",
+                f"{auth[0]}/mcp" + ("?tools=read" if gated else ""),
                 {"Authorization": f"Bearer {auth[1]}"},
             )
-            _BRIDGES[client] = (bridge, auth)
+            bridges[gated] = bridge
+            _BRIDGES[client] = (bridges, auth)
         return bridge
 
 
@@ -1495,7 +1501,7 @@ def _tool_specs(client, include_management: bool = False, doc_ids=None,
     is the local chat scope; cloud scoping is server-side."""
     _require_local_scope(client, doc_ids)
     if getattr(client, "api_key", None):
-        bridge = _cloud_bridge(client)
+        bridge = _cloud_bridge(client, gated=not include_management)
         tools_meta = bridge.list_tools()
         if not include_management:
             tools_meta = _read_only_tools(tools_meta)
@@ -1585,12 +1591,13 @@ AGENT_INSTRUCTIONS = "\n\n".join([
 ])
 
 
-def _base_instructions(client) -> str:
-    """Cloud: the live instructions the MCP server serves for this key's
-    tool set. Local: the built-in subset instructions."""
+def _base_instructions(client, include_management: bool = False) -> str:
+    """Cloud: the live instructions the MCP server serves for the tool set
+    actually shipped. Local: the built-in subset instructions."""
     if not getattr(client, "api_key", None):
         return AGENT_INSTRUCTIONS
-    instructions = _cloud_bridge(client).instructions()
+    instructions = _cloud_bridge(
+        client, gated=not include_management).instructions()
     if not isinstance(instructions, str) or not instructions.strip():
         raise PageIndexAPIError(
             "The MCP server returned no agent instructions — refusing to "
@@ -1673,9 +1680,10 @@ def doc_targeting_block(client, doc_id, scoped: bool = False) -> Optional[str]:
     )
 
 
-def build_agent_instructions(client, doc_id=None, scoped: bool = False) -> str:
+def build_agent_instructions(client, doc_id=None, scoped: bool = False,
+                             include_management: bool = False) -> str:
     """Orchestration guidance for document QA agents; with doc_id, appends
     the target documents and directs the agent to work within them."""
-    base = _base_instructions(client)
+    base = _base_instructions(client, include_management)
     block = doc_targeting_block(client, doc_id, scoped=scoped)
     return base if block is None else base + "\n\n" + block

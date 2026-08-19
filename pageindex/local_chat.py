@@ -200,6 +200,8 @@ def _openai_model(protocol: str, model_name: str, backend=None):
         except (openai.OpenAIError, TypeError) as exc:
             raise PageIndexAPIError(
                 f"The OpenAI backend is not configured: {exc}") from exc
+        # A caller-owned transport must survive the per-call close.
+        sdk_client._pageindex_caller_http = "http_client" in (backend or {})
         from agents.models.openai_responses import OpenAIResponsesModel
         return OpenAIResponsesModel(model_name, openai_client=sdk_client)
     try:
@@ -210,37 +212,20 @@ def _openai_model(protocol: str, model_name: str, backend=None):
             f"'{model_name}' routes through LiteLLM, but litellm is not "
             "installed. Run:  pip install 'litellm>=1.97'"
         )
-    from .utils import _repair_litellm_types
+    from .utils import _litellm_model, _repair_litellm_types
     _repair_litellm_types()
-    wire = model_name.removeprefix("litellm/")
-    # A litellm/ prefix is an explicit routing choice: litellm resolves
-    # credentials beyond the environment, so the key pre-check stands aside.
-    if not model_name.startswith("litellm/") and (
-            "/" not in wire or wire.startswith("openai/")):
-        if (not os.environ.get("OPENAI_API_KEY")
-                and not (backend or {}).get("api_key")):
-            raise PageIndexAPIError(
-                "The OpenAI backend is not configured: set the "
-                "OPENAI_API_KEY environment variable, pass an api_key "
-                "in chat_backend / backend (any value works for keyless "
-                "OPENAI_BASE_URL servers), or point chat_model at "
-                "another provider (e.g. 'anthropic/...')."
-            )
-    if "/" not in wire:
-        wire = f"openai/{wire}"
-    providers = getattr(litellm, "provider_list", None)
-    # custom_provider_map providers join provider_list only at call time.
-    custom = {entry.get("provider") for entry
-              in getattr(litellm, "custom_provider_map", None) or []}
-    provider = wire.split("/", 1)[0]
-    if providers and provider not in providers and provider not in custom:
+    try:
+        wire = _litellm_model(model_name, backend)
+    except litellm.AuthenticationError as exc:
         raise PageIndexAPIError(
-            f"'{wire}' routes through LiteLLM, but "
-            f"'{provider}' is not a LiteLLM provider. For an "
-            "OpenAI-compatible server (vLLM, TGI, Ollama) serving this "
-            f"model id, use 'openai/{wire}' and point OPENAI_BASE_URL "
-            "at the server."
-        )
+            "The OpenAI backend is not configured: set the "
+            "OPENAI_API_KEY environment variable, pass an api_key "
+            "in chat_backend / backend (any value works for keyless "
+            "OPENAI_BASE_URL servers), or point chat_model at "
+            "another provider (e.g. 'anthropic/...')."
+        ) from exc
+    except litellm.NotFoundError as exc:
+        raise PageIndexAPIError(str(exc)) from exc
     return LitellmModel(wire, api_key=(backend or {}).get("api_key"),
                         base_url=(backend or {}).get("base_url"))
 
@@ -277,6 +262,25 @@ def _cache_extra_args(model_name: str) -> Optional[dict]:
     return None
 
 
+def _openai_protocol(model_name: str) -> bool:
+    """Destinations that speak the OpenAI protocol on the wire, where
+    prompt_cache_key means something and extra_body lands in the request
+    body. Resolution is LiteLLM's own (same as _cache_extra_args), so the
+    answer follows actual routing; azure and openrouter ride the OpenAI
+    protocol without appearing in openai_compatible_providers."""
+    wire = model_name.removeprefix("litellm/")
+    if "/" not in wire or wire.startswith("openai/"):
+        return True
+    try:
+        import litellm
+        _, provider, _, _ = litellm.get_llm_provider(model=wire)
+    except Exception:
+        return False
+    return (provider in ("openai", "azure", "openrouter")
+            or provider in getattr(litellm, "openai_compatible_providers",
+                                   ()))
+
+
 def _merged_backend(client, backend):
     """This call's connection overrides: the client's ``chat_backend``
     under the per-call dict, per-call keys winning."""
@@ -296,8 +300,7 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
     # and both OpenAI model classes pass extra_body through verbatim. OpenAI
     # destinations only — LiteLLM plants extra_body as a literal field in
     # other providers' request bodies, which Anthropic rejects as unknown.
-    wire = model_name.removeprefix("litellm/")
-    openai_backend = "/" not in wire or wire.startswith("openai/")
+    openai_backend = _openai_protocol(model_name)
     # Chat-lane effort rides extra_args: LiteLLM takes it as its own
     # top-level kwarg on every supported openai-agents version, and the
     # channel admits values outside the OpenAI enum ("none").
@@ -472,8 +475,11 @@ def _record_chat_finish(agent, recorded: dict) -> None:
 async def _aclose_backend(agent) -> None:
     """Close the per-call AsyncOpenAI client before its event loop ends —
     otherwise httpx tears down pooled connections on a closed loop and
-    emits 'Task exception was never retrieved' noise."""
+    emits 'Task exception was never retrieved' noise. A client built on a
+    caller-owned http_client stays open."""
     backend = getattr(getattr(agent, "model", None), "_client", None)
+    if getattr(backend, "_pageindex_caller_http", False):
+        return
     close = getattr(backend, "close", None)
     if close is not None:
         try:
@@ -919,9 +925,15 @@ _CLAUDE_4096_MODELS = ("claude-3-opus", "claude-3-sonnet", "claude-3-haiku",
                        "claude-3-5-sonnet-20240620")
 
 
-def _default_max_tokens(model: str) -> int:
+def _default_max_tokens(model: str, thinking=None) -> int:
     """The wire-required per-turn budget when the caller sets none: 8192,
-    except the claude-3 generation whose output ceiling is 4096."""
+    except the claude-3 generation whose output ceiling is 4096. The wire
+    also requires max_tokens > thinking.budget_tokens, so an enabled
+    budget lifts the default above itself."""
+    budget = (thinking.get("budget_tokens")
+              if isinstance(thinking, dict) else None)
+    if isinstance(budget, int):
+        return budget + 8192
     return 4096 if model.startswith(_CLAUDE_4096_MODELS) else 8192
 
 
@@ -963,13 +975,20 @@ def run_messages(client, messages, model: str,
     cached: dict[str, Any] = (
         {"cache_control": {"type": "ephemeral"}}
         if _cache_marks(system_blocks, prepared) < 4 else {})
-    backend_client = _anthropic_client(_merged_backend(client, backend))
+    merged = _merged_backend(client, backend)
+    # The SDK defers credential resolution to request time and raises a
+    # bare TypeError there — pre-check for the contract's PageIndexAPIError.
+    if not merged and not (os.environ.get("ANTHROPIC_API_KEY")
+                           or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
+        raise PageIndexAPIError(
+            "The Anthropic backend is not configured: set the "
+            "ANTHROPIC_API_KEY environment variable, or pass an api_key "
+            "in chat_backend / backend.")
+    backend_client = _anthropic_client(merged)
+    # A caller-owned http_client must survive the per-call closes below.
+    owns_transport = "http_client" not in (merged or {})
     if max_tokens is None:
-        budget = thinking.get("budget_tokens") if isinstance(thinking, dict) else None
-        # The wire requires max_tokens > thinking.budget_tokens; the flat
-        # default would 400 every thinking call with a budget >= 8192.
-        max_tokens = (budget + 8192 if isinstance(budget, int)
-                      else _default_max_tokens(model))
+        max_tokens = _default_max_tokens(model, thinking)
     runner = backend_client.beta.messages.tool_runner(
         max_tokens=max_tokens,
         messages=prepared,
@@ -994,7 +1013,8 @@ def run_messages(client, messages, model: str,
                     f"The model backend failed: {exc}") from exc
             finally:
                 # runs on exhaustion and abandonment (GeneratorExit) alike
-                backend_client.close()
+                if owns_transport:
+                    backend_client.close()
         return events()
 
     try:
@@ -1004,7 +1024,8 @@ def run_messages(client, messages, model: str,
             f"The model backend failed: {exc}") from exc
     finally:
         # safe here: the params read-back below does no HTTP
-        backend_client.close()
+        if owns_transport:
+            backend_client.close()
     if not turns:
         raise PageIndexAPIError("The model returned no response.")
     captured: dict = {}

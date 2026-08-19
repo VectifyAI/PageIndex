@@ -1958,3 +1958,83 @@ def test_chat_gate_honors_litellm_routing_and_custom_providers(monkeypatch):
 
     with pytest.raises(PageIndexAPIError, match="not a LiteLLM provider"):
         local_chat._openai_model("chat", "Qwen/my-model")
+
+
+@needs_agents
+def test_litellm_model_still_has_the_fetch_response_seam():
+    # Guards the private seam _record_chat_finish rides (LitellmModel
+    # ._fetch_response): a vendor rename turns the recorder into a silent
+    # no-op and every truncated turn reports finish_reason "stop".
+    pytest.importorskip("litellm")
+    from agents.extensions.models.litellm_model import LitellmModel
+
+    assert hasattr(LitellmModel, "_fetch_response")
+
+
+def test_openai_protocol_predicate_follows_litellm_routing():
+    pytest.importorskip("litellm")
+    for name in ("gpt-5", "openai/gpt-4o", "litellm/gpt-4o",
+                 "azure/gpt-4o", "openrouter/openai/gpt-4o",
+                 "deepseek/deepseek-chat", "groq/llama-3.3-70b-versatile",
+                 "xai/grok-3"):
+        assert local_chat._openai_protocol(name), name
+    for name in ("anthropic/claude-sonnet-4-5", "gemini/gemini-2.5-pro",
+                 "bedrock/us.anthropic.claude-sonnet-5",
+                 "vertex_ai/claude-sonnet-4-5"):
+        assert not local_chat._openai_protocol(name), name
+
+
+@needs_agents
+def test_chat_backend_without_key_stands_aside_like_index_lane(monkeypatch):
+    """Any non-empty backend dict suppresses the key pre-check (utils rule)."""
+    pytest.importorskip("litellm")
+    import litellm  # noqa: F401 — first import may load a .env; delenv after it
+    from agents.extensions.models.litellm_model import LitellmModel
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    model = local_chat._openai_model(
+        "chat", "gpt-test", {"base_url": "http://localhost:9"})
+    assert isinstance(model, LitellmModel)
+
+
+@needs_agents
+def test_responses_model_marks_caller_owned_transport(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    shared = httpx.AsyncClient()
+    caller = local_chat._openai_model("responses", "gpt-test",
+                                      {"http_client": shared})
+    assert caller._client._pageindex_caller_http is True
+    owned = local_chat._openai_model("responses", "gpt-test")
+    assert owned._client._pageindex_caller_http is False
+
+    async def run():
+        await local_chat._aclose_backend(types.SimpleNamespace(model=caller))
+        assert not shared.is_closed  # caller-owned transport survives
+        await local_chat._aclose_backend(types.SimpleNamespace(model=owned))
+        await shared.aclose()
+
+    asyncio.run(run())
+
+
+@needs_anthropic
+def test_messages_keeps_caller_owned_http_client_open(client):
+    body = _anthropic_message([{"type": "text", "text": "a"}], "end_turn")
+    shared = httpx.Client(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=body)))
+    out = client.messages("q", model="claude-test",
+                          backend={"api_key": "t", "http_client": shared})
+    assert out["content"][0]["text"] == "a"
+    assert not shared.is_closed
+    client.messages("q", model="claude-test",
+                    backend={"api_key": "t", "http_client": shared})
+    shared.close()
+
+
+@needs_anthropic
+def test_messages_without_credentials_raises_contract_error(client,
+                                                            monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    with pytest.raises(PageIndexAPIError,
+                       match="Anthropic backend is not configured"):
+        client.messages("q", model="claude-test")
