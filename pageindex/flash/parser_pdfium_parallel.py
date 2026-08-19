@@ -23,7 +23,9 @@ from __future__ import annotations
 
 import multiprocessing
 import os
+import sys
 from concurrent.futures import ProcessPoolExecutor
+from contextlib import contextmanager
 from io import BytesIO
 from pathlib import Path
 from typing import Union
@@ -52,6 +54,29 @@ class _Type3Detected(Exception):
 _worker_pdf = None
 _worker_pdf_doc = None
 _worker_font_maps: dict = {}
+
+
+@contextmanager
+def _anonymous_main():
+    """Hide __main__'s import identity while workers spawn: spawn re-executes
+    the caller's script in every worker otherwise, which for an unguarded
+    script means one duplicate full run per worker. Our workers import
+    everything by module name and never need __main__.
+
+    ponytail: window covers the whole map; a concurrent pool spawned from
+    another thread whose tasks live in __main__ would break during it."""
+    main = sys.modules.get("__main__")
+    if main is None:
+        yield
+        return
+    d = main.__dict__
+    saved = {k: d.pop(k) for k in ("__file__", "__spec__") if k in d}
+    d["__spec__"] = None  # get_preparation_data reads it via attribute access
+    try:
+        yield
+    finally:
+        d.pop("__spec__", None)
+        d.update(saved)
 
 
 def _init_worker(kind: str, payload) -> None:
@@ -122,12 +147,17 @@ def parse_charlevel_meta_parallel(
         initargs=src,
     )
     try:
-        results = list(executor.map(_run_page, range(n_pages)))
+        with _anonymous_main():
+            results = list(executor.map(_run_page, range(n_pages)))
     except Exception:
         # _Type3Detected or any worker/pool failure. Cancel what is queued
         # and rerun sequentially; in-flight pages finish in their workers
         # and are discarded (separate processes, no shared PDFium state).
         executor.shutdown(wait=False, cancel_futures=True)
+        if getattr(multiprocessing.current_process(), "_inheriting", False):
+            # Spawn child re-importing an unguarded __main__; a sequential rerun
+            # here would silently duplicate the caller's whole run per worker.
+            raise
         return parse_charlevel_meta(doc_handle)
     executor.shutdown()
 

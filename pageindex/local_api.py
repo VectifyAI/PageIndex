@@ -1,17 +1,17 @@
 """Local implementation of the PageIndex SDK surface."""
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
+import multiprocessing
 import os
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any
 
 from .errors import PageIndexAPIError
 from .local_store import DocStore
+from .utils import run_off_loop
 
 logger = logging.getLogger(__name__)
 
@@ -22,31 +22,23 @@ def _now_iso() -> str:
     return now.replace(microsecond=now.microsecond // 1000 * 1000).isoformat()
 
 
-def _run_indexer(func, *args, **kwargs):
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return func(*args, **kwargs)
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(func, *args, **kwargs).result()
 
 
 class LocalAPI:
     """Backs PageIndexClient's local mode. One instance per client."""
 
     def __init__(self, storage_path: str, model: str, summary_model: str,
-                 retrieve_model: str, index_backend: dict | None = None):
+                 index_backend: dict | None = None):
         self._store = DocStore(storage_path)
         self._model = model
         self._summary_model = summary_model
-        self._retrieve_model = retrieve_model
         self._index_backend = index_backend
         from .utils import ConfigLoader
         self._config_loader = ConfigLoader()
 
     def _with_backend(self, func, *args):
         """Scope the indexing lane's connection overrides around one
-        operation — runs inside whatever thread _run_indexer picked."""
+        operation — runs inside whatever thread run_off_loop picked."""
         from .utils import _llm_backend
         token = _llm_backend.set(self._index_backend)
         try:
@@ -64,6 +56,12 @@ class LocalAPI:
         folder_id: str | None = None,
         metadata: dict | None = None,
     ) -> dict[str, Any]:
+        if getattr(multiprocessing.current_process(), "_inheriting", False):
+            raise PageIndexAPIError(
+                "Failed to submit document: called again while a spawned worker "
+                "process was importing your script. Put your top-level code under "
+                "if __name__ == '__main__': so worker processes do not re-run it."
+            )
         if beta_headers is not None:
             raise PageIndexAPIError(
                 "Failed to submit document: beta_headers is not supported in local mode."
@@ -114,11 +112,11 @@ class LocalAPI:
 
         try:
             if mode == "flash":
-                structure, description = _run_indexer(
-                    self._with_backend, self._index_flash, file_path, page_texts
+                structure, description = run_off_loop(
+                    self._with_backend, self._index_flash, file_path
                 )
             else:
-                structure, description = _run_indexer(
+                structure, description = run_off_loop(
                     self._with_backend, self._index_standard, file_path,
                     page_texts
                 )
@@ -128,22 +126,25 @@ class LocalAPI:
             raise PageIndexAPIError(f"Failed to submit document: {e}") from e
 
         doc_id = "pi-" + uuid.uuid4().hex
-        meta = {
-            "id": doc_id,
-            "name": self._unique_doc_name(os.path.basename(file_path)),
-            "description": description,
-            "status": "completed",
-            "createdAt": _now_iso(),
-            "pageNum": len(page_texts),
-            "folderId": None,
-            "metadata": metadata,
-            "mode": mode,
-        }
         pages = [{"page_index": i + 1, "markdown": text}
                  for i, text in enumerate(page_texts)]
         from .utils import remove_fields
-        self._store.save_document(
-            doc_id, meta, remove_fields(structure, fields=["text"]), pages)
+        # Check-then-write under the store lock; the early pre-check above
+        # is advisory only.
+        with self._store.lock():
+            meta = {
+                "id": doc_id,
+                "name": self._unique_doc_name(os.path.basename(file_path)),
+                "description": description,
+                "status": "completed",
+                "createdAt": _now_iso(),
+                "pageNum": len(page_texts),
+                "folderId": None,
+                "metadata": metadata,
+                "mode": mode,
+            }
+            self._store.save_document(
+                doc_id, meta, remove_fields(structure, fields=["text"]), pages)
         return {"doc_id": doc_id, "name": meta["name"]}
 
     def _unique_doc_name(self, name: str) -> str:
@@ -190,17 +191,10 @@ class LocalAPI:
             )
         return structure, result.get("doc_description")
 
-    def _index_flash(self, file_path: str, page_texts: list[str]) -> tuple[list, str | None]:
+    def _index_flash(self, file_path: str) -> tuple[list, str | None]:
         from .flash import page_index_flash
-        from .utils import (add_node_text, create_clean_structure_for_description,
+        from .utils import (create_clean_structure_for_description,
                             generate_doc_description, write_node_id)
-        import litellm
-        if not self._index_backend:
-            env = litellm.validate_environment(self._summary_model)
-            if not env["keys_in_environment"]:
-                raise PageIndexAPIError(
-                    f"Failed to submit document: missing API key for "
-                    f"{self._summary_model}: {', '.join(env['missing_keys'])}")
         result = page_index_flash(file_path, summary=True,
                                   summary_model=self._summary_model,
                                   optimize="full",
@@ -212,7 +206,6 @@ class LocalAPI:
                 "a structure from this PDF."
             )
         write_node_id(structure)
-        add_node_text(structure, [(text, 0) for text in page_texts])
         description = generate_doc_description(
             create_clean_structure_for_description(structure),
             model=self._summary_model,
@@ -356,6 +349,8 @@ def _format_tree_node(node: dict, node_summary: bool) -> dict:
         "node_id": node.get("node_id"),
         "page_index": node.get("start_index"),
     }
+    if node.get("key_items"):
+        out["key_items"] = node["key_items"]
     if node_summary:
         summary = node.get("summary")
         if summary is not None:

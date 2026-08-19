@@ -59,7 +59,7 @@ class CloudAPI:
                 (a taken name gains a numeric suffix), when the server
                 returns it.
         """
-        data = {'if_retrieval': True}
+        data: Dict[str, Any] = {'if_retrieval': True}
         if mode is not None:
             data['mode'] = mode
         if beta_headers is not None:
@@ -225,7 +225,7 @@ class CloudAPI:
             headers=self._headers(),
             json=payload,
             stream=stream,
-            timeout=120 if stream else 300
+            timeout=120 if stream else 600
         )
 
         if response.status_code != 200:
@@ -312,7 +312,9 @@ class CloudAPI:
             timeout=30
         )
         if response.status_code != 200:
-            raise PageIndexAPIError(f"Failed to get document metadata: {response.text}")
+            raise PageIndexAPIError(
+                f"Failed to get document metadata: {response.text}",
+                status_code=response.status_code)
         return response.json()
 
     def delete_document(self, doc_id: str) -> Dict[str, Any]:
@@ -356,7 +358,7 @@ class CloudAPI:
         if offset < 0:
             raise ValueError("offset must be non-negative")
 
-        params = {"limit": limit, "offset": offset}
+        params: Dict[str, Any] = {"limit": limit, "offset": offset}
         if folder_id is not None:
             params["folder_id"] = folder_id
 

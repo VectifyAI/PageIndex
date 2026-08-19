@@ -10,35 +10,37 @@ from typing import Any, Callable, Iterator, Optional, Union, cast
 from .errors import PageIndexAPIError
 
 
+_litellm_preload_started = False
+
+
 def _preload_litellm() -> None:
-    try:
-        import litellm  # noqa: F401
-    except Exception:
-        pass
+    """Start litellm's multi-second import in the background, once per
+    process — a per-client thread would churn under per-request clients."""
+    # LiteLLM's import otherwise fetches its model map over the network —
+    # seconds of blocking (or a hang offline). Stamped here, not at package
+    # import, so merely importing pageindex leaves the host process's own
+    # litellm untouched; setdefault, so an explicit user choice wins.
+    os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+    global _litellm_preload_started
+    if _litellm_preload_started:
+        return
+    _litellm_preload_started = True
+
+    def _import() -> None:
+        try:
+            import litellm  # noqa: F401
+        except Exception:
+            pass
+
+    threading.Thread(target=_import, daemon=True).start()
 
 
 def _parse_pages(pages: str) -> list[int]:
-    result: set[int] = set()
-    too_many = (f"Page specification '{pages}' spans more than "
-                "10000 pages; request a narrower range")
-    for part in pages.split(","):
-        part = part.strip()
-        if "-" in part:
-            start, end = (int(x) for x in part.split("-", 1))
-            if start > end:
-                raise ValueError(f"Invalid range '{part}': start must be <= end")
-        else:
-            start = end = int(part)
-        # Bound each part arithmetically before materializing it — a spec
-        # like "1-999999999" would otherwise expand to a billion integers.
-        # The cap is on distinct pages, so overlapping parts (a parent
-        # section plus its children) don't double-count.
-        if end - start + 1 > 10_000:
-            raise ValueError(too_many)
-        result.update(range(start, end + 1))
-        if len(result) > 10_000:
-            raise ValueError(too_many)
-    return sorted(result)
+    from .agent_tools import _PageSpecError, _expand_pages
+    try:
+        return _expand_pages(pages)
+    except _PageSpecError as exc:
+        raise PageIndexAPIError(str(exc)) from exc
 
 
 def _agents_sdk_model_name(model: str) -> str:
@@ -155,7 +157,7 @@ class PageIndexClient:
             self.model = opt.model
             self.index_model = opt.index_model
             self.summary_model = opt.summary_model
-            self.chat_model = _agents_sdk_model_name(opt.chat_model)
+            self.chat_model = opt.chat_model
             self.chat_backend = chat_backend
             self.storage_path = storage_path or ".pageindex"
             from .local_api import LocalAPI
@@ -163,17 +165,21 @@ class PageIndexClient:
                 storage_path=self.storage_path,
                 model=self.model,
                 summary_model=self.summary_model,
-                retrieve_model=self.chat_model,
                 index_backend=index_backend,
             )
             # LiteLLM's multi-second import would otherwise land on the
             # first chat call; failures resurface there with real context.
-            threading.Thread(target=_preload_litellm, daemon=True).start()
+            _preload_litellm()
 
     @property
     def retrieve_model(self):
         """Legacy name for ``chat_model``."""
         return self.chat_model
+
+    @retrieve_model.setter
+    def retrieve_model(self, value):
+        # 0.2.9 allowed assignment; keep the write path working too.
+        self.chat_model = value
 
     # ---------- DOCUMENT SUBMISSION ----------
 
@@ -432,7 +438,12 @@ class PageIndexClient:
         if stream:
             return cast(Iterator[str], result)
         envelope = cast(dict[str, Any], result)
-        return envelope["choices"][0]["message"]["content"] or ""
+        try:
+            return envelope["choices"][0]["message"]["content"] or ""
+        except (KeyError, IndexError, TypeError) as exc:
+            raise PageIndexAPIError(
+                "The chat response carries no answer: "
+                f"{str(envelope)[:200]}") from exc
 
     def chat_completions(
         self,
@@ -598,11 +609,12 @@ class PageIndexClient:
             model: Backend model name (defaults to ``chat_model``).
             stream: Yield Responses stream events as dicts — one logical
                 response per call: per-turn backend lifecycle events are
-                collapsed, sequence numbers are reassigned monotonically,
-                and ``output_index`` is re-based onto the single logical
-                ``output``. The single final event is the terminal
-                ``response.*`` for the run's status; its ``response``
-                carries the tool outputs in ``items``.
+                collapsed to one opening ``response.created`` and one
+                final terminal event, sequence numbers are reassigned
+                monotonically, and ``output_index`` is re-based onto the
+                single logical ``output``. The final event is the
+                terminal ``response.*`` for the run's status; its
+                ``response`` carries the tool outputs in ``items``.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call and is part
@@ -673,7 +685,10 @@ class PageIndexClient:
         final message envelope with cross-turn aggregated ``usage`` plus a
         ``messages`` field — the full new turn sequence, valid for verbatim
         append to your history. The managed system prompt carries a
-        ``cache_control`` breakpoint.
+        ``cache_control`` breakpoint, and the request sets the top-level
+        ``cache_control`` so each turn re-reads the growing conversation
+        from cache — skipped when your own blocks already use the three
+        remaining breakpoints (the managed prompt holds the fourth).
 
         Args:
             messages: Native Messages-format history (including prior
@@ -683,7 +698,9 @@ class PageIndexClient:
             max_tokens: Per-turn output budget the Messages API requires on
                 the wire; the default is resolved per model (8192, or 4096
                 for the claude-3 generation whose ceiling is lower) so the
-                simple call needs only a question. Passed through.
+                simple call needs only a question, and rises to
+                budget_tokens + 8192 when ``thinking`` is enabled (the wire
+                requires max_tokens above the budget). Passed through.
             stream: Yield the Anthropic SDK's event stream across turns
                 (its native event objects, including SDK-synthesized
                 convenience events), one message sequence per turn.
@@ -776,13 +793,16 @@ class PageIndexClient:
 
     # ---------- AGENT INTEGRATION ----------
 
-    def agent_tools(self, include_management: bool = False) -> list[Callable[..., str]]:
+    def agent_tools(
+        self, include_management: bool = False,
+        doc_id: Optional[Union[str, list[str]]] = None,
+    ) -> list[Callable[..., str]]:
         """
         Plain functions for any agent framework (LangChain, PydanticAI, ...).
         For the OpenAI / Claude Agent SDKs, prefer ``as_openai_tools()`` /
         ``as_claude_mcp()``.
 
-        Cloud: the full cloud tool set, discovered live from the PageIndex
+        Cloud: the full live read tool set, discovered from the PageIndex
         MCP server when this method is called — one function per tool,
         signature and docstring synthesized from the server's schemas, calls
         executed from your process over MCP. Raises PageIndexAPIError if the
@@ -798,9 +818,13 @@ class PageIndexClient:
                 library. Local: adds ``remove_document``. Cloud: by default
                 only tools the server marks read-only are exposed; True
                 exposes the server's complete list (upload, delete, ...).
+            doc_id: Local only — restrict the tools to this document ID
+                (or list of IDs), enforced at the tool layer: out-of-scope
+                lookups return NOT_FOUND. Raises on cloud, where scoping
+                is server-side.
         """
         from .agent_tools import build_agent_tools
-        return build_agent_tools(self, include_management)
+        return build_agent_tools(self, include_management, doc_ids=doc_id)
 
     def as_openai_tools(self, include_management: bool = False,
                         hosted: bool = False,
@@ -851,14 +875,14 @@ class PageIndexClient:
         """doc_id for the tool layer: passed through locally (structural
         allowlist), dropped on cloud where scoping is server-side and the
         config helpers keep prompt-level targeting."""
-        if not getattr(self, "api_key", None):
-            return doc_id
         if doc_id is not None and not doc_id:
-            # Cloud has no tool-layer allowlist to make an empty scope mean
-            # "nothing"; dropping it would silently mean "everything".
+            # An empty scope means "nothing" locally (empty allowlist) and
+            # cannot be represented on cloud; both refuse it loudly.
             raise PageIndexAPIError(
                 "doc_id is empty. Pass one or more document IDs, or omit "
                 "doc_id to give the agent the whole library.")
+        if not getattr(self, "api_key", None):
+            return doc_id
         return None
 
     def openai_agent_config(
@@ -882,6 +906,16 @@ class PageIndexClient:
         environment, so its model auth comes from there —
         ``chat_backend`` does not travel with it.
 
+        Prompt caching configures itself for most destinations (OpenAI
+        server-side; Anthropic- and Bedrock-hosted Claude via LiteLLM's
+        defaults). Vertex-hosted Claude is the exception — pass the
+        injection points yourself::
+
+            Agent(**config, model_settings=ModelSettings(extra_args={
+                "cache_control_injection_points": [
+                    {"location": "message", "role": "system"},
+                    {"location": "message", "index": -1}]}))
+
         Args:
             doc_id: Document ID or list of IDs to target, as in
                 ``agent_instructions``. Local: also enforced at the tool
@@ -889,19 +923,27 @@ class PageIndexClient:
                 (tool scoping is server-side).
             include_management (bool): Also expose tools that modify the
                 library.
-            model: Backend model name; overrides the local default.
+            model: Backend model name; overrides the local default. Same
+                grammar as ``chat_model`` (LiteLLM names; bare names are
+                OpenAI-compatible shorthand).
         """
         from .agent_tools import build_agent_instructions
         scope = self._local_doc_scope(doc_id)
         config: dict[str, Any] = {
             "name": "PageIndex",
-            "instructions": build_agent_instructions(self, doc_id,
-                                                     scoped=scope is not None),
+            "instructions": build_agent_instructions(
+                self, doc_id, scoped=scope is not None,
+                include_management=include_management),
             "tools": self.as_openai_tools(include_management, doc_id=scope),
         }
         model = model or getattr(self, "chat_model", None)
         if model:
-            config["model"] = model
+            config["model"] = _agents_sdk_model_name(model)
+            if config["model"].startswith("litellm/"):
+                # The runner resolves this model through LiteLLM in the
+                # caller's process, outside our completion helpers.
+                from .utils import _repair_litellm_types
+                _repair_litellm_types()
         return config
 
     def as_anthropic_tools(self, include_management: bool = False,
@@ -961,6 +1003,7 @@ class PageIndexClient:
         asynchronous: bool = False,
         max_tokens: Optional[int] = None,
         max_turns: Optional[int] = None,
+        thinking: Optional[dict] = None,
     ) -> dict[str, Any]:
         """
         Document QA ``tool_runner`` kwargs for the Anthropic SDK in one
@@ -973,10 +1016,14 @@ class PageIndexClient:
 
         Sugar over the explicit form — ``agent_instructions`` (with
         ``doc_id`` targeting) as the system prompt and
-        ``as_anthropic_tools`` as the tools — plus the same defaults
-        ``messages()`` applies: a per-model ``max_tokens`` and a
-        ``max_iterations`` bound of 10. To customize further, switch to
-        those methods directly.
+        ``as_anthropic_tools`` as the tools — plus the ``max_tokens``
+        default and 10-turn ``max_iterations`` bound ``messages()`` uses,
+        and a top-level ``cache_control`` so each loop turn re-reads the
+        growing prompt from cache (pop the key if you place your own
+        breakpoints — the API allows four). Unlike ``messages()``,
+        ``system`` here is the bare instructions string, without the chat
+        header or its block-level breakpoint. To customize further,
+        switch to those methods directly.
 
         Args:
             model: Backend model name (also resolves the ``max_tokens``
@@ -992,19 +1039,27 @@ class PageIndexClient:
             max_tokens: Per-turn output budget; default resolved per
                 model.
             max_turns: Agent-loop bound; default 10.
+            thinking: Anthropic ``thinking`` config, included in the
+                kwargs; an enabled budget also lifts the ``max_tokens``
+                default above it. Pass it here, not alongside the
+                unpacked config, so the default stays valid.
         """
         from .agent_tools import build_agent_instructions
-        from .local_chat import _default_max_tokens
+        from .local_chat import _default_max_tokens, _validate_max_turns
+        _validate_max_turns(max_turns)
         scope = self._local_doc_scope(doc_id)
         return {
             "model": model,
             "max_tokens": (max_tokens if max_tokens is not None
-                           else _default_max_tokens(model)),
-            "system": build_agent_instructions(self, doc_id,
-                                               scoped=scope is not None),
+                           else _default_max_tokens(model, thinking)),
+            "system": build_agent_instructions(
+                self, doc_id, scoped=scope is not None,
+                include_management=include_management),
             "tools": self.as_anthropic_tools(include_management, asynchronous,
                                              doc_id=scope),
             "max_iterations": max_turns if max_turns is not None else 10,
+            **({"thinking": thinking} if thinking is not None else {}),
+            "cache_control": {"type": "ephemeral"},
         }
 
     def as_claude_mcp(self, include_management: bool = False,
@@ -1072,8 +1127,9 @@ class PageIndexClient:
         from .agent_tools import build_agent_instructions
         scope = self._local_doc_scope(doc_id)
         return {
-            "system_prompt": build_agent_instructions(self, doc_id,
-                                                      scoped=scope is not None),
+            "system_prompt": build_agent_instructions(
+                self, doc_id, scoped=scope is not None,
+                include_management=include_management),
             "mcp_servers": {server_name: self.as_claude_mcp(
                 include_management, doc_id=scope)},
             # Pre-approval only — the server itself is already gated (the
@@ -1081,7 +1137,10 @@ class PageIndexClient:
             "allowed_tools": [f"mcp__{server_name}"],
         }
 
-    def agent_instructions(self, doc_id: Optional[Union[str, list[str]]] = None) -> str:
+    def agent_instructions(
+        self, doc_id: Optional[Union[str, list[str]]] = None,
+        include_management: bool = False,
+    ) -> str:
         """
         Orchestration guidance for document QA agents — pass as the agent's
         system prompt (or append to your own).
@@ -1094,12 +1153,19 @@ class PageIndexClient:
 
         With ``doc_id`` (str or list, same shape as ``chat_completions``),
         appends the target documents' names and metadata and directs the
-        agent to work within them. Raises PageIndexAPIError if a doc_id does
-        not exist, or if its name is shadowed by a newer same-name document
-        (the name-addressed tools could not reach it).
+        agent to work within them. Raises PageIndexAPIError if a doc_id
+        does not exist, or if its name is shadowed by a newer same-name
+        document — the name-addressed tools could not reach it (the
+        ``*_agent_config`` bundles, whose tools carry the doc_id scope,
+        relax this to duplicates within the targeted set).
+
+        ``include_management``: fetch the guidance for the full tool set,
+        matching tools built with ``include_management=True`` (cloud;
+        local guidance is a single set).
         """
         from .agent_tools import build_agent_instructions
-        return build_agent_instructions(self, doc_id)
+        return build_agent_instructions(
+            self, doc_id, include_management=include_management)
 
     # ---------- FOLDER MANAGEMENT ----------
 

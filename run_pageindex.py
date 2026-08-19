@@ -3,7 +3,11 @@ import os
 import json
 from pageindex import *
 from pageindex.page_index_md import md_to_tree
-from pageindex.utils import ConfigLoader
+from pageindex.utils import ConfigLoader, _openai_missing_keys
+
+# Keep LiteLLM's import off the network (frozen bundled model-cost map);
+# an explicit user setting wins.
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 if __name__ == "__main__":
     # Set up argument parser
@@ -62,7 +66,7 @@ if __name__ == "__main__":
         raise ValueError("Either --pdf_path or --md_path must be specified")
     if args.pdf_path and args.md_path:
         raise ValueError("Only one of --pdf_path or --md_path can be specified")
-    if args.optimize in ('full', 'merge') and not (args.pdf_path and args.mode == 'flash'):
+    if args.optimize is not None and not (args.pdf_path and args.mode == 'flash'):
         raise ValueError("--optimize requires Flash mode with --pdf_path")
     if args.optimize is None:
         args.optimize = 'full' if args.mode == 'flash' else 'off'
@@ -90,14 +94,15 @@ if __name__ == "__main__":
             
         if args.mode == 'flash':
             from pageindex.flash import page_index_flash
-            summary_model = args.summary_model or args.index_model or args.model
+            summary_model = (args.summary_model or args.index_model
+                             or args.model
+                             or ConfigLoader().load().summary_model)
             will_summarize = args.summary if args.summary is not None else True
-            if summary_model and (will_summarize or args.optimize == 'full'):
-                import litellm
-                env = litellm.validate_environment(summary_model)
-                if not env["keys_in_environment"]:
+            if will_summarize or args.optimize == 'full':
+                missing = _openai_missing_keys(summary_model)
+                if missing:
                     raise SystemExit(
-                        f"Missing API key for {summary_model}: {', '.join(env['missing_keys'])}")
+                        f"Missing API key for {summary_model}: {', '.join(missing)}")
             toc_with_page_number = page_index_flash(
                 args.pdf_path,
                 optimize=args.optimize if args.optimize != 'off' else False,
@@ -164,25 +169,24 @@ if __name__ == "__main__":
         user_opt = {
             'index_model': args.index_model,
             'model': args.model,
-            'if_add_node_summary': args.if_add_node_summary,
-            'if_add_doc_description': args.if_add_doc_description,
-            'if_add_node_text': args.if_add_node_text,
-            'if_add_node_id': args.if_add_node_id
         }
         
         # Load config with defaults from config.yaml
-        opt = config_loader.load(user_opt)
+        opt = config_loader.load({k: v for k, v in user_opt.items() if v is not None})
         
+        # if_add_* pass through as given (absent = off, as before this CLI
+        # used config.yaml): the PDF defaults there must not switch on LLM
+        # passes the markdown CLI never ran.
         toc_with_page_number = asyncio.run(md_to_tree(
             md_path=args.md_path,
             if_thinning=args.if_thinning.lower() == 'yes',
             min_token_threshold=args.thinning_threshold,
-            if_add_node_summary=opt.if_add_node_summary,
+            if_add_node_summary=args.if_add_node_summary,
             summary_token_threshold=args.summary_token_threshold,
             model=opt.model,
-            if_add_doc_description=opt.if_add_doc_description,
-            if_add_node_text=opt.if_add_node_text,
-            if_add_node_id=opt.if_add_node_id
+            if_add_doc_description=args.if_add_doc_description,
+            if_add_node_text=args.if_add_node_text,
+            if_add_node_id=args.if_add_node_id
         ))
         
         print('Parsing done, saving to file...')

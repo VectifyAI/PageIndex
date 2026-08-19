@@ -68,14 +68,19 @@ def test_local_client_does_not_touch_disk(tmp_path):
     assert not storage.exists()
 
 
-def test_retrieve_model_carries_agents_sdk_prefix(tmp_path):
+def test_retrieve_model_stays_as_configured(tmp_path):
+    """The public attribute keeps the caller's spelling — ``litellm/`` is
+    Agents SDK routing grammar, applied at the config door
+    (openai_agent_config), never baked into ``chat_model``: handed to the
+    Anthropic SDK or a raw request, the prefixed form is a 404."""
     def resolved(retrieve_model):
         return PageIndexClient(retrieve_model=retrieve_model,
                                storage_path=str(tmp_path / "s")).retrieve_model
 
-    assert resolved("anthropic/claude-sonnet-4-6") == "litellm/anthropic/claude-sonnet-4-6"
-    for already_routable in ("gpt-4o", "openai/gpt-4o", "litellm/anthropic/claude-sonnet-4-6"):
-        assert resolved(already_routable) == already_routable
+    for as_configured in ("anthropic/claude-sonnet-4-6", "gpt-4o",
+                          "openai/gpt-4o",
+                          "litellm/anthropic/claude-sonnet-4-6"):
+        assert resolved(as_configured) == as_configured
 
 
 def test_model_resolution_covers_every_generation(tmp_path):
@@ -173,7 +178,7 @@ def test_get_page_content(local_client, indexed_doc):
 
     assert local_client.get_page_content(indexed_doc, "99") == []
 
-    with pytest.raises(ValueError):
+    with pytest.raises(PageIndexAPIError):
         local_client.get_page_content(indexed_doc, "abc")
 
 
@@ -181,7 +186,7 @@ def test_get_page_content_span_bomb_rejected(local_client, indexed_doc):
     """An absurd range must be rejected arithmetically, not expanded into
     a billion integers in the caller's process (the tool layer already
     refused; the public client method did not)."""
-    with pytest.raises(ValueError, match="spans more than 10000"):
+    with pytest.raises(PageIndexAPIError, match="spans more than 10000"):
         local_client.get_page_content(indexed_doc, "1-1000001")
     # At the bound itself the spec still parses.
     assert local_client.get_page_content(indexed_doc, "5-10004") == []
@@ -285,18 +290,36 @@ def test_page_index_flash_rejects_unknown_optimize():
 
 def test_llm_completion_missing_key_raises_immediately(monkeypatch):
     import openai
+    import litellm  # first import may load a .env; delenv after it
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setattr(pageindex.utils, "_openai_sync_client", None)
-    monkeypatch.setattr(pageindex.utils, "_openai_async_client", None)
-    with pytest.raises(openai.OpenAIError):
+    with pytest.raises(openai.OpenAIError, match="OPENAI_API_KEY"):
         pageindex.utils.llm_completion("gpt-4o", "probe")
-    with pytest.raises(openai.OpenAIError):
+    with pytest.raises(openai.OpenAIError, match="OPENAI_API_KEY"):
         asyncio.run(pageindex.utils.llm_acompletion("gpt-4o", "probe"))
+    # unknown bare names are OpenAI shorthand, so the same check applies
+    with pytest.raises(openai.OpenAIError, match="OPENAI_API_KEY"):
+        pageindex.utils.llm_completion("my-finetune-v2", "probe")
+    # a blank exported key is as missing as no key (litellm's
+    # validate_environment reports it present)
+    monkeypatch.setenv("OPENAI_API_KEY", "   ")
+    with pytest.raises(openai.OpenAIError, match="OPENAI_API_KEY"):
+        pageindex.utils.llm_completion("gpt-4o", "probe")
+
+
+def test_llm_completion_refuses_unknown_provider(monkeypatch):
+    """A first segment LiteLLM does not know (a HuggingFace repo id like
+    Qwen/...) is refused with the openai/ escape before the retry loop,
+    instead of burning it on per-call 400s."""
+    import litellm
+    monkeypatch.setattr(litellm, "completion",
+                        lambda **kw: pytest.fail("reached the wire"))
+    with pytest.raises(Exception, match="not a LiteLLM provider"):
+        pageindex.utils.llm_completion("Qwen/my-model", "probe")
 
 
 def test_submit_missing_llm_key_fails_loud(local_client, sample_pdf, monkeypatch):
+    import litellm  # first import may load a .env; delenv after it
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setattr(pageindex.utils, "_openai_sync_client", None)
     def first_llm_call(*args, **kwargs):
         return pageindex.utils.llm_completion("gpt-4o", "probe")
     monkeypatch.setattr(page_index_module, "page_index_main", first_llm_call)
@@ -652,6 +675,70 @@ def test_generate_summaries_partial_failure_absorbed(monkeypatch):
     assert summaries == {"A": "", "B": "ok"}
 
 
+def test_generate_summaries_unrecoverable_raises(monkeypatch):
+    """A per-node 401 must abort, not store a blank node as completed."""
+    class Denied(Exception):
+        status_code = 401
+
+    async def deny_t1(model, prompt):
+        if "t1" in prompt:
+            raise Denied("key rejected")
+        return "ok"
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", deny_t1)
+    structure = [{"title": "A", "text": "t1",
+                  "nodes": [{"title": "B", "text": "t2"}]}]
+    with pytest.raises(Denied):
+        asyncio.run(pageindex.utils.generate_summaries_for_structure(structure))
+
+
+def test_summarize_tree_child_unrecoverable_raises(monkeypatch):
+    """A 401 on a leaf must abort the run, not store a blank subtree as
+    completed: the child gather's exceptions are checked, not discarded."""
+    class Denied(Exception):
+        status_code = 401
+
+    async def deny_alpha(model, prompt):
+        if "alpha" in prompt:
+            raise Denied("key rejected")
+        return '{"points": [], "summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", deny_alpha)
+    pdf_pages = [("alpha " * 5, 5), ("beta " * 5, 5)]
+    structure = [{"title": "R", "start_index": 1, "end_index": 2,
+                  "nodes": [
+                      {"title": "A", "start_index": 1, "end_index": 1},
+                      {"title": "B", "start_index": 2, "end_index": 2}]}]
+    with pytest.raises(Denied):
+        asyncio.run(pageindex.utils.summarize_tree(
+            structure, pdf_pages, small_node_tokens=0))
+
+
+def test_llm_completion_suppresses_litellm_cache_seeding(monkeypatch):
+    """Indexing prompts are single-shot: without an explicit injection
+    point litellm 1.97 seeds its own cache marks and every call pays the
+    write premium for nothing. Backend keys still override ours."""
+    import litellm
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured.clear()
+        captured.update(kwargs)
+        message = types.SimpleNamespace(content="ok")
+        choice = types.SimpleNamespace(message=message, finish_reason="stop")
+        return types.SimpleNamespace(choices=[choice])
+    monkeypatch.setattr(litellm, "completion", fake_completion)
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    assert pageindex.utils.llm_completion("gpt-4o", "probe") == "ok"
+    assert captured["cache_control_injection_points"] == [
+        {"location": "message", "role": "system"}]
+    token = pageindex.utils._llm_backend.set(
+        {"api_key": "x", "cache_control_injection_points": []})
+    try:
+        pageindex.utils.llm_completion("gpt-4o", "probe")
+    finally:
+        pageindex.utils._llm_backend.reset(token)
+    assert captured["cache_control_injection_points"] == []
+
+
 def test_delete_survives_marker_tamper(local_client, tmp_path):
     tampered = tmp_path / "store" / "docs" / "tampered" / "doc.json"
     tampered.mkdir(parents=True)
@@ -833,25 +920,28 @@ def test_parse_pages_overlap_counts_union():
     from pageindex.client import _parse_pages
     pages = _parse_pages("1-5000,2000-9000")
     assert len(pages) == 9000 and pages[0] == 1 and pages[-1] == 9000
-    with pytest.raises(ValueError, match="spans more than"):
+    with pytest.raises(PageIndexAPIError, match="spans more than"):
         _parse_pages("1-10001")
+    # one parser with the tool layer now: page 0 is rejected, not passed
+    # on — surfaced as the documented SDK error type
+    with pytest.raises(PageIndexAPIError, match="positive"):
+        _parse_pages("0-3")
 
 
 # ── backend: the indexing lane ──
 
 def test_backend_scopes_the_index_lane(tmp_path, monkeypatch):
-    """index_backend reaches both gateway paths — LiteLLM's call kwargs
-    and a fresh openai-SDK client — scoped to the operation, with the
-    endpoint spelling normalized for the openai SDK."""
+    """index_backend reaches the indexing lane's LiteLLM call kwargs
+    verbatim — bare and provider-prefixed models alike — scoped to the
+    operation, bypassing the env pre-check."""
     pytest.importorskip("litellm")
     import litellm
-    import openai
     from types import SimpleNamespace
     from pageindex.local_api import LocalAPI
     from pageindex.utils import _llm_backend, llm_completion
 
     api = LocalAPI(storage_path=str(tmp_path / "s"), model="m",
-                   summary_model="s", retrieve_model="r",
+                   summary_model="s",
                    index_backend={"api_key": "ik", "api_base": "http://b"})
     assert api._with_backend(_llm_backend.get) == {"api_key": "ik",
                                                    "api_base": "http://b"}
@@ -862,41 +952,64 @@ def test_backend_scopes_the_index_lane(tmp_path, monkeypatch):
     captured = {}
     monkeypatch.setattr(litellm, "completion",
                         lambda **kw: (captured.update(kw), reply)[1])
-    api._with_backend(lambda: llm_completion("anthropic/claude-x", "p"))
-    assert captured["api_key"] == "ik"
-    assert captured["api_base"] == "http://b"
-
-    seen = {}
-
-    class _FakeOpenAI:
-        def __init__(self, **kw):
-            seen.update(kw)
-            self.chat = SimpleNamespace(completions=SimpleNamespace(
-                create=lambda **_: reply))
-
-    monkeypatch.setattr(openai, "OpenAI", _FakeOpenAI)
-    api._with_backend(lambda: llm_completion("gpt-4o", "p"))
-    assert seen["api_key"] == "ik"
-    assert seen["base_url"] == "http://b"
-
-
-def test_index_backend_skips_the_env_precheck(tmp_path, monkeypatch):
-    """The missing-key pre-check reads environment variables only, so a
-    backend-supplied key must bypass it instead of being refused."""
-    pytest.importorskip("litellm")
-    import litellm
-    from pageindex.local_api import LocalAPI
-
-    api = LocalAPI(storage_path=str(tmp_path / "s"), model="m",
-                   summary_model="s", retrieve_model="r",
-                   index_backend={"api_key": "ik"})
     monkeypatch.setattr(litellm, "validate_environment",
                         lambda *a, **k: pytest.fail("env pre-check ran"))
-    monkeypatch.setattr(pageindex.flash, "page_index_flash",
-                        lambda *a, **k: (_ for _ in ()).throw(
-                            RuntimeError("reached-flash")))
-    with pytest.raises(RuntimeError, match="reached-flash"):
-        api._index_flash("f.pdf", ["text"])
+    for model, wire in (("anthropic/claude-x", "anthropic/claude-x"),
+                        ("gpt-4o", "openai/gpt-4o"),
+                        ("my-finetune-v2", "openai/my-finetune-v2")):
+        captured.clear()
+        api._with_backend(lambda: llm_completion(model, "p"))
+        assert captured["model"] == wire
+        assert captured["api_key"] == "ik"
+        assert captured["api_base"] == "http://b"
+
+
+def test_index_precheck_covers_only_openai_shaped(monkeypatch):
+    """The missing-key pre-check fires only for OpenAI-shaped names — other
+    providers resolve credentials at call time (IAM chains, ADC, Ollama's
+    localhost default), invisible to env inspection, so the lane must not
+    block them up front."""
+    pytest.importorskip("litellm")
+    import litellm
+    from types import SimpleNamespace
+    from pageindex.utils import llm_completion
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with pytest.raises(litellm.AuthenticationError, match="missing API key"):
+        llm_completion("my-finetune-v2", "p")
+
+    reply = SimpleNamespace(choices=[SimpleNamespace(
+        message=SimpleNamespace(content="ok"), finish_reason="stop")])
+    monkeypatch.setattr(litellm, "completion", lambda **kw: reply)
+    monkeypatch.setattr(litellm, "validate_environment",
+                        lambda *a, **k: pytest.fail("env pre-check ran"))
+    assert llm_completion("ollama/llama3", "p") == "ok"
+    assert llm_completion("bedrock/anthropic.claude-sonnet", "p") == "ok"
+
+
+def test_litellm_routing_prefix_skips_key_precheck(monkeypatch):
+    """litellm/-prefixed names are an explicit routing choice: litellm
+    resolves credentials beyond the environment (litellm.api_key, a
+    keyless OPENAI_BASE_URL server), so the env pre-check stands aside."""
+    pytest.importorskip("litellm")
+    import litellm  # noqa: F401 — first import may load a .env; delenv after
+    from pageindex.utils import _litellm_model, _openai_missing_keys
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert _openai_missing_keys("litellm/gpt-4o") == []
+    assert _litellm_model("litellm/gpt-4o", None) == "openai/gpt-4o"
+
+
+def test_custom_provider_map_passes_provider_precheck(monkeypatch):
+    """litellm appends custom_provider_map providers to provider_list only
+    at completion time, so the pre-check must consult the map itself."""
+    pytest.importorskip("litellm")
+    import litellm
+    from pageindex.utils import _litellm_model
+
+    monkeypatch.setattr(litellm, "custom_provider_map",
+                        [{"provider": "my-llm", "custom_handler": object()}])
+    assert _litellm_model("my-llm/model-a", None) == "my-llm/model-a"
 
 
 def test_backend_args_are_local_only():
@@ -904,3 +1017,65 @@ def test_backend_args_are_local_only():
         PageIndexClient(api_key="pi-k", chat_backend={"api_key": "x"})
     with pytest.raises(PageIndexAPIError, match="index_backend"):
         PageIndexClient(api_key="pi-k", index_backend={"api_key": "x"})
+
+
+def test_chat_wraps_answerless_cloud_reply(monkeypatch):
+    """A cloud reply without choices (filtered / malformed) surfaces as
+    the SDK's error, not a bare IndexError/KeyError."""
+    client = PageIndexClient(api_key="pi-k")
+    for reply in ({"id": "x", "object": "chat.completion", "choices": []},
+                  {"id": "x"}):
+        monkeypatch.setattr(client, "chat_completions",
+                            lambda *a, _r=reply, **k: _r)
+        with pytest.raises(PageIndexAPIError, match="carries no answer"):
+            client.chat("hi")
+
+
+def test_retrieve_model_assignment_still_works(local_client):
+    """0.2.9 allowed `client.retrieve_model = ...`; the legacy property
+    keeps the write path as an alias for chat_model."""
+    local_client.retrieve_model = "gpt-x"
+    assert local_client.chat_model == "gpt-x"
+    assert local_client.retrieve_model == "gpt-x"
+
+
+def test_concurrent_same_name_submits_store_unique_names(local_client,
+                                                         sample_pdf,
+                                                         monkeypatch):
+    """Name uniquing runs under the store lock at save time, so two
+    clients indexing the same filename concurrently cannot both store it
+    — a stored duplicate would shadow the older doc_id forever."""
+    import threading
+    import time as time_mod
+
+    def slow_flash(pdf, **kwargs):
+        time_mod.sleep(0.1)  # both threads index before either saves
+        return {"structure": [{"title": "T", "start_index": 1,
+                               "end_index": 2, "summary": "s", "nodes": []}]}
+
+    monkeypatch.setattr(pageindex.flash, "page_index_flash", slow_flash)
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda *a, **k: "d")
+    results = []
+    workers = [threading.Thread(
+        target=lambda: results.append(local_client.submit_document(sample_pdf)))
+        for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+    assert {r["name"] for r in results} == {"sample.pdf", "sample_1.pdf"}
+
+
+
+def test_format_tree_node_keeps_key_items():
+    """key_items from the merge optimization survive the get_tree formatter."""
+    from pageindex.local_api import _format_tree_node
+
+    node = {"title": "Chapter 1", "node_id": "0000", "start_index": 1,
+            "summary": "s",
+            "key_items": ["1.1 Alpha", "1.2 Beta", "1.3 Gamma"]}
+    out = _format_tree_node(node, node_summary=True)
+    assert out["key_items"] == ["1.1 Alpha", "1.2 Beta", "1.3 Gamma"]
+    assert "key_items" not in _format_tree_node(
+        {"title": "t", "node_id": "0001", "start_index": 1}, False)

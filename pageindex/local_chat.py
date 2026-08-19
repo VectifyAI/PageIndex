@@ -1,27 +1,7 @@
-"""Managed local chat: document-QA agents over the local tools.
-
-Three methods, three backend protocols, routed 1:1: ``chat_completions``
-drives the backend's /chat/completions (any OpenAI-compatible backend,
-final answer only), ``responses`` drives /responses (official-shape
-envelope; the full process transcript rides in ``items`` — round-trip it
-for provider prompt-cache continuation and agent memory), ``messages``
-drives Anthropic's /v1/messages via the SDK's own tool runner
-(tool_use/tool_result round-trip is the format's native behavior).
-
-Content passes through untouched — the caller's messages, the model's
-answers, tool outputs. Native stop reasons pass through on ``messages``;
-the OpenAI engine's abstraction does not surface per-turn finish reasons,
-so ``chat_completions`` reports loop completion as ``"stop"``, while
-``responses`` reports the backend's terminal ``status`` where the wire
-surfaces one (recorded at the transport layer — the framework discards
-it). The SDK owns gatekeeping (structural validation), table-setting
-(managed instructions, tools, doc targeting), tool execution, and billing
-(usage aggregation, envelope ids).
-"""
+"""Managed local chat: document-QA agents over the local tools."""
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import hashlib
 import json
 import os
@@ -52,17 +32,6 @@ def _doc_block(client, doc_id) -> Optional[str]:
     if not isinstance(doc_id, (str, list)):
         raise PageIndexAPIError("doc_id must be a string or a list of "
                                 "strings.")
-    doc_ids = [doc_id] if isinstance(doc_id, str) else list(doc_id)
-    missing = []
-    for one_id in doc_ids:
-        try:
-            client.get_document(one_id)
-        except PageIndexAPIError:
-            missing.append(str(one_id))
-    if missing:
-        raise PageIndexAPIError(
-            "Documents not found or access denied: " + ", ".join(missing)
-        )
     # scoped: the chat surfaces also pass doc_id into the tool layer, so
     # name resolution happens inside the allowlist — only a duplicate name
     # within the targeted set shadows.
@@ -118,16 +87,8 @@ def _split_chat_messages(messages) -> "tuple[list[str], list[dict]]":
 
 
 def _run_sync(coro):
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        has_loop = False
-    else:
-        has_loop = True
-    if not has_loop:
-        return asyncio.run(coro)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
+    from .utils import run_off_loop
+    return run_off_loop(asyncio.run, coro)
 
 
 _SENTINEL = object()
@@ -212,25 +173,20 @@ def _require_openai_agents(method: str) -> None:
         ) from exc
 
 
+def _sdk_backend(backend) -> dict:
+    """chat_backend for an SDK constructor: LiteLLM takes either endpoint
+    spelling, the openai and anthropic SDKs only ``base_url``."""
+    return {("base_url" if key == "api_base" else key): value
+            for key, value in (backend or {}).items()}
+
+
 def _openai_model(protocol: str, model_name: str, backend=None):
-    """The backend protocol driver — the seam tests replace with a fake.
-
-    chat protocol: LiteLLM, full stop — model names mean what LiteLLM says
-    they mean. Bare names are OpenAI-compatible shorthand (wire form
-    ``openai/<name>``, so OPENAI_API_KEY / OPENAI_BASE_URL keep selecting
-    the backend), a ``litellm/`` prefix strips, and a first segment LiteLLM
-    does not know (a HuggingFace repo id like ``Qwen/...``) is refused with
-    the ``openai/`` form instead of failing inside LiteLLM at request time.
-
-    responses protocol: the Responses API is OpenAI-SDK native — LiteLLM's
-    completion surface speaks the chat.completions format, so
-    provider-prefixed models are refused instead of silently downgrading;
-    bare and ``openai/`` names drive the OpenAI SDK."""
+    """The backend protocol driver — the seam tests replace with a fake."""
     if protocol == "responses":
+        model_name = model_name.removeprefix("litellm/")
         if "/" in model_name and not model_name.startswith("openai/"):
             raise PageIndexAPIError(
-                f"responses() cannot drive "
-                f"'{model_name.removeprefix('litellm/')}': provider-prefixed "
+                f"responses() cannot drive '{model_name}': provider-prefixed "
                 "models route through LiteLLM, which speaks chat.completions, "
                 "not the Responses API. Use chat_completions() (or messages() "
                 "for Anthropic models), or point OPENAI_BASE_URL at a "
@@ -240,10 +196,12 @@ def _openai_model(protocol: str, model_name: str, backend=None):
         import openai
         model_name = model_name.removeprefix("openai/")
         try:
-            sdk_client = openai.AsyncOpenAI(**(backend or {}))
+            sdk_client = openai.AsyncOpenAI(**_sdk_backend(backend))
         except (openai.OpenAIError, TypeError) as exc:
             raise PageIndexAPIError(
                 f"The OpenAI backend is not configured: {exc}") from exc
+        # A caller-owned transport must survive the per-call close.
+        sdk_client._pageindex_caller_http = "http_client" in (backend or {})
         from agents.models.openai_responses import OpenAIResponsesModel
         return OpenAIResponsesModel(model_name, openai_client=sdk_client)
     try:
@@ -254,30 +212,20 @@ def _openai_model(protocol: str, model_name: str, backend=None):
             f"'{model_name}' routes through LiteLLM, but litellm is not "
             "installed. Run:  pip install 'litellm>=1.97'"
         )
-    from .utils import _repair_litellm_types
+    from .utils import _litellm_model, _repair_litellm_types
     _repair_litellm_types()
-    wire = model_name.removeprefix("litellm/")
-    if "/" not in wire or wire.startswith("openai/"):
-        if (not os.environ.get("OPENAI_API_KEY")
-                and not (backend or {}).get("api_key")):
-            raise PageIndexAPIError(
-                "The OpenAI backend is not configured: set the "
-                "OPENAI_API_KEY environment variable, pass an api_key "
-                "in chat_backend / backend (any value works for keyless "
-                "OPENAI_BASE_URL servers), or point chat_model at "
-                "another provider (e.g. 'anthropic/...')."
-            )
-    if "/" not in wire:
-        wire = f"openai/{wire}"
-    providers = getattr(litellm, "provider_list", None)
-    if providers and wire.split("/", 1)[0] not in providers:
+    try:
+        wire = _litellm_model(model_name, backend)
+    except litellm.AuthenticationError as exc:
         raise PageIndexAPIError(
-            f"'{wire}' routes through LiteLLM, but "
-            f"'{wire.split('/', 1)[0]}' is not a LiteLLM provider. For an "
-            "OpenAI-compatible server (vLLM, TGI, Ollama) serving this "
-            f"model id, use 'openai/{wire}' and point OPENAI_BASE_URL "
-            "at the server."
-        )
+            "The OpenAI backend is not configured: set the "
+            "OPENAI_API_KEY environment variable, pass an api_key "
+            "in chat_backend / backend (any value works for keyless "
+            "OPENAI_BASE_URL servers), or point chat_model at "
+            "another provider (e.g. 'anthropic/...')."
+        ) from exc
+    except litellm.NotFoundError as exc:
+        raise PageIndexAPIError(str(exc)) from exc
     return LitellmModel(wire, api_key=(backend or {}).get("api_key"),
                         base_url=(backend or {}).get("base_url"))
 
@@ -290,11 +238,11 @@ def _reported_model(model_name: str) -> str:
 def _cache_extra_args(model_name: str) -> Optional[dict]:
     """Claude's prompt caching is opt-in per request: on Claude models
     routed through LiteLLM (Anthropic direct, Bedrock, Vertex — each
-    channel live-verified), mark the managed system prefix via LiteLLM's
-    injection param so the loop's later turns and a conversation's next
-    calls read it instead of repaying full price. Provider resolution is
-    LiteLLM's own, so this predicate can never disagree with where the
-    request actually routes."""
+    channel live-verified), mark the managed system prefix and the newest
+    message via LiteLLM's injection param so the loop's later turns and a
+    conversation's next calls read them instead of repaying full price.
+    Provider resolution is LiteLLM's own, so this predicate can never
+    disagree with where the request actually routes."""
     if "/" not in model_name or model_name.startswith("openai/"):
         return None
     try:
@@ -305,9 +253,32 @@ def _cache_extra_args(model_name: str) -> Optional[dict]:
         return None
     if provider == "anthropic" or (provider in ("bedrock", "vertex_ai")
                                    and "claude" in model.lower()):
+        # The pair LiteLLM itself seeds for Anthropic and Bedrock: the
+        # stable prefix plus the newest message, so each turn re-reads
+        # the turns before it. Passing it explicitly extends it to Vertex.
         return {"cache_control_injection_points": [
-            {"location": "message", "role": "system"}]}
+            {"location": "message", "role": "system"},
+            {"location": "message", "index": -1}]}
     return None
+
+
+def _openai_protocol(model_name: str) -> bool:
+    """Destinations that speak the OpenAI protocol on the wire, where
+    prompt_cache_key means something and extra_body lands in the request
+    body. Resolution is LiteLLM's own (same as _cache_extra_args), so the
+    answer follows actual routing; azure and openrouter ride the OpenAI
+    protocol without appearing in openai_compatible_providers."""
+    wire = model_name.removeprefix("litellm/")
+    if "/" not in wire or wire.startswith("openai/"):
+        return True
+    try:
+        import litellm
+        _, provider, _, _ = litellm.get_llm_provider(model=wire)
+    except Exception:
+        return False
+    return (provider in ("openai", "azure", "openrouter")
+            or provider in getattr(litellm, "openai_compatible_providers",
+                                   ()))
 
 
 def _merged_backend(client, backend):
@@ -329,8 +300,7 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
     # and both OpenAI model classes pass extra_body through verbatim. OpenAI
     # destinations only — LiteLLM plants extra_body as a literal field in
     # other providers' request bodies, which Anthropic rejects as unknown.
-    wire = model_name.removeprefix("litellm/")
-    openai_backend = "/" not in wire or wire.startswith("openai/")
+    openai_backend = _openai_protocol(model_name)
     # Chat-lane effort rides extra_args: LiteLLM takes it as its own
     # top-level kwarg on every supported openai-agents version, and the
     # channel admits values outside the OpenAI enum ("none").
@@ -338,12 +308,12 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
     if reasoning_effort is not None:
         extra_args = {**(extra_args or {}),
                       "reasoning_effort": reasoning_effort}
-    conn = dict(backend) if backend else {}
+    conn = _sdk_backend(backend) if backend else {}
     if conn and protocol == "chat":
         # LiteLLM takes connection params per call, except the two names
         # LitellmModel pins as its own keywords — those ride its constructor.
         lifted = {"api_key": conn.pop("api_key", None),
-                  "base_url": conn.pop("base_url", conn.pop("api_base", None))}
+                  "base_url": conn.pop("base_url", None)}
         if conn:
             extra_args = {**(extra_args or {}), **conn}
         conn = {key: value for key, value in lifted.items()
@@ -365,6 +335,9 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
         model_settings=ModelSettings(
             temperature=temperature, top_p=top_p, max_tokens=max_tokens,
             reasoning=reasoning,
+            # Streamed runs otherwise carry no usage at all (agents forwards
+            # this as stream_options only on streaming calls).
+            include_usage=True,
             extra_body=body,
             extra_headers=extra_headers,
             extra_args=extra_args),
@@ -377,17 +350,21 @@ def _validate_max_turns(max_turns) -> None:
         raise PageIndexAPIError("max_turns must be a positive integer.")
 
 
-def _conversation_cache_key(model_name: str, instructions: str, items) -> str:
+def _conversation_cache_key(model_name: str, instructions: str, doc_id,
+                            items) -> str:
     """Stable per-conversation cache-routing key, sent as the OpenAI
     ``prompt_cache_key`` through ModelSettings.extra_body (openai-agents
     0.20 no longer derives it from RunConfig.group_id — verified against a
     captured wire). Keyed on the prefix identity — model, instructions,
-    first conversation item — so a conversation's continuations share one
-    route without pooling unrelated conversations. Callers pass the
-    conversation's own items, never the SDK-prepended doc-targeting block:
-    that block is byte-identical for every conversation about a document
-    and would pool them all under one key."""
-    seed = json.dumps([model_name, instructions,
+    doc targeting, first conversation item — so a conversation's
+    continuations share one route without pooling unrelated conversations.
+    Callers pass the conversation's own items, never the SDK-prepended
+    doc-targeting block: that block is byte-identical for every
+    conversation about a document and would pool them all under one key.
+    doc_id carries the targeting identity instead — the same opening
+    question against different documents is different conversations."""
+    scope = [doc_id] if isinstance(doc_id, str) else doc_id
+    seed = json.dumps([model_name, instructions, scope,
                        items[0] if items else None],
                       sort_keys=True, default=str)
     return "pageindex-" + hashlib.sha256(seed.encode()).hexdigest()[:16]
@@ -437,16 +414,72 @@ def _record_response_status(agent, recorded: dict) -> None:
                 value = getattr(response, field, None)
                 recorded[field] = (value.model_dump(mode="json")
                                    if hasattr(value, "model_dump") else value)
+        # The backend's echo of what it actually ran with.
+        for field in ("tool_choice", "parallel_tool_calls"):
+            value = getattr(response, field, None)
+            if value is not None:
+                recorded[field] = (value.model_dump(mode="json")
+                                   if hasattr(value, "model_dump") else value)
         return response
 
     responses.create = recording_create
 
 
+def _record_chat_finish(agent, recorded: dict) -> None:
+    """Capture each turn's native finish_reason from the raw LiteLLM
+    response: openai-agents' ModelResponse drops it, so a truncated or
+    content-filtered final turn would otherwise report as a clean "stop".
+    The chat protocol has no transport client to hook (cf.
+    _record_response_status), so this wraps the model's response fetch;
+    no-op if that private seam moves."""
+    model = getattr(agent, "model", None)
+    fetch = getattr(model, "_fetch_response", None)
+    if fetch is None:
+        return
+
+    def note(item) -> None:
+        choices = getattr(item, "choices", None)
+        finish = getattr(choices[0], "finish_reason", None) if choices else None
+        if finish:
+            recorded["finish_reason"] = finish
+
+    class _Tee:
+        """Iteration passthrough that notes each chunk; everything else
+        (aclose/close/...) delegates to the provider stream itself."""
+
+        def __init__(self, inner):
+            self._inner = inner
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            chunk = await self._inner.__anext__()
+            note(chunk)
+            return chunk
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    async def recording_fetch(*args, **kwargs):
+        result = await fetch(*args, **kwargs)
+        if isinstance(result, tuple):
+            response, stream = result
+            return response, _Tee(stream)
+        note(result)
+        return result
+
+    model._fetch_response = recording_fetch
+
+
 async def _aclose_backend(agent) -> None:
     """Close the per-call AsyncOpenAI client before its event loop ends —
     otherwise httpx tears down pooled connections on a closed loop and
-    emits 'Task exception was never retrieved' noise."""
+    emits 'Task exception was never retrieved' noise. A client built on a
+    caller-owned http_client stays open."""
     backend = getattr(getattr(agent, "model", None), "_client", None)
+    if getattr(backend, "_pageindex_caller_http", False):
+        return
     close = getattr(backend, "close", None)
     if close is not None:
         try:
@@ -473,8 +506,10 @@ def _wrap_max_turns(max_turns) -> PageIndexAPIError:
 def _usage_sums(raw_responses) -> "tuple[int, int, int, int, int]":
     prompt = completion = cached = cache_write = reasoning = 0
     for r in raw_responses:
-        prompt += r.usage.input_tokens
-        completion += r.usage.output_tokens
+        if r.usage is None:
+            continue
+        prompt += r.usage.input_tokens or 0
+        completion += r.usage.output_tokens or 0
         details = getattr(r.usage, "input_tokens_details", None)
         cached += getattr(details, "cached_tokens", 0) or 0
         cache_write += getattr(details, "cache_write_tokens", 0) or 0
@@ -532,12 +567,14 @@ def run_chat_completions(client, messages, stream: bool = False,
     managed = _managed_instructions(system_texts)
     agent = _openai_agent(client, "chat", model_name, managed,
                           temperature, top_p, doc_ids=doc_id,
-                          cache_key=_conversation_cache_key(model_name,
-                                                            managed, history),
+                          cache_key=_conversation_cache_key(
+                              model_name, managed, doc_id, history),
                           reasoning_effort=reasoning_effort,
                           extra_body=extra_body, max_tokens=max_tokens,
                           backend=_merged_backend(client, backend),
                           extra_headers=extra_headers)
+    recorded: dict = {}
+    _record_chat_finish(agent, recorded)
     run_kwargs = _run_kwargs(max_turns)
     import openai
     from agents import Runner
@@ -562,7 +599,7 @@ def run_chat_completions(client, messages, stream: bool = False,
                 "index": 0,
                 "message": {"role": "assistant",
                             "content": result.final_output or ""},
-                "finish_reason": "stop",
+                "finish_reason": recorded.get("finish_reason") or "stop",
             }],
             "usage": _openai_usage(result.raw_responses),
         }
@@ -602,7 +639,7 @@ def run_chat_completions(client, messages, stream: bool = False,
             if not completed and hasattr(streamed, "cancel"):
                 streamed.cancel()  # abandoned/failed: stop the agent task
             await _aclose_backend(agent)
-        yield chunk({}, finish="stop")
+        yield chunk({}, finish=recorded.get("finish_reason") or "stop")
         yield {
             "id": chat_id, "object": "chat.completion.chunk",
             "created": created, "model": reported_model, "choices": [],
@@ -649,8 +686,8 @@ def run_responses(client, input, model: Optional[str] = None,
     managed = _managed_instructions(extra)
     agent = _openai_agent(client, "responses", model_name, managed,
                           temperature, top_p, doc_ids=doc_id,
-                          cache_key=_conversation_cache_key(model_name, managed,
-                                                            conversation),
+                          cache_key=_conversation_cache_key(
+                              model_name, managed, doc_id, conversation),
                           reasoning=reasoning, extra_body=extra_body,
                           max_tokens=max_output_tokens,
                           backend=_merged_backend(client, backend),
@@ -661,11 +698,14 @@ def run_responses(client, input, model: Optional[str] = None,
     from agents import Runner
     from agents.exceptions import AgentsException, MaxTurnsExceeded
 
+    response_id = f"resp_{uuid.uuid4().hex}"
+    created_at = int(time.time())
+
     def envelope(transcript: list, raw_responses) -> dict:
         return {
-            "id": f"resp_{uuid.uuid4().hex}",
+            "id": response_id,
             "object": "response",
-            "created_at": int(time.time()),
+            "created_at": created_at,
             "model": _reported_model(model_name),
             "status": recorded.get("status") or "completed",
             "output": [item for item in transcript
@@ -678,8 +718,9 @@ def run_responses(client, input, model: Optional[str] = None,
                        "parameters": tool.params_json_schema,
                        "strict": getattr(tool, "strict_json_schema", True)}
                       for tool in agent.tools],
-            "tool_choice": "auto",
-            "parallel_tool_calls": True,
+            # Backend echo when captured; the request sends neither param.
+            "tool_choice": recorded.get("tool_choice", "auto"),
+            "parallel_tool_calls": recorded.get("parallel_tool_calls", True),
             "temperature": temperature,
             "top_p": top_p,
             "reasoning": reasoning,
@@ -721,11 +762,24 @@ def run_responses(client, input, model: Optional[str] = None,
         # re-based by the count of items already committed by prior turns.
         output_offset = 0
         completed = False
+        opened = False
         try:
             async for event in streamed.stream_events():
                 if event.type == "raw_response_event":
                     data = event.data.model_dump(exclude_unset=True)
                     if data.get("type") in lifecycle:
+                        if data["type"] == "response.created" and not opened:
+                            # N per-turn openings collapse to one, carrying
+                            # the id and created_at the terminal event will
+                            # report.
+                            opened = True
+                            if data.get("response"):
+                                data["response"]["id"] = response_id
+                                data["response"]["created_at"] = created_at
+                            sequence += 1
+                            data["sequence_number"] = sequence
+                            yield data
+                            continue
                         if data["type"] in ("response.completed",
                                             "response.incomplete",
                                             "response.failed"):
@@ -735,6 +789,10 @@ def run_responses(client, input, model: Optional[str] = None,
                             for field in ("status", "incomplete_details",
                                           "error"):
                                 recorded[field] = state.get(field)
+                            for field in ("tool_choice",
+                                          "parallel_tool_calls"):
+                                if state.get(field) is not None:
+                                    recorded[field] = state[field]
                             output_offset += len(state.get("output") or [])
                         continue
                     if isinstance(data.get("output_index"), int):
@@ -793,7 +851,7 @@ def _anthropic_client(backend=None):
     """The backend client — the seam tests replace with a fake transport."""
     import anthropic
     try:
-        return anthropic.Anthropic(**(backend or {}))
+        return anthropic.Anthropic(**_sdk_backend(backend))
     except TypeError as exc:
         raise PageIndexAPIError(
             f"The Anthropic backend is not configured: {exc}") from exc
@@ -818,6 +876,18 @@ def _anthropic_system(extra_system, block: Optional[str]) -> list[dict]:
     if isinstance(extra_system, list):
         return blocks + list(extra_system)
     raise PageIndexAPIError("system must be a string or a list of blocks.")
+
+
+def _cache_marks(system_blocks, messages) -> int:
+    """Breakpoints already on the request. The API allows 4 total; the
+    top-level moving breakpoint is only added when it fits."""
+    blocks = list(system_blocks)
+    for message in messages:
+        content = message.get("content")
+        if isinstance(content, list):
+            blocks += [b for b in content if isinstance(b, dict)]
+    return sum(1 for b in blocks
+               if isinstance(b, dict) and b.get("cache_control"))
 
 
 def _dump_block(block) -> Any:
@@ -855,9 +925,15 @@ _CLAUDE_4096_MODELS = ("claude-3-opus", "claude-3-sonnet", "claude-3-haiku",
                        "claude-3-5-sonnet-20240620")
 
 
-def _default_max_tokens(model: str) -> int:
+def _default_max_tokens(model: str, thinking=None) -> int:
     """The wire-required per-turn budget when the caller sets none: 8192,
-    except the claude-3 generation whose output ceiling is 4096."""
+    except the claude-3 generation whose output ceiling is 4096. The wire
+    also requires max_tokens > thinking.budget_tokens, so an enabled
+    budget lifts the default above itself."""
+    budget = (thinking.get("budget_tokens")
+              if isinstance(thinking, dict) else None)
+    if isinstance(budget, int):
+        return budget + 8192
     return 4096 if model.startswith(_CLAUDE_4096_MODELS) else 8192
 
 
@@ -892,18 +968,38 @@ def run_messages(client, messages, model: str,
         "stop_sequences": stop_sequences, "thinking": thinking,
         "extra_body": extra_body, "extra_headers": extra_headers,
     }.items() if value is not None}
-    runner = _anthropic_client(_merged_backend(client, backend)) \
-        .beta.messages.tool_runner(
-        max_tokens=(max_tokens if max_tokens is not None
-                    else _default_max_tokens(model)),
+    system_blocks = _anthropic_system(system, block)
+    # Top-level cache_control: the server re-marks the newest block each
+    # turn, so the loop re-reads the growing conversation from cache.
+    # Counts toward the 4-breakpoint limit (live-verified 400 past it).
+    cached: dict[str, Any] = (
+        {"cache_control": {"type": "ephemeral"}}
+        if _cache_marks(system_blocks, prepared) < 4 else {})
+    merged = _merged_backend(client, backend)
+    # The SDK defers credential resolution to request time and raises a
+    # bare TypeError there — pre-check for the contract's PageIndexAPIError.
+    if not merged and not (os.environ.get("ANTHROPIC_API_KEY")
+                           or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
+        raise PageIndexAPIError(
+            "The Anthropic backend is not configured: set the "
+            "ANTHROPIC_API_KEY environment variable, or pass an api_key "
+            "in chat_backend / backend.")
+    backend_client = _anthropic_client(merged)
+    # A caller-owned http_client must survive the per-call closes below.
+    owns_transport = "http_client" not in (merged or {})
+    if max_tokens is None:
+        max_tokens = _default_max_tokens(model, thinking)
+    runner = backend_client.beta.messages.tool_runner(
+        max_tokens=max_tokens,
         messages=prepared,
         model=model,
         tools=build_anthropic_tools(client, doc_ids=doc_id),
-        system=_anthropic_system(system, block),
+        system=system_blocks,
         stream=stream,
         # Bounded like the OpenAI surfaces (their framework default is 10).
         max_iterations=max_turns if max_turns is not None else 10,
         **passthrough,
+        **cached,
     )
 
     if stream:
@@ -915,6 +1011,10 @@ def run_messages(client, messages, model: str,
             except anthropic.AnthropicError as exc:
                 raise PageIndexAPIError(
                     f"The model backend failed: {exc}") from exc
+            finally:
+                # runs on exhaustion and abandonment (GeneratorExit) alike
+                if owns_transport:
+                    backend_client.close()
         return events()
 
     try:
@@ -922,6 +1022,10 @@ def run_messages(client, messages, model: str,
     except anthropic.AnthropicError as exc:
         raise PageIndexAPIError(
             f"The model backend failed: {exc}") from exc
+    finally:
+        # safe here: the params read-back below does no HTTP
+        if owns_transport:
+            backend_client.close()
     if not turns:
         raise PageIndexAPIError("The model returned no response.")
     captured: dict = {}
@@ -955,7 +1059,7 @@ def run_messages(client, messages, model: str,
     new_messages = [_dump_message(message)
                     for message in conversation[len(prepared):]]
     final_blocks = [_dump_block(item) for item in final.content]
-    final_ids = {block["id"] for block in final_blocks
+    final_ids = {block.get("id") for block in final_blocks
                  if block.get("type") == "tool_use"}
     history_ids = {block.get("id")
                    for message in new_messages

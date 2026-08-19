@@ -124,6 +124,15 @@ class FakeModel(Model):
         self._record(system_instructions, input)
         output = self.turns.pop(0)
         sequence = 0
+        if getattr(self, "emit_created", False):
+            from openai.types.responses import ResponseCreatedEvent
+            sequence += 1
+            yield ResponseCreatedEvent(
+                type="response.created", sequence_number=sequence,
+                response=Response(
+                    id="resp_backend_turn", created_at=0.0, model="fake",
+                    object="response", output=[], parallel_tool_calls=False,
+                    tool_choice="auto", tools=[], status="in_progress"))
         for item in output:
             if item.type == "message":
                 pieces = getattr(self, "pieces", ("The ", "answer"))
@@ -306,7 +315,8 @@ def test_anthropic_routed_models_mark_managed_prefix_for_cache(
     fake_model([[_msg_item("ok")]])
     from pageindex.local_chat import _openai_agent
     marked = {"cache_control_injection_points": [
-        {"location": "message", "role": "system"}]}
+        {"location": "message", "role": "system"},
+        {"location": "message", "index": -1}]}
     for name in ("anthropic/claude-x", "litellm/anthropic/claude-x",
                  "bedrock/us.anthropic.claude-sonnet-5",
                  "vertex_ai/claude-sonnet-4-5"):
@@ -525,8 +535,8 @@ def test_doc_id_conversations_get_distinct_cache_keys(client, store_path,
     keys = []
     real = local_chat._conversation_cache_key
 
-    def spy(model_name, instructions, items):
-        key = real(model_name, instructions, items)
+    def spy(model_name, instructions, doc_id, items):
+        key = real(model_name, instructions, doc_id, items)
         keys.append(key)
         return key
 
@@ -550,6 +560,11 @@ def test_doc_id_conversations_get_distinct_cache_keys(client, store_path,
     fake_model([[_msg_item("e")]])
     client.chat_completions("Summarize section 3.", doc_id="pi-a")
     assert keys[3] != keys[4]  # same property on the chat surface
+
+    seed_doc(store_path, "pi-b", "contract.pdf")
+    fake_model([[_msg_item("f")]])
+    client.responses("What is the CAGR?", doc_id="pi-b")
+    assert keys[5] != keys[0]  # same opener, different doc: no pooling
 
 
 @needs_agents
@@ -578,6 +593,30 @@ def test_responses_stream_passthrough(client, store_path, fake_model):
                   if event.get("type") == "response.output_text.delta"][-1]
     assert (final["output"][last_delta["output_index"]]
             .get("type", "message") == "message")
+
+
+@needs_agents
+def test_responses_stream_opens_with_created(client, store_path, fake_model):
+    """N per-turn openings collapse to one response.created, not zero —
+    the logical stream must open with a response object carrying the same
+    id the terminal event reports, and the terminal envelope reports the
+    backend's tool-param echo, not assumed values."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    fake.emit_created = True  # two turns emit two; one must pass through
+    events = list(client.responses("q", stream=True))
+    created = [e for e in events if e["type"] == "response.created"]
+    assert len(created) == 1 and events[0] is created[0]
+    assert events[0]["sequence_number"] == 1
+    terminal = events[-1]
+    assert terminal["type"] == "response.completed"
+    assert created[0]["response"]["id"] == terminal["response"]["id"]
+    assert (created[0]["response"]["created_at"]
+            == terminal["response"]["created_at"])  # one timestamp, not two
+    assert terminal["response"]["parallel_tool_calls"] is False  # echo
 
 
 @needs_agents
@@ -824,6 +863,10 @@ def test_max_turns_rejects_non_positive(client, store_path, fake_model):
     with pytest.raises(PageIndexAPIError, match="positive integer"):
         client.chat_completions([{"role": "user", "content": "q"}],
                                 max_turns=0)
+    # every door that takes max_turns validates it, the runner config too
+    with pytest.raises(PageIndexAPIError, match="positive integer"):
+        client.anthropic_runner_config(model="claude-sonnet-4-5",
+                                       max_turns=-1)
 
 
 def test_enable_citations_rejected_before_framework_check(client, monkeypatch):
@@ -874,6 +917,7 @@ def test_responses_envelope_fields_and_cache_group(client, store_path,
                      "get_document_structure", "get_page_content"}
     assert all(tool["type"] == "function" for tool in result["tools"])
     assert result["instructions"].startswith(CHAT_HEADER)
+    # No transport echo attached here, so these are the fallbacks.
     assert result["parallel_tool_calls"] is True
     assert result["tool_choice"] == "auto"
 
@@ -893,17 +937,22 @@ def test_sol_class_refusal_names_its_exits():
 def test_conversation_cache_key_stable_per_conversation():
     """Cache-routing key, sent as the OpenAI prompt_cache_key. A
     conversation's continuations must share one key (same model /
-    instructions / first item), and unrelated conversations must not pool
-    under it."""
+    instructions / doc targeting / first item), and unrelated
+    conversations must not pool under it."""
     turn1 = [{"role": "user", "content": "q"}]
     continuation = turn1 + [{"role": "assistant", "content": "a"},
                             {"role": "user", "content": "and?"}]
-    key = local_chat._conversation_cache_key("m", "sys", turn1)
-    assert key == local_chat._conversation_cache_key("m", "sys", continuation)
+    key = local_chat._conversation_cache_key("m", "sys", "d1", turn1)
+    assert key == local_chat._conversation_cache_key(
+        "m", "sys", "d1", continuation)
+    assert key == local_chat._conversation_cache_key(
+        "m", "sys", ["d1"], turn1)  # str and one-item list: same targeting
     assert key != local_chat._conversation_cache_key(
-        "m", "sys", [{"role": "user", "content": "other"}])
-    assert key != local_chat._conversation_cache_key("m2", "sys", turn1)
-    assert key != local_chat._conversation_cache_key("m", "sys2", turn1)
+        "m", "sys", "d1", [{"role": "user", "content": "other"}])
+    assert key != local_chat._conversation_cache_key("m2", "sys", "d1", turn1)
+    assert key != local_chat._conversation_cache_key("m", "sys2", "d1", turn1)
+    assert key != local_chat._conversation_cache_key("m", "sys", "d2", turn1)
+    assert key != local_chat._conversation_cache_key("m", "sys", None, turn1)
 
 
 @needs_agents
@@ -924,6 +973,9 @@ def test_agent_carries_prompt_cache_key_in_extra_body(monkeypatch):
     settings = agent.model_settings
     assert settings.extra_body is None
     assert "cache_control_injection_points" in settings.extra_args
+    assert settings.extra_args["cache_control_injection_points"] == [
+        {"location": "message", "role": "system"},
+        {"location": "message", "index": -1}]
     for name in ("gpt-test", "openai/gpt-test", "litellm/openai/gpt-test"):
         agent = local_chat._openai_agent(
             None, "chat", name, "sys", None, None,
@@ -1070,18 +1122,18 @@ def test_doc_id_scopes_tools_to_targeted_documents(client, store_path,
 
 
 @needs_agents
-def test_empty_doc_id_is_an_empty_allowlist(client, store_path, fake_model):
-    """doc_id=[] scopes the agent to nothing; `or None` used to wash it
-    into unscoped full-library access."""
+def test_empty_doc_id_is_refused(client, store_path):
+    """doc_id=[] fails loud on every local surface, like cloud already
+    did: washing it to None would mean "everything", and the empty
+    allowlist meant "nothing" — an agent confidently reporting the
+    documents don't exist, with no signal the scope was empty."""
     seed_doc(store_path, "pi-a", "report.pdf")
-    fake = fake_model([
-        [_call_item("browse_documents", {})],
-        [_msg_item("done")],
-    ])
-    client.chat_completions("q", doc_id=[])
-    outputs = [item["output"] for item in fake.inputs[1]
-               if item.get("type") == "function_call_output"]
-    assert json.loads(outputs[-1])["documents"] == []
+    with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
+        client.chat_completions("q", doc_id=[])
+    with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
+        client.as_openai_tools(doc_id=[])
+    with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
+        client.agent_instructions(doc_id=[])
 
 
 @needs_agents
@@ -1106,6 +1158,11 @@ def test_openai_model_resolves_provider_prefixes():
     assert isinstance(model, OpenAIResponsesModel)
     assert str(model.model) == "gpt-5.2"
     model = local_chat._openai_model("responses", "openai/gpt-5.2")
+    assert isinstance(model, OpenAIResponsesModel)
+    assert str(model.model) == "gpt-5.2"
+    # litellm/ is routing grammar, not a provider: it strips before the
+    # provider-prefix guard, so an OpenAI model stays reachable.
+    model = local_chat._openai_model("responses", "litellm/gpt-5.2")
     assert isinstance(model, OpenAIResponsesModel)
     assert str(model.model) == "gpt-5.2"
 
@@ -1141,7 +1198,7 @@ def test_envelope_model_strips_litellm_routing_prefix(store_path, fake_model):
     seed_doc(store_path, "pi-a", "report.pdf")
     client = PageIndexLocalClient(storage_path=store_path,
                                   retrieve_model="anthropic/claude-x")
-    assert client.retrieve_model == "litellm/anthropic/claude-x"
+    assert client.retrieve_model == "anthropic/claude-x"
     fake_model([[_msg_item("ok")]])
     result = client.chat_completions("q")
     assert result["model"] == "anthropic/claude-x"
@@ -1170,6 +1227,7 @@ def test_envelope_model_strips_openai_routing_prefix(store_path, fake_model):
 def test_chat_missing_openai_key_fails_loud(monkeypatch):
     """A missing backend credential surfaces as the SDK's own error type,
     like every other precondition on the chat surfaces."""
+    pytest.importorskip("litellm")  # first import may load a .env; delenv after
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     for name in ("gpt-4o", "openai/gpt-4o"):
         with pytest.raises(PageIndexAPIError, match="OPENAI_API_KEY"):
@@ -1222,6 +1280,25 @@ def test_responses_envelope_reports_backend_truncation(client, store_path,
     assert result["status"] == "incomplete"
     assert result["incomplete_details"] == {"reason": "max_output_tokens"}
     assert result["error"] is None
+
+
+@needs_agents
+def test_responses_envelope_reports_backend_tool_params(client, store_path,
+                                                        fake_model):
+    """tool_choice / parallel_tool_calls come from the backend's echo —
+    the request sends neither, so the envelope must not assume values."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([[_msg_item("ok")]])
+
+    async def create(*args, **kwargs):
+        return types.SimpleNamespace(status=None, tool_choice="none",
+                                     parallel_tool_calls=False)
+
+    fake._client = types.SimpleNamespace(
+        responses=types.SimpleNamespace(create=create))
+    result = client.responses("q")
+    assert result["tool_choice"] == "none"
+    assert result["parallel_tool_calls"] is False
 
 
 @needs_agents
@@ -1410,14 +1487,24 @@ def test_chat_stream_close_at_opening_chunk_cancels_run(client, store_path,
 
 @needs_agents
 def test_stream_abandonment_cancels_pending_turn(client, store_path,
-                                                 fake_model):
+                                                 fake_model, monkeypatch):
     """Closing the iterator cancels the run even while it is awaiting the
     backend: the blocked turn is torn down (pump thread exits) instead of
-    running — and billing — to completion in the background."""
+    running — and billing — to completion in the background. The pump
+    thread is tracked directly — a process-global thread count would be
+    flaky against litellm's background threads."""
     import threading
-    import time as time_mod
     seed_doc(store_path, "pi-a", "report.pdf")
-    baseline = threading.active_count()
+    pumps = []
+    real_thread = threading.Thread
+
+    class _Tracking(real_thread):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            if getattr(kwargs.get("target"), "__name__", "") == "pump":
+                pumps.append(self)
+
+    monkeypatch.setattr(threading, "Thread", _Tracking)
     fake = fake_model([
         [_call_item("get_document", {"doc_name": "report.pdf"})],
         [_msg_item("The answer")],
@@ -1427,11 +1514,9 @@ def test_stream_abandonment_cancels_pending_turn(client, store_path,
                                      stream=True, stream_metadata=True)
     next(stream)  # the opening role chunk
     stream.close()
-    deadline = time_mod.monotonic() + 3.0
-    while (threading.active_count() > baseline
-           and time_mod.monotonic() < deadline):
-        time_mod.sleep(0.05)
-    assert threading.active_count() <= baseline
+    assert len(pumps) == 1
+    pumps[0].join(timeout=3.0)
+    assert not pumps[0].is_alive()
     assert fake.deltas_emitted == 0  # turn 2 never produced output
 
 
@@ -1638,6 +1723,38 @@ def test_backend_connection_reaches_each_engine(monkeypatch):
     agent = local_chat._openai_agent(None, "responses", "gpt-test", "sys",
                                      None, None, backend={"api_key": "k2"})
     assert agent.model._client.api_key == "k2"
+    # the LiteLLM endpoint spelling works on the SDK-constructed door too
+    agent = local_chat._openai_agent(None, "responses", "gpt-test", "sys",
+                                     None, None,
+                                     backend={"api_key": "k3",
+                                              "api_base": "http://rb"})
+    assert str(agent.model._client.base_url).rstrip("/") == "http://rb"
+    # both endpoint spellings on one merged dict: normalization keeps the
+    # later (per-call) key instead of the eager nested pop discarding it
+    agent = local_chat._openai_agent(
+        None, "chat", "anthropic/claude-x", "sys", None, None,
+        backend=local_chat._merged_backend(
+            types.SimpleNamespace(chat_backend={"base_url": "http://client"}),
+            {"api_base": "http://call"}))
+    assert agent.model.base_url == "http://call"
+
+
+@needs_anthropic
+def test_messages_top_level_cache_control(client, store_path, fake_anthropic):
+    """The moving breakpoint rides every request so each turn re-reads the
+    growing conversation; it stands down when the caller's own marks fill
+    the four-breakpoint budget (a fifth is a live-verified 400)."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
+    client.messages("q", model="claude-test", max_tokens=50)
+    assert calls[0]["cache_control"] == {"type": "ephemeral"}
+    marked = [{"type": "text", "text": f"b{i}",
+               "cache_control": {"type": "ephemeral"}} for i in range(3)]
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
+    client.messages("q", model="claude-test", max_tokens=50, system=marked)
+    assert "cache_control" not in calls[0]
 
 
 def test_merged_backend_precedence():
@@ -1655,6 +1772,9 @@ def test_messages_backend_merges_and_reaches_the_client(client, fake_anthropic,
                                          "base_url": "http://x"})
     assert real.api_key == "kk"
     assert str(real.base_url).rstrip("/") == "http://x"
+    real = local_chat._anthropic_client({"api_key": "kk",
+                                         "api_base": "http://y"})
+    assert str(real.base_url).rstrip("/") == "http://y"
 
     calls = fake_anthropic([
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
@@ -1714,3 +1834,207 @@ def test_messages_extra_headers_reach_the_wire(client, monkeypatch):
     client.messages("q", model="claude-sonnet-4-5",
                     extra_headers={"anthropic-beta": "context-1m-2025"})
     assert seen["beta"] == "context-1m-2025"
+
+
+@needs_agents
+def test_chat_model_settings_request_stream_usage(monkeypatch):
+    """Without include_usage the streamed run carries no usage at all and
+    the terminal chunk reports zeros (agents forwards it as
+    stream_options only on streaming calls)."""
+    monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
+    agent = local_chat._openai_agent(None, "chat", "gpt-test", "sys",
+                                     None, None)
+    assert agent.model_settings.include_usage is True
+
+
+@needs_anthropic
+def test_messages_default_max_tokens_clears_thinking_budget(client, fake_anthropic):
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "a"}], "end_turn"),
+    ])
+    client.messages("q", model="claude-test",
+                    thinking={"type": "enabled", "budget_tokens": 10000})
+    assert calls[0]["max_tokens"] == 10000 + 8192
+    assert calls[0]["thinking"] == {"type": "enabled",
+                                    "budget_tokens": 10000}
+    calls = fake_anthropic([  # fresh fake: each run closes its client
+        _anthropic_message([{"type": "text", "text": "b"}], "end_turn"),
+    ])
+    client.messages("q", model="claude-test", max_tokens=11000,
+                    thinking={"type": "enabled", "budget_tokens": 10000})
+    assert calls[0]["max_tokens"] == 11000  # explicit value passes through
+
+
+def test_record_chat_finish_records_and_delegates():
+    recorded = {}
+    closed = {"n": 0}
+
+    class Stream:
+        def __init__(self):
+            self.chunks = [
+                types.SimpleNamespace(choices=[]),
+                types.SimpleNamespace(choices=[types.SimpleNamespace(
+                    finish_reason="content_filter")]),
+            ]
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if not self.chunks:
+                raise StopAsyncIteration
+            return self.chunks.pop(0)
+
+        async def aclose(self):
+            closed["n"] += 1
+
+    async def fetch(*args, **kwargs):
+        return "shell", Stream()
+
+    model = types.SimpleNamespace(_fetch_response=fetch)
+    local_chat._record_chat_finish(types.SimpleNamespace(model=model),
+                                   recorded)
+
+    async def drive():
+        shell, tee = await model._fetch_response()
+        assert shell == "shell"
+        async for _chunk in tee:
+            pass
+        await tee.aclose()
+
+    asyncio.run(drive())
+    assert recorded == {"finish_reason": "content_filter"}
+    assert closed["n"] == 1
+    # A model without the seam: silently a no-op.
+    local_chat._record_chat_finish(
+        types.SimpleNamespace(model=types.SimpleNamespace()), {})
+
+
+@needs_agents
+def test_chat_completions_reports_native_finish_reason(client, store_path,
+                                                       monkeypatch):
+    seed_doc(store_path, "pi-a", "report.pdf")
+
+    class TruncatingModel(FakeModel):
+        async def _fetch_response(self, *args, **kwargs):
+            return types.SimpleNamespace(choices=[
+                types.SimpleNamespace(finish_reason="length")])
+
+        async def get_response(self, *args, **kwargs):
+            await self._fetch_response()
+            return await super().get_response(*args, **kwargs)
+
+        async def stream_response(self, *args, **kwargs):
+            await self._fetch_response()
+            async for event in super().stream_response(*args, **kwargs):
+                yield event
+
+    fake = TruncatingModel([[_msg_item("cut ")], [_msg_item("cut ")]])
+    monkeypatch.setattr(local_chat, "_openai_model", lambda *a: fake)
+    result = client.chat_completions("q")
+    assert result["choices"][0]["finish_reason"] == "length"
+    chunks = list(client.chat_completions("q", stream=True,
+                                          stream_metadata=True))
+    assert chunks[-2]["choices"][0]["finish_reason"] == "length"
+
+
+@needs_agents
+def test_chat_gate_honors_litellm_routing_and_custom_providers(monkeypatch):
+    """Mirrors the indexing lane: an explicit litellm/ prefix skips the env
+    key pre-check, and custom_provider_map providers pass the allowlist;
+    a name LiteLLM cannot route is still refused up front."""
+    pytest.importorskip("litellm")
+    import litellm  # first import may load a .env; delenv after it
+    from agents.extensions.models.litellm_model import LitellmModel
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    model = local_chat._openai_model("chat", "litellm/gpt-4o")
+    assert isinstance(model, LitellmModel) and model.model == "openai/gpt-4o"
+
+    monkeypatch.setattr(litellm, "custom_provider_map",
+                        [{"provider": "my-llm", "custom_handler": object()}])
+    model = local_chat._openai_model("chat", "my-llm/model-a")
+    assert isinstance(model, LitellmModel) and model.model == "my-llm/model-a"
+
+    with pytest.raises(PageIndexAPIError, match="not a LiteLLM provider"):
+        local_chat._openai_model("chat", "Qwen/my-model")
+
+
+@needs_agents
+def test_litellm_model_still_has_the_fetch_response_seam():
+    # Guards the private seam _record_chat_finish rides (LitellmModel
+    # ._fetch_response): a vendor rename turns the recorder into a silent
+    # no-op and every truncated turn reports finish_reason "stop".
+    pytest.importorskip("litellm")
+    from agents.extensions.models.litellm_model import LitellmModel
+
+    assert hasattr(LitellmModel, "_fetch_response")
+
+
+def test_openai_protocol_predicate_follows_litellm_routing():
+    pytest.importorskip("litellm")
+    for name in ("gpt-5", "openai/gpt-4o", "litellm/gpt-4o",
+                 "azure/gpt-4o", "openrouter/openai/gpt-4o",
+                 "deepseek/deepseek-chat", "groq/llama-3.3-70b-versatile",
+                 "xai/grok-3"):
+        assert local_chat._openai_protocol(name), name
+    for name in ("anthropic/claude-sonnet-4-5", "gemini/gemini-2.5-pro",
+                 "bedrock/us.anthropic.claude-sonnet-5",
+                 "vertex_ai/claude-sonnet-4-5"):
+        assert not local_chat._openai_protocol(name), name
+
+
+@needs_agents
+def test_chat_backend_without_key_stands_aside_like_index_lane(monkeypatch):
+    """Any non-empty backend dict suppresses the key pre-check (utils rule)."""
+    pytest.importorskip("litellm")
+    import litellm  # noqa: F401 — first import may load a .env; delenv after it
+    from agents.extensions.models.litellm_model import LitellmModel
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    model = local_chat._openai_model(
+        "chat", "gpt-test", {"base_url": "http://localhost:9"})
+    assert isinstance(model, LitellmModel)
+
+
+@needs_agents
+def test_responses_model_marks_caller_owned_transport(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    shared = httpx.AsyncClient()
+    caller = local_chat._openai_model("responses", "gpt-test",
+                                      {"http_client": shared})
+    assert caller._client._pageindex_caller_http is True
+    owned = local_chat._openai_model("responses", "gpt-test")
+    assert owned._client._pageindex_caller_http is False
+
+    async def run():
+        await local_chat._aclose_backend(types.SimpleNamespace(model=caller))
+        assert not shared.is_closed  # caller-owned transport survives
+        await local_chat._aclose_backend(types.SimpleNamespace(model=owned))
+        await shared.aclose()
+
+    asyncio.run(run())
+
+
+@needs_anthropic
+def test_messages_keeps_caller_owned_http_client_open(client):
+    body = _anthropic_message([{"type": "text", "text": "a"}], "end_turn")
+    shared = httpx.Client(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=body)))
+    out = client.messages("q", model="claude-test",
+                          backend={"api_key": "t", "http_client": shared})
+    assert out["content"][0]["text"] == "a"
+    assert not shared.is_closed
+    client.messages("q", model="claude-test",
+                    backend={"api_key": "t", "http_client": shared})
+    shared.close()
+
+
+@needs_anthropic
+def test_messages_without_credentials_raises_contract_error(client,
+                                                            monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    with pytest.raises(PageIndexAPIError,
+                       match="Anthropic backend is not configured"):
+        client.messages("q", model="claude-test")

@@ -1,4 +1,5 @@
 """What `pip install pageindex` exposes: 0.2.8 helper compat and import cost."""
+import os
 import subprocess
 import sys
 
@@ -99,5 +100,23 @@ def test_classic_compat_surface_still_reachable():
         "print('ok')\n"
     )
     out = subprocess.run([sys.executable, "-c", probe],
+                         capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "ok"
+
+
+def test_import_leaves_litellm_env_untouched(tmp_path):
+    """Importing the package must not configure litellm for the host
+    process; constructing a local client (which will use litellm) does."""
+    env = {k: v for k, v in os.environ.items()
+           if k != "LITELLM_LOCAL_MODEL_COST_MAP"}
+    probe = (
+        "import os, pageindex\n"
+        "assert 'LITELLM_LOCAL_MODEL_COST_MAP' not in os.environ, "
+        "'stamped at import'\n"
+        f"pageindex.PageIndexLocalClient(storage_path={str(tmp_path / 's')!r})\n"
+        "assert os.environ['LITELLM_LOCAL_MODEL_COST_MAP'] == 'True'\n"
+        "print('ok')\n"
+    )
+    out = subprocess.run([sys.executable, "-c", probe], env=env,
                          capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "ok"
