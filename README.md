@@ -333,7 +333,7 @@ Each `*_config` helper is sugar over the explicit pieces — `client.agent_instr
 </details>
 
 
-## PageIndex Cloud
+# PageIndex Cloud
 
 The open-source version is designed for text-heavy PDFs. For scanned documents or PDFs with many images, use PageIndex Cloud.
 
@@ -353,6 +353,8 @@ print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 | Image retrieval & understanding | — | ✅ |
 | PageIndex File System | — | ✅ |
 | MCP server | — | ✅ |
+
+### More About PageIndex Cloud
 
 - [Scale PageIndex to Millions of Documents](https://pageindex.ai/blog/pageindex-filesystem) — **PageIndex File System** is a Cloud-only, file-level tree indexing layer that lets PageIndex reason over an entire corpus, not just a single document.
 - [Developer Dashboard](https://developer.pageindex.ai/) — manage your API keys and projects.
