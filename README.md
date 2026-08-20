@@ -287,7 +287,16 @@ Uses Anthropic's native Messages API and tool runner. Install it with `pip insta
 
 Pass a list of ids to `doc_id` to search several documents at once, and keep it identical across a conversation's calls.
 
-### 🤖 Integrate PageIndex with your own agent
+</details>
+
+<details>
+<summary>
+
+##  Integrate PageIndex with your own agent
+
+</summary>
+
+<br>
 
 Instead of calling PageIndex's agent, hand PageIndex's tools to yours. One call fills every slot:
 
@@ -330,6 +339,7 @@ tools = client.agent_tools()
 `agent_tools()` returns plain Python functions that work with LangChain, PydanticAI, and other agent frameworks.
 
 Each `*_config` helper is sugar over the explicit pieces — `client.agent_instructions()` for the system prompt and `client.as_openai_tools()` / `as_anthropic_tools()` / `as_claude_mcp()` for the tools — so you can swap in your own prompt whenever you need to. Locally, `doc_id` is enforced at the tool layer, not just prompted: out-of-scope lookups return `NOT_FOUND`.
+
 </details>
 
 
