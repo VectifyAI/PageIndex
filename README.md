@@ -335,32 +335,42 @@ Each `*_config` helper is sugar over the explicit pieces — `client.agent_instr
 
 ## PageIndex Cloud
 
-The open-source version is designed for text-heavy PDFs. For scanned documents or PDFs with many images, use PageIndex Cloud.
+The open-source version is ideal for text-heavy PDFs and local workflows. Use PageIndex Cloud when you need OCR for scanned documents, image understanding, hosted storage, or search across a large document library.
 
-Same client, same methods — pass a [PageIndex API key](https://dash.pageindex.ai/api-keys) and the work happens on our servers, with the production OCR, tree-building, and retrieval pipeline behind it:
+Moving from Local to Cloud only requires a [PageIndex API key](https://developer.pageindex.ai/):
 
 ```python
+# Local
+client = PageIndexClient()
+
+# Cloud
 client = PageIndexClient(api_key="pi-...")
+
+# The rest of your code stays the same
 doc_id = client.submit_document("report.pdf", wait=True)["doc_id"]
 print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 ```
 
-| | **Local** (this repo) | **Cloud** ([API key](https://dash.pageindex.ai/api-keys)) |
+| Capability | **Local** (this repo) | **Cloud** ([get an API key](https://developer.pageindex.ai/)) |
 |---|---|---|
-| Parsing | text extraction | hosted OCR |
-| Data storage | local | cloud |
-| Citations & references | page-level | line-level |
-| Image retrieval & understanding | — | ✅ |
-| PageIndex File System | — | ✅ |
+| Best for | text-heavy PDFs and local workflows | scanned, image-heavy, and large document collections |
+| Parsing | local text extraction | production OCR |
+| Storage | local filesystem | managed document library |
+| Citations | page-level | line-level |
+| Image understanding | — | ✅ |
+| Multi-document scale | manual | PageIndex File System |
 | MCP server | — | ✅ |
 
 ### More About PageIndex Cloud
 
 - [Scale PageIndex to Millions of Documents](https://pageindex.ai/blog/pageindex-filesystem) — **PageIndex File System** is a Cloud-only, file-level tree indexing layer that lets PageIndex reason over an entire corpus, not just a single document.
-- [Developer Dashboard](https://developer.pageindex.ai/) — manage your API keys and projects.
-- [PageIndex Cloud documentation](https://docs.pageindex.ai/) — explore API guides and reference documentation.
 
-For dedicated or private deployment (VPC, on-prem), [contact us](https://ii2abc2jejf.typeform.com/to/gVv7qkaN) or [book a demo](https://calendly.com/pageindex/meet).
+### Ready to Try It?
+
+- [Get a PageIndex API Key](https://developer.pageindex.ai/)
+- [Read the PageIndex Cloud Documentation](https://docs.pageindex.ai/)
+
+For dedicated deployment (VPC or on-premises), [contact us](https://ii2abc2jejf.typeform.com/to/gVv7qkaN) or [book a demo](https://calendly.com/pageindex/meet).
 
 
 
