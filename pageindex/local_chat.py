@@ -254,9 +254,8 @@ def _cache_extra_args(model_name: str) -> Optional[dict]:
     if provider == "anthropic" or (provider in ("bedrock", "vertex_ai")
                                    and "claude" in model.lower()):
         # The stable prefix plus the newest message, so each turn re-reads
-        # the turns before it. LiteLLM seeds nothing on its own (its hook
-        # fires only when injection points are passed), so this pair is the
-        # sole source of the marks on all three channels.
+        # the turns before it. LiteLLM seeds nothing unprompted, so this
+        # pair is the marks' sole source.
         return {"cache_control_injection_points": [
             {"location": "message", "role": "system"},
             {"location": "message", "index": -1}]}

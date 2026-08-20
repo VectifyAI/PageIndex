@@ -13,8 +13,7 @@ Tools never raise: every outcome, including errors, is returned as the
 same JSON envelope the cloud emits ({"success": true, ...} /
 {"error": ...}) — arguments outside a pruned local signature come back as
 that envelope too, on the direct and the call_tool path alike. One
-exception: a cloud 401/403 re-raises PageIndexAPIError — a dead key is
-for the caller to fix, not for the model to retry.
+exception: a cloud 401/403 re-raises PageIndexAPIError.
 """
 from __future__ import annotations
 

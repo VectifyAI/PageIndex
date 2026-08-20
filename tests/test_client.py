@@ -748,8 +748,7 @@ def test_summarize_tree_child_unrecoverable_raises(monkeypatch):
 
 
 def test_llm_completion_backend_reaches_litellm(monkeypatch):
-    """Indexing sends no cache params of its own (litellm seeds nothing
-    unprompted); backend keys pass through and win the merge."""
+    """No cache params of our own; backend keys reach litellm and win the merge."""
     import litellm
     captured = {}
 

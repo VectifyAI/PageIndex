@@ -82,8 +82,8 @@ def _extract_raw_chars(page, text_page) -> tuple[list[dict], list[dict]]:
         is_ws = js_is_ws(codepoint)
         # FPDFText_IsGenerated returns a c_int: 1 generated, 0 real, -1 error.
         # Only a POSITIVE 1 may mark a char generated. This is the package's
-        # only read: the page-mode unicode walk consumes this flag rather than
-        # re-reading PDFium (a second read is how astral chars desynced it).
+        # only read: the page-mode unicode walk consumes this flag rather
+        # than re-reading PDFium.
         is_gen = is_generated(text_page, index_value) == 1
         # PDFium inserts is_generated chars as layout placeholders for
         # Td/Tm jumps with no literal content-stream char (typically
