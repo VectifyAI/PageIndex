@@ -894,6 +894,8 @@ class PageIndexClient:
         doc_id: Optional[Union[str, list[str]]] = None,
         include_management: bool = False,
         model: Optional[str] = None,
+        model_settings: Optional[Any] = None,
+        name: str = "PageIndex",
     ) -> dict[str, Any]:
         """
         Document QA ``Agent`` kwargs for the OpenAI Agents SDK in one
@@ -912,9 +914,10 @@ class PageIndexClient:
 
         Prompt caching: OpenAI models cache server-side on their own;
         LiteLLM-routed Claude (Anthropic, Bedrock, Vertex) gets its
-        cache marks from the bundled ``model_settings``. Replace that
-        key wholesale and the marks go with it — per-run overrides via
-        ``RunConfig(model_settings=...)`` merge instead.
+        cache marks from the bundled ``model_settings``. Pass
+        ``model_settings`` here to layer your own on top — your fields
+        win and ``extra_args`` merge. Replacing the returned key
+        wholesale drops the marks instead.
 
         Args:
             doc_id: Document ID or list of IDs to target, as in
@@ -926,11 +929,16 @@ class PageIndexClient:
             model: Backend model name; overrides the local default. Same
                 grammar as ``chat_model`` (LiteLLM names; bare names are
                 OpenAI-compatible shorthand).
+            model_settings: Your own ``ModelSettings``, merged on top of
+                the bundled cache marks; included verbatim when no marks
+                apply.
+            name (str): Agent display name; in composition it also seeds
+                the SDK-derived handoff and ``as_tool`` names.
         """
         from .agent_tools import build_agent_instructions
         scope = self._local_doc_scope(doc_id)
         config: dict[str, Any] = {
-            "name": "PageIndex",
+            "name": name,
             "instructions": build_agent_instructions(
                 self, doc_id, scoped=scope is not None,
                 include_management=include_management),
@@ -949,6 +957,10 @@ class PageIndexClient:
             if extra_args:
                 from agents import ModelSettings
                 config["model_settings"] = ModelSettings(extra_args=extra_args)
+        if model_settings is not None:
+            marks = config.get("model_settings")
+            config["model_settings"] = (marks.resolve(model_settings)
+                                        if marks else model_settings)
         return config
 
     def as_anthropic_tools(self, include_management: bool = False,

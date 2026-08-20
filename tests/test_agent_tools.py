@@ -759,6 +759,7 @@ def test_openai_agent_config_local(client, store_path):
     assert config["model"] == client.retrieve_model
     assert client.openai_agent_config(model="gpt-x")["model"] == "gpt-x"
     assert Agent(**client.openai_agent_config()).name == "PageIndex"
+    assert client.openai_agent_config(name="Researcher")["name"] == "Researcher"
 
 
 def test_openai_agent_config_model_speaks_the_agents_sdk_grammar(tmp_path):
@@ -793,6 +794,23 @@ def test_openai_agent_config_carries_cache_marks_for_litellm_claude(tmp_path):
     # The per-call override is marked by its own routing, not the default's.
     marked = client.openai_agent_config(model="bedrock/claude-y")
     assert "cache_control_injection_points" in marked["model_settings"].extra_args
+
+
+def test_openai_agent_config_merges_caller_model_settings(tmp_path):
+    """Caller model_settings merge on top of the bundled cache marks
+    (caller fields win, extra_args dict-merge); with no marks the
+    caller's object rides through verbatim."""
+    pytest.importorskip("agents")
+    from agents import ModelSettings
+    client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
+                                  chat_model="anthropic/claude-x")
+    mine = ModelSettings(temperature=0.2, extra_args={"top_k": 5})
+    merged = client.openai_agent_config(model_settings=mine)["model_settings"]
+    assert merged.temperature == 0.2
+    assert merged.extra_args["top_k"] == 5
+    assert "cache_control_injection_points" in merged.extra_args
+    verbatim = client.openai_agent_config(model="gpt-x", model_settings=mine)
+    assert verbatim["model_settings"] is mine
 
 
 def test_plain_functions_answer_bad_arguments_with_the_envelope(client,
