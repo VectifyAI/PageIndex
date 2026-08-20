@@ -12,7 +12,9 @@ Workers run pass 1 + pass 2 per page assuming the union stays empty and
 poison the run the moment any page accumulates an extent; the driver then
 discards the parallel attempt and reruns the document on the sequential
 path, which is the source of truth. Any other worker failure falls back the
-same way, so this entry can only ever return sequential-identical output.
+same way, so this entry returns sequential-identical output — except in a
+spawn child re-importing an unguarded __main__, where it re-raises instead
+of silently duplicating the caller's whole run per worker.
 
 Worker startup pays the full package import chain plus its own document
 open; ``min_pages`` routes documents too small to amortize that to the

@@ -747,10 +747,9 @@ def test_summarize_tree_child_unrecoverable_raises(monkeypatch):
             structure, pdf_pages, small_node_tokens=0))
 
 
-def test_llm_completion_suppresses_litellm_cache_seeding(monkeypatch):
-    """Indexing prompts are single-shot: without an explicit injection
-    point litellm 1.97 seeds its own cache marks and every call pays the
-    write premium for nothing. Backend keys still override ours."""
+def test_llm_completion_backend_reaches_litellm(monkeypatch):
+    """Indexing sends no cache params of its own (litellm seeds nothing
+    unprompted); backend keys pass through and win the merge."""
     import litellm
     captured = {}
 
@@ -763,15 +762,15 @@ def test_llm_completion_suppresses_litellm_cache_seeding(monkeypatch):
     monkeypatch.setattr(litellm, "completion", fake_completion)
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     assert pageindex.utils.llm_completion("gpt-4o", "probe") == "ok"
-    assert captured["cache_control_injection_points"] == [
-        {"location": "message", "role": "system"}]
+    assert "cache_control_injection_points" not in captured
     token = pageindex.utils._llm_backend.set(
-        {"api_key": "x", "cache_control_injection_points": []})
+        {"api_key": "x", "max_retries": 3})
     try:
         pageindex.utils.llm_completion("gpt-4o", "probe")
     finally:
         pageindex.utils._llm_backend.reset(token)
-    assert captured["cache_control_injection_points"] == []
+    assert captured["api_key"] == "x"
+    assert captured["max_retries"] == 3
 
 
 def test_delete_survives_marker_tamper(local_client, tmp_path):

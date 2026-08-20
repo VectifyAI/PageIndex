@@ -479,8 +479,9 @@ class PageIndexClient:
         prompt prefix cache-marked automatically. The non-stream
         response carries the final answer only; streaming yields the
         agent's visible text as it is produced, including narration before
-        tool calls. ``finish_reason`` reports loop completion ("stop") —
-        the engine does not surface per-turn backend finish reasons. For
+        tool calls. ``finish_reason`` carries the final turn's native
+        finish reason — "stop", or the backend's "length" /
+        "content_filter" when the last turn was cut short. For
         the tool-use process and prompt-cache round-trip use
         ``responses()`` or ``messages()``.
 
@@ -813,7 +814,8 @@ class PageIndexClient:
         ``get_document_structure``, ``get_page_content``).
 
         Each function takes JSON-serializable arguments, returns a JSON
-        string, and reports failures inside that JSON instead of raising.
+        string, and reports failures inside that JSON instead of raising —
+        except a cloud 401/403, which raises PageIndexAPIError.
 
         Args:
             include_management (bool): Also expose tools that modify the

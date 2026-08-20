@@ -139,18 +139,6 @@ def _is_unrecoverable(exc: Exception) -> bool:
     return getattr(exc, "status_code", None) in _UNRECOVERABLE_STATUS
 
 
-def _no_cache_seeding_kwargs(backend):
-    """litellm 1.97 auto-marks Claude requests for prompt caching (system +
-    last message); indexing prompts are single-shot and unique, so every call
-    would pay the cache-write premium with nothing ever read back. A
-    system-role-only injection point matches no indexing message, and its
-    presence stops litellm seeding its own defaults; backend keys still
-    win."""
-    return {"cache_control_injection_points":
-                [{"location": "message", "role": "system"}],
-            **(backend or {})}
-
-
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
     import litellm
     max_retries = 10
@@ -165,7 +153,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
                 messages=messages,
                 drop_params=True,
                 # the loop is the retry policy; the merge lets a backend override win
-                **{"max_retries": 0, **_no_cache_seeding_kwargs(backend)},
+                **{"max_retries": 0, **(backend or {})},
             )
             content = response.choices[0].message.content
             if return_finish_reason:
@@ -198,7 +186,7 @@ async def llm_acompletion(model, prompt):
                 model=model,
                 messages=messages,
                 drop_params=True,
-                **{"max_retries": 0, **_no_cache_seeding_kwargs(backend)},
+                **{"max_retries": 0, **(backend or {})},
             )
             return response.choices[0].message.content
         except Exception as e:

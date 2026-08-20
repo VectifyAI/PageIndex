@@ -12,7 +12,9 @@ exist on the cloud.
 Tools never raise: every outcome, including errors, is returned as the
 same JSON envelope the cloud emits ({"success": true, ...} /
 {"error": ...}) — arguments outside a pruned local signature come back as
-that envelope too, on the direct and the call_tool path alike.
+that envelope too, on the direct and the call_tool path alike. One
+exception: a cloud 401/403 re-raises PageIndexAPIError — a dead key is
+for the caller to fix, not for the model to retry.
 """
 from __future__ import annotations
 
@@ -1531,7 +1533,8 @@ def build_agent_tools(client, include_management: bool = False,
     synthesized from the server's schemas, calls proxied over MCP. Local:
     the built-in contract tools over the local store. Every function returns
     the JSON envelope as a string and never raises for arguments its
-    signature accepts (cloud-only parameters are absent from the local
+    signature accepts — except a cloud 401/403, which re-raises
+    PageIndexAPIError (cloud-only parameters are absent from the local
     signatures; the call_tool path answers them with the guided envelope).
     ``doc_ids`` is the local allowlist, as in ``_tool_specs``.
     """
