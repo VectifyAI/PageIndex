@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import bisect
 import difflib
+import re
 from collections import Counter
 
 from .text_normalize import _is_whitespace
@@ -12,6 +13,8 @@ from .code_walk import (
     _char_category,
     _walk_codes,
 )
+
+_SURROGATES = re.compile("[\ud800-\udfff]")
 
 
 def _apply_font_unicode(
@@ -37,9 +40,12 @@ def _apply_font_unicode(
         if entry is None:
             return None
         next_block, measure_item = entry
+        # Broken font data (uniD83D glyph names, surrogate-band CIDs) yields
+        # lone-surrogate targets; patched into chars they crash utf-8 saves.
         if next_block == 1:
-            return [measure_item.get(code) or chr(code) for code in other_numbers]
-        return [measure_item.get((other_numbers[key_value] << 8) | other_numbers[key_value + 1]) or chr((other_numbers[key_value] << 8) | other_numbers[key_value + 1])
+            return [_SURROGATES.sub("\ufffd", measure_item.get(code) or chr(code))
+                    for code in other_numbers]
+        return [_SURROGATES.sub("\ufffd", measure_item.get((other_numbers[key_value] << 8) | other_numbers[key_value + 1]) or chr((other_numbers[key_value] << 8) | other_numbers[key_value + 1]))
                 for key_value in range(0, len(other_numbers) - 1, 2)]
 
     def apply(patches: list[tuple[int, str]], drops: list[int],

@@ -71,6 +71,8 @@ def _extract_raw_chars(page, text_page) -> tuple[list[dict], list[dict]]:
             if 0xDC00 <= low <= 0xDFFF:
                 codepoint = ((codepoint & 0x3FF) << 10) + (low & 0x3FF) + 0x10000
                 skip_next = True
+        if 0xD800 <= codepoint <= 0xDFFF:
+            codepoint = 0xFFFD  # unpaired surrogate: not utf-8 encodable
         # u == 0 (PDFium found no unicode for the glyph) is KEPT as '\x00':
         # text extraction emits the raw charcode for unmapped codes, so its items
         # really contain chr(0) for extension-font pieces at code 0, and the

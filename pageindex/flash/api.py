@@ -126,8 +126,10 @@ def page_index_flash(pdf, summary=True, summary_model=None,
     result = extract_toc(_validate_pdf(pdf), use_embedded_toc=use_embedded_toc)
     structure = result.get("structure", [])
     if optimize and structure:
-        result["optimize"] = _optimize(structure, result.get("page_texts") or [],
-                                       optimize == "full",
+        # bookmark-only extractions carry no page_texts; expand needs them
+        pages = result.get("page_texts") or []
+        result["optimize"] = _optimize(structure, pages,
+                                       optimize == "full" and bool(pages),
                                        optimize_model or summary_model)
     if summary and structure:
         import asyncio

@@ -5,6 +5,7 @@ import json
 import logging
 import multiprocessing
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -14,6 +15,8 @@ from .local_store import DocStore
 from .utils import run_off_loop
 
 logger = logging.getLogger(__name__)
+
+_SURROGATES = re.compile("[\ud800-\udfff]")
 
 
 def _now_iso() -> str:
@@ -124,6 +127,7 @@ class LocalAPI:
             raise
         except Exception as e:
             raise PageIndexAPIError(f"Failed to submit document: {e}") from e
+        self._check_page_bounds(structure, len(page_texts))
 
         doc_id = "pi-" + uuid.uuid4().hex
         pages = [{"page_index": i + 1, "markdown": text}
@@ -164,11 +168,31 @@ class LocalAPI:
         )
 
     @staticmethod
+    def _check_page_bounds(structure: list, page_count: int) -> None:
+        """The tree (pdfium) and stored pages (PyPDF2) come from different
+        parsers; a span outside 1..page_count IndexErrors every later read."""
+        stack = list(structure)
+        while stack:
+            node = stack.pop()
+            start, end = node.get("start_index"), node.get("end_index")
+            if (start is not None and end is not None
+                    and not (1 <= start and end <= page_count)):
+                raise PageIndexAPIError(
+                    f"Failed to submit document: the extracted structure "
+                    f"references pages {start}-{end} outside the PDF's "
+                    f"{page_count} readable pages."
+                )
+            stack.extend(node.get("nodes") or [])
+
+    @staticmethod
     def _extract_page_texts(file_path: str) -> list[str]:
         import PyPDF2
         with open(file_path, "rb") as f:
             reader = PyPDF2.PdfReader(f)
-            return [page.extract_text() or "" for page in reader.pages]
+            # PyPDF2 decodes broken ToUnicode maps with surrogatepass; lone
+            # surrogates would crash every utf-8 JSON save downstream.
+            return [_SURROGATES.sub("\ufffd", page.extract_text() or "")
+                    for page in reader.pages]
 
     def _index_standard(self, file_path: str, page_texts: list[str]) -> tuple[list, str | None]:
         from .page_index_classic import page_index_main

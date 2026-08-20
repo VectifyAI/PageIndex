@@ -24,6 +24,7 @@ from __future__ import annotations
 import multiprocessing
 import os
 import sys
+import threading
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import contextmanager
 from io import BytesIO
@@ -56,27 +57,42 @@ _worker_pdf_doc = None
 _worker_font_maps: dict = {}
 
 
+_window_lock = threading.Lock()
+_window_depth = 0
+_window_saved: dict = {}
+
+
 @contextmanager
 def _anonymous_main():
     """Hide __main__'s import identity while workers spawn: spawn re-executes
     the caller's script in every worker otherwise, which for an unguarded
     script means one duplicate full run per worker. Our workers import
-    everything by module name and never need __main__.
+    everything by module name and never need __main__. Depth-counted so
+    overlapping windows restore the true originals, not a mid-window snapshot.
 
     ponytail: window covers the whole map; a concurrent pool spawned from
     another thread whose tasks live in __main__ would break during it."""
+    global _window_depth, _window_saved
     main = sys.modules.get("__main__")
     if main is None:
         yield
         return
     d = main.__dict__
-    saved = {k: d.pop(k) for k in ("__file__", "__spec__") if k in d}
-    d["__spec__"] = None  # get_preparation_data reads it via attribute access
+    with _window_lock:
+        _window_depth += 1
+        if _window_depth == 1:
+            _window_saved = {k: d.pop(k) for k in ("__file__", "__spec__")
+                             if k in d}
+            d["__spec__"] = None  # get_preparation_data reads it via attribute access
     try:
         yield
     finally:
-        d.pop("__spec__", None)
-        d.update(saved)
+        with _window_lock:
+            _window_depth -= 1
+            if _window_depth == 0:
+                d.pop("__spec__", None)
+                d.update(_window_saved)
+                _window_saved = {}
 
 
 def _init_worker(kind: str, payload) -> None:

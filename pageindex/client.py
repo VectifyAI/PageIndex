@@ -253,6 +253,8 @@ class PageIndexClient:
                 status = self.get_document(doc_id).get("status")
                 poll_failures = 0
             except (PageIndexAPIError, requests.RequestException) as exc:
+                if getattr(exc, "status_code", None) in (401, 403, 404):
+                    raise  # a definite answer, not a poll failure
                 # Tolerate transient poll failures; a 30-minute wait should
                 # not die on one 502 or dropped connection.
                 poll_failures += 1

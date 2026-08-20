@@ -282,6 +282,41 @@ def test_submit_defaults_to_flash(local_client, sample_pdf, monkeypatch):
     assert local_client._api._store.get_meta(doc_id)["mode"] == "flash"
 
 
+def test_submit_rejects_structure_beyond_stored_pages(local_client, sample_pdf,
+                                                      monkeypatch):
+    """A tree spanning pages the store lacks fails submit instead of saving a doc whose reads IndexError."""
+    monkeypatch.setattr(
+        pageindex.flash, "page_index_flash",
+        lambda pdf, **kwargs: {
+            "doc_name": "sample.pdf",
+            "structure": [{"title": "Root", "start_index": 1,
+                           "end_index": 3, "summary": "s", "nodes": []}]})
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda model, prompt, **kw: "d.")
+    with pytest.raises(PageIndexAPIError, match="pages 1-3 outside"):
+        local_client.submit_document(sample_pdf)
+    assert local_client._api._store.list_metas() == []
+
+
+def test_submit_survives_pypdf2_lone_surrogates(local_client, sample_pdf,
+                                                monkeypatch):
+    """PyPDF2 decodes broken ToUnicode with surrogatepass; the store gets U+FFFD, not a utf-8-fatal str."""
+    import PyPDF2
+    monkeypatch.setattr(PyPDF2.PageObject, "extract_text",
+                        lambda self: "\ud83dello broken")
+    monkeypatch.setattr(
+        pageindex.flash, "page_index_flash",
+        lambda p, **kwargs: {
+            "structure": [{"title": "T", "start_index": 1,
+                           "end_index": 1, "summary": "s", "nodes": []}]})
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda model, prompt, **kw: "d.")
+    doc_id = local_client.submit_document(sample_pdf)["doc_id"]
+    markdown = local_client.get_ocr(doc_id)["result"][0]["markdown"]
+    assert "\ud83d" not in markdown
+    assert markdown.startswith("�ello")
+
+
 def test_page_index_flash_rejects_unknown_optimize():
     from pageindex.flash import page_index_flash
     with pytest.raises(ValueError, match="optimize must be"):

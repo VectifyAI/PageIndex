@@ -168,3 +168,99 @@ def test_optimize_wins_over_deprecated_optimize_expand(tmp_path, monkeypatch):
     with pytest.raises(PageIndexAPIError, match="optimize='merge'"):
         page_index_flash(str(tmp_path / "missing.pdf"), summary=False,
                          optimize=None)
+
+
+def test_lone_surrogate_from_broken_tounicode_is_replaced(monkeypatch):
+    """An unpaired UTF-16 surrogate leaves as U+FFFD, not a str that crashes utf-8 save."""
+    import json
+    from io import BytesIO
+
+    import pypdfium2 as pdfium
+    import pypdfium2.raw as pdfium_c
+    from conftest import build_pdf
+    from pageindex.flash.parser_pdfium_charlevel.char_extract import (
+        _extract_raw_chars)
+
+    orig = pdfium_c.FPDFText_GetUnicode
+    monkeypatch.setattr(pdfium_c, "FPDFText_GetUnicode",
+                        lambda tp, i: 0xD83D if i == 0 else orig(tp, i))
+    pdf = pdfium.PdfDocument(BytesIO(build_pdf(["Hello broken cmap"])))
+    page = pdf[0]
+    raw_chars, _objects = _extract_raw_chars(page, page.get_textpage().raw)
+    text = "".join(char["ch"] for char in raw_chars)
+    assert "\ud83d" not in text
+    assert text.startswith("�ello")
+    json.dumps(text)  # the save-time crash this guards against
+
+
+def test_lone_surrogate_targets_never_patched_into_chars():
+    """A surrogate-band code with no cmap entry (chr fallback) must not patch a lone surrogate back in."""
+    from pageindex.flash.parser_pdfium_charlevel.unicode_apply import (
+        _apply_font_unicode)
+
+    char = {"i": 0, "ch": "X", "is_gen": False}
+    show_codes = [(7, (0xD8, 0x3D), 100.0)]
+    map_cache = {7: (2, {})}  # Identity map, no ToUnicode: target = chr(0xD83D)
+
+    _apply_font_unicode([char], [], show_codes, None, map_cache)
+
+    assert char["ch"] == "�"
+
+
+def test_anonymous_main_overlapping_windows_restore(monkeypatch):
+    """The last window out must restore the true originals, not a mid-window snapshot."""
+    import sys
+    import threading
+
+    from pageindex.flash.parser_pdfium_parallel import _anonymous_main
+
+    main = sys.modules["__main__"]
+    spec = object()
+    monkeypatch.setattr(main, "__file__", "sentinel-file", raising=False)
+    monkeypatch.setattr(main, "__spec__", spec, raising=False)
+    a_in, b_in, a_out = (threading.Event() for _ in range(3))
+
+    def first():
+        with _anonymous_main():
+            a_in.set()
+            assert b_in.wait(5)
+        a_out.set()
+
+    def second():
+        assert a_in.wait(5)
+        with _anonymous_main():
+            b_in.set()
+            assert a_out.wait(5)
+
+    threads = [threading.Thread(target=first), threading.Thread(target=second)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(10)
+    assert main.__spec__ is spec
+    assert main.__file__ == "sentinel-file"
+
+
+def test_optimize_full_skips_expand_without_page_texts(tmp_path, monkeypatch):
+    """A bookmark-only extraction (no page_texts) skips expand; merge still runs."""
+    from conftest import build_pdf
+    from pageindex.flash import api as flash_api
+
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    calls = {}
+
+    def fake_optimize(structure, pages, do_expand, model):
+        calls["pages"] = pages
+        calls["do_expand"] = do_expand
+        return {"merges": 0}
+
+    monkeypatch.setattr(flash_api, "_optimize", fake_optimize)
+    monkeypatch.setattr(flash_api, "extract_toc",
+                        lambda pdf, use_embedded_toc=True: {
+                            "structure": [{"title": "T", "start_index": 1,
+                                           "end_index": 1, "nodes": []}]})
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    result = flash_api.page_index_flash(str(pdf), summary=False)
+    assert calls == {"pages": [], "do_expand": False}
+    assert result["optimize"] == {"merges": 0}

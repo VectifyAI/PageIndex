@@ -2363,6 +2363,24 @@ def test_submit_wait_poll_error_carries_doc_id(fake_cloud_client, monkeypatch):
         cloud.submit_document("whatever.pdf", wait=True)
 
 
+def test_submit_wait_reraises_definite_poll_answers(fake_cloud_client,
+                                                    monkeypatch):
+    """A 401/403/404 poll answer is final: re-raised untouched, no retries, no keep-polling advice."""
+    cloud = fake_cloud_client(["processing"])
+    polls = {"n": 0}
+
+    def denied(doc_id):
+        polls["n"] += 1
+        raise PageIndexAPIError("Failed to get document metadata: 401",
+                                status_code=401)
+
+    monkeypatch.setattr(cloud, "get_document", denied)
+    with pytest.raises(PageIndexAPIError, match="401") as err:
+        cloud.submit_document("whatever.pdf", wait=True)
+    assert polls["n"] == 1
+    assert "Processing continues" not in str(err.value)
+
+
 def test_config_helpers_reject_empty_doc_id_on_cloud():
     """An explicitly empty scope must not silently widen to the whole
     library — cloud has no tool-layer allowlist to enforce it."""

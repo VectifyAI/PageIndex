@@ -2038,3 +2038,14 @@ def test_messages_without_credentials_raises_contract_error(client,
     with pytest.raises(PageIndexAPIError,
                        match="Anthropic backend is not configured"):
         client.messages("q", model="claude-test")
+
+
+@needs_anthropic
+def test_messages_keyless_backend_still_raises_contract_error(client,
+                                                              monkeypatch):
+    """A backend dict without credentials must not disarm the pre-check."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    with pytest.raises(PageIndexAPIError,
+                       match="Anthropic backend is not configured"):
+        client.messages("q", model="claude-test", backend={"timeout": 30})

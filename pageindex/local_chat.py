@@ -978,8 +978,11 @@ def run_messages(client, messages, model: str,
     merged = _merged_backend(client, backend)
     # The SDK defers credential resolution to request time and raises a
     # bare TypeError there — pre-check for the contract's PageIndexAPIError.
-    if not merged and not (os.environ.get("ANTHROPIC_API_KEY")
-                           or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
+    # default_headers counts: it can carry auth (or the SDK's Omit escape).
+    if (not any(key in (merged or {})
+                for key in ("api_key", "auth_token", "default_headers"))
+            and not (os.environ.get("ANTHROPIC_API_KEY")
+                     or os.environ.get("ANTHROPIC_AUTH_TOKEN"))):
         raise PageIndexAPIError(
             "The Anthropic backend is not configured: set the "
             "ANTHROPIC_API_KEY environment variable, or pass an api_key "
