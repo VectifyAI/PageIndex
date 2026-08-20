@@ -136,7 +136,7 @@ Full results, data, and the runner are in the [benchmark repo](https://github.co
 <details>
 <summary>
 
-# Detailed Usage Guide
+## Detailed Usage Guide
 
 </summary>
 
@@ -333,7 +333,7 @@ Each `*_config` helper is sugar over the explicit pieces — `client.agent_instr
 </details>
 
 
-# PageIndex Cloud
+## PageIndex Cloud
 
 The open-source version is designed for text-heavy PDFs. For scanned documents or PDFs with many images, use PageIndex Cloud.
 
