@@ -31,22 +31,22 @@
 <details open>
 <summary><h2>Updates</h2></summary>
 
-- [2026/08] 🔥 [**PageIndex SDK**](#-quickstart) — `pip install pageindex` now ships **local mode**: index, retrieve, and chat entirely on your machine with your own LLM key, or point the same client at PageIndex Cloud with an API key.
-- [2026/08] ⚡ [**PageIndex Flash**](#-step-1-build-the-tree-index) — tree structure generation from PDFs in seconds, with structure extracted heuristically instead of by an LLM.
-- [PageIndex Chat](https://app.pageindex.ai) — Human-like document analysis agent [platform](https://chat.pageindex.ai) for professional long documents. Also available via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer).
+- [2026/08] 🔥 [**PageIndex SDK**](#quickstart) — `pip install -U pageindex` now ships **local mode**: index, retrieve, and chat entirely on your machine with your own LLM key, or point the same client at PageIndex Cloud with an API key.
+- [2026/08] ⚡ [**PageIndex Flash**](#step-2-build-the-tree-index) — tree structure generation from PDFs in seconds, with structure extracted heuristically instead of by an LLM.
+- [PageIndex Chat](https://chat.pageindex.ai) — a human-like document analysis agent for long professional documents. Also available via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer).
 
 </details>
 
 
 
-# What is PageIndex?
+## What is PageIndex?
 
 Are you frustrated with vector database retrieval accuracy for long professional documents? Vector-based RAG retrieves by semantic **similarity**. But **similarity ≠ relevance** — what retrieval actually needs is relevance, and relevance requires **reasoning**. On professional documents that demand contextual understanding, domain expertise, and multi-step reasoning, similarity search misses what is relevant but not similar, and returns what is similar but not relevant.
 
 Inspired by AlphaGo, **[PageIndex](https://vectify.ai/pageindex)** replaces the vector index with a **hierarchical tree index** and lets an LLM **reason** its way through it — the way a human expert flips to the right section of a long report. Retrieval happens in two steps:
 
-1. **Index** — generate **tree structure** index for each document
-2. **Retrieve** — retrieve infomation via LLM-based **tree search**
+1. **Index** — generate a **tree-structure index** for each document
+2. **Retrieve** — retrieve information via LLM-based **tree search**
 
 <div align="center">
   <a href="https://pageindex.ai/blog/pageindex-intro" target="_blank" title="The PageIndex Framework">
@@ -67,11 +67,11 @@ Inspired by AlphaGo, **[PageIndex](https://vectify.ai/pageindex)** replaces the 
 
 It is ideal for financial reports, legal documents, regulatory filings, technical manuals, medical literature, academic textbooks — any long, complex professional document.
 
-> PageIndex achieved **state-of-the-art** [98.7% accuracy](https://github.com/VectifyAI/Mafin2.5-FinanceBench) on FinanceBench (financial document QA benchmark), vastly outperforming vector-based RAG — see [Benchmarks](#-benchmarks).
+> PageIndex achieved **state-of-the-art** [98.7% accuracy](https://github.com/VectifyAI/Mafin2.5-FinanceBench) on FinanceBench (financial document QA benchmark), vastly outperforming vector-based RAG — see [Benchmarks](#benchmarks).
 
 
 
-# Quickstart
+## Quickstart
 
 ```bash
 pip install -U pageindex
@@ -81,7 +81,6 @@ pip install -U pageindex
 ```python
 import os
 from pageindex import PageIndexClient
-import os
 
 os.environ["OPENAI_API_KEY"] = "your-openai-key"
 
@@ -102,8 +101,10 @@ print(answer)
 - **`index_model` — a basic model is sufficient.** The index model generates the document's tree index. A basic model is sufficient to produce a good tree structure.
 - **`chat_model` — use the best model you can afford.** The chat model searches the tree to retrieve information. See [Query cost and accuracy](#query-cost-and-accuracy).
 
+See the [Detailed Usage Guide](#detailed-usage-guide) to configure other models and integrate PageIndex with your own agent.
 
-# Benchmarks
+
+## Benchmarks
 
 ### Indexing cost
 
@@ -131,17 +132,19 @@ Full results, data, and the runner are in the [benchmark repo](https://github.co
 
 
 
+<a id="detailed-usage-guide"></a>
 <details>
-<summary><h1>Detailed Usage Guide</h1></summary>
+<summary><h2>Detailed Usage Guide</h2></summary>
 
 <br>
 
-## ⚙️ Step 1: Initialize the client
+### ⚙️ Step 1: Initialize the client
 
 Create a local client and choose the models used for indexing and retrieval:
 
 ```python
 from pageindex import PageIndexClient
+import os
 
 client = PageIndexClient(
     index_model="gpt-5.6-luna",
@@ -156,7 +159,7 @@ client = PageIndexClient(
 
 - **`storage_path`** specifies where indexed documents are stored locally.
 
-### Model naming conventions
+#### Model naming conventions
 
 Model names follow [LiteLLM's naming convention](https://docs.litellm.ai/docs/providers). Choose the format that matches your provider:
 
@@ -164,27 +167,29 @@ Model names follow [LiteLLM's naming convention](https://docs.litellm.ai/docs/pr
 
 ```python
 os.environ["OPENAI_API_KEY"] = "your-openai-api-key"
-chat_model="gpt-5.6-sol"
+chat_model = "gpt-5.6-sol"
 ```
 
 **Anthropic** — prefix the model name with `anthropic/` and set `ANTHROPIC_API_KEY`:
 
 ```python
 os.environ["ANTHROPIC_API_KEY"] = "your-anthropic-api-key"
-chat_model="anthropic/claude-sonnet-4-6"
+chat_model = "anthropic/claude-sonnet-4-6"
 ```
 
 **OpenRouter** — prefix the provider and model name with `openrouter/` and set `OPENROUTER_API_KEY`:
 
 ```python
 os.environ["OPENROUTER_API_KEY"] = "your-openrouter-api-key"
-chat_model="openrouter/anthropic/claude-sonnet-4-6"
+chat_model = "openrouter/anthropic/claude-sonnet-4-6"
 ```
 
 For model names and API key settings for other providers, see the [LiteLLM provider documentation](https://docs.litellm.ai/docs/providers).
 
 
-## 🌲 Step 2: Build the tree index
+<a id="step-2-build-the-tree-index"></a>
+
+### 🌲 Step 2: Build the tree index
 
 `submit_document` defaults to **Flash** indexing: the structure is extracted from the PDF's own layout (no LLM), and a model is called only for node summaries and the tree-optimization expansion pass. It takes seconds.
 
@@ -232,7 +237,7 @@ See more example [documents](https://github.com/VectifyAI/PageIndex/tree/main/ex
 
 
 
-## 💬 Step 3: Ask questions
+### 💬 Step 3: Ask questions
 
 `chat()` is the one-line surface. Underneath it is a document-QA agent, and you can talk to it over whichever protocol your stack already speaks:
 
@@ -278,7 +283,7 @@ Uses Anthropic's native Messages API and tool runner. Install it with `pip insta
 
 Pass a list of ids to `doc_id` to search several documents at once, and keep it identical across a conversation's calls.
 
-## 🤖 Integrate PageIndex with your own agent
+### 🤖 Integrate PageIndex with your own agent
 
 Instead of calling PageIndex's agent, hand PageIndex's tools to yours. One call fills every slot:
 
@@ -324,11 +329,11 @@ Each `*_config` helper is sugar over the explicit pieces — `client.agent_instr
 </details>
 
 
-# PageIndex Cloud
+## PageIndex Cloud
 
 The open-source version is designed for text-heavy PDFs. For scanned documents or PDFs with many images, use PageIndex Cloud.
 
-Same client, same methods — pass a PageIndex [API key](https://dash.pageindex.ai/api-keys) and the work happens on our servers, with the production OCR, tree-building, and retrieval pipeline behind it:
+Same client, same methods — pass a [PageIndex API key](https://dash.pageindex.ai/api-keys) and the work happens on our servers, with the production OCR, tree-building, and retrieval pipeline behind it:
 
 ```python
 client = PageIndexClient(api_key="pi-...")
@@ -339,15 +344,15 @@ print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 | | **Local** (this repo) | **Cloud** ([API key](https://dash.pageindex.ai/api-keys)) |
 |---|---|---|
 | Parsing | text extraction | hosted OCR |
-| Data Storage | local | cloud |
+| Data storage | local | cloud |
 | Citations & references | page-level | line-level |
 | Image retrieval & understanding | — | ✅ |
-| File system | — | ✅ |
+| PageIndex File System | — | ✅ |
 | MCP server | — | ✅ |
 
 - [Scale PageIndex to Millions of Documents](https://pageindex.ai/blog/pageindex-filesystem) — **PageIndex File System** is a Cloud-only, file-level tree indexing layer that lets PageIndex reason over an entire corpus, not just a single document.
 - [Developer Dashboard](https://developer.pageindex.ai/) — manage your API keys and projects.
-- [PageIndex Cloud documentation](https://docs.vectify.ai/) — explore API guides and reference documentation.
+- [PageIndex Cloud documentation](https://docs.pageindex.ai/) — explore API guides and reference documentation.
 
 For dedicated or private deployment (VPC, on-prem), [contact us](https://ii2abc2jejf.typeform.com/to/gVv7qkaN) or [book a demo](https://calendly.com/pageindex/meet).
 
@@ -355,7 +360,7 @@ For dedicated or private deployment (VPC, on-prem), [contact us](https://ii2abc2
 
 ---
 
-# ⭐ Support Us
+## ⭐ Support Us
 
 Leave us a star 🌟 if you like our project. Thank you!  
 
