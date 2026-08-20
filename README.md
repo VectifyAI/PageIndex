@@ -107,9 +107,7 @@ print(answer)
 
 ### Indexing cost
 
-Building a tree locally runs **about $0.001 per page** with `index_model="gpt-5.6-luna"` — so a 1,000-page textbook costs a little over a dollar and a few minutes, once, and every later question reuses it. 
-
-**The index model is not the bottleneck.** PageIndex is designed not to rely heavily on the model used at index time, so in our experiments a cheap model does not hurt quality.
+Building a tree locally runs **about $0.001 per page** with `index_model="gpt-5.6-luna"` — so a 1,000-page textbook costs a little over a dollar and a few minutes, once, and every later question reuses it. PageIndex is designed not to rely heavily on the model used at index time, so in our experiments a basic model does not hurt quality.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/index-cost-dark.png">
@@ -118,7 +116,7 @@ Building a tree locally runs **about $0.001 per page** with `index_model="gpt-5.
 
 
 
-### Query Cost and Accuracy
+### Query cost and accuracy
 
 [**PageIndex-OSS-Benchmark**](https://github.com/VectifyAI/PageIndex-OSS-Benchmark) measures exactly the setup in the quickstart above — `PageIndexClient()` in local mode, flash indexing, no OCR — on 62 lookup questions over 34 PDFs (1,945 pages) drawn from [MMLongBench-Doc-V2](https://github.com/VectifyAI/MMLongBench-Doc-V2). Every question's answer is a fact stated in running text, so a wrong answer is a **retrieval or reading failure**, not a reasoning one.
 
