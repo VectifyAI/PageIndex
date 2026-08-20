@@ -100,7 +100,7 @@ print(answer)
 ### Model Recommendations
 
 - **`index_model` — a basic model is sufficient.** The index model generates the document's tree index. A basic model is sufficient to produce a good tree structure.
-- **`chat_model` — use the best model you can afford.** The chat model searches the tree to retrieve information. See [Benchmarks](#-benchmarks) for the trade-off between cost and accuracy.
+- **`chat_model` — use the best model you can afford.** The chat model searches the tree to retrieve information. See [Query cost and accuracy](#query-cost-and-accuracy).
 
 
 # Benchmarks
@@ -326,7 +326,9 @@ Each `*_config` helper is sugar over the explicit pieces — `client.agent_instr
 
 # PageIndex Cloud
 
-Same client, same methods — pass an [API key](https://dash.pageindex.ai/api-keys) and the work happens on our servers, with the production OCR, tree-building, and retrieval pipeline behind it:
+The open-source version is designed for text-heavy PDFs. For scanned documents or PDFs with many images, use PageIndex Cloud.
+
+Same client, same methods — pass a PageIndex [API key](https://dash.pageindex.ai/api-keys) and the work happens on our servers, with the production OCR, tree-building, and retrieval pipeline behind it:
 
 ```python
 client = PageIndexClient(api_key="pi-...")
@@ -334,28 +336,23 @@ doc_id = client.submit_document("report.pdf", wait=True)["doc_id"]
 print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 ```
 
-
 | | **Local** (this repo) | **Cloud** ([API key](https://dash.pageindex.ai/api-keys)) |
 |---|---|---|
-| Parsing | standard PDF text extraction | [PageIndex OCR](https://pageindex.ai/blog/ocr) — built to preserve document hierarchy |
-| Scanned / image-only PDFs | not supported | supported |
-| LLM | yours — bring a provider key (`OPENAI_API_KEY`, …) and pay that provider | managed, included with your PageIndex key |
-| Storage | `./.pageindex` on disk | hosted library, folders, search |
-| Where data goes | never leaves your machine | PageIndex Cloud |
-| Image retrieval & understanding | not supported — text layer only | supported |
+| Parsing | text extraction | hosted OCR |
+| Data Storage | local | cloud |
 | Citations & references | page-level | line-level |
-| Extras | — | folders, hosted search, MCP server |
+| Image retrieval & understanding | — | ✅ |
+| File system | — | ✅ |
+| MCP server | — | ✅ |
+
+- [Scale PageIndex to Millions of Documents](https://pageindex.ai/blog/pageindex-filesystem) — **PageIndex File System** is a Cloud-only, file-level tree indexing layer that lets PageIndex reason over an entire corpus, not just a single document.
+- [Developer Dashboard](https://developer.pageindex.ai/) — manage your API keys and projects.
+- [PageIndex Cloud documentation](https://docs.vectify.ai/) — explore API guides and reference documentation.
 
 For dedicated or private deployment (VPC, on-prem), [contact us](https://ii2abc2jejf.typeform.com/to/gVv7qkaN) or [book a demo](https://calendly.com/pageindex/meet).
 
 
 
-
-
-# 🧭 Resources
-
-* 📝 [Blog](https://pageindex.ai/blog): technical articles, research insights, and product updates.
-* 🔧 [Developer](https://pageindex.ai/developer): MCP setup, API docs, and integration guides.
 ---
 
 # ⭐ Support Us
