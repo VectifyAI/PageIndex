@@ -134,7 +134,11 @@ Full results, data, and the runner are in the [benchmark repo](https://github.co
 
 <a id="detailed-usage-guide"></a>
 <details>
-<summary><h2>Detailed Usage Guide</h2></summary>
+<summary>
+
+# Detailed Usage Guide
+
+</summary>
 
 <br>
 
