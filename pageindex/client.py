@@ -910,15 +910,11 @@ class PageIndexClient:
         environment, so its model auth comes from there —
         ``chat_backend`` does not travel with it.
 
-        Prompt caching configures itself for most destinations (OpenAI
-        server-side; Anthropic- and Bedrock-hosted Claude via LiteLLM's
-        defaults). Vertex-hosted Claude is the exception — pass the
-        injection points yourself::
-
-            Agent(**config, model_settings=ModelSettings(extra_args={
-                "cache_control_injection_points": [
-                    {"location": "message", "role": "system"},
-                    {"location": "message", "index": -1}]}))
+        Prompt caching: OpenAI models cache server-side on their own;
+        LiteLLM-routed Claude (Anthropic, Bedrock, Vertex) gets its
+        cache marks from the bundled ``model_settings``. Replace that
+        key wholesale and the marks go with it — per-run overrides via
+        ``RunConfig(model_settings=...)`` merge instead.
 
         Args:
             doc_id: Document ID or list of IDs to target, as in
@@ -948,6 +944,11 @@ class PageIndexClient:
                 # caller's process, outside our completion helpers.
                 from .utils import _repair_litellm_types
                 _repair_litellm_types()
+            from .local_chat import _cache_extra_args
+            extra_args = _cache_extra_args(model)
+            if extra_args:
+                from agents import ModelSettings
+                config["model_settings"] = ModelSettings(extra_args=extra_args)
         return config
 
     def as_anthropic_tools(self, include_management: bool = False,

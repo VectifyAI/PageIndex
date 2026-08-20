@@ -777,6 +777,24 @@ def test_openai_agent_config_model_speaks_the_agents_sdk_grammar(tmp_path):
             == "litellm/groq/llama-x")
 
 
+def test_openai_agent_config_carries_cache_marks_for_litellm_claude(tmp_path):
+    """LiteLLM-routed Claude gets the same cache marks the engine
+    attaches in chat_completions(); OpenAI-bound models stay unmarked
+    (their caching is server-side, and LiteLLM seeds nothing on its
+    own)."""
+    pytest.importorskip("agents")
+    from pageindex.local_chat import _cache_extra_args
+    client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
+                                  chat_model="anthropic/claude-x")
+    settings = client.openai_agent_config()["model_settings"]
+    assert settings.extra_args == _cache_extra_args("anthropic/claude-x")
+    assert "cache_control_injection_points" in settings.extra_args
+    assert "model_settings" not in client.openai_agent_config(model="gpt-x")
+    # The per-call override is marked by its own routing, not the default's.
+    marked = client.openai_agent_config(model="bedrock/claude-y")
+    assert "cache_control_injection_points" in marked["model_settings"].extra_args
+
+
 def test_plain_functions_answer_bad_arguments_with_the_envelope(client,
                                                                 store_path):
     """agent_tools() functions must not raise into a framework loop:
