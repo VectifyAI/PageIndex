@@ -1818,6 +1818,33 @@ def test_cloud_agent_tools_trust_the_gated_endpoint(monkeypatch):
     assert len(cloud.agent_tools(include_management=True)) == 1
 
 
+def test_extract_result_skips_non_dict_messages():
+    """A 200 body of null, a batched array, or an SSE string frame must
+    surface as the contract's PageIndexAPIError, not an AttributeError."""
+    from pageindex.mcp_bridge import McpBridge
+
+    bridge = McpBridge("http://unused", {})
+
+    class _Resp:
+        def __init__(self, text, content_type="application/json"):
+            self.headers = {"Content-Type": content_type}
+            self.status_code = 200
+            self.content = text.encode("utf-8")
+
+        def json(self):
+            return json.loads(self.content)
+
+    for body in ("null", '[{"jsonrpc": "2.0", "id": 1, "result": {}}]',
+                 '"hello"'):
+        with pytest.raises(PageIndexAPIError, match="no reply matching"):
+            bridge._extract_result(_Resp(body), 1)
+
+    sse = ('data: "noise"\n\n'
+           'data: {"jsonrpc": "2.0", "id": 1, "result": {"ok": true}}\n\n')
+    result = bridge._extract_result(_Resp(sse, "text/event-stream"), 1)
+    assert result == {"ok": True}
+
+
 def test_bridge_call_tool_surfaces_iserror(monkeypatch):
     import requests as requests_mod
     import pageindex.mcp_bridge as mcp_bridge

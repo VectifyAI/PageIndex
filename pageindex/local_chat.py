@@ -233,14 +233,15 @@ def _cache_extra_args(model_name: str) -> Optional[dict]:
     channel live-verified), mark the managed system prefix and the newest
     message via LiteLLM's injection param so the loop's later turns and a
     conversation's next calls read them instead of repaying full price.
-    Provider resolution is LiteLLM's own, so this predicate can never
-    disagree with where the request actually routes."""
-    if "/" not in model_name or model_name.startswith("openai/"):
+    The name is normalized exactly as the wire path normalizes it before
+    LiteLLM's own resolution, so this predicate cannot disagree with where
+    the request actually routes."""
+    wire = model_name.removeprefix("litellm/")
+    if "/" not in wire or wire.startswith("openai/"):
         return None
     try:
         from litellm import get_llm_provider
-        model, provider, _, _ = get_llm_provider(
-            model=model_name.removeprefix("litellm/"))
+        model, provider, _, _ = get_llm_provider(model=wire)
     except Exception:
         return None
     if provider == "anthropic" or (provider in ("bedrock", "vertex_ai")

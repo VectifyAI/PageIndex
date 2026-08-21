@@ -15,7 +15,10 @@ logger = logging.getLogger(__name__)
 def _write_json_atomic(path: Path, data) -> None:
     tmp = path.with_name(path.name + f".{uuid.uuid4().hex}.tmp")
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
+        # errors=: a lone surrogate (os.fsdecode'd path in metadata, an
+        # LLM-written \ud83d escape) must not crash the store after a whole
+        # indexing run — it lands as U+FFFD instead.
+        with open(tmp, "w", encoding="utf-8", errors="replace") as f:
             json.dump(data, f, ensure_ascii=False)
             f.flush()
             os.fsync(f.fileno())

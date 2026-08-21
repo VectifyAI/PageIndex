@@ -42,6 +42,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: pip install -r requirements.txt pytest
+      # tests.yml's 'with' leg — the release gate must run the framework tests
+      - run: pip install openai-agents claude-agent-sdk anthropic
       - run: python -m pytest -q
 
   publish:

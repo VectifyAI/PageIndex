@@ -342,7 +342,7 @@ def test_submit_missing_llm_key_fails_loud(local_client, sample_pdf, monkeypatch
         return pageindex.utils.llm_completion("gpt-4o", "probe")
     monkeypatch.setattr(page_index_module, "page_index_main", first_llm_call)
     monkeypatch.setattr(pageindex.flash, "page_index_flash", first_llm_call)
-    for kwargs in ({}, {"mode": "flash"}):
+    for kwargs in ({"mode": "standard"}, {"mode": "flash"}):
         with pytest.raises(PageIndexAPIError, match="OPENAI_API_KEY"):
             local_client.submit_document(sample_pdf, **kwargs)
     assert local_client.list_documents()["total"] == 0
@@ -360,6 +360,17 @@ def test_submit_rejections(local_client, sample_pdf, tmp_path):
         local_client.submit_document(sample_pdf, folder_id="f1")
     with pytest.raises(PageIndexAPIError, match="beta_headers"):
         local_client.submit_document(sample_pdf, beta_headers=["block_reference"])
+
+
+def test_write_json_atomic_replaces_lone_surrogates(tmp_path):
+    """A lone surrogate (an os.fsdecode'd path in metadata, an LLM-written
+    \\ud83d escape) must not crash the store's writer after a whole
+    indexing run — it lands as the encoder's replacement character."""
+    from pageindex.local_store import _read_json, _write_json_atomic
+
+    path = tmp_path / "doc.json"
+    _write_json_atomic(path, {"src": "bad-\udcff-path"})
+    assert _read_json(path)["src"] == "bad-?-path"
 
 
 def test_corrupt_pdf_raises_api_error(local_client, tmp_path):

@@ -66,6 +66,41 @@ def test_optimize_full_keyless_reports_file_errors_first(tmp_path, monkeypatch):
     assert "structure" in result
 
 
+def test_empty_outline_gate_carries_page_texts(tmp_path):
+    """The gate's bookmark-built trees feed the same summary/expand passes
+    as detected ones, so its result must carry the per-page text too."""
+    from conftest import build_pdf
+    from pageindex.flash.main import extract_toc
+
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["Alpha body", "Beta body"]))
+    result = extract_toc(str(pdf))
+    assert result["structure"] == []  # the short-document gate fired
+    assert len(result["page_texts"]) == 2
+    assert "Alpha" in result["page_texts"][0]
+
+
+def test_propose_children_clamps_to_loaded_pages(monkeypatch):
+    """A tree from another parser may overrun the loaded pages; the span is
+    clamped instead of IndexErroring into a silently frozen node."""
+    import asyncio
+    from types import SimpleNamespace
+    import pageindex.tree_optimize as tree_optimize
+
+    seen = {}
+
+    async def fake_ask(model, prompt):
+        seen["prompt"] = prompt
+        return {"subsections": []}
+
+    monkeypatch.setattr(tree_optimize, "ask_model", fake_ask)
+    node = {"title": "T", "start_index": 1, "end_index": 3, "node_id": "n1"}
+    out = asyncio.run(tree_optimize.propose_children(
+        node, ["page one", "page two"], SimpleNamespace(model="m")))
+    assert out == []
+    assert "<page_2>" in seen["prompt"] and "<page_3>" not in seen["prompt"]
+
+
 def test_bootstrap_reimport_is_not_swallowed(monkeypatch):
     # An unguarded caller script re-imported by a spawn worker must die loudly,
     # not fall back to a silent full sequential rerun in every worker.
@@ -220,24 +255,32 @@ def test_anonymous_main_overlapping_windows_restore(monkeypatch):
     monkeypatch.setattr(main, "__file__", "sentinel-file", raising=False)
     monkeypatch.setattr(main, "__spec__", spec, raising=False)
     a_in, b_in, a_out = (threading.Event() for _ in range(3))
+    errors = []
 
     def first():
-        with _anonymous_main():
-            a_in.set()
-            assert b_in.wait(5)
-        a_out.set()
+        try:
+            with _anonymous_main():
+                a_in.set()
+                assert b_in.wait(5)
+            a_out.set()
+        except BaseException as exc:  # in-thread failures only warn in pytest
+            errors.append(exc)
 
     def second():
-        assert a_in.wait(5)
-        with _anonymous_main():
-            b_in.set()
-            assert a_out.wait(5)
+        try:
+            assert a_in.wait(5)
+            with _anonymous_main():
+                b_in.set()
+                assert a_out.wait(5)
+        except BaseException as exc:
+            errors.append(exc)
 
     threads = [threading.Thread(target=first), threading.Thread(target=second)]
     for thread in threads:
         thread.start()
     for thread in threads:
         thread.join(10)
+    assert not errors
     assert main.__spec__ is spec
     assert main.__file__ == "sentinel-file"
 

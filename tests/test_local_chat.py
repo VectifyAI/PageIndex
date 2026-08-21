@@ -2034,3 +2034,13 @@ def test_messages_without_credentials_raises_contract_error(client,
         with pytest.raises(PageIndexAPIError,
                            match="Anthropic backend is not configured"):
             client.messages("q", model="claude-test", backend=backend)
+
+
+def test_cache_extra_args_follow_wire_normalization():
+    """litellm/<bare-name> rides the OpenAI protocol on the wire (bare
+    names get openai/), so it must carry no Anthropic cache marks;
+    explicit anthropic routes keep them."""
+    pytest.importorskip("litellm")
+    assert local_chat._cache_extra_args("litellm/claude-sonnet-4-5") is None
+    assert local_chat._cache_extra_args("anthropic/claude-x") is not None
+    assert local_chat._cache_extra_args("litellm/anthropic/claude-x") is not None
