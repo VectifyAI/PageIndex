@@ -1039,6 +1039,32 @@ def test_cloud_error_and_empty_delete(cloud, monkeypatch):
     assert client.delete_document("pi-1") == {}
 
 
+def test_cloud_errors_carry_status_code(cloud, monkeypatch, sample_pdf):
+    """Every non-200 raise carries the HTTP status, so callers can branch
+    on 429-vs-401 instead of parsing message text."""
+    client, calls, fake = cloud
+    _patch_requests(monkeypatch,
+                    lambda m, url, kw: FakeResponse(status_code=418, text="no"))
+    attempts = [
+        lambda: client.submit_document(sample_pdf),
+        lambda: client.get_ocr("pi-1"),
+        lambda: client.get_tree("pi-1"),
+        lambda: client.submit_query("pi-1", "q"),
+        lambda: client.get_retrieval("r-1"),
+        lambda: client.chat_completions(
+            messages=[{"role": "user", "content": "q"}]),
+        lambda: client.get_document("pi-1"),
+        lambda: client.delete_document("pi-1"),
+        lambda: client.list_documents(),
+        lambda: client.create_folder("f"),
+        lambda: client.list_folders(),
+    ]
+    for attempt in attempts:
+        with pytest.raises(PageIndexAPIError) as err:
+            attempt()
+        assert err.value.status_code == 418
+
+
 def test_cloud_chat_stream_parsing(cloud, monkeypatch):
     client, calls, fake = cloud
     lines = [
@@ -1165,8 +1191,8 @@ def test_litellm_model_normalizes_without_key_prejudgment(monkeypatch):
     from pageindex.utils import _litellm_model
 
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    assert _litellm_model("litellm/gpt-4o", None) == "openai/gpt-4o"
-    assert _litellm_model("gpt-4o", None) == "openai/gpt-4o"
+    assert _litellm_model("litellm/gpt-4o") == "openai/gpt-4o"
+    assert _litellm_model("gpt-4o") == "openai/gpt-4o"
 
 
 def test_custom_provider_map_passes_provider_precheck(monkeypatch):
@@ -1178,7 +1204,7 @@ def test_custom_provider_map_passes_provider_precheck(monkeypatch):
 
     monkeypatch.setattr(litellm, "custom_provider_map",
                         [{"provider": "my-llm", "custom_handler": object()}])
-    assert _litellm_model("my-llm/model-a", None) == "my-llm/model-a"
+    assert _litellm_model("my-llm/model-a") == "my-llm/model-a"
 
 
 def test_backend_args_are_local_only():

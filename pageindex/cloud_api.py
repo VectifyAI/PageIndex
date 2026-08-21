@@ -78,7 +78,9 @@ class CloudAPI:
             )
 
         if response.status_code != 200:
-            raise PageIndexAPIError(f"Failed to submit document: {response.text}")
+            raise PageIndexAPIError(
+                f"Failed to submit document: {response.text}",
+                status_code=response.status_code)
         return response.json()
 
     # ---------- OCR FUNCTIONALITY ----------
@@ -103,7 +105,9 @@ class CloudAPI:
             timeout=30
         )
         if response.status_code != 200:
-            raise PageIndexAPIError(f"Failed to get OCR result: {response.text}")
+            raise PageIndexAPIError(
+                f"Failed to get OCR result: {response.text}",
+                status_code=response.status_code)
         return response.json()
 
     # ---------- TREE GENERATION ----------
@@ -127,7 +131,9 @@ class CloudAPI:
             timeout=30
         )
         if response.status_code != 200:
-            raise PageIndexAPIError(f"Failed to get tree result: {response.text}")
+            raise PageIndexAPIError(
+                f"Failed to get tree result: {response.text}",
+                status_code=response.status_code)
         return response.json()
 
     # ---------- RETRIEVAL ----------
@@ -156,7 +162,9 @@ class CloudAPI:
             timeout=30
         )
         if response.status_code != 200:
-            raise PageIndexAPIError(f"Failed to submit retrieval: {response.text}")
+            raise PageIndexAPIError(
+                f"Failed to submit retrieval: {response.text}",
+                status_code=response.status_code)
         return response.json()
 
     def get_retrieval(self, retrieval_id: str) -> Dict[str, Any]:
@@ -175,7 +183,9 @@ class CloudAPI:
             timeout=30
         )
         if response.status_code != 200:
-            raise PageIndexAPIError(f"Failed to get retrieval result: {response.text}")
+            raise PageIndexAPIError(
+                f"Failed to get retrieval result: {response.text}",
+                status_code=response.status_code)
         return response.json()
 
     # ---------- CHAT COMPLETIONS ----------
@@ -229,7 +239,9 @@ class CloudAPI:
         )
 
         if response.status_code != 200:
-            raise PageIndexAPIError(f"Failed to get chat completion: {response.text}")
+            raise PageIndexAPIError(
+                f"Failed to get chat completion: {response.text}",
+                status_code=response.status_code)
 
         if stream:
             if stream_metadata:
@@ -333,7 +345,9 @@ class CloudAPI:
             timeout=30
         )
         if response.status_code != 200:
-            raise PageIndexAPIError(f"Failed to delete document: {response.text}")
+            raise PageIndexAPIError(
+                f"Failed to delete document: {response.text}",
+                status_code=response.status_code)
         return response.json() if response.content else {}
 
     def list_documents(self, limit: int = 50, offset: int = 0, folder_id: Optional[str] = None) -> Dict[str, Any]:
@@ -369,7 +383,9 @@ class CloudAPI:
             timeout=30
         )
         if response.status_code != 200:
-            raise PageIndexAPIError(f"Failed to list documents: {response.text}")
+            raise PageIndexAPIError(
+                f"Failed to list documents: {response.text}",
+                status_code=response.status_code)
         return response.json()
 
     # ---------- FOLDER MANAGEMENT ----------
@@ -406,7 +422,9 @@ class CloudAPI:
             timeout=30
         )
         if response.status_code != 200:
-            raise PageIndexAPIError(f"Failed to create folder: {response.text}")
+            raise PageIndexAPIError(
+                f"Failed to create folder: {response.text}",
+                status_code=response.status_code)
         return response.json()
 
     def list_folders(self, parent_folder_id: Optional[str] = None) -> Dict[str, Any]:
@@ -433,5 +451,7 @@ class CloudAPI:
             timeout=30
         )
         if response.status_code != 200:
-            raise PageIndexAPIError(f"Failed to list folders: {response.text}")
+            raise PageIndexAPIError(
+                f"Failed to list folders: {response.text}",
+                status_code=response.status_code)
         return response.json()

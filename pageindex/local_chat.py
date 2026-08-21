@@ -214,7 +214,7 @@ def _openai_model(protocol: str, model_name: str, backend=None):
     from .utils import _litellm_model, _repair_litellm_types
     _repair_litellm_types()
     try:
-        wire = _litellm_model(model_name, backend)
+        wire = _litellm_model(model_name)
     except litellm.NotFoundError as exc:
         raise PageIndexAPIError(str(exc)) from exc
     return LitellmModel(wire, api_key=(backend or {}).get("api_key"),
@@ -857,14 +857,34 @@ def _require_anthropic() -> None:
         ) from exc
 
 
+_ANTHROPIC_CLIENTS: dict = {}  # backend key -> client, kept open for reuse
+
+
 def _anthropic_client(backend=None):
-    """The backend client — the seam tests replace with a fake transport."""
+    """The backend client — the seam tests replace with a fake transport.
+    One client per backend: each construction pays ~45 ms of SSL-context
+    build and a cold connection pool. A backend whose values defeat
+    hashing constructs per call, as before."""
     import anthropic
+    kwargs = _sdk_backend(backend)
     try:
-        return anthropic.Anthropic(**_sdk_backend(backend))
+        key = tuple(sorted(
+            (k, tuple(sorted(v.items())) if isinstance(v, dict) else v)
+            for k, v in kwargs.items()))
+        hash(key)
+    except TypeError:
+        key = None
+    if key in _ANTHROPIC_CLIENTS:
+        return _ANTHROPIC_CLIENTS[key]
+    try:
+        client = anthropic.Anthropic(**kwargs)
     except TypeError as exc:
         raise PageIndexAPIError(
             f"The Anthropic backend is not configured: {exc}") from exc
+    if key is not None and len(_ANTHROPIC_CLIENTS) < 8:
+        # ponytail: cache capped at 8 backends; the tail constructs per call
+        _ANTHROPIC_CLIENTS[key] = client
+    return client
 
 
 def _anthropic_system(extra_system, block: Optional[str]) -> list[dict]:
@@ -989,8 +1009,10 @@ def run_messages(client, messages, model: str,
         if _cache_marks(system_blocks, prepared) < 4 else {})
     merged = _merged_backend(client, backend)
     backend_client = _anthropic_client(merged)
-    # A caller-owned http_client must survive the per-call closes below.
-    owns_transport = "http_client" not in (merged or {})
+    # Close only a per-call construction: cached clients stay open for
+    # reuse; a caller-owned http_client survives regardless.
+    owns_transport = ("http_client" not in (merged or {})
+                      and backend_client not in _ANTHROPIC_CLIENTS.values())
     if max_tokens is None:
         max_tokens = _default_max_tokens(model, thinking)
     runner = backend_client.beta.messages.tool_runner(

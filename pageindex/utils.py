@@ -77,7 +77,7 @@ def run_off_loop(func, *args):
         return pool.submit(func, *args).result()
 
 
-def _litellm_model(model, backend):
+def _litellm_model(model):
     """Normalize to LiteLLM's grammar (``litellm/`` strips, bare names get
     the ``openai/`` wire form — same as the chat lane) and refuse an
     unknown provider with the 404 the retry loop treats as unrecoverable.
@@ -135,7 +135,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
     max_retries = 10
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
     backend = _llm_backend.get()
-    model = _litellm_model(model, backend)
+    model = _litellm_model(model)
     _repair_litellm_types()
     for i in range(max_retries):
         try:
@@ -171,7 +171,7 @@ async def llm_acompletion(model, prompt):
     max_retries = 10
     messages = [{"role": "user", "content": prompt}]
     backend = _llm_backend.get()
-    model = _litellm_model(model, backend)
+    model = _litellm_model(model)
     _repair_litellm_types()
     for i in range(max_retries):
         try:

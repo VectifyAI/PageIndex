@@ -1881,6 +1881,41 @@ def test_messages_default_max_tokens_clears_thinking_budget(client, fake_anthrop
     assert calls[0]["max_tokens"] == 11000  # explicit value passes through
 
 
+@needs_anthropic
+def test_anthropic_client_cached_per_backend(monkeypatch):
+    """One real client per backend: construction pays ~45ms of SSL-context
+    build and a cold connection pool each call otherwise."""
+    monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
+    a = local_chat._anthropic_client({"api_key": "k"})
+    assert local_chat._anthropic_client({"api_key": "k"}) is a
+    assert local_chat._anthropic_client({"api_key": "k2"}) is not a
+
+
+@needs_anthropic
+def test_messages_reuses_cached_client_across_runs(client, monkeypatch):
+    """A cached backend client survives the per-run close: two consecutive
+    runs ride the same client (a closed one refuses the second request),
+    and the cache hit constructs nothing."""
+    def handler(request):
+        return anthropic_httpx.Response(
+            200, json=_anthropic_message([{"type": "text", "text": "ok"}],
+                                         "end_turn"))
+    cached = anthropic.Anthropic(
+        api_key="test",
+        http_client=anthropic_httpx.Client(
+            transport=anthropic_httpx.MockTransport(handler)))
+    monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS",
+                        {(("api_key", "test"),): cached})
+
+    def boom(**kwargs):
+        raise AssertionError("cache hit expected — no new construction")
+    monkeypatch.setattr(anthropic, "Anthropic", boom)
+    for _ in range(2):
+        result = client.messages("q", model="claude-test", max_tokens=64,
+                                 backend={"api_key": "test"})
+        assert result["stop_reason"] == "end_turn"
+
+
 def test_record_chat_finish_records_and_delegates():
     recorded = {}
     closed = {"n": 0}

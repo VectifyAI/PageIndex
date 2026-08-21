@@ -432,7 +432,9 @@ def _refetch_entry(client, doc_id: str) -> Optional[dict[str, Any]]:
 
 
 def _await_completion(client, entry: dict[str, Any], wait: bool) -> dict[str, Any]:
-    """Re-poll a processing document for up to 3 minutes when wait is set."""
+    """Re-poll a processing document for up to 3 minutes when wait is set.
+    Local documents are stored already terminal, so the wait never engages
+    there."""
     doc_id = entry.get("id")
     if not wait or not doc_id or entry.get("status") in ("completed", "failed"):
         return entry
