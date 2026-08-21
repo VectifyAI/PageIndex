@@ -755,7 +755,7 @@ def test_summarize_tree_fails_loud_when_every_model_call_fails(monkeypatch):
                   "nodes": [
                       {"title": "A", "start_index": 1, "end_index": 1},
                       {"title": "B", "start_index": 2, "end_index": 2}]}]
-    with pytest.raises(RuntimeError, match="check LLM credentials"):
+    with pytest.raises(RuntimeError, match="every summary call failed"):
         asyncio.run(pageindex.utils.summarize_tree(structure, pdf_pages))
 
 

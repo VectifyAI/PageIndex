@@ -164,6 +164,7 @@ if __name__ == "__main__":
         user_opt = {
             'index_model': args.index_model,
             'model': args.model,
+            'summary_model': args.summary_model,
         }
         
         # Load config with defaults from config.yaml
@@ -179,6 +180,7 @@ if __name__ == "__main__":
             if_add_node_summary=args.if_add_node_summary,
             summary_token_threshold=args.summary_token_threshold,
             model=opt.model,
+            summary_model=opt.summary_model,
             if_add_doc_description=args.if_add_doc_description,
             if_add_node_text=args.if_add_node_text,
             if_add_node_id=args.if_add_node_id

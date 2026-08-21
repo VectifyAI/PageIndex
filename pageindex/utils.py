@@ -717,7 +717,8 @@ async def generate_summaries_for_structure(structure, model=None):
     if nodes and not any(node['summary'] for node in nodes):
         raise RuntimeError(
             "Summary generation failed for all nodes "
-            "(check LLM credentials and model availability)"
+            "(every summary call failed or returned empty; "
+            "check the model and its context limits)"
         )
     return structure
 
@@ -919,7 +920,8 @@ async def summarize_tree(structure, pdf_pages, model=None,
     if (asked and not answered) or not _any_summary(structure):
         raise RuntimeError(
             "Summary generation failed for all nodes "
-            "(check LLM credentials and model availability)"
+            "(every summary call failed or returned empty; "
+            "check the model and its context limits)"
         )
 
     strip_internal_keys(structure)

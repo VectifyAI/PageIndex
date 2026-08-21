@@ -49,6 +49,57 @@ class MarkdownCliTest(unittest.TestCase):
             self.assertTrue(out.exists(), res.stdout.decode())
             json.loads(out.read_text())
 
+    def test_md_cli_summary_model_drives_summary_calls(self):
+        """--summary-model owns the markdown summary lane: node summaries
+        and the doc description bill it, never the index model given
+        alongside — the same chain the flag's help promises on PDFs."""
+        import json
+        import os
+        import subprocess
+        import sys
+        import tempfile
+        from pathlib import Path
+
+        script = Path(__file__).resolve().parent.parent / "run_pageindex.py"
+        driver = (
+            "import json, runpy, sys\n"
+            "import pageindex.utils as U\n"
+            "seen = []\n"
+            "async def fake_acompletion(model, prompt, **kw):\n"
+            "    seen.append(model)\n"
+            "    return 'node summary'\n"
+            "def fake_completion(model, prompt, **kw):\n"
+            "    seen.append(model)\n"
+            "    return 'doc description'\n"
+            "U.llm_acompletion = fake_acompletion\n"
+            "U.llm_completion = fake_completion\n"
+            "target = sys.argv[1]\n"
+            "sys.argv = [target] + sys.argv[2:]\n"
+            "runpy.run_path(target, run_name='__main__')\n"
+            "print('MODELS_SEEN=' + json.dumps(sorted(set(seen))))\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            md = Path(tmp) / "notes.md"
+            md.write_text("# Title\n\nIntro.\n\n## Section\n\nBody.\n")
+            drv = Path(tmp) / "driver.py"
+            drv.write_text(driver)
+            env = dict(os.environ)
+            env["PYTHONPATH"] = str(script.parent)
+            res = subprocess.run(
+                [sys.executable, str(drv), str(script),
+                 "--md_path", str(md),
+                 "--if-add-node-summary", "yes",
+                 "--if-add-doc-description", "yes",
+                 "--summary-token-threshold", "1",
+                 "--summary-model", "SUMMARY-SENTINEL",
+                 "--index-model", "INDEX-DECOY"],
+                capture_output=True, cwd=tmp, env=env, timeout=180)
+            self.assertEqual(res.returncode, 0, res.stderr.decode())
+            line = next(l for l in res.stdout.decode().splitlines()
+                        if l.startswith("MODELS_SEEN="))
+            self.assertEqual(json.loads(line[len("MODELS_SEEN="):]),
+                             ["SUMMARY-SENTINEL"], res.stdout.decode())
+
 
 if __name__ == "__main__":
     unittest.main()
