@@ -1371,9 +1371,9 @@ def test_submit_scrubs_surrogates_from_the_stored_name(
                         if real(str(p)) == "sample.pdf" else real(p))
     with pytest.warns(UserWarning, match="stored as"):
         result = local_client.submit_document(sample_pdf, mode="standard")
-    assert result["name"] == "re�port.pdf"
+    assert result["name"] == "re\ufffdport.pdf"
     docs = local_client.list_documents()["documents"]
-    assert [d["name"] for d in docs] == ["re�port.pdf"]
+    assert [d["name"] for d in docs] == ["re\ufffdport.pdf"]
 
 
 def test_submit_rejects_nan_metadata(local_client):

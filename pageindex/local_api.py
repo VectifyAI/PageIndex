@@ -114,7 +114,7 @@ class LocalAPI:
         # Surrogates from a surrogateescape'd filesystem name would be
         # mangled by the store's errors="replace" write; scrub now so the
         # returned name is byte-for-byte the stored name.
-        doc_name = _SURROGATES.sub("�", os.path.basename(file_path))
+        doc_name = _SURROGATES.sub("\ufffd", os.path.basename(file_path))
         self._unique_doc_name(doc_name)
 
         try:
