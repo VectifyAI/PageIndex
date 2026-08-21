@@ -157,12 +157,19 @@ def parse_charlevel_meta_parallel(
     if w <= 1 or n_pages < min_pages:
         return parse_charlevel_meta(doc_handle)
 
-    executor = ProcessPoolExecutor(
-        max_workers=w,
-        mp_context=multiprocessing.get_context("spawn"),
-        initializer=_init_worker,
-        initargs=src,
-    )
+    try:
+        executor = ProcessPoolExecutor(
+            max_workers=w,
+            mp_context=multiprocessing.get_context("spawn"),
+            initializer=_init_worker,
+            initargs=src,
+        )
+    except Exception:
+        # Restricted environments (no working POSIX semaphores) refuse the
+        # pool at construction; the sequential path needs none of that.
+        if getattr(multiprocessing.current_process(), "_inheriting", False):
+            raise
+        return parse_charlevel_meta(doc_handle)
     try:
         with _anonymous_main():
             results = list(executor.map(_run_page, range(n_pages)))

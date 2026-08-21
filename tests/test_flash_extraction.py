@@ -153,6 +153,30 @@ def test_bootstrap_reimport_is_not_swallowed(monkeypatch):
     assert len(out) == len(meta) > 0  # normal failures still fall back sequentially
 
 
+def test_pool_construction_failure_falls_back_sequential(monkeypatch):
+    """Restricted environments (no working POSIX semaphores) refuse the pool
+    at construction, before any work is mapped; indexing must take the
+    sequential path, not die — except in a bootstrapping spawn child, where
+    a sequential rerun would duplicate the whole run per worker."""
+    import multiprocessing
+
+    from pageindex.flash import parser_pdfium_parallel as mod
+
+    class RefusedExecutor:
+        def __init__(self, *a, **k):
+            raise OSError("Function not implemented")
+
+    monkeypatch.setattr(mod, "ProcessPoolExecutor", RefusedExecutor)
+    out, meta = mod.parse_charlevel_meta_parallel(str(PDF), workers=2,
+                                                  min_pages=1)
+    assert len(out) == len(meta) > 0
+
+    cur = multiprocessing.current_process()
+    monkeypatch.setattr(cur, "_inheriting", True, raising=False)
+    with pytest.raises(OSError):
+        mod.parse_charlevel_meta_parallel(str(PDF), workers=2, min_pages=1)
+
+
 def test_submit_document_refuses_during_bootstrap(tmp_path, monkeypatch):
     import multiprocessing
 
