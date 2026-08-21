@@ -49,7 +49,7 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt pytest
       # mirror tests.yml's install shapes: the gate must cover the framework
-      # tests, the no-framework import paths, and the pdfium 4.x floor alike
+      # tests, the no-framework import paths, and the pdfium 4.x insurance alike
       - if: matrix.agent-frameworks == 'without'
         run: pip uninstall -y openai-agents
       - if: matrix.agent-frameworks == 'with'
