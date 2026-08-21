@@ -66,6 +66,7 @@ from .utils import (ConfigLoader, _is_unrecoverable, llm_acompletion,
 
 TRIGGER_PAGES = 5        # only look ahead on nodes larger than this
 ROUTING_COST = 1         # R(v), in pages
+EXPAND_CONCURRENCY = 8   # low cap: a rate-limit burst would hit the fatal exhausted-retry path
 PAGE_CHARS = 6000        # per-page text handed to the model
 TITLE_MAX_CHARS = 200    # a union title longer than this falls back to a page label
 
@@ -659,82 +660,102 @@ async def expand(structure, pages, lines, args, log, frozen):
     """
     changed = False
     queue = [n for n, _ in flatten(structure)]
+    semaphore = asyncio.Semaphore(EXPAND_CONCURRENCY)
 
-    while queue:
-        node = queue.pop(0)
-        if not is_frontier(node) or node.get("node_id") in frozen:
-            continue
-
-        span = S(node)
-        if span <= args.trigger_pages:
-            continue                     # below the trigger, stay collapsed
-
-        note(args.progress, f"    expand {node.get('node_id'):>8}  S={span}  "
-                            f"pages {node['start_index']}-{subtree_end(node)} ...")
-        candidates = []
-        cached = children_from_cache(node, args.cache, args.kinds)
-        if cached:
-            candidates.append(("cache", cached))
-
-        attempts = 0
+    async def proposals_for(node):
+        """The model half of one node's lookahead: the empty-retry ladder and
+        absorbed errors run inside the task; log entries come back so the
+        apply phase writes them in wave order."""
+        entries, llm_candidates, attempts = [], [], 0
         while attempts <= args.empty_retries:
             attempts += 1
             try:
-                proposed = await propose_children(node, pages, args)
+                async with semaphore:
+                    proposed = await propose_children(node, pages, args)
             except Exception as exc:
                 if _is_unrecoverable(exc):
                     raise  # every remaining node would fail identically
-                log.append({"op": "expand", "node_id": node.get("node_id"),
-                            "decision": "error", "attempt": attempts,
-                            "detail": f"{type(exc).__name__}: {exc}"})
+                entries.append({"op": "expand", "node_id": node.get("node_id"),
+                                "decision": "error", "attempt": attempts,
+                                "detail": f"{type(exc).__name__}: {exc}"})
                 continue
             if proposed:
-                candidates.append((f"llm:{attempts}", proposed))
+                llm_candidates.append((f"llm:{attempts}", proposed))
                 break                    # an empty answer is retried, not trusted
+        return llm_candidates, attempts, entries
 
-        if not candidates:
-            note(args.progress, f"           -> no children found, kept collapsed")
+    while queue:
+        wave, queue = queue, []
+        ready = []
+        for node in wave:
+            if not is_frontier(node) or node.get("node_id") in frozen:
+                continue
+            span = S(node)
+            if span <= args.trigger_pages:
+                continue                 # below the trigger, stay collapsed
+            note(args.progress, f"    expand {node.get('node_id'):>8}  S={span}  "
+                                f"pages {node['start_index']}-{subtree_end(node)} ...")
+            ready.append((node, span))
+
+        results = await asyncio.gather(*(proposals_for(n) for n, _ in ready),
+                                       return_exceptions=True)
+        proposals = []
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
+            proposals.append(result)
+
+        for (node, span), (llm_candidates, attempts, entries) in zip(ready, proposals):
+            log.extend(entries)
+            candidates = []
+            cached = children_from_cache(node, args.cache, args.kinds)
+            if cached:
+                candidates.append(("cache", cached))
+            candidates.extend(llm_candidates)
+
+            if not candidates:
+                note(args.progress, f"           -> no children found, kept collapsed")
+                log.append({"op": "expand", "node_id": node.get("node_id"),
+                            "decision": "no_children", "S": span, "attempts": attempts})
+                frozen.add(node.get("node_id"))
+                continue
+
+            scored = []
+            for source, children in candidates:
+                sized = assign_ends(node, children, lines)
+                cost, residual = expand_cost(node, sized, args.routing)
+                scored.append({"source": source, "children": sized,
+                               "expand_cost": cost, "S_residual": residual})
+            scored.sort(key=lambda s: s["expand_cost"])
+            best = scored[0]
+
+            cost = best["expand_cost"]
+            gain = span - cost
+            ratio = gain / span if span else 0.0
+            keep = cost < span and ratio >= args.min_gain_ratio
+
+            note(args.progress,
+                 f"           -> {len(best['children'])} children from {best['source']}, "
+                 f"cost {cost} vs {span}, "
+                 f"{'expand (gain %d)' % gain if keep else 'kept collapsed'}")
             log.append({"op": "expand", "node_id": node.get("node_id"),
-                        "decision": "no_children", "S": span, "attempts": attempts})
+                        "decision": "expand" if keep else "keep_collapsed",
+                        "S": span, "expand_cost": cost, "expand_gain": gain,
+                        "gain_ratio": round(ratio, 3), "S_residual": best["S_residual"],
+                        "source": best["source"],
+                        "considered": [{"source": s["source"], "children": len(s["children"]),
+                                        "expand_cost": s["expand_cost"]} for s in scored],
+                        "children": [{"node_id": c["node_id"], "title": c["title"],
+                                      "start_index": c["start_index"],
+                                      "end_index": c["end_index"],
+                                      "S": c["end_index"] - c["start_index"] + 1}
+                                     for c in best["children"]]})
+
             frozen.add(node.get("node_id"))
-            continue
-
-        scored = []
-        for source, children in candidates:
-            sized = assign_ends(node, children, lines)
-            cost, residual = expand_cost(node, sized, args.routing)
-            scored.append({"source": source, "children": sized,
-                           "expand_cost": cost, "S_residual": residual})
-        scored.sort(key=lambda s: s["expand_cost"])
-        best = scored[0]
-
-        cost = best["expand_cost"]
-        gain = span - cost
-        ratio = gain / span if span else 0.0
-        keep = cost < span and ratio >= args.min_gain_ratio
-
-        note(args.progress,
-             f"           -> {len(best['children'])} children from {best['source']}, "
-             f"cost {cost} vs {span}, "
-             f"{'expand (gain %d)' % gain if keep else 'kept collapsed'}")
-        log.append({"op": "expand", "node_id": node.get("node_id"),
-                    "decision": "expand" if keep else "keep_collapsed",
-                    "S": span, "expand_cost": cost, "expand_gain": gain,
-                    "gain_ratio": round(ratio, 3), "S_residual": best["S_residual"],
-                    "source": best["source"],
-                    "considered": [{"source": s["source"], "children": len(s["children"]),
-                                    "expand_cost": s["expand_cost"]} for s in scored],
-                    "children": [{"node_id": c["node_id"], "title": c["title"],
-                                  "start_index": c["start_index"],
-                                  "end_index": c["end_index"],
-                                  "S": c["end_index"] - c["start_index"] + 1}
-                                 for c in best["children"]]})
-
-        frozen.add(node.get("node_id"))
-        if keep:
-            changed = True
-            attach_children(node, best["children"], lines)
-            queue.extend(node["nodes"])   # recurse into the kept children
+            if keep:
+                changed = True
+                attach_children(node, best["children"], lines)
+                queue.extend(node["nodes"])   # recurse into the kept children
     return changed
 
 
