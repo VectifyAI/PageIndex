@@ -1165,6 +1165,13 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
         
  
 async def process_large_node_recursively(node, page_list, opt=None, logger=None):
+    if node.get('nodes'):
+        await asyncio.gather(*[
+            process_large_node_recursively(child_node, page_list, opt, logger=logger)
+            for child_node in node['nodes']
+        ])
+        return node
+
     node_page_list = page_list[node['start_index']-1:node['end_index']]
     token_num = sum([page[1] for page in node_page_list])
     
@@ -1184,13 +1191,6 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None)
             node['nodes'] = post_processing(valid_node_toc_items, node['end_index'])
             node['end_index'] = valid_node_toc_items[0]['start_index'] if valid_node_toc_items else node['end_index']
         
-    if 'nodes' in node and node['nodes']:
-        tasks = [
-            process_large_node_recursively(child_node, page_list, opt, logger=logger)
-            for child_node in node['nodes']
-        ]
-        await asyncio.gather(*tasks)
-    
     return node
 
 async def tree_parser(page_list, opt, doc=None, logger=None):
