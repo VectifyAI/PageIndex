@@ -1418,3 +1418,29 @@ def test_submit_flash_empty_structure_points_to_standard(
                         lambda pdf, **kwargs: {"structure": []})
     with pytest.raises(PageIndexAPIError, match="mode='standard'"):
         local_client.submit_document(sample_pdf)
+
+
+def test_expand_queries_a_wave_concurrently(monkeypatch):
+    """Eligible frontier nodes are proposed in one concurrent wave, not one
+    at a time — and never wider than the cap: a burst tripping rate limits
+    would hit the fatal exhausted-retry path."""
+    import pageindex.tree_optimize as tree_optimize
+
+    inflight = {"now": 0, "peak": 0}
+
+    async def slow_empty(model, prompt):
+        inflight["now"] += 1
+        inflight["peak"] = max(inflight["peak"], inflight["now"])
+        await asyncio.sleep(0.01)
+        inflight["now"] -= 1
+        return ""
+    monkeypatch.setattr(tree_optimize, "llm_acompletion", slow_empty)
+    structure = [{"title": f"T{i}", "start_index": 1 + 6 * i,
+                  "end_index": 6 + 6 * i, "node_id": f"{i:04d}", "nodes": []}
+                 for i in range(10)]
+    pages = ["heading\nbody text"] * 60
+    lines = [["heading", "body text"]] * 60
+    asyncio.run(tree_optimize.optimize(structure, pages, lines, model="m",
+                                       do_expand=True))
+    assert inflight["peak"] > 1
+    assert inflight["peak"] <= 8
