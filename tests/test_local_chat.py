@@ -2055,6 +2055,22 @@ def test_bad_model_settings_wrap_as_contract_error(client):
         client.chat_completions("q", temperature="hot")
 
 
+@needs_agents
+def test_translate_run_error_routes_all_three_kinds():
+    """The shared ladder every agent door delegates to: max_turns guidance
+    first (a MaxTurnsExceeded is also an AgentsException), then the
+    agents-framework wrap, then the model-backend wrap."""
+    import openai
+    from agents.exceptions import AgentsException, MaxTurnsExceeded
+
+    assert "max_turns (3)" in str(
+        local_chat._translate_run_error(MaxTurnsExceeded("over"), 3))
+    assert "agent backend failed" in str(
+        local_chat._translate_run_error(AgentsException("boom"), None))
+    assert "model backend failed" in str(
+        local_chat._translate_run_error(openai.OpenAIError("down"), None))
+
+
 def test_cache_marks_counts_system_and_message_blocks():
     """The counter guards the API's 4-breakpoint limit; marks live on
     system blocks and on message content blocks, never on plain strings."""
