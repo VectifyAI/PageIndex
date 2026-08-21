@@ -61,8 +61,8 @@ import re
 import sys
 from types import SimpleNamespace
 
-from .utils import (ConfigLoader, _is_unrecoverable, _openai_missing_keys,
-                    llm_acompletion, strip_internal_keys)
+from .utils import (ConfigLoader, _is_unrecoverable, llm_acompletion,
+                    strip_internal_keys)
 
 TRIGGER_PAGES = 5        # only look ahead on nodes larger than this
 ROUTING_COST = 1         # R(v), in pages
@@ -624,6 +624,9 @@ def children_from_cache(node, cache, kinds):
 async def propose_children(node, pages, args):
     """Generate one temporary level of children via the model. Validated, not committed."""
     start, end = node["start_index"], subtree_end(node)
+    end = min(end, len(pages))  # a tree from another parser may overrun pages
+    if end < start:
+        return []               # the whole span is beyond the loaded pages
     block = "\n".join(
         f"<page_{n}>\n{pages[n - 1][:PAGE_CHARS]}\n</page_{n}>" for n in range(start, end + 1))
     answer = await ask_model(args.model, EXPAND_PROMPT.format(
@@ -872,12 +875,6 @@ async def main():
     args = parser.parse_args()
 
     model = args.model or default_model()
-    if args.expand and not args.plan:
-        missing = _openai_missing_keys(model)
-        if missing:
-            sys.exit(f"{', '.join(missing)} is not set "
-                     f"(expand model: {model}).")
-
     original = json.load(open(args.structure))
     structure = copy.deepcopy(original["structure"])
     pages, lines = load_pages(args.pdf)

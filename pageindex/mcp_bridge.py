@@ -91,7 +91,9 @@ class McpBridge:
                 ) from exc
         # Strict id correlation only — accepting any result-bearing message
         # would return a stale or mis-correlated reply as this call's.
-        reply = next((m for m in messages if m.get("id") == request_id), None)
+        reply = next((m for m in messages
+                      if isinstance(m, dict) and m.get("id") == request_id),
+                     None)
         if reply is None:
             raise PageIndexAPIError(
                 "MCP server response contained no reply matching the request."

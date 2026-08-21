@@ -49,8 +49,10 @@ def query_agent(client: PageIndexLocalClient, doc_id: str, prompt: str, verbose:
     Tool calls are always printed; verbose=True also prints arguments and output previews.
     """
     agent = Agent(
-        **client.openai_agent_config(doc_id=doc_id),
-        # model_settings=ModelSettings(reasoning={"effort": "low", "summary": "auto"}),  # from agents.model_settings import ModelSettings
+        **client.openai_agent_config(
+            doc_id=doc_id,
+            # model_settings=ModelSettings(reasoning={"effort": "low", "summary": "auto"}),  # from agents.model_settings import ModelSettings
+        ),
     )
 
     async def _run():

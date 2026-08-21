@@ -12,7 +12,8 @@ Workers run pass 1 + pass 2 per page assuming the union stays empty and
 poison the run the moment any page accumulates an extent; the driver then
 discards the parallel attempt and reruns the document on the sequential
 path, which is the source of truth. Any other worker failure falls back the
-same way, so this entry can only ever return sequential-identical output.
+same way, so this entry returns sequential-identical output — except in a
+spawn child re-importing an unguarded __main__, where it re-raises.
 
 Worker startup pays the full package import chain plus its own document
 open; ``min_pages`` routes documents too small to amortize that to the
@@ -24,6 +25,7 @@ from __future__ import annotations
 import multiprocessing
 import os
 import sys
+import threading
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import contextmanager
 from io import BytesIO
@@ -56,27 +58,42 @@ _worker_pdf_doc = None
 _worker_font_maps: dict = {}
 
 
+_window_lock = threading.Lock()
+_window_depth = 0
+_window_saved: dict = {}
+
+
 @contextmanager
 def _anonymous_main():
     """Hide __main__'s import identity while workers spawn: spawn re-executes
     the caller's script in every worker otherwise, which for an unguarded
     script means one duplicate full run per worker. Our workers import
-    everything by module name and never need __main__.
+    everything by module name and never need __main__. Depth-counted so
+    overlapping windows restore the true originals, not a mid-window snapshot.
 
     ponytail: window covers the whole map; a concurrent pool spawned from
     another thread whose tasks live in __main__ would break during it."""
+    global _window_depth, _window_saved
     main = sys.modules.get("__main__")
     if main is None:
         yield
         return
     d = main.__dict__
-    saved = {k: d.pop(k) for k in ("__file__", "__spec__") if k in d}
-    d["__spec__"] = None  # get_preparation_data reads it via attribute access
+    with _window_lock:
+        _window_depth += 1
+        if _window_depth == 1:
+            _window_saved = {k: d.pop(k) for k in ("__file__", "__spec__")
+                             if k in d}
+            d["__spec__"] = None  # get_preparation_data reads it via attribute access
     try:
         yield
     finally:
-        d.pop("__spec__", None)
-        d.update(saved)
+        with _window_lock:
+            _window_depth -= 1
+            if _window_depth == 0:
+                d.pop("__spec__", None)
+                d.update(_window_saved)
+                _window_saved = {}
 
 
 def _init_worker(kind: str, payload) -> None:
@@ -140,12 +157,19 @@ def parse_charlevel_meta_parallel(
     if w <= 1 or n_pages < min_pages:
         return parse_charlevel_meta(doc_handle)
 
-    executor = ProcessPoolExecutor(
-        max_workers=w,
-        mp_context=multiprocessing.get_context("spawn"),
-        initializer=_init_worker,
-        initargs=src,
-    )
+    try:
+        executor = ProcessPoolExecutor(
+            max_workers=w,
+            mp_context=multiprocessing.get_context("spawn"),
+            initializer=_init_worker,
+            initargs=src,
+        )
+    except Exception:
+        # Restricted environments (no working POSIX semaphores) refuse the
+        # pool at construction; the sequential path needs none of that.
+        if getattr(multiprocessing.current_process(), "_inheriting", False):
+            raise
+        return parse_charlevel_meta(doc_handle)
     try:
         with _anonymous_main():
             results = list(executor.map(_run_page, range(n_pages)))

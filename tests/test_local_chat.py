@@ -8,6 +8,11 @@ import types
 import httpx  # via the hard `openai` dependency
 import pytest
 
+try:  # anthropic >= 1.0 validates http_client against httpx2
+    import httpx2 as anthropic_httpx
+except ImportError:  # older anthropic rides classic httpx
+    anthropic_httpx = httpx
+
 import pageindex.local_chat as local_chat
 from pageindex import (PageIndexAPIError, PageIndexCloudClient,
                        PageIndexLocalClient)
@@ -688,14 +693,15 @@ def fake_anthropic(monkeypatch):
             state["calls"].append(json.loads(request.content))
             body = responses[len(state["calls"]) - 1]
             if isinstance(body, str):  # pre-rendered SSE
-                return httpx.Response(
+                return anthropic_httpx.Response(
                     200, content=body.encode(),
                     headers={"content-type": "text/event-stream"})
-            return httpx.Response(200, json=body)
+            return anthropic_httpx.Response(200, json=body)
 
         fake = anthropic.Anthropic(
             api_key="test",
-            http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+            http_client=anthropic_httpx.Client(
+                transport=anthropic_httpx.MockTransport(handler)))
         monkeypatch.setattr(local_chat, "_anthropic_client",
                             lambda backend=None: fake)
         return state["calls"]
@@ -924,13 +930,20 @@ def test_responses_envelope_fields_and_cache_group(client, store_path,
 
 def test_sol_class_refusal_names_its_exits():
     """The chatcmpl+tools-while-reasoning 400 is a lane problem, not a
-    retry problem — the wrapped error must name every exit."""
-    err = local_chat._model_backend_error(Exception(
+    retry problem — the wrapped error must name every exit that is real
+    for the caller's lane. Chat has three; a responses() caller gets only
+    the litellm upgrade (it IS the other lane, and its reasoning knob is
+    ``reasoning``, not ``reasoning_effort``)."""
+    refusal = Exception(
         "Error code: 400 - Function tools with reasoning_effort are not "
-        "supported for gpt-5.6-sol in /v1/chat/completions."))
-    assert "responses()" in str(err) and "litellm" in str(err)
-    assert "pass reasoning_effort" in str(err)
-    plain = local_chat._model_backend_error(Exception("rate limited"))
+        "supported for gpt-5.6-sol in /v1/chat/completions.")
+    chat = str(local_chat._model_backend_error(refusal, "chat"))
+    assert "responses()" in chat and "litellm" in chat
+    assert "pass reasoning_effort" in chat
+    resp = str(local_chat._model_backend_error(refusal, "responses"))
+    assert "upgrade litellm" in resp
+    assert "responses()" not in resp and "pass reasoning_effort" not in resp
+    plain = local_chat._model_backend_error(Exception("rate limited"), "chat")
     assert "responses()" not in str(plain)
 
 
@@ -1224,14 +1237,15 @@ def test_envelope_model_strips_openai_routing_prefix(store_path, fake_model):
 
 
 @needs_agents
-def test_chat_missing_openai_key_fails_loud(monkeypatch):
-    """A missing backend credential surfaces as the SDK's own error type,
-    like every other precondition on the chat surfaces."""
+def test_chat_model_builds_keyless_without_prejudgment(monkeypatch):
+    """No key pre-judgment at model build: credentials are LiteLLM's call
+    at run time, so a keyless build succeeds for every spelling."""
     pytest.importorskip("litellm")  # first import may load a .env; delenv after
+    from agents.extensions.models.litellm_model import LitellmModel
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     for name in ("gpt-4o", "openai/gpt-4o"):
-        with pytest.raises(PageIndexAPIError, match="OPENAI_API_KEY"):
-            local_chat._openai_model("chat", name)
+        model = local_chat._openai_model("chat", name)
+        assert isinstance(model, LitellmModel)
 
 
 @needs_agents
@@ -1432,13 +1446,14 @@ def test_messages_provider_errors_wrap_as_sdk_errors(client, store_path,
     seed_doc(store_path, "pi-a", "report.pdf")
 
     def handler(request):
-        return httpx.Response(429, json={
+        return anthropic_httpx.Response(429, json={
             "type": "error",
             "error": {"type": "rate_limit_error", "message": "slow down"}})
 
     fake = anthropic.Anthropic(
         api_key="test", max_retries=0,
-        http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+        http_client=anthropic_httpx.Client(
+            transport=anthropic_httpx.MockTransport(handler)))
     monkeypatch.setattr(local_chat, "_anthropic_client",
                         lambda backend=None: fake)
     with pytest.raises(PageIndexAPIError, match="model backend failed"):
@@ -1824,11 +1839,12 @@ def test_messages_extra_headers_reach_the_wire(client, monkeypatch):
 
     def handler(request):
         seen["beta"] = request.headers.get("anthropic-beta")
-        return httpx.Response(200, json=_anthropic_message(
+        return anthropic_httpx.Response(200, json=_anthropic_message(
             [{"type": "text", "text": "ok"}], "end_turn"))
 
-    fake = anthropic.Anthropic(api_key="t", http_client=httpx.Client(
-        transport=httpx.MockTransport(handler)))
+    fake = anthropic.Anthropic(
+        api_key="t", http_client=anthropic_httpx.Client(
+            transport=anthropic_httpx.MockTransport(handler)))
     monkeypatch.setattr(local_chat, "_anthropic_client",
                         lambda backend=None: fake)
     client.messages("q", model="claude-sonnet-4-5",
@@ -1863,6 +1879,56 @@ def test_messages_default_max_tokens_clears_thinking_budget(client, fake_anthrop
     client.messages("q", model="claude-test", max_tokens=11000,
                     thinking={"type": "enabled", "budget_tokens": 10000})
     assert calls[0]["max_tokens"] == 11000  # explicit value passes through
+
+
+@needs_anthropic
+def test_anthropic_client_cached_per_backend(monkeypatch):
+    """One real client per backend: construction pays ~45ms of SSL-context
+    build and a cold connection pool each call otherwise."""
+    monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
+    a = local_chat._anthropic_client({"api_key": "k"})
+    assert local_chat._anthropic_client({"api_key": "k"}) is a
+    assert local_chat._anthropic_client({"api_key": "k2"}) is not a
+
+
+@needs_anthropic
+def test_anthropic_client_construction_race_keeps_first(monkeypatch):
+    """A constructor losing the store race must adopt the winner rather
+    than evict a client other threads may already hold."""
+    monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
+    winner = object()
+    real = anthropic.Anthropic
+
+    def racing(**kwargs):
+        local_chat._ANTHROPIC_CLIENTS[(("api_key", "k"),)] = winner
+        return real(**kwargs)
+    monkeypatch.setattr(anthropic, "Anthropic", racing)
+    assert local_chat._anthropic_client({"api_key": "k"}) is winner
+
+
+@needs_anthropic
+def test_messages_reuses_cached_client_across_runs(client, monkeypatch):
+    """A cached backend client survives the per-run close: two consecutive
+    runs ride the same client (a closed one refuses the second request),
+    and the cache hit constructs nothing."""
+    def handler(request):
+        return anthropic_httpx.Response(
+            200, json=_anthropic_message([{"type": "text", "text": "ok"}],
+                                         "end_turn"))
+    cached = anthropic.Anthropic(
+        api_key="test",
+        http_client=anthropic_httpx.Client(
+            transport=anthropic_httpx.MockTransport(handler)))
+    monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS",
+                        {(("api_key", "test"),): cached})
+
+    def boom(**kwargs):
+        raise AssertionError("cache hit expected — no new construction")
+    monkeypatch.setattr(anthropic, "Anthropic", boom)
+    for _ in range(2):
+        result = client.messages("q", model="claude-test", max_tokens=64,
+                                 backend={"api_key": "test"})
+        assert result["stop_reason"] == "end_turn"
 
 
 def test_record_chat_finish_records_and_delegates():
@@ -1939,10 +2005,10 @@ def test_chat_completions_reports_native_finish_reason(client, store_path,
 
 
 @needs_agents
-def test_chat_gate_honors_litellm_routing_and_custom_providers(monkeypatch):
-    """Mirrors the indexing lane: an explicit litellm/ prefix skips the env
-    key pre-check, and custom_provider_map providers pass the allowlist;
-    a name LiteLLM cannot route is still refused up front."""
+def test_chat_model_honors_litellm_routing_and_custom_providers(monkeypatch):
+    """litellm/ spellings and custom_provider_map providers pass the
+    provider allowlist; a name LiteLLM cannot route is still refused up
+    front."""
     pytest.importorskip("litellm")
     import litellm  # first import may load a .env; delenv after it
     from agents.extensions.models.litellm_model import LitellmModel
@@ -1985,19 +2051,6 @@ def test_openai_protocol_predicate_follows_litellm_routing():
 
 
 @needs_agents
-def test_chat_backend_without_key_stands_aside_like_index_lane(monkeypatch):
-    """Any non-empty backend dict suppresses the key pre-check (utils rule)."""
-    pytest.importorskip("litellm")
-    import litellm  # noqa: F401 — first import may load a .env; delenv after it
-    from agents.extensions.models.litellm_model import LitellmModel
-
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    model = local_chat._openai_model(
-        "chat", "gpt-test", {"base_url": "http://localhost:9"})
-    assert isinstance(model, LitellmModel)
-
-
-@needs_agents
 def test_responses_model_marks_caller_owned_transport(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     shared = httpx.AsyncClient()
@@ -2019,8 +2072,8 @@ def test_responses_model_marks_caller_owned_transport(monkeypatch):
 @needs_anthropic
 def test_messages_keeps_caller_owned_http_client_open(client):
     body = _anthropic_message([{"type": "text", "text": "a"}], "end_turn")
-    shared = httpx.Client(transport=httpx.MockTransport(
-        lambda request: httpx.Response(200, json=body)))
+    shared = anthropic_httpx.Client(transport=anthropic_httpx.MockTransport(
+        lambda request: anthropic_httpx.Response(200, json=body)))
     out = client.messages("q", model="claude-test",
                           backend={"api_key": "t", "http_client": shared})
     assert out["content"][0]["text"] == "a"
@@ -2032,9 +2085,100 @@ def test_messages_keeps_caller_owned_http_client_open(client):
 
 @needs_anthropic
 def test_messages_without_credentials_raises_contract_error(client,
-                                                            monkeypatch):
+                                                            monkeypatch,
+                                                            tmp_path):
+    """No pre-check: the SDK's own request-time credential-resolution
+    failure is translated into the contract's PageIndexAPIError — for a
+    bare call, a credential-less backend dict, and the unset-env-var
+    shape ({"api_key": None}) alike."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
-    with pytest.raises(PageIndexAPIError,
-                       match="Anthropic backend is not configured"):
-        client.messages("q", model="claude-test")
+    monkeypatch.delenv("ANTHROPIC_PROFILE", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))  # no ant-auth profile fallback
+    for backend in (None, {"timeout": 30}, {"api_key": None}):
+        with pytest.raises(PageIndexAPIError,
+                           match="Anthropic backend is not configured"):
+            client.messages("q", model="claude-test", backend=backend)
+
+
+def test_cache_extra_args_follow_wire_normalization():
+    """Chat lane only: litellm/<bare-name> rides the OpenAI protocol on
+    this wire (bare names get openai/), so it must carry no Anthropic
+    cache marks; explicit anthropic routes keep them. The agents lane
+    routes the same spelling to Anthropic and marks it — see
+    test_openai_agent_config_marks_bare_claude_behind_litellm_prefix."""
+    pytest.importorskip("litellm")
+    assert local_chat._cache_extra_args("litellm/claude-sonnet-4-5") is None
+    assert local_chat._cache_extra_args("anthropic/claude-x") is not None
+    assert local_chat._cache_extra_args("litellm/anthropic/claude-x") is not None
+
+
+@needs_agents
+def test_bad_model_settings_wrap_as_contract_error(client):
+    """A mistyped sampling param is the SDK's verdict (pydantic),
+    translated into the contract's PageIndexAPIError like every other
+    door failure."""
+    with pytest.raises(PageIndexAPIError, match="Invalid model settings"):
+        client.chat_completions("q", temperature="hot")
+
+
+@needs_agents
+def test_translate_run_error_routes_all_three_kinds():
+    """The shared ladder every agent door delegates to: max_turns guidance
+    first (a MaxTurnsExceeded is also an AgentsException), then the
+    agents-framework wrap, then the model-backend wrap."""
+    import openai
+    from agents.exceptions import AgentsException, MaxTurnsExceeded
+
+    assert "max_turns (3)" in str(
+        local_chat._translate_run_error(MaxTurnsExceeded("over"), 3, "chat"))
+    assert "agent backend failed" in str(
+        local_chat._translate_run_error(AgentsException("boom"), None,
+                                        "responses"))
+    assert "model backend failed" in str(
+        local_chat._translate_run_error(openai.OpenAIError("down"), None,
+                                        "chat"))
+
+
+def test_cache_marks_counts_system_and_message_blocks():
+    """The counter guards the API's 4-breakpoint limit; marks live on
+    system blocks and on message content blocks, never on plain strings."""
+    system = [{"type": "text", "text": "s",
+               "cache_control": {"type": "ephemeral"}},
+              {"type": "text", "text": "t"}]
+    messages = [
+        {"role": "user", "content": "plain strings carry no marks"},
+        {"role": "user", "content": [
+            {"type": "text", "text": "a",
+             "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": "b"}]},
+    ]
+    assert local_chat._cache_marks(system, messages) == 2
+    assert local_chat._cache_marks([], []) == 0
+
+
+def test_dump_block_omits_unset_response_defaults():
+    """messages() tells the caller to append result["messages"] verbatim;
+    a response-only default like tool_use's caller must not surface as an
+    explicit null the request schema has no variant for."""
+    pytest.importorskip("anthropic")
+    from anthropic.types.beta import BetaToolUseBlock
+    block = BetaToolUseBlock(id="tu_1", input={}, name="t", type="tool_use")
+    assert local_chat._dump_block(block) == {
+        "id": "tu_1", "input": {}, "name": "t", "type": "tool_use"}
+
+
+def test_default_max_tokens_respects_output_ceilings():
+    """A lifted thinking default must not overshoot the model's output
+    ceiling — the wire rejects max_tokens above it; bool is not a budget."""
+    lift = local_chat._default_max_tokens
+    enabled = {"type": "enabled", "budget_tokens": 30000}
+    assert lift("claude-opus-4-1", enabled) == 32000
+    assert lift("claude-sonnet-4-5-20250929",
+                {"type": "enabled", "budget_tokens": 60000}) == 64000
+    assert lift("claude-opus-4-1",
+                {"type": "enabled", "budget_tokens": 10000}) == 18192
+    assert lift("claude-test",
+                {"type": "enabled", "budget_tokens": 10000}) == 18192
+    assert lift("claude-sonnet-4-5",
+                {"type": "enabled", "budget_tokens": True}) == 8192

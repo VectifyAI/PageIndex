@@ -77,32 +77,13 @@ def run_off_loop(func, *args):
         return pool.submit(func, *args).result()
 
 
-def _openai_missing_keys(model):
-    """Missing env keys for the pre-check, which covers only OpenAI-shaped
-    names (bare or ``openai/``): other providers resolve credentials their
-    own way at call time (IAM chains, ADC, Ollama's localhost default),
-    invisible to env inspection — the chat lane draws the same line.
-    ``litellm/``-prefixed names are exempt: the prefix is an explicit
-    routing choice, and litellm resolves credentials beyond the
-    environment (litellm.api_key, a keyless OPENAI_BASE_URL server).
-    Truthiness, not litellm's validate_environment, which reports a blank
-    exported key as present."""
-    if model.startswith("litellm/"):
-        return []
-    if "/" in model and not model.startswith("openai/"):
-        return []
-    return ([] if (os.getenv("OPENAI_API_KEY") or "").strip()
-            else ["OPENAI_API_KEY"])
-
-
-def _litellm_model(model, backend):
+def _litellm_model(model):
     """Normalize to LiteLLM's grammar (``litellm/`` strips, bare names get
-    the ``openai/`` wire form — same as the chat lane) and fail fast on a
-    missing key or unknown provider, with status codes the retry loop and
-    the summary/optimize passes treat as unrecoverable."""
+    the ``openai/`` wire form — same as the chat lane) and refuse an
+    unknown provider with the 404 the retry loop treats as unrecoverable.
+    Credentials are LiteLLM's own call, made at the first completion."""
     if not model:
         return model
-    raw = model
     model = _strip_prefix(model, "litellm/")
     if "/" not in model:
         model = f"openai/{model}"
@@ -119,36 +100,34 @@ def _litellm_model(model, backend):
             f"this model id, use 'openai/{model}' and point "
             f"OPENAI_BASE_URL at the server.",
             llm_provider=None, model=model)
-    if not backend:
-        missing = _openai_missing_keys(raw)
-        if missing:
-            raise litellm.AuthenticationError(
-                f"missing API key for {model}: {', '.join(missing)}",
-                llm_provider=None, model=model)
     return model
 
 
 # Misconfiguration: no retry can fix a rejected key or a model that does not
-# exist, and every later call fails the same way. Deliberately not 400, which
-# also carries context_length_exceeded, a per-prompt failure the caller absorbs
-# today. An unknown status is a transport failure and stays retryable.
+# exist, and every later call fails the same way. An unknown status is a
+# transport failure and stays retryable.
 _UNRECOVERABLE_STATUS = frozenset({401, 403, 404})
+
+# A 400 (context_length_exceeded) is equally unfixable by retry — the prompt
+# will not shrink — but it is per-prompt: the ladder raises it immediately
+# and consumers absorb it instead of failing the run.
+_NO_RETRY_STATUS = _UNRECOVERABLE_STATUS | frozenset({400})
+
+
+class LLMRetriesExhausted(RuntimeError):
+    """The retry ladder gave up; carries the last error's status_code."""
+
+    def __init__(self, message, status_code=None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def _is_unrecoverable(exc: Exception) -> bool:
+    if isinstance(exc, LLMRetriesExhausted):
+        # 400 carries context_length_exceeded, the per-prompt failure the
+        # caller absorbs (see above); any other exhausted ladder is fatal.
+        return exc.status_code != 400
     return getattr(exc, "status_code", None) in _UNRECOVERABLE_STATUS
-
-
-def _no_cache_seeding_kwargs(backend):
-    """litellm 1.97 auto-marks Claude requests for prompt caching (system +
-    last message); indexing prompts are single-shot and unique, so every call
-    would pay the cache-write premium with nothing ever read back. A
-    system-role-only injection point matches no indexing message, and its
-    presence stops litellm seeding its own defaults; backend keys still
-    win."""
-    return {"cache_control_injection_points":
-                [{"location": "message", "role": "system"}],
-            **(backend or {})}
 
 
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
@@ -156,32 +135,34 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
     max_retries = 10
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
     backend = _llm_backend.get()
-    model = _litellm_model(model, backend)
+    model = _litellm_model(model)
     _repair_litellm_types()
     for i in range(max_retries):
         try:
-            response = litellm.completion(
-                model=model,
-                messages=messages,
-                drop_params=True,
+            response = litellm.completion(**{
+                "model": model,
+                "messages": messages,
+                "drop_params": True,
                 # the loop is the retry policy; the merge lets a backend override win
-                **{"max_retries": 0, **_no_cache_seeding_kwargs(backend)},
-            )
+                "max_retries": 0,
+                **(backend or {}),
+            })
             content = response.choices[0].message.content
             if return_finish_reason:
                 finish_reason = "max_output_reached" if response.choices[0].finish_reason == "length" else "finished"
                 return content, finish_reason
             return content
         except Exception as e:
-            if _is_unrecoverable(e):
+            if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
                 raise
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
                 time.sleep(1)
             else:
-                raise RuntimeError(
-                    f"LLM completion failed after {max_retries} retries"
+                raise LLMRetriesExhausted(
+                    f"LLM completion failed after {max_retries} retries: {e}",
+                    status_code=getattr(e, "status_code", None),
                 ) from e
 
 
@@ -190,27 +171,29 @@ async def llm_acompletion(model, prompt):
     max_retries = 10
     messages = [{"role": "user", "content": prompt}]
     backend = _llm_backend.get()
-    model = _litellm_model(model, backend)
+    model = _litellm_model(model)
     _repair_litellm_types()
     for i in range(max_retries):
         try:
-            response = await litellm.acompletion(
-                model=model,
-                messages=messages,
-                drop_params=True,
-                **{"max_retries": 0, **_no_cache_seeding_kwargs(backend)},
-            )
+            response = await litellm.acompletion(**{
+                "model": model,
+                "messages": messages,
+                "drop_params": True,
+                "max_retries": 0,
+                **(backend or {}),
+            })
             return response.choices[0].message.content
         except Exception as e:
-            if _is_unrecoverable(e):
+            if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
                 raise
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
                 await asyncio.sleep(1)
             else:
-                raise RuntimeError(
-                    f"LLM completion failed after {max_retries} retries"
+                raise LLMRetriesExhausted(
+                    f"LLM completion failed after {max_retries} retries: {e}",
+                    status_code=getattr(e, "status_code", None),
                 ) from e
 
 
@@ -738,7 +721,8 @@ async def generate_summaries_for_structure(structure, model=None):
     if nodes and not any(node['summary'] for node in nodes):
         raise RuntimeError(
             "Summary generation failed for all nodes "
-            "(check LLM credentials and model availability)"
+            "(every summary call failed or returned empty; "
+            "check the model and its context limits)"
         )
     return structure
 
@@ -835,10 +819,16 @@ async def summarize_tree(structure, pdf_pages, model=None,
     summary are left untouched; leaves under `small_node_tokens` use their raw
     text as the summary without a model call."""
     semaphore = asyncio.Semaphore(concurrency or SUMMARY_CONCURRENCY)
+    asked = answered = False
 
     async def ask(prompt):
+        nonlocal asked, answered
+        asked = True
         async with semaphore:
-            return await llm_acompletion(model, prompt)
+            reply = await llm_acompletion(model, prompt)
+        if reply:
+            answered = True
+        return reply
 
     async def leaf_summary(node):
         text = get_text_of_pdf_pages(pdf_pages, node['start_index'], node['end_index'])
@@ -927,13 +917,16 @@ async def summarize_tree(structure, pdf_pages, model=None,
         if isinstance(r, Exception) and _is_unrecoverable(r):
             raise r
 
+    # Raw-text leaves summarize without the model, so they cannot vouch for
+    # it: a run whose every model call failed still fails loud.
     def _any_summary(nodes):
         return any(n.get('summary') or _any_summary(n.get('nodes') or [])
                    for n in nodes)
-    if not _any_summary(structure):
+    if (asked and not answered) or not _any_summary(structure):
         raise RuntimeError(
             "Summary generation failed for all nodes "
-            "(check LLM credentials and model availability)"
+            "(every summary call failed or returned empty; "
+            "check the model and its context limits)"
         )
 
     strip_internal_keys(structure)
@@ -973,8 +966,12 @@ def generate_doc_description(structure, model=None):
     """
     try:
         return llm_completion(model, prompt)
-    except RuntimeError:
-        return ""
+    except Exception as e:
+        # Per-prompt 400: the unbounded whole-tree prompt overran the
+        # context; the indexed document survives with no description.
+        if getattr(e, "status_code", None) == 400:
+            return ""
+        raise
 
 
 def reorder_dict(data, key_order):

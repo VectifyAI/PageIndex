@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 import warnings
@@ -37,6 +38,10 @@ def _preload_litellm() -> None:
 
 def _parse_pages(pages: str) -> list[int]:
     from .agent_tools import _PageSpecError, _expand_pages
+    if isinstance(pages, str):
+        # 0.2.10 tolerated whitespace on this surface; the tool layer stays
+        # on the strict contract pattern.
+        pages = re.sub(r"\s*([,-])\s*", r"\1", pages.strip())
     try:
         return _expand_pages(pages)
     except _PageSpecError as exc:
@@ -253,6 +258,8 @@ class PageIndexClient:
                 status = self.get_document(doc_id).get("status")
                 poll_failures = 0
             except (PageIndexAPIError, requests.RequestException) as exc:
+                if getattr(exc, "status_code", None) in (401, 403, 404):
+                    raise  # a definite answer, not a poll failure
                 # Tolerate transient poll failures; a 30-minute wait should
                 # not die on one 502 or dropped connection.
                 poll_failures += 1
@@ -477,8 +484,9 @@ class PageIndexClient:
         prompt prefix cache-marked automatically. The non-stream
         response carries the final answer only; streaming yields the
         agent's visible text as it is produced, including narration before
-        tool calls. ``finish_reason`` reports loop completion ("stop") —
-        the engine does not surface per-turn backend finish reasons. For
+        tool calls. ``finish_reason`` carries the final turn's native
+        finish reason — "stop", or the backend's "length" /
+        "content_filter" when the last turn was cut short. For
         the tool-use process and prompt-cache round-trip use
         ``responses()`` or ``messages()``.
 
@@ -811,13 +819,15 @@ class PageIndexClient:
         ``get_document_structure``, ``get_page_content``).
 
         Each function takes JSON-serializable arguments, returns a JSON
-        string, and reports failures inside that JSON instead of raising.
+        string, and reports failures inside that JSON instead of raising —
+        except a cloud 401/403, which raises PageIndexAPIError.
 
         Args:
             include_management (bool): Also expose tools that modify the
-                library. Local: adds ``remove_document``. Cloud: by default
-                only tools the server marks read-only are exposed; True
-                exposes the server's complete list (upload, delete, ...).
+                library. Local: adds ``remove_document``. Cloud: the URL
+                is the gate — the default serves what the read-only
+                endpoint (``?tools=read``) registers; True connects to
+                the full ``/mcp`` list (upload, delete, ...).
             doc_id: Local only — restrict the tools to this document ID
                 (or list of IDs), enforced at the tool layer: out-of-scope
                 lookups return NOT_FOUND. Raises on cloud, where scoping
@@ -856,10 +866,10 @@ class PageIndexClient:
 
         Args:
             include_management (bool): Also expose tools that modify the
-                library (delete, upload). Default off: the in-process
-                cloud default serves only server-annotated read-only
-                tools, and ``hosted=True`` connects OpenAI to the
-                read-only endpoint (``/mcp?tools=read``) instead.
+                library (delete, upload). Default off: on cloud the URL
+                is the gate — in-process and ``hosted=True`` alike
+                connect to the read-only endpoint (``/mcp?tools=read``);
+                True switches to the full ``/mcp`` list.
             hosted (bool): Cloud only — hand the MCP connection to OpenAI
                 for server-side tool execution (OpenAI models only).
             doc_id: Local only — restrict the tools to this document ID
@@ -875,12 +885,8 @@ class PageIndexClient:
         """doc_id for the tool layer: passed through locally (structural
         allowlist), dropped on cloud where scoping is server-side and the
         config helpers keep prompt-level targeting."""
-        if doc_id is not None and not doc_id:
-            # An empty scope means "nothing" locally (empty allowlist) and
-            # cannot be represented on cloud; both refuse it loudly.
-            raise PageIndexAPIError(
-                "doc_id is empty. Pass one or more document IDs, or omit "
-                "doc_id to give the agent the whole library.")
+        from .agent_tools import _require_doc_selection
+        _require_doc_selection(doc_id)
         if not getattr(self, "api_key", None):
             return doc_id
         return None
@@ -890,6 +896,8 @@ class PageIndexClient:
         doc_id: Optional[Union[str, list[str]]] = None,
         include_management: bool = False,
         model: Optional[str] = None,
+        model_settings: Optional[Any] = None,
+        name: str = "PageIndex",
     ) -> dict[str, Any]:
         """
         Document QA ``Agent`` kwargs for the OpenAI Agents SDK in one
@@ -906,15 +914,12 @@ class PageIndexClient:
         environment, so its model auth comes from there —
         ``chat_backend`` does not travel with it.
 
-        Prompt caching configures itself for most destinations (OpenAI
-        server-side; Anthropic- and Bedrock-hosted Claude via LiteLLM's
-        defaults). Vertex-hosted Claude is the exception — pass the
-        injection points yourself::
-
-            Agent(**config, model_settings=ModelSettings(extra_args={
-                "cache_control_injection_points": [
-                    {"location": "message", "role": "system"},
-                    {"location": "message", "index": -1}]}))
+        Prompt caching: OpenAI models cache server-side on their own;
+        LiteLLM-routed Claude (Anthropic, Bedrock, Vertex) gets its
+        cache marks from the bundled ``model_settings``. Pass
+        ``model_settings`` here to layer your own on top — your fields
+        win and ``extra_args`` merge. Replacing the returned key
+        wholesale drops the marks instead.
 
         Args:
             doc_id: Document ID or list of IDs to target, as in
@@ -926,11 +931,16 @@ class PageIndexClient:
             model: Backend model name; overrides the local default. Same
                 grammar as ``chat_model`` (LiteLLM names; bare names are
                 OpenAI-compatible shorthand).
+            model_settings: Your own ``ModelSettings``, merged on top of
+                the bundled cache marks; included verbatim when no marks
+                apply.
+            name (str): Agent display name; in composition it also seeds
+                the SDK-derived handoff and ``as_tool`` names.
         """
         from .agent_tools import build_agent_instructions
         scope = self._local_doc_scope(doc_id)
         config: dict[str, Any] = {
-            "name": "PageIndex",
+            "name": name,
             "instructions": build_agent_instructions(
                 self, doc_id, scoped=scope is not None,
                 include_management=include_management),
@@ -944,6 +954,20 @@ class PageIndexClient:
                 # caller's process, outside our completion helpers.
                 from .utils import _repair_litellm_types
                 _repair_litellm_types()
+                # Marks follow this lane's routing: the SDK strips litellm/
+                # and LiteLLM resolves the rest (bare claude-* → Anthropic);
+                # names without the prefix ride the SDK's OpenAI provider.
+                from .local_chat import _litellm_claude_marks
+                extra_args = _litellm_claude_marks(
+                    config["model"].removeprefix("litellm/"))
+                if extra_args:
+                    from agents import ModelSettings
+                    config["model_settings"] = ModelSettings(
+                        extra_args=extra_args)
+        if model_settings is not None:
+            marks = config.get("model_settings")
+            config["model_settings"] = (marks.resolve(model_settings)
+                                        if marks else model_settings)
         return config
 
     def as_anthropic_tools(self, include_management: bool = False,
@@ -979,9 +1003,10 @@ class PageIndexClient:
 
         Args:
             include_management (bool): Also expose tools that modify the
-                library. Local: adds ``remove_document``. Cloud: by default
-                only tools the server marks read-only are exposed; True
-                exposes the server's complete list (upload, delete, ...).
+                library. Local: adds ``remove_document``. Cloud: the URL
+                is the gate — the default serves what the read-only
+                endpoint (``?tools=read``) registers; True connects to
+                the full ``/mcp`` list (upload, delete, ...).
             asynchronous (bool): Build ``beta_async_tool`` runnables for
                 ``AsyncAnthropic`` (each tool call runs in a worker
                 thread, keeping blocking I/O off your event loop). The
@@ -1063,7 +1088,8 @@ class PageIndexClient:
         }
 
     def as_claude_mcp(self, include_management: bool = False,
-                      doc_id: Optional[Union[str, list[str]]] = None):
+                      doc_id: Optional[Union[str, list[str]]] = None,
+                      server_name: str = "pageindex"):
         """
         ``mcp_servers`` entry for the Claude Agent SDK.
 
@@ -1077,6 +1103,8 @@ class PageIndexClient:
         ``pip install 'pageindex[claude]'``). ``doc_id`` (local only)
         restricts those tools to that document ID (or list), enforced at
         the tool layer; it raises on cloud, where scoping is server-side.
+        ``server_name`` names the in-process server — match it to the key
+        you register the entry under (cloud entries carry no name).
 
         Cloud hosts that surface MCP server instructions receive the same
         guidance ``agent_instructions()`` returns natively — passing both
@@ -1095,7 +1123,8 @@ class PageIndexClient:
             )
         """
         from .integrations.claude_agent_sdk import build_claude_mcp
-        return build_claude_mcp(self, include_management, doc_ids=doc_id)
+        return build_claude_mcp(self, include_management, doc_ids=doc_id,
+                                server_name=server_name)
 
     def claude_agent_config(
         self,
@@ -1122,7 +1151,8 @@ class PageIndexClient:
                 (tool scoping is server-side).
             include_management (bool): Also allow tools that modify the
                 library.
-            server_name (str): Key the server is registered under.
+            server_name (str): Key the server is registered under;
+                locally also the name the SDK server declares.
         """
         from .agent_tools import build_agent_instructions
         scope = self._local_doc_scope(doc_id)
@@ -1131,7 +1161,7 @@ class PageIndexClient:
                 self, doc_id, scoped=scope is not None,
                 include_management=include_management),
             "mcp_servers": {server_name: self.as_claude_mcp(
-                include_management, doc_id=scope)},
+                include_management, doc_id=scope, server_name=server_name)},
             # Pre-approval only — the server itself is already gated (the
             # read-only endpoint on cloud, the registered set locally).
             "allowed_tools": [f"mcp__{server_name}"],

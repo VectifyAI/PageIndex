@@ -282,28 +282,45 @@ def test_submit_defaults_to_flash(local_client, sample_pdf, monkeypatch):
     assert local_client._api._store.get_meta(doc_id)["mode"] == "flash"
 
 
+def test_submit_rejects_structure_beyond_stored_pages(local_client, sample_pdf,
+                                                      monkeypatch):
+    """A tree spanning pages the store lacks fails submit instead of saving a doc whose reads IndexError."""
+    monkeypatch.setattr(
+        pageindex.flash, "page_index_flash",
+        lambda pdf, **kwargs: {
+            "doc_name": "sample.pdf",
+            "structure": [{"title": "Root", "start_index": 1,
+                           "end_index": 3, "summary": "s", "nodes": []}]})
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda model, prompt, **kw: "d.")
+    with pytest.raises(PageIndexAPIError, match="pages 1-3 outside"):
+        local_client.submit_document(sample_pdf)
+    assert local_client._api._store.list_metas() == []
+
+
+def test_submit_survives_pypdf2_lone_surrogates(local_client, sample_pdf,
+                                                monkeypatch):
+    """PyPDF2 decodes broken ToUnicode with surrogatepass; the store gets U+FFFD, not a utf-8-fatal str."""
+    import PyPDF2
+    monkeypatch.setattr(PyPDF2.PageObject, "extract_text",
+                        lambda self: "\ud83dello broken")
+    monkeypatch.setattr(
+        pageindex.flash, "page_index_flash",
+        lambda p, **kwargs: {
+            "structure": [{"title": "T", "start_index": 1,
+                           "end_index": 1, "summary": "s", "nodes": []}]})
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda model, prompt, **kw: "d.")
+    doc_id = local_client.submit_document(sample_pdf)["doc_id"]
+    markdown = local_client.get_ocr(doc_id)["result"][0]["markdown"]
+    assert "\ud83d" not in markdown
+    assert markdown.startswith("�ello")
+
+
 def test_page_index_flash_rejects_unknown_optimize():
     from pageindex.flash import page_index_flash
     with pytest.raises(ValueError, match="optimize must be"):
         page_index_flash("never-opened.pdf", optimize="off")
-
-
-def test_llm_completion_missing_key_raises_immediately(monkeypatch):
-    import openai
-    import litellm  # first import may load a .env; delenv after it
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    with pytest.raises(openai.OpenAIError, match="OPENAI_API_KEY"):
-        pageindex.utils.llm_completion("gpt-4o", "probe")
-    with pytest.raises(openai.OpenAIError, match="OPENAI_API_KEY"):
-        asyncio.run(pageindex.utils.llm_acompletion("gpt-4o", "probe"))
-    # unknown bare names are OpenAI shorthand, so the same check applies
-    with pytest.raises(openai.OpenAIError, match="OPENAI_API_KEY"):
-        pageindex.utils.llm_completion("my-finetune-v2", "probe")
-    # a blank exported key is as missing as no key (litellm's
-    # validate_environment reports it present)
-    monkeypatch.setenv("OPENAI_API_KEY", "   ")
-    with pytest.raises(openai.OpenAIError, match="OPENAI_API_KEY"):
-        pageindex.utils.llm_completion("gpt-4o", "probe")
 
 
 def test_llm_completion_refuses_unknown_provider(monkeypatch):
@@ -320,11 +337,12 @@ def test_llm_completion_refuses_unknown_provider(monkeypatch):
 def test_submit_missing_llm_key_fails_loud(local_client, sample_pdf, monkeypatch):
     import litellm  # first import may load a .env; delenv after it
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr("pageindex.utils.time.sleep", lambda s: None)
     def first_llm_call(*args, **kwargs):
         return pageindex.utils.llm_completion("gpt-4o", "probe")
     monkeypatch.setattr(page_index_module, "page_index_main", first_llm_call)
     monkeypatch.setattr(pageindex.flash, "page_index_flash", first_llm_call)
-    for kwargs in ({}, {"mode": "flash"}):
+    for kwargs in ({"mode": "standard"}, {"mode": "flash"}):
         with pytest.raises(PageIndexAPIError, match="OPENAI_API_KEY"):
             local_client.submit_document(sample_pdf, **kwargs)
     assert local_client.list_documents()["total"] == 0
@@ -342,6 +360,17 @@ def test_submit_rejections(local_client, sample_pdf, tmp_path):
         local_client.submit_document(sample_pdf, folder_id="f1")
     with pytest.raises(PageIndexAPIError, match="beta_headers"):
         local_client.submit_document(sample_pdf, beta_headers=["block_reference"])
+
+
+def test_write_json_atomic_replaces_lone_surrogates(tmp_path):
+    """A lone surrogate (an os.fsdecode'd path in metadata, an LLM-written
+    \\ud83d escape) must not crash the store's writer after a whole
+    indexing run — it lands as the encoder's replacement character."""
+    from pageindex.local_store import _read_json, _write_json_atomic
+
+    path = tmp_path / "doc.json"
+    _write_json_atomic(path, {"src": "bad-\udcff-path"})
+    assert _read_json(path)["src"] == "bad-?-path"
 
 
 def test_corrupt_pdf_raises_api_error(local_client, tmp_path):
@@ -637,14 +666,16 @@ def test_list_documents_skips_unsafe_directory_names(
     assert [d["id"] for d in listing["documents"]] == [indexed_doc]
 
 
-def test_generate_doc_description_error_boundary(monkeypatch):
+def test_generate_doc_description_propagates_failures(monkeypatch):
+    """No swallow: a dead model fails the run instead of storing ''."""
     def raiser(exc):
         def _f(*args, **kwargs):
             raise exc
         return _f
     monkeypatch.setattr(pageindex.utils, "llm_completion",
                         raiser(RuntimeError("retries exhausted")))
-    assert pageindex.utils.generate_doc_description([]) == ""
+    with pytest.raises(RuntimeError):
+        pageindex.utils.generate_doc_description([])
     monkeypatch.setattr(pageindex.utils, "llm_completion",
                         raiser(ValueError("provider rejected the model")))
     with pytest.raises(ValueError):
@@ -712,10 +743,107 @@ def test_summarize_tree_child_unrecoverable_raises(monkeypatch):
             structure, pdf_pages, small_node_tokens=0))
 
 
-def test_llm_completion_suppresses_litellm_cache_seeding(monkeypatch):
-    """Indexing prompts are single-shot: without an explicit injection
-    point litellm 1.97 seeds its own cache marks and every call pays the
-    write premium for nothing. Backend keys still override ours."""
+def test_summarize_tree_fails_loud_when_every_model_call_fails(monkeypatch):
+    """A failure foreign to the retry ladder (not LLMRetriesExhausted)
+    blanks per node; the asked-and-never-answered backstop must still fail
+    the run loud — a raw-text short leaf cannot vouch for it."""
+    async def exhausted(model, prompt):
+        raise RuntimeError("LLM call failed after 10 attempts")
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", exhausted)
+    pdf_pages = [("tiny", 1), ("beta " * 300, 300)]
+    structure = [{"title": "R", "start_index": 1, "end_index": 2,
+                  "nodes": [
+                      {"title": "A", "start_index": 1, "end_index": 1},
+                      {"title": "B", "start_index": 2, "end_index": 2}]}]
+    with pytest.raises(RuntimeError, match="every summary call failed"):
+        asyncio.run(pageindex.utils.summarize_tree(structure, pdf_pages))
+
+
+def test_summarize_tree_all_short_leaves_need_no_model(monkeypatch):
+    """A tree whose every node summarizes from raw text makes zero model
+    calls and must not be mistaken for a failed run."""
+    async def unexpected(model, prompt):
+        raise AssertionError("no model call expected")
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", unexpected)
+    structure = [{"title": "A", "start_index": 1, "end_index": 1}]
+    out = asyncio.run(pageindex.utils.summarize_tree(structure, [("tiny", 1)]))
+    assert out[0]["summary"] == "tiny"
+
+
+def test_summarize_tree_partial_exhaustion_fails_loud(monkeypatch):
+    """One lucky call must not vouch for a model that then went away: a
+    ladder-exhausted node raises instead of silently blanking."""
+    calls = {"n": 0}
+
+    async def flaky(model, prompt):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return '{"points": ["p"], "summary": "ok"}'
+        raise pageindex.utils.LLMRetriesExhausted(
+            "LLM completion failed after 10 retries", status_code=500)
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", flaky)
+    pdf_pages = [("alpha " * 300, 300), ("beta " * 300, 300)]
+    structure = [{"title": "A", "start_index": 1, "end_index": 1},
+                 {"title": "B", "start_index": 2, "end_index": 2}]
+    with pytest.raises(pageindex.utils.LLMRetriesExhausted):
+        asyncio.run(pageindex.utils.summarize_tree(structure, pdf_pages))
+
+
+def test_generate_summaries_partial_exhaustion_fails_loud(monkeypatch):
+    calls = {"n": 0}
+
+    async def flaky(model, prompt):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return "fine"
+        raise pageindex.utils.LLMRetriesExhausted(
+            "LLM completion failed after 10 retries", status_code=500)
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", flaky)
+    structure = [{"title": "A", "text": "t1",
+                  "nodes": [{"title": "B", "text": "t2"}]}]
+    with pytest.raises(pageindex.utils.LLMRetriesExhausted):
+        asyncio.run(
+            pageindex.utils.generate_summaries_for_structure(structure))
+
+
+def test_expand_exhausted_ladder_fails_loud(monkeypatch):
+    """Keyless/broken-model expand must kill the run, not degrade to
+    no_children after burning the retry ladder on every node."""
+    import pageindex.tree_optimize as tree_optimize
+
+    async def exhausted(model, prompt):
+        raise pageindex.utils.LLMRetriesExhausted(
+            "LLM completion failed after 10 retries", status_code=500)
+    monkeypatch.setattr(tree_optimize, "llm_acompletion", exhausted)
+    structure = [{"title": "T", "start_index": 1, "end_index": 8,
+                  "node_id": "0001", "nodes": []}]
+    pages = ["heading\nbody text"] * 8
+    lines = [["heading", "body text"]] * 8
+    with pytest.raises(pageindex.utils.LLMRetriesExhausted):
+        asyncio.run(tree_optimize.optimize(structure, pages, lines,
+                                           model="m", do_expand=True))
+
+
+def test_expand_absorbs_per_prompt_rejection(monkeypatch):
+    """A 400-exhausted node (context_length_exceeded) stays collapsed and
+    the run survives — the documented per-prompt absorption."""
+    import pageindex.tree_optimize as tree_optimize
+
+    async def rejected(model, prompt):
+        raise pageindex.utils.LLMRetriesExhausted(
+            "LLM completion failed after 10 retries", status_code=400)
+    monkeypatch.setattr(tree_optimize, "llm_acompletion", rejected)
+    structure = [{"title": "T", "start_index": 1, "end_index": 8,
+                  "node_id": "0001", "nodes": []}]
+    pages = ["heading\nbody text"] * 8
+    lines = [["heading", "body text"]] * 8
+    outcome = asyncio.run(tree_optimize.optimize(structure, pages, lines,
+                                                 model="m", do_expand=True))
+    assert outcome["expands"] == 0
+
+
+def test_llm_completion_backend_reaches_litellm(monkeypatch):
+    """No cache params of our own; backend keys reach litellm and win the merge."""
     import litellm
     captured = {}
 
@@ -728,15 +856,41 @@ def test_llm_completion_suppresses_litellm_cache_seeding(monkeypatch):
     monkeypatch.setattr(litellm, "completion", fake_completion)
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     assert pageindex.utils.llm_completion("gpt-4o", "probe") == "ok"
-    assert captured["cache_control_injection_points"] == [
-        {"location": "message", "role": "system"}]
+    assert "cache_control_injection_points" not in captured
     token = pageindex.utils._llm_backend.set(
-        {"api_key": "x", "cache_control_injection_points": []})
+        {"api_key": "x", "max_retries": 3})
     try:
         pageindex.utils.llm_completion("gpt-4o", "probe")
     finally:
         pageindex.utils._llm_backend.reset(token)
-    assert captured["cache_control_injection_points"] == []
+    assert captured["api_key"] == "x"
+    assert captured["max_retries"] == 3
+
+
+def test_backend_overrides_reserved_kwargs_without_retry(monkeypatch):
+    """A backend key colliding with our own kwargs wins the merge instead
+    of raising TypeError through the retry ladder."""
+    import litellm
+    calls = {"n": 0}
+    captured = {}
+
+    def fake_completion(**kwargs):
+        calls["n"] += 1
+        captured.clear()
+        captured.update(kwargs)
+        message = types.SimpleNamespace(content="ok")
+        choice = types.SimpleNamespace(message=message, finish_reason="stop")
+        return types.SimpleNamespace(choices=[choice])
+    monkeypatch.setattr(litellm, "completion", fake_completion)
+    monkeypatch.setattr(pageindex.utils.time, "sleep", lambda s: None)
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    token = pageindex.utils._llm_backend.set({"drop_params": False})
+    try:
+        assert pageindex.utils.llm_completion("gpt-4o", "probe") == "ok"
+    finally:
+        pageindex.utils._llm_backend.reset(token)
+    assert captured["drop_params"] is False
+    assert calls["n"] == 1
 
 
 def test_delete_survives_marker_tamper(local_client, tmp_path):
@@ -885,6 +1039,32 @@ def test_cloud_error_and_empty_delete(cloud, monkeypatch):
     assert client.delete_document("pi-1") == {}
 
 
+def test_cloud_errors_carry_status_code(cloud, monkeypatch, sample_pdf):
+    """Every non-200 raise carries the HTTP status, so callers can branch
+    on 429-vs-401 instead of parsing message text."""
+    client, calls, fake = cloud
+    _patch_requests(monkeypatch,
+                    lambda m, url, kw: FakeResponse(status_code=418, text="no"))
+    attempts = [
+        lambda: client.submit_document(sample_pdf),
+        lambda: client.get_ocr("pi-1"),
+        lambda: client.get_tree("pi-1"),
+        lambda: client.submit_query("pi-1", "q"),
+        lambda: client.get_retrieval("r-1"),
+        lambda: client.chat_completions(
+            messages=[{"role": "user", "content": "q"}]),
+        lambda: client.get_document("pi-1"),
+        lambda: client.delete_document("pi-1"),
+        lambda: client.list_documents(),
+        lambda: client.create_folder("f"),
+        lambda: client.list_folders(),
+    ]
+    for attempt in attempts:
+        with pytest.raises(PageIndexAPIError) as err:
+            attempt()
+        assert err.value.status_code == 418
+
+
 def test_cloud_chat_stream_parsing(cloud, monkeypatch):
     client, calls, fake = cloud
     lines = [
@@ -964,40 +1144,55 @@ def test_backend_scopes_the_index_lane(tmp_path, monkeypatch):
         assert captured["api_base"] == "http://b"
 
 
-def test_index_precheck_covers_only_openai_shaped(monkeypatch):
-    """The missing-key pre-check fires only for OpenAI-shaped names — other
-    providers resolve credentials at call time (IAM chains, ADC, Ollama's
-    localhost default), invisible to env inspection, so the lane must not
-    block them up front."""
+def test_index_lane_makes_no_key_prejudgment(monkeypatch):
+    """Credentials are LiteLLM's call at completion time: keyless
+    environments reach the wire untouched for every provider shape."""
     pytest.importorskip("litellm")
     import litellm
     from types import SimpleNamespace
     from pageindex.utils import llm_completion
 
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    with pytest.raises(litellm.AuthenticationError, match="missing API key"):
-        llm_completion("my-finetune-v2", "p")
-
     reply = SimpleNamespace(choices=[SimpleNamespace(
         message=SimpleNamespace(content="ok"), finish_reason="stop")])
     monkeypatch.setattr(litellm, "completion", lambda **kw: reply)
     monkeypatch.setattr(litellm, "validate_environment",
                         lambda *a, **k: pytest.fail("env pre-check ran"))
+    assert llm_completion("my-finetune-v2", "p") == "ok"
     assert llm_completion("ollama/llama3", "p") == "ok"
     assert llm_completion("bedrock/anthropic.claude-sonnet", "p") == "ok"
 
 
-def test_litellm_routing_prefix_skips_key_precheck(monkeypatch):
-    """litellm/-prefixed names are an explicit routing choice: litellm
-    resolves credentials beyond the environment (litellm.api_key, a
-    keyless OPENAI_BASE_URL server), so the env pre-check stands aside."""
+def test_llm_completion_surfaces_litellms_credential_verdict(monkeypatch):
+    """LiteLLM's own missing-credentials error (a retryable-shaped 500)
+    rides the retry loop and lands verbatim in the terminal error."""
     pytest.importorskip("litellm")
     import litellm  # noqa: F401 — first import may load a .env; delenv after
-    from pageindex.utils import _litellm_model, _openai_missing_keys
+    from pageindex.utils import llm_completion
 
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    assert _openai_missing_keys("litellm/gpt-4o") == []
-    assert _litellm_model("litellm/gpt-4o", None) == "openai/gpt-4o"
+    monkeypatch.setattr("pageindex.utils.time.sleep", lambda s: None)
+    with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
+        llm_completion("gpt-4o", "probe")
+
+    async def _nosleep(s):
+        pass
+
+    monkeypatch.setattr("pageindex.utils.asyncio.sleep", _nosleep)
+    with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
+        asyncio.run(pageindex.utils.llm_acompletion("gpt-4o", "probe"))
+
+
+def test_litellm_model_normalizes_without_key_prejudgment(monkeypatch):
+    """_litellm_model only normalizes and provider-checks — a keyless
+    environment changes nothing for any spelling."""
+    pytest.importorskip("litellm")
+    import litellm  # noqa: F401 — first import may load a .env; delenv after
+    from pageindex.utils import _litellm_model
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert _litellm_model("litellm/gpt-4o") == "openai/gpt-4o"
+    assert _litellm_model("gpt-4o") == "openai/gpt-4o"
 
 
 def test_custom_provider_map_passes_provider_precheck(monkeypatch):
@@ -1009,7 +1204,7 @@ def test_custom_provider_map_passes_provider_precheck(monkeypatch):
 
     monkeypatch.setattr(litellm, "custom_provider_map",
                         [{"provider": "my-llm", "custom_handler": object()}])
-    assert _litellm_model("my-llm/model-a", None) == "my-llm/model-a"
+    assert _litellm_model("my-llm/model-a") == "my-llm/model-a"
 
 
 def test_backend_args_are_local_only():
@@ -1079,3 +1274,147 @@ def test_format_tree_node_keeps_key_items():
     assert out["key_items"] == ["1.1 Alpha", "1.2 Beta", "1.3 Gamma"]
     assert "key_items" not in _format_tree_node(
         {"title": "t", "node_id": "0001", "start_index": 1}, False)
+
+
+# ── retry-ladder and summary fail-loud edges (twelfth review) ──
+
+def test_summarize_tree_all_empty_replies_fail_loud(monkeypatch):
+    """Empty-content replies (content filter, spent output cap) must not
+    vouch for the model: a raw-text short leaf cannot carry the run when
+    every model reply comes back blank."""
+    async def blank(model, prompt):
+        return ""
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", blank)
+    pdf_pages = [("tiny", 1), ("beta " * 300, 300)]
+    structure = [{"title": "R", "start_index": 1, "end_index": 2,
+                  "nodes": [
+                      {"title": "A", "start_index": 1, "end_index": 1},
+                      {"title": "B", "start_index": 2, "end_index": 2}]}]
+    with pytest.raises(RuntimeError, match="returned empty"):
+        asyncio.run(pageindex.utils.summarize_tree(structure, pdf_pages))
+
+
+def test_summarize_tree_partial_empty_reply_absorbed(monkeypatch):
+    """One blank reply among good ones stays the documented per-node
+    absorption: blank summary, run survives."""
+    async def flaky(model, prompt):
+        if "alpha" in prompt:
+            return ""
+        return '{"points": [], "summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", flaky)
+    pdf_pages = [("alpha " * 300, 300), ("beta " * 300, 300)]
+    structure = [{"title": "A", "start_index": 1, "end_index": 1},
+                 {"title": "B", "start_index": 2, "end_index": 2}]
+    out = asyncio.run(pageindex.utils.summarize_tree(structure, pdf_pages))
+    assert [n["summary"] for n in out] == ["", "ok"]
+
+
+def test_generate_doc_description_absorbs_context_overflow(monkeypatch):
+    """A per-prompt 400 (the whole-tree prompt overran the context) keeps
+    the indexed document: empty description instead of a lost run. Anything
+    else keeps propagating (see the sibling no-swallow test)."""
+    class Rejected(Exception):
+        status_code = 400
+
+    def boom(model, prompt):
+        raise Rejected("context_length_exceeded")
+    monkeypatch.setattr(pageindex.utils, "llm_completion", boom)
+    assert pageindex.utils.generate_doc_description([]) == ""
+
+
+def test_llm_completion_400_skips_the_retry_ladder(monkeypatch):
+    """A 400 rejects this prompt permanently — retrying cannot shrink it:
+    one wire call, raised raw so consumers can absorb it per policy."""
+    pytest.importorskip("litellm")
+    import litellm
+
+    class Rejected(Exception):
+        status_code = 400
+
+    calls = {"n": 0}
+
+    def reject(**kw):
+        calls["n"] += 1
+        raise Rejected("context_length_exceeded")
+    monkeypatch.setattr(litellm, "completion", reject)
+    monkeypatch.setattr("pageindex.utils.time.sleep", lambda s: None)
+    with pytest.raises(Rejected):
+        pageindex.utils.llm_completion("gpt-4o", "p")
+    assert calls["n"] == 1
+
+
+def test_llm_acompletion_400_skips_the_retry_ladder(monkeypatch):
+    pytest.importorskip("litellm")
+    import litellm
+
+    class Rejected(Exception):
+        status_code = 400
+
+    calls = {"n": 0}
+
+    async def reject(**kw):
+        calls["n"] += 1
+        raise Rejected("context_length_exceeded")
+    monkeypatch.setattr(litellm, "acompletion", reject)
+
+    async def _nosleep(s):
+        pass
+    monkeypatch.setattr("pageindex.utils.asyncio.sleep", _nosleep)
+    with pytest.raises(Rejected):
+        asyncio.run(pageindex.utils.llm_acompletion("gpt-4o", "p"))
+    assert calls["n"] == 1
+
+
+def test_parse_pages_keeps_whitespace_tolerance():
+    """0.2.10 accepted whitespace around parts (int() tolerance); the SDK
+    surface keeps that while the tool layer stays on the strict pattern."""
+    from pageindex.client import _parse_pages
+    assert _parse_pages(" 1-3") == [1, 2, 3]
+    assert _parse_pages("5 - 7") == [5, 6, 7]
+    assert _parse_pages("3 ,8") == [3, 8]
+    assert _parse_pages("1-3\n") == [1, 2, 3]
+    assert _parse_pages("\t2") == [2]
+    with pytest.raises(PageIndexAPIError):
+        _parse_pages("1 2")
+
+
+def test_submit_scrubs_surrogates_from_the_stored_name(
+        local_client, sample_pdf, monkeypatch):
+    """The store scrubs at write time; scrubbing the basename at entry keeps
+    the returned name identical to the stored name and lets the rename
+    warning fire. (APFS refuses surrogate filenames, so the basename is
+    patched instead of the filesystem.)"""
+    import os
+
+    def fake_page_index_main(doc, opt=None, logger=None, page_list=None):
+        return {"doc_name": "x", "doc_description": "d",
+                "structure": json.loads(json.dumps(STRUCTURE))}
+    monkeypatch.setattr(page_index_module, "page_index_main",
+                        fake_page_index_main)
+    real = os.path.basename
+    monkeypatch.setattr(os.path, "basename",
+                        lambda p: "re\udcffport.pdf"
+                        if real(str(p)) == "sample.pdf" else real(p))
+    with pytest.warns(UserWarning, match="stored as"):
+        result = local_client.submit_document(sample_pdf, mode="standard")
+    assert result["name"] == "re\ufffdport.pdf"
+    docs = local_client.list_documents()["documents"]
+    assert [d["name"] for d in docs] == ["re\ufffdport.pdf"]
+
+
+def test_submit_rejects_nan_metadata(local_client):
+    """json.dumps' default (allow_nan=True) passes NaN/Infinity that no
+    strict JSON parser accepts; the gate must reject them before they reach
+    disk and every tool envelope."""
+    with pytest.raises(PageIndexAPIError, match="valid JSON"):
+        local_client.submit_document("/nonexistent.pdf",
+                                     metadata={"score": float("nan")})
+
+
+def test_submit_flash_empty_structure_points_to_standard(
+        local_client, sample_pdf, monkeypatch):
+    """The heading-less hard-fail names its way out: mode='standard'."""
+    monkeypatch.setattr(pageindex.flash, "page_index_flash",
+                        lambda pdf, **kwargs: {"structure": []})
+    with pytest.raises(PageIndexAPIError, match="mode='standard'"):
+        local_client.submit_document(sample_pdf)
