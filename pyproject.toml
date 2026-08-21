@@ -32,8 +32,6 @@ openai = ">=1.70.0"
 openai-agents = ">=0.18.1"
 litellm = ">=1.97.0"
 PyPDF2 = ">=3.0.0"
-# Installs steer to the 5.x line (requirements pins 5.13.0); the 4.x code
-# branches are insurance for externally pinned environments, not a floor.
 pypdfium2 = ">=5"
 sortedcontainers = ">=2.4.0"
 regex = ">=2024.0.0"

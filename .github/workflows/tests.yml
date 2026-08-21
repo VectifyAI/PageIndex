@@ -23,8 +23,7 @@ jobs:
         agent-frameworks: [without, with]
         pdfium: ["5"]
         include:
-          # 4.x is compatibility insurance for externally pinned envs, not
-          # an advertised install — one leg keeps the insurance honest
+          # one leg holds the 4.x insurance line
           - python-version: "3.10"
             agent-frameworks: with
             pdfium: "4"
