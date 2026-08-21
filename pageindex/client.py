@@ -1083,7 +1083,8 @@ class PageIndexClient:
         }
 
     def as_claude_mcp(self, include_management: bool = False,
-                      doc_id: Optional[Union[str, list[str]]] = None):
+                      doc_id: Optional[Union[str, list[str]]] = None,
+                      server_name: str = "pageindex"):
         """
         ``mcp_servers`` entry for the Claude Agent SDK.
 
@@ -1097,6 +1098,8 @@ class PageIndexClient:
         ``pip install 'pageindex[claude]'``). ``doc_id`` (local only)
         restricts those tools to that document ID (or list), enforced at
         the tool layer; it raises on cloud, where scoping is server-side.
+        ``server_name`` names the in-process server — match it to the key
+        you register the entry under (cloud entries carry no name).
 
         Cloud hosts that surface MCP server instructions receive the same
         guidance ``agent_instructions()`` returns natively — passing both
@@ -1115,7 +1118,8 @@ class PageIndexClient:
             )
         """
         from .integrations.claude_agent_sdk import build_claude_mcp
-        return build_claude_mcp(self, include_management, doc_ids=doc_id)
+        return build_claude_mcp(self, include_management, doc_ids=doc_id,
+                                server_name=server_name)
 
     def claude_agent_config(
         self,
@@ -1142,7 +1146,8 @@ class PageIndexClient:
                 (tool scoping is server-side).
             include_management (bool): Also allow tools that modify the
                 library.
-            server_name (str): Key the server is registered under.
+            server_name (str): Key the server is registered under;
+                locally also the name the SDK server declares.
         """
         from .agent_tools import build_agent_instructions
         scope = self._local_doc_scope(doc_id)
@@ -1151,7 +1156,7 @@ class PageIndexClient:
                 self, doc_id, scoped=scope is not None,
                 include_management=include_management),
             "mcp_servers": {server_name: self.as_claude_mcp(
-                include_management, doc_id=scope)},
+                include_management, doc_id=scope, server_name=server_name)},
             # Pre-approval only — the server itself is already gated (the
             # read-only endpoint on cloud, the registered set locally).
             "allowed_tools": [f"mcp__{server_name}"],

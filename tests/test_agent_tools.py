@@ -757,6 +757,11 @@ def test_claude_agent_config_local(client, store_path):
     config = client.claude_agent_config(doc_id="pi-a")
     assert "report.pdf" in config["system_prompt"]
     assert config["allowed_tools"] == ["mcp__pageindex"]
+    assert config["mcp_servers"]["pageindex"]["name"] == "pageindex"
+    # The SDK server's declared identity follows the registration key.
+    renamed = client.claude_agent_config(server_name="docs")
+    assert renamed["mcp_servers"]["docs"]["name"] == "docs"
+    assert renamed["allowed_tools"] == ["mcp__docs"]
 
 
 def test_openai_agent_config_local(client, store_path):

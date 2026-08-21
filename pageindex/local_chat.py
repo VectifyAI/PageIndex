@@ -375,29 +375,35 @@ def _conversation_cache_key(model_name: str, instructions: str, doc_id,
     return "pageindex-" + hashlib.sha256(seed.encode()).hexdigest()[:16]
 
 
-def _model_backend_error(exc) -> PageIndexAPIError:
+def _model_backend_error(exc, lane: str) -> PageIndexAPIError:
     """Wrap a provider failure; the sol-class refusal (chatcmpl rejects
-    function tools while reasoning is on) gets its two documented exits
-    appended, since the fix is a different lane, not a retry."""
+    function tools while reasoning is on) gets its documented exits
+    appended, since the fix is a different route, not a retry. The exits
+    are per-lane: of the chat lane's three, two are dead ends for a
+    responses() caller — it IS the other lane, and its reasoning knob is
+    ``reasoning``, not ``reasoning_effort``."""
     message = f"The model backend failed: {exc}"
     if "Function tools with reasoning_effort" in str(exc):
         message += (
             " — this model runs tools on the Responses lane: upgrade "
-            "litellm (newer releases route it there automatically), pass "
-            "reasoning_effort (older litellm routes explicit efforts), or "
-            "call responses() instead."
+            "litellm (newer releases route it there automatically)"
+        )
+        message += (
+            ", pass reasoning_effort (older litellm routes explicit "
+            "efforts), or call responses() instead." if lane == "chat"
+            else "."
         )
     return PageIndexAPIError(message)
 
 
-def _translate_run_error(exc, max_turns) -> PageIndexAPIError:
+def _translate_run_error(exc, max_turns, lane) -> PageIndexAPIError:
     """The uncaught-run ladder every agent door shares."""
     from agents.exceptions import AgentsException, MaxTurnsExceeded
     if isinstance(exc, MaxTurnsExceeded):
         return _wrap_max_turns(max_turns)
     if isinstance(exc, AgentsException):
         return PageIndexAPIError(f"The agent backend failed: {exc}")
-    return _model_backend_error(exc)
+    return _model_backend_error(exc, lane)
 
 
 def _run_kwargs(max_turns) -> dict:
@@ -600,7 +606,7 @@ def run_chat_completions(client, messages, stream: bool = False,
                 Runner.run(agent, input=items, **run_kwargs)))
         except (MaxTurnsExceeded, AgentsException,
                 openai.OpenAIError) as exc:
-            raise _translate_run_error(exc, max_turns) from exc
+            raise _translate_run_error(exc, max_turns, "chat") from exc
         return {
             "id": f"chatcmpl-{uuid.uuid4().hex}",
             "object": "chat.completion",
@@ -641,7 +647,7 @@ def run_chat_completions(client, messages, stream: bool = False,
             completed = True
         except (MaxTurnsExceeded, AgentsException,
                 openai.OpenAIError) as exc:
-            raise _translate_run_error(exc, max_turns) from exc
+            raise _translate_run_error(exc, max_turns, "chat") from exc
         finally:
             if not completed and hasattr(streamed, "cancel"):
                 streamed.cancel()  # abandoned/failed: stop the agent task
@@ -745,7 +751,8 @@ def run_responses(client, input, model: Optional[str] = None,
                            **run_kwargs)))
         except (MaxTurnsExceeded, AgentsException,
                 openai.OpenAIError) as exc:
-            raise _translate_run_error(exc, max_turns) from exc
+            raise _translate_run_error(exc, max_turns,
+                                       "responses") from exc
         transcript = result.to_input_list()[len(items):]
         return envelope(transcript, result.raw_responses)
 
@@ -808,10 +815,12 @@ def run_responses(client, input, model: Optional[str] = None,
             # except for max_turns, which always gets its guidance
             if (isinstance(exc, MaxTurnsExceeded)
                     or recorded.get("status") not in ("failed", "incomplete")):
-                raise _translate_run_error(exc, max_turns) from exc
+                raise _translate_run_error(exc, max_turns,
+                                           "responses") from exc
             completed = True
         except openai.OpenAIError as exc:
-            raise _translate_run_error(exc, max_turns) from exc
+            raise _translate_run_error(exc, max_turns,
+                                       "responses") from exc
         finally:
             if not completed and hasattr(streamed, "cancel"):
                 streamed.cancel()  # abandoned/failed: stop the agent task

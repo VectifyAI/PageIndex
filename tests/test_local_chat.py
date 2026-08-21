@@ -930,13 +930,20 @@ def test_responses_envelope_fields_and_cache_group(client, store_path,
 
 def test_sol_class_refusal_names_its_exits():
     """The chatcmpl+tools-while-reasoning 400 is a lane problem, not a
-    retry problem — the wrapped error must name every exit."""
-    err = local_chat._model_backend_error(Exception(
+    retry problem — the wrapped error must name every exit that is real
+    for the caller's lane. Chat has three; a responses() caller gets only
+    the litellm upgrade (it IS the other lane, and its reasoning knob is
+    ``reasoning``, not ``reasoning_effort``)."""
+    refusal = Exception(
         "Error code: 400 - Function tools with reasoning_effort are not "
-        "supported for gpt-5.6-sol in /v1/chat/completions."))
-    assert "responses()" in str(err) and "litellm" in str(err)
-    assert "pass reasoning_effort" in str(err)
-    plain = local_chat._model_backend_error(Exception("rate limited"))
+        "supported for gpt-5.6-sol in /v1/chat/completions.")
+    chat = str(local_chat._model_backend_error(refusal, "chat"))
+    assert "responses()" in chat and "litellm" in chat
+    assert "pass reasoning_effort" in chat
+    resp = str(local_chat._model_backend_error(refusal, "responses"))
+    assert "upgrade litellm" in resp
+    assert "responses()" not in resp and "pass reasoning_effort" not in resp
+    plain = local_chat._model_backend_error(Exception("rate limited"), "chat")
     assert "responses()" not in str(plain)
 
 
@@ -2074,11 +2081,13 @@ def test_translate_run_error_routes_all_three_kinds():
     from agents.exceptions import AgentsException, MaxTurnsExceeded
 
     assert "max_turns (3)" in str(
-        local_chat._translate_run_error(MaxTurnsExceeded("over"), 3))
+        local_chat._translate_run_error(MaxTurnsExceeded("over"), 3, "chat"))
     assert "agent backend failed" in str(
-        local_chat._translate_run_error(AgentsException("boom"), None))
+        local_chat._translate_run_error(AgentsException("boom"), None,
+                                        "responses"))
     assert "model backend failed" in str(
-        local_chat._translate_run_error(openai.OpenAIError("down"), None))
+        local_chat._translate_run_error(openai.OpenAIError("down"), None,
+                                        "chat"))
 
 
 def test_cache_marks_counts_system_and_message_blocks():
