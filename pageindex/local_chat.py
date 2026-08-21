@@ -216,14 +216,6 @@ def _openai_model(protocol: str, model_name: str, backend=None):
     _repair_litellm_types()
     try:
         wire = _litellm_model(model_name, backend)
-    except litellm.AuthenticationError as exc:
-        raise PageIndexAPIError(
-            "The OpenAI backend is not configured: set the "
-            "OPENAI_API_KEY environment variable, pass an api_key "
-            "in chat_backend / backend (any value works for keyless "
-            "OPENAI_BASE_URL servers), or point chat_model at "
-            "another provider (e.g. 'anthropic/...')."
-        ) from exc
     except litellm.NotFoundError as exc:
         raise PageIndexAPIError(str(exc)) from exc
     return LitellmModel(wire, api_key=(backend or {}).get("api_key"),
@@ -976,17 +968,6 @@ def run_messages(client, messages, model: str,
         {"cache_control": {"type": "ephemeral"}}
         if _cache_marks(system_blocks, prepared) < 4 else {})
     merged = _merged_backend(client, backend)
-    # The SDK defers credential resolution to request time and raises a
-    # bare TypeError there — pre-check for the contract's PageIndexAPIError.
-    # default_headers counts: it can carry auth (or the SDK's Omit escape).
-    if (not any(key in (merged or {})
-                for key in ("api_key", "auth_token", "default_headers"))
-            and not (os.environ.get("ANTHROPIC_API_KEY")
-                     or os.environ.get("ANTHROPIC_AUTH_TOKEN"))):
-        raise PageIndexAPIError(
-            "The Anthropic backend is not configured: set the "
-            "ANTHROPIC_API_KEY environment variable, or pass an api_key "
-            "in chat_backend / backend.")
     backend_client = _anthropic_client(merged)
     # A caller-owned http_client must survive the per-call closes below.
     owns_transport = "http_client" not in (merged or {})
@@ -1014,6 +995,14 @@ def run_messages(client, messages, model: str,
             except anthropic.AnthropicError as exc:
                 raise PageIndexAPIError(
                     f"The model backend failed: {exc}") from exc
+            except TypeError as exc:
+                # the SDK's request-time credential-resolution failure
+                if "authentication" not in str(exc).lower():
+                    raise
+                raise PageIndexAPIError(
+                    "The Anthropic backend is not configured: set the "
+                    "ANTHROPIC_API_KEY environment variable, or pass an "
+                    f"api_key in chat_backend / backend. ({exc})") from exc
             finally:
                 # runs on exhaustion and abandonment (GeneratorExit) alike
                 if owns_transport:
@@ -1025,6 +1014,14 @@ def run_messages(client, messages, model: str,
     except anthropic.AnthropicError as exc:
         raise PageIndexAPIError(
             f"The model backend failed: {exc}") from exc
+    except TypeError as exc:
+        # the SDK's request-time credential-resolution failure
+        if "authentication" not in str(exc).lower():
+            raise
+        raise PageIndexAPIError(
+            "The Anthropic backend is not configured: set the "
+            "ANTHROPIC_API_KEY environment variable, or pass an "
+            f"api_key in chat_backend / backend. ({exc})") from exc
     finally:
         # safe here: the params read-back below does no HTTP
         if owns_transport:

@@ -3,7 +3,7 @@ import os
 import json
 from pageindex import *
 from pageindex.page_index_md import md_to_tree
-from pageindex.utils import ConfigLoader, _openai_missing_keys
+from pageindex.utils import ConfigLoader
 
 # Keep LiteLLM's import off the network (frozen bundled model-cost map);
 # an explicit user setting wins.
@@ -98,11 +98,6 @@ if __name__ == "__main__":
                              or args.model
                              or ConfigLoader().load().summary_model)
             will_summarize = args.summary if args.summary is not None else True
-            if will_summarize or args.optimize == 'full':
-                missing = _openai_missing_keys(summary_model)
-                if missing:
-                    raise SystemExit(
-                        f"Missing API key for {summary_model}: {', '.join(missing)}")
             toc_with_page_number = page_index_flash(
                 args.pdf_path,
                 optimize=args.optimize if args.optimize != 'off' else False,

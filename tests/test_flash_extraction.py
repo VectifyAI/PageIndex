@@ -45,20 +45,17 @@ def test_page_mode_walk_uses_merged_surrogate_census():
     assert unmapped["ch"] == "β"
 
 
-def test_optimize_full_fails_fast_without_a_key(tmp_path, monkeypatch):
-    """optimize='full' runs LLM expand: with no key configured it must be
-    an instant, guided PageIndexAPIError — raised before any PDF work (a
-    bogus path proves the ordering) — while the LLM-free spellings and a
-    backend-carrying indexing scope stay untouched."""
+def test_optimize_full_keyless_reports_file_errors_first(tmp_path, monkeypatch):
+    """No credential pre-check: a bad path is a FileNotFoundError even
+    keyless (validation runs first), and the LLM-free spellings still run
+    end to end."""
     from conftest import build_pdf
-    from pageindex import PageIndexAPIError
     from pageindex.flash import page_index_flash
-    from pageindex.utils import _llm_backend
     import litellm  # noqa: F401 — first import may load a .env; delenv after it
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("CHATGPT_API_KEY", raising=False)
 
-    with pytest.raises(PageIndexAPIError, match="optimize='merge'"):
+    with pytest.raises(FileNotFoundError):
         page_index_flash(str(tmp_path / "missing.pdf"), summary=False)
 
     pdf = tmp_path / "doc.pdf"
@@ -67,13 +64,6 @@ def test_optimize_full_fails_fast_without_a_key(tmp_path, monkeypatch):
     assert "structure" in result
     result = page_index_flash(str(pdf), summary=False, optimize=False)
     assert "structure" in result
-
-    token = _llm_backend.set({"api_key": "k"})
-    try:
-        with pytest.raises(FileNotFoundError):
-            page_index_flash(str(tmp_path / "missing.pdf"), summary=False)
-    finally:
-        _llm_backend.reset(token)
 
 
 def test_bootstrap_reimport_is_not_swallowed(monkeypatch):
@@ -154,7 +144,7 @@ def test_optimize_wins_over_deprecated_optimize_expand(tmp_path, monkeypatch):
 
     pdf = tmp_path / "doc.pdf"
     pdf.write_bytes(build_pdf(["1 Introduction", "Body text"]))
-    # resolved to "full" before the precedence fix (keyless → fail-fast)
+    # explicit "merge" wins even when the deprecated flag says expand
     with pytest.warns(DeprecationWarning):
         result = page_index_flash(str(pdf), summary=False,
                                   optimize="merge", optimize_expand=True)
@@ -164,10 +154,21 @@ def test_optimize_wins_over_deprecated_optimize_expand(tmp_path, monkeypatch):
                                   optimize=True, optimize_expand=False)
     assert "structure" in result
     # optimize=None means unset ("full"), not off
-    from pageindex import PageIndexAPIError
-    with pytest.raises(PageIndexAPIError, match="optimize='merge'"):
-        page_index_flash(str(tmp_path / "missing.pdf"), summary=False,
-                         optimize=None)
+    from pageindex.flash import api as flash_api
+    seen = {}
+
+    def fake_optimize(structure, pages, do_expand, model):
+        seen["do_expand"] = do_expand
+        return {"merges": 0}
+
+    monkeypatch.setattr(flash_api, "_optimize", fake_optimize)
+    monkeypatch.setattr(flash_api, "extract_toc",
+                        lambda pdf, use_embedded_toc=True: {
+                            "structure": [{"title": "T", "start_index": 1,
+                                           "end_index": 1, "nodes": []}],
+                            "page_texts": ["body"]})
+    page_index_flash(str(pdf), summary=False, optimize=None)
+    assert seen["do_expand"] is True
 
 
 def test_lone_surrogate_from_broken_tounicode_is_replaced(monkeypatch):

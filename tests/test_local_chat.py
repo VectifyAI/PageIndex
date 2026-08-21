@@ -1224,14 +1224,15 @@ def test_envelope_model_strips_openai_routing_prefix(store_path, fake_model):
 
 
 @needs_agents
-def test_chat_missing_openai_key_fails_loud(monkeypatch):
-    """A missing backend credential surfaces as the SDK's own error type,
-    like every other precondition on the chat surfaces."""
+def test_chat_model_builds_keyless_without_prejudgment(monkeypatch):
+    """No key pre-judgment at model build: credentials are LiteLLM's call
+    at run time, so a keyless build succeeds for every spelling."""
     pytest.importorskip("litellm")  # first import may load a .env; delenv after
+    from agents.extensions.models.litellm_model import LitellmModel
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     for name in ("gpt-4o", "openai/gpt-4o"):
-        with pytest.raises(PageIndexAPIError, match="OPENAI_API_KEY"):
-            local_chat._openai_model("chat", name)
+        model = local_chat._openai_model("chat", name)
+        assert isinstance(model, LitellmModel)
 
 
 @needs_agents
@@ -1939,10 +1940,10 @@ def test_chat_completions_reports_native_finish_reason(client, store_path,
 
 
 @needs_agents
-def test_chat_gate_honors_litellm_routing_and_custom_providers(monkeypatch):
-    """Mirrors the indexing lane: an explicit litellm/ prefix skips the env
-    key pre-check, and custom_provider_map providers pass the allowlist;
-    a name LiteLLM cannot route is still refused up front."""
+def test_chat_model_honors_litellm_routing_and_custom_providers(monkeypatch):
+    """litellm/ spellings and custom_provider_map providers pass the
+    provider allowlist; a name LiteLLM cannot route is still refused up
+    front."""
     pytest.importorskip("litellm")
     import litellm  # first import may load a .env; delenv after it
     from agents.extensions.models.litellm_model import LitellmModel
@@ -1985,19 +1986,6 @@ def test_openai_protocol_predicate_follows_litellm_routing():
 
 
 @needs_agents
-def test_chat_backend_without_key_stands_aside_like_index_lane(monkeypatch):
-    """Any non-empty backend dict suppresses the key pre-check (utils rule)."""
-    pytest.importorskip("litellm")
-    import litellm  # noqa: F401 — first import may load a .env; delenv after it
-    from agents.extensions.models.litellm_model import LitellmModel
-
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    model = local_chat._openai_model(
-        "chat", "gpt-test", {"base_url": "http://localhost:9"})
-    assert isinstance(model, LitellmModel)
-
-
-@needs_agents
 def test_responses_model_marks_caller_owned_transport(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     shared = httpx.AsyncClient()
@@ -2032,20 +2020,17 @@ def test_messages_keeps_caller_owned_http_client_open(client):
 
 @needs_anthropic
 def test_messages_without_credentials_raises_contract_error(client,
-                                                            monkeypatch):
+                                                            monkeypatch,
+                                                            tmp_path):
+    """No pre-check: the SDK's own request-time credential-resolution
+    failure is translated into the contract's PageIndexAPIError — for a
+    bare call, a credential-less backend dict, and the unset-env-var
+    shape ({"api_key": None}) alike."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
-    with pytest.raises(PageIndexAPIError,
-                       match="Anthropic backend is not configured"):
-        client.messages("q", model="claude-test")
-
-
-@needs_anthropic
-def test_messages_keyless_backend_still_raises_contract_error(client,
-                                                              monkeypatch):
-    """A backend dict without credentials must not disarm the pre-check."""
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
-    with pytest.raises(PageIndexAPIError,
-                       match="Anthropic backend is not configured"):
-        client.messages("q", model="claude-test", backend={"timeout": 30})
+    monkeypatch.delenv("ANTHROPIC_PROFILE", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))  # no ant-auth profile fallback
+    for backend in (None, {"timeout": 30}, {"api_key": None}):
+        with pytest.raises(PageIndexAPIError,
+                           match="Anthropic backend is not configured"):
+            client.messages("q", model="claude-test", backend=backend)

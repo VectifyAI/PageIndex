@@ -323,24 +323,6 @@ def test_page_index_flash_rejects_unknown_optimize():
         page_index_flash("never-opened.pdf", optimize="off")
 
 
-def test_llm_completion_missing_key_raises_immediately(monkeypatch):
-    import openai
-    import litellm  # first import may load a .env; delenv after it
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    with pytest.raises(openai.OpenAIError, match="OPENAI_API_KEY"):
-        pageindex.utils.llm_completion("gpt-4o", "probe")
-    with pytest.raises(openai.OpenAIError, match="OPENAI_API_KEY"):
-        asyncio.run(pageindex.utils.llm_acompletion("gpt-4o", "probe"))
-    # unknown bare names are OpenAI shorthand, so the same check applies
-    with pytest.raises(openai.OpenAIError, match="OPENAI_API_KEY"):
-        pageindex.utils.llm_completion("my-finetune-v2", "probe")
-    # a blank exported key is as missing as no key (litellm's
-    # validate_environment reports it present)
-    monkeypatch.setenv("OPENAI_API_KEY", "   ")
-    with pytest.raises(openai.OpenAIError, match="OPENAI_API_KEY"):
-        pageindex.utils.llm_completion("gpt-4o", "probe")
-
-
 def test_llm_completion_refuses_unknown_provider(monkeypatch):
     """A first segment LiteLLM does not know (a HuggingFace repo id like
     Qwen/...) is refused with the openai/ escape before the retry loop,
@@ -355,6 +337,7 @@ def test_llm_completion_refuses_unknown_provider(monkeypatch):
 def test_submit_missing_llm_key_fails_loud(local_client, sample_pdf, monkeypatch):
     import litellm  # first import may load a .env; delenv after it
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr("pageindex.utils.time.sleep", lambda s: None)
     def first_llm_call(*args, **kwargs):
         return pageindex.utils.llm_completion("gpt-4o", "probe")
     monkeypatch.setattr(page_index_module, "page_index_main", first_llm_call)
@@ -997,40 +980,55 @@ def test_backend_scopes_the_index_lane(tmp_path, monkeypatch):
         assert captured["api_base"] == "http://b"
 
 
-def test_index_precheck_covers_only_openai_shaped(monkeypatch):
-    """The missing-key pre-check fires only for OpenAI-shaped names — other
-    providers resolve credentials at call time (IAM chains, ADC, Ollama's
-    localhost default), invisible to env inspection, so the lane must not
-    block them up front."""
+def test_index_lane_makes_no_key_prejudgment(monkeypatch):
+    """Credentials are LiteLLM's call at completion time: keyless
+    environments reach the wire untouched for every provider shape."""
     pytest.importorskip("litellm")
     import litellm
     from types import SimpleNamespace
     from pageindex.utils import llm_completion
 
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    with pytest.raises(litellm.AuthenticationError, match="missing API key"):
-        llm_completion("my-finetune-v2", "p")
-
     reply = SimpleNamespace(choices=[SimpleNamespace(
         message=SimpleNamespace(content="ok"), finish_reason="stop")])
     monkeypatch.setattr(litellm, "completion", lambda **kw: reply)
     monkeypatch.setattr(litellm, "validate_environment",
                         lambda *a, **k: pytest.fail("env pre-check ran"))
+    assert llm_completion("my-finetune-v2", "p") == "ok"
     assert llm_completion("ollama/llama3", "p") == "ok"
     assert llm_completion("bedrock/anthropic.claude-sonnet", "p") == "ok"
 
 
-def test_litellm_routing_prefix_skips_key_precheck(monkeypatch):
-    """litellm/-prefixed names are an explicit routing choice: litellm
-    resolves credentials beyond the environment (litellm.api_key, a
-    keyless OPENAI_BASE_URL server), so the env pre-check stands aside."""
+def test_llm_completion_surfaces_litellms_credential_verdict(monkeypatch):
+    """LiteLLM's own missing-credentials error (a retryable-shaped 500)
+    rides the retry loop and lands verbatim in the terminal error."""
     pytest.importorskip("litellm")
     import litellm  # noqa: F401 — first import may load a .env; delenv after
-    from pageindex.utils import _litellm_model, _openai_missing_keys
+    from pageindex.utils import llm_completion
 
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    assert _openai_missing_keys("litellm/gpt-4o") == []
+    monkeypatch.setattr("pageindex.utils.time.sleep", lambda s: None)
+    with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
+        llm_completion("gpt-4o", "probe")
+
+    async def _nosleep(s):
+        pass
+
+    monkeypatch.setattr("pageindex.utils.asyncio.sleep", _nosleep)
+    with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
+        asyncio.run(pageindex.utils.llm_acompletion("gpt-4o", "probe"))
+
+
+def test_litellm_model_normalizes_without_key_prejudgment(monkeypatch):
+    """_litellm_model only normalizes and provider-checks — a keyless
+    environment changes nothing for any spelling."""
+    pytest.importorskip("litellm")
+    import litellm  # noqa: F401 — first import may load a .env; delenv after
+    from pageindex.utils import _litellm_model
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     assert _litellm_model("litellm/gpt-4o", None) == "openai/gpt-4o"
+    assert _litellm_model("gpt-4o", None) == "openai/gpt-4o"
 
 
 def test_custom_provider_map_passes_provider_precheck(monkeypatch):

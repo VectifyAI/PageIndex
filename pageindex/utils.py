@@ -77,32 +77,13 @@ def run_off_loop(func, *args):
         return pool.submit(func, *args).result()
 
 
-def _openai_missing_keys(model):
-    """Missing env keys for the pre-check, which covers only OpenAI-shaped
-    names (bare or ``openai/``): other providers resolve credentials their
-    own way at call time (IAM chains, ADC, Ollama's localhost default),
-    invisible to env inspection — the chat lane draws the same line.
-    ``litellm/``-prefixed names are exempt: the prefix is an explicit
-    routing choice, and litellm resolves credentials beyond the
-    environment (litellm.api_key, a keyless OPENAI_BASE_URL server).
-    Truthiness, not litellm's validate_environment, which reports a blank
-    exported key as present."""
-    if model.startswith("litellm/"):
-        return []
-    if "/" in model and not model.startswith("openai/"):
-        return []
-    return ([] if (os.getenv("OPENAI_API_KEY") or "").strip()
-            else ["OPENAI_API_KEY"])
-
-
 def _litellm_model(model, backend):
     """Normalize to LiteLLM's grammar (``litellm/`` strips, bare names get
-    the ``openai/`` wire form — same as the chat lane) and fail fast on a
-    missing key or unknown provider, with status codes the retry loop and
-    the summary/optimize passes treat as unrecoverable."""
+    the ``openai/`` wire form — same as the chat lane) and refuse an
+    unknown provider with the 404 the retry loop treats as unrecoverable.
+    Credentials are LiteLLM's own call, made at the first completion."""
     if not model:
         return model
-    raw = model
     model = _strip_prefix(model, "litellm/")
     if "/" not in model:
         model = f"openai/{model}"
@@ -119,12 +100,6 @@ def _litellm_model(model, backend):
             f"this model id, use 'openai/{model}' and point "
             f"OPENAI_BASE_URL at the server.",
             llm_provider=None, model=model)
-    if not backend:
-        missing = _openai_missing_keys(raw)
-        if missing:
-            raise litellm.AuthenticationError(
-                f"missing API key for {model}: {', '.join(missing)}",
-                llm_provider=None, model=model)
     return model
 
 
@@ -169,7 +144,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
                 time.sleep(1)
             else:
                 raise RuntimeError(
-                    f"LLM completion failed after {max_retries} retries"
+                    f"LLM completion failed after {max_retries} retries: {e}"
                 ) from e
 
 
@@ -198,7 +173,7 @@ async def llm_acompletion(model, prompt):
                 await asyncio.sleep(1)
             else:
                 raise RuntimeError(
-                    f"LLM completion failed after {max_retries} retries"
+                    f"LLM completion failed after {max_retries} retries: {e}"
                 ) from e
 
 

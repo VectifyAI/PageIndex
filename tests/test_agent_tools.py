@@ -1270,6 +1270,10 @@ class _FakeBridge:
         ]
 
     def list_tools(self):
+        # mirrors the live server: the read endpoint serves the read subset
+        if "tools=read" in self.url:
+            return [tool for tool in self.tools
+                    if (tool.get("annotations") or {}).get("readOnlyHint")]
         return self.tools
 
     def instructions(self):
@@ -1302,8 +1306,7 @@ def test_cloud_agent_tools_discover_live_tool_set(cloud_with_fake_bridge):
     # instructions fetch and the hosted/MCP registrations.
     assert bridge.url == "https://api.pageindex.ai/mcp?tools=read"
     assert bridge.headers == {"Authorization": "Bearer pi-test-key"}
-    # Default: only tools the server marks read-only; unannotated tools are
-    # treated as non-read-only.
+    # The endpoint is the only gate: whatever it serves is exposed verbatim.
     assert [t.__name__ for t in tools] == ["search_documents", "get_document"]
     assert "ESCALATION tool" in tools[0].__doc__
 
@@ -1795,7 +1798,9 @@ def test_annotation_for_both_nullable_encodings():
             == Optional[str])
 
 
-def test_cloud_agent_tools_empty_filter_raises(monkeypatch):
+def test_cloud_agent_tools_trust_the_gated_endpoint(monkeypatch):
+    """The ?tools=read endpoint is the only gate: what it serves is exposed
+    verbatim, with no client-side annotation second-guessing."""
     import pageindex.mcp_bridge as mcp_bridge
 
     class _AllWriteBridge:
@@ -1809,8 +1814,7 @@ def test_cloud_agent_tools_empty_filter_raises(monkeypatch):
 
     monkeypatch.setattr(mcp_bridge, "McpBridge", _AllWriteBridge)
     cloud = PageIndexCloudClient(api_key="pi-test-key")
-    with pytest.raises(PageIndexAPIError, match="annotation"):
-        cloud.agent_tools()
+    assert len(cloud.agent_tools()) == 1
     assert len(cloud.agent_tools(include_management=True)) == 1
 
 

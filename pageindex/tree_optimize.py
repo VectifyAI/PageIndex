@@ -61,8 +61,8 @@ import re
 import sys
 from types import SimpleNamespace
 
-from .utils import (ConfigLoader, _is_unrecoverable, _openai_missing_keys,
-                    llm_acompletion, strip_internal_keys)
+from .utils import (ConfigLoader, _is_unrecoverable, llm_acompletion,
+                    strip_internal_keys)
 
 TRIGGER_PAGES = 5        # only look ahead on nodes larger than this
 ROUTING_COST = 1         # R(v), in pages
@@ -872,12 +872,6 @@ async def main():
     args = parser.parse_args()
 
     model = args.model or default_model()
-    if args.expand and not args.plan:
-        missing = _openai_missing_keys(model)
-        if missing:
-            sys.exit(f"{', '.join(missing)} is not set "
-                     f"(expand model: {model}).")
-
     original = json.load(open(args.structure))
     structure = copy.deepcopy(original["structure"])
     pages, lines = load_pages(args.pdf)

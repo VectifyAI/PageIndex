@@ -1462,22 +1462,6 @@ def _cloud_bridge(client, gated: bool = False):
         return bridge
 
 
-def _read_only_tools(tools_meta: list[dict]) -> list[dict]:
-    """The management gate for consumers without a framework permission
-    layer: only tools the server marks read-only, guarded against a server
-    annotation regression silently disabling every tool."""
-    filtered = [meta for meta in tools_meta
-                if (meta.get("annotations") or {}).get("readOnlyHint") is True]
-    if tools_meta and not filtered:
-        raise PageIndexAPIError(
-            "The MCP server returned tools but none are annotated "
-            "read-only — a server annotation regression would otherwise "
-            "silently disable every tool. Pass include_management=True "
-            "to expose the unfiltered list."
-        )
-    return filtered
-
-
 def _require_local_scope(client, doc_ids) -> None:
     """The allowlist is enforced in-process; cloud lookups run server-side,
     so accepting doc_ids there would be advisory-only — refuse loudly.
@@ -1504,8 +1488,6 @@ def _tool_specs(client, include_management: bool = False, doc_ids=None,
     if getattr(client, "api_key", None):
         bridge = _cloud_bridge(client, gated=not include_management)
         tools_meta = bridge.list_tools()
-        if not include_management:
-            tools_meta = _read_only_tools(tools_meta)
         return [(str(meta.get("name") or "tool"),
                  meta.get("description") or "",
                  copy.deepcopy(meta.get("inputSchema"))
