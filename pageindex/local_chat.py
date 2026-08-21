@@ -226,18 +226,16 @@ def _reported_model(model_name: str) -> str:
     return model_name.removeprefix("litellm/").removeprefix("openai/")
 
 
-def _cache_extra_args(model_name: str) -> Optional[dict]:
+def _litellm_claude_marks(wire: str) -> Optional[dict]:
     """Claude's prompt caching is opt-in per request: on Claude models
     routed through LiteLLM (Anthropic direct, Bedrock, Vertex — each
     channel live-verified), mark the managed system prefix and the newest
     message via LiteLLM's injection param so the loop's later turns and a
     conversation's next calls read them instead of repaying full price.
-    The name is normalized exactly as the wire path normalizes it before
-    LiteLLM's own resolution, so this predicate cannot disagree with where
-    the request actually routes."""
-    wire = model_name.removeprefix("litellm/")
-    if "/" not in wire or wire.startswith("openai/"):
-        return None
+    ``wire`` is the name LiteLLM itself resolves — each lane strips its
+    own routing prefixes first, because the lanes normalize differently
+    (the chat wire treats bare names as OpenAI shorthand; the Agents SDK
+    hands bare names to LiteLLM's own resolution)."""
     try:
         from litellm import get_llm_provider
         model, provider, _, _ = get_llm_provider(model=wire)
@@ -252,6 +250,16 @@ def _cache_extra_args(model_name: str) -> Optional[dict]:
             {"location": "message", "role": "system"},
             {"location": "message", "index": -1}]}
     return None
+
+
+def _cache_extra_args(model_name: str) -> Optional[dict]:
+    """The chat lane's marks: normalized exactly as _litellm_model
+    normalizes the wire (bare names get openai/), so this predicate
+    cannot disagree with where chat_completions actually routes."""
+    wire = model_name.removeprefix("litellm/")
+    if "/" not in wire or wire.startswith("openai/"):
+        return None
+    return _litellm_claude_marks(wire)
 
 
 def _openai_protocol(model_name: str) -> bool:

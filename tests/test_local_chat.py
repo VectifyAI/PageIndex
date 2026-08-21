@@ -2037,9 +2037,11 @@ def test_messages_without_credentials_raises_contract_error(client,
 
 
 def test_cache_extra_args_follow_wire_normalization():
-    """litellm/<bare-name> rides the OpenAI protocol on the wire (bare
-    names get openai/), so it must carry no Anthropic cache marks;
-    explicit anthropic routes keep them."""
+    """Chat lane only: litellm/<bare-name> rides the OpenAI protocol on
+    this wire (bare names get openai/), so it must carry no Anthropic
+    cache marks; explicit anthropic routes keep them. The agents lane
+    routes the same spelling to Anthropic and marks it — see
+    test_openai_agent_config_marks_bare_claude_behind_litellm_prefix."""
     pytest.importorskip("litellm")
     assert local_chat._cache_extra_args("litellm/claude-sonnet-4-5") is None
     assert local_chat._cache_extra_args("anthropic/claude-x") is not None

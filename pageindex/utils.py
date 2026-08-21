@@ -798,10 +798,15 @@ async def summarize_tree(structure, pdf_pages, model=None,
     summary are left untouched; leaves under `small_node_tokens` use their raw
     text as the summary without a model call."""
     semaphore = asyncio.Semaphore(concurrency or SUMMARY_CONCURRENCY)
+    asked = answered = False
 
     async def ask(prompt):
+        nonlocal asked, answered
+        asked = True
         async with semaphore:
-            return await llm_acompletion(model, prompt)
+            reply = await llm_acompletion(model, prompt)
+        answered = True
+        return reply
 
     async def leaf_summary(node):
         text = get_text_of_pdf_pages(pdf_pages, node['start_index'], node['end_index'])
@@ -890,10 +895,12 @@ async def summarize_tree(structure, pdf_pages, model=None,
         if isinstance(r, Exception) and _is_unrecoverable(r):
             raise r
 
+    # Raw-text leaves summarize without the model, so they cannot vouch for
+    # it: a run whose every model call failed still fails loud.
     def _any_summary(nodes):
         return any(n.get('summary') or _any_summary(n.get('nodes') or [])
                    for n in nodes)
-    if not _any_summary(structure):
+    if (asked and not answered) or not _any_summary(structure):
         raise RuntimeError(
             "Summary generation failed for all nodes "
             "(check LLM credentials and model availability)"

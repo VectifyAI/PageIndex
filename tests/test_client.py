@@ -741,6 +741,33 @@ def test_summarize_tree_child_unrecoverable_raises(monkeypatch):
             structure, pdf_pages, small_node_tokens=0))
 
 
+def test_summarize_tree_fails_loud_when_every_model_call_fails(monkeypatch):
+    """A retry-exhausted failure carries no status_code (litellm reports a
+    missing key as 500), so per-node handling blanks the summary instead of
+    raising; a raw-text short leaf must not vouch for such a run."""
+    async def exhausted(model, prompt):
+        raise RuntimeError("LLM call failed after 10 attempts")
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", exhausted)
+    pdf_pages = [("tiny", 1), ("beta " * 300, 300)]
+    structure = [{"title": "R", "start_index": 1, "end_index": 2,
+                  "nodes": [
+                      {"title": "A", "start_index": 1, "end_index": 1},
+                      {"title": "B", "start_index": 2, "end_index": 2}]}]
+    with pytest.raises(RuntimeError, match="check LLM credentials"):
+        asyncio.run(pageindex.utils.summarize_tree(structure, pdf_pages))
+
+
+def test_summarize_tree_all_short_leaves_need_no_model(monkeypatch):
+    """A tree whose every node summarizes from raw text makes zero model
+    calls and must not be mistaken for a failed run."""
+    async def unexpected(model, prompt):
+        raise AssertionError("no model call expected")
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", unexpected)
+    structure = [{"title": "A", "start_index": 1, "end_index": 1}]
+    out = asyncio.run(pageindex.utils.summarize_tree(structure, [("tiny", 1)]))
+    assert out[0]["summary"] == "tiny"
+
+
 def test_llm_completion_backend_reaches_litellm(monkeypatch):
     """No cache params of our own; backend keys reach litellm and win the merge."""
     import litellm

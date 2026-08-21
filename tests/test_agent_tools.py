@@ -796,6 +796,24 @@ def test_openai_agent_config_carries_cache_marks_for_litellm_claude(tmp_path):
     assert "cache_control_injection_points" in marked["model_settings"].extra_args
 
 
+def test_openai_agent_config_marks_bare_claude_behind_litellm_prefix(tmp_path):
+    """In this lane litellm/<bare-claude> routes to Anthropic — the Agents
+    SDK strips the prefix and LiteLLM resolves the bare name — unlike the
+    chat lane, whose wire treats bare names as OpenAI shorthand. The marks
+    follow this lane's routing, not the chat lane's."""
+    pytest.importorskip("agents")
+    pytest.importorskip("litellm")
+    client = PageIndexLocalClient(storage_path=str(tmp_path / "s"))
+    cfg = client.openai_agent_config(model="litellm/claude-sonnet-4-5")
+    assert cfg["model"] == "litellm/claude-sonnet-4-5"
+    assert "cache_control_injection_points" in cfg["model_settings"].extra_args
+    # Without the prefix the SDK's default OpenAI provider serves the name.
+    assert "model_settings" not in client.openai_agent_config(
+        model="claude-sonnet-4-5")
+    assert "model_settings" not in client.openai_agent_config(
+        model="litellm/gpt-4o")
+
+
 def test_openai_agent_config_merges_caller_model_settings(tmp_path):
     """Caller model_settings merge on top of the bundled cache marks
     (caller fields win, extra_args dict-merge); with no marks the

@@ -819,9 +819,10 @@ class PageIndexClient:
 
         Args:
             include_management (bool): Also expose tools that modify the
-                library. Local: adds ``remove_document``. Cloud: by default
-                only tools the server marks read-only are exposed; True
-                exposes the server's complete list (upload, delete, ...).
+                library. Local: adds ``remove_document``. Cloud: the URL
+                is the gate — the default serves what the read-only
+                endpoint (``?tools=read``) registers; True connects to
+                the full ``/mcp`` list (upload, delete, ...).
             doc_id: Local only — restrict the tools to this document ID
                 (or list of IDs), enforced at the tool layer: out-of-scope
                 lookups return NOT_FOUND. Raises on cloud, where scoping
@@ -860,10 +861,10 @@ class PageIndexClient:
 
         Args:
             include_management (bool): Also expose tools that modify the
-                library (delete, upload). Default off: the in-process
-                cloud default serves only server-annotated read-only
-                tools, and ``hosted=True`` connects OpenAI to the
-                read-only endpoint (``/mcp?tools=read``) instead.
+                library (delete, upload). Default off: on cloud the URL
+                is the gate — in-process and ``hosted=True`` alike
+                connect to the read-only endpoint (``/mcp?tools=read``);
+                True switches to the full ``/mcp`` list.
             hosted (bool): Cloud only — hand the MCP connection to OpenAI
                 for server-side tool execution (OpenAI models only).
             doc_id: Local only — restrict the tools to this document ID
@@ -948,11 +949,16 @@ class PageIndexClient:
                 # caller's process, outside our completion helpers.
                 from .utils import _repair_litellm_types
                 _repair_litellm_types()
-            from .local_chat import _cache_extra_args
-            extra_args = _cache_extra_args(model)
-            if extra_args:
-                from agents import ModelSettings
-                config["model_settings"] = ModelSettings(extra_args=extra_args)
+                # Marks follow this lane's routing: the SDK strips litellm/
+                # and LiteLLM resolves the rest (bare claude-* → Anthropic);
+                # names without the prefix ride the SDK's OpenAI provider.
+                from .local_chat import _litellm_claude_marks
+                extra_args = _litellm_claude_marks(
+                    config["model"].removeprefix("litellm/"))
+                if extra_args:
+                    from agents import ModelSettings
+                    config["model_settings"] = ModelSettings(
+                        extra_args=extra_args)
         if model_settings is not None:
             marks = config.get("model_settings")
             config["model_settings"] = (marks.resolve(model_settings)
@@ -992,9 +998,10 @@ class PageIndexClient:
 
         Args:
             include_management (bool): Also expose tools that modify the
-                library. Local: adds ``remove_document``. Cloud: by default
-                only tools the server marks read-only are exposed; True
-                exposes the server's complete list (upload, delete, ...).
+                library. Local: adds ``remove_document``. Cloud: the URL
+                is the gate — the default serves what the read-only
+                endpoint (``?tools=read``) registers; True connects to
+                the full ``/mcp`` list (upload, delete, ...).
             asynchronous (bool): Build ``beta_async_tool`` runnables for
                 ``AsyncAnthropic`` (each tool call runs in a worker
                 thread, keeping blocking I/O off your event loop). The
