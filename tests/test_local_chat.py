@@ -2044,3 +2044,29 @@ def test_cache_extra_args_follow_wire_normalization():
     assert local_chat._cache_extra_args("litellm/claude-sonnet-4-5") is None
     assert local_chat._cache_extra_args("anthropic/claude-x") is not None
     assert local_chat._cache_extra_args("litellm/anthropic/claude-x") is not None
+
+
+@needs_agents
+def test_bad_model_settings_wrap_as_contract_error(client):
+    """A mistyped sampling param is the SDK's verdict (pydantic),
+    translated into the contract's PageIndexAPIError like every other
+    door failure."""
+    with pytest.raises(PageIndexAPIError, match="Invalid model settings"):
+        client.chat_completions("q", temperature="hot")
+
+
+def test_cache_marks_counts_system_and_message_blocks():
+    """The counter guards the API's 4-breakpoint limit; marks live on
+    system blocks and on message content blocks, never on plain strings."""
+    system = [{"type": "text", "text": "s",
+               "cache_control": {"type": "ephemeral"}},
+              {"type": "text", "text": "t"}]
+    messages = [
+        {"role": "user", "content": "plain strings carry no marks"},
+        {"role": "user", "content": [
+            {"type": "text", "text": "a",
+             "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": "b"}]},
+    ]
+    assert local_chat._cache_marks(system, messages) == 2
+    assert local_chat._cache_marks([], []) == 0

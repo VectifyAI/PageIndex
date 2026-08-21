@@ -879,12 +879,8 @@ class PageIndexClient:
         """doc_id for the tool layer: passed through locally (structural
         allowlist), dropped on cloud where scoping is server-side and the
         config helpers keep prompt-level targeting."""
-        if doc_id is not None and not doc_id:
-            # An empty scope means "nothing" locally (empty allowlist) and
-            # cannot be represented on cloud; both refuse it loudly.
-            raise PageIndexAPIError(
-                "doc_id is empty. Pass one or more document IDs, or omit "
-                "doc_id to give the agent the whole library.")
+        from .agent_tools import _require_doc_selection
+        _require_doc_selection(doc_id)
         if not getattr(self, "api_key", None):
             return doc_id
         return None

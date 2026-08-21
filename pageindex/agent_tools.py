@@ -1462,15 +1462,19 @@ def _cloud_bridge(client, gated: bool = False):
         return bridge
 
 
-def _require_local_scope(client, doc_ids) -> None:
-    """The allowlist is enforced in-process; cloud lookups run server-side,
-    so accepting doc_ids there would be advisory-only — refuse loudly.
-    An empty allowlist is refused too: it would scope the agent to
-    nothing, with no signal to the caller."""
+def _require_doc_selection(doc_ids) -> None:
+    """An empty selection fails loud: washed to None it would mean
+    "everything", while the tool-layer allowlist would mean "nothing"."""
     if doc_ids is not None and not doc_ids:
         raise PageIndexAPIError(
             "doc_id is empty. Pass one or more document IDs, or omit "
             "doc_id to give the agent the whole library.")
+
+
+def _require_local_scope(client, doc_ids) -> None:
+    """The allowlist is enforced in-process; cloud lookups run server-side,
+    so accepting doc_ids there would be advisory-only — refuse loudly."""
+    _require_doc_selection(doc_ids)
     if doc_ids is not None and getattr(client, "api_key", None):
         raise PageIndexAPIError(
             "doc_ids scoping applies to local tools only — cloud calls "
@@ -1603,12 +1607,7 @@ def doc_targeting_block(client, doc_id, scoped: bool = False) -> Optional[str]:
     if doc_id is None:
         return None
     doc_ids = [doc_id] if isinstance(doc_id, str) else list(doc_id)
-    if not doc_ids:
-        # An empty selection must fail loud: washing it to None would mean
-        # "everything", and the tool-layer allowlist would mean "nothing".
-        raise PageIndexAPIError(
-            "doc_id is empty. Pass one or more document IDs, or omit "
-            "doc_id to give the agent the whole library.")
+    _require_doc_selection(doc_ids)
     details = []
     missing = []
     for one_id in doc_ids:

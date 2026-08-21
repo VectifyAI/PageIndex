@@ -320,12 +320,9 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
             body = {**(body or {}), **extra_body}
         else:
             extra_args = {**(extra_args or {}), **extra_body}
-    return Agent(
-        name="PageIndex",
-        instructions=instructions,
-        tools=build_openai_tools(client, doc_ids=doc_ids),
-        model=_openai_model(protocol, model_name, conn or None),
-        model_settings=ModelSettings(
+    from pydantic import ValidationError
+    try:
+        settings = ModelSettings(
             temperature=temperature, top_p=top_p, max_tokens=max_tokens,
             reasoning=reasoning,
             # Streamed runs otherwise carry no usage at all (agents forwards
@@ -333,7 +330,15 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
             include_usage=True,
             extra_body=body,
             extra_headers=extra_headers,
-            extra_args=extra_args),
+            extra_args=extra_args)
+    except ValidationError as exc:
+        raise PageIndexAPIError(f"Invalid model settings: {exc}") from exc
+    return Agent(
+        name="PageIndex",
+        instructions=instructions,
+        tools=build_openai_tools(client, doc_ids=doc_ids),
+        model=_openai_model(protocol, model_name, conn or None),
+        model_settings=settings,
     )
 
 
@@ -376,6 +381,16 @@ def _model_backend_error(exc) -> PageIndexAPIError:
             "call responses() instead."
         )
     return PageIndexAPIError(message)
+
+
+def _translate_run_error(exc, max_turns) -> PageIndexAPIError:
+    """The uncaught-run ladder every agent door shares."""
+    from agents.exceptions import AgentsException, MaxTurnsExceeded
+    if isinstance(exc, MaxTurnsExceeded):
+        return _wrap_max_turns(max_turns)
+    if isinstance(exc, AgentsException):
+        return PageIndexAPIError(f"The agent backend failed: {exc}")
+    return _model_backend_error(exc)
 
 
 def _run_kwargs(max_turns) -> dict:
@@ -576,13 +591,9 @@ def run_chat_completions(client, messages, stream: bool = False,
         try:
             result = _run_sync(_run_closing(agent,
                 Runner.run(agent, input=items, **run_kwargs)))
-        except MaxTurnsExceeded as exc:
-            raise _wrap_max_turns(max_turns) from exc
-        except AgentsException as exc:
-            raise PageIndexAPIError(
-                f"The agent backend failed: {exc}") from exc
-        except openai.OpenAIError as exc:
-            raise _model_backend_error(exc) from exc
+        except (MaxTurnsExceeded, AgentsException,
+                openai.OpenAIError) as exc:
+            raise _translate_run_error(exc, max_turns) from exc
         return {
             "id": f"chatcmpl-{uuid.uuid4().hex}",
             "object": "chat.completion",
@@ -621,13 +632,9 @@ def run_chat_completions(client, messages, stream: bool = False,
                         and isinstance(event.data, ResponseTextDeltaEvent)):
                     yield chunk({"content": event.data.delta})
             completed = True
-        except MaxTurnsExceeded as exc:
-            raise _wrap_max_turns(max_turns) from exc
-        except AgentsException as exc:
-            raise PageIndexAPIError(
-                f"The agent backend failed: {exc}") from exc
-        except openai.OpenAIError as exc:
-            raise _model_backend_error(exc) from exc
+        except (MaxTurnsExceeded, AgentsException,
+                openai.OpenAIError) as exc:
+            raise _translate_run_error(exc, max_turns) from exc
         finally:
             if not completed and hasattr(streamed, "cancel"):
                 streamed.cancel()  # abandoned/failed: stop the agent task
@@ -729,14 +736,9 @@ def run_responses(client, input, model: Optional[str] = None,
             result = _run_sync(_run_closing(agent,
                 Runner.run(agent, input=[dict(item) for item in items],
                            **run_kwargs)))
-        except MaxTurnsExceeded as exc:
-            raise _wrap_max_turns(max_turns) from exc
-        except AgentsException as exc:
-            raise PageIndexAPIError(
-                f"The agent backend failed: {exc}") from exc
-        except openai.OpenAIError as exc:
-            raise PageIndexAPIError(
-                f"The model backend failed: {exc}") from exc
+        except (MaxTurnsExceeded, AgentsException,
+                openai.OpenAIError) as exc:
+            raise _translate_run_error(exc, max_turns) from exc
         transcript = result.to_input_list()[len(items):]
         return envelope(transcript, result.raw_responses)
 
@@ -794,16 +796,15 @@ def run_responses(client, input, model: Optional[str] = None,
                     data["sequence_number"] = sequence
                     yield data
             completed = True
-        except MaxTurnsExceeded as exc:
-            raise _wrap_max_turns(max_turns) from exc
         except AgentsException as exc:
-            if recorded.get("status") not in ("failed", "incomplete"):
-                raise PageIndexAPIError(
-                    f"The agent backend failed: {exc}") from exc
+            # a run the envelope already reports failed/incomplete is done —
+            # except for max_turns, which always gets its guidance
+            if (isinstance(exc, MaxTurnsExceeded)
+                    or recorded.get("status") not in ("failed", "incomplete")):
+                raise _translate_run_error(exc, max_turns) from exc
             completed = True
         except openai.OpenAIError as exc:
-            raise PageIndexAPIError(
-                f"The model backend failed: {exc}") from exc
+            raise _translate_run_error(exc, max_turns) from exc
         finally:
             if not completed and hasattr(streamed, "cancel"):
                 streamed.cancel()  # abandoned/failed: stop the agent task

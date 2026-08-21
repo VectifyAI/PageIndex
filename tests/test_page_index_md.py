@@ -35,8 +35,11 @@ class MarkdownCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             md = Path(tmp) / "notes.md"
             md.write_text("# Title\n\nIntro.\n\n## Section\n\nBody.\n")
-            env = {k: v for k, v in os.environ.items()
-                   if k not in ("OPENAI_API_KEY", "CHATGPT_API_KEY")}
+            env = dict(os.environ)
+            # present-but-empty beats deletion: utils' load_dotenv() does
+            # not override existing vars, so the repo .env key stays out
+            env["OPENAI_API_KEY"] = ""
+            env["CHATGPT_API_KEY"] = ""
             env["PYTHONPATH"] = str(script.parent)
             res = subprocess.run(
                 [sys.executable, str(script), "--md_path", str(md)],

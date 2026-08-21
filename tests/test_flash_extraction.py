@@ -243,6 +243,21 @@ def test_lone_surrogate_targets_never_patched_into_chars():
     assert char["ch"] == "�"
 
 
+def test_lone_surrogate_from_single_byte_map_is_replaced():
+    """The single-byte branch scrubs mapped lone surrogates like the
+    two-byte branch does."""
+    from pageindex.flash.parser_pdfium_charlevel.unicode_apply import (
+        _apply_font_unicode)
+
+    char = {"i": 0, "ch": "X", "is_gen": False}
+    show_codes = [(7, (0x41,), 100.0)]
+    map_cache = {7: (1, {0x41: "\ud83d"})}
+
+    _apply_font_unicode([char], [], show_codes, None, map_cache)
+
+    assert char["ch"] == "�"
+
+
 def test_anonymous_main_overlapping_windows_restore(monkeypatch):
     """The last window out must restore the true originals, not a mid-window snapshot."""
     import sys
