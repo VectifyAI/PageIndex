@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 import warnings
@@ -37,6 +38,10 @@ def _preload_litellm() -> None:
 
 def _parse_pages(pages: str) -> list[int]:
     from .agent_tools import _PageSpecError, _expand_pages
+    if isinstance(pages, str):
+        # 0.2.10 tolerated whitespace on this surface; the tool layer stays
+        # on the strict contract pattern.
+        pages = re.sub(r"\s*([,-])\s*", r"\1", pages.strip())
     try:
         return _expand_pages(pages)
     except _PageSpecError as exc:

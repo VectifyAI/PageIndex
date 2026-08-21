@@ -79,7 +79,7 @@ class LocalAPI:
                     "Failed to submit document: metadata must be a dict."
                 )
             try:
-                json.dumps(metadata)
+                json.dumps(metadata, allow_nan=False)
             except (TypeError, ValueError) as e:
                 raise PageIndexAPIError(
                     f"Failed to submit document: metadata must be valid JSON. {e}"
@@ -111,7 +111,11 @@ class LocalAPI:
             raise PageIndexAPIError(
                 "Failed to submit document: PDF has no content. All pages are blank."
             )
-        self._unique_doc_name(os.path.basename(file_path))
+        # Surrogates from a surrogateescape'd filesystem name would be
+        # mangled by the store's errors="replace" write; scrub now so the
+        # returned name is byte-for-byte the stored name.
+        doc_name = _SURROGATES.sub("�", os.path.basename(file_path))
+        self._unique_doc_name(doc_name)
 
         try:
             if mode == "flash":
@@ -138,7 +142,7 @@ class LocalAPI:
         with self._store.lock():
             meta = {
                 "id": doc_id,
-                "name": self._unique_doc_name(os.path.basename(file_path)),
+                "name": self._unique_doc_name(doc_name),
                 "description": description,
                 "status": "completed",
                 "createdAt": _now_iso(),

@@ -32,7 +32,7 @@ if __name__ == "__main__":
     parser.add_argument('--model', type=str, default=None,
                       help='(legacy) Same as --index-model')
     parser.add_argument('--summary-model', type=str, default=None,
-                      help='Model for node summaries (defaults to --index-model, then --model, then config.yaml)')
+                      help='Model for node summaries (falls back to config.yaml summary_model, then --index-model, then --model)')
 
     parser.add_argument('--toc-check-pages', type=int, default=None,
                       help='Number of pages to check for table of contents (PDF only)')
@@ -94,9 +94,11 @@ if __name__ == "__main__":
             
         if args.mode == 'flash':
             from pageindex.flash import page_index_flash
-            summary_model = (args.summary_model or args.index_model
-                             or args.model
-                             or ConfigLoader().load().summary_model)
+            summary_model = ConfigLoader().load({k: v for k, v in {
+                'summary_model': args.summary_model,
+                'index_model': args.index_model,
+                'model': args.model,
+            }.items() if v is not None}).summary_model
             will_summarize = args.summary if args.summary is not None else True
             toc_with_page_number = page_index_flash(
                 args.pdf_path,
@@ -106,6 +108,8 @@ if __name__ == "__main__":
                 use_embedded_toc=args.embedded_toc if args.embedded_toc is not None else True,
                 summary=will_summarize,
             )
+            if not toc_with_page_number.get('structure'):
+                raise ValueError("PageIndex Flash could not extract a structure from this PDF")
             if 'optimize' in toc_with_page_number:
                 o = toc_with_page_number['optimize']
                 print(f"Optimize: merges={o['merges']} expands={o['expands']}, "

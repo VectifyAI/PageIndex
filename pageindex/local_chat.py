@@ -902,10 +902,12 @@ def _cache_marks(system_blocks, messages) -> int:
 
 def _dump_block(block) -> Any:
     """A content block as a plain JSON dict, minus SDK-internal fields the
-    API rejects (ParsedBetaTextBlock.__api_exclude__, e.g. parsed_output)."""
+    API rejects (ParsedBetaTextBlock.__api_exclude__, e.g. parsed_output)
+    and unset response-only defaults (exclude_unset, like the SDK's own
+    request serializer — an explicit null fails the request schema)."""
     if hasattr(block, "model_dump"):
         exclude = getattr(type(block), "__api_exclude__", None)
-        return block.model_dump(mode="json",
+        return block.model_dump(mode="json", exclude_unset=True,
                                 exclude=set(exclude) if exclude else None)
     return block
 

@@ -413,3 +413,57 @@ def test_optimize_expand_warning_names_the_behavior_change(tmp_path,
     with pytest.warns(DeprecationWarning, match="now runs"):
         flash_api.page_index_flash(str(pdf), summary=False,
                                    optimize_expand=False)
+
+
+# ── run_pageindex.py flash branch (twelfth review) ──
+
+SCRIPT = Path(__file__).resolve().parent.parent / "run_pageindex.py"
+
+
+def _run_flash_cli(monkeypatch, tmp_path, argv, structure):
+    """Drive run_pageindex.py in-process with a stubbed flash indexer."""
+    import runpy
+    import sys
+
+    import pageindex.flash
+
+    pdf = tmp_path / "t.pdf"
+    pdf.write_bytes(b"%PDF-1.4 stub")
+    captured = {}
+
+    def fake_flash(path, **kw):
+        captured.update(kw)
+        return {"structure": structure}
+    monkeypatch.setattr(pageindex.flash, "page_index_flash", fake_flash)
+    monkeypatch.setattr(sys, "argv",
+                        ["run_pageindex.py", "--pdf_path", str(pdf), *argv])
+    monkeypatch.chdir(tmp_path)
+    runpy.run_path(str(SCRIPT), run_name="__main__")
+    return captured
+
+
+def test_flash_cli_summary_model_follows_config_chain(monkeypatch, tmp_path):
+    """--model must not outrank a file-supplied summary_model: the flash
+    branch resolves through ConfigLoader's chain like the standard and
+    markdown branches, and like the --summary-model help promises."""
+    import pageindex.utils as U
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text((Path(U.__file__).parent / "config.yaml").read_text()
+                   + "\nsummary_model: yaml-summary\n")
+    orig = U.ConfigLoader.__init__
+    monkeypatch.setattr(U.ConfigLoader, "__init__",
+                        lambda self, default_path=None: orig(self, str(cfg)))
+    captured = _run_flash_cli(
+        monkeypatch, tmp_path, ["--model", "cli-model"],
+        [{"title": "T", "start_index": 1, "end_index": 1}])
+    assert captured["summary_model"] == "yaml-summary"
+    assert captured["optimize_model"] == "yaml-summary"
+
+
+def test_flash_cli_rejects_empty_structure(monkeypatch, tmp_path):
+    """A PDF flash cannot structure must error like the SDK does, not write
+    "structure": [] and exit 0 with a success message."""
+    with pytest.raises(ValueError, match="could not extract a structure"):
+        _run_flash_cli(monkeypatch, tmp_path, [], [])
+    assert not (tmp_path / "results").exists()

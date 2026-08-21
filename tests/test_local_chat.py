@@ -2105,3 +2105,14 @@ def test_cache_marks_counts_system_and_message_blocks():
     ]
     assert local_chat._cache_marks(system, messages) == 2
     assert local_chat._cache_marks([], []) == 0
+
+
+def test_dump_block_omits_unset_response_defaults():
+    """messages() tells the caller to append result["messages"] verbatim;
+    a response-only default like tool_use's caller must not surface as an
+    explicit null the request schema has no variant for."""
+    pytest.importorskip("anthropic")
+    from anthropic.types.beta import BetaToolUseBlock
+    block = BetaToolUseBlock(id="tu_1", input={}, name="t", type="tool_use")
+    assert local_chat._dump_block(block) == {
+        "id": "tu_1", "input": {}, "name": "t", "type": "tool_use"}

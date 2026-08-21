@@ -1248,3 +1248,138 @@ def test_format_tree_node_keeps_key_items():
     assert out["key_items"] == ["1.1 Alpha", "1.2 Beta", "1.3 Gamma"]
     assert "key_items" not in _format_tree_node(
         {"title": "t", "node_id": "0001", "start_index": 1}, False)
+
+
+# ── retry-ladder and summary fail-loud edges (twelfth review) ──
+
+def test_summarize_tree_all_empty_replies_fail_loud(monkeypatch):
+    """Empty-content replies (content filter, spent output cap) must not
+    vouch for the model: a raw-text short leaf cannot carry the run when
+    every model reply comes back blank."""
+    async def blank(model, prompt):
+        return ""
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", blank)
+    pdf_pages = [("tiny", 1), ("beta " * 300, 300)]
+    structure = [{"title": "R", "start_index": 1, "end_index": 2,
+                  "nodes": [
+                      {"title": "A", "start_index": 1, "end_index": 1},
+                      {"title": "B", "start_index": 2, "end_index": 2}]}]
+    with pytest.raises(RuntimeError, match="returned empty"):
+        asyncio.run(pageindex.utils.summarize_tree(structure, pdf_pages))
+
+
+def test_summarize_tree_partial_empty_reply_absorbed(monkeypatch):
+    """One blank reply among good ones stays the documented per-node
+    absorption: blank summary, run survives."""
+    async def flaky(model, prompt):
+        if "alpha" in prompt:
+            return ""
+        return '{"points": [], "summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", flaky)
+    pdf_pages = [("alpha " * 300, 300), ("beta " * 300, 300)]
+    structure = [{"title": "A", "start_index": 1, "end_index": 1},
+                 {"title": "B", "start_index": 2, "end_index": 2}]
+    out = asyncio.run(pageindex.utils.summarize_tree(structure, pdf_pages))
+    assert [n["summary"] for n in out] == ["", "ok"]
+
+
+def test_generate_doc_description_absorbs_context_overflow(monkeypatch):
+    """A per-prompt 400 (the whole-tree prompt overran the context) keeps
+    the indexed document: empty description instead of a lost run. Anything
+    else keeps propagating (see the sibling no-swallow test)."""
+    class Rejected(Exception):
+        status_code = 400
+
+    def boom(model, prompt):
+        raise Rejected("context_length_exceeded")
+    monkeypatch.setattr(pageindex.utils, "llm_completion", boom)
+    assert pageindex.utils.generate_doc_description([]) == ""
+
+
+def test_llm_completion_400_skips_the_retry_ladder(monkeypatch):
+    """A 400 rejects this prompt permanently — retrying cannot shrink it:
+    one wire call, raised raw so consumers can absorb it per policy."""
+    pytest.importorskip("litellm")
+    import litellm
+
+    class Rejected(Exception):
+        status_code = 400
+
+    calls = {"n": 0}
+
+    def reject(**kw):
+        calls["n"] += 1
+        raise Rejected("context_length_exceeded")
+    monkeypatch.setattr(litellm, "completion", reject)
+    monkeypatch.setattr("pageindex.utils.time.sleep", lambda s: None)
+    with pytest.raises(Rejected):
+        pageindex.utils.llm_completion("gpt-4o", "p")
+    assert calls["n"] == 1
+
+
+def test_llm_acompletion_400_skips_the_retry_ladder(monkeypatch):
+    pytest.importorskip("litellm")
+    import litellm
+
+    class Rejected(Exception):
+        status_code = 400
+
+    calls = {"n": 0}
+
+    async def reject(**kw):
+        calls["n"] += 1
+        raise Rejected("context_length_exceeded")
+    monkeypatch.setattr(litellm, "acompletion", reject)
+
+    async def _nosleep(s):
+        pass
+    monkeypatch.setattr("pageindex.utils.asyncio.sleep", _nosleep)
+    with pytest.raises(Rejected):
+        asyncio.run(pageindex.utils.llm_acompletion("gpt-4o", "p"))
+    assert calls["n"] == 1
+
+
+def test_parse_pages_keeps_whitespace_tolerance():
+    """0.2.10 accepted whitespace around parts (int() tolerance); the SDK
+    surface keeps that while the tool layer stays on the strict pattern."""
+    from pageindex.client import _parse_pages
+    assert _parse_pages(" 1-3") == [1, 2, 3]
+    assert _parse_pages("5 - 7") == [5, 6, 7]
+    assert _parse_pages("3 ,8") == [3, 8]
+    assert _parse_pages("1-3\n") == [1, 2, 3]
+    assert _parse_pages("\t2") == [2]
+    with pytest.raises(PageIndexAPIError):
+        _parse_pages("1 2")
+
+
+def test_submit_scrubs_surrogates_from_the_stored_name(
+        local_client, sample_pdf, monkeypatch):
+    """The store scrubs at write time; scrubbing the basename at entry keeps
+    the returned name identical to the stored name and lets the rename
+    warning fire. (APFS refuses surrogate filenames, so the basename is
+    patched instead of the filesystem.)"""
+    import os
+
+    def fake_page_index_main(doc, opt=None, logger=None, page_list=None):
+        return {"doc_name": "x", "doc_description": "d",
+                "structure": json.loads(json.dumps(STRUCTURE))}
+    monkeypatch.setattr(page_index_module, "page_index_main",
+                        fake_page_index_main)
+    real = os.path.basename
+    monkeypatch.setattr(os.path, "basename",
+                        lambda p: "re\udcffport.pdf"
+                        if real(str(p)) == "sample.pdf" else real(p))
+    with pytest.warns(UserWarning, match="stored as"):
+        result = local_client.submit_document(sample_pdf, mode="standard")
+    assert result["name"] == "re�port.pdf"
+    docs = local_client.list_documents()["documents"]
+    assert [d["name"] for d in docs] == ["re�port.pdf"]
+
+
+def test_submit_rejects_nan_metadata(local_client):
+    """json.dumps' default (allow_nan=True) passes NaN/Infinity that no
+    strict JSON parser accepts; the gate must reject them before they reach
+    disk and every tool envelope."""
+    with pytest.raises(PageIndexAPIError, match="valid JSON"):
+        local_client.submit_document("/nonexistent.pdf",
+                                     metadata={"score": float("nan")})

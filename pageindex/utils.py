@@ -104,10 +104,14 @@ def _litellm_model(model, backend):
 
 
 # Misconfiguration: no retry can fix a rejected key or a model that does not
-# exist, and every later call fails the same way. Deliberately not 400, which
-# also carries context_length_exceeded, a per-prompt failure the caller absorbs
-# today. An unknown status is a transport failure and stays retryable.
+# exist, and every later call fails the same way. An unknown status is a
+# transport failure and stays retryable.
 _UNRECOVERABLE_STATUS = frozenset({401, 403, 404})
+
+# A 400 (context_length_exceeded) is equally unfixable by retry — the prompt
+# will not shrink — but it is per-prompt: the ladder raises it immediately
+# and consumers absorb it instead of failing the run.
+_NO_RETRY_STATUS = _UNRECOVERABLE_STATUS | frozenset({400})
 
 
 class LLMRetriesExhausted(RuntimeError):
@@ -149,7 +153,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
                 return content, finish_reason
             return content
         except Exception as e:
-            if _is_unrecoverable(e):
+            if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
                 raise
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
@@ -180,7 +184,7 @@ async def llm_acompletion(model, prompt):
             })
             return response.choices[0].message.content
         except Exception as e:
-            if _is_unrecoverable(e):
+            if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
                 raise
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
@@ -822,7 +826,8 @@ async def summarize_tree(structure, pdf_pages, model=None,
         asked = True
         async with semaphore:
             reply = await llm_acompletion(model, prompt)
-        answered = True
+        if reply:
+            answered = True
         return reply
 
     async def leaf_summary(node):
@@ -959,7 +964,14 @@ def generate_doc_description(structure, model=None):
     
     Directly return the description, do not include any other text.
     """
-    return llm_completion(model, prompt)
+    try:
+        return llm_completion(model, prompt)
+    except Exception as e:
+        # Per-prompt 400: the unbounded whole-tree prompt overran the
+        # context; the indexed document survives with no description.
+        if getattr(e, "status_code", None) == 400:
+            return ""
+        raise
 
 
 def reorder_dict(data, key_order):
