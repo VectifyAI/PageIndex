@@ -1409,3 +1409,12 @@ def test_submit_rejects_nan_metadata(local_client):
     with pytest.raises(PageIndexAPIError, match="valid JSON"):
         local_client.submit_document("/nonexistent.pdf",
                                      metadata={"score": float("nan")})
+
+
+def test_submit_flash_empty_structure_points_to_standard(
+        local_client, sample_pdf, monkeypatch):
+    """The heading-less hard-fail names its way out: mode='standard'."""
+    monkeypatch.setattr(pageindex.flash, "page_index_flash",
+                        lambda pdf, **kwargs: {"structure": []})
+    with pytest.raises(PageIndexAPIError, match="mode='standard'"):
+        local_client.submit_document(sample_pdf)

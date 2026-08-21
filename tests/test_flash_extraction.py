@@ -464,6 +464,6 @@ def test_flash_cli_summary_model_follows_config_chain(monkeypatch, tmp_path):
 def test_flash_cli_rejects_empty_structure(monkeypatch, tmp_path):
     """A PDF flash cannot structure must error like the SDK does, not write
     "structure": [] and exit 0 with a success message."""
-    with pytest.raises(ValueError, match="could not extract a structure"):
+    with pytest.raises(ValueError, match="try --mode standard"):
         _run_flash_cli(monkeypatch, tmp_path, [], [])
     assert not (tmp_path / "results").exists()

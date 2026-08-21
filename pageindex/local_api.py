@@ -237,7 +237,8 @@ class LocalAPI:
         if not structure:
             raise PageIndexAPIError(
                 "Failed to submit document: PageIndex Flash could not extract "
-                "a structure from this PDF."
+                "a structure from this PDF. Try mode='standard', which builds "
+                "the structure with the model."
             )
         write_node_id(structure)
         description = generate_doc_description(

@@ -2166,3 +2166,19 @@ def test_dump_block_omits_unset_response_defaults():
     block = BetaToolUseBlock(id="tu_1", input={}, name="t", type="tool_use")
     assert local_chat._dump_block(block) == {
         "id": "tu_1", "input": {}, "name": "t", "type": "tool_use"}
+
+
+def test_default_max_tokens_respects_output_ceilings():
+    """A lifted thinking default must not overshoot the model's output
+    ceiling — the wire rejects max_tokens above it; bool is not a budget."""
+    lift = local_chat._default_max_tokens
+    enabled = {"type": "enabled", "budget_tokens": 30000}
+    assert lift("claude-opus-4-1", enabled) == 32000
+    assert lift("claude-sonnet-4-5-20250929",
+                {"type": "enabled", "budget_tokens": 60000}) == 64000
+    assert lift("claude-opus-4-1",
+                {"type": "enabled", "budget_tokens": 10000}) == 18192
+    assert lift("claude-test",
+                {"type": "enabled", "budget_tokens": 10000}) == 18192
+    assert lift("claude-sonnet-4-5",
+                {"type": "enabled", "budget_tokens": True}) == 8192

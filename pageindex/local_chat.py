@@ -962,11 +962,19 @@ def _default_max_tokens(model: str, thinking=None) -> int:
     """The wire-required per-turn budget when the caller sets none: 8192,
     except the claude-3 generation whose output ceiling is 4096. The wire
     also requires max_tokens > thinking.budget_tokens, so an enabled
-    budget lifts the default above itself."""
+    budget lifts the default above itself — clamped to the model's output
+    ceiling where LiteLLM's capability map knows it."""
     budget = (thinking.get("budget_tokens")
               if isinstance(thinking, dict) else None)
-    if isinstance(budget, int):
-        return budget + 8192
+    if isinstance(budget, int) and not isinstance(budget, bool):
+        want = budget + 8192
+        try:
+            import litellm
+            ceiling = (litellm.model_cost.get(model)
+                       or {}).get("max_output_tokens")
+        except Exception:
+            ceiling = None
+        return min(want, ceiling) if ceiling else want
     return 4096 if model.startswith(_CLAUDE_4096_MODELS) else 8192
 
 

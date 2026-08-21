@@ -109,7 +109,8 @@ if __name__ == "__main__":
                 summary=will_summarize,
             )
             if not toc_with_page_number.get('structure'):
-                raise ValueError("PageIndex Flash could not extract a structure from this PDF")
+                raise ValueError("PageIndex Flash could not extract a structure from this PDF; "
+                                 "try --mode standard, which builds the structure with the model")
             if 'optimize' in toc_with_page_number:
                 o = toc_with_page_number['optimize']
                 print(f"Optimize: merges={o['merges']} expands={o['expands']}, "
