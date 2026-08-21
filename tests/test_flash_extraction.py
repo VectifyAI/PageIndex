@@ -13,6 +13,21 @@ import pytest
 PDF = Path(__file__).parent.parent / "examples" / "documents" / "earthmover.pdf"
 
 
+def test_read_bookmarks_same_on_pdfium_4_and_5():
+    """Users may install pypdfium2 4.x or 5.x (floor >=4.30) — the bookmark
+    reader has one branch per major and both must yield the same entries.
+    The CI pdfium-4 leg runs this against the 4.x branch; everywhere else
+    it pins the 5.x branch to the same values."""
+    from pageindex.flash.embedded_toc import read_bookmarks
+
+    pdf = Path(__file__).parent.parent / "examples" / "documents" / "attention-residuals.pdf"
+    bookmarks = read_bookmarks(str(pdf))
+    assert len(bookmarks) == 22
+    assert bookmarks[0] == {"title": "Introduction", "level": 1, "page": 2}
+    assert bookmarks[2] == {"title": "Training Deep Networks via Residuals",
+                            "level": 2, "page": 3}
+
+
 @pytest.mark.skipif(int(version("pypdfium2").split(".")[0]) < 5,
                     reason="extraction is pinned to pdfium 5.x font-name semantics")
 def test_page_text_pins_pdfium5_semantics():
