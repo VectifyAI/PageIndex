@@ -8,6 +8,11 @@ import types
 import httpx  # via the hard `openai` dependency
 import pytest
 
+try:  # anthropic >= 1.0 validates http_client against httpx2
+    import httpx2 as anthropic_httpx
+except ImportError:  # older anthropic rides classic httpx
+    anthropic_httpx = httpx
+
 import pageindex.local_chat as local_chat
 from pageindex import (PageIndexAPIError, PageIndexCloudClient,
                        PageIndexLocalClient)
@@ -688,14 +693,15 @@ def fake_anthropic(monkeypatch):
             state["calls"].append(json.loads(request.content))
             body = responses[len(state["calls"]) - 1]
             if isinstance(body, str):  # pre-rendered SSE
-                return httpx.Response(
+                return anthropic_httpx.Response(
                     200, content=body.encode(),
                     headers={"content-type": "text/event-stream"})
-            return httpx.Response(200, json=body)
+            return anthropic_httpx.Response(200, json=body)
 
         fake = anthropic.Anthropic(
             api_key="test",
-            http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+            http_client=anthropic_httpx.Client(
+                transport=anthropic_httpx.MockTransport(handler)))
         monkeypatch.setattr(local_chat, "_anthropic_client",
                             lambda backend=None: fake)
         return state["calls"]
@@ -1433,13 +1439,14 @@ def test_messages_provider_errors_wrap_as_sdk_errors(client, store_path,
     seed_doc(store_path, "pi-a", "report.pdf")
 
     def handler(request):
-        return httpx.Response(429, json={
+        return anthropic_httpx.Response(429, json={
             "type": "error",
             "error": {"type": "rate_limit_error", "message": "slow down"}})
 
     fake = anthropic.Anthropic(
         api_key="test", max_retries=0,
-        http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+        http_client=anthropic_httpx.Client(
+            transport=anthropic_httpx.MockTransport(handler)))
     monkeypatch.setattr(local_chat, "_anthropic_client",
                         lambda backend=None: fake)
     with pytest.raises(PageIndexAPIError, match="model backend failed"):
@@ -1825,11 +1832,12 @@ def test_messages_extra_headers_reach_the_wire(client, monkeypatch):
 
     def handler(request):
         seen["beta"] = request.headers.get("anthropic-beta")
-        return httpx.Response(200, json=_anthropic_message(
+        return anthropic_httpx.Response(200, json=_anthropic_message(
             [{"type": "text", "text": "ok"}], "end_turn"))
 
-    fake = anthropic.Anthropic(api_key="t", http_client=httpx.Client(
-        transport=httpx.MockTransport(handler)))
+    fake = anthropic.Anthropic(
+        api_key="t", http_client=anthropic_httpx.Client(
+            transport=anthropic_httpx.MockTransport(handler)))
     monkeypatch.setattr(local_chat, "_anthropic_client",
                         lambda backend=None: fake)
     client.messages("q", model="claude-sonnet-4-5",
@@ -2007,8 +2015,8 @@ def test_responses_model_marks_caller_owned_transport(monkeypatch):
 @needs_anthropic
 def test_messages_keeps_caller_owned_http_client_open(client):
     body = _anthropic_message([{"type": "text", "text": "a"}], "end_turn")
-    shared = httpx.Client(transport=httpx.MockTransport(
-        lambda request: httpx.Response(200, json=body)))
+    shared = anthropic_httpx.Client(transport=anthropic_httpx.MockTransport(
+        lambda request: anthropic_httpx.Response(200, json=body)))
     out = client.messages("q", model="claude-test",
                           backend={"api_key": "t", "http_client": shared})
     assert out["content"][0]["text"] == "a"
