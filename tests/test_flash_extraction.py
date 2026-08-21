@@ -100,6 +100,12 @@ def test_propose_children_clamps_to_loaded_pages(monkeypatch):
     assert out == []
     assert "<page_2>" in seen["prompt"] and "<page_3>" not in seen["prompt"]
 
+    seen.clear()
+    node = {"title": "T", "start_index": 3, "end_index": 4, "node_id": "n2"}
+    out = asyncio.run(tree_optimize.propose_children(
+        node, ["page one", "page two"], SimpleNamespace(model="m")))
+    assert out == [] and "prompt" not in seen  # fully beyond: no model call
+
 
 def test_bootstrap_reimport_is_not_swallowed(monkeypatch):
     # An unguarded caller script re-imported by a spawn worker must die loudly,

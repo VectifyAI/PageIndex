@@ -625,6 +625,8 @@ async def propose_children(node, pages, args):
     """Generate one temporary level of children via the model. Validated, not committed."""
     start, end = node["start_index"], subtree_end(node)
     end = min(end, len(pages))  # a tree from another parser may overrun pages
+    if end < start:
+        return []               # the whole span is beyond the loaded pages
     block = "\n".join(
         f"<page_{n}>\n{pages[n - 1][:PAGE_CHARS]}\n</page_{n}>" for n in range(start, end + 1))
     answer = await ask_model(args.model, EXPAND_PROMPT.format(

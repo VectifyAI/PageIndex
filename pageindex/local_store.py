@@ -17,7 +17,7 @@ def _write_json_atomic(path: Path, data) -> None:
     try:
         # errors=: a lone surrogate (os.fsdecode'd path in metadata, an
         # LLM-written \ud83d escape) must not crash the store after a whole
-        # indexing run — it lands as U+FFFD instead.
+        # indexing run — it is replaced instead.
         with open(tmp, "w", encoding="utf-8", errors="replace") as f:
             json.dump(data, f, ensure_ascii=False)
             f.flush()
