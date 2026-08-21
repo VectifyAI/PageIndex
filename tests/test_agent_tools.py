@@ -213,6 +213,17 @@ def test_browse_documents_relevance_unsupported(client, store_path):
     assert "local mode" in bad_sort["error"]
 
 
+def test_expand_pages_enforces_contract_pattern():
+    """int() alone is far laxer than the published pages pattern; an
+    out-of-contract spelling must reject, never resolve to another page."""
+    from pageindex.agent_tools import _PageSpecError, _expand_pages
+    assert _expand_pages("1-3, 7") == [1, 2, 3, 7]
+    for bad in ["1_0", "+5", "٥", "１", " 1", "1 - 3"]:
+        with pytest.raises(_PageSpecError) as excinfo:
+            _expand_pages(bad)
+        assert excinfo.value.code == "invalid"
+
+
 def test_browse_documents_empty_and_folder_error(client):
     payload, is_error = run(client, "browse_documents")
     assert not is_error

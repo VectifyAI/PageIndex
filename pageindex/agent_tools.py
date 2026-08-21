@@ -12,8 +12,10 @@ exist on the cloud.
 Tools never raise: every outcome, including errors, is returned as the
 same JSON envelope the cloud emits ({"success": true, ...} /
 {"error": ...}) — arguments outside a pruned local signature come back as
-that envelope too, on the direct and the call_tool path alike. One
-exception: a cloud 401/403 re-raises PageIndexAPIError.
+that envelope too, on the direct and the call_tool path alike, except
+browse_documents' ``recursive``: call_tool honors it, because the flat
+no-folders shape it asks for is trivially true here. One exception to
+never-raise: a cloud 401/403 re-raises PageIndexAPIError.
 """
 from __future__ import annotations
 
@@ -518,13 +520,23 @@ class _PageSpecError(ValueError):
         self.code = code
 
 
+# re.ASCII mirrors the ECMA regex semantics the contract's pattern carries
+_PAGE_SPEC_RE = re.compile(
+    TOOL_CONTRACT["get_page_content"]["schema"]["properties"]["pages"]["pattern"],
+    re.ASCII)
+
+
 def _expand_pages(pages) -> list[int]:
     """Expand '1-3,7' into sorted distinct pages — the one parser for the
-    SDK surface and the tool layer. Raises _PageSpecError with code
-    'invalid', 'too_many', or 'nonpositive'."""
+    SDK surface and the tool layer, holding both to the contract's pages
+    pattern. Raises _PageSpecError with code 'invalid', 'too_many', or
+    'nonpositive'."""
     if not isinstance(pages, str):
         raise _PageSpecError("invalid",
                              f"Invalid page specification: {pages!r}")
+    if not _PAGE_SPEC_RE.fullmatch(pages):
+        raise _PageSpecError(
+            "invalid", f"Invalid page specification '{pages}'")
     too_many = (f"Page specification '{pages}' spans more than "
                 f"{_MAX_REQUESTED_PAGES} pages; request a narrower range")
     expanded: set[int] = set()

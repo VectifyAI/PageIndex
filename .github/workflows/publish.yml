@@ -33,7 +33,8 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.13"]
-    name: test py${{ matrix.python-version }}
+        agent-frameworks: [without, with]
+    name: test py${{ matrix.python-version }} (${{ matrix.agent-frameworks }} frameworks)
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
@@ -42,8 +43,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: pip install -r requirements.txt pytest
-      # tests.yml's 'with' leg — the release gate must run the framework tests
-      - run: pip install openai-agents claude-agent-sdk anthropic
+      # mirror tests.yml's two install shapes: the gate must cover the
+      # framework tests and the no-framework import paths alike
+      - if: matrix.agent-frameworks == 'without'
+        run: pip uninstall -y openai-agents
+      - if: matrix.agent-frameworks == 'with'
+        run: pip install openai-agents claude-agent-sdk anthropic
       - run: python -m pytest -q
 
   publish:

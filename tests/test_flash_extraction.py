@@ -329,3 +329,45 @@ def test_optimize_full_skips_expand_without_page_texts(tmp_path, monkeypatch):
     result = flash_api.page_index_flash(str(pdf), summary=False)
     assert calls == {"pages": [], "do_expand": False}
     assert result["optimize"] == {"merges": 0}
+
+
+def test_optimize_full_skips_expand_on_textless_pages(tmp_path, monkeypatch):
+    """Scanned PDFs yield page_texts of empty strings; expand still skips —
+    proposals against empty text are all rejected, so the calls are waste."""
+    from conftest import build_pdf
+    from pageindex.flash import api as flash_api
+
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    calls = {}
+
+    def fake_optimize(structure, pages, do_expand, model):
+        calls["do_expand"] = do_expand
+        return {"merges": 0}
+
+    monkeypatch.setattr(flash_api, "_optimize", fake_optimize)
+    monkeypatch.setattr(flash_api, "extract_toc",
+                        lambda pdf, use_embedded_toc=True: {
+                            "structure": [{"title": "T", "start_index": 1,
+                                           "end_index": 2, "nodes": []}],
+                            "page_texts": ["", ""]})
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    result = flash_api.page_index_flash(str(pdf), summary=False)
+    assert calls == {"do_expand": False}
+    assert result["optimize"] == {"merges": 0}
+
+
+def test_optimize_expand_warning_names_the_behavior_change(tmp_path,
+                                                           monkeypatch):
+    """The deprecation must say the optimize pass now runs, not just that
+    the parameter was renamed."""
+    from conftest import build_pdf
+    from pageindex.flash import api as flash_api
+
+    monkeypatch.setattr(flash_api, "extract_toc",
+                        lambda pdf, use_embedded_toc=True: {"structure": []})
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    with pytest.warns(DeprecationWarning, match="now runs"):
+        flash_api.page_index_flash(str(pdf), summary=False,
+                                   optimize_expand=False)

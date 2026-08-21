@@ -110,7 +110,19 @@ def _litellm_model(model, backend):
 _UNRECOVERABLE_STATUS = frozenset({401, 403, 404})
 
 
+class LLMRetriesExhausted(RuntimeError):
+    """The retry ladder gave up; carries the last error's status_code."""
+
+    def __init__(self, message, status_code=None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
 def _is_unrecoverable(exc: Exception) -> bool:
+    if isinstance(exc, LLMRetriesExhausted):
+        # 400 carries context_length_exceeded, the per-prompt failure the
+        # caller absorbs (see above); any other exhausted ladder is fatal.
+        return exc.status_code != 400
     return getattr(exc, "status_code", None) in _UNRECOVERABLE_STATUS
 
 
@@ -123,13 +135,14 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
     _repair_litellm_types()
     for i in range(max_retries):
         try:
-            response = litellm.completion(
-                model=model,
-                messages=messages,
-                drop_params=True,
+            response = litellm.completion(**{
+                "model": model,
+                "messages": messages,
+                "drop_params": True,
                 # the loop is the retry policy; the merge lets a backend override win
-                **{"max_retries": 0, **(backend or {})},
-            )
+                "max_retries": 0,
+                **(backend or {}),
+            })
             content = response.choices[0].message.content
             if return_finish_reason:
                 finish_reason = "max_output_reached" if response.choices[0].finish_reason == "length" else "finished"
@@ -143,8 +156,9 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
             if i < max_retries - 1:
                 time.sleep(1)
             else:
-                raise RuntimeError(
-                    f"LLM completion failed after {max_retries} retries: {e}"
+                raise LLMRetriesExhausted(
+                    f"LLM completion failed after {max_retries} retries: {e}",
+                    status_code=getattr(e, "status_code", None),
                 ) from e
 
 
@@ -157,12 +171,13 @@ async def llm_acompletion(model, prompt):
     _repair_litellm_types()
     for i in range(max_retries):
         try:
-            response = await litellm.acompletion(
-                model=model,
-                messages=messages,
-                drop_params=True,
-                **{"max_retries": 0, **(backend or {})},
-            )
+            response = await litellm.acompletion(**{
+                "model": model,
+                "messages": messages,
+                "drop_params": True,
+                "max_retries": 0,
+                **(backend or {}),
+            })
             return response.choices[0].message.content
         except Exception as e:
             if _is_unrecoverable(e):
@@ -172,8 +187,9 @@ async def llm_acompletion(model, prompt):
             if i < max_retries - 1:
                 await asyncio.sleep(1)
             else:
-                raise RuntimeError(
-                    f"LLM completion failed after {max_retries} retries: {e}"
+                raise LLMRetriesExhausted(
+                    f"LLM completion failed after {max_retries} retries: {e}",
+                    status_code=getattr(e, "status_code", None),
                 ) from e
 
 
@@ -941,10 +957,7 @@ def generate_doc_description(structure, model=None):
     
     Directly return the description, do not include any other text.
     """
-    try:
-        return llm_completion(model, prompt)
-    except RuntimeError:
-        return ""
+    return llm_completion(model, prompt)
 
 
 def reorder_dict(data, key_order):

@@ -666,14 +666,16 @@ def test_list_documents_skips_unsafe_directory_names(
     assert [d["id"] for d in listing["documents"]] == [indexed_doc]
 
 
-def test_generate_doc_description_error_boundary(monkeypatch):
+def test_generate_doc_description_propagates_failures(monkeypatch):
+    """No swallow: a dead model fails the run instead of storing ''."""
     def raiser(exc):
         def _f(*args, **kwargs):
             raise exc
         return _f
     monkeypatch.setattr(pageindex.utils, "llm_completion",
                         raiser(RuntimeError("retries exhausted")))
-    assert pageindex.utils.generate_doc_description([]) == ""
+    with pytest.raises(RuntimeError):
+        pageindex.utils.generate_doc_description([])
     monkeypatch.setattr(pageindex.utils, "llm_completion",
                         raiser(ValueError("provider rejected the model")))
     with pytest.raises(ValueError):
@@ -768,6 +770,78 @@ def test_summarize_tree_all_short_leaves_need_no_model(monkeypatch):
     assert out[0]["summary"] == "tiny"
 
 
+def test_summarize_tree_partial_exhaustion_fails_loud(monkeypatch):
+    """One lucky call must not vouch for a model that then went away: a
+    ladder-exhausted node raises instead of silently blanking."""
+    calls = {"n": 0}
+
+    async def flaky(model, prompt):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return '{"points": ["p"], "summary": "ok"}'
+        raise pageindex.utils.LLMRetriesExhausted(
+            "LLM completion failed after 10 retries", status_code=500)
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", flaky)
+    pdf_pages = [("alpha " * 300, 300), ("beta " * 300, 300)]
+    structure = [{"title": "A", "start_index": 1, "end_index": 1},
+                 {"title": "B", "start_index": 2, "end_index": 2}]
+    with pytest.raises(pageindex.utils.LLMRetriesExhausted):
+        asyncio.run(pageindex.utils.summarize_tree(structure, pdf_pages))
+
+
+def test_generate_summaries_partial_exhaustion_fails_loud(monkeypatch):
+    calls = {"n": 0}
+
+    async def flaky(model, prompt):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return "fine"
+        raise pageindex.utils.LLMRetriesExhausted(
+            "LLM completion failed after 10 retries", status_code=500)
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", flaky)
+    structure = [{"title": "A", "text": "t1",
+                  "nodes": [{"title": "B", "text": "t2"}]}]
+    with pytest.raises(pageindex.utils.LLMRetriesExhausted):
+        asyncio.run(
+            pageindex.utils.generate_summaries_for_structure(structure))
+
+
+def test_expand_exhausted_ladder_fails_loud(monkeypatch):
+    """Keyless/broken-model expand must kill the run, not degrade to
+    no_children after burning the retry ladder on every node."""
+    import pageindex.tree_optimize as tree_optimize
+
+    async def exhausted(model, prompt):
+        raise pageindex.utils.LLMRetriesExhausted(
+            "LLM completion failed after 10 retries", status_code=500)
+    monkeypatch.setattr(tree_optimize, "llm_acompletion", exhausted)
+    structure = [{"title": "T", "start_index": 1, "end_index": 8,
+                  "node_id": "0001", "nodes": []}]
+    pages = ["heading\nbody text"] * 8
+    lines = [["heading", "body text"]] * 8
+    with pytest.raises(pageindex.utils.LLMRetriesExhausted):
+        asyncio.run(tree_optimize.optimize(structure, pages, lines,
+                                           model="m", do_expand=True))
+
+
+def test_expand_absorbs_per_prompt_rejection(monkeypatch):
+    """A 400-exhausted node (context_length_exceeded) stays collapsed and
+    the run survives — the documented per-prompt absorption."""
+    import pageindex.tree_optimize as tree_optimize
+
+    async def rejected(model, prompt):
+        raise pageindex.utils.LLMRetriesExhausted(
+            "LLM completion failed after 10 retries", status_code=400)
+    monkeypatch.setattr(tree_optimize, "llm_acompletion", rejected)
+    structure = [{"title": "T", "start_index": 1, "end_index": 8,
+                  "node_id": "0001", "nodes": []}]
+    pages = ["heading\nbody text"] * 8
+    lines = [["heading", "body text"]] * 8
+    outcome = asyncio.run(tree_optimize.optimize(structure, pages, lines,
+                                                 model="m", do_expand=True))
+    assert outcome["expands"] == 0
+
+
 def test_llm_completion_backend_reaches_litellm(monkeypatch):
     """No cache params of our own; backend keys reach litellm and win the merge."""
     import litellm
@@ -791,6 +865,32 @@ def test_llm_completion_backend_reaches_litellm(monkeypatch):
         pageindex.utils._llm_backend.reset(token)
     assert captured["api_key"] == "x"
     assert captured["max_retries"] == 3
+
+
+def test_backend_overrides_reserved_kwargs_without_retry(monkeypatch):
+    """A backend key colliding with our own kwargs wins the merge instead
+    of raising TypeError through the retry ladder."""
+    import litellm
+    calls = {"n": 0}
+    captured = {}
+
+    def fake_completion(**kwargs):
+        calls["n"] += 1
+        captured.clear()
+        captured.update(kwargs)
+        message = types.SimpleNamespace(content="ok")
+        choice = types.SimpleNamespace(message=message, finish_reason="stop")
+        return types.SimpleNamespace(choices=[choice])
+    monkeypatch.setattr(litellm, "completion", fake_completion)
+    monkeypatch.setattr(pageindex.utils.time, "sleep", lambda s: None)
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    token = pageindex.utils._llm_backend.set({"drop_params": False})
+    try:
+        assert pageindex.utils.llm_completion("gpt-4o", "probe") == "ok"
+    finally:
+        pageindex.utils._llm_backend.reset(token)
+    assert captured["drop_params"] is False
+    assert calls["n"] == 1
 
 
 def test_delete_survives_marker_tamper(local_client, tmp_path):
