@@ -19,6 +19,12 @@ logger = logging.getLogger(__name__)
 _SURROGATES = re.compile("[\ud800-\udfff]")
 
 
+def _scrub_surrogates(text: str) -> str:
+    """Lone surrogates (surrogateescape'd names, PyPDF2's surrogatepass
+    decodes) cannot encode to UTF-8; replace with U+FFFD."""
+    return _SURROGATES.sub("\ufffd", text)
+
+
 def _now_iso() -> str:
     """Naive UTC, millisecond precision."""
     now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -114,7 +120,7 @@ class LocalAPI:
         # Surrogates from a surrogateescape'd filesystem name would be
         # mangled by the store's errors="replace" write; scrub now so the
         # returned name is byte-for-byte the stored name.
-        doc_name = _SURROGATES.sub("\ufffd", os.path.basename(file_path))
+        doc_name = _scrub_surrogates(os.path.basename(file_path))
         self._unique_doc_name(doc_name)
 
         try:
@@ -195,7 +201,7 @@ class LocalAPI:
             reader = PyPDF2.PdfReader(f)
             # PyPDF2 decodes broken ToUnicode maps with surrogatepass; lone
             # surrogates would crash every utf-8 JSON save downstream.
-            return [_SURROGATES.sub("\ufffd", page.extract_text() or "")
+            return [_scrub_surrogates(page.extract_text() or "")
                     for page in reader.pages]
 
     def _index_standard(self, file_path: str, page_texts: list[str]) -> tuple[list, str | None]:
