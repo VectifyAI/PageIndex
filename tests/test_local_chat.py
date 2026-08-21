@@ -1892,6 +1892,21 @@ def test_anthropic_client_cached_per_backend(monkeypatch):
 
 
 @needs_anthropic
+def test_anthropic_client_construction_race_keeps_first(monkeypatch):
+    """A constructor losing the store race must adopt the winner rather
+    than evict a client other threads may already hold."""
+    monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
+    winner = object()
+    real = anthropic.Anthropic
+
+    def racing(**kwargs):
+        local_chat._ANTHROPIC_CLIENTS[(("api_key", "k"),)] = winner
+        return real(**kwargs)
+    monkeypatch.setattr(anthropic, "Anthropic", racing)
+    assert local_chat._anthropic_client({"api_key": "k"}) is winner
+
+
+@needs_anthropic
 def test_messages_reuses_cached_client_across_runs(client, monkeypatch):
     """A cached backend client survives the per-run close: two consecutive
     runs ride the same client (a closed one refuses the second request),
