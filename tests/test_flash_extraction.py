@@ -243,7 +243,10 @@ def test_lone_surrogate_from_broken_tounicode_is_replaced(monkeypatch):
                         lambda tp, i: 0xD83D if i == 0 else orig(tp, i))
     pdf = pdfium.PdfDocument(BytesIO(build_pdf(["Hello broken cmap"])))
     page = pdf[0]
-    raw_chars, _objects = _extract_raw_chars(page, page.get_textpage().raw)
+    # hold the textpage: GC finalizes an unreferenced one mid-extraction,
+    # closing the handle so every per-char call reads back 0
+    text_page = page.get_textpage()
+    raw_chars, _objects = _extract_raw_chars(page, text_page.raw)
     text = "".join(char["ch"] for char in raw_chars)
     assert "\ud83d" not in text
     assert text.startswith("�ello")
