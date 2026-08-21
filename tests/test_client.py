@@ -744,9 +744,9 @@ def test_summarize_tree_child_unrecoverable_raises(monkeypatch):
 
 
 def test_summarize_tree_fails_loud_when_every_model_call_fails(monkeypatch):
-    """A retry-exhausted failure carries no status_code (litellm reports a
-    missing key as 500), so per-node handling blanks the summary instead of
-    raising; a raw-text short leaf must not vouch for such a run."""
+    """A failure foreign to the retry ladder (not LLMRetriesExhausted)
+    blanks per node; the asked-and-never-answered backstop must still fail
+    the run loud — a raw-text short leaf cannot vouch for it."""
     async def exhausted(model, prompt):
         raise RuntimeError("LLM call failed after 10 attempts")
     monkeypatch.setattr(pageindex.utils, "llm_acompletion", exhausted)

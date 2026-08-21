@@ -104,9 +104,9 @@ def page_index_flash(pdf, summary=True, summary_model=None,
         import warnings
         warnings.warn(
             "optimize_expand is deprecated: pass optimize='full', 'merge', "
-            "or False. It maps onto optimize (False -> 'merge', True -> "
-            "'full'), so the optimize pass now runs where the old "
-            "optimize=False default ran nothing.",
+            "or False. When optimize is not passed it maps onto it (False "
+            "-> 'merge', True -> 'full'), so the optimize pass now runs "
+            "where the old optimize=False default ran nothing.",
             DeprecationWarning, stacklevel=2)
     if optimize is None or optimize is True:
         # legacy spellings only — an explicit 'full'/'merge' wins
