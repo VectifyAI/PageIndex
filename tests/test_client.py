@@ -1420,9 +1420,9 @@ def test_submit_flash_empty_structure_points_to_standard(
         local_client.submit_document(sample_pdf)
 
 
-def test_expand_queries_a_wave_concurrently(monkeypatch):
-    """Eligible frontier nodes are proposed in one concurrent wave, not one
-    at a time — and never wider than the cap: a burst tripping rate limits
+def test_expand_queries_nodes_concurrently(monkeypatch):
+    """Eligible frontier nodes are proposed concurrently, not one at a
+    time — and never wider than the cap: a burst tripping rate limits
     would hit the fatal exhausted-retry path."""
     import pageindex.tree_optimize as tree_optimize
 
