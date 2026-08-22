@@ -66,7 +66,7 @@ from .utils import (ConfigLoader, _is_unrecoverable, llm_acompletion,
 
 TRIGGER_PAGES = 5        # only look ahead on nodes larger than this
 ROUTING_COST = 1         # R(v), in pages
-EXPAND_CONCURRENCY = 8   # low cap: a rate-limit burst would hit the fatal exhausted-retry path
+EXPAND_CONCURRENCY = 32  # measured plateau: the ready frontier is 21-28 wide on few-hundred-page PDFs
 PAGE_CHARS = 6000        # per-page text handed to the model
 TITLE_MAX_CHARS = 200    # a union title longer than this falls back to a page label
 
