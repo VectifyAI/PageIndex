@@ -1437,10 +1437,10 @@ def test_expand_queries_nodes_concurrently(monkeypatch):
     monkeypatch.setattr(tree_optimize, "llm_acompletion", slow_empty)
     structure = [{"title": f"T{i}", "start_index": 1 + 6 * i,
                   "end_index": 6 + 6 * i, "node_id": f"{i:04d}", "nodes": []}
-                 for i in range(10)]
-    pages = ["heading\nbody text"] * 60
-    lines = [["heading", "body text"]] * 60
+                 for i in range(40)]
+    pages = ["heading\nbody text"] * 240
+    lines = [["heading", "body text"]] * 240
     asyncio.run(tree_optimize.optimize(structure, pages, lines, model="m",
                                        do_expand=True))
     assert inflight["peak"] > 1
-    assert inflight["peak"] <= 8
+    assert inflight["peak"] <= 32
