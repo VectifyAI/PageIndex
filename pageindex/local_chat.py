@@ -170,7 +170,8 @@ def _require_openai_agents(method: str) -> None:
         import agents  # noqa: F401
     except ImportError as exc:
         raise PageIndexAPIError(
-            f"{method} in local mode requires the OpenAI Agents SDK — "
+            f"{method} with your own chat model requires the OpenAI "
+            "Agents SDK — "
             "pip install openai-agents. "
             "messages() runs on the anthropic extra instead."
         ) from exc
@@ -863,7 +864,8 @@ def _require_anthropic() -> None:
         import anthropic  # noqa: F401
     except ImportError as exc:
         raise PageIndexAPIError(
-            "messages in local mode requires the Anthropic SDK — "
+            "messages drives your own chat model and requires the "
+            "Anthropic SDK — "
             "pip install anthropic (or pip install 'pageindex[anthropic]')."
         ) from exc
     try:
@@ -871,7 +873,7 @@ def _require_anthropic() -> None:
         from anthropic.lib.tools import ToolError  # noqa: F401
     except ImportError as exc:
         raise PageIndexAPIError(
-            "messages in local mode requires anthropic >= 0.108.0 (the tool "
+            "messages requires anthropic >= 0.108.0 (the tool "
             "runner with ToolError) — pip install -U anthropic."
         ) from exc
 

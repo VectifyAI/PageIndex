@@ -283,12 +283,12 @@ class PageIndexClient:
             ``client.chat_model`` — on a cloud client, setting it runs
             the document-QA agent in your process over the cloud
             documents (page content then flows through your process to
-            your model provider). Chat names
-            route through LiteLLM and mean what LiteLLM says they mean;
-            bare names are OpenAI-compatible shorthand, and
-            ``openai/Qwen/...`` is the form for an OpenAI-compatible
-            server that itself serves slashed model ids (vLLM, TGI).
-            Defaults to the SDK default (strong).
+            your model provider). Chat names route through LiteLLM and
+            mean what LiteLLM says they mean; bare names are
+            OpenAI-compatible shorthand, and ``openai/Qwen/...`` is the
+            form for an OpenAI-compatible server that itself serves
+            slashed model ids (vLLM, TGI). Defaults to the SDK default
+            (strong).
         model (str, optional): Local mode only — one model for both roles:
             sets the default for ``index_model`` and ``chat_model`` at
             once. The role-specific arguments win over it. (Also the
@@ -736,10 +736,9 @@ class PageIndexClient:
             model: Own-model chat only — backend model name (defaults
                 to ``chat_model``).
             reasoning_effort: Own-model chat only — how hard the model
-                thinks
-                (``"low"`` / ``"medium"`` / ``"high"``; what a backend
-                accepts is its own). Unset sends nothing — the model's
-                default behavior applies.
+                thinks (``"low"`` / ``"medium"`` / ``"high"``; what a
+                backend accepts is its own). Unset sends nothing — the
+                model's default behavior applies.
 
         Returns:
             - stream=False: the answer string
@@ -824,11 +823,12 @@ class PageIndexClient:
             model: Own-model chat only — backend model name (defaults to
                 ``chat_model``). The managed endpoint selects its own.
             max_turns: Own-model chat only — cap on agent turns per call.
-            top_p: Own-model chat only — nucleus sampling, passed through to the
-                model.
-            max_tokens: Own-model chat only — per-call output cap, passed through;
-                it bounds each backend call in the agent loop (the way
-                max_turns bounds the loop), not the whole run.
+            top_p: Own-model chat only — nucleus sampling, passed
+                through to the model.
+            max_tokens: Own-model chat only — per-call output cap,
+                passed through; it bounds each backend call in the agent
+                loop (the way max_turns bounds the loop), not the whole
+                run.
             reasoning_effort: Own-model chat only — passed through verbatim as
                 LiteLLM's ``reasoning_effort``; each provider maps it to
                 its own thinking control, and the values mean what the
@@ -881,7 +881,7 @@ class PageIndexClient:
                 "model, max_turns, top_p, max_tokens, reasoning_effort, "
                 "extra_body, extra_headers and backend drive your own chat "
                 "model, which this client does not configure — construct "
-                "the client with chat_model=... (or chat=...) to run the "
+                "the client with chat_model=... (or a chat= model) to run the "
                 "agent in your process, or drop them to use the managed "
                 "chat endpoint, which selects its own model."
             )
@@ -913,11 +913,11 @@ class PageIndexClient:
 
         Own-model chat only — local mode, or a cloud client constructed
         with ``chat_model=``/``chat=``. Drives your backend's /responses
-        end to end (no
-        translation layer). The envelope is official Responses shape —
-        ``output`` carries the model-produced items and parses with the
-        openai SDK types — and the whole process transcript (including the
-        tool outputs the SDK executed) rides in the extra ``items`` field.
+        end to end (no translation layer). The envelope is official
+        Responses shape — ``output`` carries the model-produced items
+        and parses with the openai SDK types — and the whole process
+        transcript (including the tool outputs the SDK executed) rides
+        in the extra ``items`` field.
         Append the returned ``items`` to your next call's ``input`` verbatim
         to keep provider prompt-cache prefix continuity and the agent's
         memory of what it already read.
@@ -973,7 +973,7 @@ class PageIndexClient:
         if not self._local_chat:
             raise PageIndexAPIError(
                 "responses() drives your own chat model — construct the "
-                "client with chat_model=... (or chat=...); the managed "
+                "client with chat_model=... (or a chat= model); the managed "
                 "cloud chat serves chat_completions() only."
             )
         from .local_chat import run_responses
@@ -1008,10 +1008,10 @@ class PageIndexClient:
 
         Own-model chat only — local mode, or a cloud client constructed
         with ``chat_model=``/``chat=``. Drives Anthropic's /v1/messages
-        via the
-        Anthropic SDK's own tool runner (requires ``pageindex[anthropic]``;
-        ANTHROPIC_API_KEY selects the backend). ``tool_use``/``tool_result``
-        round-trip is the format's native behavior: the response is the
+        via the Anthropic SDK's own tool runner (requires
+        ``pageindex[anthropic]``; ANTHROPIC_API_KEY selects the
+        backend). ``tool_use``/``tool_result`` round-trip is the
+        format's native behavior: the response is the
         final message envelope with cross-turn aggregated ``usage`` plus a
         ``messages`` field — the full new turn sequence, valid for verbatim
         append to your history. The managed system prompt carries a
@@ -1063,7 +1063,7 @@ class PageIndexClient:
         if not self._local_chat:
             raise PageIndexAPIError(
                 "messages() drives your own chat model — construct the "
-                "client with chat_model=... (or chat=...); the managed "
+                "client with chat_model=... (or a chat= model); the managed "
                 "cloud chat serves chat_completions() only."
             )
         from .local_chat import run_messages
