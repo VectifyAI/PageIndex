@@ -348,7 +348,7 @@ class PageIndexClient:
         # ``model`` sets every role, so it claims both sides.
         index_flat: dict[str, Any] = {
             name: value for name, value in
-            (("api_key", api_key), ("type", type),
+            (("api_key", api_key),
              ("index_model", index_model),
              ("summary_model", summary_model),
              ("index_backend", index_backend),
@@ -375,10 +375,20 @@ class PageIndexClient:
                 "chat= and the flat chat-side arguments "
                 f"({', '.join(sorted(chat_flat))}) are two spellings of "
                 "the same thing — use one or the other.")
+        # ``type=`` is a cross-check, not a spelling: it combines with
+        # either spelling of the index side and must agree with it.
+        declared = _declared_type(type, "client")
         if index is not None:
             cloud_key, index_conf = _resolve_index_slot(index)
+            if declared == "local" and cloud_key is not None:
+                raise PageIndexAPIError(
+                    'type="local" disagrees with index= — that index '
+                    "selects cloud documents. Drop one of them.")
+            if declared == "cloud" and cloud_key is None:
+                raise PageIndexAPIError(
+                    'type="cloud" disagrees with index= — that index '
+                    "configures the local store. Drop one of them.")
         else:
-            declared = _declared_type(index_flat.pop("type", None), "client")
             cloud_key = api_key
             if declared == "local" and api_key is not None:
                 raise PageIndexAPIError(
@@ -718,7 +728,10 @@ class PageIndexClient:
             messages: A question string, or role/content conversation
                 history.
             doc_id: Document ID or list of IDs to scope the conversation.
-                Keep it identical across a conversation's calls.
+                Keep it identical across a conversation's calls. Local
+                documents: also enforced at the tool layer, not just
+                prompted. Cloud documents: the managed chat scopes
+                server-side; own-model chat targets at the prompt level.
             stream: Yield the answer as text chunks as it is produced.
             model: Own-model chat only — backend model name (defaults
                 to ``chat_model``).
@@ -799,7 +812,10 @@ class PageIndexClient:
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call and is part
-                of the cached prompt prefix.
+                of the cached prompt prefix. Local documents: also
+                enforced at the tool layer, not just prompted. Cloud
+                documents: the managed chat scopes server-side;
+                own-model chat targets at the prompt level.
             temperature: Sampling temperature, passed through to the model.
             stream_metadata: With stream=True, yield chunk dicts instead of
                 text pieces.
@@ -928,7 +944,9 @@ class PageIndexClient:
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call and is part
-                of the cached prompt prefix.
+                of the cached prompt prefix. Local documents: also
+                enforced at the tool layer; cloud documents:
+                prompt-level targeting only.
             instructions: Appended to the managed system prompt.
             temperature / top_p: Passed through to the model.
             max_turns: Cap on agent turns per call.
@@ -1018,7 +1036,9 @@ class PageIndexClient:
                 convenience events), one message sequence per turn.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
-                targeting block it adds is re-set each call.
+                targeting block it adds is re-set each call. Local
+                documents: also enforced at the tool layer; cloud
+                documents: prompt-level targeting only.
             system: Appended after the managed system blocks.
             temperature / top_p / top_k / stop_sequences: Passed through.
             max_turns: Cap on agent turns per call (default 10, like the
@@ -1544,7 +1564,15 @@ class PageIndexCloudClient(PageIndexClient):
     the environment: ``PageIndexCloudClient()`` reads PAGEINDEX_API_KEY.
     The shortest env-key cloud spelling."""
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        *,
+        chat: Optional[Union[dict[str, Any], str]] = None,
+        chat_model: Optional[str] = None,
+        retrieve_model: Optional[str] = None,
+        chat_backend: Optional[dict[str, Any]] = None,
+    ):
         if api_key is None:
             # .env keys arrive via utils' import-time load_dotenv().
             from . import utils  # noqa: F401
@@ -1555,7 +1583,9 @@ class PageIndexCloudClient(PageIndexClient):
                 "api_key=..., or export PAGEINDEX_API_KEY. Get one at "
                 "https://dash.pageindex.ai/api-keys."
             )
-        super().__init__(api_key)
+        super().__init__(api_key, chat=chat, chat_model=chat_model,
+                         retrieve_model=retrieve_model,
+                         chat_backend=chat_backend)
 
 
 class PageIndexLocalClient(PageIndexClient):

@@ -1,7 +1,9 @@
 """Config shapes for the constructor's ``index=`` / ``chat=`` slots.
 
 The slots are the grouped spelling of the flat constructor arguments —
-same names, same meanings, one spelling per side. A dict declares its
+the same arguments with the side prefix factored out of the names
+(``index={"model": ...}`` is ``index_model=``), one spelling per side.
+A dict declares its
 side by its keys (cloud takes a key, local takes models); an optional
 ``"type"`` field states the side explicitly and must agree with the
 other keys. The ``"pageindex-cloud"`` string is the label spelling for

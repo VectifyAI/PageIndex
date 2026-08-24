@@ -151,6 +151,12 @@ def test_bridge_cloud_docs_own_model():
     from pageindex import PageIndexCloudClient, PageIndexLocalClient
     assert not PageIndexCloudClient("k")._local_chat
     assert PageIndexLocalClient()._local_chat
+    # The cloud pinned class pins only the index side: the chat side
+    # stays free, same vocabulary as PageIndexClient.
+    pinned = PageIndexCloudClient("k", chat_model="openai/m")
+    assert pinned._local_chat and pinned.chat_model == "openai/m"
+    assert PageIndexCloudClient("k", chat={"model": "m"}).chat_model == "m"
+    assert not PageIndexCloudClient("k", chat="pageindex-cloud")._local_chat
 
 
 def test_cloud_index_args_still_rejected():
@@ -1724,8 +1730,18 @@ def test_type_declaration_top_level(monkeypatch):
         PageIndexClient(api_key="k", type="local")
     with pytest.raises(PageIndexAPIError, match='"cloud" or "local"'):
         PageIndexClient(type="banana")
-    with pytest.raises(PageIndexAPIError, match="two spellings"):
-        PageIndexClient(type="local", index="m")
+
+    # type= beside index= is the same cross-check: agreement passes,
+    # disagreement errors, and the vocabulary check still comes first.
+    assert PageIndexClient(type="local", index="m").index_model == "m"
+    assert PageIndexClient(type="cloud",
+                           index={"api_key": "pi-x"}).api_key == "pi-x"
+    with pytest.raises(PageIndexAPIError, match="disagrees with index="):
+        PageIndexClient(type="cloud", index="m")
+    with pytest.raises(PageIndexAPIError, match="disagrees with index="):
+        PageIndexClient(type="local", index={"api_key": "k"})
+    with pytest.raises(PageIndexAPIError, match='"cloud" or "local"'):
+        PageIndexClient(type="banana", index="m")
 
 
 def test_type_declaration_in_index_dict(monkeypatch):
