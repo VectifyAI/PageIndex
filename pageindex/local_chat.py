@@ -401,7 +401,8 @@ def _model_backend_error(exc, lane: str, client=None) -> PageIndexAPIError:
             else "."
         )
     if (getattr(client, "api_key", None)
-            and "api key" in str(exc).lower().replace("_", " ")):
+            and (getattr(exc, "status_code", None) == 401
+                 or "api key" in str(exc).lower().replace("_", " "))):
         message += (
             " — note: your chat model runs in your process on your own "
             "provider credentials; the PageIndex api_key does not cover "
@@ -1063,8 +1064,7 @@ def run_messages(client, messages, model: str,
                     for event in turn_stream:
                         yield event
             except anthropic.AnthropicError as exc:
-                raise PageIndexAPIError(
-                    f"The model backend failed: {exc}") from exc
+                raise _model_backend_error(exc, "messages", client) from exc
             except TypeError as exc:
                 # the SDK's request-time credential-resolution failure
                 if "authentication" not in str(exc).lower():
@@ -1082,8 +1082,7 @@ def run_messages(client, messages, model: str,
     try:
         turns = [turn for turn in runner]
     except anthropic.AnthropicError as exc:
-        raise PageIndexAPIError(
-            f"The model backend failed: {exc}") from exc
+        raise _model_backend_error(exc, "messages", client) from exc
     except TypeError as exc:
         # the SDK's request-time credential-resolution failure
         if "authentication" not in str(exc).lower():

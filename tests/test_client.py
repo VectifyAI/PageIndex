@@ -4,6 +4,8 @@ import importlib
 import json
 import re
 import shutil
+import subprocess
+import sys
 import types
 
 import pytest
@@ -215,8 +217,7 @@ def test_same_side_double_spelling_rejected():
     for kwargs in ({"api_key": "k", "index": {"api_key": "k"}},
                    {"index": "m", "index_model": "m"},
                    {"index": "m", "storage_path": "/x"},
-                   {"chat": "m", "chat_model": "m"},
-                   {"chat": "m", "model": "m"}):
+                   {"chat": "m", "chat_model": "m"}):
         with pytest.raises(PageIndexAPIError, match="two spellings"):
             PageIndexClient(**kwargs)
     # Mixing tiers across sides is fine — the rule is per side.
@@ -261,6 +262,121 @@ def test_bare_client_ignores_env_key(monkeypatch):
     monkeypatch.setenv("PAGEINDEX_API_KEY", "pi-env")
     client = PageIndexClient()
     assert not hasattr(client, "api_key") and client._local_chat
+
+
+def test_env_key_reads_load_dotenv():
+    """The SDK's .env support is pageindex.utils' import-time
+    load_dotenv(); every spelling that reads PAGEINDEX_API_KEY must
+    trigger it, or a key in .env is visible only when something else
+    imported utils first. The sentinel finder stands in for the .env
+    file: importing pageindex.utils makes the key appear."""
+    probe = "\n".join([
+        "import importlib.abc, os, sys",
+        "class Sentinel(importlib.abc.MetaPathFinder):",
+        "    def find_spec(self, name, path=None, target=None):",
+        "        if name == 'pageindex.utils':",
+        "            os.environ.setdefault('PAGEINDEX_API_KEY', 'pi-dotenv')",
+        "        return None",
+        "sys.meta_path.insert(0, Sentinel())",
+        "import pageindex",
+        "from pageindex import PageIndexClient, PageIndexCloudClient",
+        "for build in (lambda: PageIndexClient(index='pageindex-cloud'),",
+        "              lambda: PageIndexClient(type='cloud'),",
+        "              lambda: PageIndexClient(index={'type': 'cloud'}),",
+        "              lambda: PageIndexCloudClient()):",
+        "    sys.modules.pop('pageindex.utils', None)",
+        "    pageindex.__dict__.pop('utils', None)",
+        "    os.environ.pop('PAGEINDEX_API_KEY', None)",
+        "    assert build().api_key == 'pi-dotenv', build",
+        "print('ok')",
+    ])
+    out = subprocess.run([sys.executable, "-c", probe],
+                         capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "ok"
+
+
+def test_empty_values_refused_never_silent():
+    """An empty value configures nothing — pre-fix, an empty chat-side
+    value on a cloud client silently selected own-model chat on the
+    default model."""
+    for kwargs in ({"chat_model": ""}, {"retrieve_model": ""},
+                   {"chat_backend": {}}, {"model": ""},
+                   {"index_model": ""}, {"index_backend": {}},
+                   {"storage_path": ""}):
+        with pytest.raises(PageIndexAPIError, match="configures nothing"):
+            PageIndexClient(**kwargs)
+        if next(iter(kwargs)) in ("chat_model", "retrieve_model",
+                                  "chat_backend"):
+            with pytest.raises(PageIndexAPIError, match="configures nothing"):
+                PageIndexClient(api_key="pi-k", **kwargs)
+    with pytest.raises(PageIndexAPIError, match="configures nothing"):
+        PageIndexClient(api_key="pi-k", chat={"model": ""})
+    with pytest.raises(PageIndexAPIError, match="configures nothing"):
+        PageIndexClient(chat={"backend": {}})
+    # None-valued slot keys mean "absent", exactly like the flat args —
+    # a slot left with nothing real is the empty-dict error.
+    with pytest.raises(PageIndexAPIError, match="empty dict"):
+        PageIndexClient(api_key="pi-k", chat={"model": None})
+    with pytest.raises(PageIndexAPIError, match="empty dict"):
+        PageIndexClient(index={"model": None})
+
+
+def test_model_umbrella_names_split_for_slots():
+    """model= sets both roles, so no slot can absorb it — the error
+    teaches the split instead of calling disjoint things one spelling."""
+    for kwargs in ({"model": "m", "chat": {"backend": {"base_url": "u"}}},
+                   {"model": "m", "index": {"storage_path": "/x"}},
+                   {"model": "m", "chat": "c"}):
+        with pytest.raises(PageIndexAPIError,
+                           match="split it into index_model= and chat_model="):
+            PageIndexClient(**kwargs)
+
+
+def test_post_construction_chat_model_switches_whole_client():
+    """chat_model is documented as assignable; the mode must follow the
+    attribute, never a stale construction-time snapshot."""
+    client = PageIndexClient(api_key="pi-k")
+    assert not client._local_chat
+    client.chat_model = "openai/m"
+    assert client._local_chat
+    legacy = PageIndexClient(api_key="pi-k")
+    legacy.retrieve_model = "m2"  # the 0.2.9 write path
+    assert legacy._local_chat and legacy.chat_model == "m2"
+
+
+def test_keyless_cloud_hint_matches_the_spelling(monkeypatch):
+    """Following the error's own remedy must construct a working client
+    — the index= spellings cannot combine with flat api_key=."""
+    monkeypatch.delenv("PAGEINDEX_API_KEY", raising=False)
+    with pytest.raises(PageIndexAPIError) as err:
+        PageIndexClient(index="pageindex-cloud")
+    assert 'index={"api_key": ...}' in str(err.value)
+    with pytest.raises(PageIndexAPIError) as err:
+        PageIndexClient(index={"type": "cloud"})
+    assert 'index={"api_key": ...}' in str(err.value)
+    with pytest.raises(PageIndexAPIError) as err:
+        PageIndexClient(type="cloud")
+    assert "(api_key=...)" in str(err.value)
+    assert PageIndexClient(type="cloud", api_key="pi-k").api_key == "pi-k"
+
+
+def test_argument_type_errors_are_pageindex_errors():
+    for kwargs, msg in (({"index": {"storage_path": 5}},
+                         "storage_path must be a str"),
+                        ({"chat": {"backend": "x"}},
+                         "chat_backend must be a dict"),
+                        ({"chat_backend": "x"}, "chat_backend must be a dict"),
+                        ({"chat_model": 5}, "chat_model must be a str"),
+                        ({"index_backend": ["x"]},
+                         "index_backend must be a dict")):
+        with pytest.raises(PageIndexAPIError, match=msg):
+            PageIndexClient(**kwargs)
+
+
+def test_slot_strings_are_stripped():
+    assert PageIndexClient(chat=" openai/m ").chat_model == "openai/m"
+    assert PageIndexClient(index=" i-model ").index_model == "i-model"
 
 
 # ── local: indexing and reading ──

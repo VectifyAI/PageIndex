@@ -65,14 +65,27 @@ _LOCAL_INDEX_KEYS = ("model", "summary_model", "backend", "storage_path")
 _RESERVED_MODE_WORDS = {"cloud", "local", "hosted", "managed"}
 
 
-def _env_cloud_key(spelling: str) -> str:
+def _env_cloud_key(spelling: str, inline: str = "api_key=...") -> str:
+    # .env support lives in utils' import-time load_dotenv(): load it
+    # before the read, or a key in .env is visible only by import order.
+    from . import utils  # noqa: F401
     key = os.environ.get("PAGEINDEX_API_KEY")
     if not key:
         raise PageIndexAPIError(
             f"{spelling} reads the PageIndex API key from the "
             "PAGEINDEX_API_KEY environment variable, which is not set — "
-            "export it, or pass the key inline (api_key=...).")
+            f"export it, or pass the key inline ({inline}).")
     return key
+
+
+# One argument vocabulary regardless of spelling: every value is shape-
+# checked in the constructor, so a wrong type or an empty value refuses
+# there as a PageIndexAPIError — never later, never silently.
+_ARG_TYPES: "dict[str, tuple[type, ...]]" = {
+    "model": (str,), "index_model": (str,), "summary_model": (str,),
+    "chat_model": (str,), "retrieve_model": (str,),
+    "storage_path": (str, os.PathLike), "index_backend": (dict,),
+    "chat_backend": (dict,)}
 
 
 def _declared_type(value, side: str):
@@ -92,7 +105,8 @@ def _resolve_index_slot(index) -> "tuple[Optional[str], dict[str, Any]]":
         # Normalized compare: a case/whitespace variant of the label must
         # never fall through and silently become a model name.
         if index.strip().lower() == PAGEINDEX_CLOUD:
-            return _env_cloud_key('index="pageindex-cloud"'), {}
+            return _env_cloud_key('index="pageindex-cloud"',
+                                  'index={"api_key": ...}'), {}
         if index.strip().lower() in _RESERVED_MODE_WORDS:
             raise PageIndexAPIError(
                 f'index="{index}" is not a mode word — a bare string here '
@@ -101,16 +115,19 @@ def _resolve_index_slot(index) -> "tuple[Optional[str], dict[str, Any]]":
                 'PAGEINDEX_API_KEY) or {"api_key": ...}; local is the '
                 "default.")
         if index.strip():
-            return None, {"index_model": index}
+            return None, {"index_model": index.strip()}
         raise PageIndexAPIError(
             "index is an empty string — pass a local index model name, "
             'or "pageindex-cloud".')
     if isinstance(index, dict):
-        conf = dict(index)
+        # None-valued keys mean "absent", exactly like the flat arguments.
+        conf = {name: value for name, value in index.items()
+                if value is not None}
         declared = _declared_type(conf.pop("type", None), "index")
         if not conf:
             if declared == "cloud":
-                return _env_cloud_key('index={"type": "cloud"}'), {}
+                return _env_cloud_key('index={"type": "cloud"}',
+                                      'index={"api_key": ...}'), {}
             if declared == "local":
                 return None, {}
             raise PageIndexAPIError(
@@ -166,12 +183,14 @@ def _resolve_chat_slot(chat) -> "tuple[Optional[str], dict[str, Any]]":
                 'managed chat write "pageindex-cloud" or '
                 '{"type": "cloud"}.')
         if chat.strip():
-            return "own", {"chat_model": chat}
+            return "own", {"chat_model": chat.strip()}
         raise PageIndexAPIError(
             "chat is an empty string — pass a model name, or "
             '"pageindex-cloud" for the managed chat.')
     if isinstance(chat, dict):
-        conf = dict(chat)
+        # None-valued keys mean "absent", exactly like the flat arguments.
+        conf = {name: value for name, value in chat.items()
+                if value is not None}
         declared = _declared_type(conf.pop("type", None), "chat")
         unknown = set(conf) - {"model", "backend"}
         if (not conf and declared is None) or unknown:
@@ -278,16 +297,17 @@ class PageIndexClient:
         summary_model (str, optional): Local mode only — legacy: overrides
             the model used for node summaries and document descriptions;
             ``index_model`` covers this.
-        retrieve_model (str, optional): Local mode only — legacy name for
-            ``chat_model``.
+        retrieve_model (str, optional): Legacy name for ``chat_model`` —
+            same meaning everywhere, cloud clients included.
         storage_path (str, optional): Local mode only — directory where
             indexed documents are stored. Defaults to ``./.pageindex``.
         index_backend (dict, optional): Local mode only — connection
             overrides for the indexing lane's LLM calls. Keys are
             LiteLLM's own connection params — ``api_key``, ``api_base``,
             ``api_version``, ``aws_*``, … — passed through verbatim.
-        chat_backend (dict, optional): Local mode only — default
-            connection overrides for the chat surfaces; a call's own
+        chat_backend (dict, optional): Default connection overrides for
+            the chat surfaces — a chat-side argument like ``chat_model``,
+            so on a cloud client it selects own-model chat. A call's own
             ``backend`` keys win over it. The dict reaches whichever
             door runs, in that door's vocabulary (see each method) —
             ``api_key`` / ``base_url`` mean the same thing on all three.
@@ -340,6 +360,11 @@ class PageIndexClient:
              ("retrieve_model", retrieve_model),
              ("chat_backend", chat_backend), ("model", model))
             if value is not None}
+        if model is not None and (index is not None or chat is not None):
+            raise PageIndexAPIError(
+                "model= sets both roles at once, so no slot can absorb "
+                "it — split it into index_model= and chat_model= to "
+                "combine with index=/chat=.")
         if index is not None and index_flat:
             raise PageIndexAPIError(
                 "index= and the flat index-side arguments "
@@ -368,6 +393,21 @@ class PageIndexClient:
         else:
             chat_mode = "own" if chat_flat else None
             chat_conf = chat_flat
+        # Every spelling lands here: wrong types and empty values refuse
+        # loudly — an empty chat-side value must never silently select
+        # own-model chat.
+        for conf in (index_conf, chat_conf):
+            for name, value in conf.items():
+                if not isinstance(value, _ARG_TYPES[name]):
+                    # value.__class__: the ``type=`` parameter shadows the
+                    # builtin in this scope.
+                    raise PageIndexAPIError(
+                        f"{name} must be a {_ARG_TYPES[name][0].__name__}, "
+                        f"got {value.__class__.__name__}.")
+                if not value:
+                    raise PageIndexAPIError(
+                        f"{name} is empty — it configures nothing. Pass a "
+                        "real value, or drop the argument.")
 
         if cloud_key is not None:
             if index_conf:
@@ -381,8 +421,7 @@ class PageIndexClient:
             self.api_key = cloud_key
             from .cloud_api import CloudAPI
             self._api = CloudAPI(self)
-            self._local_chat = chat_mode == "own"
-            if self._local_chat:
+            if chat_mode == "own":
                 from .utils import ConfigLoader
                 overrides = {name: value for name, value in chat_conf.items()
                              if name in ("chat_model", "retrieve_model")
@@ -411,7 +450,6 @@ class PageIndexClient:
             self.chat_model = opt.chat_model
             self.chat_backend = chat_conf.get("chat_backend")
             self.storage_path = index_conf.get("storage_path") or ".pageindex"
-            self._local_chat = True
             from .local_api import LocalAPI
             self._api = LocalAPI(
                 storage_path=self.storage_path,
@@ -422,6 +460,13 @@ class PageIndexClient:
             # LiteLLM's multi-second import would otherwise land on the
             # first chat call; failures resurface there with real context.
             _preload_litellm()
+
+    @property
+    def _local_chat(self) -> bool:
+        # Derived, never stored: own-model chat is exactly "a chat model
+        # is configured", so a post-construction ``client.chat_model = m``
+        # switches the whole client, not half of it.
+        return hasattr(self, "chat_model")
 
     @property
     def retrieve_model(self):
@@ -1501,6 +1546,8 @@ class PageIndexCloudClient(PageIndexClient):
 
     def __init__(self, api_key: Optional[str] = None):
         if api_key is None:
+            # .env keys arrive via utils' import-time load_dotenv().
+            from . import utils  # noqa: F401
             api_key = os.environ.get("PAGEINDEX_API_KEY")
         if not api_key:
             raise PageIndexAPIError(

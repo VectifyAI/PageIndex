@@ -1491,8 +1491,10 @@ def _require_local_scope(client, doc_ids) -> None:
     _require_doc_selection(doc_ids)
     if doc_ids is not None and getattr(client, "api_key", None):
         raise PageIndexAPIError(
-            "doc_ids scoping applies to local tools only — cloud calls "
-            "are scoped server-side."
+            "doc_ids scoping applies to local tools only — the managed "
+            "cloud chat scopes doc_id server-side, and own-model chat "
+            "over cloud documents targets documents at the prompt level, "
+            "without a tool-layer allowlist."
         )
 
 

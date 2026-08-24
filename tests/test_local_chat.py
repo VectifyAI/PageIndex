@@ -2298,6 +2298,40 @@ def test_bridge_auth_failure_error_teaches_architecture():
         local_chat._model_backend_error(exc, "chat", local))
     assert "provider credentials" not in str(
         local_chat._model_backend_error(Exception("boom"), "chat", bridge))
+    # 401-shaped failures carry no "api key" text on some providers
+    # (Anthropic says x-api-key): the status code is the signal.
+    denied = Exception("invalid x-api-key")
+    denied.status_code = 401
+    assert "your own provider credentials" in str(
+        local_chat._model_backend_error(denied, "messages", bridge))
+
+
+@needs_anthropic
+def test_messages_auth_failure_teaches_architecture(bridge_client,
+                                                    monkeypatch):
+    """The auth note must reach the messages door too — both its paths
+    wrap provider failures through _model_backend_error."""
+    client, _ = bridge_client
+
+    def handler(request):
+        return anthropic_httpx.Response(
+            401, json={"type": "error",
+                       "error": {"type": "authentication_error",
+                                 "message": "invalid x-api-key"}})
+
+    def fresh_fake(backend=None):
+        # per call: run_messages closes a per-call transport it owns
+        return anthropic.Anthropic(
+            api_key="test",
+            http_client=anthropic_httpx.Client(
+                transport=anthropic_httpx.MockTransport(handler)))
+
+    monkeypatch.setattr(local_chat, "_anthropic_client", fresh_fake)
+    with pytest.raises(PageIndexAPIError, match="provider credentials"):
+        client.messages("q", model="claude-test", max_tokens=100)
+    with pytest.raises(PageIndexAPIError, match="provider credentials"):
+        list(client.messages("q", model="claude-test", max_tokens=100,
+                             stream=True))
 
 
 @needs_agents
