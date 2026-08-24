@@ -109,19 +109,158 @@ def test_model_resolution_covers_every_generation(tmp_path):
         assert client.retrieve_model == client.chat_model, kwargs
 
 
-def test_explicit_mode_clients(tmp_path):
+def test_explicit_mode_clients(tmp_path, monkeypatch):
     from pageindex import PageIndexCloudClient, PageIndexLocalClient
 
+    monkeypatch.delenv("PAGEINDEX_API_KEY", raising=False)
     for bad_key in (None, ""):
         with pytest.raises(PageIndexAPIError, match="requires a PageIndex API key"):
             PageIndexCloudClient(bad_key)
     cloud = PageIndexCloudClient("k")
     assert cloud.api_key == "k" and isinstance(cloud, PageIndexClient)
+    # The class name says cloud, so the env key may fill the value —
+    # the shortest env-key cloud construction. Explicit "" still raises.
+    monkeypatch.setenv("PAGEINDEX_API_KEY", "pi-env")
+    assert PageIndexCloudClient().api_key == "pi-env"
+    assert PageIndexCloudClient("k").api_key == "k"
+    with pytest.raises(PageIndexAPIError, match="requires a PageIndex API key"):
+        PageIndexCloudClient("")
 
     local = PageIndexLocalClient(model="m", storage_path=str(tmp_path / "s"))
     assert local.model == "m" and isinstance(local, PageIndexClient)
     with pytest.raises(TypeError):
         PageIndexLocalClient("k")
+
+
+# ── constructor matrix: two sides, one spelling each ──
+
+
+def test_bridge_cloud_docs_own_model():
+    """chat-side arguments on a cloud client select own-model chat."""
+    from pageindex.utils import DEFAULT_CHAT_MODEL
+    client = PageIndexClient(api_key="pi-k", chat_model="openai/m")
+    assert client.api_key == "pi-k" and client._local_chat
+    assert client.chat_model == "openai/m" and client.chat_backend is None
+    assert not PageIndexClient(api_key="pi-k")._local_chat
+    # Only the backend given: the chat model falls back to the default.
+    partial = PageIndexClient(api_key="pi-k", chat_backend={"api_key": "x"})
+    assert partial._local_chat and partial.chat_model == DEFAULT_CHAT_MODEL
+    # The pinned classes carry the flag too.
+    from pageindex import PageIndexCloudClient, PageIndexLocalClient
+    assert not PageIndexCloudClient("k")._local_chat
+    assert PageIndexLocalClient()._local_chat
+
+
+def test_cloud_index_args_still_rejected():
+    with pytest.raises(PageIndexAPIError, match="index_model"):
+        PageIndexClient(api_key="k", index_model="m")
+    # ``model`` claims both sides, so the index side rejects it — the
+    # error points at the chat-side spelling that stays available.
+    with pytest.raises(PageIndexAPIError, match="stay yours"):
+        PageIndexClient(api_key="k", model="m")
+
+
+def test_index_slot_spellings(tmp_path, monkeypatch):
+    client = PageIndexClient(index="i-model")
+    assert client.index_model == "i-model" and client._local_chat
+    assert not hasattr(client, "api_key")
+
+    full = PageIndexClient(index={"model": "i", "summary_model": "s",
+                                  "backend": {"api_key": "b"},
+                                  "storage_path": str(tmp_path / "s")})
+    assert (full.index_model, full.summary_model) == ("i", "s")
+    assert full.storage_path == str(tmp_path / "s")
+
+    inline = PageIndexClient(index={"api_key": "pi-k"})
+    assert inline.api_key == "pi-k" and not inline._local_chat
+
+    monkeypatch.setenv("PAGEINDEX_API_KEY", "pi-env")
+    assert PageIndexClient(index="pageindex-cloud").api_key == "pi-env"
+    # An inline key wins over the environment (env is never consulted).
+    assert PageIndexClient(index={"api_key": "pi-x"}).api_key == "pi-x"
+    monkeypatch.delenv("PAGEINDEX_API_KEY")
+    with pytest.raises(PageIndexAPIError, match="PAGEINDEX_API_KEY"):
+        PageIndexClient(index="pageindex-cloud")
+
+
+def test_chat_slot_spellings():
+    assert PageIndexClient(chat="openai/m").chat_model == "openai/m"
+    full = PageIndexClient(chat={"model": "m", "backend": {"base_url": "u"}})
+    assert (full.chat_model, full.chat_backend) == ("m", {"base_url": "u"})
+
+    bridge = PageIndexClient(index={"api_key": "k"}, chat="openai/m")
+    assert bridge._local_chat and bridge.api_key == "k"
+    managed = PageIndexClient(index={"api_key": "k"}, chat="pageindex-cloud")
+    assert not managed._local_chat
+    # The impossible cell: local documents cannot feed the managed chat.
+    with pytest.raises(PageIndexAPIError, match="cannot read the local store"):
+        PageIndexClient(chat="pageindex-cloud")
+
+
+def test_slot_flat_equivalence(tmp_path):
+    """The slots are the grouped spelling of the flat arguments — same
+    names, same resolution."""
+    flat = PageIndexClient(index_model="i", chat_model="c",
+                           chat_backend={"k": 1},
+                           storage_path=str(tmp_path / "a"))
+    slot = PageIndexClient(
+        index={"model": "i", "storage_path": str(tmp_path / "a")},
+        chat={"model": "c", "backend": {"k": 1}})
+    for attr in ("model", "index_model", "summary_model", "chat_model",
+                 "chat_backend", "storage_path", "_local_chat"):
+        assert getattr(flat, attr) == getattr(slot, attr), attr
+
+
+def test_same_side_double_spelling_rejected():
+    for kwargs in ({"api_key": "k", "index": {"api_key": "k"}},
+                   {"index": "m", "index_model": "m"},
+                   {"index": "m", "storage_path": "/x"},
+                   {"chat": "m", "chat_model": "m"},
+                   {"chat": "m", "model": "m"}):
+        with pytest.raises(PageIndexAPIError, match="two spellings"):
+            PageIndexClient(**kwargs)
+    # Mixing tiers across sides is fine — the rule is per side.
+    assert PageIndexClient(api_key="k", chat={"model": "m"})._local_chat
+
+
+def test_slot_validation_errors(monkeypatch):
+    for bad, msg in [({}, "empty dict"),
+                     ({"api_key": "k", "model": "m"}, "mixes cloud and local"),
+                     ({"nope": 1}, "Unknown index keys"),
+                     ({"api_key": ""}, "non-empty string")]:
+        with pytest.raises(PageIndexAPIError, match=msg):
+            PageIndexClient(index=bad)
+    for bad, msg in [({}, "empty dict"), ({"nope": 1}, "Unknown chat keys")]:
+        with pytest.raises(PageIndexAPIError, match=msg):
+            PageIndexClient(chat=bad)
+    with pytest.raises(PageIndexAPIError, match="string or a dict"):
+        PageIndexClient(index=5)
+    with pytest.raises(PageIndexAPIError, match="string or a dict"):
+        PageIndexClient(chat=5)
+    with pytest.raises(PageIndexAPIError, match="empty string"):
+        PageIndexClient(index="  ")
+    with pytest.raises(PageIndexAPIError, match="empty string"):
+        PageIndexClient(chat=" ")
+    # Case/whitespace variants of the label never fall through to a
+    # silent model name.
+    monkeypatch.setenv("PAGEINDEX_API_KEY", "pi-env")
+    assert PageIndexClient(index=" Pageindex-Cloud ").api_key == "pi-env"
+    assert not PageIndexClient(index={"api_key": "k"},
+                               chat="PAGEINDEX-CLOUD")._local_chat
+    # Bare mode words never parse as model names — no silent wrong mode.
+    for word in ("cloud", "local", "Hosted", " cloud "):
+        with pytest.raises(PageIndexAPIError, match="not a mode word"):
+            PageIndexClient(index=word)
+        with pytest.raises(PageIndexAPIError, match="not a mode word"):
+            PageIndexClient(chat=word)
+
+
+def test_bare_client_ignores_env_key(monkeypatch):
+    """PAGEINDEX_API_KEY never moves the documents on its own — only code
+    that explicitly says cloud reads it."""
+    monkeypatch.setenv("PAGEINDEX_API_KEY", "pi-env")
+    client = PageIndexClient()
+    assert not hasattr(client, "api_key") and client._local_chat
 
 
 # ── local: indexing and reading ──
@@ -1207,11 +1346,14 @@ def test_custom_provider_map_passes_provider_precheck(monkeypatch):
     assert _litellm_model("my-llm/model-a") == "my-llm/model-a"
 
 
-def test_backend_args_are_local_only():
-    with pytest.raises(PageIndexAPIError, match="chat_backend"):
-        PageIndexClient(api_key="pi-k", chat_backend={"api_key": "x"})
+def test_index_backend_is_local_only_chat_backend_selects_own_model():
+    """index_backend has nothing to configure on cloud (the managed
+    pipeline indexes); chat_backend is a chat-side argument, so on a
+    cloud client it selects own-model chat like chat_model does."""
     with pytest.raises(PageIndexAPIError, match="index_backend"):
         PageIndexClient(api_key="pi-k", index_backend={"api_key": "x"})
+    client = PageIndexClient(api_key="pi-k", chat_backend={"api_key": "x"})
+    assert client._local_chat and client.chat_backend == {"api_key": "x"}
 
 
 def test_chat_wraps_answerless_cloud_reply(monkeypatch):
@@ -1444,3 +1586,60 @@ def test_expand_queries_nodes_concurrently(monkeypatch):
                                        do_expand=True))
     assert inflight["peak"] > 1
     assert inflight["peak"] <= 32
+
+
+def test_type_declaration_top_level(monkeypatch):
+    """type= states where documents live; always optional, always
+    checked, and type="cloud" alone reads the env key."""
+    monkeypatch.setenv("PAGEINDEX_API_KEY", "pi-env")
+    assert PageIndexClient(type="cloud").api_key == "pi-env"
+    assert not PageIndexClient(type="cloud")._local_chat
+    bridge = PageIndexClient(type="cloud", chat_model="openai/m")
+    assert bridge._local_chat and bridge.api_key == "pi-env"
+    agreed = PageIndexClient(api_key="pi-x", type="cloud")
+    assert agreed.api_key == "pi-x"
+    local = PageIndexClient(type="local")
+    assert local._local_chat and not hasattr(local, "api_key")
+
+    monkeypatch.delenv("PAGEINDEX_API_KEY")
+    with pytest.raises(PageIndexAPIError, match="PAGEINDEX_API_KEY"):
+        PageIndexClient(type="cloud")
+    with pytest.raises(PageIndexAPIError, match="conflicts with api_key"):
+        PageIndexClient(api_key="k", type="local")
+    with pytest.raises(PageIndexAPIError, match='"cloud" or "local"'):
+        PageIndexClient(type="banana")
+    with pytest.raises(PageIndexAPIError, match="two spellings"):
+        PageIndexClient(type="local", index="m")
+
+
+def test_type_declaration_in_index_dict(monkeypatch):
+    monkeypatch.setenv("PAGEINDEX_API_KEY", "pi-env")
+    assert PageIndexClient(index={"type": "cloud"}).api_key == "pi-env"
+    assert PageIndexClient(
+        index={"type": "cloud", "api_key": "pi-x"}).api_key == "pi-x"
+    typed = PageIndexClient(index={"type": "local", "model": "i"})
+    assert typed.index_model == "i"
+    assert not hasattr(PageIndexClient(index={"type": "local"}), "api_key")
+
+    with pytest.raises(PageIndexAPIError, match='type "cloud" but carries'):
+        PageIndexClient(index={"type": "cloud", "model": "i"})
+    with pytest.raises(PageIndexAPIError, match='type "local" but carries'):
+        PageIndexClient(index={"type": "local", "api_key": "k"})
+    with pytest.raises(PageIndexAPIError, match='"cloud" or "local"'):
+        PageIndexClient(index={"type": "hosted"})
+
+
+def test_type_declaration_in_chat_dict():
+    managed = PageIndexClient(api_key="pi-k", chat={"type": "cloud"})
+    assert not managed._local_chat
+    # {"type": "local"} alone declares own-model chat — default model.
+    from pageindex.utils import DEFAULT_CHAT_MODEL
+    own = PageIndexClient(api_key="pi-k", chat={"type": "local"})
+    assert own._local_chat and own.chat_model == DEFAULT_CHAT_MODEL
+    typed = PageIndexClient(chat={"type": "local", "model": "m"})
+    assert typed.chat_model == "m"
+
+    with pytest.raises(PageIndexAPIError, match='type "cloud" but carries'):
+        PageIndexClient(api_key="pi-k", chat={"type": "cloud", "model": "m"})
+    with pytest.raises(PageIndexAPIError, match="cannot read the local store"):
+        PageIndexClient(chat={"type": "cloud"})
