@@ -48,6 +48,7 @@ class McpBridge:
         self._session_id: Optional[str] = None
         self._protocol_version: Optional[str] = None
         self._instructions: Optional[str] = None
+        self._tools: Optional[list[dict]] = None
         self._initialized = False
         self._lock = threading.RLock()
         self._next_id = 0
@@ -129,6 +130,7 @@ class McpBridge:
                     self._initialized = False
                     self._session_id = None
                     self._protocol_version = None
+                    self._tools = None  # the set may have changed server-side
             return self._request(method, params, _retry=False)
         if response.status_code >= 400:
             raise PageIndexAPIError(
@@ -183,6 +185,12 @@ class McpBridge:
         return self._instructions
 
     def list_tools(self) -> list[dict]:
+        # Cached per session — every chat turn rebuilds the tool set, and
+        # a per-turn tools/list round trip is pure latency. The 404
+        # session-expiry reset clears it.
+        with self._lock:
+            if self._tools is not None:
+                return self._tools
         tools: list[dict] = []
         cursor: Optional[str] = None
         # A server echoing its cursor (or cycling) must not hang the client:
@@ -193,6 +201,8 @@ class McpBridge:
             tools.extend(result.get("tools") or [])
             next_cursor = result.get("nextCursor")
             if not next_cursor or next_cursor == cursor:
+                with self._lock:
+                    self._tools = tools
                 return tools
             cursor = next_cursor
         raise PageIndexAPIError(

@@ -385,6 +385,18 @@ def test_slot_strings_are_stripped():
     assert PageIndexClient(index=" i-model ").index_model == "i-model"
 
 
+def test_managed_chat_client_reads_none_not_attribute_error():
+    """The docstring advertises client.chat_model on every client; a
+    managed-chat client answers None (the endpoint picks its own model)."""
+    client = PageIndexClient(api_key="pi-k")
+    assert client.chat_model is None
+    assert client.retrieve_model is None
+    assert client.chat_backend is None
+    assert not client._local_chat
+    client.chat_model = "openai/m"  # and the switch still flips
+    assert client._local_chat
+
+
 # ── local: indexing and reading ──
 
 def test_submit_and_get_tree(local_client, indexed_doc, tmp_path, monkeypatch):

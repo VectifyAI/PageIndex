@@ -1038,6 +1038,9 @@ def run_messages(client, messages, model: str,
     cached: dict[str, Any] = (
         {"cache_control": {"type": "ephemeral"}}
         if _cache_marks(system_blocks, prepared) < 4 else {})
+    # Tools before the transport: on a bridge client building them is
+    # network I/O, and a failure there must not strand the client below.
+    tools = build_anthropic_tools(client, doc_ids=scope)
     merged = _merged_backend(client, backend)
     backend_client = _anthropic_client(merged)
     # Close only a per-call construction: cached clients stay open for
@@ -1050,7 +1053,7 @@ def run_messages(client, messages, model: str,
         max_tokens=max_tokens,
         messages=prepared,
         model=model,
-        tools=build_anthropic_tools(client, doc_ids=scope),
+        tools=tools,
         system=system_blocks,
         stream=stream,
         # Bounded like the OpenAI surfaces (their framework default is 10).

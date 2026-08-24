@@ -288,7 +288,8 @@ class PageIndexClient:
             OpenAI-compatible shorthand, and ``openai/Qwen/...`` is the
             form for an OpenAI-compatible server that itself serves
             slashed model ids (vLLM, TGI). Defaults to the SDK default
-            (strong).
+            (strong); reads ``None`` on a cloud client where the managed
+            chat answers.
         model (str, optional): Local mode only — one model for both roles:
             sets the default for ``index_model`` and ``chat_model`` at
             once. The role-specific arguments win over it. (Also the
@@ -440,6 +441,10 @@ class PageIndexClient:
                 self.chat_model = opt.chat_model
                 self.chat_backend = chat_conf.get("chat_backend")
                 _preload_litellm()
+            else:
+                # Managed chat: the endpoint selects its own model.
+                self.chat_model = None
+                self.chat_backend = None
         else:
             if chat_mode == "managed":
                 raise PageIndexAPIError(
@@ -474,9 +479,10 @@ class PageIndexClient:
     @property
     def _local_chat(self) -> bool:
         # Derived, never stored: own-model chat is exactly "a chat model
-        # is configured", so a post-construction ``client.chat_model = m``
-        # switches the whole client, not half of it.
-        return hasattr(self, "chat_model")
+        # is configured" (None on a managed-chat client), so a
+        # post-construction ``client.chat_model = m`` switches the whole
+        # client, not half of it.
+        return getattr(self, "chat_model", None) is not None
 
     @property
     def retrieve_model(self):

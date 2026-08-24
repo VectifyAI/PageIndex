@@ -1446,11 +1446,66 @@ def test_list_tools_pagination_is_bounded():
         (params or {}).get("cursor")]
     assert [t["name"] for t in bridge.list_tools()] == ["a", "b"]
 
+    bridge = McpBridge("http://x/mcp", {})  # fresh: the first run caches
     bridge._request = lambda method, params=None: {
         "tools": [],
         "nextCursor": {"c1": "c2"}.get((params or {}).get("cursor"), "c1")}
     with pytest.raises(PageIndexAPIError, match="did not terminate"):
         bridge.list_tools()
+
+
+def test_list_tools_cached_until_session_reset():
+    """Every chat turn rebuilds the tool set — the tools/list round trip
+    must be paid once per session, and the 404 session-expiry reset must
+    refetch (the tool set may have changed server-side)."""
+    import json as json_mod
+    from pageindex.mcp_bridge import McpBridge
+
+    calls = {"list": 0, "call": 0}
+
+    class R:
+        def __init__(self, status, body=None, headers=None):
+            self.status_code = status
+            self._body = body or {}
+            self.headers = {"Content-Type": "application/json",
+                            **(headers or {})}
+            self.text = json_mod.dumps(self._body)
+            self.content = self.text.encode()
+
+        def json(self):
+            return self._body
+
+    def fake_post(payload, session_id=None, protocol_version=None):
+        rid, method = payload.get("id"), payload.get("method")
+        if method == "initialize":
+            return R(200, {"jsonrpc": "2.0", "id": rid,
+                           "result": {"instructions": "I"}},
+                     headers={"Mcp-Session-Id": "s1"})
+        if method == "notifications/initialized":
+            return R(202)
+        if method == "tools/list":
+            calls["list"] += 1
+            return R(200, {"jsonrpc": "2.0", "id": rid,
+                           "result": {"tools": [{"name": f"t{calls['list']}"}]}})
+        if method == "tools/call":
+            calls["call"] += 1
+            if calls["call"] == 1 and session_id:
+                return R(404)  # the spec's expired-session status
+            return R(200, {"jsonrpc": "2.0", "id": rid,
+                           "result": {"content": [{"type": "text",
+                                                   "text": "ok"}]}})
+        raise AssertionError(f"unexpected method {method}")
+
+    bridge = McpBridge("http://x/mcp", {})
+    bridge._post = fake_post
+    assert [t["name"] for t in bridge.list_tools()] == ["t1"]
+    assert [t["name"] for t in bridge.list_tools()] == ["t1"]
+    assert calls["list"] == 1
+    # Session expires mid-conversation: the next call re-initializes and
+    # the tool cache goes with it.
+    assert bridge.call_tool("get_document", {"doc_name": "r.pdf"}) == ("ok", False)
+    assert [t["name"] for t in bridge.list_tools()] == ["t2"]
+    assert calls["list"] == 2
 
 
 def test_mcp_bridge_protocol(monkeypatch):

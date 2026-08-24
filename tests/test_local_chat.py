@@ -2334,6 +2334,37 @@ def test_messages_auth_failure_teaches_architecture(bridge_client,
                              stream=True))
 
 
+@needs_anthropic
+def test_messages_no_backend_leak_when_tool_build_fails(bridge_client,
+                                                        monkeypatch):
+    """build_anthropic_tools is network I/O on a bridge client — a
+    failure there must not strand an opened per-call transport."""
+    client, _ = bridge_client
+    made = []
+
+    class FakeAnthropic:
+        def __init__(self):
+            self.closed = False
+            self.beta = types.SimpleNamespace(messages=types.SimpleNamespace(
+                tool_runner=lambda **kw: iter(())))
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(local_chat, "_anthropic_client",
+                        lambda backend=None: made.append(FakeAnthropic())
+                        or made[-1])
+
+    def boom(client, doc_ids=None):
+        raise PageIndexAPIError("Could not reach the PageIndex MCP server")
+
+    monkeypatch.setattr(
+        "pageindex.integrations.anthropic_sdk.build_anthropic_tools", boom)
+    with pytest.raises(PageIndexAPIError, match="MCP server"):
+        client.messages("q", model="claude-test", max_tokens=100)
+    assert all(fake.closed for fake in made)
+
+
 @needs_agents
 def test_bridge_responses_lane_runs_cloud_tools(bridge_client, fake_model):
     """The Responses door on a bridge client: same engine, cloud tools,
