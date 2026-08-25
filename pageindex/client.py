@@ -58,30 +58,246 @@ def _agents_sdk_model_name(model: str) -> str:
     return f"litellm/{model}"
 
 
+_LOCAL_INDEX_KEYS = ("model", "summary_model", "backend", "storage_path")
+
+# Near-synonyms of "cloud" that would otherwise parse as model names —
+# a silent wrong mode. They error, pointing at the real word.
+_RESERVED_MODE_WORDS = {"hosted", "managed"}
+
+
+def _env_cloud_key(spelling: str, inline: str = "api_key=...") -> str:
+    # .env support lives in utils' import-time load_dotenv(): load it
+    # before the read, or a key in .env is visible only by import order.
+    from . import utils  # noqa: F401
+    key = os.environ.get("PAGEINDEX_API_KEY")
+    if not key:
+        raise PageIndexAPIError(
+            f"{spelling} reads the PageIndex API key from the "
+            "PAGEINDEX_API_KEY environment variable, which is not set — "
+            f"export it, or pass the key inline ({inline}).")
+    return key
+
+
+# One argument vocabulary regardless of spelling: every value is shape-
+# checked in the constructor, so a wrong type or an empty value refuses
+# there as a PageIndexAPIError — never later, never silently.
+_ARG_TYPES: "dict[str, tuple[type, ...]]" = {
+    "model": (str,), "index_model": (str,), "summary_model": (str,),
+    "chat_model": (str,), "retrieve_model": (str,),
+    "storage_path": (str, os.PathLike), "index_backend": (dict,),
+    "chat_backend": (dict,)}
+
+
+def _declared_mode(value, side: str):
+    if isinstance(value, str):
+        value = value.strip().lower()
+    if value not in (None, "cloud", "local"):
+        raise PageIndexAPIError(
+            f'{side} "mode" must be "cloud" or "local", not {value!r}.')
+    return value
+
+
+_CloudKey = Union[str, Callable[[], str], None]
+
+
+def _resolve_index_slot(index) -> "tuple[_CloudKey, dict[str, Any]]":
+    """The ``index=`` slot as (cloud api_key, local overrides). A dict
+    declares its side by its keys; an optional "mode" states it and must
+    agree. Keyless cloud spellings ("cloud" / "pageindex-cloud",
+    {"mode": "cloud"}) return the environment read as a thunk, so the
+    caller's mode cross-check runs before the environment is touched."""
+    from .types import PAGEINDEX_CLOUD
+    if isinstance(index, str):
+        # Normalized compare: a case/whitespace variant of a mode word
+        # must never fall through and silently become a model name.
+        word = index.strip().lower()
+        if word in (PAGEINDEX_CLOUD, "cloud"):
+            return lambda: _env_cloud_key(f'index="{index.strip()}"',
+                                          'index={"api_key": ...}'), {}
+        if word == "local":
+            return None, {}
+        if word in _RESERVED_MODE_WORDS:
+            raise PageIndexAPIError(
+                f'index="{index}" is not a mode word — the cloud spelling '
+                'is index="cloud" (key from PAGEINDEX_API_KEY) or '
+                'index={"api_key": ...}.')
+        if index.strip():
+            return None, {"index_model": index}
+        raise PageIndexAPIError(
+            "index is an empty string — pass a local index model name, "
+            'or "cloud".')
+    if isinstance(index, dict):
+        # None-valued keys mean "absent", exactly like the flat arguments.
+        conf = {name: value for name, value in index.items()
+                if value is not None}
+        declared = _declared_mode(conf.pop("mode", None), "index")
+        if not conf:
+            if declared == "cloud":
+                return lambda: _env_cloud_key('index={"mode": "cloud"}',
+                                              'index={"api_key": ...}'), {}
+            if declared == "local":
+                return None, {}
+            raise PageIndexAPIError(
+                "index is an empty dict — its keys pick the side: "
+                '{"api_key": ...} for cloud documents, or '
+                f"{', '.join(_LOCAL_INDEX_KEYS)} for the local store.")
+        unknown = set(conf) - {"api_key"} - set(_LOCAL_INDEX_KEYS)
+        if unknown:
+            raise PageIndexAPIError(
+                f"Unknown index keys ({', '.join(sorted(unknown))}) — "
+                'cloud takes "api_key"; local takes '
+                f"{', '.join(_LOCAL_INDEX_KEYS)}.")
+        if "api_key" in conf:
+            if declared == "local":
+                raise PageIndexAPIError(
+                    'index declares mode "local" but carries api_key — '
+                    "an API key means cloud documents. Drop one of them.")
+            if len(conf) > 1:
+                raise PageIndexAPIError(
+                    "index mixes cloud and local keys — cloud documents "
+                    'take {"api_key": ...} alone; the cloud pipeline does '
+                    "its own indexing.")
+            key = conf["api_key"]
+            if not key or not isinstance(key, str):
+                raise PageIndexAPIError(
+                    'index["api_key"] must be a non-empty string.')
+            return key, {}
+        if declared == "cloud":
+            raise PageIndexAPIError(
+                'index declares mode "cloud" but carries local keys '
+                f"({', '.join(sorted(conf))}) — the cloud pipeline does "
+                'its own indexing; cloud takes "api_key" only.')
+        mapped = {"index_model": conf.get("model"),
+                  "summary_model": conf.get("summary_model"),
+                  "index_backend": conf.get("backend"),
+                  "storage_path": conf.get("storage_path")}
+        return None, {name: value for name, value in mapped.items()
+                      if value is not None}
+    raise PageIndexAPIError("index must be a string or a dict.")
+
+
+def _resolve_chat_slot(chat) -> "tuple[Optional[str], dict[str, Any]]":
+    """The ``chat=`` slot as (mode, own-model overrides) — mode is
+    "managed", "own", or None (nothing declared beyond the overrides)."""
+    from .types import PAGEINDEX_CLOUD
+    if isinstance(chat, str):
+        word = chat.strip().lower()
+        if word in (PAGEINDEX_CLOUD, "cloud"):
+            return "managed", {}
+        if word == "local":
+            return "own", {}
+        if word in _RESERVED_MODE_WORDS:
+            raise PageIndexAPIError(
+                f'chat="{chat}" is not a mode word — the managed chat is '
+                'chat="cloud".')
+        if chat.strip():
+            return "own", {"chat_model": chat}
+        raise PageIndexAPIError(
+            "chat is an empty string — pass a model name, or "
+            '"cloud" for the managed chat.')
+    if isinstance(chat, dict):
+        # None-valued keys mean "absent", exactly like the flat arguments.
+        conf = {name: value for name, value in chat.items()
+                if value is not None}
+        declared = _declared_mode(conf.pop("mode", None), "chat")
+        unknown = set(conf) - {"model", "backend"}
+        if (not conf and declared is None) or unknown:
+            raise PageIndexAPIError(
+                ("chat is an empty dict" if not conf else
+                 f"Unknown chat keys ({', '.join(sorted(unknown))})")
+                + ' — chat takes "model" and "backend" (your own model), '
+                'or {"mode": "cloud"} / "cloud" for the managed chat.')
+        if declared == "cloud":
+            if conf:
+                raise PageIndexAPIError(
+                    'chat declares mode "cloud" but carries '
+                    f"({', '.join(sorted(conf))}) — the managed chat "
+                    "selects its own model. Drop the mode, or the keys.")
+            return "managed", {}
+        mapped = {"chat_model": conf.get("model"),
+                  "chat_backend": conf.get("backend")}
+        return "own", {name: value for name, value in mapped.items()
+                       if value is not None}
+    raise PageIndexAPIError("chat must be a string or a dict.")
+
+
 class PageIndexClient:
     """
     Python SDK client for PageIndex.
 
-    Cloud mode (an ``api_key`` is given) talks to the PageIndex API at
-    api.pageindex.ai, exactly like the 0.2.x SDK. Local mode (no ``api_key``)
-    runs the same operations on your machine: documents are indexed with the
-    open-source PageIndex pipeline using your own LLM provider key (e.g.
-    ``OPENAI_API_KEY`` in the environment) and stored under ``storage_path``.
+    Two independent sides, each locally run or cloud-managed:
+
+    - **index** — where documents live. With an ``api_key`` they live in
+      your PageIndex cloud account, indexed by the managed pipeline,
+      exactly like the 0.2.x SDK. Without one they are indexed on your
+      machine by the open-source pipeline (your own LLM provider key,
+      e.g. ``OPENAI_API_KEY``) and stored under ``storage_path``.
+    - **chat** — who answers. With a chat model configured
+      (``chat_model=`` / ``chat=``), the document-QA agent runs in your
+      process against your own model and credentials — in both index
+      modes. On a cloud client with no chat model, the managed cloud
+      chat answers.
+
+    ``api_key`` moves your documents, never your model: ``chat_model``
+    always means your own model on your own keys. The fourth combination
+    (local documents + managed chat) cannot be expressed — the managed
+    chat cannot read your disk.
+
+    Usage:
+        client = PageIndexClient()                  # local docs + your model
+        client = PageIndexClient(api_key="...")     # cloud docs + managed chat
+        client = PageIndexClient(api_key="...",     # cloud docs + your model
+                                 chat_model="openai/gpt-5.2")
+
+    ``index=`` / ``chat=`` are the grouped spelling of the same flat
+    arguments — a string as shorthand, a dict for the full config; each
+    side picks one spelling per client. ``index="cloud"`` (or the label
+    ``"pageindex-cloud"``) is the keyless cloud spelling (the key comes
+    from the ``PAGEINDEX_API_KEY`` environment variable — which is read
+    only when the code explicitly says cloud; a bare ``PageIndexClient()``
+    stays local regardless of the environment).
 
     Args:
         api_key (str, optional): PageIndex cloud API key
             (https://dash.pageindex.ai/api-keys). Omit for local mode.
+        index (str | dict, optional): The index side, grouped —
+            ``"cloud"`` / ``"pageindex-cloud"`` (cloud, key from the
+            environment), ``"local"``, a local index model name, or a
+            dict: ``{"api_key": ...}`` for cloud, ``{"model",
+            "summary_model", "backend", "storage_path"}`` for local. An
+            optional ``"mode"`` key (``"cloud"`` / ``"local"``) states
+            the side and must agree with the other keys; ``{"mode":
+            "cloud"}`` alone reads the key from the environment. Not
+            combinable with this side's flat arguments.
+        chat (str | dict, optional): The chat side, grouped — a model
+            name (your own model), ``"cloud"`` / ``"pageindex-cloud"``
+            (managed chat, cloud clients only), ``"local"`` (your own
+            model, the default one), or ``{"model", "backend"}``. An
+            optional ``"mode"`` key states the side: ``{"mode":
+            "cloud"}`` alone is the managed chat, ``"local"`` is your
+            own model and must agree with the other keys. Not
+            combinable with this side's flat arguments.
+        mode (str, optional): Client-level declaration of where the
+            documents live — ``"cloud"`` or ``"local"`` — checked
+            against the other arguments (``mode="local"`` with an
+            api_key errors). ``mode="cloud"`` alone reads the key from
+            the ``PAGEINDEX_API_KEY`` environment variable. Always
+            optional: the arguments themselves already carry the mode.
         index_model (str, optional): Local mode only — LLM used to index
             documents (structure and summaries). Defaults to the SDK
             default (fast and cheap).
-        chat_model (str, optional): Local mode only — the model the chat
-            surfaces (``chat``, ``chat_completions``, ``responses``)
-            default to, exposed as ``client.chat_model``. Chat names
-            route through LiteLLM and mean what LiteLLM says they mean;
-            bare names are OpenAI-compatible shorthand, and
-            ``openai/Qwen/...`` is the form for an OpenAI-compatible
-            server that itself serves slashed model ids (vLLM, TGI).
-            Defaults to the SDK default (strong).
+        chat_model (str, optional): Your own model for the chat surfaces
+            (``chat``, ``chat_completions``, ``responses``), exposed as
+            ``client.chat_model`` — on a cloud client, setting it runs
+            the document-QA agent in your process over the cloud
+            documents (page content then flows through your process to
+            your model provider). Chat names route through LiteLLM and
+            mean what LiteLLM says they mean; bare names are
+            OpenAI-compatible shorthand, and ``openai/Qwen/...`` is the
+            form for an OpenAI-compatible server that itself serves
+            slashed model ids (vLLM, TGI). Defaults to the SDK default
+            (strong); reads ``None`` on a cloud client where the managed
+            chat answers.
         model (str, optional): Local mode only — one model for both roles:
             sets the default for ``index_model`` and ``chat_model`` at
             once. The role-specific arguments win over it. (Also the
@@ -90,26 +306,23 @@ class PageIndexClient:
         summary_model (str, optional): Local mode only — legacy: overrides
             the model used for node summaries and document descriptions;
             ``index_model`` covers this.
-        retrieve_model (str, optional): Local mode only — legacy name for
-            ``chat_model``.
+        retrieve_model (str, optional): Legacy name for ``chat_model`` —
+            same meaning everywhere, cloud clients included.
         storage_path (str, optional): Local mode only — directory where
             indexed documents are stored. Defaults to ``./.pageindex``.
         index_backend (dict, optional): Local mode only — connection
             overrides for the indexing lane's LLM calls. Keys are
             LiteLLM's own connection params — ``api_key``, ``api_base``,
             ``api_version``, ``aws_*``, … — passed through verbatim.
-        chat_backend (dict, optional): Local mode only — default
-            connection overrides for the chat surfaces; a call's own
+        chat_backend (dict, optional): Default connection overrides for
+            the chat surfaces — a chat-side argument like ``chat_model``,
+            so on a cloud client it selects own-model chat. A call's own
             ``backend`` keys win over it. The dict reaches whichever
             door runs, in that door's vocabulary (see each method) —
             ``api_key`` / ``base_url`` mean the same thing on all three.
 
-    Usage:
-        client = PageIndexClient(api_key="...")   # cloud
-        client = PageIndexClient()                # local
-
-    PageIndexCloudClient / PageIndexLocalClient pin the mode at construction
-    instead of inferring it from api_key.
+    PageIndexCloudClient / PageIndexLocalClient pin the index side at
+    construction instead of inferring it from api_key.
 
     Local mode differences (all documented per method): indexing is
     synchronous, only PDFs are supported, and folders / ``beta_headers`` /
@@ -119,10 +332,15 @@ class PageIndexClient:
 
     BASE_URL = "https://api.pageindex.ai"
 
+    _pin: Optional[str] = None  # the pinned subclasses' index side
+
     def __init__(
         self,
         api_key: Optional[str] = None,
         *,
+        index: Optional[Union[dict[str, Any], str]] = None,
+        chat: Optional[Union[dict[str, Any], str]] = None,
+        mode: Optional[str] = None,
         index_model: Optional[str] = None,
         chat_model: Optional[str] = None,
         model: Optional[str] = None,
@@ -137,44 +355,170 @@ class PageIndexClient:
                 "api_key is an empty string. Pass a real PageIndex API key for "
                 "cloud mode, or omit api_key entirely for local mode."
             )
-        model_args = {"index_model": index_model, "chat_model": chat_model,
-                      "model": model, "summary_model": summary_model,
-                      "retrieve_model": retrieve_model}
-        if api_key is not None:
-            local_only = dict(model_args, storage_path=storage_path,
-                              index_backend=index_backend,
-                              chat_backend=chat_backend)
-            passed = [name for name, value in local_only.items() if value is not None]
-            if passed:
+        # Each side picks one spelling — its slot, or the flat arguments.
+        # ``model`` sets every role, so it claims both sides.
+        index_flat: dict[str, Any] = {
+            name: value for name, value in
+            (("api_key", api_key),
+             ("index_model", index_model),
+             ("summary_model", summary_model),
+             ("index_backend", index_backend),
+             ("storage_path", storage_path), ("model", model))
+            if value is not None}
+        chat_flat: dict[str, Any] = {
+            name: value for name, value in
+            (("chat_model", chat_model),
+             ("retrieve_model", retrieve_model),
+             ("chat_backend", chat_backend), ("model", model))
+            if value is not None}
+        if model is not None and (index is not None or chat is not None):
+            raise PageIndexAPIError(
+                "model= sets both roles at once, so no slot can absorb "
+                'it — name the model inside the slot ({"model": ...}) '
+                "and use index_model= / chat_model= for a side written "
+                "flat.")
+        if index is not None and index_flat:
+            raise PageIndexAPIError(
+                "index= and the flat index-side arguments "
+                f"({', '.join(sorted(index_flat))}) are two spellings of "
+                "the same thing — use one or the other.")
+        if chat is not None and chat_flat:
+            raise PageIndexAPIError(
+                "chat= and the flat chat-side arguments "
+                f"({', '.join(sorted(chat_flat))}) are two spellings of "
+                "the same thing — use one or the other.")
+        # ``mode=`` is a cross-check, not a spelling: it combines with
+        # either spelling of the index side and must agree with it. The
+        # pinned classes declare the side by class; their errors name the
+        # class, never a mode= the user did not write.
+        declared = _declared_mode(mode, "client") or self._pin
+        pinned = type(self).__name__ if self._pin else None
+        if index is not None:
+            cloud_key, index_conf = _resolve_index_slot(index)
+            if declared == "local" and cloud_key is not None:
                 raise PageIndexAPIError(
-                    f"Local-mode arguments ({', '.join(passed)}) cannot be "
-                    "combined with api_key — remove them, or omit api_key to "
-                    "run locally."
-                )
-            self.api_key = api_key
+                    f"{pinned} pins local documents — that index= selects "
+                    "cloud documents. Drop it, or use PageIndexCloudClient."
+                    if pinned else
+                    'mode="local" disagrees with index= — that index '
+                    "selects cloud documents. Drop one of them.")
+            if declared == "cloud" and cloud_key is None:
+                raise PageIndexAPIError(
+                    f"{pinned} pins cloud documents — that index= "
+                    "configures the local store. Drop it, or use "
+                    "PageIndexLocalClient."
+                    if pinned else
+                    'mode="cloud" disagrees with index= — that index '
+                    "configures the local store. Drop one of them.")
+            if callable(cloud_key):
+                cloud_key = cloud_key()
+        else:
+            cloud_key = api_key
+            if declared == "local" and api_key is not None:
+                raise PageIndexAPIError(
+                    'mode="local" conflicts with api_key — an API key '
+                    "means cloud documents. Drop one of them.")
+            if declared == "cloud" and cloud_key is None:
+                cloud_key = _env_cloud_key('mode="cloud"')
+            index_conf = {name: value for name, value in index_flat.items()
+                          if name != "api_key"}
+        if chat is not None:
+            chat_mode, chat_conf = _resolve_chat_slot(chat)
+        else:
+            chat_mode = "own" if chat_flat else None
+            chat_conf = chat_flat
+        # Every spelling lands here: strings are stripped, wrong types and
+        # empty values refuse loudly — an empty chat-side value must never
+        # silently select own-model chat.
+        for side, slot, conf in (("index", index, index_conf),
+                                 ("chat", chat, chat_conf)):
+            for name, value in conf.items():
+                # Slot keys are the flat names with the side prefix off.
+                shown = (f'{side}["{name.removeprefix(side + "_")}"]'
+                         if slot is not None else name)
+                if not isinstance(value, _ARG_TYPES[name]):
+                    raise PageIndexAPIError(
+                        f"{shown} must be a {_ARG_TYPES[name][0].__name__}, "
+                        f"got {type(value).__name__}.")
+                if isinstance(value, str):
+                    value = conf[name] = value.strip()
+                if not value:
+                    raise PageIndexAPIError(
+                        f"{shown} is empty — it configures nothing. Pass a "
+                        "real value, or drop the argument.")
+
+        if cloud_key is not None:
+            if index_conf:
+                raise PageIndexAPIError(
+                    "Cloud documents are indexed by the PageIndex pipeline "
+                    "— the index-side arguments "
+                    f"({', '.join(sorted(index_conf))}) have nothing to "
+                    "configure there; remove them. (chat_model= / chat= "
+                    "stay yours: they run the chat agent in your process "
+                    "with your own model.)")
+            self.api_key = cloud_key
             from .cloud_api import CloudAPI
             self._api = CloudAPI(self)
+            if chat_mode == "own":
+                from .utils import ConfigLoader
+                overrides = {name: value for name, value in chat_conf.items()
+                             if name in ("chat_model", "retrieve_model")
+                             and value}
+                opt = ConfigLoader().load(overrides or None)
+                self.chat_model = opt.chat_model
+                self.chat_backend = chat_conf.get("chat_backend")
+                _preload_litellm()
+            else:
+                # Managed chat: the endpoint selects its own model.
+                self.chat_model = None
+                self.chat_backend = None
         else:
+            if chat_mode == "managed":
+                if pinned:
+                    exits = (f"{pinned} pins local documents: use "
+                             "PageIndexCloudClient (or PageIndexClient("
+                             "api_key=...))")
+                else:
+                    exits = ('Go cloud (api_key=... or index="cloud")'
+                             + (' and drop mode="local"' if mode is not None
+                                else ""))
+                raise PageIndexAPIError(
+                    "The managed chat needs cloud documents — it cannot "
+                    f"read the local store. {exits}, or set your own chat "
+                    "model instead.")
             from .utils import ConfigLoader
-            overrides = {key: value for key, value in model_args.items()
-                         if value}
+            overrides = {name: value for name, value in
+                         {**index_conf, **chat_conf}.items()
+                         if name in ("model", "index_model", "summary_model",
+                                     "chat_model", "retrieve_model")
+                         and value}
             opt = ConfigLoader().load(overrides or None)
             self.model = opt.model
             self.index_model = opt.index_model
             self.summary_model = opt.summary_model
             self.chat_model = opt.chat_model
-            self.chat_backend = chat_backend
-            self.storage_path = storage_path or ".pageindex"
+            self.chat_backend = chat_conf.get("chat_backend")
+            self.storage_path = index_conf.get("storage_path") or ".pageindex"
             from .local_api import LocalAPI
             self._api = LocalAPI(
                 storage_path=self.storage_path,
                 model=self.model,
                 summary_model=self.summary_model,
-                index_backend=index_backend,
+                index_backend=index_conf.get("index_backend"),
             )
             # LiteLLM's multi-second import would otherwise land on the
             # first chat call; failures resurface there with real context.
             _preload_litellm()
+
+    @property
+    def _local_chat(self) -> bool:
+        # Derived, never stored: own-model chat is exactly "a chat model
+        # is configured" (None on a managed-chat client). Blank configures
+        # nothing — the constructor refuses it, and assignment must agree.
+        model = getattr(self, "chat_model", None)
+        if isinstance(model, str):
+            return bool(model.strip())
+        return model is not None
 
     @property
     def retrieve_model(self):
@@ -415,7 +759,7 @@ class PageIndexClient:
         """
         Ask a question about your documents, get the answer.
 
-        Thin sugar over ``chat_completions()`` in both modes — same
+        Thin sugar over ``chat_completions()`` in every mode — same
         engine, same wire, minus the envelope. Multi-turn: keep your own
         role/content list of the visible conversation (append each answer
         as an assistant message) and pass it back. For usage accounting,
@@ -426,14 +770,17 @@ class PageIndexClient:
             messages: A question string, or role/content conversation
                 history.
             doc_id: Document ID or list of IDs to scope the conversation.
-                Keep it identical across a conversation's calls.
+                Keep it identical across a conversation's calls. Local
+                documents: also enforced at the tool layer, not just
+                prompted. Cloud documents: the managed chat scopes
+                server-side; own-model chat targets at the prompt level.
             stream: Yield the answer as text chunks as it is produced.
-            model: Local only — backend model name (defaults to
-                ``chat_model``).
-            reasoning_effort: Local only — how hard the model thinks
-                (``"low"`` / ``"medium"`` / ``"high"``; what a backend
-                accepts is its own). Unset sends nothing — the model's
-                default behavior applies.
+            model: Own-model chat only — backend model name (defaults
+                to ``chat_model``).
+            reasoning_effort: Own-model chat only — how hard the model
+                thinks (``"low"`` / ``"medium"`` / ``"high"``; what a
+                backend accepts is its own). Unset sends nothing — the
+                model's default behavior applies.
 
         Returns:
             - stream=False: the answer string
@@ -472,9 +819,13 @@ class PageIndexClient:
         """
         PageIndex Chat Completions: document QA in one call.
 
-        Cloud: the hosted chat endpoint. Local: a managed document-QA agent
-        run over the local tools against your own LLM backend, routed
-        through LiteLLM — model names mean what LiteLLM says they mean.
+        With no chat model configured (a plain cloud client): the managed
+        hosted chat endpoint. With one — local mode, or a cloud client
+        constructed with ``chat_model=``/``chat=`` (own-model chat) — a
+        managed document-QA agent runs in your process over the mode's
+        tools (local store, or the live cloud tool set) against your own
+        LLM backend, routed through LiteLLM — model names mean what
+        LiteLLM says they mean.
         Bare names are OpenAI-compatible shorthand (the OpenAI SDK's usual
         env config — OPENAI_API_KEY, OPENAI_BASE_URL — selects the
         backend, so any OpenAI-compatible server works; write
@@ -493,46 +844,50 @@ class PageIndexClient:
         Args:
             messages: Conversation messages with 'role' and 'content' keys,
                 or a bare query string (it becomes a single user message).
-                Local also accepts system/developer messages — their content
-                is appended to the managed system prompt. Local takes text
-                history only: tool-role turns are rejected (the cloud
-                endpoint forwards them verbatim), and message fields beyond
-                role/content are dropped.
+                Own-model chat also accepts system/developer messages —
+                their content is appended to the managed system prompt —
+                and takes text history only: tool-role turns are rejected
+                (the managed endpoint forwards them verbatim), and message
+                fields beyond role/content are dropped.
             stream: Enable streaming responses.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call and is part
-                of the cached prompt prefix.
+                of the cached prompt prefix. Local documents: also
+                enforced at the tool layer, not just prompted. Cloud
+                documents: the managed chat scopes server-side;
+                own-model chat targets at the prompt level.
             temperature: Sampling temperature, passed through to the model.
             stream_metadata: With stream=True, yield chunk dicts instead of
                 text pieces.
-            enable_citations: Cloud-only — local mode raises (citations need
-                block-level OCR data local mode does not store).
-            model: Local only — backend model name (defaults to
-                ``chat_model``). The cloud endpoint selects its own.
-            max_turns: Local only — cap on agent turns per call.
-            top_p: Local only — nucleus sampling, passed through to the
-                model.
-            max_tokens: Local only — per-call output cap, passed through;
-                it bounds each backend call in the agent loop (the way
-                max_turns bounds the loop), not the whole run.
-            reasoning_effort: Local only — passed through verbatim as
+            enable_citations: Managed chat only — own-model chat raises
+                (the in-process engine has no citation machinery).
+            model: Own-model chat only — backend model name (defaults to
+                ``chat_model``). The managed endpoint selects its own.
+            max_turns: Own-model chat only — cap on agent turns per call.
+            top_p: Own-model chat only — nucleus sampling, passed
+                through to the model.
+            max_tokens: Own-model chat only — per-call output cap,
+                passed through; it bounds each backend call in the agent
+                loop (the way max_turns bounds the loop), not the whole
+                run.
+            reasoning_effort: Own-model chat only — passed through verbatim as
                 LiteLLM's ``reasoning_effort``; each provider maps it to
                 its own thinking control, and the values mean what the
                 backend says they mean. Unset sends nothing (the
                 backend's default applies).
-            extra_body: Local only — extra request fields beyond this
+            extra_body: Own-model chat only — extra request fields beyond this
                 method's parameters, merged last so they win.
                 OpenAI-compatible backends take them verbatim in the
                 request body; LiteLLM-routed providers take them as
                 LiteLLM's own params (mapped or refused per provider).
                 Credentials belong in ``backend``, never here.
-            extra_headers: Local only — extra HTTP headers merged into
+            extra_headers: Own-model chat only — extra HTTP headers merged into
                 each backend request; caller headers win. One exception:
                 LiteLLM's anthropic adapter owns the ``anthropic-beta``
                 header (your value is dropped there) — use ``messages()``
                 for Anthropic beta flags.
-            backend: Local only — connection overrides for this call's
+            backend: Own-model chat only — connection overrides for this call's
                 backend, merged over the client's ``chat_backend``
                 (per-call keys win). Keys are LiteLLM's own connection
                 params — ``api_key``, ``base_url``, ``api_version``,
@@ -550,8 +905,7 @@ class PageIndexClient:
                     "messages must be a non-empty string or a list of "
                     "message dicts.")
             messages = [{"role": "user", "content": messages}]
-        from .cloud_api import CloudAPI
-        if not isinstance(self._api, CloudAPI):
+        if self._local_chat:
             from .local_chat import run_chat_completions
             return run_chat_completions(
                 self, messages, stream=stream, doc_id=doc_id,
@@ -567,10 +921,14 @@ class PageIndexClient:
                 or backend is not None):
             raise PageIndexAPIError(
                 "model, max_turns, top_p, max_tokens, reasoning_effort, "
-                "extra_body, extra_headers and backend are local-mode "
-                "parameters — the cloud chat endpoint selects its own model."
+                "extra_body, extra_headers and backend drive your own chat "
+                "model, which this client does not configure — construct "
+                "the client with chat_model=... (or a chat= model) to run the "
+                "agent in your process, or drop them to use the managed "
+                "chat endpoint, which selects its own model."
             )
-        return self._api.chat_completions(
+        from .cloud_api import CloudAPI
+        return cast(CloudAPI, self._api).chat_completions(
             messages=messages, stream=stream, doc_id=doc_id,
             temperature=temperature, stream_metadata=stream_metadata,
             enable_citations=enable_citations,
@@ -595,11 +953,13 @@ class PageIndexClient:
         """
         Document QA over the OpenAI Responses protocol — the agentic surface.
 
-        Local only for now. Drives your backend's /responses end to end (no
-        translation layer). The envelope is official Responses shape —
-        ``output`` carries the model-produced items and parses with the
-        openai SDK types — and the whole process transcript (including the
-        tool outputs the SDK executed) rides in the extra ``items`` field.
+        Own-model chat only — local mode, or a cloud client constructed
+        with ``chat_model=``/``chat=``. Drives your backend's /responses
+        end to end (no translation layer). The envelope is official
+        Responses shape — ``output`` carries the model-produced items
+        and parses with the openai SDK types — and the whole process
+        transcript (including the tool outputs the SDK executed) rides
+        in the extra ``items`` field.
         Append the returned ``items`` to your next call's ``input`` verbatim
         to keep provider prompt-cache prefix continuity and the agent's
         memory of what it already read.
@@ -626,7 +986,9 @@ class PageIndexClient:
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call and is part
-                of the cached prompt prefix.
+                of the cached prompt prefix. Local documents: also
+                enforced at the tool layer; cloud documents:
+                prompt-level targeting only.
             instructions: Appended to the managed system prompt.
             temperature / top_p: Passed through to the model.
             max_turns: Cap on agent turns per call.
@@ -650,11 +1012,11 @@ class PageIndexClient:
                 ``api_key``, ``base_url``, ``organization``, … — passed
                 verbatim; unknown keys raise.
         """
-        from .cloud_api import CloudAPI
-        if isinstance(self._api, CloudAPI):
+        if not self._local_chat:
             raise PageIndexAPIError(
-                "responses is not available on PageIndex cloud yet — it is "
-                "a local-mode surface for now."
+                "responses() drives your own chat model — construct the "
+                "client with chat_model=... (or a chat= model); the managed "
+                "cloud chat serves chat_completions() only."
             )
         from .local_chat import run_responses
         return run_responses(
@@ -686,10 +1048,12 @@ class PageIndexClient:
         """
         Document QA over the Anthropic Messages protocol — Claude-native.
 
-        Local only for now. Drives Anthropic's /v1/messages via the
-        Anthropic SDK's own tool runner (requires ``pageindex[anthropic]``;
-        ANTHROPIC_API_KEY selects the backend). ``tool_use``/``tool_result``
-        round-trip is the format's native behavior: the response is the
+        Own-model chat only — local mode, or a cloud client constructed
+        with ``chat_model=``/``chat=``. Drives Anthropic's /v1/messages
+        via the Anthropic SDK's own tool runner (requires
+        ``pageindex[anthropic]``; ANTHROPIC_API_KEY selects the
+        backend). ``tool_use``/``tool_result`` round-trip is the
+        format's native behavior: the response is the
         final message envelope with cross-turn aggregated ``usage`` plus a
         ``messages`` field — the full new turn sequence, valid for verbatim
         append to your history. The managed system prompt carries a
@@ -714,7 +1078,9 @@ class PageIndexClient:
                 convenience events), one message sequence per turn.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
-                targeting block it adds is re-set each call.
+                targeting block it adds is re-set each call. Local
+                documents: also enforced at the tool layer; cloud
+                documents: prompt-level targeting only.
             system: Appended after the managed system blocks.
             temperature / top_p / top_k / stop_sequences: Passed through.
             max_turns: Cap on agent turns per call (default 10, like the
@@ -736,11 +1102,11 @@ class PageIndexClient:
                 ``api_key``, ``base_url``, ``auth_token``, … — passed
                 verbatim; unknown keys raise.
         """
-        from .cloud_api import CloudAPI
-        if isinstance(self._api, CloudAPI):
+        if not self._local_chat:
             raise PageIndexAPIError(
-                "messages is not available on PageIndex cloud yet — it is "
-                "a local-mode surface for now."
+                "messages() drives your own chat model — construct the "
+                "client with chat_model=... (or a chat= model); the managed "
+                "cloud chat serves chat_completions() only."
             )
         from .local_chat import run_messages
         return run_messages(
@@ -907,8 +1273,9 @@ class PageIndexClient:
 
         Sugar over the explicit form — ``agent_instructions`` (with
         ``doc_id`` targeting) as the instructions and
-        ``as_openai_tools`` as the tools; local clients also carry their
-        configured ``chat_model`` (cloud omits ``model`` so the
+        ``as_openai_tools`` as the tools; clients with a configured
+        ``chat_model`` — local mode, or cloud with ``chat_model=`` —
+        also carry it (a plain cloud client omits ``model`` so the
         framework default applies). To customize further, switch to
         those methods directly. You run this config in your own
         environment, so its model auth comes from there —
@@ -946,7 +1313,7 @@ class PageIndexClient:
                 include_management=include_management),
             "tools": self.as_openai_tools(include_management, doc_id=scope),
         }
-        model = model or getattr(self, "chat_model", None)
+        model = model or (self.chat_model if self._local_chat else None)
         if model:
             config["model"] = _agents_sdk_model_name(model)
             if config["model"].startswith("litellm/"):
@@ -1235,23 +1602,48 @@ class PageIndexClient:
 
 
 class PageIndexCloudClient(PageIndexClient):
-    """Cloud mode — requires a real API key at construction."""
+    """Cloud mode — the class name says cloud, so the key may come from
+    the environment: ``PageIndexCloudClient()`` reads PAGEINDEX_API_KEY.
+    The shortest env-key cloud spelling."""
 
-    def __init__(self, api_key: str):
-        if not api_key:
-            raise PageIndexAPIError(
-                "PageIndexCloudClient requires a PageIndex API key — get one "
-                "at https://dash.pageindex.ai/api-keys."
-            )
-        super().__init__(api_key)
+    _pin = "cloud"
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        *,
+        index: Optional[Union[dict[str, Any], str]] = None,
+        chat: Optional[Union[dict[str, Any], str]] = None,
+        chat_model: Optional[str] = None,
+        retrieve_model: Optional[str] = None,
+        chat_backend: Optional[dict[str, Any]] = None,
+    ):
+        if index is None:
+            if api_key is None:
+                # .env keys arrive via utils' import-time load_dotenv().
+                from . import utils  # noqa: F401
+                api_key = os.environ.get("PAGEINDEX_API_KEY")
+            if not api_key:
+                raise PageIndexAPIError(
+                    "PageIndexCloudClient requires a PageIndex API key — "
+                    "pass api_key=..., or export PAGEINDEX_API_KEY. Get one "
+                    "at https://dash.pageindex.ai/api-keys."
+                )
+        super().__init__(api_key, index=index, chat=chat,
+                         chat_model=chat_model, retrieve_model=retrieve_model,
+                         chat_backend=chat_backend)
 
 
 class PageIndexLocalClient(PageIndexClient):
     """Local mode — no api_key parameter, no cloud access."""
 
+    _pin = "local"
+
     def __init__(
         self,
         *,
+        index: Optional[Union[dict[str, Any], str]] = None,
+        chat: Optional[Union[dict[str, Any], str]] = None,
         index_model: Optional[str] = None,
         chat_model: Optional[str] = None,
         model: Optional[str] = None,
@@ -1261,7 +1653,8 @@ class PageIndexLocalClient(PageIndexClient):
         index_backend: Optional[dict[str, Any]] = None,
         chat_backend: Optional[dict[str, Any]] = None,
     ):
-        super().__init__(None, index_model=index_model, chat_model=chat_model,
+        super().__init__(None, index=index, chat=chat,
+                         index_model=index_model, chat_model=chat_model,
                          model=model, summary_model=summary_model,
                          retrieve_model=retrieve_model, storage_path=storage_path,
                          index_backend=index_backend, chat_backend=chat_backend)

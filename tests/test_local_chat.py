@@ -14,8 +14,8 @@ except ImportError:  # older anthropic rides classic httpx
     anthropic_httpx = httpx
 
 import pageindex.local_chat as local_chat
-from pageindex import (PageIndexAPIError, PageIndexCloudClient,
-                       PageIndexLocalClient)
+from pageindex import (PageIndexAPIError, PageIndexClient,
+                       PageIndexCloudClient, PageIndexLocalClient)
 from pageindex.local_chat import CHAT_HEADER
 from pageindex.local_store import DocStore
 
@@ -242,7 +242,7 @@ def test_chat_completions_accepts_query_string(client, store_path, fake_model):
 @needs_agents
 def test_chat_completions_validation(client, store_path, fake_model):
     fake_model([[_msg_item("ok")]])
-    with pytest.raises(PageIndexAPIError, match="cloud-only"):
+    with pytest.raises(PageIndexAPIError, match="managed chat endpoint"):
         client.chat_completions([{"role": "user", "content": "x"}],
                                 enable_citations=True)
     with pytest.raises(PageIndexAPIError, match="responses\\(\\) or messages"):
@@ -284,32 +284,30 @@ def test_chat_completions_missing_framework(client, monkeypatch):
 
 def test_cloud_guards():
     cloud = PageIndexCloudClient(api_key="pi-test-key")
-    with pytest.raises(PageIndexAPIError, match="local-mode parameters"):
+    with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.chat_completions([{"role": "user", "content": "x"}], model="m")
-    with pytest.raises(PageIndexAPIError, match="local-mode"):
+    with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.chat_completions([{"role": "user", "content": "x"}],
                                reasoning_effort="low")
-    with pytest.raises(PageIndexAPIError, match="local-mode"):
+    with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.chat_completions([{"role": "user", "content": "x"}],
                                extra_body={"service_tier": "auto"})
-    with pytest.raises(PageIndexAPIError, match="local-mode"):
+    with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.chat_completions([{"role": "user", "content": "x"}], top_p=0.9)
-    with pytest.raises(PageIndexAPIError, match="local-mode"):
+    with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.chat_completions([{"role": "user", "content": "x"}],
                                max_tokens=256)
-    with pytest.raises(PageIndexAPIError, match="local-mode"):
+    with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.chat("x", reasoning_effort="low")
-    with pytest.raises(PageIndexAPIError, match="local-mode"):
+    with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.chat_completions([{"role": "user", "content": "x"}],
                                backend={"api_key": "k"})
-    with pytest.raises(PageIndexAPIError, match="local-mode"):
+    with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.chat_completions([{"role": "user", "content": "x"}],
                                extra_headers={"x-beta": "1"})
-    with pytest.raises(PageIndexAPIError, match="not available on PageIndex "
-                                                "cloud yet"):
+    with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.responses("x")
-    with pytest.raises(PageIndexAPIError, match="not available on PageIndex "
-                                                "cloud yet"):
+    with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.messages([{"role": "user", "content": "x"}], model="m",
                        max_tokens=10)
 
@@ -877,9 +875,17 @@ def test_max_turns_rejects_non_positive(client, store_path, fake_model):
 
 def test_enable_citations_rejected_before_framework_check(client, monkeypatch):
     monkeypatch.setitem(sys.modules, "agents", None)
-    with pytest.raises(PageIndexAPIError, match="cloud-only"):
+    with pytest.raises(PageIndexAPIError, match="managed chat endpoint"):
         client.chat_completions([{"role": "user", "content": "x"}],
                                 enable_citations=True)
+    # A cloud own-model client is told the real gate — managed vs own
+    # chat — never "cloud-only": it is on the cloud.
+    cloud = PageIndexClient(api_key="pi-k", chat_model="m")
+    with pytest.raises(PageIndexAPIError) as err:
+        cloud.chat_completions([{"role": "user", "content": "x"}],
+                               enable_citations=True)
+    assert "cloud-only" not in str(err.value)
+    assert "drop the chat model" in str(err.value)
 
 
 @needs_agents
@@ -2182,3 +2188,249 @@ def test_default_max_tokens_respects_output_ceilings():
                 {"type": "enabled", "budget_tokens": 10000}) == 18192
     assert lift("claude-sonnet-4-5",
                 {"type": "enabled", "budget_tokens": True}) == 8192
+
+
+# ── own-model chat over cloud documents (the bridge) ──
+
+
+class FakeBridge:
+    """Stands in for the cloud MCP bridge: one read tool, live
+    instructions, recorded calls."""
+
+    def __init__(self):
+        self.calls = []
+
+    def instructions(self):
+        return "CLOUD LIVE INSTRUCTIONS"
+
+    def list_tools(self):
+        return [{"name": "get_document",
+                 "description": "Cloud get_document",
+                 "inputSchema": {"type": "object", "properties": {
+                     "doc_name": {"type": "string"}}}}]
+
+    def call_tool(self, name, arguments):
+        self.calls.append((name, arguments))
+        return json.dumps({"status": "success",
+                           "data": {"doc": "cloud-doc"}}), False
+
+
+@pytest.fixture
+def bridge_client(monkeypatch):
+    import pageindex.agent_tools as agent_tools
+    from pageindex import PageIndexClient
+    bridge = FakeBridge()
+    monkeypatch.setattr(agent_tools, "_cloud_bridge",
+                        lambda client, gated=True: bridge)
+    client = PageIndexClient(api_key="pi-k", chat_model="fake-model")
+    return client, bridge
+
+
+@needs_agents
+def test_bridge_chat_runs_engine_over_cloud_tools(bridge_client, fake_model):
+    """A cloud client with its own chat model runs the in-process agent:
+    tools come from the live cloud MCP set, instructions from the MCP
+    server — not the local subset."""
+    client, bridge = bridge_client
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "r.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    result = client.chat_completions("What?")
+    assert result["choices"][0]["message"]["content"] == "The answer"
+    assert bridge.calls == [("get_document", {"doc_name": "r.pdf"})]
+    assert fake.instructions[0].startswith(CHAT_HEADER)
+    assert "CLOUD LIVE INSTRUCTIONS" in fake.instructions[0]
+    assert "READING WORKFLOW" not in fake.instructions[0]
+    # The tool result made it back into turn 2.
+    assert "cloud-doc" in json.dumps(fake.inputs[1])
+
+
+@needs_agents
+def test_bridge_doc_id_targets_at_prompt_level(bridge_client, fake_model,
+                                               monkeypatch):
+    """On cloud tools there is no local allowlist: doc_id becomes the
+    prompt-level targeting block only. (Had the tool layer received the
+    doc_ids, _require_local_scope would raise on a cloud client — this
+    call succeeding is the proof it did not.)"""
+    client, _ = bridge_client
+    monkeypatch.setattr(client, "get_document",
+                        lambda doc_id: {"name": "r.pdf", "description": "d",
+                                        "status": "completed",
+                                        "metadata": None})
+    monkeypatch.setattr(
+        client, "list_documents",
+        lambda **kw: {"documents": [{"id": "pi-a", "name": "r.pdf"}],
+                      "total": 1})
+    fake = fake_model([[_msg_item("ok")]])
+    client.chat_completions("q", doc_id="pi-a")
+    first = fake.inputs[0][0]
+    assert "specified document" in first["content"]
+    assert "r.pdf" in first["content"]
+
+
+def test_bridge_gate_and_citations(monkeypatch):
+    from pageindex import PageIndexClient
+    client = PageIndexClient(api_key="pi-k", chat_model="m")
+    with pytest.raises(PageIndexAPIError, match="drop the chat model"):
+        client.chat_completions("x", enable_citations=True)
+
+    called = {}
+
+    def fake_responses(client_arg, *args, **kwargs):
+        called["responses"] = client_arg
+        return {}
+
+    def fake_messages(client_arg, *args, **kwargs):
+        called["messages"] = client_arg
+        return {}
+
+    monkeypatch.setattr(local_chat, "run_responses", fake_responses)
+    monkeypatch.setattr(local_chat, "run_messages", fake_messages)
+    client.responses("q")
+    client.messages("q", model="mm")
+    assert called["responses"] is client and called["messages"] is client
+
+
+def test_bridge_auth_failure_error_teaches_architecture():
+    """The misreading ("the cloud runs my model") surfaces as a missing
+    provider key — that error is where the architecture gets spelled out,
+    and only there: local clients and non-auth failures stay untouched."""
+    from pageindex import PageIndexClient
+    bridge = PageIndexClient(api_key="pi-k", chat_model="m")
+    local = PageIndexLocalClient()
+    exc = Exception("The api_key client option must be set")
+    assert "your own provider credentials" in str(
+        local_chat._model_backend_error(exc, "chat", bridge))
+    assert "provider credentials" not in str(
+        local_chat._model_backend_error(exc, "chat", local))
+    assert "provider credentials" not in str(
+        local_chat._model_backend_error(Exception("boom"), "chat", bridge))
+    # 401-shaped failures carry no "api key" text on some providers
+    # (Anthropic says x-api-key): the status code is the signal.
+    denied = Exception("invalid x-api-key")
+    denied.status_code = 401
+    assert "your own provider credentials" in str(
+        local_chat._model_backend_error(denied, "messages", bridge))
+
+
+def test_bridge_auth_note_managed_exit_is_chat_lane_only():
+    """The managed-chat exit ("drop the chat model") is real only for
+    chat_completions(); responses() and messages() refuse a client
+    without an own model, so on those lanes the note keeps the
+    credentials advice and drops the exit that would send the caller in
+    a circle."""
+    from pageindex import PageIndexClient
+    bridge = PageIndexClient(api_key="pi-k", chat_model="m")
+    denied = Exception("invalid x-api-key")
+    denied.status_code = 401
+    chat = str(local_chat._model_backend_error(denied, "chat", bridge))
+    assert "drop the chat model" in chat
+    for lane in ("responses", "messages"):
+        text = str(local_chat._model_backend_error(denied, lane, bridge))
+        assert "your own provider credentials" in text
+        assert "drop the chat model" not in text
+
+
+@needs_anthropic
+def test_messages_auth_failure_teaches_architecture(bridge_client,
+                                                    monkeypatch):
+    """The auth note must reach the messages door too — both its paths
+    wrap provider failures through _model_backend_error."""
+    client, _ = bridge_client
+
+    def handler(request):
+        return anthropic_httpx.Response(
+            401, json={"type": "error",
+                       "error": {"type": "authentication_error",
+                                 "message": "invalid x-api-key"}})
+
+    def fresh_fake(backend=None):
+        # per call: run_messages closes a per-call transport it owns
+        return anthropic.Anthropic(
+            api_key="test",
+            http_client=anthropic_httpx.Client(
+                transport=anthropic_httpx.MockTransport(handler)))
+
+    monkeypatch.setattr(local_chat, "_anthropic_client", fresh_fake)
+    with pytest.raises(PageIndexAPIError, match="provider credentials"):
+        client.messages("q", model="claude-test", max_tokens=100)
+    with pytest.raises(PageIndexAPIError, match="provider credentials"):
+        list(client.messages("q", model="claude-test", max_tokens=100,
+                             stream=True))
+
+
+@needs_anthropic
+def test_messages_no_backend_leak_when_tool_build_fails(bridge_client,
+                                                        monkeypatch):
+    """build_anthropic_tools is network I/O on a bridge client — a
+    failure there must not strand an opened per-call transport."""
+    client, _ = bridge_client
+    made = []
+
+    class FakeAnthropic:
+        def __init__(self):
+            self.closed = False
+            self.beta = types.SimpleNamespace(messages=types.SimpleNamespace(
+                tool_runner=lambda **kw: iter(())))
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(local_chat, "_anthropic_client",
+                        lambda backend=None: made.append(FakeAnthropic())
+                        or made[-1])
+
+    def boom(client, doc_ids=None):
+        raise PageIndexAPIError("Could not reach the PageIndex MCP server")
+
+    monkeypatch.setattr(
+        "pageindex.integrations.anthropic_sdk.build_anthropic_tools", boom)
+    with pytest.raises(PageIndexAPIError, match="MCP server"):
+        client.messages("q", model="claude-test", max_tokens=100)
+    assert all(fake.closed for fake in made)
+
+
+@needs_agents
+def test_bridge_responses_lane_runs_cloud_tools(bridge_client, fake_model):
+    """The Responses door on a bridge client: same engine, cloud tools,
+    live instructions."""
+    client, bridge = bridge_client
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "r.pdf"})],
+        [_msg_item("Done")],
+    ])
+    result = client.responses("What?")
+    assert result["object"] == "response" and result["status"] == "completed"
+    assert "Done" in json.dumps(result["output"])
+    assert bridge.calls == [("get_document", {"doc_name": "r.pdf"})]
+    assert "CLOUD LIVE INSTRUCTIONS" in fake.instructions[0]
+    assert fake_model.state["protocols"][0][0] == "responses"
+
+
+@needs_anthropic
+def test_bridge_messages_lane_runs_cloud_tools(bridge_client, fake_anthropic):
+    """The Messages door on a bridge client: cloud MCP tools on the wire,
+    live instructions in the cached system prefix."""
+    client, bridge = bridge_client
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "The answer"}],
+                           "end_turn"),
+    ])
+    result = client.messages("What?", model="claude-test", max_tokens=64)
+    assert result["content"][0]["text"] == "The answer"
+    wire = calls[0]
+    assert wire["tools"][0]["name"] == "get_document"
+    system_text = json.dumps(wire["system"])
+    assert "CLOUD LIVE INSTRUCTIONS" in system_text
+    assert "READING WORKFLOW" not in system_text
+
+
+@needs_agents
+def test_bridge_openai_agent_config_carries_configured_model(bridge_client):
+    """A bridge client's openai_agent_config carries its chat_model —
+    same semantics as local; a plain cloud client still omits model."""
+    client, _ = bridge_client
+    config = client.openai_agent_config()
+    assert config["model"] == "fake-model"
+    assert "CLOUD LIVE INSTRUCTIONS" in config["instructions"]
