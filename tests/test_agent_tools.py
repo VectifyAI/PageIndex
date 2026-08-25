@@ -2653,6 +2653,7 @@ def test_cloud_tool_list_empty_raises(monkeypatch):
     """An empty tools/list must raise like empty instructions does: a
     zero-tool agent answers from the model's own knowledge instead of
     the documents, with nothing to signal it."""
+    pytest.importorskip("agents")
     import pageindex.mcp_bridge as mcp_bridge
 
     class _ToollessBridge:

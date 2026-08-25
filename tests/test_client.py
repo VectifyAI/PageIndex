@@ -1919,6 +1919,7 @@ def test_blank_chat_model_assignment_stays_managed():
 def test_blank_chat_model_carries_no_model_into_agent_config():
     """Same rule at the config door: a blank chat_model must not become
     a model literally named "   " in the returned config."""
+    pytest.importorskip("agents")
     client = PageIndexClient()
     client.chat_model = "   "
     assert "model" not in client.openai_agent_config()
