@@ -2,11 +2,13 @@
 import asyncio
 import importlib
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -302,11 +304,31 @@ def test_env_key_reads_load_dotenv():
     assert out.stdout.strip() == "ok"
 
 
+def test_env_key_found_from_cwd(tmp_path):
+    """A pip-installed SDK lives in site-packages; the user's .env lives
+    at their project root. A bare load_dotenv() searches upward from
+    utils.py, so it found a checkout's .env and never an installed
+    user's. A script file, not -c: dotenv treats a file-less __main__ as
+    interactive and searches from the cwd regardless."""
+    (tmp_path / ".env").write_text("PAGEINDEX_API_KEY=pi-dotenv-cwd\n")
+    (tmp_path / "app.py").write_text(
+        "from pageindex import PageIndexCloudClient\n"
+        "print('ok' if PageIndexCloudClient().api_key == 'pi-dotenv-cwd'\n"
+        "      else 'other')\n")
+    env = {**os.environ, "PYTHONPATH": str(Path(__file__).parent.parent)}
+    env.pop("PAGEINDEX_API_KEY", None)
+    out = subprocess.run([sys.executable, "app.py"], cwd=tmp_path, env=env,
+                         capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "ok"
+
+
 def test_empty_values_refused_never_silent():
     """An empty value configures nothing — pre-fix, an empty chat-side
     value on a cloud client silently selected own-model chat on the
     default model."""
-    for kwargs in ({"chat_model": ""}, {"retrieve_model": ""},
+    for kwargs in ({"chat_model": ""}, {"chat_model": " "},
+                   {"retrieve_model": ""},
                    {"chat_backend": {}}, {"model": ""},
                    {"index_model": ""}, {"index_backend": {}},
                    {"storage_path": ""}):
@@ -318,6 +340,8 @@ def test_empty_values_refused_never_silent():
                 PageIndexClient(api_key="pi-k", **kwargs)
     with pytest.raises(PageIndexAPIError, match="configures nothing"):
         PageIndexClient(api_key="pi-k", chat={"model": ""})
+    with pytest.raises(PageIndexAPIError, match="configures nothing"):
+        PageIndexClient(api_key="pi-k", chat={"model": " "})
     with pytest.raises(PageIndexAPIError, match="configures nothing"):
         PageIndexClient(chat={"backend": {}})
     # None-valued slot keys mean "absent", exactly like the flat args —

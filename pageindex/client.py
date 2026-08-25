@@ -413,7 +413,7 @@ class PageIndexClient:
                     raise PageIndexAPIError(
                         f"{name} must be a {_ARG_TYPES[name][0].__name__}, "
                         f"got {type(value).__name__}.")
-                if not value:
+                if not (value.strip() if isinstance(value, str) else value):
                     raise PageIndexAPIError(
                         f"{name} is empty — it configures nothing. Pass a "
                         "real value, or drop the argument.")
@@ -477,9 +477,7 @@ class PageIndexClient:
     @property
     def _local_chat(self) -> bool:
         # Derived, never stored: own-model chat is exactly "a chat model
-        # is configured" (None on a managed-chat client), so a
-        # post-construction ``client.chat_model = m`` switches the whole
-        # client, not half of it.
+        # is configured" (None on a managed-chat client).
         return getattr(self, "chat_model", None) is not None
 
     @property
