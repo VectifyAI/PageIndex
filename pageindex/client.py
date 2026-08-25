@@ -109,7 +109,7 @@ def _resolve_index_slot(index) -> "tuple[Optional[str], dict[str, Any]]":
                                   'index={"api_key": ...}'), {}
         if index.strip().lower() in _RESERVED_MODE_WORDS:
             raise PageIndexAPIError(
-                f'index="{index}" is not a mode word — a bare string here '
+                f'index="{index}" is a reserved word — a bare string here '
                 "is a local index model name. For cloud documents write "
                 '"pageindex-cloud", index={"mode": "cloud"} (key from '
                 'PAGEINDEX_API_KEY) or {"api_key": ...}; local is the '
@@ -178,7 +178,7 @@ def _resolve_chat_slot(chat) -> "tuple[Optional[str], dict[str, Any]]":
             return "managed", {}
         if chat.strip().lower() in _RESERVED_MODE_WORDS:
             raise PageIndexAPIError(
-                f'chat="{chat}" is not a mode word — a bare string here is '
+                f'chat="{chat}" is a reserved word — a bare string here is '
                 "your own model name (e.g. \"openai/gpt-5.2\"). For the "
                 'managed chat write "pageindex-cloud" or '
                 '{"mode": "cloud"}.')

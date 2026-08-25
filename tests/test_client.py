@@ -256,9 +256,9 @@ def test_slot_validation_errors(monkeypatch):
                                chat="PAGEINDEX-CLOUD")._local_chat
     # Bare mode words never parse as model names — no silent wrong mode.
     for word in ("cloud", "local", "Hosted", " cloud "):
-        with pytest.raises(PageIndexAPIError, match="not a mode word"):
+        with pytest.raises(PageIndexAPIError, match="reserved word"):
             PageIndexClient(index=word)
-        with pytest.raises(PageIndexAPIError, match="not a mode word"):
+        with pytest.raises(PageIndexAPIError, match="reserved word"):
             PageIndexClient(chat=word)
 
 
