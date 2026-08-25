@@ -60,9 +60,9 @@ def _agents_sdk_model_name(model: str) -> str:
 
 _LOCAL_INDEX_KEYS = ("model", "summary_model", "backend", "storage_path")
 
-# Bare mode words would otherwise parse as model names — a silent wrong
-# mode. Reserved: they error with the real spellings instead.
-_RESERVED_MODE_WORDS = {"cloud", "local", "hosted", "managed"}
+# Near-synonyms of "cloud" that would otherwise parse as model names —
+# a silent wrong mode. They error, pointing at the real word.
+_RESERVED_MODE_WORDS = {"hosted", "managed"}
 
 
 def _env_cloud_key(spelling: str, inline: str = "api_key=...") -> str:
@@ -89,36 +89,43 @@ _ARG_TYPES: "dict[str, tuple[type, ...]]" = {
 
 
 def _declared_mode(value, side: str):
+    if isinstance(value, str):
+        value = value.strip().lower()
     if value not in (None, "cloud", "local"):
         raise PageIndexAPIError(
             f'{side} "mode" must be "cloud" or "local", not {value!r}.')
     return value
 
 
-def _resolve_index_slot(index) -> "tuple[Optional[str], dict[str, Any]]":
+_CloudKey = Union[str, Callable[[], str], None]
+
+
+def _resolve_index_slot(index) -> "tuple[_CloudKey, dict[str, Any]]":
     """The ``index=`` slot as (cloud api_key, local overrides). A dict
     declares its side by its keys; an optional "mode" states it and must
-    agree. Keyless cloud spellings ("pageindex-cloud", {"mode": "cloud"})
-    read the key from the environment."""
+    agree. Keyless cloud spellings ("cloud" / "pageindex-cloud",
+    {"mode": "cloud"}) return the environment read as a thunk, so the
+    caller's mode cross-check runs before the environment is touched."""
     from .types import PAGEINDEX_CLOUD
     if isinstance(index, str):
-        # Normalized compare: a case/whitespace variant of the label must
-        # never fall through and silently become a model name.
-        if index.strip().lower() == PAGEINDEX_CLOUD:
-            return _env_cloud_key('index="pageindex-cloud"',
-                                  'index={"api_key": ...}'), {}
-        if index.strip().lower() in _RESERVED_MODE_WORDS:
+        # Normalized compare: a case/whitespace variant of a mode word
+        # must never fall through and silently become a model name.
+        word = index.strip().lower()
+        if word in (PAGEINDEX_CLOUD, "cloud"):
+            return lambda: _env_cloud_key(f'index="{index.strip()}"',
+                                          'index={"api_key": ...}'), {}
+        if word == "local":
+            return None, {}
+        if word in _RESERVED_MODE_WORDS:
             raise PageIndexAPIError(
-                f'index="{index}" is a reserved word — a bare string here '
-                "is a local index model name. For cloud documents write "
-                '"pageindex-cloud", index={"mode": "cloud"} (key from '
-                'PAGEINDEX_API_KEY) or {"api_key": ...}; local is the '
-                "default.")
+                f'index="{index}" is not a mode word — the cloud spelling '
+                'is index="cloud" (key from PAGEINDEX_API_KEY) or '
+                'index={"api_key": ...}.')
         if index.strip():
-            return None, {"index_model": index.strip()}
+            return None, {"index_model": index}
         raise PageIndexAPIError(
             "index is an empty string — pass a local index model name, "
-            'or "pageindex-cloud".')
+            'or "cloud".')
     if isinstance(index, dict):
         # None-valued keys mean "absent", exactly like the flat arguments.
         conf = {name: value for name, value in index.items()
@@ -126,8 +133,8 @@ def _resolve_index_slot(index) -> "tuple[Optional[str], dict[str, Any]]":
         declared = _declared_mode(conf.pop("mode", None), "index")
         if not conf:
             if declared == "cloud":
-                return _env_cloud_key('index={"mode": "cloud"}',
-                                      'index={"api_key": ...}'), {}
+                return lambda: _env_cloud_key('index={"mode": "cloud"}',
+                                              'index={"api_key": ...}'), {}
             if declared == "local":
                 return None, {}
             raise PageIndexAPIError(
@@ -174,19 +181,20 @@ def _resolve_chat_slot(chat) -> "tuple[Optional[str], dict[str, Any]]":
     "managed", "own", or None (nothing declared beyond the overrides)."""
     from .types import PAGEINDEX_CLOUD
     if isinstance(chat, str):
-        if chat.strip().lower() == PAGEINDEX_CLOUD:
+        word = chat.strip().lower()
+        if word in (PAGEINDEX_CLOUD, "cloud"):
             return "managed", {}
-        if chat.strip().lower() in _RESERVED_MODE_WORDS:
+        if word == "local":
+            return "own", {}
+        if word in _RESERVED_MODE_WORDS:
             raise PageIndexAPIError(
-                f'chat="{chat}" is a reserved word — a bare string here is '
-                "your own model name (e.g. \"openai/gpt-5.2\"). For the "
-                'managed chat write "pageindex-cloud" or '
-                '{"mode": "cloud"}.')
+                f'chat="{chat}" is not a mode word — the managed chat is '
+                'chat="cloud".')
         if chat.strip():
-            return "own", {"chat_model": chat.strip()}
+            return "own", {"chat_model": chat}
         raise PageIndexAPIError(
             "chat is an empty string — pass a model name, or "
-            '"pageindex-cloud" for the managed chat.')
+            '"cloud" for the managed chat.')
     if isinstance(chat, dict):
         # None-valued keys mean "absent", exactly like the flat arguments.
         conf = {name: value for name, value in chat.items()
@@ -198,8 +206,7 @@ def _resolve_chat_slot(chat) -> "tuple[Optional[str], dict[str, Any]]":
                 ("chat is an empty dict" if not conf else
                  f"Unknown chat keys ({', '.join(sorted(unknown))})")
                 + ' — chat takes "model" and "backend" (your own model), '
-                'or {"mode": "cloud"} / "pageindex-cloud" for the managed '
-                "chat.")
+                'or {"mode": "cloud"} / "cloud" for the managed chat.')
         if declared == "cloud":
             if conf:
                 raise PageIndexAPIError(
@@ -244,27 +251,28 @@ class PageIndexClient:
 
     ``index=`` / ``chat=`` are the grouped spelling of the same flat
     arguments — a string as shorthand, a dict for the full config; each
-    side picks one spelling per client. ``index="pageindex-cloud"`` is
-    the keyless cloud spelling (the key comes from the
-    ``PAGEINDEX_API_KEY`` environment variable — which is read only when
-    the code explicitly says cloud; a bare ``PageIndexClient()`` stays
-    local regardless of the environment).
+    side picks one spelling per client. ``index="cloud"`` (or the label
+    ``"pageindex-cloud"``) is the keyless cloud spelling (the key comes
+    from the ``PAGEINDEX_API_KEY`` environment variable — which is read
+    only when the code explicitly says cloud; a bare ``PageIndexClient()``
+    stays local regardless of the environment).
 
     Args:
         api_key (str, optional): PageIndex cloud API key
             (https://dash.pageindex.ai/api-keys). Omit for local mode.
         index (str | dict, optional): The index side, grouped —
-            ``"pageindex-cloud"`` (cloud, key from the environment), a
-            local index model name, or a dict: ``{"api_key": ...}`` for
-            cloud, ``{"model", "summary_model", "backend",
-            "storage_path"}`` for local. An optional ``"mode"`` key
-            (``"cloud"`` / ``"local"``) states the side and must agree
-            with the other keys; ``{"mode": "cloud"}`` alone reads the
-            key from the environment. Not combinable with this side's
-            flat arguments.
+            ``"cloud"`` / ``"pageindex-cloud"`` (cloud, key from the
+            environment), ``"local"``, a local index model name, or a
+            dict: ``{"api_key": ...}`` for cloud, ``{"model",
+            "summary_model", "backend", "storage_path"}`` for local. An
+            optional ``"mode"`` key (``"cloud"`` / ``"local"``) states
+            the side and must agree with the other keys; ``{"mode":
+            "cloud"}`` alone reads the key from the environment. Not
+            combinable with this side's flat arguments.
         chat (str | dict, optional): The chat side, grouped — a model
-            name (your own model), ``"pageindex-cloud"`` (managed chat,
-            cloud clients only), or ``{"model", "backend"}``. An
+            name (your own model), ``"cloud"`` / ``"pageindex-cloud"``
+            (managed chat, cloud clients only), ``"local"`` (your own
+            model, the default one), or ``{"model", "backend"}``. An
             optional ``"mode"`` key states the side: ``{"mode":
             "cloud"}`` alone is the managed chat, ``"local"`` is your
             own model and must agree with the other keys. Not
@@ -324,6 +332,8 @@ class PageIndexClient:
 
     BASE_URL = "https://api.pageindex.ai"
 
+    _pin: Optional[str] = None  # the pinned subclasses' index side
+
     def __init__(
         self,
         api_key: Optional[str] = None,
@@ -364,8 +374,9 @@ class PageIndexClient:
         if model is not None and (index is not None or chat is not None):
             raise PageIndexAPIError(
                 "model= sets both roles at once, so no slot can absorb "
-                "it — split it into index_model= and chat_model= to "
-                "combine with index=/chat=.")
+                'it — name the model inside the slot ({"model": ...}) '
+                "and use index_model= / chat_model= for a side written "
+                "flat.")
         if index is not None and index_flat:
             raise PageIndexAPIError(
                 "index= and the flat index-side arguments "
@@ -377,18 +388,30 @@ class PageIndexClient:
                 f"({', '.join(sorted(chat_flat))}) are two spellings of "
                 "the same thing — use one or the other.")
         # ``mode=`` is a cross-check, not a spelling: it combines with
-        # either spelling of the index side and must agree with it.
-        declared = _declared_mode(mode, "client")
+        # either spelling of the index side and must agree with it. The
+        # pinned classes declare the side by class; their errors name the
+        # class, never a mode= the user did not write.
+        declared = _declared_mode(mode, "client") or self._pin
+        pinned = type(self).__name__ if self._pin else None
         if index is not None:
             cloud_key, index_conf = _resolve_index_slot(index)
             if declared == "local" and cloud_key is not None:
                 raise PageIndexAPIError(
+                    f"{pinned} pins local documents — that index= selects "
+                    "cloud documents. Drop it, or use PageIndexCloudClient."
+                    if pinned else
                     'mode="local" disagrees with index= — that index '
                     "selects cloud documents. Drop one of them.")
             if declared == "cloud" and cloud_key is None:
                 raise PageIndexAPIError(
+                    f"{pinned} pins cloud documents — that index= "
+                    "configures the local store. Drop it, or use "
+                    "PageIndexLocalClient."
+                    if pinned else
                     'mode="cloud" disagrees with index= — that index '
                     "configures the local store. Drop one of them.")
+            if callable(cloud_key):
+                cloud_key = cloud_key()
         else:
             cloud_key = api_key
             if declared == "local" and api_key is not None:
@@ -404,18 +427,24 @@ class PageIndexClient:
         else:
             chat_mode = "own" if chat_flat else None
             chat_conf = chat_flat
-        # Every spelling lands here: wrong types and empty values refuse
-        # loudly — an empty chat-side value must never silently select
-        # own-model chat.
-        for conf in (index_conf, chat_conf):
+        # Every spelling lands here: strings are stripped, wrong types and
+        # empty values refuse loudly — an empty chat-side value must never
+        # silently select own-model chat.
+        for side, slot, conf in (("index", index, index_conf),
+                                 ("chat", chat, chat_conf)):
             for name, value in conf.items():
+                # Slot keys are the flat names with the side prefix off.
+                shown = (f'{side}["{name.removeprefix(side + "_")}"]'
+                         if slot is not None else name)
                 if not isinstance(value, _ARG_TYPES[name]):
                     raise PageIndexAPIError(
-                        f"{name} must be a {_ARG_TYPES[name][0].__name__}, "
+                        f"{shown} must be a {_ARG_TYPES[name][0].__name__}, "
                         f"got {type(value).__name__}.")
-                if not (value.strip() if isinstance(value, str) else value):
+                if isinstance(value, str):
+                    value = conf[name] = value.strip()
+                if not value:
                     raise PageIndexAPIError(
-                        f"{name} is empty — it configures nothing. Pass a "
+                        f"{shown} is empty — it configures nothing. Pass a "
                         "real value, or drop the argument.")
 
         if cloud_key is not None:
@@ -445,11 +474,18 @@ class PageIndexClient:
                 self.chat_backend = None
         else:
             if chat_mode == "managed":
+                if pinned:
+                    exits = (f"{pinned} pins local documents: use "
+                             "PageIndexCloudClient (or PageIndexClient("
+                             "api_key=...))")
+                else:
+                    exits = ('Go cloud (api_key=... or index="cloud")'
+                             + (' and drop mode="local"' if mode is not None
+                                else ""))
                 raise PageIndexAPIError(
                     "The managed chat needs cloud documents — it cannot "
-                    "read the local store. Go cloud (api_key=... or "
-                    'index="pageindex-cloud"), or set your own chat model '
-                    "instead.")
+                    f"read the local store. {exits}, or set your own chat "
+                    "model instead.")
             from .utils import ConfigLoader
             overrides = {name: value for name, value in
                          {**index_conf, **chat_conf}.items()
@@ -477,8 +513,12 @@ class PageIndexClient:
     @property
     def _local_chat(self) -> bool:
         # Derived, never stored: own-model chat is exactly "a chat model
-        # is configured" (None on a managed-chat client).
-        return getattr(self, "chat_model", None) is not None
+        # is configured" (None on a managed-chat client). Blank configures
+        # nothing — the constructor refuses it, and assignment must agree.
+        model = getattr(self, "chat_model", None)
+        if isinstance(model, str):
+            return bool(model.strip())
+        return model is not None
 
     @property
     def retrieve_model(self):
@@ -1273,7 +1313,7 @@ class PageIndexClient:
                 include_management=include_management),
             "tools": self.as_openai_tools(include_management, doc_id=scope),
         }
-        model = model or getattr(self, "chat_model", None)
+        model = model or (self.chat_model if self._local_chat else None)
         if model:
             config["model"] = _agents_sdk_model_name(model)
             if config["model"].startswith("litellm/"):
@@ -1566,36 +1606,44 @@ class PageIndexCloudClient(PageIndexClient):
     the environment: ``PageIndexCloudClient()`` reads PAGEINDEX_API_KEY.
     The shortest env-key cloud spelling."""
 
+    _pin = "cloud"
+
     def __init__(
         self,
         api_key: Optional[str] = None,
         *,
+        index: Optional[Union[dict[str, Any], str]] = None,
         chat: Optional[Union[dict[str, Any], str]] = None,
         chat_model: Optional[str] = None,
         retrieve_model: Optional[str] = None,
         chat_backend: Optional[dict[str, Any]] = None,
     ):
-        if api_key is None:
-            # .env keys arrive via utils' import-time load_dotenv().
-            from . import utils  # noqa: F401
-            api_key = os.environ.get("PAGEINDEX_API_KEY")
-        if not api_key:
-            raise PageIndexAPIError(
-                "PageIndexCloudClient requires a PageIndex API key — pass "
-                "api_key=..., or export PAGEINDEX_API_KEY. Get one at "
-                "https://dash.pageindex.ai/api-keys."
-            )
-        super().__init__(api_key, chat=chat, chat_model=chat_model,
-                         retrieve_model=retrieve_model,
+        if index is None:
+            if api_key is None:
+                # .env keys arrive via utils' import-time load_dotenv().
+                from . import utils  # noqa: F401
+                api_key = os.environ.get("PAGEINDEX_API_KEY")
+            if not api_key:
+                raise PageIndexAPIError(
+                    "PageIndexCloudClient requires a PageIndex API key — "
+                    "pass api_key=..., or export PAGEINDEX_API_KEY. Get one "
+                    "at https://dash.pageindex.ai/api-keys."
+                )
+        super().__init__(api_key, index=index, chat=chat,
+                         chat_model=chat_model, retrieve_model=retrieve_model,
                          chat_backend=chat_backend)
 
 
 class PageIndexLocalClient(PageIndexClient):
     """Local mode — no api_key parameter, no cloud access."""
 
+    _pin = "local"
+
     def __init__(
         self,
         *,
+        index: Optional[Union[dict[str, Any], str]] = None,
+        chat: Optional[Union[dict[str, Any], str]] = None,
         index_model: Optional[str] = None,
         chat_model: Optional[str] = None,
         model: Optional[str] = None,
@@ -1605,7 +1653,8 @@ class PageIndexLocalClient(PageIndexClient):
         index_backend: Optional[dict[str, Any]] = None,
         chat_backend: Optional[dict[str, Any]] = None,
     ):
-        super().__init__(None, index_model=index_model, chat_model=chat_model,
+        super().__init__(None, index=index, chat=chat,
+                         index_model=index_model, chat_model=chat_model,
                          model=model, summary_model=summary_model,
                          retrieve_model=retrieve_model, storage_path=storage_path,
                          index_backend=index_backend, chat_backend=chat_backend)

@@ -7,7 +7,7 @@ A dict declares its
 side by its keys (cloud takes a key, local takes models); an optional
 ``"mode"`` field states the side explicitly and must agree with the
 other keys. The ``"pageindex-cloud"`` string is the label spelling for
-"this side is managed", used when the API key lives in the environment.
+"this side is managed" — a synonym of ``"cloud"``.
 """
 from __future__ import annotations
 

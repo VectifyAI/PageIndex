@@ -594,11 +594,11 @@ def run_chat_completions(client, messages, stream: bool = False,
                          ) -> Union[dict, Iterator[str], Iterator[dict]]:
     if enable_citations:
         raise PageIndexAPIError(
-            "enable_citations is cloud-only — it needs the managed chat "
-            + ("endpoint: drop the chat model configuration to use it."
+            "enable_citations needs the managed chat endpoint — "
+            + ("drop the chat model configuration to use it."
                if getattr(client, "api_key", None) else
-               "endpoint; local mode does not store the block-level OCR "
-               "data citations need."))
+               "local mode does not store the block-level OCR data "
+               "citations need."))
     _require_openai_agents("chat_completions")
     _validate_max_turns(max_turns)
     system_texts, history = _split_chat_messages(messages)

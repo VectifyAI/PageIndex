@@ -1508,6 +1508,12 @@ def _tool_specs(client, include_management: bool = False, doc_ids=None,
     if getattr(client, "api_key", None):
         bridge = _cloud_bridge(client, gated=not include_management)
         tools_meta = bridge.list_tools()
+        if not tools_meta:
+            raise PageIndexAPIError(
+                "The MCP server returned no tools — a zero-tool agent would "
+                "answer from the model's own knowledge, not the documents, "
+                "with nothing to signal it."
+            )
         return [(str(meta.get("name") or "tool"),
                  meta.get("description") or "",
                  copy.deepcopy(meta.get("inputSchema"))

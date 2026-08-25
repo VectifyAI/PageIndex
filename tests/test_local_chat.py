@@ -14,8 +14,8 @@ except ImportError:  # older anthropic rides classic httpx
     anthropic_httpx = httpx
 
 import pageindex.local_chat as local_chat
-from pageindex import (PageIndexAPIError, PageIndexCloudClient,
-                       PageIndexLocalClient)
+from pageindex import (PageIndexAPIError, PageIndexClient,
+                       PageIndexCloudClient, PageIndexLocalClient)
 from pageindex.local_chat import CHAT_HEADER
 from pageindex.local_store import DocStore
 
@@ -242,7 +242,7 @@ def test_chat_completions_accepts_query_string(client, store_path, fake_model):
 @needs_agents
 def test_chat_completions_validation(client, store_path, fake_model):
     fake_model([[_msg_item("ok")]])
-    with pytest.raises(PageIndexAPIError, match="cloud-only"):
+    with pytest.raises(PageIndexAPIError, match="managed chat endpoint"):
         client.chat_completions([{"role": "user", "content": "x"}],
                                 enable_citations=True)
     with pytest.raises(PageIndexAPIError, match="responses\\(\\) or messages"):
@@ -875,9 +875,17 @@ def test_max_turns_rejects_non_positive(client, store_path, fake_model):
 
 def test_enable_citations_rejected_before_framework_check(client, monkeypatch):
     monkeypatch.setitem(sys.modules, "agents", None)
-    with pytest.raises(PageIndexAPIError, match="cloud-only"):
+    with pytest.raises(PageIndexAPIError, match="managed chat endpoint"):
         client.chat_completions([{"role": "user", "content": "x"}],
                                 enable_citations=True)
+    # A cloud own-model client is told the real gate — managed vs own
+    # chat — never "cloud-only": it is on the cloud.
+    cloud = PageIndexClient(api_key="pi-k", chat_model="m")
+    with pytest.raises(PageIndexAPIError) as err:
+        cloud.chat_completions([{"role": "user", "content": "x"}],
+                               enable_citations=True)
+    assert "cloud-only" not in str(err.value)
+    assert "drop the chat model" in str(err.value)
 
 
 @needs_agents

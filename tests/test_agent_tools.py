@@ -2647,3 +2647,22 @@ def test_agent_tools_doc_id_refused_on_cloud():
     cloud = PageIndexCloudClient(api_key="pi-test-key")
     with pytest.raises(PageIndexAPIError, match="local tools only"):
         cloud.agent_tools(doc_id="pi-a")
+
+
+def test_cloud_tool_list_empty_raises(monkeypatch):
+    """An empty tools/list must raise like empty instructions does: a
+    zero-tool agent answers from the model's own knowledge instead of
+    the documents, with nothing to signal it."""
+    import pageindex.mcp_bridge as mcp_bridge
+
+    class _ToollessBridge:
+        def __init__(self, url, headers):
+            pass
+
+        def list_tools(self):
+            return []
+
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _ToollessBridge)
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    with pytest.raises(PageIndexAPIError, match="no tools"):
+        cloud.as_openai_tools()

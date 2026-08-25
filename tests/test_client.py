@@ -153,12 +153,80 @@ def test_bridge_cloud_docs_own_model():
     from pageindex import PageIndexCloudClient, PageIndexLocalClient
     assert not PageIndexCloudClient("k")._local_chat
     assert PageIndexLocalClient()._local_chat
-    # The cloud pinned class pins only the index side: the chat side
-    # stays free, same vocabulary as PageIndexClient.
+    # The pinned classes pin only the index side: the chat side stays
+    # free, same vocabulary as PageIndexClient.
     pinned = PageIndexCloudClient("k", chat_model="openai/m")
     assert pinned._local_chat and pinned.chat_model == "openai/m"
     assert PageIndexCloudClient("k", chat={"model": "m"}).chat_model == "m"
+    assert PageIndexLocalClient(chat={"model": "m"}).chat_model == "m"
     assert not PageIndexCloudClient("k", chat="pageindex-cloud")._local_chat
+
+
+def test_local_pinned_class_takes_index_slot(tmp_path, monkeypatch):
+    """The local pinned class takes the grouped spelling of the index
+    vocabulary it already takes flat; a cloud index= is refused in the
+    class's name, never a cloud client."""
+    from pageindex import PageIndexLocalClient
+    client = PageIndexLocalClient(
+        index={"model": "i", "storage_path": str(tmp_path / "a")})
+    assert client.index_model == "i"
+    assert client.storage_path == str(tmp_path / "a")
+    assert PageIndexLocalClient(index="i").index_model == "i"
+    # The mode= disagreement fires before any environment read.
+    monkeypatch.setattr("pageindex.client._env_cloud_key", lambda *a: (
+        pytest.fail("environment read before the mode cross-check")))
+    for cloud in ("cloud", "pageindex-cloud", {"api_key": "k"},
+                  {"mode": "cloud"}):
+        with pytest.raises(PageIndexAPIError,
+                           match="PageIndexLocalClient pins local documents"):
+            PageIndexLocalClient(index=cloud)
+
+
+def test_cloud_pinned_class_takes_index_slot(monkeypatch):
+    """The cloud pinned class takes index= for the key; a local index= is
+    refused in the class's name, never a local client."""
+    from pageindex import PageIndexCloudClient
+    assert PageIndexCloudClient(index={"api_key": "k"}).api_key == "k"
+    monkeypatch.setenv("PAGEINDEX_API_KEY", "pi-env")
+    assert PageIndexCloudClient(index="cloud").api_key == "pi-env"
+    for local in ("local", "i-model", {"model": "m"}, {"storage_path": "/x"}):
+        with pytest.raises(PageIndexAPIError,
+                           match="PageIndexCloudClient pins cloud documents"):
+            PageIndexCloudClient(index=local)
+    with pytest.raises(PageIndexAPIError, match="two spellings"):
+        PageIndexCloudClient("k", index={"api_key": "k"})
+    monkeypatch.delenv("PAGEINDEX_API_KEY")
+    with pytest.raises(PageIndexAPIError, match='index="cloud" reads'):
+        PageIndexCloudClient(index="cloud")
+
+
+def test_pinned_class_errors_name_a_reachable_exit():
+    """The pinned classes have no mode= (and Local no api_key=): their
+    refusals name the class and an exit that class can take, never a
+    remedy that only PageIndexClient accepts. An explicit mode="local"
+    is named the same way — the exit has to drop it."""
+    from pageindex import PageIndexCloudClient, PageIndexLocalClient
+    with pytest.raises(PageIndexAPIError) as err:
+        PageIndexLocalClient(chat="cloud")
+    message = str(err.value)
+    assert "PageIndexLocalClient pins local documents" in message
+    assert 'index="cloud"' not in message and "mode=" not in message
+    # The exits it names construct.
+    assert not PageIndexCloudClient("k", chat="cloud")._local_chat
+    assert not PageIndexClient(api_key="k", chat="cloud")._local_chat
+    assert PageIndexLocalClient(chat="m")._local_chat
+    with pytest.raises(PageIndexAPIError, match='and drop mode="local"'):
+        PageIndexClient(mode="local", chat="cloud")
+    with pytest.raises(PageIndexAPIError) as err:
+        PageIndexClient(chat="cloud")
+    assert "mode=" not in str(err.value)
+
+
+def test_mode_words_normalize_like_the_label(monkeypatch):
+    monkeypatch.setenv("PAGEINDEX_API_KEY", "pi-env")
+    assert PageIndexClient(mode=" Cloud ").api_key == "pi-env"
+    assert not hasattr(PageIndexClient(index={"mode": "LOCAL"}), "api_key")
+    assert not PageIndexClient(api_key="k", chat={"mode": "Cloud"})._local_chat
 
 
 def test_cloud_index_args_still_rejected():
@@ -256,11 +324,16 @@ def test_slot_validation_errors(monkeypatch):
     assert PageIndexClient(index=" Pageindex-Cloud ").api_key == "pi-env"
     assert not PageIndexClient(index={"api_key": "k"},
                                chat="PAGEINDEX-CLOUD")._local_chat
-    # Bare mode words never parse as model names — no silent wrong mode.
-    for word in ("cloud", "local", "Hosted", " cloud "):
-        with pytest.raises(PageIndexAPIError, match="reserved word"):
+    # Bare mode words are the label's short form; near-synonyms point at
+    # the real word instead of parsing as model names.
+    assert PageIndexClient(index=" Cloud ").api_key == "pi-env"
+    assert not hasattr(PageIndexClient(index="local"), "api_key")
+    assert not PageIndexClient(api_key="k", chat="cloud")._local_chat
+    assert PageIndexClient(api_key="k", chat="local")._local_chat
+    for word in ("Hosted", " managed "):
+        with pytest.raises(PageIndexAPIError, match="not a mode word"):
             PageIndexClient(index=word)
-        with pytest.raises(PageIndexAPIError, match="reserved word"):
+        with pytest.raises(PageIndexAPIError, match="not a mode word"):
             PageIndexClient(chat=word)
 
 
@@ -352,15 +425,23 @@ def test_empty_values_refused_never_silent():
         PageIndexClient(index={"model": None})
 
 
-def test_model_umbrella_names_split_for_slots():
+def test_model_umbrella_names_split_for_slots(tmp_path):
     """model= sets both roles, so no slot can absorb it — the error
-    teaches the split instead of calling disjoint things one spelling."""
+    teaches a rewrite that works: the model inside the slot, the flat
+    role name for the other side."""
     for kwargs in ({"model": "m", "chat": {"backend": {"base_url": "u"}}},
                    {"model": "m", "index": {"storage_path": "/x"}},
                    {"model": "m", "chat": "c"}):
         with pytest.raises(PageIndexAPIError,
-                           match="split it into index_model= and chat_model="):
+                           match="name the model inside the slot"):
             PageIndexClient(**kwargs)
+    # Following the remedy constructs a working client.
+    client = PageIndexClient(
+        index={"model": "m", "storage_path": str(tmp_path)}, chat_model="m")
+    assert client.index_model == client.chat_model == "m"
+    client = PageIndexClient(
+        index_model="m", chat={"model": "m", "backend": {"base_url": "u"}})
+    assert client.index_model == client.chat_model == "m"
 
 
 def test_post_construction_chat_model_switches_whole_client():
@@ -393,9 +474,9 @@ def test_keyless_cloud_hint_matches_the_spelling(monkeypatch):
 
 def test_argument_type_errors_are_pageindex_errors():
     for kwargs, msg in (({"index": {"storage_path": 5}},
-                         "storage_path must be a str"),
+                         r'index\["storage_path"\] must be a str'),
                         ({"chat": {"backend": "x"}},
-                         "chat_backend must be a dict"),
+                         r'chat\["backend"\] must be a dict'),
                         ({"chat_backend": "x"}, "chat_backend must be a dict"),
                         ({"chat_model": 5}, "chat_model must be a str"),
                         ({"index_backend": ["x"]},
@@ -404,9 +485,14 @@ def test_argument_type_errors_are_pageindex_errors():
             PageIndexClient(**kwargs)
 
 
-def test_slot_strings_are_stripped():
-    assert PageIndexClient(chat=" openai/m ").chat_model == "openai/m"
-    assert PageIndexClient(index=" i-model ").index_model == "i-model"
+def test_strings_are_stripped_in_every_spelling():
+    for client in (PageIndexClient(index=" i-model ", chat=" openai/m "),
+                   PageIndexClient(index={"model": " i-model "},
+                                   chat={"model": " openai/m "}),
+                   PageIndexClient(index_model=" i-model ",
+                                   chat_model=" openai/m ")):
+        assert client.index_model == "i-model"
+        assert client.chat_model == "openai/m"
 
 
 def test_managed_chat_client_reads_none_not_attribute_error():
@@ -1816,3 +1902,23 @@ def test_mode_declaration_in_chat_dict():
         PageIndexClient(chat={"mode": "cloud"})
     with pytest.raises(PageIndexAPIError, match=r"Unknown chat keys \(type\)"):
         PageIndexClient(api_key="pi-k", chat={"type": "cloud"})
+
+
+def test_blank_chat_model_assignment_stays_managed():
+    """The constructor refuses chat_model="" as configuring nothing, so
+    the assignment path must agree — cfg.get("chat_model", "") otherwise
+    opens the bridge and hands LiteLLM a nameless model."""
+    client = PageIndexClient(api_key="pi-k")
+    for blank in ("", "   "):
+        client.chat_model = blank
+        assert not client._local_chat, repr(blank)
+    client.retrieve_model = ""
+    assert not client._local_chat
+
+
+def test_blank_chat_model_carries_no_model_into_agent_config():
+    """Same rule at the config door: a blank chat_model must not become
+    a model literally named "   " in the returned config."""
+    client = PageIndexClient()
+    client.chat_model = "   "
+    assert "model" not in client.openai_agent_config()
