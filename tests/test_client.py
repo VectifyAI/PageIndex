@@ -287,8 +287,8 @@ def test_env_key_reads_load_dotenv():
         "import pageindex",
         "from pageindex import PageIndexClient, PageIndexCloudClient",
         "for build in (lambda: PageIndexClient(index='pageindex-cloud'),",
-        "              lambda: PageIndexClient(type='cloud'),",
-        "              lambda: PageIndexClient(index={'type': 'cloud'}),",
+        "              lambda: PageIndexClient(mode='cloud'),",
+        "              lambda: PageIndexClient(index={'mode': 'cloud'}),",
         "              lambda: PageIndexCloudClient()):",
         "    sys.modules.pop('pageindex.utils', None)",
         "    pageindex.__dict__.pop('utils', None)",
@@ -359,12 +359,12 @@ def test_keyless_cloud_hint_matches_the_spelling(monkeypatch):
         PageIndexClient(index="pageindex-cloud")
     assert 'index={"api_key": ...}' in str(err.value)
     with pytest.raises(PageIndexAPIError) as err:
-        PageIndexClient(index={"type": "cloud"})
+        PageIndexClient(index={"mode": "cloud"})
     assert 'index={"api_key": ...}' in str(err.value)
     with pytest.raises(PageIndexAPIError) as err:
-        PageIndexClient(type="cloud")
+        PageIndexClient(mode="cloud")
     assert "(api_key=...)" in str(err.value)
-    assert PageIndexClient(type="cloud", api_key="pi-k").api_key == "pi-k"
+    assert PageIndexClient(mode="cloud", api_key="pi-k").api_key == "pi-k"
 
 
 def test_argument_type_errors_are_pageindex_errors():
@@ -1722,68 +1722,73 @@ def test_expand_queries_nodes_concurrently(monkeypatch):
     assert inflight["peak"] <= 32
 
 
-def test_type_declaration_top_level(monkeypatch):
-    """type= states where documents live; always optional, always
-    checked, and type="cloud" alone reads the env key."""
+def test_mode_declaration_top_level(monkeypatch):
+    """mode= states where documents live; always optional, always
+    checked, and mode="cloud" alone reads the env key."""
     monkeypatch.setenv("PAGEINDEX_API_KEY", "pi-env")
-    assert PageIndexClient(type="cloud").api_key == "pi-env"
-    assert not PageIndexClient(type="cloud")._local_chat
-    bridge = PageIndexClient(type="cloud", chat_model="openai/m")
+    assert PageIndexClient(mode="cloud").api_key == "pi-env"
+    assert not PageIndexClient(mode="cloud")._local_chat
+    bridge = PageIndexClient(mode="cloud", chat_model="openai/m")
     assert bridge._local_chat and bridge.api_key == "pi-env"
-    agreed = PageIndexClient(api_key="pi-x", type="cloud")
+    agreed = PageIndexClient(api_key="pi-x", mode="cloud")
     assert agreed.api_key == "pi-x"
-    local = PageIndexClient(type="local")
+    local = PageIndexClient(mode="local")
     assert local._local_chat and not hasattr(local, "api_key")
 
     monkeypatch.delenv("PAGEINDEX_API_KEY")
     with pytest.raises(PageIndexAPIError, match="PAGEINDEX_API_KEY"):
-        PageIndexClient(type="cloud")
+        PageIndexClient(mode="cloud")
     with pytest.raises(PageIndexAPIError, match="conflicts with api_key"):
-        PageIndexClient(api_key="k", type="local")
+        PageIndexClient(api_key="k", mode="local")
     with pytest.raises(PageIndexAPIError, match='"cloud" or "local"'):
-        PageIndexClient(type="banana")
+        PageIndexClient(mode="banana")
 
-    # type= beside index= is the same cross-check: agreement passes,
+    # mode= beside index= is the same cross-check: agreement passes,
     # disagreement errors, and the vocabulary check still comes first.
-    assert PageIndexClient(type="local", index="m").index_model == "m"
-    assert PageIndexClient(type="cloud",
+    assert PageIndexClient(mode="local", index="m").index_model == "m"
+    assert PageIndexClient(mode="cloud",
                            index={"api_key": "pi-x"}).api_key == "pi-x"
     with pytest.raises(PageIndexAPIError, match="disagrees with index="):
-        PageIndexClient(type="cloud", index="m")
+        PageIndexClient(mode="cloud", index="m")
     with pytest.raises(PageIndexAPIError, match="disagrees with index="):
-        PageIndexClient(type="local", index={"api_key": "k"})
+        PageIndexClient(mode="local", index={"api_key": "k"})
     with pytest.raises(PageIndexAPIError, match='"cloud" or "local"'):
-        PageIndexClient(type="banana", index="m")
+        PageIndexClient(mode="banana", index="m")
 
 
-def test_type_declaration_in_index_dict(monkeypatch):
+def test_mode_declaration_in_index_dict(monkeypatch):
     monkeypatch.setenv("PAGEINDEX_API_KEY", "pi-env")
-    assert PageIndexClient(index={"type": "cloud"}).api_key == "pi-env"
+    assert PageIndexClient(index={"mode": "cloud"}).api_key == "pi-env"
     assert PageIndexClient(
-        index={"type": "cloud", "api_key": "pi-x"}).api_key == "pi-x"
-    typed = PageIndexClient(index={"type": "local", "model": "i"})
-    assert typed.index_model == "i"
-    assert not hasattr(PageIndexClient(index={"type": "local"}), "api_key")
+        index={"mode": "cloud", "api_key": "pi-x"}).api_key == "pi-x"
+    declared = PageIndexClient(index={"mode": "local", "model": "i"})
+    assert declared.index_model == "i"
+    assert not hasattr(PageIndexClient(index={"mode": "local"}), "api_key")
 
-    with pytest.raises(PageIndexAPIError, match='type "cloud" but carries'):
-        PageIndexClient(index={"type": "cloud", "model": "i"})
-    with pytest.raises(PageIndexAPIError, match='type "local" but carries'):
-        PageIndexClient(index={"type": "local", "api_key": "k"})
+    with pytest.raises(PageIndexAPIError, match='mode "cloud" but carries'):
+        PageIndexClient(index={"mode": "cloud", "model": "i"})
+    with pytest.raises(PageIndexAPIError, match='mode "local" but carries'):
+        PageIndexClient(index={"mode": "local", "api_key": "k"})
     with pytest.raises(PageIndexAPIError, match='"cloud" or "local"'):
-        PageIndexClient(index={"type": "hosted"})
+        PageIndexClient(index={"mode": "hosted"})
+    # The key is "mode"; the pre-release "type" is just an unknown key.
+    with pytest.raises(PageIndexAPIError, match=r"Unknown index keys \(type\)"):
+        PageIndexClient(index={"type": "cloud"})
 
 
-def test_type_declaration_in_chat_dict():
-    managed = PageIndexClient(api_key="pi-k", chat={"type": "cloud"})
+def test_mode_declaration_in_chat_dict():
+    managed = PageIndexClient(api_key="pi-k", chat={"mode": "cloud"})
     assert not managed._local_chat
-    # {"type": "local"} alone declares own-model chat — default model.
+    # {"mode": "local"} alone declares own-model chat — default model.
     from pageindex.utils import DEFAULT_CHAT_MODEL
-    own = PageIndexClient(api_key="pi-k", chat={"type": "local"})
+    own = PageIndexClient(api_key="pi-k", chat={"mode": "local"})
     assert own._local_chat and own.chat_model == DEFAULT_CHAT_MODEL
-    typed = PageIndexClient(chat={"type": "local", "model": "m"})
-    assert typed.chat_model == "m"
+    declared = PageIndexClient(chat={"mode": "local", "model": "m"})
+    assert declared.chat_model == "m"
 
-    with pytest.raises(PageIndexAPIError, match='type "cloud" but carries'):
-        PageIndexClient(api_key="pi-k", chat={"type": "cloud", "model": "m"})
+    with pytest.raises(PageIndexAPIError, match='mode "cloud" but carries'):
+        PageIndexClient(api_key="pi-k", chat={"mode": "cloud", "model": "m"})
     with pytest.raises(PageIndexAPIError, match="cannot read the local store"):
-        PageIndexClient(chat={"type": "cloud"})
+        PageIndexClient(chat={"mode": "cloud"})
+    with pytest.raises(PageIndexAPIError, match=r"Unknown chat keys \(type\)"):
+        PageIndexClient(api_key="pi-k", chat={"type": "cloud"})

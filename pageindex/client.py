@@ -88,17 +88,17 @@ _ARG_TYPES: "dict[str, tuple[type, ...]]" = {
     "chat_backend": (dict,)}
 
 
-def _declared_type(value, side: str):
+def _declared_mode(value, side: str):
     if value not in (None, "cloud", "local"):
         raise PageIndexAPIError(
-            f'{side} "type" must be "cloud" or "local", not {value!r}.')
+            f'{side} "mode" must be "cloud" or "local", not {value!r}.')
     return value
 
 
 def _resolve_index_slot(index) -> "tuple[Optional[str], dict[str, Any]]":
     """The ``index=`` slot as (cloud api_key, local overrides). A dict
-    declares its side by its keys; an optional "type" states it and must
-    agree. Keyless cloud spellings ("pageindex-cloud", {"type": "cloud"})
+    declares its side by its keys; an optional "mode" states it and must
+    agree. Keyless cloud spellings ("pageindex-cloud", {"mode": "cloud"})
     read the key from the environment."""
     from .types import PAGEINDEX_CLOUD
     if isinstance(index, str):
@@ -111,7 +111,7 @@ def _resolve_index_slot(index) -> "tuple[Optional[str], dict[str, Any]]":
             raise PageIndexAPIError(
                 f'index="{index}" is not a mode word — a bare string here '
                 "is a local index model name. For cloud documents write "
-                '"pageindex-cloud", index={"type": "cloud"} (key from '
+                '"pageindex-cloud", index={"mode": "cloud"} (key from '
                 'PAGEINDEX_API_KEY) or {"api_key": ...}; local is the '
                 "default.")
         if index.strip():
@@ -123,10 +123,10 @@ def _resolve_index_slot(index) -> "tuple[Optional[str], dict[str, Any]]":
         # None-valued keys mean "absent", exactly like the flat arguments.
         conf = {name: value for name, value in index.items()
                 if value is not None}
-        declared = _declared_type(conf.pop("type", None), "index")
+        declared = _declared_mode(conf.pop("mode", None), "index")
         if not conf:
             if declared == "cloud":
-                return _env_cloud_key('index={"type": "cloud"}',
+                return _env_cloud_key('index={"mode": "cloud"}',
                                       'index={"api_key": ...}'), {}
             if declared == "local":
                 return None, {}
@@ -143,7 +143,7 @@ def _resolve_index_slot(index) -> "tuple[Optional[str], dict[str, Any]]":
         if "api_key" in conf:
             if declared == "local":
                 raise PageIndexAPIError(
-                    'index declares type "local" but carries api_key — '
+                    'index declares mode "local" but carries api_key — '
                     "an API key means cloud documents. Drop one of them.")
             if len(conf) > 1:
                 raise PageIndexAPIError(
@@ -157,7 +157,7 @@ def _resolve_index_slot(index) -> "tuple[Optional[str], dict[str, Any]]":
             return key, {}
         if declared == "cloud":
             raise PageIndexAPIError(
-                'index declares type "cloud" but carries local keys '
+                'index declares mode "cloud" but carries local keys '
                 f"({', '.join(sorted(conf))}) — the cloud pipeline does "
                 'its own indexing; cloud takes "api_key" only.')
         mapped = {"index_model": conf.get("model"),
@@ -181,7 +181,7 @@ def _resolve_chat_slot(chat) -> "tuple[Optional[str], dict[str, Any]]":
                 f'chat="{chat}" is not a mode word — a bare string here is '
                 "your own model name (e.g. \"openai/gpt-5.2\"). For the "
                 'managed chat write "pageindex-cloud" or '
-                '{"type": "cloud"}.')
+                '{"mode": "cloud"}.')
         if chat.strip():
             return "own", {"chat_model": chat.strip()}
         raise PageIndexAPIError(
@@ -191,21 +191,21 @@ def _resolve_chat_slot(chat) -> "tuple[Optional[str], dict[str, Any]]":
         # None-valued keys mean "absent", exactly like the flat arguments.
         conf = {name: value for name, value in chat.items()
                 if value is not None}
-        declared = _declared_type(conf.pop("type", None), "chat")
+        declared = _declared_mode(conf.pop("mode", None), "chat")
         unknown = set(conf) - {"model", "backend"}
         if (not conf and declared is None) or unknown:
             raise PageIndexAPIError(
                 ("chat is an empty dict" if not conf else
                  f"Unknown chat keys ({', '.join(sorted(unknown))})")
                 + ' — chat takes "model" and "backend" (your own model), '
-                'or {"type": "cloud"} / "pageindex-cloud" for the managed '
+                'or {"mode": "cloud"} / "pageindex-cloud" for the managed '
                 "chat.")
         if declared == "cloud":
             if conf:
                 raise PageIndexAPIError(
-                    'chat declares type "cloud" but carries '
+                    'chat declares mode "cloud" but carries '
                     f"({', '.join(sorted(conf))}) — the managed chat "
-                    "selects its own model. Drop the type, or the keys.")
+                    "selects its own model. Drop the mode, or the keys.")
             return "managed", {}
         mapped = {"chat_model": conf.get("model"),
                   "chat_backend": conf.get("backend")}
@@ -257,22 +257,22 @@ class PageIndexClient:
             ``"pageindex-cloud"`` (cloud, key from the environment), a
             local index model name, or a dict: ``{"api_key": ...}`` for
             cloud, ``{"model", "summary_model", "backend",
-            "storage_path"}`` for local. An optional ``"type"`` key
+            "storage_path"}`` for local. An optional ``"mode"`` key
             (``"cloud"`` / ``"local"``) states the side and must agree
-            with the other keys; ``{"type": "cloud"}`` alone reads the
+            with the other keys; ``{"mode": "cloud"}`` alone reads the
             key from the environment. Not combinable with this side's
             flat arguments.
         chat (str | dict, optional): The chat side, grouped — a model
             name (your own model), ``"pageindex-cloud"`` (managed chat,
             cloud clients only), or ``{"model", "backend"}``. An
-            optional ``"type"`` key states the side: ``{"type":
+            optional ``"mode"`` key states the side: ``{"mode":
             "cloud"}`` alone is the managed chat, ``"local"`` is your
             own model and must agree with the other keys. Not
             combinable with this side's flat arguments.
-        type (str, optional): Client-level declaration of where the
+        mode (str, optional): Client-level declaration of where the
             documents live — ``"cloud"`` or ``"local"`` — checked
-            against the other arguments (``type="local"`` with an
-            api_key errors). ``type="cloud"`` alone reads the key from
+            against the other arguments (``mode="local"`` with an
+            api_key errors). ``mode="cloud"`` alone reads the key from
             the ``PAGEINDEX_API_KEY`` environment variable. Always
             optional: the arguments themselves already carry the mode.
         index_model (str, optional): Local mode only — LLM used to index
@@ -330,7 +330,7 @@ class PageIndexClient:
         *,
         index: Optional[Union[dict[str, Any], str]] = None,
         chat: Optional[Union[dict[str, Any], str]] = None,
-        type: Optional[str] = None,
+        mode: Optional[str] = None,
         index_model: Optional[str] = None,
         chat_model: Optional[str] = None,
         model: Optional[str] = None,
@@ -376,27 +376,27 @@ class PageIndexClient:
                 "chat= and the flat chat-side arguments "
                 f"({', '.join(sorted(chat_flat))}) are two spellings of "
                 "the same thing — use one or the other.")
-        # ``type=`` is a cross-check, not a spelling: it combines with
+        # ``mode=`` is a cross-check, not a spelling: it combines with
         # either spelling of the index side and must agree with it.
-        declared = _declared_type(type, "client")
+        declared = _declared_mode(mode, "client")
         if index is not None:
             cloud_key, index_conf = _resolve_index_slot(index)
             if declared == "local" and cloud_key is not None:
                 raise PageIndexAPIError(
-                    'type="local" disagrees with index= — that index '
+                    'mode="local" disagrees with index= — that index '
                     "selects cloud documents. Drop one of them.")
             if declared == "cloud" and cloud_key is None:
                 raise PageIndexAPIError(
-                    'type="cloud" disagrees with index= — that index '
+                    'mode="cloud" disagrees with index= — that index '
                     "configures the local store. Drop one of them.")
         else:
             cloud_key = api_key
             if declared == "local" and api_key is not None:
                 raise PageIndexAPIError(
-                    'type="local" conflicts with api_key — an API key '
+                    'mode="local" conflicts with api_key — an API key '
                     "means cloud documents. Drop one of them.")
             if declared == "cloud" and cloud_key is None:
-                cloud_key = _env_cloud_key('type="cloud"')
+                cloud_key = _env_cloud_key('mode="cloud"')
             index_conf = {name: value for name, value in index_flat.items()
                           if name != "api_key"}
         if chat is not None:
@@ -410,11 +410,9 @@ class PageIndexClient:
         for conf in (index_conf, chat_conf):
             for name, value in conf.items():
                 if not isinstance(value, _ARG_TYPES[name]):
-                    # value.__class__: the ``type=`` parameter shadows the
-                    # builtin in this scope.
                     raise PageIndexAPIError(
                         f"{name} must be a {_ARG_TYPES[name][0].__name__}, "
-                        f"got {value.__class__.__name__}.")
+                        f"got {type(value).__name__}.")
                 if not value:
                     raise PageIndexAPIError(
                         f"{name} is empty — it configures nothing. Pass a "
