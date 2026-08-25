@@ -2306,6 +2306,24 @@ def test_bridge_auth_failure_error_teaches_architecture():
         local_chat._model_backend_error(denied, "messages", bridge))
 
 
+def test_bridge_auth_note_managed_exit_is_chat_lane_only():
+    """The managed-chat exit ("drop the chat model") is real only for
+    chat_completions(); responses() and messages() refuse a client
+    without an own model, so on those lanes the note keeps the
+    credentials advice and drops the exit that would send the caller in
+    a circle."""
+    from pageindex import PageIndexClient
+    bridge = PageIndexClient(api_key="pi-k", chat_model="m")
+    denied = Exception("invalid x-api-key")
+    denied.status_code = 401
+    chat = str(local_chat._model_backend_error(denied, "chat", bridge))
+    assert "drop the chat model" in chat
+    for lane in ("responses", "messages"):
+        text = str(local_chat._model_backend_error(denied, lane, bridge))
+        assert "your own provider credentials" in text
+        assert "drop the chat model" not in text
+
+
 @needs_anthropic
 def test_messages_auth_failure_teaches_architecture(bridge_client,
                                                     monkeypatch):

@@ -187,7 +187,7 @@ class McpBridge:
     def list_tools(self) -> list[dict]:
         # Cached per session — every chat turn rebuilds the tool set, and
         # a per-turn tools/list round trip is pure latency. The 404
-        # session-expiry reset clears it.
+        # session-expiry reset clears it; a blank list never enters it.
         with self._lock:
             if self._tools is not None:
                 return self._tools
@@ -201,8 +201,9 @@ class McpBridge:
             tools.extend(result.get("tools") or [])
             next_cursor = result.get("nextCursor")
             if not next_cursor or next_cursor == cursor:
-                with self._lock:
-                    self._tools = tools
+                if tools:
+                    with self._lock:
+                        self._tools = tools
                 return tools
             cursor = next_cursor
         raise PageIndexAPIError(

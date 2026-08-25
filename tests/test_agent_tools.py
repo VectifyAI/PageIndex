@@ -1508,6 +1508,26 @@ def test_list_tools_cached_until_session_reset():
     assert calls["list"] == 2
 
 
+def test_list_tools_empty_page_is_not_cached():
+    """A blank tools/list (a deploy blip, a gate misconfiguration) must not
+    stick for the session: the next call refetches; only a real list caches."""
+    from pageindex.mcp_bridge import McpBridge
+
+    bridge = McpBridge("http://x/mcp", {})
+    pages = iter([{"tools": []}, {"tools": [{"name": "t"}]}])
+    calls = {"list": 0}
+
+    def fake_request(method, params=None):
+        calls["list"] += 1
+        return next(pages)
+
+    bridge._request = fake_request
+    assert bridge.list_tools() == []
+    assert [t["name"] for t in bridge.list_tools()] == ["t"]
+    assert [t["name"] for t in bridge.list_tools()] == ["t"]
+    assert calls["list"] == 2
+
+
 def test_mcp_bridge_protocol(monkeypatch):
     import requests as requests_mod
     from pageindex.mcp_bridge import McpBridge

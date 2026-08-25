@@ -17,8 +17,9 @@ PAGEINDEX_CLOUD = "pageindex-cloud"
 
 
 class CloudIndexConfig(TypedDict, total=False):
-    """Documents hosted on PageIndex cloud. ``api_key`` may be omitted —
-    it then comes from the PAGEINDEX_API_KEY environment variable."""
+    """Documents hosted on PageIndex cloud. ``api_key`` may be omitted
+    when ``mode: "cloud"`` stays — it then comes from the
+    PAGEINDEX_API_KEY environment variable."""
 
     mode: Literal["cloud"]
     api_key: str

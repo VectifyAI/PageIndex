@@ -407,8 +407,11 @@ def _model_backend_error(exc, lane: str, client=None) -> PageIndexAPIError:
         message += (
             " — note: your chat model runs in your process on your own "
             "provider credentials; the PageIndex api_key does not cover "
-            "it. Set the provider key (or chat_backend), or drop the "
-            "chat model configuration to use the managed cloud chat.")
+            "it. Set the provider key (or chat_backend)")
+        message += (
+            ", or drop the chat model configuration to use the managed "
+            "cloud chat." if lane == "chat" else "."
+        )
     return PageIndexAPIError(message)
 
 
