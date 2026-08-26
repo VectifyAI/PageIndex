@@ -379,7 +379,7 @@ print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 | Best for | text-heavy PDFs and local workflows | scanned, image-heavy, and large document collections |
 | Indexing | runs locally | runs in PageIndex Cloud, with production OCR and image understanding |
 | Storage | local | managed in PageIndex Cloud |
-| Chat model | your model | your compatible model |
+| Chat model | your model | your model |
 | Citations | page-level | line-level |
 | Image understanding | — | ✅ |
 | Multi-document scale | manual | PageIndex File System |
