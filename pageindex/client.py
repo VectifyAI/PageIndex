@@ -346,7 +346,7 @@ class PageIndexClient:
         model: Optional[str] = None,
         summary_model: Optional[str] = None,
         retrieve_model: Optional[str] = None,
-        storage_path: Optional[str] = None,
+        storage_path: Optional[Union[str, os.PathLike[str]]] = None,
         index_backend: Optional[dict[str, Any]] = None,
         chat_backend: Optional[dict[str, Any]] = None,
     ):
@@ -915,6 +915,11 @@ class PageIndexClient:
                 reasoning_effort=reasoning_effort, extra_body=extra_body,
                 extra_headers=extra_headers, backend=backend,
             )
+        if not getattr(self, "api_key", None):
+            raise PageIndexAPIError(
+                "chat_model is empty — it configures nothing, and a local "
+                "client has no managed chat to fall back to. Set "
+                "chat_model=... to run the agent with your own model.")
         if (model is not None or max_turns is not None or top_p is not None
                 or max_tokens is not None or reasoning_effort is not None
                 or extra_body is not None or extra_headers is not None
@@ -1649,7 +1654,7 @@ class PageIndexLocalClient(PageIndexClient):
         model: Optional[str] = None,
         summary_model: Optional[str] = None,
         retrieve_model: Optional[str] = None,
-        storage_path: Optional[str] = None,
+        storage_path: Optional[Union[str, os.PathLike[str]]] = None,
         index_backend: Optional[dict[str, Any]] = None,
         chat_backend: Optional[dict[str, Any]] = None,
     ):

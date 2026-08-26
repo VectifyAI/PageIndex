@@ -11,6 +11,7 @@ other keys. The ``"pageindex-cloud"`` string is the label spelling for
 """
 from __future__ import annotations
 
+import os
 from typing import Literal, TypedDict, Union
 
 PAGEINDEX_CLOUD = "pageindex-cloud"
@@ -32,7 +33,7 @@ class LocalIndexConfig(TypedDict, total=False):
     model: str
     summary_model: str
     backend: dict
-    storage_path: str
+    storage_path: Union[str, os.PathLike[str]]
 
 
 class ChatConfig(TypedDict, total=False):
