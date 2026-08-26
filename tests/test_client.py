@@ -2131,6 +2131,8 @@ def test_expand_fuses_same_page_children_before_reporting_them(monkeypatch):
     assert outcome["expands"] == 1 and outcome["same_page_merges"] == 1
     assert [n["title"] for n in tree[0]["nodes"][1]["nodes"]][1:] == ["Sub Three", "Sub Four"]
     assert all(children != 4 for report in reports for _, children in report)
+    # the round entry agrees with the run counters: the fusion happened this round
+    assert [e["same_page"] for e in outcome["log"] if e["op"] == "round"] == [True]
 
 
 def test_expand_keeps_same_page_children_when_merging_is_off(monkeypatch):

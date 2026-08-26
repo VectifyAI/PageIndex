@@ -825,14 +825,19 @@ async def optimize(structure, pages, lines, model=None, routing=ROUTING_COST,
     for round_no in range(1, max_rounds + 1):
         rounds = round_no
         note(progress, f"  round {round_no}")
-        same_page = merge_same_page(structure, log) if do_merge else False
+        round_start = len(log)
+        if do_merge:
+            merge_same_page(structure, log)
         merged = merge(structure, routing, log, frozen, progress) if do_merge else False
         if merged:
             # a collapsed subtree can land on a sibling's exact pages
-            same_page = merge_same_page(structure, log) or same_page
+            merge_same_page(structure, log)
         settled(structure)
         expanded = await expand(structure, pages, lines, opts, log, frozen) \
             if do_expand else False
+        # derived from this round's log slice, so the flag counts the fusions
+        # inside expand too and cannot disagree with the run counters
+        same_page = any(e["op"] == "merge_same_page" for e in log[round_start:])
         log.append({"op": "round", "round": round_no, "same_page": same_page,
                     "merged": merged, "expanded": expanded})
         if not (same_page or merged or expanded):
