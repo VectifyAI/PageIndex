@@ -1187,10 +1187,10 @@ def test_summarize_tree_all_short_leaves_need_no_model(monkeypatch):
     assert out[0]["summary"] == "tiny"
 
 
-def test_summarize_tree_admits_deepest_leaf_first(monkeypatch):
-    """The tree is visited level by level, so with one permit the shallow
-    leaf D reaches the gate before the deep leaf C. C must be admitted first
-    anyway: the parents still owed above it are what the run ends on."""
+def test_summarize_tree_starts_the_deepest_leaf_first(monkeypatch):
+    """Visited level by level, the shallow leaves A and D would take both
+    permits before the deep leaf C even reached the gate. C must start first:
+    the parents still owed above it are what the run ends on."""
     started = []
 
     async def fake(model, prompt):
@@ -1207,9 +1207,35 @@ def test_summarize_tree_admits_deepest_leaf_first(monkeypatch):
             {"title": "C", "start_index": 2, "end_index": 2}]},
         {"title": "D", "start_index": 3, "end_index": 3}]}]
     asyncio.run(pageindex.utils.summarize_tree(
-        structure, pdf_pages, small_node_tokens=0, concurrency=1))
+        structure, pdf_pages, small_node_tokens=0, concurrency=2))
     assert started.index("gamma") < started.index("delta")
     assert started.count("Section Title") == 2
+
+
+def test_summarize_tree_admits_a_ready_parent_before_a_queued_shallow_leaf(monkeypatch):
+    """With one permit the leaf D is already queued when C's child finishes
+    and C becomes ready. C has two calls left above it, D one, so C goes
+    first even though D asked earlier."""
+    started = []
+
+    async def fake(model, prompt):
+        started.append(next(w for w in ("Section Title: C", "Section Title",
+                                        "alpha", "epsilon", "delta")
+                            if w in prompt))
+        for _ in range(8):
+            await asyncio.sleep(0)
+        return '{"points": [], "summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", fake)
+    pdf_pages = [("alpha " * 5, 5), ("epsilon " * 5, 5), ("delta " * 5, 5)]
+    structure = [{"title": "R", "start_index": 1, "end_index": 3, "nodes": [
+        {"title": "B", "start_index": 2, "end_index": 2, "nodes": [
+            {"title": "C", "start_index": 2, "end_index": 2, "nodes": [
+                {"title": "E", "start_index": 2, "end_index": 2}]}]},
+        {"title": "A", "start_index": 1, "end_index": 1},
+        {"title": "D", "start_index": 3, "end_index": 3}]}]
+    asyncio.run(pageindex.utils.summarize_tree(
+        structure, pdf_pages, small_node_tokens=0, concurrency=1))
+    assert started.index("Section Title: C") < started.index("delta")
 
 
 def test_priority_gate_passes_the_permit_on_when_its_taker_is_cancelled():

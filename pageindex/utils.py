@@ -873,9 +873,9 @@ async def summarize_tree(structure, pdf_pages, model=None,
     child summaries plus the pages no child covers. A parent's summary describes
     its whole subtree (end_index union semantics). Nodes that already carry a
     summary are left untouched; leaves under `small_node_tokens` use their raw
-    text as the summary without a model call. Queued model calls are admitted
-    deepest node first: depth counts the calls left on a node's path to the
-    root, its own included."""
+    text as the summary without a model call. Model calls run deepest node
+    first, both in starting order and in leaving the queue: depth counts the
+    calls left on a node's path to the root, its own included."""
     gate = _PriorityGate(concurrency or SUMMARY_CONCURRENCY)
     asked = answered = False
 
@@ -952,11 +952,10 @@ async def summarize_tree(structure, pdf_pages, model=None,
     """
         return parse_summary(await ask(prompt, prio))
 
-    async def visit(node, depth=1):
+    async def visit(node, depth, child_tasks):
         children = node.get('nodes') or []
         if children:
-            done = await asyncio.gather(*(visit(child, depth + 1) for child in children),
-                                        return_exceptions=True)
+            done = await asyncio.gather(*child_tasks, return_exceptions=True)
             for result in done:
                 if isinstance(result, Exception) and _is_unrecoverable(result):
                     raise result
@@ -970,8 +969,19 @@ async def summarize_tree(structure, pdf_pages, model=None,
             if _is_unrecoverable(e):
                 raise
 
-    results = await asyncio.gather(*(visit(root) for root in structure),
-                                    return_exceptions=True)
+    order = []
+
+    def collect(nodes, depth):
+        for node in nodes:
+            collect(node.get('nodes') or [], depth + 1)
+            order.append((depth, node))
+    collect(structure, 1)
+    tasks = {}
+    for depth, node in sorted(order, key=lambda pair: -pair[0]):
+        tasks[id(node)] = asyncio.create_task(visit(
+            node, depth, [tasks[id(child)] for child in node.get('nodes') or []]))
+    results = await asyncio.gather(*(tasks[id(root)] for root in structure),
+                                   return_exceptions=True)
     for r in results:
         if isinstance(r, Exception) and _is_unrecoverable(r):
             raise r
