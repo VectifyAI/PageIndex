@@ -198,7 +198,7 @@ client = PageIndexClient(
 
 - **`storage_path`** specifies where indexed documents are stored locally.
 
-`index_model=` / `chat_model=` are the flat spellings of the quickstart's `index=` / `chat=` — the two are interchangeable.
+`index_model=` / `chat_model=` are the flat spellings of the quickstart's `index=` / `chat=`; either spelling works.
 
 #### Model naming conventions
 
@@ -400,7 +400,7 @@ client = PageIndexClient(
     chat="gpt-5.6-sol",                  # use your preferred compatible model for chat
 )
 
-# The rest of your code stays the same — wait=True because cloud indexing is asynchronous
+# The rest of your code stays the same (wait=True: cloud indexing is asynchronous)
 doc_id = client.submit_document("report.pdf", wait=True)["doc_id"]
 print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 ```
