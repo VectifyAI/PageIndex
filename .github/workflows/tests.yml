@@ -21,7 +21,13 @@ jobs:
       matrix:
         python-version: ["3.10", "3.13"]
         agent-frameworks: [without, with]
-    name: py${{ matrix.python-version }} (${{ matrix.agent-frameworks }} frameworks)
+        pdfium: ["5"]
+        include:
+          # one leg holds the 4.x insurance line
+          - python-version: "3.10"
+            agent-frameworks: with
+            pdfium: "4"
+    name: py${{ matrix.python-version }} (${{ matrix.agent-frameworks }} frameworks, pdfium ${{ matrix.pdfium }})
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
@@ -35,4 +41,6 @@ jobs:
         run: pip uninstall -y openai-agents
       - if: matrix.agent-frameworks == 'with'
         run: pip install openai-agents claude-agent-sdk anthropic
+      - if: matrix.pdfium == '4'
+        run: pip install "pypdfium2<5"
       - run: python -m pytest -q

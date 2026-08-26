@@ -61,11 +61,12 @@ import re
 import sys
 from types import SimpleNamespace
 
-from .utils import (ConfigLoader, _is_unrecoverable, _openai_missing_keys,
-                    llm_acompletion, strip_internal_keys)
+from .utils import (ConfigLoader, _is_unrecoverable, llm_acompletion,
+                    strip_internal_keys)
 
 TRIGGER_PAGES = 5        # only look ahead on nodes larger than this
 ROUTING_COST = 1         # R(v), in pages
+EXPAND_CONCURRENCY = 32  # measured plateau: the ready frontier is 21-28 wide on few-hundred-page PDFs
 PAGE_CHARS = 6000        # per-page text handed to the model
 TITLE_MAX_CHARS = 200    # a union title longer than this falls back to a page label
 
@@ -624,6 +625,9 @@ def children_from_cache(node, cache, kinds):
 async def propose_children(node, pages, args):
     """Generate one temporary level of children via the model. Validated, not committed."""
     start, end = node["start_index"], subtree_end(node)
+    end = min(end, len(pages))  # a tree from another parser may overrun pages
+    if end < start:
+        return []               # the whole span is beyond the loaded pages
     block = "\n".join(
         f"<page_{n}>\n{pages[n - 1][:PAGE_CHARS]}\n</page_{n}>" for n in range(start, end + 1))
     answer = await ask_model(args.model, EXPAND_PROMPT.format(
@@ -655,46 +659,53 @@ async def expand(structure, pages, lines, args, log, frozen):
     priced with expand_cost and the cheapest is kept.
     """
     changed = False
-    queue = [n for n, _ in flatten(structure)]
+    semaphore = asyncio.Semaphore(EXPAND_CONCURRENCY)
 
-    while queue:
-        node = queue.pop(0)
+    async def proposals_for(node):
+        """The model half of one node's lookahead: the empty-retry ladder and
+        absorbed errors run inside the task; log entries come back so a
+        node's entries stay contiguous under concurrency."""
+        entries, llm_candidates, attempts = [], [], 0
+        while attempts <= args.empty_retries:
+            attempts += 1
+            try:
+                async with semaphore:
+                    proposed = await propose_children(node, pages, args)
+            except Exception as exc:
+                if _is_unrecoverable(exc):
+                    raise  # every remaining node would fail identically
+                entries.append({"op": "expand", "node_id": node.get("node_id"),
+                                "decision": "error", "attempt": attempts,
+                                "detail": f"{type(exc).__name__}: {exc}"})
+                continue
+            if proposed:
+                llm_candidates.append((f"llm:{attempts}", proposed))
+                break                    # an empty answer is retried, not trusted
+        return llm_candidates, attempts, entries
+
+    async def process(node):
+        nonlocal changed
         if not is_frontier(node) or node.get("node_id") in frozen:
-            continue
-
+            return
         span = S(node)
         if span <= args.trigger_pages:
-            continue                     # below the trigger, stay collapsed
-
+            return                       # below the trigger, stay collapsed
         note(args.progress, f"    expand {node.get('node_id'):>8}  S={span}  "
                             f"pages {node['start_index']}-{subtree_end(node)} ...")
+        llm_candidates, attempts, entries = await proposals_for(node)
+        log.extend(entries)
         candidates = []
         cached = children_from_cache(node, args.cache, args.kinds)
         if cached:
             candidates.append(("cache", cached))
-
-        attempts = 0
-        while attempts <= args.empty_retries:
-            attempts += 1
-            try:
-                proposed = await propose_children(node, pages, args)
-            except Exception as exc:
-                if _is_unrecoverable(exc):
-                    raise  # every remaining node would fail identically
-                log.append({"op": "expand", "node_id": node.get("node_id"),
-                            "decision": "error", "attempt": attempts,
-                            "detail": f"{type(exc).__name__}: {exc}"})
-                continue
-            if proposed:
-                candidates.append((f"llm:{attempts}", proposed))
-                break                    # an empty answer is retried, not trusted
+        candidates.extend(llm_candidates)
 
         if not candidates:
             note(args.progress, f"           -> no children found, kept collapsed")
             log.append({"op": "expand", "node_id": node.get("node_id"),
                         "decision": "no_children", "S": span, "attempts": attempts})
             frozen.add(node.get("node_id"))
-            continue
+            return
 
         scored = []
         for source, children in candidates:
@@ -731,7 +742,19 @@ async def expand(structure, pages, lines, args, log, frozen):
         if keep:
             changed = True
             attach_children(node, best["children"], lines)
-            queue.extend(node["nodes"])   # recurse into the kept children
+            results = await asyncio.gather(*(process(child)
+                                             for child in node["nodes"]),
+                                           return_exceptions=True)
+            for result in results:
+                if isinstance(result, BaseException):
+                    raise result
+
+    results = await asyncio.gather(*(process(node)
+                                     for node, _ in flatten(structure)),
+                                   return_exceptions=True)
+    for result in results:
+        if isinstance(result, BaseException):
+            raise result
     return changed
 
 
@@ -872,12 +895,6 @@ async def main():
     args = parser.parse_args()
 
     model = args.model or default_model()
-    if args.expand and not args.plan:
-        missing = _openai_missing_keys(model)
-        if missing:
-            sys.exit(f"{', '.join(missing)} is not set "
-                     f"(expand model: {model}).")
-
     original = json.load(open(args.structure))
     structure = copy.deepcopy(original["structure"])
     pages, lines = load_pages(args.pdf)

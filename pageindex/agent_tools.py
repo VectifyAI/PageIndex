@@ -12,7 +12,10 @@ exist on the cloud.
 Tools never raise: every outcome, including errors, is returned as the
 same JSON envelope the cloud emits ({"success": true, ...} /
 {"error": ...}) — arguments outside a pruned local signature come back as
-that envelope too, on the direct and the call_tool path alike.
+that envelope too, on the direct and the call_tool path alike, except
+browse_documents' ``recursive``: call_tool honors it, because the flat
+no-folders shape it asks for is trivially true here. One exception to
+never-raise: a cloud 401/403 re-raises PageIndexAPIError.
 """
 from __future__ import annotations
 
@@ -429,7 +432,9 @@ def _refetch_entry(client, doc_id: str) -> Optional[dict[str, Any]]:
 
 
 def _await_completion(client, entry: dict[str, Any], wait: bool) -> dict[str, Any]:
-    """Re-poll a processing document for up to 3 minutes when wait is set."""
+    """Re-poll a processing document for up to 3 minutes when wait is set.
+    Local documents are stored already terminal, so the wait never engages
+    there."""
     doc_id = entry.get("id")
     if not wait or not doc_id or entry.get("status") in ("completed", "failed"):
         return entry
@@ -517,13 +522,23 @@ class _PageSpecError(ValueError):
         self.code = code
 
 
+# re.ASCII mirrors the ECMA regex semantics the contract's pattern carries
+_PAGE_SPEC_RE = re.compile(
+    TOOL_CONTRACT["get_page_content"]["schema"]["properties"]["pages"]["pattern"],
+    re.ASCII)
+
+
 def _expand_pages(pages) -> list[int]:
     """Expand '1-3,7' into sorted distinct pages — the one parser for the
-    SDK surface and the tool layer. Raises _PageSpecError with code
-    'invalid', 'too_many', or 'nonpositive'."""
+    SDK surface and the tool layer, holding both to the contract's pages
+    pattern. Raises _PageSpecError with code 'invalid', 'too_many', or
+    'nonpositive'."""
     if not isinstance(pages, str):
         raise _PageSpecError("invalid",
                              f"Invalid page specification: {pages!r}")
+    if not _PAGE_SPEC_RE.fullmatch(pages):
+        raise _PageSpecError(
+            "invalid", f"Invalid page specification '{pages}'")
     too_many = (f"Page specification '{pages}' spans more than "
                 f"{_MAX_REQUESTED_PAGES} pages; request a narrower range")
     expanded: set[int] = set()
@@ -1461,35 +1476,25 @@ def _cloud_bridge(client, gated: bool = False):
         return bridge
 
 
-def _read_only_tools(tools_meta: list[dict]) -> list[dict]:
-    """The management gate for consumers without a framework permission
-    layer: only tools the server marks read-only, guarded against a server
-    annotation regression silently disabling every tool."""
-    filtered = [meta for meta in tools_meta
-                if (meta.get("annotations") or {}).get("readOnlyHint") is True]
-    if tools_meta and not filtered:
-        raise PageIndexAPIError(
-            "The MCP server returned tools but none are annotated "
-            "read-only — a server annotation regression would otherwise "
-            "silently disable every tool. Pass include_management=True "
-            "to expose the unfiltered list."
-        )
-    return filtered
-
-
-def _require_local_scope(client, doc_ids) -> None:
-    """The allowlist is enforced in-process; cloud lookups run server-side,
-    so accepting doc_ids there would be advisory-only — refuse loudly.
-    An empty allowlist is refused too: it would scope the agent to
-    nothing, with no signal to the caller."""
+def _require_doc_selection(doc_ids) -> None:
+    """An empty selection fails loud: washed to None it would mean
+    "everything", while the tool-layer allowlist would mean "nothing"."""
     if doc_ids is not None and not doc_ids:
         raise PageIndexAPIError(
             "doc_id is empty. Pass one or more document IDs, or omit "
             "doc_id to give the agent the whole library.")
+
+
+def _require_local_scope(client, doc_ids) -> None:
+    """The allowlist is enforced in-process; cloud tools take none, so
+    accepting doc_ids there would be advisory-only — refuse loudly."""
+    _require_doc_selection(doc_ids)
     if doc_ids is not None and getattr(client, "api_key", None):
         raise PageIndexAPIError(
-            "doc_ids scoping applies to local tools only — cloud calls "
-            "are scoped server-side."
+            "doc_ids scoping applies to local tools only — the managed "
+            "cloud chat scopes doc_id server-side, and own-model chat "
+            "over cloud documents targets documents at the prompt level, "
+            "without a tool-layer allowlist."
         )
 
 
@@ -1498,13 +1503,17 @@ def _tool_specs(client, include_management: bool = False, doc_ids=None,
     """(name, description, schema, invoke) per tool, for adapters that take
     the wire schema verbatim. ``invoke`` returns (envelope_text, is_error).
     Schemas are copies (frameworks keep the dict by reference). ``doc_ids``
-    is the local chat scope; cloud scoping is server-side."""
+    is the local chat scope."""
     _require_local_scope(client, doc_ids)
     if getattr(client, "api_key", None):
         bridge = _cloud_bridge(client, gated=not include_management)
         tools_meta = bridge.list_tools()
-        if not include_management:
-            tools_meta = _read_only_tools(tools_meta)
+        if not tools_meta:
+            raise PageIndexAPIError(
+                "The MCP server returned no tools — a zero-tool agent would "
+                "answer from the model's own knowledge, not the documents, "
+                "with nothing to signal it."
+            )
         return [(str(meta.get("name") or "tool"),
                  meta.get("description") or "",
                  copy.deepcopy(meta.get("inputSchema"))
@@ -1531,7 +1540,8 @@ def build_agent_tools(client, include_management: bool = False,
     synthesized from the server's schemas, calls proxied over MCP. Local:
     the built-in contract tools over the local store. Every function returns
     the JSON envelope as a string and never raises for arguments its
-    signature accepts (cloud-only parameters are absent from the local
+    signature accepts — except a cloud 401/403, which re-raises
+    PageIndexAPIError (cloud-only parameters are absent from the local
     signatures; the call_tool path answers them with the guided envelope).
     ``doc_ids`` is the local allowlist, as in ``_tool_specs``.
     """
@@ -1619,12 +1629,7 @@ def doc_targeting_block(client, doc_id, scoped: bool = False) -> Optional[str]:
     if doc_id is None:
         return None
     doc_ids = [doc_id] if isinstance(doc_id, str) else list(doc_id)
-    if not doc_ids:
-        # An empty selection must fail loud: washing it to None would mean
-        # "everything", and the tool-layer allowlist would mean "nothing".
-        raise PageIndexAPIError(
-            "doc_id is empty. Pass one or more document IDs, or omit "
-            "doc_id to give the agent the whole library.")
+    _require_doc_selection(doc_ids)
     details = []
     missing = []
     for one_id in doc_ids:

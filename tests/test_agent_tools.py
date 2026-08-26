@@ -213,6 +213,17 @@ def test_browse_documents_relevance_unsupported(client, store_path):
     assert "local mode" in bad_sort["error"]
 
 
+def test_expand_pages_enforces_contract_pattern():
+    """int() alone is far laxer than the published pages pattern; an
+    out-of-contract spelling must reject, never resolve to another page."""
+    from pageindex.agent_tools import _PageSpecError, _expand_pages
+    assert _expand_pages("1-3, 7") == [1, 2, 3, 7]
+    for bad in ["1_0", "+5", "٥", "１", " 1", "1 - 3"]:
+        with pytest.raises(_PageSpecError) as excinfo:
+            _expand_pages(bad)
+        assert excinfo.value.code == "invalid"
+
+
 def test_browse_documents_empty_and_folder_error(client):
     payload, is_error = run(client, "browse_documents")
     assert not is_error
@@ -746,6 +757,11 @@ def test_claude_agent_config_local(client, store_path):
     config = client.claude_agent_config(doc_id="pi-a")
     assert "report.pdf" in config["system_prompt"]
     assert config["allowed_tools"] == ["mcp__pageindex"]
+    assert config["mcp_servers"]["pageindex"]["name"] == "pageindex"
+    # The SDK server's declared identity follows the registration key.
+    renamed = client.claude_agent_config(server_name="docs")
+    assert renamed["mcp_servers"]["docs"]["name"] == "docs"
+    assert renamed["allowed_tools"] == ["mcp__docs"]
 
 
 def test_openai_agent_config_local(client, store_path):
@@ -759,6 +775,7 @@ def test_openai_agent_config_local(client, store_path):
     assert config["model"] == client.retrieve_model
     assert client.openai_agent_config(model="gpt-x")["model"] == "gpt-x"
     assert Agent(**client.openai_agent_config()).name == "PageIndex"
+    assert client.openai_agent_config(name="Researcher")["name"] == "Researcher"
 
 
 def test_openai_agent_config_model_speaks_the_agents_sdk_grammar(tmp_path):
@@ -775,6 +792,59 @@ def test_openai_agent_config_model_speaks_the_agents_sdk_grammar(tmp_path):
             == "litellm/anthropic/claude-y")
     assert (client.openai_agent_config(model="litellm/groq/llama-x")["model"]
             == "litellm/groq/llama-x")
+
+
+def test_openai_agent_config_carries_cache_marks_for_litellm_claude(tmp_path):
+    """LiteLLM-routed Claude gets the same cache marks the engine
+    attaches in chat_completions(); OpenAI-bound models stay unmarked
+    (their caching is server-side, and LiteLLM seeds nothing on its
+    own)."""
+    pytest.importorskip("agents")
+    from pageindex.local_chat import _cache_extra_args
+    client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
+                                  chat_model="anthropic/claude-x")
+    settings = client.openai_agent_config()["model_settings"]
+    assert settings.extra_args == _cache_extra_args("anthropic/claude-x")
+    assert "cache_control_injection_points" in settings.extra_args
+    assert "model_settings" not in client.openai_agent_config(model="gpt-x")
+    # The per-call override is marked by its own routing, not the default's.
+    marked = client.openai_agent_config(model="bedrock/claude-y")
+    assert "cache_control_injection_points" in marked["model_settings"].extra_args
+
+
+def test_openai_agent_config_marks_bare_claude_behind_litellm_prefix(tmp_path):
+    """In this lane litellm/<bare-claude> routes to Anthropic — the Agents
+    SDK strips the prefix and LiteLLM resolves the bare name — unlike the
+    chat lane, whose wire treats bare names as OpenAI shorthand. The marks
+    follow this lane's routing, not the chat lane's."""
+    pytest.importorskip("agents")
+    pytest.importorskip("litellm")
+    client = PageIndexLocalClient(storage_path=str(tmp_path / "s"))
+    cfg = client.openai_agent_config(model="litellm/claude-sonnet-4-5")
+    assert cfg["model"] == "litellm/claude-sonnet-4-5"
+    assert "cache_control_injection_points" in cfg["model_settings"].extra_args
+    # Without the prefix the SDK's default OpenAI provider serves the name.
+    assert "model_settings" not in client.openai_agent_config(
+        model="claude-sonnet-4-5")
+    assert "model_settings" not in client.openai_agent_config(
+        model="litellm/gpt-4o")
+
+
+def test_openai_agent_config_merges_caller_model_settings(tmp_path):
+    """Caller model_settings merge on top of the bundled cache marks
+    (caller fields win, extra_args dict-merge); with no marks the
+    caller's object rides through verbatim."""
+    pytest.importorskip("agents")
+    from agents import ModelSettings
+    client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
+                                  chat_model="anthropic/claude-x")
+    mine = ModelSettings(temperature=0.2, extra_args={"top_k": 5})
+    merged = client.openai_agent_config(model_settings=mine)["model_settings"]
+    assert merged.temperature == 0.2
+    assert merged.extra_args["top_k"] == 5
+    assert "cache_control_injection_points" in merged.extra_args
+    verbatim = client.openai_agent_config(model="gpt-x", model_settings=mine)
+    assert verbatim["model_settings"] is mine
 
 
 def test_plain_functions_answer_bad_arguments_with_the_envelope(client,
@@ -802,14 +872,17 @@ def test_non_string_doc_name_stays_not_found(client, store_path):
     assert is_error and payload["errorCode"] == "NOT_FOUND"
 
 
-def test_openai_agent_config_repairs_litellm_types(tmp_path, monkeypatch):
+@pytest.mark.parametrize("repair", ["_repair_litellm_types",
+                                    "_mute_litellm_bridge_usage_warning"])
+def test_openai_agent_config_repairs_litellm_types(tmp_path, monkeypatch,
+                                                   repair):
     """The BYO path resolves its model through LiteLLM in the caller's
-    process, outside our completion helpers — the py3.10 type repair must
+    process, outside our completion helpers — the LiteLLM repairs must
     run at config time, and only for LiteLLM-routed models."""
     pytest.importorskip("agents")
     import pageindex.utils
     calls = []
-    monkeypatch.setattr(pageindex.utils, "_repair_litellm_types",
+    monkeypatch.setattr(pageindex.utils, repair,
                         lambda: calls.append(True))
     client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
                                   chat_model="anthropic/claude-x")
@@ -1234,6 +1307,10 @@ class _FakeBridge:
         ]
 
     def list_tools(self):
+        # mirrors the live server: the read endpoint serves the read subset
+        if "tools=read" in self.url:
+            return [tool for tool in self.tools
+                    if (tool.get("annotations") or {}).get("readOnlyHint")]
         return self.tools
 
     def instructions(self):
@@ -1266,8 +1343,7 @@ def test_cloud_agent_tools_discover_live_tool_set(cloud_with_fake_bridge):
     # instructions fetch and the hosted/MCP registrations.
     assert bridge.url == "https://api.pageindex.ai/mcp?tools=read"
     assert bridge.headers == {"Authorization": "Bearer pi-test-key"}
-    # Default: only tools the server marks read-only; unannotated tools are
-    # treated as non-read-only.
+    # The endpoint is the only gate: whatever it serves is exposed verbatim.
     assert [t.__name__ for t in tools] == ["search_documents", "get_document"]
     assert "ESCALATION tool" in tools[0].__doc__
 
@@ -1759,7 +1835,9 @@ def test_annotation_for_both_nullable_encodings():
             == Optional[str])
 
 
-def test_cloud_agent_tools_empty_filter_raises(monkeypatch):
+def test_cloud_agent_tools_trust_the_gated_endpoint(monkeypatch):
+    """The ?tools=read endpoint is the only gate: what it serves is exposed
+    verbatim, with no client-side annotation second-guessing."""
     import pageindex.mcp_bridge as mcp_bridge
 
     class _AllWriteBridge:
@@ -1773,9 +1851,35 @@ def test_cloud_agent_tools_empty_filter_raises(monkeypatch):
 
     monkeypatch.setattr(mcp_bridge, "McpBridge", _AllWriteBridge)
     cloud = PageIndexCloudClient(api_key="pi-test-key")
-    with pytest.raises(PageIndexAPIError, match="annotation"):
-        cloud.agent_tools()
+    assert len(cloud.agent_tools()) == 1
     assert len(cloud.agent_tools(include_management=True)) == 1
+
+
+def test_extract_result_skips_non_dict_messages():
+    """A 200 body of null, a batched array, or an SSE string frame must
+    surface as the contract's PageIndexAPIError, not an AttributeError."""
+    from pageindex.mcp_bridge import McpBridge
+
+    bridge = McpBridge("http://unused", {})
+
+    class _Resp:
+        def __init__(self, text, content_type="application/json"):
+            self.headers = {"Content-Type": content_type}
+            self.status_code = 200
+            self.content = text.encode("utf-8")
+
+        def json(self):
+            return json.loads(self.content)
+
+    for body in ("null", '[{"jsonrpc": "2.0", "id": 1, "result": {}}]',
+                 '"hello"'):
+        with pytest.raises(PageIndexAPIError, match="no reply matching"):
+            bridge._extract_result(_Resp(body), 1)
+
+    sse = ('data: "noise"\n\n'
+           'data: {"jsonrpc": "2.0", "id": 1, "result": {"ok": true}}\n\n')
+    result = bridge._extract_result(_Resp(sse, "text/event-stream"), 1)
+    assert result == {"ok": True}
 
 
 def test_bridge_call_tool_surfaces_iserror(monkeypatch):
@@ -2363,6 +2467,24 @@ def test_submit_wait_poll_error_carries_doc_id(fake_cloud_client, monkeypatch):
         cloud.submit_document("whatever.pdf", wait=True)
 
 
+def test_submit_wait_reraises_definite_poll_answers(fake_cloud_client,
+                                                    monkeypatch):
+    """A 401/403/404 poll answer is final: re-raised untouched, no retries, no keep-polling advice."""
+    cloud = fake_cloud_client(["processing"])
+    polls = {"n": 0}
+
+    def denied(doc_id):
+        polls["n"] += 1
+        raise PageIndexAPIError("Failed to get document metadata: 401",
+                                status_code=401)
+
+    monkeypatch.setattr(cloud, "get_document", denied)
+    with pytest.raises(PageIndexAPIError, match="401") as err:
+        cloud.submit_document("whatever.pdf", wait=True)
+    assert polls["n"] == 1
+    assert "Processing continues" not in str(err.value)
+
+
 def test_config_helpers_reject_empty_doc_id_on_cloud():
     """An explicitly empty scope must not silently widen to the whole
     library — cloud has no tool-layer allowlist to enforce it."""
@@ -2528,3 +2650,23 @@ def test_agent_tools_doc_id_refused_on_cloud():
     cloud = PageIndexCloudClient(api_key="pi-test-key")
     with pytest.raises(PageIndexAPIError, match="local tools only"):
         cloud.agent_tools(doc_id="pi-a")
+
+
+def test_cloud_tool_list_empty_raises(monkeypatch):
+    """An empty tools/list must raise like empty instructions does: a
+    zero-tool agent answers from the model's own knowledge instead of
+    the documents, with nothing to signal it."""
+    pytest.importorskip("agents")
+    import pageindex.mcp_bridge as mcp_bridge
+
+    class _ToollessBridge:
+        def __init__(self, url, headers):
+            pass
+
+        def list_tools(self):
+            return []
+
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _ToollessBridge)
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    with pytest.raises(PageIndexAPIError, match="no tools"):
+        cloud.as_openai_tools()

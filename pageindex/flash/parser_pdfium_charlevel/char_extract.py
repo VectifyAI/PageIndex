@@ -71,6 +71,8 @@ def _extract_raw_chars(page, text_page) -> tuple[list[dict], list[dict]]:
             if 0xDC00 <= low <= 0xDFFF:
                 codepoint = ((codepoint & 0x3FF) << 10) + (low & 0x3FF) + 0x10000
                 skip_next = True
+        if 0xD800 <= codepoint <= 0xDFFF:
+            codepoint = 0xFFFD  # unpaired surrogate: not utf-8 encodable
         # u == 0 (PDFium found no unicode for the glyph) is KEPT as '\x00':
         # text extraction emits the raw charcode for unmapped codes, so its items
         # really contain chr(0) for extension-font pieces at code 0, and the
@@ -79,9 +81,9 @@ def _extract_raw_chars(page, text_page) -> tuple[list[dict], list[dict]]:
         ch_str = chr(codepoint)
         is_ws = js_is_ws(codepoint)
         # FPDFText_IsGenerated returns a c_int: 1 generated, 0 real, -1 error.
-        # Only a POSITIVE 1 may mark a char generated -- the -1 has to read the
-        # same way here as it does in the page-mode unicode walk, or the two
-        # char sets disagree and that walk desyncs.
+        # Only a POSITIVE 1 may mark a char generated. This is the package's
+        # only read: the page-mode unicode walk consumes this flag rather
+        # than re-reading PDFium.
         is_gen = is_generated(text_page, index_value) == 1
         # PDFium inserts is_generated chars as layout placeholders for
         # Td/Tm jumps with no literal content-stream char (typically

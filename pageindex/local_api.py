@@ -5,6 +5,7 @@ import json
 import logging
 import multiprocessing
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -14,6 +15,14 @@ from .local_store import DocStore
 from .utils import run_off_loop
 
 logger = logging.getLogger(__name__)
+
+_SURROGATES = re.compile("[\ud800-\udfff]")
+
+
+def _scrub_surrogates(text: str) -> str:
+    """Lone surrogates (surrogateescape'd names, PyPDF2's surrogatepass
+    decodes) cannot encode to UTF-8; replace with U+FFFD."""
+    return _SURROGATES.sub("\ufffd", text)
 
 
 def _now_iso() -> str:
@@ -76,7 +85,7 @@ class LocalAPI:
                     "Failed to submit document: metadata must be a dict."
                 )
             try:
-                json.dumps(metadata)
+                json.dumps(metadata, allow_nan=False)
             except (TypeError, ValueError) as e:
                 raise PageIndexAPIError(
                     f"Failed to submit document: metadata must be valid JSON. {e}"
@@ -108,7 +117,11 @@ class LocalAPI:
             raise PageIndexAPIError(
                 "Failed to submit document: PDF has no content. All pages are blank."
             )
-        self._unique_doc_name(os.path.basename(file_path))
+        # Surrogates from a surrogateescape'd filesystem name would be
+        # mangled by the store's errors="replace" write; scrub now so the
+        # returned name is byte-for-byte the stored name.
+        doc_name = _scrub_surrogates(os.path.basename(file_path))
+        self._unique_doc_name(doc_name)
 
         try:
             if mode == "flash":
@@ -124,6 +137,7 @@ class LocalAPI:
             raise
         except Exception as e:
             raise PageIndexAPIError(f"Failed to submit document: {e}") from e
+        self._check_page_bounds(structure, len(page_texts))
 
         doc_id = "pi-" + uuid.uuid4().hex
         pages = [{"page_index": i + 1, "markdown": text}
@@ -134,7 +148,7 @@ class LocalAPI:
         with self._store.lock():
             meta = {
                 "id": doc_id,
-                "name": self._unique_doc_name(os.path.basename(file_path)),
+                "name": self._unique_doc_name(doc_name),
                 "description": description,
                 "status": "completed",
                 "createdAt": _now_iso(),
@@ -164,11 +178,31 @@ class LocalAPI:
         )
 
     @staticmethod
+    def _check_page_bounds(structure: list, page_count: int) -> None:
+        """The tree (pdfium) and stored pages (PyPDF2) come from different
+        parsers; a span outside 1..page_count IndexErrors every later read."""
+        stack = list(structure)
+        while stack:
+            node = stack.pop()
+            start, end = node.get("start_index"), node.get("end_index")
+            if (start is not None and end is not None
+                    and not (1 <= start and end <= page_count)):
+                raise PageIndexAPIError(
+                    f"Failed to submit document: the extracted structure "
+                    f"references pages {start}-{end} outside the PDF's "
+                    f"{page_count} readable pages."
+                )
+            stack.extend(node.get("nodes") or [])
+
+    @staticmethod
     def _extract_page_texts(file_path: str) -> list[str]:
         import PyPDF2
         with open(file_path, "rb") as f:
             reader = PyPDF2.PdfReader(f)
-            return [page.extract_text() or "" for page in reader.pages]
+            # PyPDF2 decodes broken ToUnicode maps with surrogatepass; lone
+            # surrogates would crash every utf-8 JSON save downstream.
+            return [_scrub_surrogates(page.extract_text() or "")
+                    for page in reader.pages]
 
     def _index_standard(self, file_path: str, page_texts: list[str]) -> tuple[list, str | None]:
         from .page_index_classic import page_index_main
@@ -203,7 +237,8 @@ class LocalAPI:
         if not structure:
             raise PageIndexAPIError(
                 "Failed to submit document: PageIndex Flash could not extract "
-                "a structure from this PDF."
+                "a structure from this PDF. Try mode='standard', which builds "
+                "the structure with the model."
             )
         write_node_id(structure)
         description = generate_doc_description(

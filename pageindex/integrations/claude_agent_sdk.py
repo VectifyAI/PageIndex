@@ -14,7 +14,8 @@ from .._version import sdk_version
 from ..errors import PageIndexAPIError
 
 
-def build_claude_mcp(client, include_management: bool = False, doc_ids=None):
+def build_claude_mcp(client, include_management: bool = False, doc_ids=None,
+                     server_name: str = "pageindex"):
     from ..agent_tools import _require_local_scope
     _require_local_scope(client, doc_ids)
     if getattr(client, "api_key", None):
@@ -61,5 +62,5 @@ def build_claude_mcp(client, include_management: bool = False, doc_ids=None):
         for name, description, schema, invoke
         in _tool_specs(client, include_management, doc_ids)
     ]
-    return create_sdk_mcp_server(name="pageindex", version=sdk_version(),
+    return create_sdk_mcp_server(name=server_name, version=sdk_version(),
                                  tools=tools)
