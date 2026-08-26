@@ -1238,6 +1238,35 @@ def test_summarize_tree_admits_a_ready_parent_before_a_queued_shallow_leaf(monke
     assert started.index("Section Title: C") < started.index("delta")
 
 
+def test_summary_scheduler_starts_a_marked_node_without_waiting_for_the_rest(monkeypatch):
+    """A node marked final summarizes right away while its siblings are still
+    unmarked; marking it again, or marking its parent later, never repeats
+    its call: the parent composes the summary already written."""
+    calls = []
+
+    async def fake(model, prompt):
+        calls.append(prompt)
+        return '{"points": [], "summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", fake)
+    pdf_pages = [("alpha " * 5, 5), ("beta " * 5, 5)]
+    leaf = {"title": "A", "start_index": 1, "end_index": 1}
+    root = {"title": "R", "start_index": 1, "end_index": 2, "nodes": [
+        leaf, {"title": "B", "start_index": 2, "end_index": 2}]}
+
+    async def scenario():
+        scheduler = pageindex.utils.SummaryScheduler([root], pdf_pages, small_node_tokens=0)
+        scheduler.mark_final([leaf])
+        scheduler.mark_final([leaf])
+        for _ in range(3):
+            await asyncio.sleep(0)
+        assert len(calls) == 1 and "alpha" in calls[0]
+        scheduler.mark_final(list(pageindex.utils._subtree([root])))
+        return await scheduler.finish()
+    asyncio.run(scenario())
+    assert len(calls) == 3
+    assert [n["summary"] for n in (leaf, root["nodes"][1], root)] == ["ok"] * 3
+
+
 def test_priority_gate_passes_the_permit_on_when_its_taker_is_cancelled():
     """A waiter cancelled after the permit was granted but before it ran
     must hand the permit on, or the pool shrinks by one for good."""
