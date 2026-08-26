@@ -396,7 +396,7 @@ def test_env_key_found_from_cwd(tmp_path):
     assert out.stdout.strip() == "ok"
 
 
-def test_env_not_found_from_cwd_stays_unset(tmp_path, tmp_path_factory):
+def test_env_not_loaded_from_install_dir(tmp_path, tmp_path_factory):
     """The cwd search finding nothing must end the search: find_dotenv
     returns '' then, and `or None` handed load_dotenv its own upward walk
     from utils.py — the install-dir leak the cwd search replaced. A
