@@ -95,13 +95,35 @@ answer = client.chat("What was the 2023 operating margin, and where is it stated
 print(answer)
 ```
 
-
 ### Model Recommendations
 
 - **`index_model` — a basic model is sufficient.** The index model generates the document's tree index. A basic model is sufficient to produce a good tree structure.
 - **`chat_model` — use the best model you can afford.** The chat model searches the tree to retrieve information. See [Query cost and accuracy](#query-cost-and-accuracy).
 
 See the [Detailed Usage Guide](#detailed-usage-guide) to configure other models and integrate PageIndex with your own agent.
+
+To request inline page-level citations, pass a system message together with the question:
+
+```python
+messages = [
+    {
+        "role": "system",
+        "content": (
+            'Cite only statements supported by tool outputs using '
+            '<cite doc="{docName}" page="{pageNumber}"/>'
+        ),
+    },
+    {"role": "user", "content": "Summarize the document."},
+]
+
+answer = client.chat(messages, doc_id=doc_id)
+```
+
+The model fills in the document name and page number, for example:
+
+```text
+Revenue increased during the reporting period. <cite doc="report.pdf" page="12"/>
+```
 
 
 ## Benchmarks
