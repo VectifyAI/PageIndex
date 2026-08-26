@@ -894,6 +894,7 @@ class SummaryScheduler:
         self._asked = self._answered = False
         self._marks = {}     # id(node) -> future resolved once the node is final
         self._tasks = {}     # id(node) -> its summary task
+        self._finals = []    # (node, ids of its children when it was marked)
 
     def mark_final(self, nodes):
         """These nodes will not gain, lose or swap children: their summaries
@@ -903,6 +904,7 @@ class SummaryScheduler:
             mark = self._mark(node)
             if not mark.done():
                 mark.set_result(None)
+                self._finals.append((node, tuple(id(c) for c in node.get('nodes') or [])))
         marked = {id(node) for node in nodes}
         order = []
 
@@ -938,7 +940,10 @@ class SummaryScheduler:
 
     async def _leaf_summary(self, node, prio):
         text = get_text_of_pdf_pages(self._pdf_pages, node['start_index'], node['end_index'])
-        if count_tokens(text, model="gpt-4o") < self._small_node_tokens:
+        # no text averages 8+ chars per token, so length alone clears most
+        # leaves without paying for the tokenizer on the loop
+        if (len(text) <= self._small_node_tokens * 8
+                and count_tokens(text, model="gpt-4o") < self._small_node_tokens):
             return text.strip()
 
         # A node merged from same-page siblings carries a title joined from theirs.
@@ -1021,6 +1026,20 @@ class SummaryScheduler:
 
     async def finish(self):
         """Wait for every summary; fails loud if the model never answered."""
+        # mark_final is a promise: the node stays in the tree and keeps its
+        # children. Verify it before awaiting anything - a broken promise
+        # leaves tasks whose marks can never arrive, a hang with no diagnosis.
+        live = {id(node) for node in _subtree(self.structure)}
+        for node, children in self._finals:
+            if id(node) not in live or tuple(id(c) for c in node.get('nodes') or []) != children:
+                name = node.get('title') or node.get('node_id') or '?'
+                raise RuntimeError(f"node {name!r} was dropped or changed "
+                                   "after it was marked final")
+        undecided = sum(1 for nid in self._tasks
+                        if not (mark := self._marks.get(nid)) or not mark.done())
+        if undecided:
+            raise RuntimeError(f"{undecided} node(s) were tasked but never marked final; "
+                               "their summaries would wait forever")
         results = await asyncio.gather(*(self._task(root, 1) for root in self.structure),
                                        return_exceptions=True)
         for r in results:

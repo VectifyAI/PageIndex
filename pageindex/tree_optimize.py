@@ -745,7 +745,8 @@ async def expand(structure, pages, lines, args, log, frozen):
             return
         changed = True
         attach_children(node, best["children"], lines)
-        merge_same_page([node], log)
+        if args.do_merge:
+            merge_same_page([node], log)
         args.settled([node])
         results = await asyncio.gather(*(process(child)
                                          for child in node["nodes"]),
@@ -812,7 +813,7 @@ async def optimize(structure, pages, lines, model=None, routing=ROUTING_COST,
                            min_gain_ratio=min_gain_ratio, cache=cache,
                            kinds=set(kinds) if kinds else None,
                            empty_retries=empty_retries, progress=progress,
-                           settled=settled)
+                           settled=settled, do_merge=do_merge)
     baseline = set(validate(structure, page_count)) if page_count else set()
     before = complexity(structure, page_count, routing=routing) if page_count else {}
 
