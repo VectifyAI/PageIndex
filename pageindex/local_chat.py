@@ -1,4 +1,4 @@
-"""Managed local chat: document-QA agents over the local tools."""
+"""Own-model chat: document-QA agents over the local or cloud agent tools."""
 from __future__ import annotations
 
 import asyncio
@@ -10,7 +10,7 @@ import time
 import uuid
 from typing import Any, Iterator, Optional, Union
 
-from .agent_tools import AGENT_INSTRUCTIONS, doc_targeting_block
+from .agent_tools import _base_instructions, doc_targeting_block
 from .errors import PageIndexAPIError
 
 CHAT_HEADER = (
@@ -21,20 +21,24 @@ CHAT_HEADER = (
 
 # ── shared: prompt, doc targeting, validation, sync bridges ──
 
-def _managed_instructions(extra_system: list[str]) -> str:
-    return "\n\n".join([CHAT_HEADER, AGENT_INSTRUCTIONS, *extra_system])
+def _managed_instructions(client, extra_system: list[str]) -> str:
+    # Local: the built-in subset guidance. Own-model chat over cloud
+    # documents: the live instructions the MCP server serves.
+    base: str = _base_instructions(client)
+    return "\n\n".join([CHAT_HEADER, base, *extra_system])
 
 
-def _doc_block(client, doc_id) -> Optional[str]:
+def _doc_block(client, doc_id, scoped: bool) -> Optional[str]:
     if doc_id is None:
         return None
     if not isinstance(doc_id, (str, list)):
         raise PageIndexAPIError("doc_id must be a string or a list of "
                                 "strings.")
-    # scoped: the chat surfaces also pass doc_id into the tool layer, so
-    # name resolution happens inside the allowlist — only a duplicate name
-    # within the targeted set shadows.
-    return doc_targeting_block(client, doc_id, scoped=True)
+    # scoped: local surfaces also pass doc_id into the tool layer, so name
+    # resolution happens inside the allowlist — only a duplicate name
+    # within the targeted set shadows. Cloud tools take no allowlist
+    # (targeting is prompt-level), so the whole library shadows.
+    return doc_targeting_block(client, doc_id, scoped=scoped)
 
 
 def _system_text(content: Any) -> str:
@@ -166,7 +170,8 @@ def _require_openai_agents(method: str) -> None:
         import agents  # noqa: F401
     except ImportError as exc:
         raise PageIndexAPIError(
-            f"{method} in local mode requires the OpenAI Agents SDK — "
+            f"{method} with your own chat model requires the OpenAI "
+            "Agents SDK — "
             "pip install openai-agents. "
             "messages() runs on the anthropic extra instead."
         ) from exc
@@ -375,13 +380,16 @@ def _conversation_cache_key(model_name: str, instructions: str, doc_id,
     return "pageindex-" + hashlib.sha256(seed.encode()).hexdigest()[:16]
 
 
-def _model_backend_error(exc, lane: str) -> PageIndexAPIError:
+def _model_backend_error(exc, lane: str, client=None) -> PageIndexAPIError:
     """Wrap a provider failure; the sol-class refusal (chatcmpl rejects
     function tools while reasoning is on) gets its documented exits
     appended, since the fix is a different route, not a retry. The exits
     are per-lane: of the chat lane's three, two are dead ends for a
     responses() caller — it IS the other lane, and its reasoning knob is
-    ``reasoning``, not ``reasoning_effort``."""
+    ``reasoning``, not ``reasoning_effort``. On a cloud client an
+    auth-shaped failure gets the own-model architecture spelled out —
+    the misreading it corrects ("the cloud runs my model") surfaces
+    exactly here."""
     message = f"The model backend failed: {exc}"
     if "Function tools with reasoning_effort" in str(exc):
         message += (
@@ -393,17 +401,28 @@ def _model_backend_error(exc, lane: str) -> PageIndexAPIError:
             "efforts), or call responses() instead." if lane == "chat"
             else "."
         )
+    if (getattr(client, "api_key", None)
+            and (getattr(exc, "status_code", None) == 401
+                 or "api key" in str(exc).lower().replace("_", " "))):
+        message += (
+            " — note: your chat model runs in your process on your own "
+            "provider credentials; the PageIndex api_key does not cover "
+            "it. Set the provider key (or chat_backend)")
+        message += (
+            ", or drop the chat model configuration to use the managed "
+            "cloud chat." if lane == "chat" else "."
+        )
     return PageIndexAPIError(message)
 
 
-def _translate_run_error(exc, max_turns, lane) -> PageIndexAPIError:
+def _translate_run_error(exc, max_turns, lane, client=None) -> PageIndexAPIError:
     """The uncaught-run ladder every agent door shares."""
     from agents.exceptions import AgentsException, MaxTurnsExceeded
     if isinstance(exc, MaxTurnsExceeded):
         return _wrap_max_turns(max_turns)
     if isinstance(exc, AgentsException):
         return PageIndexAPIError(f"The agent backend failed: {exc}")
-    return _model_backend_error(exc, lane)
+    return _model_backend_error(exc, lane, client)
 
 
 def _run_kwargs(max_turns) -> dict:
@@ -575,19 +594,22 @@ def run_chat_completions(client, messages, stream: bool = False,
                          ) -> Union[dict, Iterator[str], Iterator[dict]]:
     if enable_citations:
         raise PageIndexAPIError(
-            "enable_citations is cloud-only — citations need block-level OCR "
-            "data that local mode does not store."
-        )
+            "enable_citations needs the managed chat endpoint — "
+            + ("drop the chat model configuration to use it."
+               if getattr(client, "api_key", None) else
+               "local mode does not store the block-level OCR data "
+               "citations need."))
     _require_openai_agents("chat_completions")
     _validate_max_turns(max_turns)
     system_texts, history = _split_chat_messages(messages)
-    block = _doc_block(client, doc_id)
+    scope = client._local_doc_scope(doc_id)
+    block = _doc_block(client, doc_id, scoped=scope is not None)
     items = ([{"role": "user", "content": block}] if block else []) + history
     model_name = model or client.chat_model
     reported_model = _reported_model(model_name)
-    managed = _managed_instructions(system_texts)
+    managed = _managed_instructions(client, system_texts)
     agent = _openai_agent(client, "chat", model_name, managed,
-                          temperature, top_p, doc_ids=doc_id,
+                          temperature, top_p, doc_ids=scope,
                           cache_key=_conversation_cache_key(
                               model_name, managed, doc_id, history),
                           reasoning_effort=reasoning_effort,
@@ -606,7 +628,7 @@ def run_chat_completions(client, messages, stream: bool = False,
                 Runner.run(agent, input=items, **run_kwargs)))
         except (MaxTurnsExceeded, AgentsException,
                 openai.OpenAIError) as exc:
-            raise _translate_run_error(exc, max_turns, "chat") from exc
+            raise _translate_run_error(exc, max_turns, "chat", client) from exc
         return {
             "id": f"chatcmpl-{uuid.uuid4().hex}",
             "object": "chat.completion",
@@ -647,7 +669,7 @@ def run_chat_completions(client, messages, stream: bool = False,
             completed = True
         except (MaxTurnsExceeded, AgentsException,
                 openai.OpenAIError) as exc:
-            raise _translate_run_error(exc, max_turns, "chat") from exc
+            raise _translate_run_error(exc, max_turns, "chat", client) from exc
         finally:
             if not completed and hasattr(streamed, "cancel"):
                 streamed.cancel()  # abandoned/failed: stop the agent task
@@ -690,15 +712,16 @@ def run_responses(client, input, model: Optional[str] = None,
     else:
         raise PageIndexAPIError("input must be a non-empty string or list "
                                 "of item dicts.")
-    block = _doc_block(client, doc_id)
+    scope = client._local_doc_scope(doc_id)
+    block = _doc_block(client, doc_id, scoped=scope is not None)
     conversation = items
     if block:
         items = [{"role": "user", "content": block}] + items
     extra = [instructions] if instructions else []
     model_name = model or client.chat_model
-    managed = _managed_instructions(extra)
+    managed = _managed_instructions(client, extra)
     agent = _openai_agent(client, "responses", model_name, managed,
-                          temperature, top_p, doc_ids=doc_id,
+                          temperature, top_p, doc_ids=scope,
                           cache_key=_conversation_cache_key(
                               model_name, managed, doc_id, conversation),
                           reasoning=reasoning, extra_body=extra_body,
@@ -752,7 +775,7 @@ def run_responses(client, input, model: Optional[str] = None,
         except (MaxTurnsExceeded, AgentsException,
                 openai.OpenAIError) as exc:
             raise _translate_run_error(exc, max_turns,
-                                       "responses") from exc
+                                       "responses", client) from exc
         transcript = result.to_input_list()[len(items):]
         return envelope(transcript, result.raw_responses)
 
@@ -816,11 +839,11 @@ def run_responses(client, input, model: Optional[str] = None,
             if (isinstance(exc, MaxTurnsExceeded)
                     or recorded.get("status") not in ("failed", "incomplete")):
                 raise _translate_run_error(exc, max_turns,
-                                           "responses") from exc
+                                           "responses", client) from exc
             completed = True
         except openai.OpenAIError as exc:
             raise _translate_run_error(exc, max_turns,
-                                       "responses") from exc
+                                       "responses", client) from exc
         finally:
             if not completed and hasattr(streamed, "cancel"):
                 streamed.cancel()  # abandoned/failed: stop the agent task
@@ -844,7 +867,8 @@ def _require_anthropic() -> None:
         import anthropic  # noqa: F401
     except ImportError as exc:
         raise PageIndexAPIError(
-            "messages in local mode requires the Anthropic SDK — "
+            "messages drives your own chat model and requires the "
+            "Anthropic SDK — "
             "pip install anthropic (or pip install 'pageindex[anthropic]')."
         ) from exc
     try:
@@ -852,7 +876,7 @@ def _require_anthropic() -> None:
         from anthropic.lib.tools import ToolError  # noqa: F401
     except ImportError as exc:
         raise PageIndexAPIError(
-            "messages in local mode requires anthropic >= 0.108.0 (the tool "
+            "messages requires anthropic >= 0.108.0 (the tool "
             "runner with ToolError) — pip install -U anthropic."
         ) from exc
 
@@ -888,13 +912,13 @@ def _anthropic_client(backend=None):
     return client
 
 
-def _anthropic_system(extra_system, block: Optional[str]) -> list[dict]:
+def _anthropic_system(client, extra_system, block: Optional[str]) -> list[dict]:
     """System blocks: cache_control marks the stable managed prefix only
     (the API allows 4 breakpoints total — the varying doc block and caller
     blocks must not consume the budget); the doc block and caller system
     content follow as their own blocks."""
     blocks = [{"type": "text",
-               "text": CHAT_HEADER + "\n\n" + AGENT_INSTRUCTIONS,
+               "text": CHAT_HEADER + "\n\n" + _base_instructions(client),
                "cache_control": {"type": "ephemeral"}}]
     if block:
         blocks.append({"type": "text", "text": block})
@@ -1002,20 +1026,24 @@ def run_messages(client, messages, model: str,
             or not all(isinstance(message, dict) for message in messages)):
         raise PageIndexAPIError("messages must be a non-empty string or a "
                                 "list of message dicts.")
-    block = _doc_block(client, doc_id)
+    scope = client._local_doc_scope(doc_id)
+    block = _doc_block(client, doc_id, scoped=scope is not None)
     prepared = [dict(message) for message in messages]
     passthrough = {key: value for key, value in {
         "temperature": temperature, "top_p": top_p, "top_k": top_k,
         "stop_sequences": stop_sequences, "thinking": thinking,
         "extra_body": extra_body, "extra_headers": extra_headers,
     }.items() if value is not None}
-    system_blocks = _anthropic_system(system, block)
+    system_blocks = _anthropic_system(client, system, block)
     # Top-level cache_control: the server re-marks the newest block each
     # turn, so the loop re-reads the growing conversation from cache.
     # Counts toward the 4-breakpoint limit (live-verified 400 past it).
     cached: dict[str, Any] = (
         {"cache_control": {"type": "ephemeral"}}
         if _cache_marks(system_blocks, prepared) < 4 else {})
+    # Tools before the transport: on a bridge client building them is
+    # network I/O, and a failure there must not strand the client below.
+    tools = build_anthropic_tools(client, doc_ids=scope)
     merged = _merged_backend(client, backend)
     backend_client = _anthropic_client(merged)
     # Close only a per-call construction: cached clients stay open for
@@ -1028,7 +1056,7 @@ def run_messages(client, messages, model: str,
         max_tokens=max_tokens,
         messages=prepared,
         model=model,
-        tools=build_anthropic_tools(client, doc_ids=doc_id),
+        tools=tools,
         system=system_blocks,
         stream=stream,
         # Bounded like the OpenAI surfaces (their framework default is 10).
@@ -1044,8 +1072,7 @@ def run_messages(client, messages, model: str,
                     for event in turn_stream:
                         yield event
             except anthropic.AnthropicError as exc:
-                raise PageIndexAPIError(
-                    f"The model backend failed: {exc}") from exc
+                raise _model_backend_error(exc, "messages", client) from exc
             except TypeError as exc:
                 # the SDK's request-time credential-resolution failure
                 if "authentication" not in str(exc).lower():
@@ -1063,8 +1090,7 @@ def run_messages(client, messages, model: str,
     try:
         turns = [turn for turn in runner]
     except anthropic.AnthropicError as exc:
-        raise PageIndexAPIError(
-            f"The model backend failed: {exc}") from exc
+        raise _model_backend_error(exc, "messages", client) from exc
     except TypeError as exc:
         # the SDK's request-time credential-resolution failure
         if "authentication" not in str(exc).lower():

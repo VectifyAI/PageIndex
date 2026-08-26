@@ -3,6 +3,8 @@ from typing import TYPE_CHECKING as _TYPE_CHECKING
 
 from .client import PageIndexClient, PageIndexCloudClient, PageIndexLocalClient
 from .errors import PageIndexAPIError
+from .types import (ChatConfig, CloudIndexConfig, IndexConfig,
+                    LocalIndexConfig)
 
 if _TYPE_CHECKING:
     from .flash import page_index_flash
@@ -13,6 +15,7 @@ if _TYPE_CHECKING:
 __all__ = [
     "PageIndexClient", "PageIndexCloudClient", "PageIndexLocalClient",
     "PageIndexAPIError",
+    "IndexConfig", "CloudIndexConfig", "LocalIndexConfig", "ChatConfig",
     "page_index", "page_index_main", "page_index_flash",
     "optimize_tree", "md_to_tree",
 ]
@@ -25,7 +28,7 @@ _LAZY = {
 _SUBMODULES = {"agent_tools", "client", "cloud_api", "errors", "flash",
                "integrations", "local_api", "local_chat", "local_store",
                "mcp_bridge", "page_index_classic", "page_index_md",
-               "tree_optimize", "utils"}
+               "tree_optimize", "types", "utils"}
 
 
 def __getattr__(name):
