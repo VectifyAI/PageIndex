@@ -85,8 +85,8 @@ from pageindex import PageIndexClient
 os.environ["OPENAI_API_KEY"] = "your-openai-key"
 
 client = PageIndexClient(                     
-    index_model="gpt-5.6-luna",               # model to build the tree index
-    chat_model="gpt-5.6-sol",                 # model to search the tree
+    index="gpt-5.6-luna",               # model to build the tree index
+    chat="gpt-5.6-sol",                 # model to search the tree
 )
 doc_id = client.submit_document("report.pdf")["doc_id"]
 
@@ -345,16 +345,22 @@ Each `*_config` helper is sugar over the explicit pieces — `client.agent_instr
 
 ## PageIndex Cloud
 
-The open-source version is ideal for text-heavy PDFs and local workflows. Use PageIndex Cloud when you need OCR for scanned documents, image understanding, hosted storage, or search across a large document library.
+The open-source version is ideal for text-heavy PDFs and local workflows. With **PageIndex Cloud, document indexing and storage run in the cloud**: PageIndex handles parsing, OCR, image understanding, tree-index construction, and managed storage for you. The chat and retrieval layer remains **compatible with your model**, so you can search the cloud-hosted index using the model provider your application already uses.
 
-Moving from Local to Cloud only requires a [PageIndex API key](https://developer.pageindex.ai/):
+Moving indexing and storage from Local to Cloud only requires a [PageIndex API key](https://developer.pageindex.ai/):
 
 ```python
-# Local
-client = PageIndexClient()
+import os
+from pageindex import PageIndexClient
 
-# Cloud
-client = PageIndexClient(api_key="pi-...")
+os.environ["PageIndex_API_KEY"] = "your-pageindex-key"
+os.environ["OPENAI_API_KEY"] = "your-openai-key"
+
+
+client = PageIndexClient(
+    index="cloud",                       # build and store the index in PageIndex Cloud
+    chat="gpt-5.6-sol",                  # use your preferred compatible model for chat
+)
 
 # The rest of your code stays the same
 doc_id = client.submit_document("report.pdf", wait=True)["doc_id"]
@@ -364,8 +370,9 @@ print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 | Capability | **Local** (this repo) | **Cloud** ([get an API key](https://developer.pageindex.ai/)) |
 |---|---|---|
 | Best for | text-heavy PDFs and local workflows | scanned, image-heavy, and large document collections |
-| Parsing | local text extraction | production OCR |
-| Storage | local filesystem | managed document library |
+| Indexing | runs locally | runs in PageIndex Cloud, with production OCR and image understanding |
+| Storage | local | managed in PageIndex Cloud |
+| Chat model | your model | your compatible model |
 | Citations | page-level | line-level |
 | Image understanding | — | ✅ |
 | Multi-document scale | manual | PageIndex File System |
