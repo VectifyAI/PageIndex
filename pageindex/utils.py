@@ -9,6 +9,8 @@ import json
 import PyPDF2
 import copy
 import asyncio
+import heapq
+from contextlib import asynccontextmanager
 from io import BytesIO
 from dotenv import find_dotenv, load_dotenv
 load_dotenv(find_dotenv(usecwd=True))
@@ -745,6 +747,47 @@ SUMMARY_RAW_TEXT_TOKENS = 200   # leaves under this reuse their raw text as the 
 SUMMARY_INTRO_MAX_PAGES = 3     # cap on leading pages fed into a parent summary
 
 
+class _PriorityGate:
+    """Semaphore that admits the highest-priority waiter first, FIFO within a priority."""
+
+    def __init__(self, permits):
+        if permits < 1:
+            raise ValueError("permits must be >= 1")
+        self._free = permits
+        self._waiters = []
+        self._seq = 0
+
+    @asynccontextmanager
+    async def slot(self, prio):
+        await self.acquire(prio)
+        try:
+            yield
+        finally:
+            self.release()
+
+    async def acquire(self, prio):
+        if self._free > 0 and not self._waiters:
+            self._free -= 1
+            return
+        fut = asyncio.get_running_loop().create_future()
+        heapq.heappush(self._waiters, (-prio, self._seq, fut))
+        self._seq += 1
+        try:
+            await fut
+        except asyncio.CancelledError:
+            if fut.done() and not fut.cancelled():
+                self.release()  # granted while cancelling: pass the permit on
+            raise
+
+    def release(self):
+        while self._waiters:
+            _, _, fut = heapq.heappop(self._waiters)
+            if not fut.done():
+                fut.set_result(None)  # the permit moves straight to this waiter
+                return
+        self._free += 1
+
+
 def get_intro_text(node, pdf_pages, max_pages=SUMMARY_INTRO_MAX_PAGES):
     """Pages of the node covered by no child: from its start to just before the
     first child starts. Empty when the first child opens on the node's own page."""
@@ -830,20 +873,22 @@ async def summarize_tree(structure, pdf_pages, model=None,
     child summaries plus the pages no child covers. A parent's summary describes
     its whole subtree (end_index union semantics). Nodes that already carry a
     summary are left untouched; leaves under `small_node_tokens` use their raw
-    text as the summary without a model call."""
-    semaphore = asyncio.Semaphore(concurrency or SUMMARY_CONCURRENCY)
+    text as the summary without a model call. Queued model calls are admitted
+    deepest node first: depth counts the calls left on a node's path to the
+    root, its own included."""
+    gate = _PriorityGate(concurrency or SUMMARY_CONCURRENCY)
     asked = answered = False
 
-    async def ask(prompt):
+    async def ask(prompt, prio):
         nonlocal asked, answered
         asked = True
-        async with semaphore:
+        async with gate.slot(prio):
             reply = await llm_acompletion(model, prompt)
         if reply:
             answered = True
         return reply
 
-    async def leaf_summary(node):
+    async def leaf_summary(node, prio):
         text = get_text_of_pdf_pages(pdf_pages, node['start_index'], node['end_index'])
         if count_tokens(text, model="gpt-4o") < small_node_tokens:
             return text.strip()
@@ -874,14 +919,14 @@ async def summarize_tree(structure, pdf_pages, model=None,
 
     Follow strictly the above JSON return format. Do not include any other text!
     """
-        reply = await ask(prompt)
+        reply = await ask(prompt, prio)
         if retitle:
             written = parse_title(reply)
             if written:
                 node['title'] = written
         return parse_summary(reply)
 
-    async def parent_summary(node):
+    async def parent_summary(node, prio):
         children = node['nodes']
         intro = get_intro_text(node, pdf_pages, max_pages=max_intro_pages)
         listing = json.dumps(
@@ -905,12 +950,12 @@ async def summarize_tree(structure, pdf_pages, model=None,
 
     Follow strictly the above JSON return format. Do not include any other text!
     """
-        return parse_summary(await ask(prompt))
+        return parse_summary(await ask(prompt, prio))
 
-    async def visit(node):
+    async def visit(node, depth=1):
         children = node.get('nodes') or []
         if children:
-            done = await asyncio.gather(*(visit(child) for child in children),
+            done = await asyncio.gather(*(visit(child, depth + 1) for child in children),
                                         return_exceptions=True)
             for result in done:
                 if isinstance(result, Exception) and _is_unrecoverable(result):
@@ -918,7 +963,8 @@ async def summarize_tree(structure, pdf_pages, model=None,
         if node.get('summary'):
             return
         try:
-            node['summary'] = await (parent_summary(node) if children else leaf_summary(node))
+            node['summary'] = await (parent_summary(node, depth) if children
+                                     else leaf_summary(node, depth))
         except Exception as e:
             node['summary'] = ""
             if _is_unrecoverable(e):

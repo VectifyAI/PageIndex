@@ -1187,6 +1187,47 @@ def test_summarize_tree_all_short_leaves_need_no_model(monkeypatch):
     assert out[0]["summary"] == "tiny"
 
 
+def test_summarize_tree_admits_deepest_leaf_first(monkeypatch):
+    """The tree is visited level by level, so with one permit the shallow
+    leaf D reaches the gate before the deep leaf C. C must be admitted first
+    anyway: the parents still owed above it are what the run ends on."""
+    started = []
+
+    async def fake(model, prompt):
+        started.append(next(w for w in ("alpha", "gamma", "delta", "Section Title")
+                            if w in prompt))
+        for _ in range(8):      # enough loop turns for every leaf to reach the gate
+            await asyncio.sleep(0)
+        return '{"points": [], "summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", fake)
+    pdf_pages = [("alpha " * 5, 5), ("gamma " * 5, 5), ("delta " * 5, 5)]
+    structure = [{"title": "R", "start_index": 1, "end_index": 3, "nodes": [
+        {"title": "A", "start_index": 1, "end_index": 1},
+        {"title": "B", "start_index": 2, "end_index": 2, "nodes": [
+            {"title": "C", "start_index": 2, "end_index": 2}]},
+        {"title": "D", "start_index": 3, "end_index": 3}]}]
+    asyncio.run(pageindex.utils.summarize_tree(
+        structure, pdf_pages, small_node_tokens=0, concurrency=1))
+    assert started.index("gamma") < started.index("delta")
+    assert started.count("Section Title") == 2
+
+
+def test_priority_gate_passes_the_permit_on_when_its_taker_is_cancelled():
+    """A waiter cancelled after the permit was granted but before it ran
+    must hand the permit on, or the pool shrinks by one for good."""
+    async def scenario():
+        gate = pageindex.utils._PriorityGate(1)
+        await gate.acquire(1)
+        waiter = asyncio.create_task(gate.acquire(1))
+        await asyncio.sleep(0)          # queued
+        gate.release()                  # granted to `waiter`, not yet resumed
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+        await asyncio.wait_for(gate.acquire(1), 1)   # hangs on a leaked permit
+    asyncio.run(scenario())
+
+
 def test_summarize_tree_partial_exhaustion_fails_loud(monkeypatch):
     """One lucky call must not vouch for a model that then went away: a
     ladder-exhausted node raises instead of silently blanking."""
