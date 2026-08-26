@@ -106,13 +106,20 @@ See the [Detailed Usage Guide](#detailed-usage-guide) to configure other models 
 
 ## Benchmarks
 
-### Indexing cost
+### Indexing cost and time
 
 Building a tree locally runs **about $0.001 per page** with `index_model="gpt-5.6-luna"` — so a 1,000-page textbook costs a little over a dollar and a few minutes, once, and every later question reuses it. PageIndex is designed not to rely heavily on the model used at index time, so in our experiments a basic model does not hurt quality.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/index-cost-dark.png">
   <img src="assets/index-cost-light.png" alt="Indexing cost against document length, log-log, for nine PDFs from 9 to 1,098 pages. Points track a $0.0011-per-page reference line; the spread around it is text density, not length.">
+</picture>
+
+Indexing time also scales predictably with document length. In the same local setup, the benchmark documents—from 9 to 1,098 pages—finished in roughly **13 seconds to 4.5 minutes**.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/index-time-dark.png">
+  <img src="assets/index-time-light.png" alt="Indexing time against document length, log-log, for nine PDFs from 9 to 1,098 pages. The measured indexing times range from about 13 seconds to 4.5 minutes and increase predictably with document length.">
 </picture>
 
 
