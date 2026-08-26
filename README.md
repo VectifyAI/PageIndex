@@ -360,7 +360,7 @@ Moving indexing and storage from Local to Cloud only requires a [PageIndex API k
 import os
 from pageindex import PageIndexClient
 
-os.environ["PageIndex_API_KEY"] = "your-pageindex-key"
+os.environ["PAGEINDEX_API_KEY"] = "your-pageindex-key"
 os.environ["OPENAI_API_KEY"] = "your-openai-key"
 
 
