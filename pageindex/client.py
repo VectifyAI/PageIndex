@@ -126,7 +126,7 @@ def _resolve_index_slot(index) -> "tuple[_CloudKey, dict[str, Any]]":
         raise PageIndexAPIError(
             "index is an empty string — pass a local index model name, "
             'or "cloud".')
-    if isinstance(index, dict):
+    if isinstance(index, Mapping):
         # None-valued keys mean "absent", exactly like the flat arguments.
         conf = {name: value for name, value in index.items()
                 if value is not None}
@@ -195,7 +195,7 @@ def _resolve_chat_slot(chat) -> "tuple[Optional[str], dict[str, Any]]":
         raise PageIndexAPIError(
             "chat is an empty string — pass a model name, or "
             '"cloud" for the managed chat.')
-    if isinstance(chat, dict):
+    if isinstance(chat, Mapping):
         # None-valued keys mean "absent", exactly like the flat arguments.
         conf = {name: value for name, value in chat.items()
                 if value is not None}
@@ -308,8 +308,9 @@ class PageIndexClient:
             ``index_model`` covers this.
         retrieve_model (str, optional): Legacy name for ``chat_model`` —
             same meaning everywhere, cloud clients included.
-        storage_path (str, optional): Local mode only — directory where
-            indexed documents are stored. Defaults to ``./.pageindex``.
+        storage_path (str or os.PathLike, optional): Local mode only —
+            directory where indexed documents are stored. Defaults to
+            ``./.pageindex``.
         index_backend (dict, optional): Local mode only — connection
             overrides for the indexing lane's LLM calls. Keys are
             LiteLLM's own connection params — ``api_key``, ``api_base``,
@@ -1201,8 +1202,7 @@ class PageIndexClient:
                 the full ``/mcp`` list (upload, delete, ...).
             doc_id: Local only — restrict the tools to this document ID
                 (or list of IDs), enforced at the tool layer: out-of-scope
-                lookups return NOT_FOUND. Raises on cloud, where scoping
-                is server-side.
+                lookups return NOT_FOUND. Raises on cloud.
         """
         from .agent_tools import build_agent_tools
         return build_agent_tools(self, include_management, doc_ids=doc_id)
@@ -1245,8 +1245,7 @@ class PageIndexClient:
                 for server-side tool execution (OpenAI models only).
             doc_id: Local only — restrict the tools to this document ID
                 (or list of IDs), enforced at the tool layer: out-of-scope
-                lookups return NOT_FOUND. Raises on cloud, where scoping
-                is server-side.
+                lookups return NOT_FOUND. Raises on cloud.
         """
         from .integrations.openai_agents import build_openai_tools
         return build_openai_tools(self, include_management, hosted,
@@ -1297,8 +1296,7 @@ class PageIndexClient:
         Args:
             doc_id: Document ID or list of IDs to target, as in
                 ``agent_instructions``. Local: also enforced at the tool
-                layer, not just prompted. Cloud: prompt-level targeting
-                (tool scoping is server-side).
+                layer, not just prompted. Cloud: prompt-level targeting.
             include_management (bool): Also expose tools that modify the
                 library.
             model: Backend model name; overrides the local default. Same
@@ -1386,8 +1384,7 @@ class PageIndexClient:
                 sync and async runners each accept only their own flavor.
             doc_id: Local only — restrict the tools to this document ID
                 (or list of IDs), enforced at the tool layer: out-of-scope
-                lookups return NOT_FOUND. Raises on cloud, where scoping
-                is server-side.
+                lookups return NOT_FOUND. Raises on cloud.
         """
         from .integrations.anthropic_sdk import build_anthropic_tools
         return build_anthropic_tools(self, include_management, asynchronous,
@@ -1428,8 +1425,7 @@ class PageIndexClient:
                 default).
             doc_id: Document ID or list of IDs to target, as in
                 ``agent_instructions``. Local: also enforced at the tool
-                layer, not just prompted. Cloud: prompt-level targeting
-                (tool scoping is server-side).
+                layer, not just prompted. Cloud: prompt-level targeting.
             include_management (bool): Also expose tools that modify the
                 library.
             asynchronous (bool): Build async runnables for
@@ -1475,7 +1471,7 @@ class PageIndexClient:
         same way at registration (requires ``claude-agent-sdk``;
         ``pip install 'pageindex[claude]'``). ``doc_id`` (local only)
         restricts those tools to that document ID (or list), enforced at
-        the tool layer; it raises on cloud, where scoping is server-side.
+        the tool layer; it raises on cloud.
         ``server_name`` names the in-process server — match it to the key
         you register the entry under (cloud entries carry no name).
 
@@ -1520,8 +1516,7 @@ class PageIndexClient:
         Args:
             doc_id: Document ID or list of IDs to target, as in
                 ``agent_instructions``. Local: also enforced at the tool
-                layer, not just prompted. Cloud: prompt-level targeting
-                (tool scoping is server-side).
+                layer, not just prompted. Cloud: prompt-level targeting.
             include_management (bool): Also allow tools that modify the
                 library.
             server_name (str): Key the server is registered under;

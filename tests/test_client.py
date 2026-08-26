@@ -289,6 +289,15 @@ def test_slot_flat_equivalence(tmp_path):
         assert getattr(flat, attr) == getattr(slot, attr), attr
 
 
+def test_slots_take_any_mapping():
+    """The slots are typed Mapping so the exported TypedDicts pass a
+    checker; the resolvers must accept what the annotation admits — and
+    read-only proxies prove they never mutate the caller's mapping."""
+    client = PageIndexClient(index=types.MappingProxyType({"api_key": "pi-k"}),
+                             chat=types.MappingProxyType({"model": "m"}))
+    assert (client.api_key, client.chat_model) == ("pi-k", "m")
+
+
 def test_same_side_double_spelling_rejected():
     for kwargs in ({"api_key": "k", "index": {"api_key": "k"}},
                    {"index": "m", "index_model": "m"},

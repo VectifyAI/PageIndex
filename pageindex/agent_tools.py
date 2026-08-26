@@ -1503,7 +1503,7 @@ def _tool_specs(client, include_management: bool = False, doc_ids=None,
     """(name, description, schema, invoke) per tool, for adapters that take
     the wire schema verbatim. ``invoke`` returns (envelope_text, is_error).
     Schemas are copies (frameworks keep the dict by reference). ``doc_ids``
-    is the local chat scope; cloud scoping is server-side."""
+    is the local chat scope."""
     _require_local_scope(client, doc_ids)
     if getattr(client, "api_key", None):
         bridge = _cloud_bridge(client, gated=not include_management)

@@ -1,4 +1,4 @@
-"""Managed local chat: document-QA agents over the local tools."""
+"""Own-model chat: document-QA agents over the local or cloud agent tools."""
 from __future__ import annotations
 
 import asyncio
