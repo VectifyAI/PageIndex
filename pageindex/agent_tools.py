@@ -1486,8 +1486,8 @@ def _require_doc_selection(doc_ids) -> None:
 
 
 def _require_local_scope(client, doc_ids) -> None:
-    """The allowlist is enforced in-process; cloud lookups run server-side,
-    so accepting doc_ids there would be advisory-only — refuse loudly."""
+    """The allowlist is enforced in-process; cloud tools take none, so
+    accepting doc_ids there would be advisory-only — refuse loudly."""
     _require_doc_selection(doc_ids)
     if doc_ids is not None and getattr(client, "api_key", None):
         raise PageIndexAPIError(
