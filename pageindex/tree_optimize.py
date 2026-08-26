@@ -722,6 +722,8 @@ async def expand(structure, pages, lines, args, log, frozen):
         cost = best["expand_cost"]
         gain = span - cost
         ratio = gain / span if span else 0.0
+        # strict: at cost == span the next round's merge (span <= cost) would
+        # fold the node right back, touching children already marked final
         keep = cost < span and ratio >= args.min_gain_ratio
 
         note(args.progress,
