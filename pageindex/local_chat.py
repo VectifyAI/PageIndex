@@ -1131,11 +1131,10 @@ def run_messages(client, messages, model: str,
     # The full turn sequence (assistant tool_use + user tool_result + final),
     # valid for verbatim append to the caller's history. The runner appends
     # a turn to its params only when it executed tools from it, and which
-    # turns qualify is vendor policy (anthropic < 1.1 executes a max_tokens
-    # turn's complete tool_use blocks; 1.1+ treats every non-tool_use stop
-    # as terminal), so stop_reason alone cannot tell. Whether final's
-    # tool_use ids already sit in the history is the ground truth for
-    # "already appended".
+    # turns qualify is vendor policy that has changed across anthropic
+    # releases, so stop_reason alone cannot tell. Whether final's tool_use
+    # ids already sit in the history is the ground truth for "already
+    # appended".
     new_messages = [_dump_message(message)
                     for message in conversation[len(prepared):]]
     final_blocks = [_dump_block(item) for item in final.content]
