@@ -872,14 +872,17 @@ def test_non_string_doc_name_stays_not_found(client, store_path):
     assert is_error and payload["errorCode"] == "NOT_FOUND"
 
 
-def test_openai_agent_config_repairs_litellm_types(tmp_path, monkeypatch):
+@pytest.mark.parametrize("repair", ["_repair_litellm_types",
+                                    "_mute_litellm_bridge_usage_warning"])
+def test_openai_agent_config_repairs_litellm_types(tmp_path, monkeypatch,
+                                                   repair):
     """The BYO path resolves its model through LiteLLM in the caller's
-    process, outside our completion helpers — the py3.10 type repair must
+    process, outside our completion helpers — the LiteLLM repairs must
     run at config time, and only for LiteLLM-routed models."""
     pytest.importorskip("agents")
     import pageindex.utils
     calls = []
-    monkeypatch.setattr(pageindex.utils, "_repair_litellm_types",
+    monkeypatch.setattr(pageindex.utils, repair,
                         lambda: calls.append(True))
     client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
                                   chat_model="anthropic/claude-x")

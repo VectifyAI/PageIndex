@@ -2043,6 +2043,31 @@ def test_litellm_model_still_has_the_fetch_response_seam():
     assert hasattr(LitellmModel, "_fetch_response")
 
 
+@needs_agents
+def test_litellm_lane_hides_the_bridge_usage_warning():
+    """litellm's chat→Responses bridge stores a chat-shaped usage dict in a
+    ResponseAPIUsage field and pydantic reports it on every streamed turn;
+    building the lane's model hides exactly that message — any other
+    mismatch still shows."""
+    pytest.importorskip("litellm")
+    import warnings
+    from litellm.types.llms.openai import ResponsesAPIResponse
+
+    bridged = ResponsesAPIResponse(id="r", created_at=0, output=[])
+    bridged.usage = {"completion_tokens": 1, "prompt_tokens": 1,
+                     "total_tokens": 2}
+    other = ResponsesAPIResponse(id="r", created_at=0, output=[])
+    other.created_at = "later"
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        local_chat._openai_model("chat", "gpt-5.2")
+        bridged.model_dump()
+        other.model_dump()
+    seen = [str(w.message) for w in caught]
+    assert not any("ResponseAPIUsage" in m for m in seen)
+    assert any("Expected `int`" in m for m in seen)
+
+
 def test_openai_protocol_predicate_follows_litellm_routing():
     pytest.importorskip("litellm")
     for name in ("gpt-5", "openai/gpt-4o", "litellm/gpt-4o",

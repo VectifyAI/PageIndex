@@ -1323,8 +1323,10 @@ class PageIndexClient:
             if config["model"].startswith("litellm/"):
                 # The runner resolves this model through LiteLLM in the
                 # caller's process, outside our completion helpers.
-                from .utils import _repair_litellm_types
+                from .utils import (_mute_litellm_bridge_usage_warning,
+                                    _repair_litellm_types)
                 _repair_litellm_types()
+                _mute_litellm_bridge_usage_warning()
                 # Marks follow this lane's routing: the SDK strips litellm/
                 # and LiteLLM resolves the rest (bare claude-* → Anthropic);
                 # names without the prefix ride the SDK's OpenAI provider.

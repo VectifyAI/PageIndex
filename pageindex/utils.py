@@ -45,6 +45,19 @@ def _repair_litellm_types() -> None:
     except Exception:
         pass  # best-effort: a failed repair leaves litellm's own error
 
+
+def _mute_litellm_bridge_usage_warning() -> None:
+    """litellm's chat→Responses bridge (e.g. OpenAI gpt-5.4+ with function
+    tools) logs a chat-shaped usage dict inside a ResponseAPIUsage field
+    (litellm_logging._get_assembled_streaming_response, 1.97–1.98), and
+    pydantic reports it on every streamed turn. Hide exactly that message;
+    every other warning still surfaces."""
+    import warnings
+    warnings.filterwarnings(
+        "ignore",
+        message=r"Pydantic serializer warnings:\s+"
+                r"(PydanticSerializationUnexpectedValue\()?Expected `ResponseAPIUsage`")
+
 # Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
 if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
     import warnings

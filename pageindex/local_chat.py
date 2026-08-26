@@ -216,8 +216,10 @@ def _openai_model(protocol: str, model_name: str, backend=None):
             f"'{model_name}' routes through LiteLLM, but litellm is not "
             "installed. Run:  pip install 'litellm>=1.97'"
         )
-    from .utils import _litellm_model, _repair_litellm_types
+    from .utils import (_litellm_model, _mute_litellm_bridge_usage_warning,
+                        _repair_litellm_types)
     _repair_litellm_types()
+    _mute_litellm_bridge_usage_warning()
     try:
         wire = _litellm_model(model_name)
     except litellm.NotFoundError as exc:
