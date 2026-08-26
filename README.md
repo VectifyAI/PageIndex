@@ -43,7 +43,7 @@
 
 Are you frustrated with vector database retrieval accuracy for long and complex documents? Vector-based RAG retrieves by semantic **similarity**. But **similarity ≠ relevance**: what retrieval actually needs is relevance, and relevance requires **reasoning**. On professional documents that demand contextual understanding, domain expertise, and multi-step reasoning, similarity search misses what is relevant but not similar, and returns what is similar but not relevant.
 
-Inspired by AlphaGo, **[PageIndex](https://vectify.ai/pageindex)** replaces the vector index with a **hierarchical tree index** and lets an LLM **reason** its way through it, the way a human expert goes straight to the right section of a long report. Retrieval happens in two steps:
+Inspired by AlphaGo, **[PageIndex](https://vectify.ai/pageindex)** replaces the vector index with a **hierarchical tree index** and lets an LLM **reason** its way through it, the way a human expert turns to the right section of a long report. Retrieval happens in two steps:
 
 1. **Index**: generate a **tree-structure index** for each document
 2. **Retrieve**: **search that tree** with LLM reasoning, agentically
@@ -245,7 +245,7 @@ tree = client.get_document_structure(doc_id)    # titles, page ranges, summaries
 client.list_documents()                         # everything you have indexed
 ```
 
-A PageIndex tree is a table of contents optimized for LLMs and agents:
+A PageIndex tree looks like a table of contents optimized for LLMs and agents:
 
 ```jsonc
 {
