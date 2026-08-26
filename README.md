@@ -31,9 +31,9 @@
 <details open>
 <summary><h2>Updates</h2></summary>
 
-- [2026/08] 🔥 [**PageIndex SDK**](#quickstart) — `pip install -U pageindex` now ships **local mode**: index, retrieve, and chat entirely on your machine with your own LLM key, or point the same client at PageIndex Cloud with an API key.
-- [2026/08] ⚡ [**PageIndex Flash**](#step-2-build-the-tree-index) — tree structure generation from PDFs in seconds, with structure extracted heuristically instead of by an LLM.
-- [PageIndex Chat](https://chat.pageindex.ai) — a human-like document analysis agent for long professional documents. Also available via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer).
+- [2026/08] 🔥 [**PageIndex SDK**](#quickstart): `pip install -U pageindex` now ships **local mode**: index, retrieve, and chat entirely on your machine with your own LLM key, or point the same client at PageIndex Cloud with an API key.
+- [2026/08] ⚡ [**PageIndex Flash**](#step-2-build-the-tree-index): tree structure generation from PDFs in seconds, with structure extracted heuristically instead of by an LLM.
+- [PageIndex Chat](https://chat.pageindex.ai): a human-like document analysis agent for long professional documents. Also available via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer).
 
 </details>
 
@@ -41,12 +41,12 @@
 
 ## What is PageIndex?
 
-Are you frustrated with vector database retrieval accuracy for long and complex documents? Vector-based RAG retrieves by semantic **similarity**. But **similarity ≠ relevance** — what retrieval actually needs is relevance, and relevance requires **reasoning**. On professional documents that demand contextual understanding, domain expertise, and multi-step reasoning, similarity search misses what is relevant but not similar, and returns what is similar but not relevant.
+Are you frustrated with vector database retrieval accuracy for long and complex documents? Vector-based RAG retrieves by semantic **similarity**. But **similarity ≠ relevance**: what retrieval actually needs is relevance, and relevance requires **reasoning**. On professional documents that demand contextual understanding, domain expertise, and multi-step reasoning, similarity search misses what is relevant but not similar, and returns what is similar but not relevant.
 
-Inspired by AlphaGo, **[PageIndex](https://vectify.ai/pageindex)** replaces the vector index with a **hierarchical tree index** and lets an LLM **reason** its way through it — the way a human expert flips to the right section of a long report. Retrieval happens in two steps:
+Inspired by AlphaGo, **[PageIndex](https://vectify.ai/pageindex)** replaces the vector index with a **hierarchical tree index** and lets an LLM **reason** its way through it, the way a human expert goes straight to the right section of a long report. Retrieval happens in two steps:
 
-1. **Index** — generate a **tree-structure index** for each document
-2. **Retrieve** — **search that tree** with LLM reasoning, agentically
+1. **Index**: generate a **tree-structure index** for each document
+2. **Retrieve**: **search that tree** with LLM reasoning, agentically
 
 <div align="center">
   <a href="https://pageindex.ai/blog/pageindex-intro" target="_blank" title="The PageIndex Framework">
@@ -67,11 +67,11 @@ Inspired by AlphaGo, **[PageIndex](https://vectify.ai/pageindex)** replaces the 
 | **Unit** | fixed-size chunks | natural sections |
 | **Retrieval** | semantic similarity search | LLM reasoning over the tree |
 | **Result** | opaque, “vibe retrieval” | traceable to explicit references |
-| **Context** | query embedding only | full context: conversation history, domain knowledge |
+| **Context** | query embedding only | full context: conversation history, domain knowledge, etc. |
 
-It is ideal for financial reports, legal documents, regulatory filings, technical manuals, medical literature, academic textbooks — any long, complex professional document.
+It is ideal for financial reports, legal documents, regulatory filings, technical manuals, medical literature, academic textbooks, and any other long, complex professional document.
 
-> PageIndex achieved **state-of-the-art** [98.7% accuracy](https://github.com/VectifyAI/Mafin2.5-FinanceBench) on FinanceBench (financial document QA benchmark), vastly outperforming vector-based RAG — see [Benchmarks](#benchmarks).
+> PageIndex achieved **state-of-the-art** [98.7% accuracy](https://github.com/VectifyAI/Mafin2.5-FinanceBench) on FinanceBench (financial document QA benchmark), vastly outperforming vector-based RAG (see [Benchmarks](#benchmarks)).
 
 
 
@@ -101,8 +101,8 @@ print(answer)
 
 ### Model Recommendations
 
-- **`index=` — a basic model is sufficient.** The index model generates the document's tree index. A basic model is sufficient to produce a good tree structure.
-- **`chat=` — use the best model you can afford.** The chat model searches the tree to retrieve information. See [Query cost and accuracy](#query-cost-and-accuracy).
+- **`index=`: a basic model is sufficient.** The index model generates the document's tree index. A basic model is sufficient to produce a good tree structure.
+- **`chat=`: use the best model you can afford.** The chat model searches the tree to retrieve information. See [Query cost and accuracy](#query-cost-and-accuracy).
 
 See the [Detailed Usage Guide](#detailed-usage-guide) to configure other models, or [integrate PageIndex with your own agent](#integrate-with-your-own-agent).
 
@@ -136,14 +136,14 @@ Revenue increased during the reporting period. <cite doc="report.pdf" page="12"/
 
 ### Indexing cost and time
 
-Building a tree locally runs **about $0.001 per page** with `index_model="gpt-5.6-luna"` — so a 1,000-page textbook costs a little over a dollar and a few minutes, once, and every later question reuses it. PageIndex is designed not to rely heavily on the model used at index time, so in our experiments a basic model does not hurt quality.
+Building a tree locally runs **about $0.001 per page** with `index_model="gpt-5.6-luna"`, so a 1,000-page textbook costs a little over a dollar and a few minutes, once, and every later question reuses it. PageIndex is designed not to rely heavily on the model used at index time, so in our experiments a basic model does not hurt quality.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/index-cost-dark.png">
   <img src="assets/index-cost-light.png" alt="Indexing cost against document length, log-log, for nine PDFs from 9 to 1,098 pages. Points track a $0.0011-per-page reference line; the spread around it is text density, not length.">
 </picture>
 
-Indexing time also scales predictably with document length. In the same local setup, the benchmark documents — from 9 to 1,098 pages — finished in roughly **13 seconds to 4.5 minutes**.
+Indexing time also scales predictably with document length. In the same local setup, the benchmark documents (9 to 1,098 pages) finished in roughly **13 seconds to 4.5 minutes**.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/index-time-dark.png">
@@ -154,7 +154,7 @@ Indexing time also scales predictably with document length. In the same local se
 
 ### Query cost and accuracy
 
-[**PageIndex-OSS-Benchmark**](https://github.com/VectifyAI/PageIndex-OSS-Benchmark) measures exactly the setup in the quickstart above — `PageIndexClient()` in local mode, flash indexing, no OCR — on 62 lookup questions over 34 PDFs (1,945 pages) drawn from [MMLongBench-Doc-V2](https://github.com/VectifyAI/MMLongBench-Doc-V2). Every question's answer is a fact stated in running text, so a wrong answer is a **retrieval or reading failure**, not a reasoning one.
+[**PageIndex-OSS-Benchmark**](https://github.com/VectifyAI/PageIndex-OSS-Benchmark) measures exactly the setup in the quickstart above (`PageIndexClient()` in local mode, flash indexing, no OCR) on 62 lookup questions over 34 PDFs (1,945 pages) drawn from [MMLongBench-Doc-V2](https://github.com/VectifyAI/MMLongBench-Doc-V2). Every question's answer is a fact stated in running text, so a wrong answer is a **retrieval or reading failure**, not a reasoning one.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/results-dark.png">
@@ -204,21 +204,21 @@ client = PageIndexClient(
 
 Model names follow [LiteLLM's naming convention](https://docs.litellm.ai/docs/providers). Choose the format that matches your provider:
 
-**OpenAI** — use the model name directly and set `OPENAI_API_KEY`:
+**OpenAI**: use the model name directly and set `OPENAI_API_KEY`:
 
 ```python
 os.environ["OPENAI_API_KEY"] = "your-openai-api-key"
 chat_model = "gpt-5.6-sol"
 ```
 
-**Anthropic** — prefix the model name with `anthropic/` and set `ANTHROPIC_API_KEY`:
+**Anthropic**: prefix the model name with `anthropic/` and set `ANTHROPIC_API_KEY`:
 
 ```python
 os.environ["ANTHROPIC_API_KEY"] = "your-anthropic-api-key"
 chat_model = "anthropic/claude-sonnet-4-6"
 ```
 
-**OpenRouter** — prefix the provider and model name with `openrouter/` and set `OPENROUTER_API_KEY`:
+**OpenRouter**: prefix the provider and model name with `openrouter/` and set `OPENROUTER_API_KEY`:
 
 ```python
 os.environ["OPENROUTER_API_KEY"] = "your-openrouter-api-key"
@@ -241,11 +241,11 @@ doc_id = client.submit_document("report.pdf")["doc_id"]
 Inspect what you got:
 
 ```python
-tree = client.get_document_structure(doc_id)    # titles, page ranges, summaries — no text
+tree = client.get_document_structure(doc_id)    # titles, page ranges, summaries; no text
 client.list_documents()                         # everything you have indexed
 ```
 
-A PageIndex tree looks like this — a table of contents optimized for LLMs and agents:
+A PageIndex tree is a table of contents optimized for LLMs and agents:
 
 ```jsonc
 {
@@ -376,7 +376,7 @@ tools = client.agent_tools()
 
 `agent_tools()` returns plain Python functions that work with LangChain, PydanticAI, and other agent frameworks.
 
-Each `*_config` helper is sugar over the explicit pieces — `client.agent_instructions()` for the system prompt and `client.as_openai_tools()` / `as_anthropic_tools()` / `as_claude_mcp()` for the tools — so you can swap in your own prompt whenever you need to. Locally, `doc_id` is enforced at the tool layer, not just prompted: out-of-scope lookups return `NOT_FOUND`.
+Each `*_config` helper is sugar over the explicit pieces (`client.agent_instructions()` for the system prompt, `client.as_openai_tools()` / `as_anthropic_tools()` / `as_claude_mcp()` for the tools), so you can swap in your own prompt whenever you need to. Locally, `doc_id` is enforced at the tool layer, not just prompted: out-of-scope lookups return `NOT_FOUND`.
 
 </details>
 
@@ -418,7 +418,7 @@ print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 
 ### More About PageIndex Cloud
 
-- [Scale PageIndex to Millions of Documents](https://pageindex.ai/blog/pageindex-filesystem) — **PageIndex File System** is a Cloud-only, file-level tree indexing layer that lets PageIndex reason over an entire corpus, not just a single document.
+- [Scale PageIndex to Millions of Documents](https://pageindex.ai/blog/pageindex-filesystem): **PageIndex File System** is a Cloud-only, file-level tree indexing layer that lets PageIndex reason over an entire corpus, not just a single document.
 
 ### Ready to Try It?
 
