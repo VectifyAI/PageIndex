@@ -36,7 +36,8 @@ When a subtree is merged away, the removed titles are kept on the parent as
 `key_items`: the pages stay reachable by scanning the parent, but the titles
 are routing information that would otherwise be lost.
 
-merge_same_page() runs first, as a special case of the same idea. Retrieval is
+merge_same_page() runs wherever same-page duplicates can appear, as a special
+case of the same idea. Retrieval is
 page-granular, so frontier siblings covering identical pages cannot be told apart:
 an agent routed to any of them reads the same text, and because the leaf summary
 prompt sees only that text, their summaries come back near-identical. They collapse
@@ -491,9 +492,10 @@ def union_title(titles, node):
 def merge_same_page(structure, log):
     """Collapse frontier siblings that cover exactly the same pages.
 
-    Deterministic and free. Runs before merge() because a narrower tree changes
-    its ancestors' tree_cost, and before expand() because children an expand pass
-    lands on one page are the same redundancy arriving later.
+    Deterministic and free. Runs at every seam where the redundancy can appear:
+    before merge() because a narrower tree changes its ancestors' tree_cost,
+    again after it because a collapsed subtree can land on a sibling's exact
+    pages, and on a node's children right after expand attaches them.
     """
     changed = False
 
