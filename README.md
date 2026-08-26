@@ -102,6 +102,8 @@ print(answer)
 
 See the [Detailed Usage Guide](#detailed-usage-guide) to configure other models and integrate PageIndex with your own agent.
 
+### Request Answers with Citations
+
 To request inline page-level citations, pass a system message together with the question:
 
 ```python
