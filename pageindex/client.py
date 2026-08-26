@@ -259,7 +259,7 @@ class PageIndexClient:
 
     Args:
         api_key (str, optional): PageIndex cloud API key
-            (https://dash.pageindex.ai/api-keys). Omit for local mode.
+            (https://developer.pageindex.ai/api-keys). Omit for local mode.
         index (str | dict, optional): The index side, grouped —
             ``"cloud"`` / ``"pageindex-cloud"`` (cloud, key from the
             environment), ``"local"``, a local index model name, or a
@@ -1630,7 +1630,7 @@ class PageIndexCloudClient(PageIndexClient):
                 raise PageIndexAPIError(
                     "PageIndexCloudClient requires a PageIndex API key — "
                     "pass api_key=..., or export PAGEINDEX_API_KEY. Get one "
-                    "at https://dash.pageindex.ai/api-keys."
+                    "at https://developer.pageindex.ai/api-keys."
                 )
         super().__init__(api_key, index=index, chat=chat,
                          chat_model=chat_model, retrieve_model=retrieve_model,
