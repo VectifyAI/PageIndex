@@ -46,7 +46,7 @@ Are you frustrated with vector database retrieval accuracy for long and complex 
 Inspired by AlphaGo, **[PageIndex](https://vectify.ai/pageindex)** replaces the vector index with a **hierarchical tree index** and lets an LLM **reason** its way through it — the way a human expert flips to the right section of a long report. Retrieval happens in two steps:
 
 1. **Index** — generate a **tree-structure index** for each document
-2. **Retrieve** — retrieve information via LLM-based **tree search**
+2. **Retrieve** — **search that tree** with LLM reasoning, agentically
 
 <div align="center">
   <a href="https://pageindex.ai/blog/pageindex-intro" target="_blank" title="The PageIndex Framework">
@@ -55,13 +55,17 @@ Inspired by AlphaGo, **[PageIndex](https://vectify.ai/pageindex)** replaces the 
 </div>
 
 
+### Why it works
+
+> PageIndex is a vectorless, reasoning-based RAG engine that mirrors how humans read, delivering traceable, explainable, and context-aware retrieval, without vector databases or chunking.
+
 ### Compare with Vector RAG
 
 | | Vector RAG | **PageIndex** |
 |---|---|---|
 | **Index** | vector index | tree index |
 | **Unit** | fixed-size chunks | natural sections |
-| **Retrieval** | semantic similarity search | LLM-based relevance search |
+| **Retrieval** | semantic similarity search | LLM reasoning over the tree |
 | **Result** | opaque, “vibe retrieval” | traceable to explicit references |
 | **Context** | query embedding only | full context: conversation history, domain knowledge |
 
@@ -97,10 +101,10 @@ print(answer)
 
 ### Model Recommendations
 
-- **`index_model` — a basic model is sufficient.** The index model generates the document's tree index. A basic model is sufficient to produce a good tree structure.
-- **`chat_model` — use the best model you can afford.** The chat model searches the tree to retrieve information. See [Query cost and accuracy](#query-cost-and-accuracy).
+- **`index=` — a basic model is sufficient.** The index model generates the document's tree index. A basic model is sufficient to produce a good tree structure.
+- **`chat=` — use the best model you can afford.** The chat model searches the tree to retrieve information. See [Query cost and accuracy](#query-cost-and-accuracy).
 
-See the [Detailed Usage Guide](#detailed-usage-guide) to configure other models and integrate PageIndex with your own agent.
+See the [Detailed Usage Guide](#detailed-usage-guide) to configure other models, or [integrate PageIndex with your own agent](#integrate-with-your-own-agent).
 
 ### Get Answers with Citations
 
@@ -139,7 +143,7 @@ Building a tree locally runs **about $0.001 per page** with `index_model="gpt-5.
   <img src="assets/index-cost-light.png" alt="Indexing cost against document length, log-log, for nine PDFs from 9 to 1,098 pages. Points track a $0.0011-per-page reference line; the spread around it is text density, not length.">
 </picture>
 
-Indexing time also scales predictably with document length. In the same local setup, the benchmark documents—from 9 to 1,098 pages—finished in roughly **13 seconds to 4.5 minutes**.
+Indexing time also scales predictably with document length. In the same local setup, the benchmark documents — from 9 to 1,098 pages — finished in roughly **13 seconds to 4.5 minutes**.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/index-time-dark.png">
@@ -193,6 +197,8 @@ client = PageIndexClient(
 - **`chat_model`** searches the tree and answers questions. Use the best model you can afford.
 
 - **`storage_path`** specifies where indexed documents are stored locally.
+
+`index_model=` / `chat_model=` are the flat spellings of the quickstart's `index=` / `chat=` — the two are interchangeable.
 
 #### Model naming conventions
 
@@ -320,10 +326,11 @@ Pass a list of ids to `doc_id` to search several documents at once, and keep it 
 
 </details>
 
+<a id="integrate-with-your-own-agent"></a>
 <details>
 <summary>
 
-##  Integrate PageIndex with your own agent
+## Integrate PageIndex with your own agent
 
 </summary>
 
@@ -393,7 +400,7 @@ client = PageIndexClient(
     chat="gpt-5.6-sol",                  # use your preferred compatible model for chat
 )
 
-# The rest of your code stays the same
+# The rest of your code stays the same — wait=True because cloud indexing is asynchronous
 doc_id = client.submit_document("report.pdf", wait=True)["doc_id"]
 print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 ```
@@ -403,7 +410,7 @@ print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 | Best for | text-heavy PDFs and local workflows | scanned, image-heavy, and large document collections |
 | Indexing | runs locally | runs in PageIndex Cloud, with production OCR and image understanding |
 | Storage | local | managed in PageIndex Cloud |
-| Chat model | your model | your model |
+| Chat model | your model | your model, or the managed chat included with your key |
 | Citations | page-level | line-level |
 | Image understanding | — | ✅ |
 | Multi-document scale | manual | PageIndex File System |
