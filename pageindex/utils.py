@@ -11,7 +11,7 @@ import copy
 import asyncio
 from io import BytesIO
 from dotenv import find_dotenv, load_dotenv
-load_dotenv(find_dotenv(usecwd=True) or None)
+load_dotenv(find_dotenv(usecwd=True))
 import logging
 import yaml
 from pathlib import Path

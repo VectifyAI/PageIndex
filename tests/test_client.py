@@ -289,6 +289,15 @@ def test_slot_flat_equivalence(tmp_path):
         assert getattr(flat, attr) == getattr(slot, attr), attr
 
 
+def test_slots_take_any_mapping():
+    """The slots are typed Mapping so the exported TypedDicts pass a
+    checker; the resolvers must accept what the annotation admits — and
+    read-only proxies prove they never mutate the caller's mapping."""
+    client = PageIndexClient(index=types.MappingProxyType({"api_key": "pi-k"}),
+                             chat=types.MappingProxyType({"model": "m"}))
+    assert (client.api_key, client.chat_model) == ("pi-k", "m")
+
+
 def test_same_side_double_spelling_rejected():
     for kwargs in ({"api_key": "k", "index": {"api_key": "k"}},
                    {"index": "m", "index_model": "m"},
@@ -394,6 +403,31 @@ def test_env_key_found_from_cwd(tmp_path):
                          capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "ok"
+
+
+def test_env_not_loaded_from_install_dir(tmp_path, tmp_path_factory):
+    """The cwd search finding nothing must end the search: find_dotenv
+    returns '' then, and `or None` handed load_dotenv its own upward walk
+    from utils.py — the install-dir leak the cwd search replaced. A
+    symlinked package puts utils.py under a tree whose root holds a .env;
+    the cwd tree holds none."""
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "pageindex").symlink_to(Path(__file__).parent.parent / "pageindex")
+    (tmp_path / ".env").write_text("PAGEINDEX_API_KEY=pi-leaked\n")
+    cwd = tmp_path_factory.mktemp("elsewhere")
+    (cwd / "app.py").write_text(
+        "from pageindex import PageIndexCloudClient, PageIndexAPIError\n"
+        "try:\n"
+        "    print(PageIndexCloudClient().api_key)\n"
+        "except PageIndexAPIError:\n"
+        "    print('unset')\n")
+    env = {**os.environ, "PYTHONPATH": str(site)}
+    env.pop("PAGEINDEX_API_KEY", None)
+    out = subprocess.run([sys.executable, "app.py"], cwd=cwd, env=env,
+                         capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() != "pi-leaked", out.stdout
 
 
 def test_empty_values_refused_never_silent():
@@ -1914,6 +1948,16 @@ def test_blank_chat_model_assignment_stays_managed():
         assert not client._local_chat, repr(blank)
     client.retrieve_model = ""
     assert not client._local_chat
+
+
+def test_local_client_blank_chat_model_refuses_at_chat_door(local_client):
+    """A local client has no managed chat to fall back to: with chat_model
+    blanked, chat_completions() must refuse as a PageIndexAPIError, not
+    surface LocalAPI's missing chat_completions as an AttributeError."""
+    for blank in ("", "   ", None):
+        local_client.chat_model = blank
+        with pytest.raises(PageIndexAPIError, match="chat_model is empty"):
+            local_client.chat_completions("hi")
 
 
 def test_blank_chat_model_carries_no_model_into_agent_config():
