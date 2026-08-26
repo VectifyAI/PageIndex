@@ -73,26 +73,43 @@ async def _summarize(structure, page_list, model, concurrency=None):
     await summarize_tree(structure, page_list, model=model, concurrency=concurrency)
 
 
-def _optimize(structure, page_texts, do_expand, model):
+async def _optimize_async(structure, page_texts, do_expand, model, on_final=None):
     """Merge/expand refinement between extraction and summaries.
 
     Beyond the merge the default path runs anyway, this adds LLM expand and
-    reports before/after search-cost metrics. Summaries run after, so they
-    describe the final tree. Expand reads the same page text the summaries use.
+    reports before/after search-cost metrics. Expand reads the same page text
+    the summaries use.
     """
-    import asyncio
     from ..tree_optimize import optimize
     lines = [[line_text.strip() for line_text in (page_text or "").splitlines()
               if line_text.strip()]
              for page_text in page_texts]
-    outcome = asyncio.run(optimize(structure, page_texts, lines, model=model,
-                                   do_expand=do_expand,
-                                   page_count=len(page_texts)))
+    outcome = await optimize(structure, page_texts, lines, model=model,
+                             do_expand=do_expand, page_count=len(page_texts),
+                             on_final=on_final)
     return {"merges": outcome["merges"], "expands": outcome["expands"],
             "same_page_merges": outcome["same_page_merges"],
             "same_page_dropped": outcome["same_page_dropped"],
             "kept_collapsed": outcome["kept_collapsed"],
             "before": outcome["before"], "after": outcome["after"]}
+
+
+def _optimize(structure, page_texts, do_expand, model):
+    import asyncio
+    return asyncio.run(_optimize_async(structure, page_texts, do_expand, model))
+
+
+async def _optimize_and_summarize(structure, page_texts, model, summary_model,
+                                  concurrency):
+    """Expand and summarize on one loop: a node is summarized as soon as
+    expand can no longer change it, a parent once its children are done."""
+    from ..utils import SummaryScheduler
+    scheduler = SummaryScheduler(structure, [(text, 0) for text in page_texts],
+                                 model=summary_model, concurrency=concurrency)
+    report = await _optimize_async(structure, page_texts, True, model,
+                                   on_final=scheduler.mark_final)
+    await scheduler.finish()
+    return report
 
 
 def page_index_flash(pdf, summary=True, summary_model=None,
@@ -118,28 +135,31 @@ def page_index_flash(pdf, summary=True, summary_model=None,
             f"optimize must be 'full', 'merge', or False, got {optimize!r}")
     result = extract_toc(_validate_pdf(pdf), use_embedded_toc=use_embedded_toc)
     structure = result.get("structure", [])
+    if summary and structure and summary_model is None:
+        from ..utils import ConfigLoader
+        cfg = ConfigLoader().load()
+        summary_model = getattr(cfg, 'summary_model', None) or cfg.model
+    # bookmark-only extractions carry no page_texts and scanned ones
+    # only empty strings; expand needs text
+    pages = result.pop("page_texts", None) or []
+    do_expand = optimize == "full" and any(pages)
+    if optimize and structure and summary and do_expand:
+        import asyncio
+        result["optimize"] = asyncio.run(_optimize_and_summarize(
+            structure, pages, optimize_model or summary_model,
+            summary_model, summary_concurrency))
+        return result
     if optimize and structure:
-        # bookmark-only extractions carry no page_texts and scanned ones
-        # only empty strings; expand needs text
-        pages = result.get("page_texts") or []
-        result["optimize"] = _optimize(structure, pages,
-                                       optimize == "full" and any(pages),
+        result["optimize"] = _optimize(structure, pages, do_expand,
                                        optimize_model or summary_model)
     if summary and structure:
         import asyncio
-        from ..utils import ConfigLoader
-        if summary_model is None:
-            cfg = ConfigLoader().load()
-            summary_model = getattr(cfg, 'summary_model', None) or cfg.model
-        page_texts = result.pop("page_texts", [])
-        page_list = [(text, 0) for text in page_texts]
+        page_list = [(text, 0) for text in pages]
         asyncio.run(_summarize(structure, page_list, summary_model,
                                concurrency=summary_concurrency))
-    else:
-        result.pop("page_texts", None)
-        if structure:
-            from ..utils import strip_internal_keys
-            strip_internal_keys(structure)   # summarize_tree does this on its way out
+    elif structure:
+        from ..utils import strip_internal_keys
+        strip_internal_keys(structure)   # summarize_tree does this on its way out
     return result
 
 

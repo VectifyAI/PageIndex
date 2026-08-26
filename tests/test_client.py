@@ -1962,6 +1962,157 @@ def test_expand_queries_nodes_concurrently(monkeypatch):
     assert inflight["peak"] <= 32
 
 
+def _expand_fixture():
+    """Twelve pages; X spans nine of them, so expand looks at it and, when
+    the model offers 'Sub One' (page 4) and 'Sub Two' (page 8), splits it
+    into two leaves under the trigger. Bodies are long enough that every
+    leaf summary needs the model."""
+    body = "body " * 250
+    pages = [body] * 12
+    pages[3] = "Sub One\n" + body
+    pages[7] = "Sub Two\n" + body
+    lines = [[l for l in p.splitlines() if l.strip()] for p in pages]
+    tree = [{"title": "R", "start_index": 1, "end_index": 12, "node_id": "0000", "nodes": [
+        {"title": "A", "start_index": 1, "end_index": 3, "node_id": "0001"},
+        {"title": "X", "start_index": 4, "end_index": 12, "node_id": "0002"}]}]
+    return tree, pages, lines
+
+
+def test_final_nodes_holds_back_only_undecided_expand_candidates():
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, _, _ = _expand_fixture()
+    titles = lambda nodes: sorted(n["title"] for n in nodes)
+    assert titles(tree_optimize.final_nodes(tree, 5, set())) == ["A", "R"]
+    assert titles(tree_optimize.final_nodes(tree, 5, {"0002"})) == ["A", "R", "X"]
+    assert titles(tree_optimize.final_nodes(tree, 9, set())) == ["A", "R", "X"]
+
+
+def test_optimize_reports_final_nodes_as_expand_decides(monkeypatch):
+    """Before the first expand call, everything expand cannot touch is
+    reported final; the candidate and what it grows are reported the moment
+    it is decided; the closing report covers the whole tree."""
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, lines = _expand_fixture()
+    reports, replied_after = [], []
+
+    async def propose(model, prompt):
+        await asyncio.sleep(0.01)
+        replied_after.append(len(reports))
+        return {"subsections": [{"title": "Sub One", "page": 4},
+                                {"title": "Sub Two", "page": 8}]}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+    asyncio.run(tree_optimize.optimize(
+        tree, pages, lines, model="m", do_expand=True,
+        on_final=lambda nodes: reports.append(sorted(n["title"] for n in nodes))))
+    before_reply = [t for report in reports[:replied_after[0]] for t in report]
+    assert "R" in before_reply and "A" in before_reply and "X" not in before_reply
+    decided = next(r for r in reports[replied_after[0]:] if "X" in r)
+    assert decided == ["Sub One", "Sub Two", "X"]
+    assert reports[-1] == ["A", "R", "Sub One", "Sub Two", "X"]
+
+
+def test_optimize_reports_a_candidate_kept_collapsed_once_decided(monkeypatch):
+    """A candidate the model finds nothing in is final the moment its retry
+    ladder ends, not at the end of the run."""
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, lines = _expand_fixture()
+    reports = []
+
+    async def nothing(model, prompt):
+        return {"subsections": []}
+    monkeypatch.setattr(tree_optimize, "ask_model", nothing)
+    asyncio.run(tree_optimize.optimize(
+        tree, pages, lines, model="m", do_expand=True,
+        on_final=lambda nodes: reports.append(sorted(n["title"] for n in nodes))))
+    assert ["X"] in reports[:-1]
+
+
+def test_merge_fuses_the_same_page_frontier_it_creates_at_once():
+    """Collapsing F leaves it on exactly G's page; the two must fuse right
+    then, not one round later (with a single round they never would)."""
+    import pageindex.tree_optimize as tree_optimize
+
+    tree = [{"title": "R", "start_index": 1, "end_index": 6, "node_id": "0000", "nodes": [
+        {"title": "F", "start_index": 1, "end_index": 1, "node_id": "0001", "nodes": [
+            {"title": "f1", "start_index": 1, "end_index": 1, "node_id": "0002"}]},
+        {"title": "G", "start_index": 1, "end_index": 1, "node_id": "0003"},
+        {"title": "H", "start_index": 2, "end_index": 5, "node_id": "0004"}]}]
+    outcome = asyncio.run(tree_optimize.optimize(
+        tree, None, None, do_expand=False, max_rounds=1))
+    assert outcome["merges"] == 1 and outcome["same_page_merges"] == 1
+    kept = tree[0]["nodes"]
+    assert [n["title"] for n in kept][1:] == ["H"] and kept[0].get("_same_page")
+
+
+def test_expand_fuses_same_page_children_before_reporting_them(monkeypatch):
+    """Two proposed headings on one page become one node as soon as they
+    are attached, so the report never carries a duplicate."""
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, lines = _expand_fixture()
+    pages[3] = "Sub One\nSub Two\n" + pages[3]
+    pages[4] = "Sub Three\n" + pages[4]
+    pages[8] = "Sub Four\n" + pages[8]
+    lines = [[l for l in p.splitlines() if l.strip()] for p in pages]
+
+    async def propose(model, prompt):
+        return {"subsections": [{"title": "Sub One", "page": 4}, {"title": "Sub Two", "page": 4},
+                                {"title": "Sub Three", "page": 5}, {"title": "Sub Four", "page": 9}]}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+    reports = []
+    outcome = asyncio.run(tree_optimize.optimize(
+        tree, pages, lines, model="m", do_expand=True, max_rounds=1,
+        on_final=lambda nodes: reports.append([(n["title"], len(n.get("nodes") or []))
+                                              for n in nodes])))
+    assert outcome["expands"] == 1 and outcome["same_page_merges"] == 1
+    assert [n["title"] for n in tree[0]["nodes"][1]["nodes"]][1:] == ["Sub Three", "Sub Four"]
+    assert all(children != 4 for report in reports for _, children in report)
+
+
+def test_flash_summaries_start_while_expand_is_still_deciding(tmp_path, monkeypatch):
+    """With expand on, summaries run on the same loop: a leaf expand cannot
+    touch is already being summarized when the model answers about X. Every
+    node is summarized exactly once and the tree matches the merge+expand
+    pass run on its own."""
+    from conftest import build_pdf
+    import copy
+    import pageindex.flash.api as flash_api
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, _ = _expand_fixture()
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: {
+        "structure": copy.deepcopy(tree), "page_texts": list(pages)})
+    started, replied_after = [], []
+
+    async def propose(model, prompt):
+        await asyncio.sleep(0.05)
+        replied_after.append(len(started))
+        return {"subsections": [{"title": "Sub One", "page": 4},
+                                {"title": "Sub Two", "page": 8}]}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+
+    async def summarize(model, prompt):
+        started.append(prompt)
+        await asyncio.sleep(0.01)
+        return '{"points": [], "summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", summarize)
+
+    result = flash_api.page_index_flash(str(pdf), summary_model="m")
+    assert replied_after[0] >= 1
+    assert result["optimize"]["expands"] == 1
+    nodes = list(pageindex.utils._subtree(result["structure"]))
+    assert [n["summary"] for n in nodes] == ["ok"] * 5 and len(started) == 5
+    shape = lambda nodes: [(n["title"], n["start_index"], n["end_index"],
+                            shape(n.get("nodes") or [])) for n in nodes]
+    alone = flash_api.page_index_flash(str(pdf), summary=False)
+    assert shape(result["structure"]) == shape(alone["structure"])
+
+
 def test_mode_declaration_top_level(monkeypatch):
     """mode= states where documents live; always optional, always
     checked, and mode="cloud" alone reads the env key."""
