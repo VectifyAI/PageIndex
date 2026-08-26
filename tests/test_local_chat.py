@@ -664,8 +664,17 @@ def test_responses_stream_events_validate_as_official_events(
 try:
     import anthropic
     _HAS_ANTHROPIC = True
+    # anthropic 1.1 made every non-tool_use stop reason terminal: the runner
+    # no longer executes tool_use blocks from a max_tokens-cut turn.
+    try:
+        _ANTHROPIC_RUNS_CUT_TOOL_TURNS = tuple(
+            int(piece) for piece in anthropic.__version__.split(".")[:2]
+        ) < (1, 1)
+    except ValueError:
+        _ANTHROPIC_RUNS_CUT_TOOL_TURNS = False  # unparseable: assume current
 except ImportError:
     _HAS_ANTHROPIC = False
+    _ANTHROPIC_RUNS_CUT_TOOL_TURNS = False
 
 needs_anthropic = pytest.mark.skipif(not _HAS_ANTHROPIC,
                                      reason="anthropic not installed")
@@ -1653,9 +1662,12 @@ def test_messages_max_turns_truncation_round_trippable(client, store_path,
 def test_messages_tool_use_cut_by_max_tokens_not_duplicated(client,
                                                             store_path,
                                                             fake_anthropic):
-    """A max_tokens turn with complete tool_use blocks still executes and
-    is appended by the runner — keying the re-append guard on stop_reason
-    duplicated the tool_use id and broke verbatim continuation."""
+    """A max_tokens turn carrying complete tool_use blocks: anthropic < 1.1
+    executes and appends it, 1.1+ treats it as terminal and never executes.
+    The envelope keys on the runner's history rather than stop_reason
+    (keying on stop_reason once duplicated the tool_use id), so on either
+    side the id never duplicates and the appendable messages stay valid
+    for verbatim continuation."""
     seed_doc(store_path, "pi-a", "report.pdf")
     calls = fake_anthropic([
         _anthropic_message([_anthropic_tool_use()], "max_tokens"),
@@ -1666,8 +1678,15 @@ def test_messages_tool_use_cut_by_max_tokens_not_duplicated(client,
     assert len(calls) == 1
     assert result["stop_reason"] == "max_tokens"
     roles = [message["role"] for message in result["messages"]]
-    assert roles == ["assistant", "user"]  # tool_use, tool_result — no dup
-    assert json.dumps(result["messages"]).count('"tu_1"') == 2  # use + result
+    if _ANTHROPIC_RUNS_CUT_TOOL_TURNS:
+        assert roles == ["assistant", "user"]  # tool_use then tool_result
+        assert json.dumps(result["messages"]).count('"tu_1"') == 2  # use + result
+    else:
+        # Unexecuted tool_use has no tool_result: stripped from the
+        # appendable history, still visible in content.
+        assert roles == []
+        assert json.dumps(result["messages"]).count('"tu_1"') == 0
+        assert [block["type"] for block in result["content"]] == ["tool_use"]
 
 
 @needs_anthropic
