@@ -137,6 +137,7 @@ Three steps from a fresh client to answers. Expand each for the full set of opti
 
 <details>
 <summary><b>⚙️ Step 1: Initialize the client</b></summary>
+<br>
 
 Create a local client and choose the models used for indexing and retrieval:
 
@@ -191,6 +192,7 @@ For model names and API key settings for other providers, see the [LiteLLM provi
 <a id="step-2-build-the-tree-index"></a>
 <details>
 <summary><b>🌲 Step 2: Build the tree index</b></summary>
+<br>
 
 `submit_document` defaults to **Flash** indexing: the structure is extracted from the PDF's own layout (no LLM), and a model is called only for node summaries and the tree-optimization expansion pass. It takes seconds.
 
@@ -239,6 +241,7 @@ See more example [documents](https://github.com/VectifyAI/PageIndex/tree/main/ex
 
 <details>
 <summary><b>💬 Step 3: Ask questions</b></summary>
+<br>
 
 `chat()` is the one-line surface. Underneath it is a document-QA agent, and you can talk to it over whichever protocol your stack already speaks:
 
@@ -294,6 +297,7 @@ PageIndex can also be integrated into your own agent. Each example below sets up
 
 <details>
 <summary><b>OpenAI Agents SDK</b></summary>
+<br>
 
 ```python
 from agents import Agent, Runner
@@ -308,6 +312,7 @@ result = Runner.run_sync(agent, "Summarize the auditor's concerns.")
 
 <details>
 <summary><b>Anthropic SDK tool runner</b></summary>
+<br>
 
 ```python
 runner = anthropic_client.beta.messages.tool_runner(
@@ -322,6 +327,7 @@ runner = anthropic_client.beta.messages.tool_runner(
 
 <details>
 <summary><b>Claude Agent SDK</b></summary>
+<br>
 
 ```python
 options = ClaudeAgentOptions(**client.claude_agent_config(doc_id=doc_id))
@@ -333,6 +339,7 @@ options = ClaudeAgentOptions(**client.claude_agent_config(doc_id=doc_id))
 
 <details>
 <summary><b>Other agent frameworks</b></summary>
+<br>
 
 ```python
 tools = client.agent_tools()
