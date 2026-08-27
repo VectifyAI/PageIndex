@@ -54,7 +54,7 @@ Inspired by AlphaGo, **[PageIndex](https://vectify.ai/pageindex)** replaces the 
 </div>
 
 
-### In one sentence
+### TL;DR
 
 <blockquote align="center"><b>PageIndex is a vectorless, reasoning-based RAG engine that mirrors how humans read,<br>delivering traceable, explainable, and context-aware retrieval, without vector databases or chunking.</b></blockquote>
 
