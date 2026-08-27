@@ -164,6 +164,18 @@ Indexing time also scales predictably with document length. In the same local se
 
 Full results, data, and the runner are in the [benchmark repo](https://github.com/VectifyAI/PageIndex-OSS-Benchmark).
 
+### PageIndex leads a finance QA benchmark
+
+Mafin 2.5, a reasoning-based RAG system for financial document analysis powered by PageIndex, reached a state-of-the-art [**98.7% accuracy**](https://vectify.ai/blog/Mafin2.5) on [FinanceBench](https://arxiv.org/abs/2311.11944), far ahead of vector-based RAG systems on SEC filings and earnings disclosures.
+
+<div align="center">
+  <a href="https://github.com/VectifyAI/Mafin2.5-FinanceBench">
+    <img src="https://github.com/user-attachments/assets/571aa074-d803-43c7-80c4-a04254b782a3" width="90%">
+  </a>
+</div>
+
+Explore the full [benchmark results](https://github.com/VectifyAI/Mafin2.5-FinanceBench) and the [blog post](https://vectify.ai/blog/Mafin2.5).
+
 
 
 
