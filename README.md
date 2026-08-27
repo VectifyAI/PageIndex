@@ -195,7 +195,7 @@ For model names and API key settings for other providers, see the [LiteLLM provi
 <summary><a id="step-2-build-the-tree-index"></a><b>🌲 Step 2: Build the tree index</b></summary>
 <br>
 
-`submit_document` defaults to **Flash** indexing: the structure is extracted from the PDF's own layout (no LLM), and a model is called only for node summaries and the tree-optimization expansion pass. It takes seconds.
+`submit_document` defaults to **PageIndex Flash** indexing: the structure is extracted from the PDF's own layout (no LLM), and a model is called only for node summaries and the tree-optimization expansion pass. It takes seconds.
 
 ```python
 doc_id = client.submit_document("report.pdf")["doc_id"]
