@@ -128,7 +128,7 @@ Revenue increased during the reporting period. <cite doc="report.pdf" page="12"/
 
 # Usage
 
-This section goes beyond the quickstart: the client step by step, then how to use PageIndex's tools inside your own agent.
+Configure the client step by step, or use PageIndex's tools inside your own agent.
 
 <a id="detailed-usage-guide"></a>
 ### Detailed Usage Guide
