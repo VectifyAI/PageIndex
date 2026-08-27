@@ -128,7 +128,7 @@ Revenue increased during the reporting period. <cite doc="report.pdf" page="12"/
 
 # Usage
 
-Two ways to use PageIndex: (i) directly through the client, or (ii) integrated into an agent you already have.
+Two ways to use PageIndex: (i) directly through the SDK client, or (ii) integrated into your own agent.
 
 <a id="detailed-usage-guide"></a>
 ### Detailed Usage Guide
