@@ -45,7 +45,7 @@ Are you frustrated with vector database retrieval accuracy for long and complex 
 Inspired by AlphaGo, **[PageIndex](https://vectify.ai/pageindex)** replaces the vector index with a **hierarchical tree index** and lets an LLM **reason** its way through it, the way a human expert turns to and reads the right section of a long report. Retrieval happens in two steps:
 
 1. **Index**: generate a **tree-structure index** for each document
-2. **Retrieve**: **search that tree** with LLM reasoning, agentically
+2. **Retrieve**: agentically **search that tree** with LLM reasoning
 
 <div align="center">
   <a href="https://pageindex.ai/blog/pageindex-intro" target="_blank" title="The PageIndex Framework">
