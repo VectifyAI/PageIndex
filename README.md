@@ -188,6 +188,7 @@ chat_model = "openrouter/anthropic/claude-sonnet-4-6"
 For model names and API key settings for other providers, see the [LiteLLM provider documentation](https://docs.litellm.ai/docs/providers).
 
 </details>
+<br>
 
 <a id="step-2-build-the-tree-index"></a>
 <details>
@@ -238,6 +239,7 @@ A PageIndex tree looks like a table of contents optimized for LLMs and agents:
 See more example [documents](https://github.com/VectifyAI/PageIndex/tree/main/examples/documents) and generated [tree structures](https://github.com/VectifyAI/PageIndex/tree/main/examples/documents/results).
 
 </details>
+<br>
 
 <details>
 <summary><b>💬 Step 3: Ask questions</b></summary>
@@ -309,6 +311,7 @@ result = Runner.run_sync(agent, "Summarize the auditor's concerns.")
 `openai_agent_config()` provides the instructions and tools required by an OpenAI agent.
 
 </details>
+<br>
 
 <details>
 <summary><b>Anthropic SDK tool runner</b></summary>
@@ -324,6 +327,7 @@ runner = anthropic_client.beta.messages.tool_runner(
 `anthropic_runner_config()` configures Anthropic's native tool runner. Install the integration with `pip install 'pageindex[anthropic]'`.
 
 </details>
+<br>
 
 <details>
 <summary><b>Claude Agent SDK</b></summary>
@@ -336,6 +340,7 @@ options = ClaudeAgentOptions(**client.claude_agent_config(doc_id=doc_id))
 `claude_agent_config()` creates the options for the Claude Agent SDK. Install the integration with `pip install 'pageindex[claude]'`.
 
 </details>
+<br>
 
 <details>
 <summary><b>Other agent frameworks</b></summary>
