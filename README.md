@@ -360,7 +360,7 @@ Each `*_config` helper is sugar over the explicit pieces (`client.agent_instruct
 
 #### Indexing cost and time
 
-Building a tree locally runs **about $0.001 per page** with `index_model="gpt-5.6-luna"`, so a 1,000-page textbook costs a little over a dollar and a few minutes, once, and every later question reuses it. PageIndex is designed not to rely heavily on the model used at index time, so in our experiments a basic model does not hurt quality.
+Building a tree locally runs **about $0.001 per page** with `gpt-5.6-luna` as the index model, so a 1,000-page textbook costs a little over a dollar and a few minutes, once, and every later question reuses it. PageIndex is designed not to rely heavily on the model used at index time, so in our experiments a basic model does not hurt quality.
 
 <div align="center">
 <picture>
