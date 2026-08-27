@@ -299,14 +299,26 @@ PageIndex can also be integrated into your own agent. Each example below covers 
 <summary><b>OpenAI Agents SDK</b></summary>
 <br>
 
+Ships with the SDK, no extras needed:
+
 ```python
 from agents import Agent, Runner
 
 agent = Agent(**client.openai_agent_config(doc_id=doc_id))
 result = Runner.run_sync(agent, "Summarize the auditor's concerns.")
+print(result.final_output)
 ```
 
-`openai_agent_config()` provides the instructions and tools required by an OpenAI agent.
+`openai_agent_config()` returns the instructions and tools an `Agent` needs. To use your own prompt or pick tools yourself, assemble the pieces directly:
+
+```python
+agent = Agent(
+    name="PageIndex",
+    instructions=client.agent_instructions(doc_id=doc_id),   # or your own prompt
+    tools=client.as_openai_tools(doc_id=doc_id),              # include_management=True adds deletion
+    model=client.chat_model,                                  # local clients only
+)
+```
 
 </details>
 <br>
@@ -315,14 +327,31 @@ result = Runner.run_sync(agent, "Summarize the auditor's concerns.")
 <summary><b>Anthropic SDK tool runner</b></summary>
 <br>
 
+Install with `pip install 'pageindex[anthropic]'`:
+
 ```python
-runner = anthropic_client.beta.messages.tool_runner(
+import anthropic
+
+runner = anthropic.Anthropic().beta.messages.tool_runner(
     **client.anthropic_runner_config(model="claude-sonnet-4-6", doc_id=doc_id),
     messages=[{"role": "user", "content": "Summarize the auditor's concerns."}],
 )
+final = runner.until_done()
+print(final.content[-1].text)
 ```
 
-`anthropic_runner_config()` configures Anthropic's native tool runner. Install the integration with `pip install 'pageindex[anthropic]'`.
+`anthropic_runner_config()` fills every `tool_runner` slot except `messages`. The explicit form:
+
+```python
+runner = anthropic.Anthropic().beta.messages.tool_runner(
+    model="claude-sonnet-4-6",
+    max_tokens=8192,
+    system=client.agent_instructions(doc_id=doc_id),
+    tools=client.as_anthropic_tools(doc_id=doc_id),   # asynchronous=True for AsyncAnthropic
+    max_iterations=10,
+    messages=[{"role": "user", "content": "Summarize the auditor's concerns."}],
+)
+```
 
 </details>
 <br>
@@ -331,11 +360,26 @@ runner = anthropic_client.beta.messages.tool_runner(
 <summary><b>Claude Agent SDK</b></summary>
 <br>
 
+Install with `pip install 'pageindex[claude]'`. The Claude Agent SDK is async-native:
+
 ```python
+from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
+
 options = ClaudeAgentOptions(**client.claude_agent_config(doc_id=doc_id))
+async for message in query(prompt="Summarize the auditor's concerns.", options=options):
+    if isinstance(message, ResultMessage):
+        print(message.result)
 ```
 
-`claude_agent_config()` creates the options for the Claude Agent SDK. Install the integration with `pip install 'pageindex[claude]'`.
+`claude_agent_config()` supplies the system prompt, the PageIndex MCP server, and its tool pre-approval. The explicit form:
+
+```python
+options = ClaudeAgentOptions(
+    system_prompt=client.agent_instructions(doc_id=doc_id),
+    mcp_servers={"pageindex": client.as_claude_mcp(doc_id=doc_id)},
+    allowed_tools=["mcp__pageindex"],
+)
+```
 
 </details>
 <br>
@@ -345,12 +389,12 @@ options = ClaudeAgentOptions(**client.claude_agent_config(doc_id=doc_id))
 <br>
 
 ```python
-tools = client.agent_tools()
+tools = client.agent_tools(doc_id=doc_id)   # plain functions returning JSON
 ```
 
-`agent_tools()` returns plain Python functions that work with LangChain, PydanticAI, and other agent frameworks.
+`agent_tools()` returns plain Python functions that work with LangChain, PydanticAI, and any other agent framework.
 
-Each `*_config` helper is sugar over the explicit pieces (`client.agent_instructions()` for the system prompt, `client.as_openai_tools()` / `as_anthropic_tools()` / `as_claude_mcp()` for the tools), so you can swap in your own prompt whenever you need to. Locally, `doc_id` is enforced at the tool layer, not just prompted: out-of-scope lookups return `NOT_FOUND`.
+Every helper above accepts `doc_id=` to point the agent at specific documents and `include_management=True` to also expose document deletion (off by default). Locally, `doc_id` is enforced at the tool layer, not just prompted: out-of-scope lookups return `NOT_FOUND`.
 
 </details>
 
