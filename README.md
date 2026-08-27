@@ -103,7 +103,7 @@ print(answer)
 - **`index=`: a basic model is sufficient.** The index model generates the document's tree index. A basic model is sufficient to produce a good tree structure.
 - **`chat=`: use the best model you can afford.** The chat model searches the tree to retrieve information. See [Query cost and accuracy](#query-cost-and-accuracy).
 
-See [Usage](#usage) to configure other models, or [integrate PageIndex with your own agent](#integrate-with-your-own-agent).
+See the [Detailed Usage Guide](#detailed-usage-guide) to configure other models, or [integrate PageIndex with your own agent](#integrate-with-your-own-agent).
 
 ### Get Answers with Citations
 
@@ -128,8 +128,11 @@ Revenue increased during the reporting period. <cite doc="report.pdf" page="12"/
 
 # Usage
 
+<a id="detailed-usage-guide"></a>
+### Detailed Usage Guide
+
 <details>
-<summary><h3>⚙️ Step 1: Initialize the client</h3></summary>
+<summary><h4>⚙️ Step 1: Initialize the client</h4></summary>
 
 Create a local client and choose the models used for indexing and retrieval:
 
@@ -183,7 +186,7 @@ For model names and API key settings for other providers, see the [LiteLLM provi
 
 <a id="step-2-build-the-tree-index"></a>
 <details>
-<summary><h3>🌲 Step 2: Build the tree index</h3></summary>
+<summary><h4>🌲 Step 2: Build the tree index</h4></summary>
 
 `submit_document` defaults to **Flash** indexing: the structure is extracted from the PDF's own layout (no LLM), and a model is called only for node summaries and the tree-optimization expansion pass. It takes seconds.
 
@@ -231,7 +234,7 @@ See more example [documents](https://github.com/VectifyAI/PageIndex/tree/main/ex
 </details>
 
 <details>
-<summary><h3>💬 Step 3: Ask questions</h3></summary>
+<summary><h4>💬 Step 3: Ask questions</h4></summary>
 
 `chat()` is the one-line surface. Underneath it is a document-QA agent, and you can talk to it over whichever protocol your stack already speaks:
 
@@ -281,12 +284,12 @@ Pass a list of ids to `doc_id` to search several documents at once, and keep it 
 
 
 <a id="integrate-with-your-own-agent"></a>
-<details>
-<summary><h3>Integrate PageIndex with your own agent</h3></summary>
+### Integrate PageIndex with your own agent
 
 Instead of calling PageIndex's agent, hand PageIndex's tools to yours. One call fills every slot:
 
-**OpenAI Agents SDK:**
+<details>
+<summary><h4>OpenAI Agents SDK</h4></summary>
 
 ```python
 from agents import Agent, Runner
@@ -297,7 +300,10 @@ result = Runner.run_sync(agent, "Summarize the auditor's concerns.")
 
 `openai_agent_config()` provides the instructions and tools required by an OpenAI agent.
 
-**Anthropic SDK tool runner:**
+</details>
+
+<details>
+<summary><h4>Anthropic SDK tool runner</h4></summary>
 
 ```python
 runner = anthropic_client.beta.messages.tool_runner(
@@ -308,7 +314,10 @@ runner = anthropic_client.beta.messages.tool_runner(
 
 `anthropic_runner_config()` configures Anthropic's native tool runner. Install the integration with `pip install 'pageindex[anthropic]'`.
 
-**Claude Agent SDK:**
+</details>
+
+<details>
+<summary><h4>Claude Agent SDK</h4></summary>
 
 ```python
 options = ClaudeAgentOptions(**client.claude_agent_config(doc_id=doc_id))
@@ -316,7 +325,10 @@ options = ClaudeAgentOptions(**client.claude_agent_config(doc_id=doc_id))
 
 `claude_agent_config()` creates the options for the Claude Agent SDK. Install the integration with `pip install 'pageindex[claude]'`.
 
-**Other agent frameworks:**
+</details>
+
+<details>
+<summary><h4>Other agent frameworks</h4></summary>
 
 ```python
 tools = client.agent_tools()
@@ -324,9 +336,10 @@ tools = client.agent_tools()
 
 `agent_tools()` returns plain Python functions that work with LangChain, PydanticAI, and other agent frameworks.
 
+</details>
+
 Each `*_config` helper is sugar over the explicit pieces (`client.agent_instructions()` for the system prompt, `client.as_openai_tools()` / `as_anthropic_tools()` / `as_claude_mcp()` for the tools), so you can swap in your own prompt whenever you need to. Locally, `doc_id` is enforced at the tool layer, not just prompted: out-of-scope lookups return `NOT_FOUND`.
 
-</details>
 
 
 # Benchmarks
