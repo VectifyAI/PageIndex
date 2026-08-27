@@ -137,7 +137,7 @@ Building a tree locally runs **about $0.001 per page** with `index_model="gpt-5.
 <div align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/index-cost-dark.png">
-  <img src="assets/index-cost-light.png" width="90%" alt="Indexing cost against document length, log-log, for nine PDFs from 9 to 1,098 pages. Points track a $0.0011-per-page reference line; the spread around it is text density, not length.">
+  <img src="assets/index-cost-light.png" width="80%" alt="Indexing cost against document length, log-log, for nine PDFs from 9 to 1,098 pages. Points track a $0.0011-per-page reference line; the spread around it is text density, not length.">
 </picture>
 </div>
 
@@ -146,7 +146,7 @@ Indexing time also scales predictably with document length. In the same local se
 <div align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/index-time-dark.png">
-  <img src="assets/index-time-light.png" width="90%" alt="Indexing time against document length, log-log, for nine PDFs from 9 to 1,098 pages. The measured indexing times range from about 13 seconds to 4.5 minutes and increase predictably with document length.">
+  <img src="assets/index-time-light.png" width="80%" alt="Indexing time against document length, log-log, for nine PDFs from 9 to 1,098 pages. The measured indexing times range from about 13 seconds to 4.5 minutes and increase predictably with document length.">
 </picture>
 </div>
 
@@ -159,7 +159,7 @@ Indexing time also scales predictably with document length. In the same local se
 <div align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/results-dark.png">
-  <img src="assets/results-light.png" width="90%" alt="Accuracy against average cost per question. Each model forms a near-vertical reasoning-effort ladder; moving between models costs an order of magnitude a step.">
+  <img src="assets/results-light.png" width="80%" alt="Accuracy against average cost per question. Each model forms a near-vertical reasoning-effort ladder; moving between models costs an order of magnitude a step.">
 </picture>
 </div>
 
@@ -172,7 +172,7 @@ PageIndex reached a state-of-the-art [**98.7% accuracy**](https://vectify.ai/blo
 
 <div align="center">
   <a href="https://github.com/VectifyAI/Mafin2.5-FinanceBench">
-    <img src="https://github.com/user-attachments/assets/571aa074-d803-43c7-80c4-a04254b782a3" width="90%">
+    <img src="https://github.com/user-attachments/assets/571aa074-d803-43c7-80c4-a04254b782a3" width="80%">
   </a>
 </div>
 
