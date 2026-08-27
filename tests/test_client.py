@@ -2379,3 +2379,42 @@ def test_summary_max_words_reaches_the_local_indexer():
     assert PageIndexLocalClient()._api._summary_max_words is None
     with pytest.raises(PageIndexAPIError, match=r'index\["summary_max_words"\] must be a'):
         PageIndexLocalClient(index={"summary_max_words": "80"})
+
+
+def test_flash_knobs_reach_the_local_indexer(tmp_path, sample_pdf, monkeypatch):
+    """summary_concurrency, use_embedded_toc and optimize are settable on the
+    client, flat or in the index slot, and land on page_index_flash the way
+    the CLI's flags do ("off" is no optimize pass at all)."""
+    from pageindex import PageIndexLocalClient
+    captured = {}
+    monkeypatch.setattr(pageindex.flash, "page_index_flash",
+                        lambda p, **kw: captured.update(kw) or {
+                            "structure": [{"title": "T", "start_index": 1,
+                                           "end_index": 1, "summary": "s", "nodes": []}]})
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda model, prompt, **kw: "d.")
+    stores = iter(range(10))
+
+    def run(**kwargs):
+        captured.clear()
+        store = str(tmp_path / str(next(stores)))
+        if "index" in kwargs:
+            kwargs["index"] = {**kwargs["index"], "storage_path": store}
+        else:
+            kwargs["storage_path"] = store
+        client = PageIndexLocalClient(**kwargs)
+        client.submit_document(sample_pdf)
+        return (captured.get("summary_concurrency"), captured["use_embedded_toc"],
+                captured["optimize"])
+
+    assert run(summary_concurrency=8, use_embedded_toc=False, optimize="merge") == (8, False, "merge")
+    assert run(index={"summary_concurrency": 8, "use_embedded_toc": False,
+                      "optimize": "off"}) == (8, False, False)
+    assert run() == (None, True, "full")
+    for kwargs, msg in (({"index": {"use_embedded_toc": "no"}},
+                         r'index\["use_embedded_toc"\] must be a bool'),
+                        ({"optimize": "sometimes"},
+                         r'optimize must be "full", "merge" or "off"'),
+                        ({"summary_concurrency": "8"}, "summary_concurrency must be a")):
+        with pytest.raises(PageIndexAPIError, match=msg):
+            PageIndexLocalClient(**kwargs)

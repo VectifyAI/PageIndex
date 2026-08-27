@@ -467,3 +467,9 @@ def test_flash_cli_rejects_empty_structure(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="try --mode standard"):
         _run_flash_cli(monkeypatch, tmp_path, [], [])
     assert not (tmp_path / "results").exists()
+
+
+def test_flash_cli_summary_concurrency_reaches_the_indexer(monkeypatch, tmp_path):
+    captured = _run_flash_cli(monkeypatch, tmp_path, ["--summary-concurrency", "8"],
+                              [{"title": "A", "start_index": 1, "end_index": 1}])
+    assert captured["summary_concurrency"] == 8
