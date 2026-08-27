@@ -103,7 +103,7 @@ print(answer)
 - **`index=`: a basic model is sufficient.** The index model generates the document's tree index. A basic model is sufficient to produce a good tree structure.
 - **`chat=`: use the best model you can afford.** The chat model searches the tree to retrieve information. See [Query cost and accuracy](#query-cost-and-accuracy).
 
-See [the SDK client guide](#use-pageindex-through-the-sdk-client) to configure other models, or [integrate PageIndex with your own agent](#integrate-pageindex-with-your-own-agent).
+See [the SDK client guide](#a-use-pageindex-through-the-sdk-client) to configure other models, or [integrate PageIndex with your own agent](#b-integrate-pageindex-with-your-own-agent).
 
 ### Get Answers with Citations
 
@@ -128,9 +128,9 @@ Revenue increased during the reporting period. <cite doc="report.pdf" page="12"/
 
 # Usage Guide
 
-Two ways to use PageIndex: (i) directly through the SDK client, or (ii) integrate it into your own agent.
+Two ways to use PageIndex: (a) directly through the SDK client, or (b) integrate it into your own agent.
 
-### Use PageIndex through the SDK client
+### (a) Use PageIndex through the SDK client
 
 End to end in three steps: set up, index, ask. Expand a step below for its full options.
 
@@ -289,7 +289,7 @@ Pass a list of ids to `doc_id` to search several documents at once, and keep it 
 
 </details>
 
-### Integrate PageIndex with your own agent
+### (b) Integrate PageIndex with your own agent
 
 PageIndex can also be integrated into your own agent. Each example below sets up one framework:
 
