@@ -74,7 +74,8 @@ async def _summarize(structure, page_list, model, concurrency=None):
 
 
 async def _optimize_async(structure, page_texts, do_expand, model, on_final=None):
-    """Merge/expand refinement after extraction, overlapped with the summaries.
+    """Merge/expand refinement after extraction, overlapped with the summaries
+    when `on_final` is passed; without it the caller runs them after.
 
     Beyond the merge the default path runs anyway, this adds LLM expand and
     reports before/after search-cost metrics. Expand reads the same page text
