@@ -473,3 +473,9 @@ def test_flash_cli_summary_concurrency_reaches_the_indexer(monkeypatch, tmp_path
     captured = _run_flash_cli(monkeypatch, tmp_path, ["--summary-concurrency", "8"],
                               [{"title": "A", "start_index": 1, "end_index": 1}])
     assert captured["summary_concurrency"] == 8
+
+
+def test_flash_cli_summary_max_words_reaches_the_indexer(monkeypatch, tmp_path):
+    captured = _run_flash_cli(monkeypatch, tmp_path, ["--summary-max-words", "80"],
+                              [{"title": "A", "start_index": 1, "end_index": 1}])
+    assert captured["summary_max_words"] == 80
