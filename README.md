@@ -128,12 +128,13 @@ Revenue increased during the reporting period. <cite doc="report.pdf" page="12"/
 
 # Usage
 
-Use PageIndex directly through the client, or integrate its tools into your own agent.
+- [**Detailed Usage Guide**](#detailed-usage-guide): use PageIndex directly through the client.
+- [**Integrate PageIndex with your own agent**](#integrate-with-your-own-agent): bring PageIndex into an agent you already have.
 
 <a id="detailed-usage-guide"></a>
 ### Detailed Usage Guide
 
-Each step expands to its full set of options: model names for any provider, the structure of a built tree index, and the OpenAI- and Anthropic-compatible interfaces behind `chat()`.
+Three steps from a fresh client to answers. Expand each for the full set of options.
 
 <details>
 <summary><h4>⚙️ Step 1: Initialize the client</h4></summary>
@@ -290,7 +291,7 @@ Pass a list of ids to `doc_id` to search several documents at once, and keep it 
 <a id="integrate-with-your-own-agent"></a>
 ### Integrate PageIndex with your own agent
 
-PageIndex's document tools also work inside an agent you already have. Each helper below sets up one framework in a single call:
+PageIndex also works inside an agent you already have. Each helper below sets up one framework in a single call:
 
 <details>
 <summary><h4>OpenAI Agents SDK</h4></summary>
