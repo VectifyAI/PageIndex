@@ -131,8 +131,8 @@ def _resolve_index_slot(index) -> "tuple[_CloudKey, dict[str, Any]]":
             'or "cloud".')
     if isinstance(index, Mapping):
         # None-valued keys mean "absent", exactly like the flat arguments.
-        conf = {name: value for name, value in index.items()
-                if value is not None}
+        conf: dict[str, Any] = {name: value for name, value in index.items()
+                                if value is not None}
         declared = _declared_mode(conf.pop("mode", None), "index")
         if not conf:
             if declared == "cloud":
@@ -170,16 +170,8 @@ def _resolve_index_slot(index) -> "tuple[_CloudKey, dict[str, Any]]":
                 'index declares mode "cloud" but carries local keys '
                 f"({', '.join(sorted(conf))}) — the cloud pipeline does "
                 'its own indexing; cloud takes "api_key" only.')
-        mapped = {"index_model": conf.get("model"),
-                  "summary_model": conf.get("summary_model"),
-                  "index_backend": conf.get("backend"),
-                  "storage_path": conf.get("storage_path"),
-                  "summary_max_words": conf.get("summary_max_words"),
-                  "summary_concurrency": conf.get("summary_concurrency"),
-                  "use_embedded_toc": conf.get("use_embedded_toc"),
-                  "optimize": conf.get("optimize")}
-        return None, {name: value for name, value in mapped.items()
-                      if value is not None}
+        rename = {"model": "index_model", "backend": "index_backend"}
+        return None, {rename.get(name, name): value for name, value in conf.items()}
     raise PageIndexAPIError("index must be a string or a dict.")
 
 
@@ -318,7 +310,9 @@ class PageIndexClient:
         summary_max_words (int, optional): Local mode only — the word cap
             each node summary is asked to stay within. Defaults to 150.
         summary_concurrency (int, optional): Local mode only — cap on
-            simultaneous indexing model calls. Defaults to 64.
+            simultaneous indexing model calls per lane: the summaries, and
+            expand up to its own ceiling of 32. The lanes overlap, so up to
+            cap + min(32, cap) calls run at once. Defaults to 64.
         use_embedded_toc (bool, optional): Local mode only — whether flash
             indexing consumes the PDF's embedded bookmarks when they look
             trustworthy. Defaults to True.

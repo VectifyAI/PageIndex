@@ -885,8 +885,8 @@ class SummaryScheduler:
 
     def __init__(self, structure, pdf_pages, model=None,
                  small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
-                 max_intro_pages=SUMMARY_INTRO_MAX_PAGES, max_words=None,
-                 concurrency=None):
+                 max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None,
+                 max_words=None):
         self.structure = structure
         self._pdf_pages = pdf_pages
         self._model = model
@@ -1062,8 +1062,8 @@ class SummaryScheduler:
 
 async def summarize_tree(structure, pdf_pages, model=None,
                          small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
-                         max_intro_pages=SUMMARY_INTRO_MAX_PAGES, max_words=None,
-                         concurrency=None):
+                         max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None,
+                         max_words=None):
     """Bottom-up summaries: leaves from their own pages, parents composed from
     child summaries plus the pages no child covers. A parent's summary describes
     its whole subtree (end_index union semantics). Nodes that already carry a
@@ -1075,7 +1075,7 @@ async def summarize_tree(structure, pdf_pages, model=None,
     scheduler = SummaryScheduler(structure, pdf_pages, model=model,
                                  small_node_tokens=small_node_tokens,
                                  max_intro_pages=max_intro_pages,
-                                 max_words=max_words, concurrency=concurrency)
+                                 concurrency=concurrency, max_words=max_words)
     scheduler.mark_final(list(_subtree(structure)))
     return await scheduler.finish()
 

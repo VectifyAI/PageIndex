@@ -2393,17 +2393,11 @@ def test_flash_knobs_reach_the_local_indexer(tmp_path, sample_pdf, monkeypatch):
                                            "end_index": 1, "summary": "s", "nodes": []}]})
     monkeypatch.setattr(pageindex.utils, "llm_completion",
                         lambda model, prompt, **kw: "d.")
-    stores = iter(range(10))
+    monkeypatch.chdir(tmp_path)  # the default .pageindex store lands here
 
     def run(**kwargs):
         captured.clear()
-        store = str(tmp_path / str(next(stores)))
-        if "index" in kwargs:
-            kwargs["index"] = {**kwargs["index"], "storage_path": store}
-        else:
-            kwargs["storage_path"] = store
-        client = PageIndexLocalClient(**kwargs)
-        client.submit_document(sample_pdf)
+        PageIndexLocalClient(**kwargs).submit_document(sample_pdf)
         return (captured.get("summary_concurrency"), captured["use_embedded_toc"],
                 captured["optimize"])
 
@@ -2429,12 +2423,14 @@ def test_summary_concurrency_caps_expand_too(tmp_path, monkeypatch):
 
     body = "body " * 250
     pages = [body] * 30
-    roots = [{"title": f"X{i}", "start_index": 1 + 10 * i, "end_index": 10 + 10 * i,
-              "node_id": f"000{i}"} for i in range(3)]
+
+    def roots():
+        return [{"title": f"X{i}", "start_index": 1 + 10 * i, "end_index": 10 + 10 * i,
+                 "node_id": f"000{i}"} for i in range(3)]
     pdf = tmp_path / "doc.pdf"
     pdf.write_bytes(build_pdf(["x"]))
     monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: {
-        "structure": roots, "page_texts": list(pages)})
+        "structure": roots(), "page_texts": list(pages)})
     in_flight, peak = 0, 0
 
     async def propose(model, prompt):
@@ -2452,3 +2448,6 @@ def test_summary_concurrency_caps_expand_too(tmp_path, monkeypatch):
 
     flash_api.page_index_flash(str(pdf), summary_model="m", summary_concurrency=1)
     assert peak == 1
+    peak = 0
+    flash_api.page_index_flash(str(pdf), summary_model="m")  # control: the three overlap
+    assert peak == 3
