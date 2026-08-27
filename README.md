@@ -132,7 +132,7 @@ Two ways to use PageIndex: (i) directly through the SDK client, or (ii) integrat
 
 ### Use PageIndex through the SDK client
 
-Three steps from a fresh client to answers. Expand each for the full set of options.
+The complete workflow in three steps. Expand each step for its full set of options.
 
 <details>
 <summary><b>⚙️ Step 1: Initialize the client</b></summary>
