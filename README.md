@@ -103,7 +103,7 @@ print(answer)
 - **`index=`: a basic model is sufficient.** The index model generates the document's tree index. A basic model is sufficient to produce a good tree structure.
 - **`chat=`: use the best model you can afford.** The chat model searches the tree to retrieve information. See [Query cost and accuracy](#query-cost-and-accuracy).
 
-See the [Detailed Usage Guide](#detailed-usage-guide) to configure other models, or [integrate PageIndex with your own agent](#integrate-with-your-own-agent).
+See [the SDK client guide](#sdk-client) to configure other models, or [integrate PageIndex with your own agent](#integrate-with-your-own-agent).
 
 ### Get Answers with Citations
 
@@ -130,8 +130,8 @@ Revenue increased during the reporting period. <cite doc="report.pdf" page="12"/
 
 Two ways to use PageIndex: (i) directly through the SDK client, or (ii) integrate it into your own agent.
 
-<a id="detailed-usage-guide"></a>
-### Detailed Usage Guide
+<a id="sdk-client"></a>
+### Use PageIndex through the SDK client
 
 Three steps from a fresh client to answers. Expand each for the full set of options.
 
