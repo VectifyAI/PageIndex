@@ -89,7 +89,7 @@ from pageindex import PageIndexClient
 
 os.environ["OPENAI_API_KEY"] = "your-openai-key"
 
-client = PageIndexClient(                     
+client = PageIndexClient(
     index="gpt-5.6-luna",               # model to build the tree index
     chat="gpt-5.6-sol",                 # model to search the tree
 )
@@ -258,7 +258,7 @@ Pass a string or role/content history and get the answer back.
 **Stream the answer:**
 
 ```python
-client.chat(question, doc_id=doc_id, stream=True)
+client.chat("...", doc_id=doc_id, stream=True)
 ```
 
 Returns the answer as text chunks.
