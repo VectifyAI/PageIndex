@@ -12,7 +12,7 @@ from typing import Any
 
 from .errors import PageIndexAPIError
 from .local_store import DocStore
-from .utils import run_off_loop
+from .utils import count_tokens, run_off_loop
 
 logger = logging.getLogger(__name__)
 
@@ -214,9 +214,7 @@ class LocalAPI:
 
     def _index_standard(self, file_path: str, page_texts: list[str]) -> tuple[list, str | None]:
         from .page_index_classic import page_index_main
-        import litellm
-        page_list = [(text, litellm.token_counter(model=self._model, text=text))
-                     for text in page_texts]
+        page_list = [(text, count_tokens(text, model=self._model)) for text in page_texts]
         opt = self._config_loader.load({
             "model": self._model,
             "summary_model": self._summary_model,

@@ -2128,11 +2128,25 @@ def test_expand_fuses_same_page_children_before_reporting_them(monkeypatch):
         return {"subsections": [{"title": "Sub One", "page": 4}, {"title": "Sub Two", "page": 4},
                                 {"title": "Sub Three", "page": 5}, {"title": "Sub Four", "page": 9}]}
     monkeypatch.setattr(tree_optimize, "ask_model", propose)
+
+    async def summarize(model, prompt):
+        return '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", summarize)
     reports = []
-    outcome = asyncio.run(tree_optimize.optimize(
-        tree, pages, lines, model="m", do_expand=True, max_rounds=1,
-        on_final=lambda nodes: reports.append([(n["title"], len(n.get("nodes") or []))
-                                              for n in nodes])))
+
+    async def run():
+        # the real scheduler: mark_final snapshots each node's children and
+        # finish() rejects a later change, so settling before the fusion fails here
+        scheduler = pageindex.utils.SummaryScheduler(tree, [(p, 0) for p in pages], model="m")
+
+        def on_final(nodes):
+            reports.append([(n["title"], len(n.get("nodes") or [])) for n in nodes])
+            scheduler.mark_final(nodes)
+        outcome = await tree_optimize.optimize(tree, pages, lines, model="m", do_expand=True,
+                                               max_rounds=1, on_final=on_final)
+        await scheduler.finish()
+        return outcome
+    outcome = asyncio.run(run())
     assert outcome["expands"] == 1 and outcome["same_page_merges"] == 1
     assert [n["title"] for n in tree[0]["nodes"][1]["nodes"]][1:] == ["Sub Three", "Sub Four"]
     assert all(children != 4 for report in reports for _, children in report)
@@ -2451,3 +2465,17 @@ def test_summary_concurrency_caps_expand_too(tmp_path, monkeypatch):
     peak = 0
     flash_api.page_index_flash(str(pdf), summary_model="m")  # control: the three overlap
     assert peak == 3
+
+
+def test_count_tokens_falls_back_to_the_default_tokenizer(monkeypatch):
+    import litellm
+
+    def token_counter(model=None, text=None, **_):
+        if model is not None:
+            raise TypeError("TextInputSequence must be str")  # HF tokenizer on a lone surrogate
+        return 7
+    monkeypatch.setattr(litellm, "token_counter", token_counter)
+    assert pageindex.utils.count_tokens("x", model="groq/llama-3.1-8b-instant") == 7
+
+    monkeypatch.setattr(litellm, "token_counter", lambda model=None, text=None, **_: 3 if model else 7)
+    assert pageindex.utils.count_tokens("x", model="m") == 3  # the model's own count wins when it works

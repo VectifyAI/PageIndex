@@ -751,6 +751,7 @@ async def expand(structure, pages, lines, args, log, frozen):
         attach_children(node, best["children"], lines)
         if args.do_merge:
             merge_same_page([node], log)
+        # settle after the fusion: mark_final snapshots the children, finish() rejects a later change
         args.settled([node])
         results = await asyncio.gather(*(process(child)
                                          for child in node["nodes"]),

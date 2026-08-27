@@ -71,7 +71,10 @@ def count_tokens(text, model=None):
     if not text:
         return 0
     import litellm
-    return litellm.token_counter(model=model, text=text)
+    try:
+        return litellm.token_counter(model=model, text=text)
+    except Exception:
+        return litellm.token_counter(model=None, text=text)
 
 
 def _strip_prefix(s, prefix):
@@ -515,14 +518,13 @@ def add_preface_if_needed(data):
 
 
 def get_page_tokens(pdf_path, model=None, pdf_parser="PyPDF2"):
-    import litellm
     if pdf_parser == "PyPDF2":
         pdf_reader = PyPDF2.PdfReader(pdf_path)
         page_list = []
         for page_num in range(len(pdf_reader.pages)):
             page = pdf_reader.pages[page_num]
             page_text = page.extract_text()
-            token_length = litellm.token_counter(model=model, text=page_text)
+            token_length = count_tokens(page_text, model=model)
             page_list.append((page_text, token_length))
         return page_list
     elif pdf_parser == "PyMuPDF":
@@ -535,7 +537,7 @@ def get_page_tokens(pdf_path, model=None, pdf_parser="PyPDF2"):
         page_list = []
         for page in doc:
             page_text = page.get_text()
-            token_length = litellm.token_counter(model=model, text=page_text)
+            token_length = count_tokens(page_text, model=model)
             page_list.append((page_text, token_length))
         return page_list
     else:
