@@ -128,7 +128,7 @@ Revenue increased during the reporting period. <cite doc="report.pdf" page="12"/
 
 # Benchmarks
 
-### Local mode
+### PageIndex Local
 
 #### Indexing cost and time
 
