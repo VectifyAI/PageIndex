@@ -130,7 +130,7 @@ Revenue increased during the reporting period. <cite doc="report.pdf" page="12"/
 
 <a id="detailed-usage-guide"></a>
 <details>
-<summary><h2>Detailed Usage Guide</h2></summary>
+<summary><h3>Detailed Usage Guide</h3></summary>
 
 ### ⚙️ Step 1: Initialize the client
 
@@ -283,7 +283,7 @@ Pass a list of ids to `doc_id` to search several documents at once, and keep it 
 
 <a id="integrate-with-your-own-agent"></a>
 <details>
-<summary><h2>Integrate PageIndex with your own agent</h2></summary>
+<summary><h3>Integrate PageIndex with your own agent</h3></summary>
 
 Instead of calling PageIndex's agent, hand PageIndex's tools to yours. One call fills every slot:
 
