@@ -133,7 +133,7 @@ Configure the client step by step, or use PageIndex's tools inside your own agen
 <a id="detailed-usage-guide"></a>
 ### Detailed Usage Guide
 
-Expand a step for the full options: model naming for other providers, what a tree looks like, and the protocol surfaces behind `chat()`.
+Each step expands to its full set of options: model names for any provider, the structure of a built tree index, and the OpenAI- and Anthropic-compatible interfaces behind `chat()`.
 
 <details>
 <summary><h4>⚙️ Step 1: Initialize the client</h4></summary>
@@ -290,7 +290,7 @@ Pass a list of ids to `doc_id` to search several documents at once, and keep it 
 <a id="integrate-with-your-own-agent"></a>
 ### Integrate PageIndex with your own agent
 
-Instead of calling PageIndex's agent, hand PageIndex's tools to yours. One call fills every slot:
+PageIndex's document tools also work inside an agent you already have. Each helper below sets up one framework in a single call:
 
 <details>
 <summary><h4>OpenAI Agents SDK</h4></summary>
