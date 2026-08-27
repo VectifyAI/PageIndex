@@ -128,7 +128,9 @@ Revenue increased during the reporting period. <cite doc="report.pdf" page="12"/
 
 ## Benchmarks
 
-### Indexing cost and time
+### Open-source PageIndex, running locally
+
+#### Indexing cost and time
 
 Building a tree locally runs **about $0.001 per page** with `index_model="gpt-5.6-luna"`, so a 1,000-page textbook costs a little over a dollar and a few minutes, once, and every later question reuses it. PageIndex is designed not to rely heavily on the model used at index time, so in our experiments a basic model does not hurt quality.
 
@@ -150,7 +152,7 @@ Indexing time also scales predictably with document length. In the same local se
 
 
 
-### Query cost and accuracy
+#### Query cost and accuracy
 
 [**PageIndex-OSS-Benchmark**](https://github.com/VectifyAI/PageIndex-OSS-Benchmark) measures exactly the setup in the quickstart above (`PageIndexClient()` in local mode, flash indexing, no OCR) on 62 lookup questions over 34 PDFs (1,945 pages) drawn from [MMLongBench-Doc-V2](https://github.com/VectifyAI/MMLongBench-Doc-V2). Every question's answer is a fact stated in running text, so a wrong answer is a **retrieval or reading failure**, not a reasoning one.
 
@@ -164,7 +166,7 @@ Indexing time also scales predictably with document length. In the same local se
 
 Full results, data, and the runner are in the [benchmark repo](https://github.com/VectifyAI/PageIndex-OSS-Benchmark).
 
-### PageIndex leads a finance QA benchmark
+### FinanceBench
 
 PageIndex reached a state-of-the-art [**98.7% accuracy**](https://vectify.ai/blog/Mafin2.5) on [FinanceBench](https://arxiv.org/abs/2311.11944), a financial document QA benchmark, vastly outperforming vector-based RAG.
 
