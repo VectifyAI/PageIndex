@@ -172,7 +172,7 @@ PageIndex reached a state-of-the-art [**98.7% accuracy**](https://vectify.ai/blo
 
 <div align="center">
   <a href="https://github.com/VectifyAI/Mafin2.5-FinanceBench">
-    <img src="https://github.com/user-attachments/assets/571aa074-d803-43c7-80c4-a04254b782a3" width="90%">
+    <img src="https://github.com/user-attachments/assets/571aa074-d803-43c7-80c4-a04254b782a3" width="70%">
   </a>
 </div>
 
