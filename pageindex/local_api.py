@@ -38,11 +38,13 @@ class LocalAPI:
     """Backs PageIndexClient's local mode. One instance per client."""
 
     def __init__(self, storage_path: str, model: str, summary_model: str,
-                 index_backend: dict | None = None):
+                 index_backend: dict | None = None,
+                 summary_max_words: int | None = None):
         self._store = DocStore(storage_path)
         self._model = model
         self._summary_model = summary_model
         self._index_backend = index_backend
+        self._summary_max_words = summary_max_words
         from .utils import ConfigLoader
         self._config_loader = ConfigLoader()
 
@@ -230,7 +232,8 @@ class LocalAPI:
         result = page_index_flash(file_path, summary=True,
                                   summary_model=self._summary_model,
                                   optimize="full",
-                                  optimize_model=self._summary_model)
+                                  optimize_model=self._summary_model,
+                                  summary_max_words=self._summary_max_words)
         structure = result.get("structure", [])
         reason = flash_rejection_reason(result)
         if reason:
