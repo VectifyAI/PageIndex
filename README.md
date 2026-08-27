@@ -336,9 +336,9 @@ tools = client.agent_tools()
 
 `agent_tools()` returns plain Python functions that work with LangChain, PydanticAI, and other agent frameworks.
 
-</details>
-
 Each `*_config` helper is sugar over the explicit pieces (`client.agent_instructions()` for the system prompt, `client.as_openai_tools()` / `as_anthropic_tools()` / `as_claude_mcp()` for the tools), so you can swap in your own prompt whenever you need to. Locally, `doc_id` is enforced at the tool layer, not just prompted: out-of-scope lookups return `NOT_FOUND`.
+
+</details>
 
 
 
