@@ -99,14 +99,14 @@ def _optimize(structure, page_texts, do_expand, model):
     return asyncio.run(_optimize_async(structure, page_texts, do_expand, model))
 
 
-async def _optimize_and_summarize(structure, page_texts, model, summary_model,
+async def _optimize_and_summarize(structure, page_texts, optimize_model, summary_model,
                                   concurrency):
     """Expand and summarize on one loop: a node is summarized as soon as
     expand can no longer change it, a parent once its children are done."""
     from ..utils import SummaryScheduler
     scheduler = SummaryScheduler(structure, [(text, 0) for text in page_texts],
                                  model=summary_model, concurrency=concurrency)
-    report = await _optimize_async(structure, page_texts, True, model,
+    report = await _optimize_async(structure, page_texts, True, optimize_model,
                                    on_final=scheduler.mark_final)
     await scheduler.finish()
     return report
@@ -146,8 +146,8 @@ def page_index_flash(pdf, summary=True, summary_model=None,
     if optimize and structure and summary and do_expand:
         import asyncio
         result["optimize"] = asyncio.run(_optimize_and_summarize(
-            structure, pages, optimize_model or summary_model,
-            summary_model, summary_concurrency))
+            structure, pages, optimize_model=optimize_model or summary_model,
+            summary_model=summary_model, concurrency=summary_concurrency))
         return result
     if optimize and structure:
         result["optimize"] = _optimize(structure, pages, do_expand,

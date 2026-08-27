@@ -1032,10 +1032,10 @@ class SummaryScheduler:
                 name = node.get('title') or node.get('node_id') or '?'
                 raise RuntimeError(f"node {name!r} was dropped or changed "
                                    "after it was marked final")
-        undecided = sum(1 for nid in self._tasks
+        undecided = sum(1 for nid in live
                         if not (mark := self._marks.get(nid)) or not mark.done())
         if undecided:
-            raise RuntimeError(f"{undecided} node(s) were tasked but never marked final; "
+            raise RuntimeError(f"{undecided} node(s) were never marked final; "
                                "their summaries would wait forever")
         results = await asyncio.gather(*(self._task(root, 1) for root in self.structure),
                                        return_exceptions=True)
