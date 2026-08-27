@@ -111,8 +111,8 @@ To request inline page-level citations, pass a system message together with the 
 
 ```python
 messages = [
-    {"role": "system", "content": """Cite only statements supported by
-        tool outputs using <cite doc="{docName}" page="{pageNumber}"/>"""},
+    {"role": "system", "content": """Cite only statements supported by tool outputs using
+        <cite doc="{docName}" page="{pageNumber}"/>"""},
     {"role": "user", "content": "Summarize the document."},
 ]
 
