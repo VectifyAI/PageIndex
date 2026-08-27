@@ -128,8 +128,12 @@ Revenue increased during the reporting period. <cite doc="report.pdf" page="12"/
 
 # Usage
 
+The quickstart covers the happy path. This section covers the rest: the client step by step, then PageIndex as a set of tools inside your own agent.
+
 <a id="detailed-usage-guide"></a>
 ### Detailed Usage Guide
+
+Expand a step for the full options: model naming for other providers, what a tree looks like, and the protocol surfaces behind `chat()`.
 
 <details>
 <summary><h4>⚙️ Step 1: Initialize the client</h4></summary>
