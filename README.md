@@ -38,7 +38,7 @@
 
 
 
-## What is PageIndex?
+# What is PageIndex?
 
 Are you frustrated with vector database retrieval accuracy for long and complex documents? Vector-based RAG retrieves by semantic **similarity**. But **similarity ≠ relevance** — what retrieval actually needs is relevance, and relevance requires **reasoning**. On professional documents that demand contextual understanding, domain expertise, and multi-step reasoning, similarity search misses what is relevant but not similar, and returns what is similar but not relevant.
 
@@ -74,7 +74,7 @@ It is ideal for financial reports, legal documents, regulatory filings, technica
 
 
 
-## Quickstart
+# Quickstart
 
 ```bash
 pip install -U pageindex
@@ -126,7 +126,7 @@ Revenue increased during the reporting period. <cite doc="report.pdf" page="12"/
 ```
 
 
-## Benchmarks
+# Benchmarks
 
 ### Open-source PageIndex, running locally
 
@@ -185,7 +185,7 @@ Explore the full [benchmark results](https://github.com/VectifyAI/Mafin2.5-Finan
 <details>
 <summary>
 
-## Detailed Usage Guide
+# Detailed Usage Guide
 
 </summary>
 
@@ -342,7 +342,7 @@ Pass a list of ids to `doc_id` to search several documents at once, and keep it 
 <details>
 <summary>
 
-## Integrate PageIndex with your own agent
+# Integrate PageIndex with your own agent
 
 </summary>
 
@@ -391,7 +391,7 @@ Each `*_config` helper is sugar over the explicit pieces (`client.agent_instruct
 </details>
 
 
-## PageIndex Cloud
+# PageIndex Cloud
 
 The open-source version is ideal for text-heavy PDFs and local workflows. With **PageIndex Cloud, document indexing and storage run in the cloud**: PageIndex handles parsing, OCR, image understanding, tree-index construction, and managed storage for you. The chat and retrieval layer remains **compatible with your model**, so you can search the cloud-hosted index using the model provider your application already uses.
 
@@ -440,7 +440,7 @@ For dedicated deployment (VPC or on-premises), [contact us](https://ii2abc2jejf.
 
 ---
 
-## ⭐ Support Us
+# ⭐ Support Us
 
 Leave us a star 🌟 if you like our project. Thank you!  
 
