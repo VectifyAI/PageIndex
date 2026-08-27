@@ -130,9 +130,9 @@ Revenue increased during the reporting period. <cite doc="report.pdf" page="12"/
 
 <a id="detailed-usage-guide"></a>
 <details>
-<summary><h3>Detailed Usage Guide</h3></summary>
+<summary><h2>Detailed Usage Guide</h2></summary>
 
-#### ⚙️ Step 1: Initialize the client
+### ⚙️ Step 1: Initialize the client
 
 Create a local client and choose the models used for indexing and retrieval:
 
@@ -155,7 +155,7 @@ client = PageIndexClient(
 
 `index_model=` / `chat_model=` are the flat spellings of the quickstart's `index=` / `chat=`; either spelling works.
 
-##### Model naming conventions
+#### Model naming conventions
 
 Model names follow [LiteLLM's naming convention](https://docs.litellm.ai/docs/providers). Choose the format that matches your provider:
 
@@ -185,7 +185,7 @@ For model names and API key settings for other providers, see the [LiteLLM provi
 
 <a id="step-2-build-the-tree-index"></a>
 
-#### 🌲 Step 2: Build the tree index
+### 🌲 Step 2: Build the tree index
 
 `submit_document` defaults to **Flash** indexing: the structure is extracted from the PDF's own layout (no LLM), and a model is called only for node summaries and the tree-optimization expansion pass. It takes seconds.
 
@@ -233,7 +233,7 @@ See more example [documents](https://github.com/VectifyAI/PageIndex/tree/main/ex
 
 
 
-#### 💬 Step 3: Ask questions
+### 💬 Step 3: Ask questions
 
 `chat()` is the one-line surface. Underneath it is a document-QA agent, and you can talk to it over whichever protocol your stack already speaks:
 
@@ -283,7 +283,7 @@ Pass a list of ids to `doc_id` to search several documents at once, and keep it 
 
 <a id="integrate-with-your-own-agent"></a>
 <details>
-<summary><h3>Integrate PageIndex with your own agent</h3></summary>
+<summary><h2>Integrate PageIndex with your own agent</h2></summary>
 
 Instead of calling PageIndex's agent, hand PageIndex's tools to yours. One call fills every slot:
 
