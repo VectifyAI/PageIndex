@@ -777,3 +777,9 @@ def test_landscape_deck_title_is_the_slide_heading(tmp_path):
     pdf = tmp_path / "deck.pdf"
     pdf.write_bytes(_deck_pdf())
     assert extract_toc(str(pdf))["doc_title"] == DECK_TITLES[0]
+
+
+def test_flash_cli_summary_concurrency_reaches_the_indexer(monkeypatch, tmp_path):
+    captured = _run_flash_cli(monkeypatch, tmp_path, ["--summary-concurrency", "8"],
+                              [{"title": "A", "start_index": 1, "end_index": 1}])
+    assert captured["summary_concurrency"] == 8
