@@ -54,22 +54,7 @@ Inspired by AlphaGo, **[PageIndex](https://vectify.ai/pageindex)** replaces the 
 </div>
 
 
-**A — 居中斜体大字（epigraph）**
-
-<h3 align="center"><i>PageIndex is a vectorless, reasoning-based RAG engine that mirrors how humans read, delivering traceable, explainable, and context-aware retrieval, without vector databases or chunking.</i></h3>
-
-**B — GitHub Alert 框**
-
-> [!TIP]
-> PageIndex is a vectorless, reasoning-based RAG engine that mirrors how humans read, delivering traceable, explainable, and context-aware retrieval, without vector databases or chunking.
-
-**C — 引用块 + 居中加粗**
-
-<blockquote align="center"><b>PageIndex is a vectorless, reasoning-based RAG engine that mirrors how humans read, delivering traceable, explainable, and context-aware retrieval, without vector databases or chunking.</b></blockquote>
-
-**D — 现状：普通块引用**
-
-> PageIndex is a vectorless, reasoning-based RAG engine that mirrors how humans read, delivering traceable, explainable, and context-aware retrieval, without vector databases or chunking.
+<blockquote align="center"><b>PageIndex is a vectorless, reasoning-based RAG engine that mirrors how humans read,<br>delivering traceable, explainable, and context-aware retrieval, without vector databases or chunking.</b></blockquote>
 
 ### Compare with Vector RAG
 
