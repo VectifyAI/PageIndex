@@ -166,7 +166,7 @@ Full results, data, and the runner are in the [benchmark repo](https://github.co
 
 ### PageIndex leads a finance QA benchmark
 
-PageIndex reached a state-of-the-art [**98.7% accuracy**](https://vectify.ai/blog/Mafin2.5) on [FinanceBench](https://arxiv.org/abs/2311.11944), a financial document QA benchmark, far ahead of vector-based RAG systems on SEC filings and earnings disclosures.
+PageIndex reached a state-of-the-art [**98.7% accuracy**](https://vectify.ai/blog/Mafin2.5) on [FinanceBench](https://arxiv.org/abs/2311.11944), a QA benchmark built on SEC filings and earnings reports, vastly outperforming vector-based RAG.
 
 <div align="center">
   <a href="https://github.com/VectifyAI/Mafin2.5-FinanceBench">
