@@ -140,14 +140,14 @@ Building a tree locally runs **about $0.001 per page** with `index_model="gpt-5.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/index-cost-dark.png">
-  <img src="assets/index-cost-light.png" alt="Indexing cost against document length, log-log, for nine PDFs from 9 to 1,098 pages. Points track a $0.0011-per-page reference line; the spread around it is text density, not length.">
+  <img src="assets/index-cost-light.png" width="70%" alt="Indexing cost against document length, log-log, for nine PDFs from 9 to 1,098 pages. Points track a $0.0011-per-page reference line; the spread around it is text density, not length.">
 </picture>
 
 Indexing time also scales predictably with document length. In the same local setup, the benchmark documents (9 to 1,098 pages) finished in roughly **13 seconds to 4.5 minutes**.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/index-time-dark.png">
-  <img src="assets/index-time-light.png" alt="Indexing time against document length, log-log, for nine PDFs from 9 to 1,098 pages. The measured indexing times range from about 13 seconds to 4.5 minutes and increase predictably with document length.">
+  <img src="assets/index-time-light.png" width="70%" alt="Indexing time against document length, log-log, for nine PDFs from 9 to 1,098 pages. The measured indexing times range from about 13 seconds to 4.5 minutes and increase predictably with document length.">
 </picture>
 
 
@@ -158,7 +158,7 @@ Indexing time also scales predictably with document length. In the same local se
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/results-dark.png">
-  <img src="assets/results-light.png" alt="Accuracy against average cost per question. Each model forms a near-vertical reasoning-effort ladder; moving between models costs an order of magnitude a step.">
+  <img src="assets/results-light.png" width="70%" alt="Accuracy against average cost per question. Each model forms a near-vertical reasoning-effort ladder; moving between models costs an order of magnitude a step.">
 </picture>
 
 
