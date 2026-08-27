@@ -1268,26 +1268,6 @@ def test_summary_scheduler_starts_a_marked_node_without_waiting_for_the_rest(mon
     assert [n["summary"] for n in (leaf, root["nodes"][1], root)] == ["ok"] * 3
 
 
-def test_leaf_summary_skips_the_tokenizer_when_length_already_rules_small_out(monkeypatch):
-    """No text averages 8+ characters per token, so a long leaf cannot come
-    in under the raw-text floor: its length alone settles the small-node
-    gate and the tokenizer, a synchronous cost on the loop, never runs."""
-    counted = []
-    real = pageindex.utils.count_tokens
-    monkeypatch.setattr(pageindex.utils, "count_tokens",
-                        lambda text, model=None: counted.append(len(text)) or real(text, model=model))
-
-    async def fake(model, prompt):
-        return '{"points": [], "summary": "ok"}'
-    monkeypatch.setattr(pageindex.utils, "llm_acompletion", fake)
-    long_leaf = [{"title": "A", "start_index": 1, "end_index": 1}]
-    asyncio.run(pageindex.utils.summarize_tree(long_leaf, [("word " * 1000, 1000)]))
-    assert long_leaf[0]["summary"] == "ok" and counted == []
-    short_leaf = [{"title": "B", "start_index": 1, "end_index": 1}]
-    asyncio.run(pageindex.utils.summarize_tree(short_leaf, [("tiny", 1)]))
-    assert short_leaf[0]["summary"] == "tiny" and counted == [4]
-
-
 def test_finish_fails_loud_when_a_final_node_changes_afterwards(monkeypatch):
     """mark_final is a promise: the node stays in the tree and keeps its
     children. finish() verifies it, so a run that broke the promise fails

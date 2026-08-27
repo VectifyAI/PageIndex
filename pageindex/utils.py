@@ -940,10 +940,7 @@ class SummaryScheduler:
 
     async def _leaf_summary(self, node, prio):
         text = get_text_of_pdf_pages(self._pdf_pages, node['start_index'], node['end_index'])
-        # no text averages 8+ chars per token, so length alone clears most
-        # leaves without paying for the tokenizer on the loop
-        if (len(text) <= self._small_node_tokens * 8
-                and count_tokens(text, model="gpt-4o") < self._small_node_tokens):
+        if count_tokens(text, model=self._model) < self._small_node_tokens:
             return text.strip()
 
         # A node merged from same-page siblings carries a title joined from theirs.
