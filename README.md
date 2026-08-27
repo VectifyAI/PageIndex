@@ -448,7 +448,7 @@ PageIndex reached a state-of-the-art [**98.7% accuracy**](https://vectify.ai/blo
 <a href="https://github.com/VectifyAI/Mafin2.5-FinanceBench">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/financebench-dark.png">
-  <img src="assets/financebench-light.png" width="75%" alt="FinanceBench accuracy: PageIndex 98.7%, vector RAG 50%.">
+  <img src="assets/financebench-light.png" width="60%" alt="FinanceBench accuracy: PageIndex 98.7%, vector RAG 50%.">
 </picture>
 </a>
 </div>
