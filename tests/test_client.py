@@ -2309,3 +2309,73 @@ def test_blank_chat_model_carries_no_model_into_agent_config():
     client = PageIndexClient()
     client.chat_model = "   "
     assert "model" not in client.openai_agent_config()
+
+
+def test_summary_prompts_cap_words_and_omit_points(monkeypatch):
+    """Both summary prompts ask for the summary alone, within the word cap.
+    The points list the model wrote first was parsed and thrown away, and
+    with it gone the summary swallows its content unless a cap holds it."""
+    prompts = []
+
+    async def capture(model, prompt):
+        prompts.append(prompt)
+        return '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", capture)
+    pdf_pages = [("alpha " * 5, 5), ("beta " * 5, 5)]
+
+    def tree():
+        return [{"title": "R", "start_index": 1, "end_index": 2,
+                 "nodes": [{"title": "A", "start_index": 1, "end_index": 1},
+                           {"title": "B", "start_index": 2, "end_index": 2}]}]
+
+    asyncio.run(pageindex.utils.summarize_tree(tree(), pdf_pages, small_node_tokens=0))
+    assert len(prompts) == 3
+    assert all("within 150 words" in p and '"points"' not in p for p in prompts)
+
+    prompts.clear()
+    asyncio.run(pageindex.utils.summarize_tree(tree(), pdf_pages, small_node_tokens=0,
+                                               max_words=80))
+    assert len(prompts) == 3 and all("within 80 words" in p for p in prompts)
+
+
+def test_page_index_flash_plumbs_summary_max_words(tmp_path, monkeypatch):
+    """summary_max_words reaches the prompts on both summary paths: the
+    plain one and the one overlapped with expand."""
+    from conftest import build_pdf
+    import copy
+    import pageindex.flash.api as flash_api
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, _ = _expand_fixture()
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: {
+        "structure": copy.deepcopy(tree), "page_texts": list(pages)})
+
+    async def propose(model, prompt):
+        return {"subsections": [{"title": "Sub One", "page": 4},
+                                {"title": "Sub Two", "page": 8}]}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+    prompts = []
+
+    async def capture(model, prompt):
+        prompts.append(prompt)
+        return '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", capture)
+
+    for optimize in (False, "full"):
+        prompts.clear()
+        flash_api.page_index_flash(str(pdf), summary_model="m", optimize=optimize,
+                                   summary_max_words=80)
+        assert prompts and all("within 80 words" in p for p in prompts), optimize
+
+
+def test_summary_max_words_reaches_the_local_indexer():
+    """index["summary_max_words"] and the flat argument both land on the
+    local indexer; a non-int refuses in the constructor like every slot."""
+    from pageindex import PageIndexLocalClient
+    assert PageIndexLocalClient(index={"summary_max_words": 80})._api._summary_max_words == 80
+    assert PageIndexLocalClient(summary_max_words=80)._api._summary_max_words == 80
+    assert PageIndexLocalClient()._api._summary_max_words is None
+    with pytest.raises(PageIndexAPIError, match=r'index\["summary_max_words"\] must be a'):
+        PageIndexLocalClient(index={"summary_max_words": "80"})

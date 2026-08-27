@@ -33,6 +33,8 @@ if __name__ == "__main__":
                       help='(legacy) Same as --index-model')
     parser.add_argument('--summary-model', type=str, default=None,
                       help='Model for node summaries (falls back to config.yaml summary_model, then --index-model, then --model)')
+    parser.add_argument('--summary-max-words', type=int, default=None,
+                      help='Word cap for each node summary (flash mode; default 150)')
 
     parser.add_argument('--toc-check-pages', type=int, default=None,
                       help='Number of pages to check for table of contents (PDF only)')
@@ -74,6 +76,8 @@ if __name__ == "__main__":
         raise ValueError("--embedded-toc requires Flash mode with --pdf_path")
     if args.summary is not None and not (args.pdf_path and args.mode == 'flash'):
         raise ValueError("--summary requires Flash mode with --pdf_path")
+    if args.summary_max_words is not None and not (args.pdf_path and args.mode == 'flash'):
+        raise ValueError("--summary-max-words requires Flash mode with --pdf_path")
     if args.pdf_path and args.mode == 'flash':
         for flag, value in (('--toc-check-pages', args.toc_check_pages),
                             ('--max-pages-per-node', args.max_pages_per_node),
@@ -107,6 +111,7 @@ if __name__ == "__main__":
                 summary_model=summary_model,
                 use_embedded_toc=args.embedded_toc if args.embedded_toc is not None else True,
                 summary=will_summarize,
+                summary_max_words=args.summary_max_words,
             )
             if not toc_with_page_number.get('structure'):
                 raise ValueError("PageIndex Flash could not extract a structure from this PDF; "

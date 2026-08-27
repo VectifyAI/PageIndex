@@ -745,6 +745,7 @@ async def generate_summaries_for_structure(structure, model=None):
 SUMMARY_CONCURRENCY = 64        # simultaneous summary model calls
 SUMMARY_RAW_TEXT_TOKENS = 200   # leaves under this reuse their raw text as the summary
 SUMMARY_INTRO_MAX_PAGES = 3     # cap on leading pages fed into a parent summary
+SUMMARY_MAX_WORDS = 150         # word cap the summary prompts ask for
 
 
 class _PriorityGate:
@@ -884,12 +885,14 @@ class SummaryScheduler:
 
     def __init__(self, structure, pdf_pages, model=None,
                  small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
-                 max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None):
+                 max_intro_pages=SUMMARY_INTRO_MAX_PAGES, max_words=None,
+                 concurrency=None):
         self.structure = structure
         self._pdf_pages = pdf_pages
         self._model = model
         self._small_node_tokens = small_node_tokens
         self._max_intro_pages = max_intro_pages
+        self._max_words = max_words or SUMMARY_MAX_WORDS
         self._gate = _PriorityGate(concurrency or SUMMARY_CONCURRENCY)
         self._asked = self._answered = False
         self._marks = {}     # id(node) -> future resolved once the node is final
@@ -957,13 +960,12 @@ class SummaryScheduler:
 
         prompt = f"""You are given a text chunk from a document.
     Your task is to generate a concise description of everything that is covered in the text, summarizing all its points without omitting any type of content.
-    Keep the description concise and to the point, avoiding unnecessary details.{ask_title}
+    Keep the description concise and to the point, avoiding unnecessary details, within {self._max_words} words.{ask_title}
 
     Given Text: {text}
 
     Reply strictly in the following JSON format:
     {{{title_field}
-        "points": <a list of points covered in the text>,
         "summary": <a concise description of everything that is covered in the text, summarizing all its points without omitting any type of content>
     }}
 
@@ -984,7 +986,7 @@ class SummaryScheduler:
             ensure_ascii=False)
         prompt = f"""You are given a section of a document: the text that opens the section (possibly empty) and the titles and summaries of its subsections.
     Your task is to generate a concise description of everything that is covered in the whole section, summarizing all its points without omitting any type of content.
-    Keep the description concise and to the point, avoiding unnecessary details.
+    Keep the description concise and to the point, avoiding unnecessary details, within {self._max_words} words.
 
     Section Title: {node.get('title', '')}
 
@@ -994,7 +996,6 @@ class SummaryScheduler:
 
     Reply strictly in the following JSON format:
     {{
-        "points": <a list of points covered in the section>,
         "summary": <a concise description of everything that is covered in the section, summarizing all its points without omitting any type of content>
     }}
 
@@ -1061,18 +1062,20 @@ class SummaryScheduler:
 
 async def summarize_tree(structure, pdf_pages, model=None,
                          small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
-                         max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None):
+                         max_intro_pages=SUMMARY_INTRO_MAX_PAGES, max_words=None,
+                         concurrency=None):
     """Bottom-up summaries: leaves from their own pages, parents composed from
     child summaries plus the pages no child covers. A parent's summary describes
     its whole subtree (end_index union semantics). Nodes that already carry a
     summary are left untouched; leaves under `small_node_tokens` use their raw
-    text as the summary without a model call. Model calls run deepest node
-    first, both in starting order and in leaving the queue: depth counts the
-    calls left on a node's path to the root, its own included."""
+    text as the summary without a model call; every prompt asks for at most
+    `max_words` words. Model calls run deepest node first, both in starting
+    order and in leaving the queue: depth counts the calls left on a node's
+    path to the root, its own included."""
     scheduler = SummaryScheduler(structure, pdf_pages, model=model,
                                  small_node_tokens=small_node_tokens,
                                  max_intro_pages=max_intro_pages,
-                                 concurrency=concurrency)
+                                 max_words=max_words, concurrency=concurrency)
     scheduler.mark_final(list(_subtree(structure)))
     return await scheduler.finish()
 
