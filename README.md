@@ -290,7 +290,7 @@ Pass a list of ids to `doc_id` to search several documents at once, and keep it 
 <a id="integrate-with-your-own-agent"></a>
 ### Integrate PageIndex with your own agent
 
-PageIndex also works inside an agent you already have. Each helper below sets up one framework in a single call:
+PageIndex can also be integrated into your own agent. Each example below sets up one framework:
 
 <details>
 <summary><h4>OpenAI Agents SDK</h4></summary>
