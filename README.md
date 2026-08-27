@@ -439,8 +439,8 @@ print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 
 ### Ready to Try It?
 
-- [Get a PageIndex API Key](https://developer.pageindex.ai/)
-- [Read the PageIndex Cloud Documentation](https://docs.pageindex.ai/)
+- Get a [PageIndex API key](https://developer.pageindex.ai/)
+- Read the [PageIndex Cloud documentation](https://docs.pageindex.ai/)
 
 For dedicated deployment (VPC or on-premises), [contact us](https://ii2abc2jejf.typeform.com/to/gVv7qkaN) or [book a demo](https://calendly.com/pageindex/meet).
 
