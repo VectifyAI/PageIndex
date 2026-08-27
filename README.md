@@ -181,8 +181,6 @@ Full results, data, and the runner are in the [benchmark repo](https://github.co
 
 </summary>
 
-<br>
-
 ### ⚙️ Step 1: Initialize the client
 
 Create a local client and choose the models used for indexing and retrieval:
@@ -339,8 +337,6 @@ Pass a list of ids to `doc_id` to search several documents at once, and keep it 
 ## Integrate PageIndex with your own agent
 
 </summary>
-
-<br>
 
 Instead of calling PageIndex's agent, hand PageIndex's tools to yours. One call fills every slot:
 
