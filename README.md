@@ -103,7 +103,7 @@ print(answer)
 - **`index=`: a basic model is sufficient.** The index model generates the document's tree index. A basic model is sufficient to produce a good tree structure.
 - **`chat=`: use the best model you can afford.** The chat model searches the tree to retrieve information. See [Query cost and accuracy](#query-cost-and-accuracy).
 
-See the [Detailed Usage Guide](#detailed-usage-guide) to configure other models, or [integrate PageIndex with your own agent](#integrate-with-your-own-agent).
+See [Usage](#usage) to configure other models, or [integrate PageIndex with your own agent](#integrate-with-your-own-agent).
 
 ### Get Answers with Citations
 
@@ -128,11 +128,8 @@ Revenue increased during the reporting period. <cite doc="report.pdf" page="12"/
 
 # Usage
 
-<a id="detailed-usage-guide"></a>
 <details>
-<summary><h3>Detailed Usage Guide</h3></summary>
-
-### ⚙️ Step 1: Initialize the client
+<summary><h3>⚙️ Step 1: Initialize the client</h3></summary>
 
 Create a local client and choose the models used for indexing and retrieval:
 
@@ -182,10 +179,11 @@ chat_model = "openrouter/anthropic/claude-sonnet-4-6"
 
 For model names and API key settings for other providers, see the [LiteLLM provider documentation](https://docs.litellm.ai/docs/providers).
 
+</details>
 
 <a id="step-2-build-the-tree-index"></a>
-
-### 🌲 Step 2: Build the tree index
+<details>
+<summary><h3>🌲 Step 2: Build the tree index</h3></summary>
 
 `submit_document` defaults to **Flash** indexing: the structure is extracted from the PDF's own layout (no LLM), and a model is called only for node summaries and the tree-optimization expansion pass. It takes seconds.
 
@@ -230,10 +228,10 @@ A PageIndex tree looks like a table of contents optimized for LLMs and agents:
 
 See more example [documents](https://github.com/VectifyAI/PageIndex/tree/main/examples/documents) and generated [tree structures](https://github.com/VectifyAI/PageIndex/tree/main/examples/documents/results).
 
+</details>
 
-
-
-### 💬 Step 3: Ask questions
+<details>
+<summary><h3>💬 Step 3: Ask questions</h3></summary>
 
 `chat()` is the one-line surface. Underneath it is a document-QA agent, and you can talk to it over whichever protocol your stack already speaks:
 
@@ -280,6 +278,7 @@ Uses Anthropic's native Messages API and tool runner. Install it with `pip insta
 Pass a list of ids to `doc_id` to search several documents at once, and keep it identical across a conversation's calls.
 
 </details>
+
 
 <a id="integrate-with-your-own-agent"></a>
 <details>
