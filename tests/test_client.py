@@ -2418,3 +2418,37 @@ def test_flash_knobs_reach_the_local_indexer(tmp_path, sample_pdf, monkeypatch):
                         ({"summary_concurrency": "8"}, "summary_concurrency must be a")):
         with pytest.raises(PageIndexAPIError, match=msg):
             PageIndexLocalClient(**kwargs)
+
+
+def test_summary_concurrency_caps_expand_too(tmp_path, monkeypatch):
+    """A user who lowers summary_concurrency for a tight quota gets the whole
+    indexing lane lowered: expand's own gate takes the same cap."""
+    from conftest import build_pdf
+    import pageindex.flash.api as flash_api
+    import pageindex.tree_optimize as tree_optimize
+
+    body = "body " * 250
+    pages = [body] * 30
+    roots = [{"title": f"X{i}", "start_index": 1 + 10 * i, "end_index": 10 + 10 * i,
+              "node_id": f"000{i}"} for i in range(3)]
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: {
+        "structure": roots, "page_texts": list(pages)})
+    in_flight, peak = 0, 0
+
+    async def propose(model, prompt):
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.02)
+        in_flight -= 1
+        return {"subsections": []}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+
+    async def summarize(model, prompt):
+        return '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", summarize)
+
+    flash_api.page_index_flash(str(pdf), summary_model="m", summary_concurrency=1)
+    assert peak == 1
