@@ -661,7 +661,7 @@ async def expand(structure, pages, lines, args, log, frozen):
     priced with expand_cost and the cheapest is kept.
     """
     changed = False
-    semaphore = asyncio.Semaphore(EXPAND_CONCURRENCY)
+    semaphore = asyncio.Semaphore(args.concurrency)
 
     async def proposals_for(node):
         """The model half of one node's lookahead: the empty-retry ladder and
@@ -790,7 +790,8 @@ async def optimize(structure, pages, lines, model=None, routing=ROUTING_COST,
                    trigger_pages=TRIGGER_PAGES, min_gain_ratio=0.0,
                    do_merge=True, do_expand=True, max_rounds=3, page_count=None,
                    cache=None, kinds=("section", "table"), empty_retries=1,
-                   do_relabel=True, progress=False, on_final=None):
+                   do_relabel=True, progress=False, on_final=None,
+                   concurrency=None):
     """Run merge and expand over a tree until neither changes anything.
 
     Mutates `structure` in place and returns a summary.
@@ -817,7 +818,9 @@ async def optimize(structure, pages, lines, model=None, routing=ROUTING_COST,
                            min_gain_ratio=min_gain_ratio, cache=cache,
                            kinds=set(kinds) if kinds else None,
                            empty_retries=empty_retries, progress=progress,
-                           settled=settled, do_merge=do_merge)
+                           settled=settled, do_merge=do_merge,
+                           concurrency=min(EXPAND_CONCURRENCY,
+                                           concurrency or EXPAND_CONCURRENCY))
     baseline = set(validate(structure, page_count)) if page_count else set()
     before = complexity(structure, page_count, routing=routing) if page_count else {}
 

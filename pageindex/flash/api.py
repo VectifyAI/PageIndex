@@ -78,7 +78,8 @@ async def _summarize(structure, page_list, model, concurrency=None, max_words=No
                          max_words=max_words)
 
 
-async def _optimize_async(structure, page_texts, do_expand, model, on_final=None):
+async def _optimize_async(structure, page_texts, do_expand, model, on_final=None,
+                          concurrency=None):
     """Merge/expand refinement after extraction, overlapped with the summaries
     when `on_final` is passed; without it the caller runs them after.
 
@@ -92,7 +93,7 @@ async def _optimize_async(structure, page_texts, do_expand, model, on_final=None
              for page_text in page_texts]
     outcome = await optimize(structure, page_texts, lines, model=model,
                              do_expand=do_expand, page_count=len(page_texts),
-                             on_final=on_final)
+                             on_final=on_final, concurrency=concurrency)
     return {"merges": outcome["merges"], "expands": outcome["expands"],
             "same_page_merges": outcome["same_page_merges"],
             "same_page_dropped": outcome["same_page_dropped"],
@@ -100,9 +101,10 @@ async def _optimize_async(structure, page_texts, do_expand, model, on_final=None
             "before": outcome["before"], "after": outcome["after"]}
 
 
-def _optimize(structure, page_texts, do_expand, model):
+def _optimize(structure, page_texts, do_expand, model, concurrency=None):
     import asyncio
-    return asyncio.run(_optimize_async(structure, page_texts, do_expand, model))
+    return asyncio.run(_optimize_async(structure, page_texts, do_expand, model,
+                                       concurrency=concurrency))
 
 
 async def _optimize_and_summarize(structure, page_texts, optimize_model, summary_model,
@@ -114,7 +116,8 @@ async def _optimize_and_summarize(structure, page_texts, optimize_model, summary
                                  model=summary_model, concurrency=concurrency,
                                  max_words=max_words)
     report = await _optimize_async(structure, page_texts, True, optimize_model,
-                                   on_final=scheduler.mark_final)
+                                   on_final=scheduler.mark_final,
+                                   concurrency=concurrency)
     await scheduler.finish()
     return report
 
@@ -162,7 +165,7 @@ def page_index_flash(pdf, summary=True, summary_model=None,
                      optimize: str | bool | None = None, optimize_expand=None,
                      optimize_model=None, summary_concurrency=None,
                      use_embedded_toc=True, summary_max_words=None) -> dict:
-    """Build a PageIndex tree structure from a PDF using layout statistics. The tree extraction itself uses no LLM; by default an LLM writes node summaries and expands the tree (``summary=False, optimize=False`` runs fully LLM-free). Args: pdf: path to a PDF file (``str`` or ``pathlib.Path``) or an in-memory binary stream (``io.BytesIO``). summary: if True, generate LLM summaries for each node (requires ``summary_model``). summary_model: the LLM model identifier to use for summary generation. optimize: ``"full"`` for merge + LLM expand (a model unreachable after the retry ladder — a missing credential included — fails the run loudly from expand itself; a per-prompt rejection leaves just that node collapsed), ``"merge"`` for deterministic merge only, ``False`` to disable. ``True`` is accepted as ``"full"`` for backward compatibility; defaults to ``"full"``. Expand needs readable page text, so a bookmark-only or scanned PDF runs the merge half only (``expands`` reports 0). optimize_expand: deprecated — use ``optimize``. Honored only when ``optimize`` is not passed (or is the legacy ``True``): ``False`` maps to ``"merge"``, ``True`` to ``"full"``. optimize_model: the LLM model for expand (defaults to the summary model). summary_concurrency: maximum simultaneous summary model calls; None uses the library default. summary_max_words: word cap each node summary is asked to stay within; None uses the library default (150). use_embedded_toc: if True, consume the PDF's embedded bookmarks when trustworthy: deep bookmarks become the frame and the detected sections they lack are grafted back in after noise filtering, coarse ones become the chapter frame with detected nodes re-hung under them (deeper sparse entries are filled in when the page text confirms them, and garbled extracted titles are repaired from the bookmark strings), garbage ones are ignored. On by default; pass False for the pure detected structure. Returns: dict with keys ``doc_name``, ``doc_title``, ``structure`` (a list of ``{"title", "node_id", "start_index", "end_index"}`` dicts; ``"nodes"`` holds the children where there are any and ``"summary"`` appears when summaries ran; page indexes are 1-based; a hierarchy that starts after page 1 is preceded by a ``Preface`` node covering the pages before it, as in standard mode) and ``has_abstract_or_references_section`` (True when a top-level entry is an abstract or references heading). ``toc_source`` says where the structure came from: ``"detected"`` (layout), ``"bookmarks"`` (the embedded outline), ``"hybrid"`` (bookmarks framing the detected sections), ``"pages"`` (no hierarchy found, so one node per page titled ``Page N``; left unsummarized and unoptimized when there are more than ``FLAT_TREE_MAX_NODES`` pages, a size the local client and CLI refuse) or ``"unreadable"`` (no page carries text; ``structure`` is empty). With ``optimize`` an ``optimize`` key reports merge/expand counts and before/after search-cost metrics; a refused flat tree carries neither it nor node summaries. """
+    """Build a PageIndex tree structure from a PDF using layout statistics. The tree extraction itself uses no LLM; by default an LLM writes node summaries and expands the tree (``summary=False, optimize=False`` runs fully LLM-free). Args: pdf: path to a PDF file (``str`` or ``pathlib.Path``) or an in-memory binary stream (``io.BytesIO``). summary: if True, generate LLM summaries for each node (requires ``summary_model``). summary_model: the LLM model identifier to use for summary generation. optimize: ``"full"`` for merge + LLM expand (a model unreachable after the retry ladder — a missing credential included — fails the run loudly from expand itself; a per-prompt rejection leaves just that node collapsed), ``"merge"`` for deterministic merge only, ``False`` to disable. ``True`` is accepted as ``"full"`` for backward compatibility; defaults to ``"full"``. Expand needs readable page text, so a bookmark-only or scanned PDF runs the merge half only (``expands`` reports 0). optimize_expand: deprecated — use ``optimize``. Honored only when ``optimize`` is not passed (or is the legacy ``True``): ``False`` maps to ``"merge"``, ``True`` to ``"full"``. optimize_model: the LLM model for expand (defaults to the summary model). summary_concurrency: cap on simultaneous indexing model calls per lane: the summaries, and expand up to its own ceiling of 32; None uses the library defaults (64 and 32). summary_max_words: word cap each node summary is asked to stay within; None uses the library default (150). use_embedded_toc: if True, consume the PDF's embedded bookmarks when trustworthy: deep bookmarks become the frame and the detected sections they lack are grafted back in after noise filtering, coarse ones become the chapter frame with detected nodes re-hung under them (deeper sparse entries are filled in when the page text confirms them, and garbled extracted titles are repaired from the bookmark strings), garbage ones are ignored. On by default; pass False for the pure detected structure. Returns: dict with keys ``doc_name``, ``doc_title``, ``structure`` (a list of ``{"title", "node_id", "start_index", "end_index"}`` dicts; ``"nodes"`` holds the children where there are any and ``"summary"`` appears when summaries ran; page indexes are 1-based; a hierarchy that starts after page 1 is preceded by a ``Preface`` node covering the pages before it, as in standard mode) and ``has_abstract_or_references_section`` (True when a top-level entry is an abstract or references heading). ``toc_source`` says where the structure came from: ``"detected"`` (layout), ``"bookmarks"`` (the embedded outline), ``"hybrid"`` (bookmarks framing the detected sections), ``"pages"`` (no hierarchy found, so one node per page titled ``Page N``; left unsummarized and unoptimized when there are more than ``FLAT_TREE_MAX_NODES`` pages, a size the local client and CLI refuse) or ``"unreadable"`` (no page carries text; ``structure`` is empty). With ``optimize`` an ``optimize`` key reports merge/expand counts and before/after search-cost metrics; a refused flat tree carries neither it nor node summaries. """
     if optimize_expand is not None:
         import warnings
         warnings.warn(
@@ -209,7 +212,8 @@ def page_index_flash(pdf, summary=True, summary_model=None,
         return result
     if optimize and structure:
         result["optimize"] = _optimize(structure, pages, do_expand,
-                                       optimize_model or summary_model)
+                                       optimize_model or summary_model,
+                                       concurrency=summary_concurrency)
     if summary and structure:
         import asyncio
         page_list = [(text, 0) for text in pages]
