@@ -444,13 +444,12 @@ Full results, data, and the runner are in the [benchmark repo](https://github.co
 
 PageIndex reached a state-of-the-art [**98.7% accuracy**](https://vectify.ai/blog/Mafin2.5) on [FinanceBench](https://arxiv.org/abs/2311.11944) (financial document QA benchmark), vastly outperforming vector-based RAG.
 
-<!--
 <div align="center">
-  <a href="https://github.com/VectifyAI/Mafin2.5-FinanceBench">
-    <img src="https://github.com/user-attachments/assets/571aa074-d803-43c7-80c4-a04254b782a3" width="70%">
-  </a>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/financebench-dark.png">
+  <img src="assets/financebench-light.png" width="75%" alt="FinanceBench accuracy: PageIndex 98.7%, vector RAG 50%.">
+</picture>
 </div>
--->
 
 Explore the full FinanceBench [evaluation results](https://github.com/VectifyAI/Mafin2.5-FinanceBench) and the [blog post](https://vectify.ai/blog/Mafin2.5).
 
