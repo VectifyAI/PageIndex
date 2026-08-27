@@ -110,8 +110,11 @@ See the [Detailed Usage Guide](#detailed-usage-guide) to configure other models,
 To request inline page-level citations, pass a system message together with the question:
 
 ```python
+system_prompt = """Cite only statements supported by tool outputs
+using <cite doc="{docName}" page="{pageNumber}"/>"""
+
 messages = [
-    {"role": "system", "content": 'Cite only statements supported by tool outputs using <cite doc="{docName}" page="{pageNumber}"/>'},
+    {"role": "system", "content": system_prompt},
     {"role": "user", "content": "Summarize the document."},
 ]
 
