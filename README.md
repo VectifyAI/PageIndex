@@ -390,7 +390,6 @@ from pageindex import PageIndexClient
 os.environ["PAGEINDEX_API_KEY"] = "your-pageindex-key"
 os.environ["OPENAI_API_KEY"] = "your-openai-key"
 
-
 client = PageIndexClient(
     index="cloud",                       # build and store the index in PageIndex Cloud
     chat="gpt-5.6-sol",                  # use your preferred compatible model for chat
