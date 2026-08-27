@@ -404,7 +404,7 @@ PageIndex reached a state-of-the-art [**98.7% accuracy**](https://vectify.ai/blo
   </a>
 </div>
 
-Explore the full [FinanceBench evaluation results](https://github.com/VectifyAI/Mafin2.5-FinanceBench) and the [blog post](https://vectify.ai/blog/Mafin2.5).
+Explore the full FinanceBench [evaluation results](https://github.com/VectifyAI/Mafin2.5-FinanceBench) and the [blog post](https://vectify.ai/blog/Mafin2.5).
 
 
 # PageIndex Cloud
