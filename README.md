@@ -288,7 +288,6 @@ Uses Anthropic's native Messages API and tool runner. Install it with `pip insta
 Pass a list of ids to `doc_id` to search several documents at once, and keep it identical across a conversation's calls.
 
 </details>
-<br>
 
 ### Integrate PageIndex with your own agent
 
