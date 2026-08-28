@@ -403,7 +403,7 @@ Every helper above accepts `doc_id=` to point the agent at specific documents an
 <summary><b>MCP server</b></summary>
 <br>
 
-PageIndex Cloud also runs an MCP server, so any agent or app that supports MCP can connect directly to it without the SDK:
+[PageIndex Cloud](#pageindex-cloud) also runs an MCP server, so any agent or app that supports MCP can connect directly to it without the SDK:
 
 ```json
 {
