@@ -780,6 +780,9 @@ def test_claude_agent_config_refuses_a_non_claude_chat_model(
             cloud.claude_agent_config()
         # An explicit model is the SDK's own name, passed verbatim.
         assert cloud.claude_agent_config(model="sonnet")["model"] == "sonnet"
+        # ... and the client's LiteLLM spelling is accepted too.
+        assert (cloud.claude_agent_config(model="anthropic/claude-sonnet-4-6")
+                ["model"] == "claude-sonnet-4-6")
     # The default chat model was never chosen: the SDK keeps its own.
     cloud = PageIndexCloudClient(api_key="pi-test-key", chat_model="gpt-5.6-sol")
     assert "model" not in cloud.claude_agent_config()
@@ -936,6 +939,14 @@ def test_openai_agent_config_cloud_omits_model(cloud_with_fake_bridge):
     assert config["instructions"] == "SERVER GUIDANCE"
     assert [tool.name for tool in config["tools"]] == ["search_documents",
                                                        "get_document"]
+
+
+def test_anthropic_runner_config_accepts_the_litellm_spelling(client):
+    pytest.importorskip("anthropic")
+    config = client.anthropic_runner_config(
+        model="anthropic/claude-3-opus-20240229")
+    assert config["model"] == "claude-3-opus-20240229"
+    assert config["max_tokens"] == 4096   # resolved on the stripped id
 
 
 def test_anthropic_runner_config_shapes(client, store_path):

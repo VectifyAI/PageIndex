@@ -76,6 +76,12 @@ def _claude_agent_sdk_model_name(model: str) -> str:
     return name
 
 
+def _anthropic_model_id(model):
+    """Explicit ``model=`` on the Anthropic-native surfaces: the client's
+    LiteLLM spelling is accepted too, so its ``anthropic/`` prefix goes."""
+    return model.removeprefix("anthropic/") if isinstance(model, str) else model
+
+
 _LOCAL_INDEX_KEYS = ("model", "summary_model", "backend", "storage_path")
 
 # Near-synonyms of "cloud" that would otherwise parse as model names —
@@ -1090,7 +1096,8 @@ class PageIndexClient:
             messages: Native Messages-format history (including prior
                 tool_use/tool_result blocks on round-trip), or a bare query
                 string (it becomes a single user message).
-            model: Required — there is no cross-vendor default to guess.
+            model: Required — there is no cross-vendor default to guess;
+                the client's ``anthropic/`` spelling is accepted.
             max_tokens: Per-turn output budget the Messages API requires on
                 the wire; the default is resolved per model (8192, or 4096
                 for the claude-3 generation whose ceiling is lower) so the
@@ -1134,7 +1141,8 @@ class PageIndexClient:
             )
         from .local_chat import run_messages
         return run_messages(
-            self, messages, model=model, max_tokens=max_tokens,
+            self, messages, model=_anthropic_model_id(model),
+            max_tokens=max_tokens,
             stream=stream, doc_id=doc_id, system=system,
             temperature=temperature, top_p=top_p, top_k=top_k,
             stop_sequences=stop_sequences, max_turns=max_turns,
@@ -1441,7 +1449,8 @@ class PageIndexClient:
         switch to those methods directly.
 
         Args:
-            model: Backend model name (also resolves the ``max_tokens``
+            model: Backend model name, ``anthropic/`` prefix accepted
+                (also resolves the ``max_tokens``
                 default).
             doc_id: Document ID or list of IDs to target, as in
                 ``agent_instructions``. Local: also enforced at the tool
@@ -1461,6 +1470,7 @@ class PageIndexClient:
         from .agent_tools import build_agent_instructions
         from .local_chat import _default_max_tokens, _validate_max_turns
         _validate_max_turns(max_turns)
+        model = _anthropic_model_id(model)
         scope = self._local_doc_scope(doc_id)
         return {
             "model": model,
@@ -1542,8 +1552,8 @@ class PageIndexClient:
                 library.
             server_name (str): Key the server is registered under;
                 locally also the name the SDK server declares.
-            model (str, optional): The SDK's own model name, passed
-                verbatim. Unset: a chosen ``chat_model`` is forwarded (its
+            model (str, optional): The SDK's own model name (a LiteLLM
+                ``anthropic/`` prefix is dropped). Unset: a chosen ``chat_model`` is forwarded (its
                 LiteLLM ``anthropic/`` prefix stripped; the SDK runs Claude
                 only, so any other provider raises); the default chat
                 model, like a managed-chat client, leaves the SDK's own
@@ -1567,7 +1577,7 @@ class PageIndexClient:
             # The default chat model is not a choice: leave the SDK's own.
             model = _claude_agent_sdk_model_name(chat_model)
         if model:
-            config["model"] = model
+            config["model"] = _anthropic_model_id(model)
         return config
 
     def agent_instructions(

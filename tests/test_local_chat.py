@@ -1569,6 +1569,15 @@ def test_messages_max_tokens_default_resolves_per_model(client, fake_anthropic):
 
 
 @needs_anthropic
+def test_messages_accepts_the_litellm_spelling(client, fake_anthropic):
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
+    client.messages("q", model="anthropic/claude-3-opus-20240229")
+    assert calls[0]["model"] == "claude-3-opus-20240229"
+    assert calls[0]["max_tokens"] == 4096
+
+
+@needs_anthropic
 def test_messages_thinking_passes_through(client, fake_anthropic):
     """Anthropic-native thinking config, forwarded verbatim; unset sends
     nothing so the backend default applies."""
