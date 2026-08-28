@@ -324,7 +324,7 @@ agent = Agent(
 <br>
 
 <details>
-<summary><b>Anthropic SDK tool runner</b></summary>
+<summary><b>Anthropic SDK (tool runner)</b></summary>
 <br>
 
 Install with `pip install 'pageindex[anthropic]'`:
