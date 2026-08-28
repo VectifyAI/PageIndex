@@ -282,10 +282,10 @@ Returns the agent's process transcript in `items`. Append those items to the nex
 **Use the Anthropic Messages format:**
 
 ```python
-client.messages("...", model="claude-sonnet-4-6", doc_id=doc_id)
+client.messages("...", doc_id=doc_id)
 ```
 
-Uses Anthropic's native Messages API and tool runner; a Claude `chat_model` carries over, or pass `model=` directly. Install with `pip install 'pageindex[anthropic]'`.
+Uses Anthropic's native Messages API and tool runner; assumes a Claude `chat_model`, otherwise pass `model=`. Install with `pip install 'pageindex[anthropic]'`.
 
 Pass a list of ids to `doc_id` to search several documents at once, and keep it identical across a conversation's calls.
 
@@ -335,14 +335,14 @@ Install with `pip install 'pageindex[anthropic]'`:
 import anthropic
 
 runner = anthropic.Anthropic().beta.messages.tool_runner(
-    **client.anthropic_runner_config(model="claude-sonnet-4-6", doc_id=doc_id),
+    **client.anthropic_runner_config(doc_id=doc_id),
     messages=[{"role": "user", "content": "Summarize the auditor's concerns."}],
 )
 final = runner.until_done()
 print(final.content[-1].text)
 ```
 
-`anthropic_runner_config()` fills every `tool_runner` slot except `messages`; a Claude `chat_model` carries over, or pass `model=` directly. The explicit form:
+`anthropic_runner_config()` fills every `tool_runner` slot except `messages`; assumes a Claude `chat_model`, otherwise pass `model=`. The explicit form:
 
 ```python
 runner = anthropic.Anthropic().beta.messages.tool_runner(
