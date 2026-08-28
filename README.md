@@ -403,7 +403,7 @@ Every helper above accepts `doc_id=` to point the agent at specific documents an
 <summary><b>MCP server</b></summary>
 <br>
 
-PageIndex Cloud also runs an MCP server, so any agent or app that supports MCP can connect directly without the SDK:
+PageIndex Cloud also runs an MCP server, so any agent or app that supports MCP can connect directly to it without the SDK:
 
 ```json
 {
@@ -417,7 +417,7 @@ PageIndex Cloud also runs an MCP server, so any agent or app that supports MCP c
 }
 ```
 
-The same API key and documents work across the MCP server and the REST API; see the [MCP documentation](https://docs.pageindex.ai/mcp). Local indexes have no standalone server: use `agent_tools()` above, or `as_claude_mcp()` for an in-process one.
+Full details in the [MCP documentation](https://docs.pageindex.ai/mcp). Local indexes have no hosted server: use `agent_tools()` above, or `as_claude_mcp()` for an in-process one.
 
 </details>
 
