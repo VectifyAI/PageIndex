@@ -770,6 +770,10 @@ def test_claude_agent_config_forwards_a_claude_chat_model(cloud_with_fake_bridge
     for name in ("anthropic/claude-sonnet-4-6", "claude-sonnet-4-6"):
         cloud = PageIndexCloudClient(api_key="pi-test-key", chat_model=name)
         assert cloud.claude_agent_config()["model"] == "claude-sonnet-4-6"
+    # A Claude id LiteLLM's model map does not know yet still passes.
+    cloud = PageIndexCloudClient(api_key="pi-test-key",
+                                 chat_model="claude-3-5-sonnet-latest")
+    assert cloud.claude_agent_config()["model"] == "claude-3-5-sonnet-latest"
 
 
 def test_claude_agent_config_refuses_a_non_claude_chat_model(

@@ -61,12 +61,16 @@ def _agents_sdk_model_name(model: str) -> str:
 def _claude_model_name(chat_model, surface: str, hint: str = "") -> str:
     """A chat_model as the model id an Anthropic-native surface sends:
     LiteLLM's ``anthropic/`` routing prefix stripped, any other provider
-    refused (those surfaces run Claude only)."""
+    refused (those surfaces run Claude only). LiteLLM resolves the name;
+    one its model map does not know yet falls back to Anthropic's own
+    rule — every Claude id starts with "claude"."""
     try:
         from litellm import get_llm_provider
         name, provider, _, _ = get_llm_provider(model=chat_model)
     except Exception:
-        name, provider = chat_model, None
+        name = (chat_model.removeprefix("anthropic/")
+                if isinstance(chat_model, str) else "")
+        provider = "anthropic" if name.startswith("claude") else None
     if provider != "anthropic":
         raise PageIndexAPIError(
             f"{surface} runs on Claude — pass model=..., or configure a "
