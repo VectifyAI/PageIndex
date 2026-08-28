@@ -282,10 +282,10 @@ Returns the agent's process transcript in `items`. Append those items to the nex
 **Use the Anthropic Messages format:**
 
 ```python
-client.messages("...", model="claude-sonnet-4-6", doc_id=doc_id)
+client.messages("...", doc_id=doc_id)
 ```
 
-Uses Anthropic's native Messages API and tool runner. Install it with `pip install 'pageindex[anthropic]'`.
+Uses Anthropic's native Messages API and tool runner; assumes a Claude `chat_model`, otherwise pass `model=`. Install with `pip install 'pageindex[anthropic]'`.
 
 Pass a list of ids to `doc_id` to search several documents at once, and keep it identical across a conversation's calls.
 
@@ -293,7 +293,7 @@ Pass a list of ids to `doc_id` to search several documents at once, and keep it 
 
 ### (b) Integrate PageIndex with your own agent
 
-PageIndex can also be integrated into your own agent. Each example below covers a different framework:
+PageIndex can also be integrated into your own agent. Each item below covers a different integration path:
 
 <details>
 <summary><b>OpenAI Agents SDK</b></summary>
@@ -320,11 +320,13 @@ agent = Agent(
 )
 ```
 
+The Agents SDK resolves `model` itself, so a non-OpenAI name needs its `litellm/` prefix; `openai_agent_config()` adds that, plus prompt-cache settings for Claude models.
+
 </details>
 <br>
 
 <details>
-<summary><b>Anthropic SDK tool runner</b></summary>
+<summary><b>Anthropic SDK (tool runner)</b></summary>
 <br>
 
 Install with `pip install 'pageindex[anthropic]'`:
@@ -333,14 +335,14 @@ Install with `pip install 'pageindex[anthropic]'`:
 import anthropic
 
 runner = anthropic.Anthropic().beta.messages.tool_runner(
-    **client.anthropic_runner_config(model="claude-sonnet-4-6", doc_id=doc_id),
+    **client.anthropic_runner_config(doc_id=doc_id),
     messages=[{"role": "user", "content": "Summarize the auditor's concerns."}],
 )
 final = runner.until_done()
 print(final.content[-1].text)
 ```
 
-`anthropic_runner_config()` fills every `tool_runner` slot except `messages`. The explicit form:
+`anthropic_runner_config()` fills every `tool_runner` slot except `messages`; assumes a Claude `chat_model`, otherwise pass `model=`. The explicit form:
 
 ```python
 runner = anthropic.Anthropic().beta.messages.tool_runner(
@@ -357,10 +359,10 @@ runner = anthropic.Anthropic().beta.messages.tool_runner(
 <br>
 
 <details>
-<summary><b>Claude Agent SDK</b></summary>
+<summary><a id="claude-agent-sdk"></a><b>Claude Agent SDK</b></summary>
 <br>
 
-Install with `pip install 'pageindex[claude]'`. The Claude Agent SDK is async-native:
+Install with `pip install 'pageindex[claude]'` and set `ANTHROPIC_API_KEY`. The Claude Agent SDK is async-native:
 
 ```python
 from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
@@ -371,10 +373,11 @@ async for message in query(prompt="Summarize the auditor's concerns.", options=o
         print(message.result)
 ```
 
-`claude_agent_config()` supplies the system prompt, the PageIndex MCP server, and its tool pre-approval. The explicit form:
+`claude_agent_config()` supplies the system prompt, the PageIndex MCP server, and its tool pre-approval. The agent runs on Claude only: a Claude `chat_model` carries over, or pass `model=` directly. The explicit form:
 
 ```python
 options = ClaudeAgentOptions(
+    model="claude-sonnet-4-6",                                # optional; the SDK's default otherwise
     system_prompt=client.agent_instructions(doc_id=doc_id),
     mcp_servers={"pageindex": client.as_claude_mcp(doc_id=doc_id)},
     allowed_tools=["mcp__pageindex"],
@@ -395,6 +398,29 @@ tools = client.agent_tools(doc_id=doc_id)   # plain functions returning JSON
 `agent_tools()` returns plain Python functions that work with LangChain, PydanticAI, and any other agent framework.
 
 Every helper above accepts `doc_id=` to point the agent at specific documents and `include_management=True` to also expose document deletion (off by default). Locally, `doc_id` is enforced at the tool layer, not just prompted: out-of-scope lookups return `NOT_FOUND`.
+
+</details>
+<br>
+
+<details>
+<summary><b>MCP server</b></summary>
+<br>
+
+[PageIndex Cloud](#pageindex-cloud) also runs an MCP server, so any agent or app that supports MCP can connect directly to it without the SDK:
+
+```json
+{
+  "mcpServers": {
+    "pageindex": {
+      "type": "http",
+      "url": "https://api.pageindex.ai/mcp",
+      "headers": { "Authorization": "Bearer your-pageindex-key" }
+    }
+  }
+}
+```
+
+Full details in the [MCP documentation](https://docs.pageindex.ai/mcp). Local mode has no standalone MCP server yet: use `agent_tools()` above, or the in-process MCP server for the [Claude Agent SDK](#claude-agent-sdk).
 
 </details>
 
