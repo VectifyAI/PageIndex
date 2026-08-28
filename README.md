@@ -357,7 +357,7 @@ runner = anthropic.Anthropic().beta.messages.tool_runner(
 <br>
 
 <details>
-<summary><b>Claude Agent SDK</b></summary>
+<summary><a id="claude-agent-sdk"></a><b>Claude Agent SDK</b></summary>
 <br>
 
 Install with `pip install 'pageindex[claude]'`. The Claude Agent SDK is async-native:
@@ -417,7 +417,7 @@ PageIndex Cloud also runs an MCP server, so any agent or app that supports MCP c
 }
 ```
 
-Full details in the [MCP documentation](https://docs.pageindex.ai/mcp). Local indexes have no standalone MCP server yet: use `agent_tools()` above, or the Claude Agent SDK's in-process server.
+Full details in the [MCP documentation](https://docs.pageindex.ai/mcp). Local indexes have no standalone MCP server yet: use `agent_tools()` above, or the [Claude Agent SDK](#claude-agent-sdk)'s in-process MCP server.
 
 </details>
 
