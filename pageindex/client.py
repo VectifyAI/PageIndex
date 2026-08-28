@@ -58,31 +58,28 @@ def _agents_sdk_model_name(model: str) -> str:
     return f"litellm/{model}"
 
 
-def _claude_model_name(chat_model, surface: str, hint: str = "") -> str:
-    """A chat_model as the model id an Anthropic-native surface sends:
-    LiteLLM's ``anthropic/`` routing prefix stripped, any other provider
-    refused (those surfaces run Claude only). LiteLLM resolves the name;
-    one its model map does not know yet falls back to Anthropic's own
-    rule — every Claude id starts with "claude"."""
+def _claude_model_name(model, surface: str, hint: str = "") -> str:
+    """A model name — explicit ``model=`` or the client's ``chat_model`` —
+    as the id an Anthropic-native surface sends. Read the client's way:
+    a ``litellm/`` prefix is dropped, LiteLLM says whose model it is, and
+    the ``anthropic/`` routing prefix goes. A name LiteLLM cannot place
+    falls back to this lane's own rule: no provider prefix means
+    Anthropic's own (a new release, an alias like "sonnet") and the
+    destination judges the id; anything else is refused, like every
+    other provider — these surfaces run Claude only."""
+    wire = model.removeprefix("litellm/") if isinstance(model, str) else ""
     try:
         from litellm import get_llm_provider
-        name, provider, _, _ = get_llm_provider(model=chat_model)
+        name, provider, _, _ = get_llm_provider(model=wire)
     except Exception:
-        name = (chat_model.removeprefix("anthropic/")
-                if isinstance(chat_model, str) else "")
-        provider = "anthropic" if name.startswith("claude") else None
+        name = wire
+        provider = "anthropic" if wire and "/" not in wire else None
     if provider != "anthropic":
         raise PageIndexAPIError(
-            f"{surface} runs on Claude — pass model=..., or configure a "
-            f"Claude chat_model (yours: {chat_model!r}){hint}."
+            f"{surface} runs on Claude, not {model!r} — pass a Claude "
+            f"model=..., or configure a Claude chat_model{hint}."
         )
     return name
-
-
-def _anthropic_model_id(model):
-    """Explicit ``model=`` on the Anthropic-native surfaces: the client's
-    LiteLLM spelling is accepted too, so its ``anthropic/`` prefix goes."""
-    return model.removeprefix("anthropic/") if isinstance(model, str) else model
 
 
 _LOCAL_INDEX_KEYS = ("model", "summary_model", "backend", "storage_path")
@@ -1099,10 +1096,9 @@ class PageIndexClient:
             messages: Native Messages-format history (including prior
                 tool_use/tool_result blocks on round-trip), or a bare query
                 string (it becomes a single user message).
-            model: Anthropic model id (the client's ``anthropic/``
-                spelling is accepted too). Unset: a Claude ``chat_model``
-                carries over; any other raises — there is no cross-vendor
-                default to guess.
+            model: Claude model, in the client's spelling or Anthropic's
+                own. Unset: a Claude ``chat_model`` carries over; any
+                other raises — there is no cross-vendor default to guess.
             max_tokens: Per-turn output budget the Messages API requires on
                 the wire; the default is resolved per model (8192, or 4096
                 for the claude-3 generation whose ceiling is lower) so the
@@ -1147,8 +1143,7 @@ class PageIndexClient:
         from .local_chat import run_messages
         return run_messages(
             self, messages,
-            model=(_anthropic_model_id(model) if model
-                   else _claude_model_name(self.chat_model, "messages()")),
+            model=_claude_model_name(model or self.chat_model, "messages()"),
             max_tokens=max_tokens,
             stream=stream, doc_id=doc_id, system=system,
             temperature=temperature, top_p=top_p, top_k=top_k,
@@ -1456,8 +1451,8 @@ class PageIndexClient:
         switch to those methods directly.
 
         Args:
-            model: Backend model name, ``anthropic/`` prefix accepted
-                (also resolves the ``max_tokens`` default). Unset: a
+            model: Claude model, in the client's spelling or Anthropic's
+                own (also resolves the ``max_tokens`` default). Unset: a
                 Claude ``chat_model`` carries over; any other raises.
             doc_id: Document ID or list of IDs to target, as in
                 ``agent_instructions``. Local: also enforced at the tool
@@ -1477,8 +1472,8 @@ class PageIndexClient:
         from .agent_tools import build_agent_instructions
         from .local_chat import _default_max_tokens, _validate_max_turns
         _validate_max_turns(max_turns)
-        model = (_anthropic_model_id(model) if model else _claude_model_name(
-            self.chat_model, "anthropic_runner_config()"))
+        model = _claude_model_name(model or self.chat_model,
+                                   "anthropic_runner_config()")
         scope = self._local_doc_scope(doc_id)
         return {
             "model": model,
@@ -1560,12 +1555,12 @@ class PageIndexClient:
                 library.
             server_name (str): Key the server is registered under;
                 locally also the name the SDK server declares.
-            model (str, optional): The SDK's own model name (a LiteLLM
-                ``anthropic/`` prefix is dropped). Unset: a chosen
-                ``chat_model`` is forwarded (its LiteLLM ``anthropic/``
-                prefix stripped; the SDK runs Claude only, so any other
-                provider raises); the default chat model, like a
-                managed-chat client, leaves the SDK's own default in place.
+            model (str, optional): Claude model, in the client's spelling
+                or the SDK's own (aliases included). Unset: a chosen
+                ``chat_model`` is forwarded the same way (the SDK runs
+                Claude only, so any other provider raises); the default
+                chat model, like a managed-chat client, leaves the SDK's
+                own default in place.
         """
         from .agent_tools import build_agent_instructions
         scope = self._local_doc_scope(doc_id)
@@ -1581,13 +1576,13 @@ class PageIndexClient:
         }
         from .utils import DEFAULT_CHAT_MODEL
         chat_model = self.chat_model
+        # The default chat model is not a choice: leave the SDK's own.
         if not model and chat_model and chat_model != DEFAULT_CHAT_MODEL:
-            # The default chat model is not a choice: leave the SDK's own.
-            model = _claude_model_name(
-                chat_model, "claude_agent_config()",
-                "; openai_agent_config() takes other providers")
+            model = chat_model
         if model:
-            config["model"] = _anthropic_model_id(model)
+            config["model"] = _claude_model_name(
+                model, "claude_agent_config()",
+                "; openai_agent_config() takes other providers")
         return config
 
     def agent_instructions(

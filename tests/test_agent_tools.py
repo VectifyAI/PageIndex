@@ -767,13 +767,16 @@ def test_claude_agent_config_local(client, store_path):
 def test_claude_agent_config_forwards_a_claude_chat_model(cloud_with_fake_bridge):
     # chat_model says who answers; the Claude Agent SDK takes Anthropic's
     # own name, so LiteLLM's routing prefix is stripped.
-    for name in ("anthropic/claude-sonnet-4-6", "claude-sonnet-4-6"):
+    for name in ("anthropic/claude-sonnet-4-6", "claude-sonnet-4-6",
+                 "litellm/anthropic/claude-sonnet-4-6"):
         cloud = PageIndexCloudClient(api_key="pi-test-key", chat_model=name)
         assert cloud.claude_agent_config()["model"] == "claude-sonnet-4-6"
-    # A Claude id LiteLLM's model map does not know yet still passes.
-    cloud = PageIndexCloudClient(api_key="pi-test-key",
-                                 chat_model="claude-3-5-sonnet-latest")
-    assert cloud.claude_agent_config()["model"] == "claude-3-5-sonnet-latest"
+    # Ids LiteLLM's model map does not know yet still pass: prefixed via
+    # LiteLLM's own prefix rule, bare via this lane's (no prefix = Anthropic).
+    for name in ("anthropic/claude-3-5-sonnet-latest",
+                 "claude-3-5-sonnet-latest"):
+        cloud = PageIndexCloudClient(api_key="pi-test-key", chat_model=name)
+        assert cloud.claude_agent_config()["model"] == "claude-3-5-sonnet-latest"
 
 
 def test_claude_agent_config_refuses_a_non_claude_chat_model(
@@ -782,11 +785,13 @@ def test_claude_agent_config_refuses_a_non_claude_chat_model(
         cloud = PageIndexCloudClient(api_key="pi-test-key", chat_model=name)
         with pytest.raises(PageIndexAPIError, match="model="):
             cloud.claude_agent_config()
-        # An explicit model is the SDK's own name, passed verbatim.
+        # An explicit model may be the SDK's own name (an alias included)...
         assert cloud.claude_agent_config(model="sonnet")["model"] == "sonnet"
-        # ... and the client's LiteLLM spelling is accepted too.
-        assert (cloud.claude_agent_config(model="anthropic/claude-sonnet-4-6")
-                ["model"] == "claude-sonnet-4-6")
+        # ... or the client's spelling, read exactly like chat_model.
+        for spelling in ("anthropic/claude-sonnet-4-6",
+                         "litellm/anthropic/claude-sonnet-4-6"):
+            assert (cloud.claude_agent_config(model=spelling)["model"]
+                    == "claude-sonnet-4-6")
     # The default chat model was never chosen: the SDK keeps its own.
     cloud = PageIndexCloudClient(api_key="pi-test-key", chat_model="gpt-5.6-sol")
     assert "model" not in cloud.claude_agent_config()
