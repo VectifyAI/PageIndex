@@ -400,10 +400,10 @@ Every helper above accepts `doc_id=` to point the agent at specific documents an
 <br>
 
 <details>
-<summary><b>Any MCP client</b></summary>
+<summary><b>MCP server</b></summary>
 <br>
 
-Cloud indexes are also reachable over MCP, so an agent that already speaks the protocol needs no SDK at all:
+PageIndex Cloud also runs an MCP server, so any agent or app that supports MCP can connect to it without the SDK:
 
 ```json
 {
