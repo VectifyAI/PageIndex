@@ -285,7 +285,7 @@ Returns the agent's process transcript in `items`. Append those items to the nex
 client.messages("...", doc_id=doc_id)
 ```
 
-Uses Anthropic's native Messages API and tool runner; assumes a Claude `chat_model`, otherwise pass `model=`. Install with `pip install 'pageindex[anthropic]'`.
+Uses Anthropic's native Messages API and tool runner; a Claude `chat_model` carries over, otherwise pass `model=`. Install with `pip install 'pageindex[anthropic]'` and set `ANTHROPIC_API_KEY`.
 
 Pass a list of ids to `doc_id` to search several documents at once, and keep it identical across a conversation's calls.
 
@@ -316,7 +316,7 @@ agent = Agent(
     name="PageIndex",
     instructions=client.agent_instructions(doc_id=doc_id),   # or your own prompt
     tools=client.as_openai_tools(doc_id=doc_id),              # include_management=True adds deletion
-    model=client.chat_model,                                  # local clients only
+    model=client.chat_model,                                  # own-model chat only; None on managed chat
 )
 ```
 
@@ -329,7 +329,7 @@ The Agents SDK resolves `model` itself, so a non-OpenAI name needs its `litellm/
 <summary><b>Anthropic SDK (tool runner)</b></summary>
 <br>
 
-Install with `pip install 'pageindex[anthropic]'`:
+Install with `pip install 'pageindex[anthropic]'` and set `ANTHROPIC_API_KEY`:
 
 ```python
 import anthropic
@@ -342,7 +342,7 @@ final = runner.until_done()
 print(final.content[-1].text)
 ```
 
-`anthropic_runner_config()` fills every `tool_runner` slot except `messages`; assumes a Claude `chat_model`, otherwise pass `model=`. The explicit form:
+`anthropic_runner_config()` fills every `tool_runner` slot except `messages`; a Claude `chat_model` carries over, otherwise pass `model=`. The explicit form:
 
 ```python
 runner = anthropic.Anthropic().beta.messages.tool_runner(
@@ -351,6 +351,7 @@ runner = anthropic.Anthropic().beta.messages.tool_runner(
     system=client.agent_instructions(doc_id=doc_id),
     tools=client.as_anthropic_tools(doc_id=doc_id),   # asynchronous=True for AsyncAnthropic
     max_iterations=10,
+    cache_control={"type": "ephemeral"},                # prompt caching across turns
     messages=[{"role": "user", "content": "Summarize the auditor's concerns."}],
 )
 ```
@@ -373,7 +374,7 @@ async for message in query(prompt="Summarize the auditor's concerns.", options=o
         print(message.result)
 ```
 
-`claude_agent_config()` supplies the system prompt, the PageIndex MCP server, and its tool pre-approval. The agent runs on Claude only: a Claude `chat_model` carries over, or pass `model=` directly. The explicit form:
+`claude_agent_config()` supplies the system prompt, the PageIndex MCP server, and its tool pre-approval. The agent runs on Claude only: a Claude `chat_model` carries over, otherwise pass `model=` or leave the SDK's default. The explicit form:
 
 ```python
 options = ClaudeAgentOptions(
