@@ -417,7 +417,7 @@ PageIndex Cloud also runs an MCP server, so any agent or app that supports MCP c
 }
 ```
 
-Full details in the [MCP documentation](https://docs.pageindex.ai/mcp). Local indexes have no standalone MCP server yet: use `agent_tools()` above, or the [Claude Agent SDK](#claude-agent-sdk)'s in-process MCP server.
+Full details in the [MCP documentation](https://docs.pageindex.ai/mcp). Local mode has no standalone MCP server yet: use `agent_tools()` above, or the [Claude Agent SDK](#claude-agent-sdk)'s in-process MCP server.
 
 </details>
 
