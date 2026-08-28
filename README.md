@@ -397,6 +397,29 @@ tools = client.agent_tools(doc_id=doc_id)   # plain functions returning JSON
 Every helper above accepts `doc_id=` to point the agent at specific documents and `include_management=True` to also expose document deletion (off by default). Locally, `doc_id` is enforced at the tool layer, not just prompted: out-of-scope lookups return `NOT_FOUND`.
 
 </details>
+<br>
+
+<details>
+<summary><b>Any MCP client</b></summary>
+<br>
+
+Cloud indexes are also reachable over MCP, so an agent that already speaks the protocol needs no SDK at all:
+
+```json
+{
+  "mcpServers": {
+    "pageindex": {
+      "type": "http",
+      "url": "https://api.pageindex.ai/mcp",
+      "headers": { "Authorization": "Bearer your-pageindex-key" }
+    }
+  }
+}
+```
+
+The same API key and documents work across the MCP server and the REST API; see the [MCP documentation](https://docs.pageindex.ai/mcp). Local indexes have no standalone server: use `agent_tools()` above, or `as_claude_mcp()` for an in-process one.
+
+</details>
 
 
 
