@@ -351,7 +351,7 @@ runner = anthropic.Anthropic().beta.messages.tool_runner(
     system=client.agent_instructions(doc_id=doc_id),
     tools=client.as_anthropic_tools(doc_id=doc_id),   # asynchronous=True for AsyncAnthropic
     max_iterations=10,
-    cache_control={"type": "ephemeral"},                # prompt caching across turns
+    cache_control={"type": "ephemeral"},              # prompt caching across turns
     messages=[{"role": "user", "content": "Summarize the auditor's concerns."}],
 )
 ```
