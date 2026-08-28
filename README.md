@@ -362,7 +362,7 @@ runner = anthropic.Anthropic().beta.messages.tool_runner(
 <summary><a id="claude-agent-sdk"></a><b>Claude Agent SDK</b></summary>
 <br>
 
-Install with `pip install 'pageindex[claude]'`. The Claude Agent SDK is async-native:
+Install with `pip install 'pageindex[claude]'` and set `ANTHROPIC_API_KEY`. The Claude Agent SDK is async-native:
 
 ```python
 from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
@@ -373,10 +373,11 @@ async for message in query(prompt="Summarize the auditor's concerns.", options=o
         print(message.result)
 ```
 
-`claude_agent_config()` supplies the system prompt, the PageIndex MCP server, and its tool pre-approval. The explicit form:
+`claude_agent_config()` supplies the system prompt, the PageIndex MCP server, and its tool pre-approval. The agent runs on Claude only: a Claude `chat_model` carries over, or pass `model=` directly. The explicit form:
 
 ```python
 options = ClaudeAgentOptions(
+    model="claude-sonnet-4-6",                                # optional; the SDK's default otherwise
     system_prompt=client.agent_instructions(doc_id=doc_id),
     mcp_servers={"pageindex": client.as_claude_mcp(doc_id=doc_id)},
     allowed_tools=["mcp__pageindex"],
