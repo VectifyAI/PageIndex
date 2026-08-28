@@ -764,6 +764,41 @@ def test_claude_agent_config_local(client, store_path):
     assert renamed["allowed_tools"] == ["mcp__docs"]
 
 
+def test_claude_agent_config_forwards_a_claude_chat_model(cloud_with_fake_bridge):
+    # chat_model says who answers; the Claude Agent SDK takes Anthropic's
+    # own name, so LiteLLM's routing prefix is stripped.
+    for name in ("anthropic/claude-sonnet-4-6", "claude-sonnet-4-6"):
+        cloud = PageIndexCloudClient(api_key="pi-test-key", chat_model=name)
+        assert cloud.claude_agent_config()["model"] == "claude-sonnet-4-6"
+
+
+def test_claude_agent_config_refuses_a_non_claude_chat_model(
+        cloud_with_fake_bridge):
+    for name in ("gpt-4.1", "openrouter/anthropic/claude-sonnet-4-6"):
+        cloud = PageIndexCloudClient(api_key="pi-test-key", chat_model=name)
+        with pytest.raises(PageIndexAPIError, match="model="):
+            cloud.claude_agent_config()
+        # An explicit model is the SDK's own name, passed verbatim.
+        assert cloud.claude_agent_config(model="sonnet")["model"] == "sonnet"
+    # The default chat model was never chosen: the SDK keeps its own.
+    cloud = PageIndexCloudClient(api_key="pi-test-key", chat_model="gpt-5.6-sol")
+    assert "model" not in cloud.claude_agent_config()
+
+
+def test_claude_agent_config_managed_chat_sets_no_model(cloud_with_fake_bridge):
+    cloud, _ = cloud_with_fake_bridge
+    assert "model" not in cloud.claude_agent_config()
+
+
+def test_claude_agent_config_local_chat_model(store_path):
+    pytest.importorskip("claude_agent_sdk")
+    local = PageIndexLocalClient(storage_path=store_path,
+                                 chat_model="anthropic/claude-sonnet-4-6")
+    assert local.claude_agent_config()["model"] == "claude-sonnet-4-6"
+    assert "model" not in PageIndexLocalClient(
+        storage_path=store_path).claude_agent_config()
+
+
 def test_openai_agent_config_local(client, store_path):
     pytest.importorskip("agents")
     from agents import Agent

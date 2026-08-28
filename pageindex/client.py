@@ -58,6 +58,24 @@ def _agents_sdk_model_name(model: str) -> str:
     return f"litellm/{model}"
 
 
+def _claude_agent_sdk_model_name(model: str) -> str:
+    """The Claude Agent SDK runs Anthropic-direct Claude only: LiteLLM's
+    ``anthropic/`` routing prefix is stripped, any other provider refused."""
+    try:
+        from litellm import get_llm_provider
+        name, provider, _, _ = get_llm_provider(model=model)
+    except Exception:
+        name, provider = model, None
+    if provider != "anthropic":
+        raise PageIndexAPIError(
+            f"claude_agent_config: chat_model {model!r} is not an Anthropic "
+            "Claude model, and the Claude Agent SDK runs Claude only — pass "
+            "model=... to this call, or use openai_agent_config() for other "
+            "providers."
+        )
+    return name
+
+
 _LOCAL_INDEX_KEYS = ("model", "summary_model", "backend", "storage_path")
 
 # Near-synonyms of "cloud" that would otherwise parse as model names —
@@ -1502,6 +1520,7 @@ class PageIndexClient:
         doc_id: Optional[Union[str, list[str]]] = None,
         include_management: bool = False,
         server_name: str = "pageindex",
+        model: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         Document QA ``ClaudeAgentOptions`` kwargs in one call::
@@ -1523,10 +1542,16 @@ class PageIndexClient:
                 library.
             server_name (str): Key the server is registered under;
                 locally also the name the SDK server declares.
+            model (str, optional): The SDK's own model name, passed
+                verbatim. Unset: a chosen ``chat_model`` is forwarded (its
+                LiteLLM ``anthropic/`` prefix stripped; the SDK runs Claude
+                only, so any other provider raises); the default chat
+                model, like a managed-chat client, leaves the SDK's own
+                default in place.
         """
         from .agent_tools import build_agent_instructions
         scope = self._local_doc_scope(doc_id)
-        return {
+        config: dict[str, Any] = {
             "system_prompt": build_agent_instructions(
                 self, doc_id, scoped=scope is not None,
                 include_management=include_management),
@@ -1536,6 +1561,14 @@ class PageIndexClient:
             # read-only endpoint on cloud, the registered set locally).
             "allowed_tools": [f"mcp__{server_name}"],
         }
+        from .utils import DEFAULT_CHAT_MODEL
+        chat_model = self.chat_model
+        if not model and chat_model and chat_model != DEFAULT_CHAT_MODEL:
+            # The default chat model is not a choice: leave the SDK's own.
+            model = _claude_agent_sdk_model_name(chat_model)
+        if model:
+            config["model"] = model
+        return config
 
     def agent_instructions(
         self, doc_id: Optional[Union[str, list[str]]] = None,
