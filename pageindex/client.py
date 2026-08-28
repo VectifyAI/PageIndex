@@ -1553,11 +1553,11 @@ class PageIndexClient:
             server_name (str): Key the server is registered under;
                 locally also the name the SDK server declares.
             model (str, optional): The SDK's own model name (a LiteLLM
-                ``anthropic/`` prefix is dropped). Unset: a chosen ``chat_model`` is forwarded (its
-                LiteLLM ``anthropic/`` prefix stripped; the SDK runs Claude
-                only, so any other provider raises); the default chat
-                model, like a managed-chat client, leaves the SDK's own
-                default in place.
+                ``anthropic/`` prefix is dropped). Unset: a chosen
+                ``chat_model`` is forwarded (its LiteLLM ``anthropic/``
+                prefix stripped; the SDK runs Claude only, so any other
+                provider raises); the default chat model, like a
+                managed-chat client, leaves the SDK's own default in place.
         """
         from .agent_tools import build_agent_instructions
         scope = self._local_doc_scope(doc_id)
