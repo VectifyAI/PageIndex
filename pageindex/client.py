@@ -68,12 +68,15 @@ def _claude_model_name(model, surface: str, hint: str = "") -> str:
     Anthropic's own (a new release, an alias like "sonnet") and the
     destination judges the id; a prefixed one is refused."""
     wire = model.removeprefix("litellm/") if isinstance(model, str) else ""
-    try:
-        from litellm import get_llm_provider
-        name, provider, _, _ = get_llm_provider(model=wire)
-    except Exception:
-        name = wire
-        provider = "anthropic" if wire and "/" not in wire else None
+    name, provider = wire, None
+    if wire:
+        try:
+            import litellm
+            # Or an unplaced name prints a "Provider List" banner to stdout.
+            litellm.suppress_debug_info = True
+            name, provider, _, _ = litellm.get_llm_provider(model=wire)
+        except Exception:
+            provider = "anthropic" if "/" not in wire else None
     if provider != "anthropic":
         raise PageIndexAPIError(
             f"{surface} runs on Claude, not {model!r} — pass a Claude "
@@ -1563,8 +1566,18 @@ class PageIndexClient:
                 own default in place.
         """
         from .agent_tools import build_agent_instructions
+        chat_model = self.chat_model
+        if not model and chat_model:
+            from .utils import DEFAULT_CHAT_MODEL
+            # The default chat model is not a choice: leave the SDK's own.
+            if chat_model != DEFAULT_CHAT_MODEL:
+                model = chat_model
+        if model:
+            model = _claude_model_name(
+                model, "claude_agent_config()",
+                "; openai_agent_config() takes other providers")
         scope = self._local_doc_scope(doc_id)
-        config: dict[str, Any] = {
+        return {
             "system_prompt": build_agent_instructions(
                 self, doc_id, scoped=scope is not None,
                 include_management=include_management),
@@ -1573,17 +1586,8 @@ class PageIndexClient:
             # Pre-approval only — the server itself is already gated (the
             # read-only endpoint on cloud, the registered set locally).
             "allowed_tools": [f"mcp__{server_name}"],
+            **({"model": model} if model else {}),
         }
-        from .utils import DEFAULT_CHAT_MODEL
-        chat_model = self.chat_model
-        # The default chat model is not a choice: leave the SDK's own.
-        if not model and chat_model and chat_model != DEFAULT_CHAT_MODEL:
-            model = chat_model
-        if model:
-            config["model"] = _claude_model_name(
-                model, "claude_agent_config()",
-                "; openai_agent_config() takes other providers")
-        return config
 
     def agent_instructions(
         self, doc_id: Optional[Union[str, list[str]]] = None,

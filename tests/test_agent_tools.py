@@ -783,7 +783,7 @@ def test_claude_agent_config_refuses_a_non_claude_chat_model(
         cloud_with_fake_bridge):
     for name in ("gpt-4.1", "openrouter/anthropic/claude-sonnet-4-6"):
         cloud = PageIndexCloudClient(api_key="pi-test-key", chat_model=name)
-        with pytest.raises(PageIndexAPIError, match="model="):
+        with pytest.raises(PageIndexAPIError, match="runs on Claude"):
             cloud.claude_agent_config()
         # An explicit model may be the SDK's own name (an alias included)...
         assert cloud.claude_agent_config(model="sonnet")["model"] == "sonnet"
@@ -966,7 +966,7 @@ def test_anthropic_runner_config_carries_a_claude_chat_model(client, store_path)
     assert config["model"] == "claude-3-opus-20240229"
     assert config["max_tokens"] == 4096
     # The default chat model is not Claude: nothing to guess.
-    with pytest.raises(PageIndexAPIError, match="model="):
+    with pytest.raises(PageIndexAPIError, match="runs on Claude"):
         client.anthropic_runner_config()
 
 

@@ -282,7 +282,7 @@ Returns the agent's process transcript in `items`. Append those items to the nex
 **Use the Anthropic Messages format:**
 
 ```python
-client.messages("...", doc_id=doc_id)
+client.messages("...", doc_id=doc_id)   # Claude only: pass a Claude model via model=, or chat_model on the client
 ```
 
 Uses Anthropic's native Messages API and tool runner; a Claude `chat_model` carries over, otherwise pass `model=`. Install with `pip install 'pageindex[anthropic]'` and set `ANTHROPIC_API_KEY`.
@@ -335,7 +335,7 @@ Install with `pip install 'pageindex[anthropic]'` and set `ANTHROPIC_API_KEY`:
 import anthropic
 
 runner = anthropic.Anthropic().beta.messages.tool_runner(
-    **client.anthropic_runner_config(doc_id=doc_id),
+    **client.anthropic_runner_config(doc_id=doc_id),   # Claude only: pass a Claude model via model=, or chat_model on the client
     messages=[{"role": "user", "content": "Summarize the auditor's concerns."}],
 )
 final = runner.until_done()

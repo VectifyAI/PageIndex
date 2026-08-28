@@ -1587,7 +1587,7 @@ def test_messages_carries_a_claude_chat_model(store_path, fake_anthropic):
     assert calls[0]["model"] == "claude-3-opus-20240229"
     assert calls[0]["max_tokens"] == 4096
     # The default chat model is not Claude: nothing to guess.
-    with pytest.raises(PageIndexAPIError, match="model="):
+    with pytest.raises(PageIndexAPIError, match="runs on Claude"):
         PageIndexLocalClient(storage_path=store_path).messages("q")
 
 
