@@ -417,7 +417,7 @@ Every helper above accepts `doc_id=` to point the agent at specific documents an
 }
 ```
 
-Full details in the [MCP documentation](https://docs.pageindex.ai/mcp). Local mode has no standalone MCP server yet: use `agent_tools()` above, or the [Claude Agent SDK](#claude-agent-sdk)'s in-process MCP server.
+Full details in the [MCP documentation](https://docs.pageindex.ai/mcp). Local mode has no standalone MCP server yet: use `agent_tools()` above, or the in-process MCP server for the [Claude Agent SDK](#claude-agent-sdk).
 
 </details>
 
