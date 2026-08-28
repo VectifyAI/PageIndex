@@ -62,11 +62,11 @@ def _claude_model_name(model, surface: str, hint: str = "") -> str:
     """A model name — explicit ``model=`` or the client's ``chat_model`` —
     as the id an Anthropic-native surface sends. Read the client's way:
     a ``litellm/`` prefix is dropped, LiteLLM says whose model it is, and
-    the ``anthropic/`` routing prefix goes. A name LiteLLM cannot place
-    falls back to this lane's own rule: no provider prefix means
+    the ``anthropic/`` routing prefix goes. A name it places with another
+    provider is refused — these surfaces run Claude only. One it cannot
+    place falls back to this lane's own rule: no provider prefix means
     Anthropic's own (a new release, an alias like "sonnet") and the
-    destination judges the id; anything else is refused, like every
-    other provider — these surfaces run Claude only."""
+    destination judges the id; a prefixed one is refused."""
     wire = model.removeprefix("litellm/") if isinstance(model, str) else ""
     try:
         from litellm import get_llm_provider
