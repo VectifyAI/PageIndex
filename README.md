@@ -285,7 +285,7 @@ Returns the agent's process transcript in `items`. Append those items to the nex
 client.messages("...", model="claude-sonnet-4-6", doc_id=doc_id)
 ```
 
-Uses Anthropic's native Messages API and tool runner (so `model=` takes a plain Anthropic id, no `anthropic/` prefix). Install with `pip install 'pageindex[anthropic]'`.
+Uses Anthropic's native Messages API and tool runner (so `model=` takes a plain model id, no `anthropic/` prefix). Install with `pip install 'pageindex[anthropic]'`.
 
 Pass a list of ids to `doc_id` to search several documents at once, and keep it identical across a conversation's calls.
 
