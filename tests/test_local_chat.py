@@ -1578,6 +1578,20 @@ def test_messages_accepts_the_litellm_spelling(client, fake_anthropic):
 
 
 @needs_anthropic
+def test_messages_carries_a_claude_chat_model(store_path, fake_anthropic):
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
+    local = PageIndexLocalClient(storage_path=store_path,
+                                 chat_model="anthropic/claude-3-opus-20240229")
+    local.messages("q")
+    assert calls[0]["model"] == "claude-3-opus-20240229"
+    assert calls[0]["max_tokens"] == 4096
+    # The default chat model is not Claude: nothing to guess.
+    with pytest.raises(PageIndexAPIError, match="model="):
+        PageIndexLocalClient(storage_path=store_path).messages("q")
+
+
+@needs_anthropic
 def test_messages_thinking_passes_through(client, fake_anthropic):
     """Anthropic-native thinking config, forwarded verbatim; unset sends
     nothing so the backend default applies."""

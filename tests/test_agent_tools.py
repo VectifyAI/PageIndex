@@ -949,6 +949,18 @@ def test_anthropic_runner_config_accepts_the_litellm_spelling(client):
     assert config["max_tokens"] == 4096   # resolved on the stripped id
 
 
+def test_anthropic_runner_config_carries_a_claude_chat_model(client, store_path):
+    pytest.importorskip("anthropic")
+    local = PageIndexLocalClient(storage_path=store_path,
+                                 chat_model="anthropic/claude-3-opus-20240229")
+    config = local.anthropic_runner_config()
+    assert config["model"] == "claude-3-opus-20240229"
+    assert config["max_tokens"] == 4096
+    # The default chat model is not Claude: nothing to guess.
+    with pytest.raises(PageIndexAPIError, match="model="):
+        client.anthropic_runner_config()
+
+
 def test_anthropic_runner_config_shapes(client, store_path):
     pytest.importorskip("anthropic")
     import anthropic
