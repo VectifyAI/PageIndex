@@ -64,3 +64,12 @@ def test_home_flag_overrides_env(indexed, tmp_path, capsys):
     other = tmp_path / "elsewhere"
     assert cli.main(["--home", str(other), "add", str(indexed), "--no-summaries"]) == 0
     assert (other / ".pageindex" / "manifest.json").exists()
+
+
+def test_digest_command_writes_file(indexed, capsys, home):
+    cli.main(["add", str(indexed)])
+    capsys.readouterr()
+    assert cli.main(["digest", "Book"]) == 0
+    path = capsys.readouterr().out.strip()
+    assert path.endswith("digests/book-title/book.md")
+    assert "# Book Title" in open(path).read()

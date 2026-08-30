@@ -47,6 +47,10 @@ def _parser() -> argparse.ArgumentParser:
     sm.add_argument("--model")
     sm.add_argument("--node", action="append", dest="nodes")
     sm.add_argument("--force", action="store_true")
+
+    dg = sub.add_parser("digest", help="write Markdown digest(s) for a book or one node")
+    dg.add_argument("book")
+    dg.add_argument("--node")
     return p
 
 
@@ -117,6 +121,11 @@ def main(argv: list[str] | None = None) -> int:
                 describe_book(store, meta["id"], model=model)
                 store.update_meta(meta["id"], status="completed")
             return 0 if stats["failed"] == 0 else 2
+        if args.command == "digest":
+            from .digest import write_digest
+            path = write_digest(cfg, store, meta["id"], node_id=args.node)
+            print(path)
+            return 0
     except (LookupError, FileNotFoundError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
