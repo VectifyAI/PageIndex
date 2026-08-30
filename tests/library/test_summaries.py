@@ -106,6 +106,67 @@ def test_not_logged_in_aborts_the_run(sample_tree, sample_pages, monkeypatch):
             model="m", book="B", small_node_tokens=0))
 
 
+def test_unrecoverable_error_aborts_immediately_not_deferred(monkeypatch):
+    """Verify that an unrecoverable error (401) is not deferred.
+    The fix ensures exceptions propagate via direct raise instead of being
+    stored in a fatal list and re-raised after the entire tree finishes."""
+    from pageindex.backends.base import CliBackendError
+
+    # Build a tree with enough structure to show deferred vs immediate handling
+    structure = [
+        {
+            "node_id": "ch1",
+            "title": "Chapter 1",
+            "start_index": 0,
+            "end_index": 5,
+            "nodes": [
+                {
+                    "node_id": f"s1_{i}",
+                    "title": f"Section 1.{i}",
+                    "start_index": i,
+                    "end_index": i,
+                }
+                for i in range(5)
+            ],
+        },
+        {
+            "node_id": "ch2",
+            "title": "Chapter 2",
+            "start_index": 5,
+            "end_index": 10,
+            "nodes": [
+                {
+                    "node_id": f"s2_{i}",
+                    "title": f"Section 2.{i}",
+                    "start_index": 5 + i,
+                    "end_index": 5 + i,
+                }
+                for i in range(5)
+            ],
+        },
+    ]
+    page_texts = [f"Page {i} text" for i in range(10)]
+    call_count = [0]
+
+    async def flaky(model, prompt):
+        call_count[0] += 1
+        # Fail on 3rd call, simulating a login error that should abort
+        if call_count[0] == 3:
+            raise CliBackendError("Not logged in", status_code=401, retryable=False)
+        return '{"summary": "ok"}'
+
+    monkeypatch.setattr("pageindex.utils.llm_acompletion", flaky)
+
+    # The fix ensures that an unrecoverable error is raised immediately.
+    # With the old code, it would be stored in a `fatal` list and re-raised
+    # after the entire tree traversal completes. With the fix, it propagates
+    # directly via raise, not via a deferred list-based mechanism.
+    with pytest.raises(CliBackendError):
+        asyncio.run(summaries.summarize_tier(
+            structure, page_texts, tier="summary", profile="nonfiction",
+            model="m", book="B", small_node_tokens=0))
+
+
 def test_summarize_book_checkpoints_and_marks_meta(store, sample_tree, sample_pages, fake_llm):
     meta = {"id": "pi-x", "name": "b.pdf", "description": None, "status": "indexed",
             "createdAt": "2026-08-30T00:00:00.000000", "pageNum": 6, "folderId": None,

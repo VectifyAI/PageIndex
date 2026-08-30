@@ -47,7 +47,6 @@ async def summarize_tier(structure: list[dict], page_texts: list[str], *, tier: 
     model_field = f"{tier}_model"
     semaphore = asyncio.Semaphore(concurrency or DEFAULT_CONCURRENCY)
     stats = {"generated": 0, "skipped": 0, "failed": 0, "errors": []}
-    fatal: list[BaseException] = []
 
     def selected(node: dict) -> bool:
         return wanted is None or node.get("node_id") in wanted
@@ -79,8 +78,6 @@ async def summarize_tier(structure: list[dict], page_texts: list[str], *, tier: 
         children = node.get("nodes") or []
         if children:
             await asyncio.gather(*(visit(child) for child in children))
-        if fatal:
-            return
         if not selected(node):
             return
         if node.get(tier) and not force:
@@ -89,9 +86,8 @@ async def summarize_tier(structure: list[dict], page_texts: list[str], *, tier: 
         try:
             text, used = await (parent_text(node) if children else leaf_text(node))
         except Exception as exc:  # noqa: BLE001 - per-node failure is data
-            if getattr(exc, "status_code", None) in (401, 403) or utils._is_unrecoverable(exc):
-                fatal.append(exc)
-                return
+            if utils._is_unrecoverable(exc):
+                raise
             stats["failed"] += 1
             stats["errors"].append(f"{node.get('node_id')} {node.get('title', '')!r}: {exc}")
             logger.warning("summary failed for %s: %s", node.get("node_id"), exc)
@@ -107,8 +103,6 @@ async def summarize_tier(structure: list[dict], page_texts: list[str], *, tier: 
             on_node(node)
 
     await asyncio.gather(*(visit(root) for root in structure))
-    if fatal:
-        raise fatal[0]
     return stats
 
 
