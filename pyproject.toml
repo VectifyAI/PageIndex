@@ -41,12 +41,16 @@ pyyaml = ">=6.0"
 claude-agent-sdk = { version = ">=0.1.53", optional = true }
 # Older releases execute a refusal turn's tool_use blocks.
 anthropic = { version = ">=0.108.0", optional = true }
+mcp = ">=2.0"
 
 [tool.poetry.extras]
 claude = ["claude-agent-sdk"]
 # Empty on purpose: keeps pip install "pageindex[openai]" valid.
 openai = []
 anthropic = ["anthropic"]
+
+[tool.poetry.scripts]
+books = "pageindex.library.cli:main"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=7.0"
