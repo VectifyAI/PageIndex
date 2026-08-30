@@ -155,8 +155,11 @@ def test_unrecoverable_error_aborts_immediately_not_deferred(monkeypatch):
 
     async def flaky(model, prompt):
         calls.append(1)
+        # Yield control to let event loop interleave concurrent tasks, like real I/O would.
+        # Without this, tasks run synchronously in sequence, masking real concurrency behavior.
+        await asyncio.sleep(0)
         # Fail on Section 1.2, early in the tree (before most leaves)
-        # This ensures clear separation: buggy code ~18 calls, fixed code <12
+        # This ensures clear separation: buggy code ~18 calls, fixed code <10
         if "Section 1.2" in prompt:
             raise CliBackendError("Not logged in", status_code=401, retryable=False)
         return '{"summary": "ok"}'
@@ -171,11 +174,13 @@ def test_unrecoverable_error_aborts_immediately_not_deferred(monkeypatch):
             structure, page_texts, tier="summary", profile="nonfiction",
             model="m", book="B", small_node_tokens=0))
 
-    # The key assertion: we made far fewer calls than total nodes
-    # Old behavior: ~18 calls (entire tree walked)
-    # New behavior: <12 calls (stopped after Section 1.2 early exit)
-    assert len(calls) < total_nodes, \
-        f"Expected early abort (<{total_nodes} calls) but made {len(calls)} calls"
+    # The key assertion: we made far fewer calls than total nodes.
+    # With yield point, concurrent interleaving is real and measurable:
+    # - Fixed code (with immediate raise): ~9 calls (stops after Section 1.2 error)
+    # - Buggy code (with fatal list): ~16 calls (most of tree walked before raise)
+    # Setting threshold at 15 to clearly distinguish both behaviors.
+    assert len(calls) < 15, \
+        f"Expected early abort (<15 calls) but made {len(calls)} calls"
 
 
 def test_summarize_book_checkpoints_and_marks_meta(store, sample_tree, sample_pages, fake_llm):
