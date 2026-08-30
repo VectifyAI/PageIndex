@@ -144,6 +144,14 @@ def _is_unrecoverable(exc: Exception) -> bool:
 
 
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
+    from .backends import resolve as _resolve_cli
+    cli = _resolve_cli(model)
+    if cli is not None:
+        if chat_history:
+            prompt = "\n\n".join(f"{m['role']}: {m['content']}" for m in chat_history) \
+                + f"\n\nuser: {prompt}"
+        content = cli.complete(prompt)
+        return (content, "finished") if return_finish_reason else content
     import litellm
     max_retries = 10
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
@@ -180,6 +188,10 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
 
 
 async def llm_acompletion(model, prompt):
+    from .backends import resolve as _resolve_cli
+    cli = _resolve_cli(model)
+    if cli is not None:
+        return await cli.acomplete(prompt)
     import litellm
     max_retries = 10
     messages = [{"role": "user", "content": prompt}]

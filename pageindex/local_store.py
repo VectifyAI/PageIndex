@@ -124,6 +124,25 @@ class DocStore:
         manifest[doc_id] = meta
         self._write_manifest(manifest)
 
+    def save_tree(self, doc_id: str, tree: list) -> None:
+        """Rewrite tree.json only (summary checkpoints)."""
+        doc_dir = self._doc_dir(doc_id)
+        if doc_dir is None or not (doc_dir / "doc.json").is_file():
+            raise KeyError(f"Unknown doc_id: {doc_id!r}")
+        _write_json_atomic(doc_dir / "tree.json", tree)
+
+    def update_meta(self, doc_id: str, **fields) -> dict:
+        """Merge fields into doc.json and the manifest; returns the new meta."""
+        meta = self.get_meta(doc_id)
+        if meta is None:
+            raise KeyError(f"Unknown doc_id: {doc_id!r}")
+        meta = {**meta, **fields}
+        _write_json_atomic(self._doc_dir(doc_id) / "doc.json", meta)
+        manifest = self._read_manifest()
+        manifest[doc_id] = meta
+        self._write_manifest(manifest)
+        return meta
+
     def _read_doc_file(self, doc_id: str, name: str):
         doc_dir = self._doc_dir(doc_id)
         if doc_dir is None or not (doc_dir / "doc.json").is_file():
