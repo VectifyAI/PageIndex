@@ -51,6 +51,9 @@ def _parser() -> argparse.ArgumentParser:
     dg = sub.add_parser("digest", help="write Markdown digest(s) for a book or one node")
     dg.add_argument("book")
     dg.add_argument("--node")
+
+    sub.add_parser("mcp", help="run the stdio MCP server for Claude Code")
+
     return p
 
 
@@ -83,6 +86,10 @@ def main(argv: list[str] | None = None) -> int:
     cfg = LibraryConfig.load(args.home)
     cfg.home.mkdir(parents=True, exist_ok=True)
     store = DocStore(str(cfg.storage_path))
+    if args.command == "mcp":
+        from .mcp_server import build_server
+        build_server(cfg).run("stdio")
+        return 0
     try:
         if args.command == "add":
             out = add_book(args.pdf, cfg, profile=args.profile, model=args.model,
