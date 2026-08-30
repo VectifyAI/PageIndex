@@ -1,0 +1,97 @@
+# Prompt templates per profile and tier. Placeholders: {book} {title} {text}
+# {intro} {children} {max_words}. A profile falls back to `nonfiction` for
+# any tier/kind it does not define.
+profiles:
+  nonfiction:
+    summary:
+      max_words: 60
+      leaf: |
+        You are indexing the book "{book}". Below is the full text of the section titled "{title}".
+        Write a routing summary: what this section is about and which distinct topics, arguments,
+        practices or examples it contains, so a reader can decide whether to open it. At most
+        {max_words} words. Do not evaluate or interpret; describe.
+
+        Section text:
+        {text}
+
+        Reply strictly in this JSON format and nothing else:
+        {{"points": ["<topic>", "..."], "summary": "<at most {max_words} words>"}}
+      parent: |
+        You are indexing the book "{book}". The section "{title}" contains the subsections listed
+        below (titles and their summaries), preceded by the text that opens the section (may be empty).
+        Write a routing summary of the whole section covering every subsection's topics. At most
+        {max_words} words.
+
+        Opening text:
+        {intro}
+
+        Subsections (JSON):
+        {children}
+
+        Reply strictly in this JSON format and nothing else:
+        {{"points": ["<topic>", "..."], "summary": "<at most {max_words} words>"}}
+    digest:
+      max_words: 600
+      leaf: |
+        You are writing a study digest of the book "{book}" for its owner, who has read it and wants
+        a faithful reference. Below is the full text of the section titled "{title}".
+        Write a digest in Markdown of at most {max_words} words with these parts:
+        - **Thesis** — one or two sentences: what the author is saying here.
+        - **Key points** — bullets, each a complete claim or instruction from the text, in the author's
+          order. Keep the author's terminology.
+        - **Examples & stories** — bullets for illustrations, anecdotes or analogies used (skip if none).
+        - **Quotable lines** — up to 4 short verbatim quotes.
+        Stay strictly within the text; do not add outside knowledge or opinions.
+
+        Section text:
+        {text}
+      parent: |
+        You are writing a study digest of the book "{book}". The section "{title}" contains the
+        subsections below, each with its own digest, preceded by the text that opens the section
+        (may be empty). Write a digest in Markdown of at most {max_words} words that synthesizes the
+        whole section: **Thesis**, **Key points** (grouped by theme, preserving the author's
+        terminology), **Examples & stories**, **Quotable lines** (up to 4, taken from the subsection
+        digests). Stay strictly within the material below.
+
+        Opening text:
+        {intro}
+
+        Subsection digests (JSON):
+        {children}
+    description:
+      max_words: 120
+      doc: |
+        You are cataloguing the book "{book}". Below is its table of contents with section summaries.
+        Write one paragraph of at most {max_words} words describing the book: what kind of book it is,
+        who wrote it and for whom, how it is organised, and its main themes — so a reader choosing
+        between many books can tell whether this one is relevant. Reply with the paragraph only.
+
+        Table of contents:
+        {structure}
+  diary:
+    summary:
+      max_words: 80
+      leaf: |
+        You are indexing the diary "{book}". Below are the entries for "{title}".
+        Write a routing summary listing the people, places, events, health matters, travels and
+        spiritual observations mentioned in this period, so a reader can decide whether to open it.
+        At most {max_words} words. Describe; do not interpret.
+
+        Entries:
+        {text}
+
+        Reply strictly in this JSON format and nothing else:
+        {{"points": ["<item>", "..."], "summary": "<at most {max_words} words>"}}
+    digest:
+      max_words: 700
+      leaf: |
+        You are writing a digest of the diary "{book}" for its owner. Below are the entries for
+        "{title}". Write a Markdown digest of at most {max_words} words:
+        - **Period overview** — two or three sentences.
+        - **Chronology** — one bullet per notable entry, prefixed with its date, stating what happened.
+        - **Recurring themes** — bullets.
+        - **Quotable lines** — up to 4 short verbatim quotes with their dates.
+        Stay strictly within the entries; no outside knowledge.
+
+        Entries:
+        {text}
