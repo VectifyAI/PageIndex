@@ -911,7 +911,9 @@ def _anthropic_client(backend=None, route="anthropic"):
         return _ANTHROPIC_CLIENTS[key]
     try:
         client = getattr(anthropic, _ROUTE_CLIENTS[route])(**kwargs)
-    except TypeError as exc:
+    except (anthropic.AnthropicError, ValueError, TypeError) as exc:
+        # Vertex/Foundry refuse a missing region or credential right at
+        # construction, each with its own type; same contract for all.
         raise PageIndexAPIError(
             f"The Anthropic backend is not configured: {exc}") from exc
     if key is not None and len(_ANTHROPIC_CLIENTS) < 8:
@@ -1059,6 +1061,15 @@ def run_messages(client, messages, model: str, route: str = "anthropic",
     # reuse; a caller-owned http_client survives regardless.
     owns_transport = ("http_client" not in (merged or {})
                       and backend_client not in _ANTHROPIC_CLIENTS.values())
+    if not hasattr(backend_client.beta.messages, "tool_runner"):
+        # An anthropic build predating this route's tool runner passes
+        # _require_anthropic (its probes are older): name the gap here.
+        if owns_transport:
+            backend_client.close()
+        raise PageIndexAPIError(
+            "messages on this route needs the anthropic SDK's tool "
+            "runner, which this anthropic build lacks — "
+            "pip install -U anthropic.")
     if max_tokens is None:
         max_tokens = _default_max_tokens(model, thinking)
     runner = backend_client.beta.messages.tool_runner(

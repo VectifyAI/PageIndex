@@ -810,6 +810,23 @@ def test_claude_agent_config_local_chat_model(store_path):
         storage_path=store_path).claude_agent_config()
 
 
+def test_claude_agent_config_route_prefix_sets_the_channel_switch(
+        cloud_with_fake_bridge):
+    # Claude Code picks its transport from env switches, not a client
+    # class — so here the routing prefix rides along as that switch.
+    cloud, _ = cloud_with_fake_bridge
+    for prefix, switch in (("bedrock", "CLAUDE_CODE_USE_BEDROCK"),
+                           ("vertex_ai", "CLAUDE_CODE_USE_VERTEX"),
+                           ("azure_ai", "CLAUDE_CODE_USE_FOUNDRY")):
+        cloud.chat_model = f"{prefix}/claude-opus-4-6"
+        config = cloud.claude_agent_config()
+        assert config["model"] == "claude-opus-4-6"
+        assert config["env"] == {switch: "1"}
+    # Direct-route spellings need no switch: no env key at all.
+    cloud.chat_model = "anthropic/claude-opus-4-6"
+    assert "env" not in cloud.claude_agent_config()
+
+
 def test_openai_agent_config_local(client, store_path):
     pytest.importorskip("agents")
     from agents import Agent
@@ -2782,6 +2799,40 @@ def test_stock_chat_model_never_impersonates_a_choice(store_path):
     stock.chat_model = "anthropic/claude-opus-4-1"
     assert not stock._chat_model_stock
     assert stock.anthropic_runner_config()["model"] == "claude-opus-4-1"
+
+
+def test_config_yaml_chat_model_is_a_choice(store_path, monkeypatch,
+                                            cloud_with_fake_bridge):
+    # config.yaml is the third way to name a chat model; a key set there
+    # must read as chosen, exactly like the constructor spellings.
+    pytest.importorskip("anthropic")
+    import pageindex.utils
+    real = pageindex.utils.ConfigLoader._load_yaml
+
+    def with_chat_model(path):
+        loaded = dict(real(path))
+        loaded["chat_model"] = "anthropic/claude-sonnet-4-6"
+        return loaded
+
+    monkeypatch.setattr(pageindex.utils.ConfigLoader, "_load_yaml",
+                        staticmethod(with_chat_model))
+    local = PageIndexLocalClient(storage_path=store_path)
+    assert not local._chat_model_stock
+    assert local.anthropic_runner_config()["model"] == "claude-sonnet-4-6"
+    cloud = PageIndexCloudClient(api_key="pi-test-key", chat="local")
+    assert not cloud._chat_model_stock
+    assert cloud.claude_agent_config()["model"] == "claude-sonnet-4-6"
+
+    def with_blank_keys(path):
+        loaded = dict(real(path))
+        loaded["chat_model"] = None   # a bare "chat_model:" line
+        loaded["model"] = ""
+        return loaded
+
+    # Blank values mean "absent", exactly like the flat arguments.
+    monkeypatch.setattr(pageindex.utils.ConfigLoader, "_load_yaml",
+                        staticmethod(with_blank_keys))
+    assert PageIndexLocalClient(storage_path=store_path)._chat_model_stock
 
 
 def test_anthropic_runner_config_strips_the_route_prefix(store_path):

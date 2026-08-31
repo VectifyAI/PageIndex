@@ -82,6 +82,18 @@ def _claude_wire(model, surface: str) -> "tuple[str, str]":
     return wire.removeprefix("anthropic/"), "anthropic"
 
 
+_ROUTE_ENV = {"bedrock": "CLAUDE_CODE_USE_BEDROCK",
+              "vertex_ai": "CLAUDE_CODE_USE_VERTEX",
+              "azure_ai": "CLAUDE_CODE_USE_FOUNDRY"}
+
+
+def _yaml_names_chat(loader) -> bool:
+    # config.yaml is a third way to name a chat model. Blank values mean
+    # "absent", exactly like the flat arguments (_resolve_models agrees).
+    return any(loader._default_dict.get(key)
+               for key in ("chat_model", "retrieve_model", "model"))
+
+
 def _needs_model(surface: str) -> PageIndexAPIError:
     # The stock chat_model default is not the user's choice: never send
     # it on an Anthropic-native surface as if it were one.
@@ -501,10 +513,12 @@ class PageIndexClient:
                 overrides = {name: value for name, value in chat_conf.items()
                              if name in ("chat_model", "retrieve_model")
                              and value}
-                opt = ConfigLoader().load(overrides or None)
+                loader = ConfigLoader()
+                opt = loader.load(overrides or None)
                 self._chat_model = opt.chat_model
                 # chat="local" alone names no model: the stock default.
-                self._chat_model_stock = not overrides
+                self._chat_model_stock = (not overrides
+                                          and not _yaml_names_chat(loader))
                 self.chat_backend = chat_conf.get("chat_backend")
                 _preload_litellm()
             else:
@@ -532,14 +546,16 @@ class PageIndexClient:
                          if name in ("model", "index_model", "summary_model",
                                      "chat_model", "retrieve_model")
                          and value}
-            opt = ConfigLoader().load(overrides or None)
+            loader = ConfigLoader()
+            opt = loader.load(overrides or None)
             self.model = opt.model
             self.index_model = opt.index_model
             self.summary_model = opt.summary_model
             self._chat_model = opt.chat_model
-            self._chat_model_stock = not (overrides.get("chat_model")
-                                          or overrides.get("retrieve_model")
-                                          or overrides.get("model"))
+            self._chat_model_stock = (not (overrides.get("chat_model")
+                                           or overrides.get("retrieve_model")
+                                           or overrides.get("model"))
+                                      and not _yaml_names_chat(loader))
             self.chat_backend = chat_conf.get("chat_backend")
             self.storage_path = index_conf.get("storage_path") or ".pageindex"
             from .local_api import LocalAPI
@@ -1600,17 +1616,21 @@ class PageIndexClient:
                 locally also the name the SDK server declares.
             model (str, optional): Claude model, in the client's spelling
                 or the SDK's own (aliases included) — routing prefixes
-                are stripped and the SDK judges the id. Unset: a
-                ``chat_model`` you set is forwarded as written; the stock
-                default, like a managed-chat client, leaves the SDK's own
-                default in place.
+                are stripped and the SDK judges the id. A ``bedrock/``,
+                ``vertex_ai/``, or ``azure_ai/`` prefix also rides along
+                as the matching ``CLAUDE_CODE_USE_*`` env switch, so
+                Claude Code serves that channel. Unset: a ``chat_model``
+                you set is forwarded as written; the stock default, like
+                a managed-chat client, leaves the SDK's own default in
+                place.
         """
         from .agent_tools import build_agent_instructions
         # The stock default is not a choice: leave the SDK's own model.
         if not model and not self._chat_model_stock:
             model = self.chat_model
+        route = None
         if model:
-            model, _ = _claude_wire(model, "claude_agent_config()")
+            model, route = _claude_wire(model, "claude_agent_config()")
         scope = self._local_doc_scope(doc_id)
         return {
             "system_prompt": build_agent_instructions(
@@ -1622,6 +1642,10 @@ class PageIndexClient:
             # read-only endpoint on cloud, the registered set locally).
             "allowed_tools": [f"mcp__{server_name}"],
             **({"model": model} if model else {}),
+            # Claude Code picks its transport from env switches; the SDK
+            # merges this over the inherited environment.
+            **({"env": {_ROUTE_ENV[route]: "1"}}
+               if route in _ROUTE_ENV else {}),
         }
 
     def agent_instructions(

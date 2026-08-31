@@ -2553,3 +2553,40 @@ def test_anthropic_client_foundry_route(monkeypatch):
     foundry = local_chat._anthropic_client(
         {"resource": "r", "api_key": "k"}, "azure_ai")
     assert isinstance(foundry, anthropic.AnthropicFoundry)
+
+
+@needs_anthropic
+def test_anthropic_client_unconfigured_route_keeps_the_error_contract(
+        monkeypatch):
+    """Vertex and Foundry fail at construction (region, credentials) —
+    those failures must wrap like the direct route's request-time ones."""
+    monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
+    for name in ("CLOUD_ML_REGION", "GOOGLE_CLOUD_PROJECT",
+                 "ANTHROPIC_FOUNDRY_API_KEY", "ANTHROPIC_FOUNDRY_BASE_URL",
+                 "ANTHROPIC_FOUNDRY_RESOURCE"):
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(PageIndexAPIError,
+                       match="Anthropic backend is not configured"):
+        local_chat._anthropic_client(None, "vertex_ai")
+    if not hasattr(anthropic, "AnthropicFoundry"):
+        pytest.skip("this anthropic build has no Foundry client")
+    with pytest.raises(PageIndexAPIError,
+                       match="Anthropic backend is not configured"):
+        local_chat._anthropic_client(None, "azure_ai")
+
+
+@needs_anthropic
+def test_messages_names_the_missing_tool_runner(client, monkeypatch):
+    # anthropic 0.108–0.121 constructs Bedrock/Vertex clients whose beta
+    # surface has no tool runner: name the gap, not an AttributeError.
+    class _Runnerless:
+        class beta:
+            class messages: ...
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(local_chat, "_anthropic_client",
+                        lambda backend=None, route="anthropic": _Runnerless())
+    with pytest.raises(PageIndexAPIError, match="tool runner"):
+        client.messages("q", model="bedrock/anthropic.claude-sonnet-4-6-v1:0")
