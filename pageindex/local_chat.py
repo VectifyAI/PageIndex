@@ -878,32 +878,38 @@ def _require_anthropic() -> None:
         from anthropic.lib.tools import ToolError  # noqa: F401
     except ImportError as exc:
         raise PageIndexAPIError(
-            "messages requires anthropic >= 0.108.0 (the tool "
+            "messages requires anthropic >= 0.122.0 (the tool "
             "runner with ToolError) — pip install -U anthropic."
         ) from exc
 
 
-_ANTHROPIC_CLIENTS: dict = {}  # backend key -> client, kept open for reuse
+_ANTHROPIC_CLIENTS: dict = {}  # (route, backend) key -> client, kept open
+
+# The transport class per routing prefix — the anthropic SDK ships one
+# client per channel, so a row here is what makes a route reachable.
+_ROUTE_CLIENTS = {"anthropic": "Anthropic", "bedrock": "AnthropicBedrock",
+                  "vertex_ai": "AnthropicVertex"}
 
 
-def _anthropic_client(backend=None):
+def _anthropic_client(backend=None, route="anthropic"):
     """The backend client — the seam tests replace with a fake transport.
-    One client per backend: each construction pays ~45 ms of SSL-context
-    build and a cold connection pool. A backend whose values defeat
-    hashing constructs per call, as before."""
+    ``route`` (declared by the model's prefix) picks the SDK client
+    class. One client per (route, backend): each construction pays
+    ~45 ms of SSL-context build and a cold connection pool. A backend
+    whose values defeat hashing constructs per call, as before."""
     import anthropic
     kwargs = _sdk_backend(backend)
     try:
-        key = tuple(sorted(
+        key = (route, tuple(sorted(
             (k, tuple(sorted(v.items())) if isinstance(v, dict) else v)
-            for k, v in kwargs.items()))
+            for k, v in kwargs.items())))
         hash(key)
     except TypeError:
         key = None
     if key in _ANTHROPIC_CLIENTS:
         return _ANTHROPIC_CLIENTS[key]
     try:
-        client = anthropic.Anthropic(**kwargs)
+        client = getattr(anthropic, _ROUTE_CLIENTS[route])(**kwargs)
     except TypeError as exc:
         raise PageIndexAPIError(
             f"The Anthropic backend is not configured: {exc}") from exc
@@ -1004,7 +1010,7 @@ def _default_max_tokens(model: str, thinking=None) -> int:
     return 4096 if model.startswith(_CLAUDE_4096_MODELS) else 8192
 
 
-def run_messages(client, messages, model: str,
+def run_messages(client, messages, model: str, route: str = "anthropic",
                  max_tokens: Optional[int] = None,
                  stream: bool = False, doc_id=None, system=None,
                  temperature: Optional[float] = None,
@@ -1047,7 +1053,7 @@ def run_messages(client, messages, model: str,
     # network I/O, and a failure there must not strand the client below.
     tools = build_anthropic_tools(client, doc_ids=scope)
     merged = _merged_backend(client, backend)
-    backend_client = _anthropic_client(merged)
+    backend_client = _anthropic_client(merged, route)
     # Close only a per-call construction: cached clients stay open for
     # reuse; a caller-owned http_client survives regardless.
     owns_transport = ("http_client" not in (merged or {})

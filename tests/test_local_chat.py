@@ -710,7 +710,7 @@ def fake_anthropic(monkeypatch):
             http_client=anthropic_httpx.Client(
                 transport=anthropic_httpx.MockTransport(handler)))
         monkeypatch.setattr(local_chat, "_anthropic_client",
-                            lambda backend=None: fake)
+                            lambda backend=None, route="anthropic": fake)
         return state["calls"]
 
     return install
@@ -1470,7 +1470,7 @@ def test_messages_provider_errors_wrap_as_sdk_errors(client, store_path,
         http_client=anthropic_httpx.Client(
             transport=anthropic_httpx.MockTransport(handler)))
     monkeypatch.setattr(local_chat, "_anthropic_client",
-                        lambda backend=None: fake)
+                        lambda backend=None, route="anthropic": fake)
     with pytest.raises(PageIndexAPIError, match="model backend failed"):
         client.messages("q", model="claude-test")
     with pytest.raises(PageIndexAPIError, match="model backend failed"):
@@ -1586,8 +1586,8 @@ def test_messages_carries_a_claude_chat_model(store_path, fake_anthropic):
     local.messages("q")
     assert calls[0]["model"] == "claude-3-opus-20240229"
     assert calls[0]["max_tokens"] == 4096
-    # The default chat model is not Claude: nothing to guess.
-    with pytest.raises(PageIndexAPIError, match="runs on Claude"):
+    # The stock default was never chosen: nothing to send.
+    with pytest.raises(PageIndexAPIError, match="needs a model"):
         PageIndexLocalClient(storage_path=store_path).messages("q")
 
 
@@ -1845,8 +1845,8 @@ def test_messages_backend_merges_and_reaches_the_client(client, fake_anthropic,
     seen = {}
     monkeypatch.setattr(
         local_chat, "_anthropic_client",
-        lambda backend=None: (seen.setdefault("backend", backend),
-                              fixture_client())[1])
+        lambda backend=None, route="anthropic": (
+            seen.setdefault("backend", backend), fixture_client())[1])
     client.chat_backend = {"base_url": "http://cb"}
     client.messages("q", model="claude-sonnet-4-5", backend={"api_key": "z"})
     assert seen["backend"] == {"base_url": "http://cb", "api_key": "z"}
@@ -1894,7 +1894,7 @@ def test_messages_extra_headers_reach_the_wire(client, monkeypatch):
         api_key="t", http_client=anthropic_httpx.Client(
             transport=anthropic_httpx.MockTransport(handler)))
     monkeypatch.setattr(local_chat, "_anthropic_client",
-                        lambda backend=None: fake)
+                        lambda backend=None, route="anthropic": fake)
     client.messages("q", model="claude-sonnet-4-5",
                     extra_headers={"anthropic-beta": "context-1m-2025"})
     assert seen["beta"] == "context-1m-2025"
@@ -1948,7 +1948,8 @@ def test_anthropic_client_construction_race_keeps_first(monkeypatch):
     real = anthropic.Anthropic
 
     def racing(**kwargs):
-        local_chat._ANTHROPIC_CLIENTS[(("api_key", "k"),)] = winner
+        local_chat._ANTHROPIC_CLIENTS[
+            ("anthropic", (("api_key", "k"),))] = winner
         return real(**kwargs)
     monkeypatch.setattr(anthropic, "Anthropic", racing)
     assert local_chat._anthropic_client({"api_key": "k"}) is winner
@@ -1968,7 +1969,7 @@ def test_messages_reuses_cached_client_across_runs(client, monkeypatch):
         http_client=anthropic_httpx.Client(
             transport=anthropic_httpx.MockTransport(handler)))
     monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS",
-                        {(("api_key", "test"),): cached})
+                        {("anthropic", (("api_key", "test"),)): cached})
 
     def boom(**kwargs):
         raise AssertionError("cache hit expected — no new construction")
@@ -2412,7 +2413,7 @@ def test_messages_auth_failure_teaches_architecture(bridge_client,
                        "error": {"type": "authentication_error",
                                  "message": "invalid x-api-key"}})
 
-    def fresh_fake(backend=None):
+    def fresh_fake(backend=None, route="anthropic"):
         # per call: run_messages closes a per-call transport it owns
         return anthropic.Anthropic(
             api_key="test",
@@ -2445,8 +2446,8 @@ def test_messages_no_backend_leak_when_tool_build_fails(bridge_client,
             self.closed = True
 
     monkeypatch.setattr(local_chat, "_anthropic_client",
-                        lambda backend=None: made.append(FakeAnthropic())
-                        or made[-1])
+                        lambda backend=None, route="anthropic":
+                        made.append(FakeAnthropic()) or made[-1])
 
     def boom(client, doc_ids=None):
         raise PageIndexAPIError("Could not reach the PageIndex MCP server")
@@ -2501,3 +2502,44 @@ def test_bridge_openai_agent_config_carries_configured_model(bridge_client):
     config = client.openai_agent_config()
     assert config["model"] == "fake-model"
     assert "CLOUD LIVE INSTRUCTIONS" in config["instructions"]
+
+
+@needs_anthropic
+def test_messages_routes_by_model_prefix(client, fake_anthropic, monkeypatch):
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
+    fixture_client = local_chat._anthropic_client
+    seen = {}
+    monkeypatch.setattr(
+        local_chat, "_anthropic_client",
+        lambda backend=None, route="anthropic": (
+            seen.setdefault("route", route), fixture_client())[1])
+    client.messages(
+        "q", model="bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0")
+    assert seen["route"] == "bedrock"
+    assert calls[0]["model"] == "anthropic.claude-3-5-sonnet-20241022-v2:0"
+
+
+@needs_anthropic
+def test_anthropic_client_route_picks_the_transport_class(monkeypatch):
+    """The model's routing prefix selects the SDK client class — the
+    bedrock/vertex ids only mean something to their own transports."""
+    monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
+    pytest.importorskip("boto3")
+    bedrock = local_chat._anthropic_client(
+        {"aws_region": "us-east-1", "aws_access_key": "a",
+         "aws_secret_key": "s"}, "bedrock")
+    assert isinstance(bedrock, anthropic.AnthropicBedrock)
+    direct = local_chat._anthropic_client({"api_key": "k"})
+    assert isinstance(direct, anthropic.Anthropic)
+    assert not isinstance(direct, anthropic.AnthropicBedrock)
+
+
+@needs_anthropic
+def test_anthropic_client_vertex_route(monkeypatch):
+    monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
+    pytest.importorskip("google.auth")
+    vertex = local_chat._anthropic_client(
+        {"region": "us-east5", "project_id": "p", "access_token": "t"},
+        "vertex_ai")
+    assert isinstance(vertex, anthropic.AnthropicVertex)
