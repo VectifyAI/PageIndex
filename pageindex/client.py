@@ -59,8 +59,10 @@ def _agents_sdk_model_name(model: str) -> str:
 
 
 # The Anthropic-stack routes this SDK wires a transport for; a row is
-# an inventory fact, not a model judgment (add azure_ai/Foundry on demand).
-_CLAUDE_ROUTES = ("bedrock", "vertex_ai")
+# an inventory fact, not a model judgment. Growth rule: a row per route
+# LiteLLM names and the anthropic SDK ships a client for (Mantle and
+# Claude-on-AWS/GoogleCloud wait on LiteLLM prefix names).
+_CLAUDE_ROUTES = ("bedrock", "vertex_ai", "azure_ai")
 
 
 def _claude_wire(model, surface: str) -> "tuple[str, str]":
@@ -1121,11 +1123,12 @@ class PageIndexClient:
                 tool_use/tool_result blocks on round-trip), or a bare query
                 string (it becomes a single user message).
             model: Model for the Messages wire, sent as written — a
-                ``bedrock/`` or ``vertex_ai/`` prefix selects that
-                channel's SDK client, anything else goes to Anthropic
-                directly (``litellm/`` and ``anthropic/`` prefixes are
-                stripped). Unset: a ``chat_model`` you set carries over;
-                the stock default raises rather than being sent.
+                ``bedrock/``, ``vertex_ai/``, or ``azure_ai/`` prefix
+                selects that channel's SDK client, anything else goes to
+                Anthropic directly (``litellm/`` and ``anthropic/``
+                prefixes are stripped). Unset: a ``chat_model`` you set
+                carries over; the stock default raises rather than being
+                sent.
             max_tokens: Per-turn output budget the Messages API requires on
                 the wire; the default is resolved per model (8192, or 4096
                 for the claude-3 generation whose ceiling is lower) so the
@@ -1482,8 +1485,9 @@ class PageIndexClient:
 
         Args:
             model: Model name, routing prefixes (``litellm/``,
-                ``anthropic/``, ``bedrock/``, ``vertex_ai/``) stripped —
-                your client is the transport and judges the id; also
+                ``anthropic/``, ``bedrock/``, ``vertex_ai/``,
+                ``azure_ai/``) stripped — your client is the transport
+                and judges the id; also
                 resolves the ``max_tokens`` default. Unset: a
                 ``chat_model`` you set carries over; the stock default
                 raises rather than being sent.

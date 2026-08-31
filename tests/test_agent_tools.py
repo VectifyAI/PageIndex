@@ -2752,6 +2752,8 @@ def test_claude_wire_reads_only_the_routing_prefix():
         "us.anthropic.claude-sonnet-4-6-v1:0", "bedrock")
     assert _claude_wire("vertex_ai/claude-sonnet-4@20250514", "t()") == (
         "claude-sonnet-4@20250514", "vertex_ai")
+    assert _claude_wire("azure_ai/claude-opus-4-6", "t()") == (
+        "claude-opus-4-6", "azure_ai")
     # Unknown prefixes and bare names ship verbatim on the direct route.
     assert _claude_wire("team/claude-prod", "t()") == (
         "team/claude-prod", "anthropic")

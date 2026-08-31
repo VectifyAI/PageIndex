@@ -2543,3 +2543,13 @@ def test_anthropic_client_vertex_route(monkeypatch):
         {"region": "us-east5", "project_id": "p", "access_token": "t"},
         "vertex_ai")
     assert isinstance(vertex, anthropic.AnthropicVertex)
+
+
+@needs_anthropic
+def test_anthropic_client_foundry_route(monkeypatch):
+    if not hasattr(anthropic, "AnthropicFoundry"):
+        pytest.skip("anthropic < 0.122 has no Foundry client")
+    monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
+    foundry = local_chat._anthropic_client(
+        {"resource": "r", "api_key": "k"}, "azure_ai")
+    assert isinstance(foundry, anthropic.AnthropicFoundry)

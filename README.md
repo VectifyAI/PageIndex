@@ -285,7 +285,7 @@ Returns the agent's process transcript in `items`. Append those items to the nex
 client.messages("...", doc_id=doc_id, model="claude-sonnet-4-6")   # or set chat_model on the client and omit model=
 ```
 
-Uses Anthropic's native Messages API and tool runner; a `chat_model` you set carries over, otherwise pass `model=`. Install with `pip install 'pageindex[anthropic]'` and set `ANTHROPIC_API_KEY`.
+Uses Anthropic's native Messages API and tool runner; a `chat_model` you set carries over, otherwise pass `model=`. A `bedrock/`, `vertex_ai/`, or `azure_ai/` prefix runs Claude through AWS, GCP, or Azure (Microsoft Foundry) instead, with that channel's credentials via `chat_backend`. Install with `pip install 'pageindex[anthropic]'` and set `ANTHROPIC_API_KEY`.
 
 Pass a list of ids to `doc_id` to search several documents at once, and keep it identical across a conversation's calls.
 

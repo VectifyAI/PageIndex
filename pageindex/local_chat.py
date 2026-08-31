@@ -888,7 +888,8 @@ _ANTHROPIC_CLIENTS: dict = {}  # (route, backend) key -> client, kept open
 # The transport class per routing prefix — the anthropic SDK ships one
 # client per channel, so a row here is what makes a route reachable.
 _ROUTE_CLIENTS = {"anthropic": "Anthropic", "bedrock": "AnthropicBedrock",
-                  "vertex_ai": "AnthropicVertex"}
+                  "vertex_ai": "AnthropicVertex",
+                  "azure_ai": "AnthropicFoundry"}
 
 
 def _anthropic_client(backend=None, route="anthropic"):

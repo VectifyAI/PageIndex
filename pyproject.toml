@@ -39,8 +39,8 @@ python-dotenv = ">=1.0.0"
 pyyaml = ">=6.0"
 # Older releases break string prompts with SDK MCP servers (#597, #780).
 claude-agent-sdk = { version = ">=0.1.53", optional = true }
-# Pre-0.122 lacks the Bedrock/Vertex tool runner; pre-0.108 executes a
-# refusal turn's tool_use blocks.
+# Pre-0.122 lacks the Bedrock/Vertex tool runner and the Foundry client;
+# pre-0.108 executes a refusal turn's tool_use blocks.
 anthropic = { version = ">=0.122.0", optional = true }
 
 [tool.poetry.extras]
