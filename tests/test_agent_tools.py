@@ -2437,7 +2437,17 @@ def test_wait_until_completed_returns_final_document(fake_cloud_client):
 
 @pytest.mark.parametrize("parameter", ["timeout", "poll_interval"])
 @pytest.mark.parametrize(
-    "bad_value", [0, -1, float("nan"), float("inf"), True, "2"]
+    "bad_value",
+    [
+        0,
+        -1,
+        float("nan"),
+        float("inf"),
+        True,
+        "2",
+        pytest.param(10**1000, id="overflow-positive"),
+        pytest.param(-(10**1000), id="overflow-negative"),
+    ],
 )
 def test_wait_until_completed_rejects_invalid_timing(
     fake_cloud_client, parameter, bad_value
@@ -2460,6 +2470,30 @@ def test_wait_until_completed_uses_custom_initial_interval(
     cloud.wait_until_completed("pi-fake", poll_interval=4)
 
     assert clock.sleeps == [4.0, 6.0]
+
+
+def test_wait_until_completed_caps_backoff(fake_cloud_client, monkeypatch):
+    clock = _FakeClock()
+    monkeypatch.setattr(client_module, "time", clock)
+    cloud = fake_cloud_client([
+        "processing", "processing", "processing", "processing", "completed"
+    ])
+
+    cloud.wait_until_completed("pi-fake", poll_interval=8)
+
+    assert clock.sleeps == [8.0, 12.0, 15.0, 15.0]
+
+
+def test_wait_until_completed_preserves_large_initial_interval(
+    fake_cloud_client, monkeypatch
+):
+    clock = _FakeClock()
+    monkeypatch.setattr(client_module, "time", clock)
+    cloud = fake_cloud_client(["processing", "completed"])
+
+    cloud.wait_until_completed("pi-fake", poll_interval=20)
+
+    assert clock.sleeps == [20.0]
 
 
 def test_wait_until_completed_does_not_poll_after_deadline(
@@ -2529,6 +2563,29 @@ def test_wait_completed_document_does_not_sleep(fake_cloud_client, monkeypatch):
     assert clock.sleeps == []
 
 
+def test_wait_until_completed_returns_real_local_document(client, store_path):
+    seed_doc(store_path, "pi-local", "local.pdf")
+
+    document = client.wait_until_completed("pi-local")
+
+    assert document["id"] == "pi-local"
+    assert document["status"] == "completed"
+
+
+def test_wait_until_completed_reraises_missing_local_document(
+    client, monkeypatch
+):
+    clock = _FakeClock()
+    monkeypatch.setattr(client_module, "time", clock)
+
+    with pytest.raises(PageIndexAPIError, match="Document not found") as err:
+        client.wait_until_completed("pi-missing")
+
+    assert err.value.status_code == 404
+    assert "Processing continues in the cloud" not in str(err.value)
+    assert clock.sleeps == []
+
+
 def test_submit_wait_polls_until_completed(fake_cloud_client):
     cloud = fake_cloud_client(["processing", "processing", "completed"])
     result = cloud.submit_document("whatever.pdf", wait=True)
@@ -2576,12 +2633,40 @@ def test_submit_wait_poll_error_carries_doc_id(fake_cloud_client, monkeypatch):
     recoverable, like the timeout and failed branches do."""
     cloud = fake_cloud_client(["processing"])
 
+    polls = {"n": 0}
+
     def boom(doc_id):
+        polls["n"] += 1
         raise PageIndexAPIError("Failed to get document metadata: 502")
 
     monkeypatch.setattr(cloud, "get_document", boom)
     with pytest.raises(PageIndexAPIError, match="pi-fake"):
         cloud.submit_document("whatever.pdf", wait=True)
+    assert polls["n"] == 3
+
+
+def test_wait_recovers_after_two_consecutive_poll_failures(
+    fake_cloud_client, monkeypatch
+):
+    cloud = fake_cloud_client(["processing"])
+    responses = iter([
+        PageIndexAPIError("temporary 502"),
+        PageIndexAPIError("temporary 503"),
+        {"id": "pi-fake", "status": "completed"},
+    ])
+    polls = {"n": 0}
+
+    def poll(doc_id):
+        polls["n"] += 1
+        response = next(responses)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    monkeypatch.setattr(cloud, "get_document", poll)
+
+    assert cloud.wait_until_completed("pi-fake")["status"] == "completed"
+    assert polls["n"] == 3
 
 
 def test_submit_wait_reraises_definite_poll_answers(fake_cloud_client,

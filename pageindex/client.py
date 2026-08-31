@@ -609,17 +609,22 @@ class PageIndexClient:
         import requests
 
         timings = {"timeout": timeout, "poll_interval": poll_interval}
+        validated_timings: dict[str, float] = {}
         for name, value in timings.items():
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, Real)
-                or not math.isfinite(float(value))
-                or value <= 0
-            ):
+            if isinstance(value, bool) or not isinstance(value, Real):
                 raise ValueError(f"{name} must be a finite number greater than 0")
+            try:
+                seconds = float(value)
+            except (OverflowError, ValueError) as exc:
+                raise ValueError(
+                    f"{name} must be a finite number greater than 0"
+                ) from exc
+            if not math.isfinite(seconds) or seconds <= 0:
+                raise ValueError(f"{name} must be a finite number greater than 0")
+            validated_timings[name] = seconds
 
-        timeout_seconds = float(timeout)
-        interval = float(poll_interval)
+        timeout_seconds = validated_timings["timeout"]
+        interval = validated_timings["poll_interval"]
         max_interval = max(15.0, interval)
         deadline = time.monotonic() + timeout_seconds
         poll_failures = 0
