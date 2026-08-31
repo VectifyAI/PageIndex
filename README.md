@@ -193,8 +193,6 @@ client = PageIndexClient(
     index="cloud",                       # build and store the index in PageIndex Cloud
     chat="gpt-5.6-sol",                  # use your preferred compatible model for chat
 )
-
-
 doc_id = client.submit_document("report.pdf", wait=True)["doc_id"]
 print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 ```
