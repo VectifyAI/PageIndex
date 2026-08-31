@@ -319,17 +319,21 @@ class PageIndexClient:
             documents (structure and summaries). Defaults to the SDK
             default (fast and cheap).
         chat_model (str, optional): Your own model for the chat surfaces
-            (``chat``, ``chat_completions``, ``responses``), exposed as
-            ``client.chat_model`` — on a cloud client, setting it runs
-            the document-QA agent in your process over the cloud
-            documents (page content then flows through your process to
-            your model provider). Chat names route through LiteLLM and
-            mean what LiteLLM says they mean; bare names are
-            OpenAI-compatible shorthand, and ``openai/Qwen/...`` is the
-            form for an OpenAI-compatible server that itself serves
-            slashed model ids (vLLM, TGI). Defaults to the SDK default
-            (strong); reads ``None`` on a cloud client where the managed
-            chat answers.
+            (``chat``, ``chat_completions``, ``responses``; a value you
+            set also carries onto ``messages`` and the two Anthropic
+            agent configs), exposed as ``client.chat_model`` — on a
+            cloud client, setting it runs the document-QA agent in your
+            process over the cloud documents (page content then flows
+            through your process to your model provider). Chat names
+            route through LiteLLM and mean what LiteLLM says they mean;
+            bare names are OpenAI-compatible shorthand, and
+            ``openai/Qwen/...`` is the form for an OpenAI-compatible
+            server that itself serves slashed model ids (vLLM, TGI). The
+            Anthropic-native surfaces read the name by its routing
+            prefix instead — bare names are Anthropic's own — and treat
+            the untouched stock default as no choice. Defaults to the
+            SDK default (strong); reads ``None`` on a cloud client where
+            the managed chat answers.
         model (str, optional): Local mode only — one model for both roles:
             sets the default for ``index_model`` and ``chat_model`` at
             once. The role-specific arguments win over it. (Also the
