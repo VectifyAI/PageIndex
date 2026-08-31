@@ -171,16 +171,17 @@ def extract_toc(
             "doc_title": None,
             "structure": [],
             "has_abstract_or_references_section": False,
+            # the summary/expand passes read these like on the normal path
+            "page_texts": ["\n".join(block_text(block)
+                                     for block in (page.secondary_slot or []))
+                           for page in pages],
         }
         # Bookmarks need no extracted text, so they can still structure a
         # document this gate wrote off as unreadable.
         if use_embedded_toc:
             from .embedded_toc import apply_embedded_toc
             result["structure"], result["toc_source"] = apply_embedded_toc(
-                [], doc_handle, len(pages),
-                page_texts=["\n".join(block_text(block)
-                                      for block in (page.secondary_slot or []))
-                            for page in pages],
+                [], doc_handle, len(pages), page_texts=result["page_texts"],
             )
         return result
 

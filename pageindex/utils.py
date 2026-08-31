@@ -1,5 +1,7 @@
+import contextvars
 import logging
 import os
+import sys
 import textwrap
 from datetime import datetime
 import time
@@ -7,10 +9,9 @@ import json
 import PyPDF2
 import copy
 import asyncio
-import pymupdf
 from io import BytesIO
-from dotenv import load_dotenv
-load_dotenv()
+from dotenv import find_dotenv, load_dotenv
+load_dotenv(find_dotenv(usecwd=True))
 import logging
 import yaml
 from pathlib import Path
@@ -20,8 +21,35 @@ import re
 # litellm is imported inside the functions that use it; eager import is slow
 # and fetches a remote model-cost map.
 
+
+# The indexing lane's connection overrides, scoped by LocalAPI around each
+# indexing operation — a contextvar, so the value reaches this module's
+# helpers and their asyncio tasks without threading it through every call.
+_llm_backend: contextvars.ContextVar = contextvars.ContextVar(
+    "pageindex_llm_backend", default=None)
+
+
+def _repair_litellm_types() -> None:
+    """litellm 1.97.0's Message/Delta annotations carry nested forward refs
+    Python 3.10 cannot resolve (BerriAI/litellm#36384), so every completion
+    dies constructing its response. Rebuild them once with the defining
+    modules' names; no-op on 3.11+ and on fixed litellm releases."""
+    if sys.version_info >= (3, 11):
+        return
+    try:
+        import litellm.types.llms.openai as openai_types
+        import litellm.types.utils as litellm_types
+        namespace = {**vars(openai_types), **vars(litellm_types)}
+        litellm_types.Message.model_rebuild(_types_namespace=namespace)
+        litellm_types.Delta.model_rebuild(_types_namespace=namespace)
+    except Exception:
+        pass  # best-effort: a failed repair leaves litellm's own error
+
 # Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
 if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
+    import warnings
+    warnings.warn("CHATGPT_API_KEY is deprecated — set OPENAI_API_KEY "
+                  "instead.", FutureWarning)
     os.environ["OPENAI_API_KEY"] = os.getenv("CHATGPT_API_KEY")
 
 def count_tokens(text, model=None):
@@ -31,115 +59,144 @@ def count_tokens(text, model=None):
     return litellm.token_counter(model=model, text=text)
 
 
-def _is_openai_model(model):
-    """Models without a provider prefix (no '/') use the openai SDK directly.
-    For other providers, use 'provider/model' format (e.g. 'anthropic/claude-sonnet-4-6')."""
-    if not model or model.startswith('litellm/'):
-        return False
-    return '/' not in model or model.startswith('openai/')
+def _strip_prefix(s, prefix):
+    if s.startswith(prefix):
+        return s[len(prefix):]
+    return s
 
 
-_openai_sync_client = None
-_openai_async_client = None
+def run_off_loop(func, *args):
+    """Run func now, or on a worker thread when this thread already runs an
+    asyncio loop (func may itself call asyncio.run)."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return func(*args)
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(func, *args).result()
+
+
+def _litellm_model(model):
+    """Normalize to LiteLLM's grammar (``litellm/`` strips, bare names get
+    the ``openai/`` wire form — same as the chat lane) and refuse an
+    unknown provider with the 404 the retry loop treats as unrecoverable.
+    Credentials are LiteLLM's own call, made at the first completion."""
+    if not model:
+        return model
+    model = _strip_prefix(model, "litellm/")
+    if "/" not in model:
+        model = f"openai/{model}"
+    import litellm
+    provider = model.split("/", 1)[0]
+    providers = getattr(litellm, "provider_list", None)
+    # custom_provider_map providers join provider_list only at call time.
+    custom = {entry.get("provider") for entry
+              in getattr(litellm, "custom_provider_map", None) or []}
+    if providers and provider not in providers and provider not in custom:
+        raise litellm.NotFoundError(
+            f"'{model}' routes through LiteLLM, but '{provider}' is not a "
+            f"LiteLLM provider. For an OpenAI-compatible server serving "
+            f"this model id, use 'openai/{model}' and point "
+            f"OPENAI_BASE_URL at the server.",
+            llm_provider=None, model=model)
+    return model
 
 
 # Misconfiguration: no retry can fix a rejected key or a model that does not
-# exist, and every later call fails the same way. Deliberately not 400, which
-# also carries context_length_exceeded, a per-prompt failure the caller absorbs
-# today. An unknown status is a transport failure and stays retryable.
+# exist, and every later call fails the same way. An unknown status is a
+# transport failure and stays retryable.
 _UNRECOVERABLE_STATUS = frozenset({401, 403, 404})
+
+# A 400 (context_length_exceeded) is equally unfixable by retry — the prompt
+# will not shrink — but it is per-prompt: the ladder raises it immediately
+# and consumers absorb it instead of failing the run.
+_NO_RETRY_STATUS = _UNRECOVERABLE_STATUS | frozenset({400})
+
+
+class LLMRetriesExhausted(RuntimeError):
+    """The retry ladder gave up; carries the last error's status_code."""
+
+    def __init__(self, message, status_code=None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def _is_unrecoverable(exc: Exception) -> bool:
+    if isinstance(exc, LLMRetriesExhausted):
+        # 400 carries context_length_exceeded, the per-prompt failure the
+        # caller absorbs (see above); any other exhausted ladder is fatal.
+        return exc.status_code != 400
     return getattr(exc, "status_code", None) in _UNRECOVERABLE_STATUS
 
 
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
-    use_openai_sdk = _is_openai_model(model)
-    if model:
-        model = model.removeprefix("litellm/")
-        if use_openai_sdk:
-            model = model.removeprefix("openai/")
+    import litellm
     max_retries = 10
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
+    backend = _llm_backend.get()
+    model = _litellm_model(model)
+    _repair_litellm_types()
     for i in range(max_retries):
         try:
-            if use_openai_sdk:
-                global _openai_sync_client
-                if _openai_sync_client is None:
-                    import openai
-                    _openai_sync_client = openai.OpenAI(max_retries=0)
-                response = _openai_sync_client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                )
-            else:
-                import litellm
-                response = litellm.completion(
-                    model=model,
-                    messages=messages,
-                    temperature=0,
-                    drop_params=True,
-                )
+            response = litellm.completion(**{
+                "model": model,
+                "messages": messages,
+                "drop_params": True,
+                # the loop is the retry policy; the merge lets a backend override win
+                "max_retries": 0,
+                **(backend or {}),
+            })
             content = response.choices[0].message.content
             if return_finish_reason:
                 finish_reason = "max_output_reached" if response.choices[0].finish_reason == "length" else "finished"
                 return content, finish_reason
             return content
         except Exception as e:
-            if _is_unrecoverable(e):
+            if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
                 raise
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
                 time.sleep(1)
             else:
-                logging.error('Max retries reached for prompt: ' + prompt)
-                if return_finish_reason:
-                    return "", "error"
-                return ""
+                raise LLMRetriesExhausted(
+                    f"LLM completion failed after {max_retries} retries: {e}",
+                    status_code=getattr(e, "status_code", None),
+                ) from e
 
 
 async def llm_acompletion(model, prompt):
-    use_openai_sdk = _is_openai_model(model)
-    if model:
-        model = model.removeprefix("litellm/")
-        if use_openai_sdk:
-            model = model.removeprefix("openai/")
+    import litellm
     max_retries = 10
     messages = [{"role": "user", "content": prompt}]
+    backend = _llm_backend.get()
+    model = _litellm_model(model)
+    _repair_litellm_types()
     for i in range(max_retries):
         try:
-            if use_openai_sdk:
-                global _openai_async_client
-                if _openai_async_client is None:
-                    import openai
-                    _openai_async_client = openai.AsyncOpenAI(max_retries=0)
-                response = await _openai_async_client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                )
-            else:
-                import litellm
-                response = await litellm.acompletion(
-                    model=model,
-                    messages=messages,
-                    temperature=0,
-                    drop_params=True,
-                )
+            response = await litellm.acompletion(**{
+                "model": model,
+                "messages": messages,
+                "drop_params": True,
+                "max_retries": 0,
+                **(backend or {}),
+            })
             return response.choices[0].message.content
         except Exception as e:
-            if _is_unrecoverable(e):
+            if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
                 raise
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
                 await asyncio.sleep(1)
             else:
-                logging.error('Max retries reached for prompt: ' + prompt)
-                return ""
-            
-            
+                raise LLMRetriesExhausted(
+                    f"LLM completion failed after {max_retries} retries: {e}",
+                    status_code=getattr(e, "status_code", None),
+                ) from e
+
+
 def get_json_content(response):
     start_idx = response.find("```json")
     if start_idx != -1:
@@ -180,7 +237,7 @@ def extract_json(content):
             # Remove any trailing commas before closing brackets/braces
             json_content = json_content.replace(',]', ']').replace(',}', '}')
             return json.loads(json_content)
-        except:
+        except Exception:
             logging.error("Failed to parse JSON even after cleanup")
             return {}
     except Exception as e:
@@ -454,6 +511,7 @@ def get_page_tokens(pdf_path, model=None, pdf_parser="PyPDF2"):
             page_list.append((page_text, token_length))
         return page_list
     elif pdf_parser == "PyMuPDF":
+        import pymupdf
         if isinstance(pdf_path, BytesIO):
             pdf_stream = pdf_path
             doc = pymupdf.open(stream=pdf_stream, filetype="pdf")
@@ -471,12 +529,16 @@ def get_page_tokens(pdf_path, model=None, pdf_parser="PyPDF2"):
         
 
 def get_text_of_pdf_pages(pdf_pages, start_page, end_page):
+    if start_page is None or end_page is None:
+        return ""
     text = ""
     for page_num in range(start_page-1, end_page):
         text += pdf_pages[page_num][0]
     return text
 
 def get_text_of_pdf_pages_with_labels(pdf_pages, start_page, end_page):
+    if start_page is None or end_page is None:
+        return ""
     text = ""
     for page_num in range(start_page-1, end_page):
         text += f"<physical_index_{page_num+1}>\n{pdf_pages[page_num][0]}\n<physical_index_{page_num+1}>\n"
@@ -522,12 +584,14 @@ def clean_structure_post(data):
             clean_structure_post(section)
     return data
 
-def remove_fields(data, fields=['text']):
+def remove_fields(data, fields=['text'], max_len=None):
     if isinstance(data, dict):
-        return {k: remove_fields(v, fields)
+        return {k: remove_fields(v, fields, max_len)
             for k, v in data.items() if k not in fields}
     elif isinstance(data, list):
-        return [remove_fields(item, fields) for item in data]
+        return [remove_fields(item, fields, max_len) for item in data]
+    elif isinstance(data, str):
+        return data[:max_len] + '...' if max_len is not None and len(data) > max_len else data
     return data
 
 def print_toc(tree, indent=0):
@@ -648,10 +712,18 @@ async def generate_node_summary(node, model=None):
 async def generate_summaries_for_structure(structure, model=None):
     nodes = structure_to_list(structure)
     tasks = [generate_node_summary(node, model=model) for node in nodes]
-    summaries = await asyncio.gather(*tasks)
+    summaries = await asyncio.gather(*tasks, return_exceptions=True)
 
     for node, summary in zip(nodes, summaries):
-        node['summary'] = summary
+        if isinstance(summary, Exception) and _is_unrecoverable(summary):
+            raise summary
+        node['summary'] = "" if isinstance(summary, BaseException) else summary
+    if nodes and not any(node['summary'] for node in nodes):
+        raise RuntimeError(
+            "Summary generation failed for all nodes "
+            "(every summary call failed or returned empty; "
+            "check the model and its context limits)"
+        )
     return structure
 
 
@@ -747,10 +819,16 @@ async def summarize_tree(structure, pdf_pages, model=None,
     summary are left untouched; leaves under `small_node_tokens` use their raw
     text as the summary without a model call."""
     semaphore = asyncio.Semaphore(concurrency or SUMMARY_CONCURRENCY)
+    asked = answered = False
 
     async def ask(prompt):
+        nonlocal asked, answered
+        asked = True
         async with semaphore:
-            return await llm_acompletion(model, prompt)
+            reply = await llm_acompletion(model, prompt)
+        if reply:
+            answered = True
+        return reply
 
     async def leaf_summary(node):
         text = get_text_of_pdf_pages(pdf_pages, node['start_index'], node['end_index'])
@@ -819,12 +897,38 @@ async def summarize_tree(structure, pdf_pages, model=None,
     async def visit(node):
         children = node.get('nodes') or []
         if children:
-            await asyncio.gather(*(visit(child) for child in children))
+            done = await asyncio.gather(*(visit(child) for child in children),
+                                        return_exceptions=True)
+            for result in done:
+                if isinstance(result, Exception) and _is_unrecoverable(result):
+                    raise result
         if node.get('summary'):
             return
-        node['summary'] = await (parent_summary(node) if children else leaf_summary(node))
+        try:
+            node['summary'] = await (parent_summary(node) if children else leaf_summary(node))
+        except Exception as e:
+            node['summary'] = ""
+            if _is_unrecoverable(e):
+                raise
 
-    await asyncio.gather(*(visit(root) for root in structure))
+    results = await asyncio.gather(*(visit(root) for root in structure),
+                                    return_exceptions=True)
+    for r in results:
+        if isinstance(r, Exception) and _is_unrecoverable(r):
+            raise r
+
+    # Raw-text leaves summarize without the model, so they cannot vouch for
+    # it: a run whose every model call failed still fails loud.
+    def _any_summary(nodes):
+        return any(n.get('summary') or _any_summary(n.get('nodes') or [])
+                   for n in nodes)
+    if (asked and not answered) or not _any_summary(structure):
+        raise RuntimeError(
+            "Summary generation failed for all nodes "
+            "(every summary call failed or returned empty; "
+            "check the model and its context limits)"
+        )
+
     strip_internal_keys(structure)
     return structure
 
@@ -860,8 +964,14 @@ def generate_doc_description(structure, model=None):
     
     Directly return the description, do not include any other text.
     """
-    response = llm_completion(model, prompt)
-    return response
+    try:
+        return llm_completion(model, prompt)
+    except Exception as e:
+        # Per-prompt 400: the unbounded whole-tree prompt overran the
+        # context; the indexed document survives with no description.
+        if getattr(e, "status_code", None) == 400:
+            return ""
+        raise
 
 
 def reorder_dict(data, key_order):
@@ -918,6 +1028,29 @@ def page_level_thinning(structure, thinning_threshold_node_num=20, min_pages_for
     return structure
 
 
+DEFAULT_INDEX_MODEL = "gpt-5.6-luna"
+DEFAULT_CHAT_MODEL = "gpt-5.6-sol"
+
+# Each of the five names has shipped in a release; all stay accepted.
+_MODEL_KEYS = ("model", "summary_model", "retrieve_model",
+               "index_model", "chat_model")
+
+
+def _resolve_models(merged: dict) -> None:
+    """Fill the model roles from whichever names were given: new names win
+    over old, specific over general, ``model`` sets every role, and the
+    built-in defaults close each chain. Idempotent, so already-resolved
+    config objects can round-trip through load()."""
+    given = {key: merged.get(key) for key in _MODEL_KEYS}
+    index = given["index_model"] or given["model"] or DEFAULT_INDEX_MODEL
+    summary = (given["summary_model"] or given["index_model"]
+               or given["model"] or DEFAULT_INDEX_MODEL)
+    chat = (given["chat_model"] or given["retrieve_model"]
+            or given["model"] or DEFAULT_CHAT_MODEL)
+    merged.update(model=index, index_model=index, summary_model=summary,
+                  chat_model=chat, retrieve_model=chat)
+
+
 class ConfigLoader:
     def __init__(self, default_path: str = None):
         if default_path is None:
@@ -930,7 +1063,8 @@ class ConfigLoader:
             return yaml.safe_load(f) or {}
 
     def _validate_keys(self, user_dict):
-        unknown_keys = set(user_dict) - set(self._default_dict)
+        unknown_keys = (set(user_dict) - set(self._default_dict)
+                        - set(_MODEL_KEYS))
         if unknown_keys:
             raise ValueError(f"Unknown config keys: {unknown_keys}")
 
@@ -949,27 +1083,45 @@ class ConfigLoader:
 
         self._validate_keys(user_dict)
         merged = {**self._default_dict, **user_dict}
+        _resolve_models(merged)
         return config(**merged)
 
-def create_node_mapping(tree):
-    """Create a flat dict mapping node_id to node for quick lookup."""
+def create_node_mapping(tree, include_page_ranges=False, max_page=None):
+    """Map node_id to node; with include_page_ranges, to {"node", "start_index",
+    "end_index"} (end = next node's page_index, or max_page for the last node)."""
+    def get_all_nodes(tree):
+        if isinstance(tree, dict):
+            return [tree] + [node for child in tree.get('nodes', []) for node in get_all_nodes(child)]
+        elif isinstance(tree, list):
+            return [node for item in tree for node in get_all_nodes(item)]
+        return []
+
+    all_nodes = get_all_nodes(tree)
+    if not include_page_ranges:
+        return {node["node_id"]: node for node in all_nodes if node.get("node_id")}
     mapping = {}
-    def _traverse(nodes):
-        for node in nodes:
-            if node.get('node_id'):
-                mapping[node['node_id']] = node
-            if node.get('nodes'):
-                _traverse(node['nodes'])
-    _traverse(tree)
+    for i, node in enumerate(all_nodes):
+        if node.get("node_id"):
+            end_page = all_nodes[i + 1].get("page_index") if i + 1 < len(all_nodes) else max_page
+            mapping[node["node_id"]] = {
+                "node": node,
+                "start_index": node["page_index"],
+                "end_index": end_page,
+            }
     return mapping
 
-def print_tree(tree, indent=0):
+def print_tree(tree, exclude_fields=None, indent=0):
+    """Outline view; passing exclude_fields gives the 0.2.8 pprint view."""
+    if exclude_fields is not None:
+        from pprint import pprint
+        pprint(remove_fields(tree, exclude_fields, max_len=40), sort_dicts=False, width=100)
+        return
     for node in tree:
         summary = node.get('summary') or node.get('prefix_summary', '')
         summary_str = f"  —  {summary[:60]}..." if summary else ""
         print('  ' * indent + f"[{node.get('node_id', '?')}] {node.get('title', '')}{summary_str}")
         if node.get('nodes'):
-            print_tree(node['nodes'], indent + 1)
+            print_tree(node['nodes'], indent=indent + 1)
 
 def print_wrapped(text, width=100):
     for line in text.splitlines():

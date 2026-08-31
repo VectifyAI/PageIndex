@@ -1,0 +1,103 @@
+name: Publish to PyPI
+
+# Release flow (the git tag IS the version — nothing to bump in the repo):
+#   1. git tag -a v0.2.9 -m "Release 0.2.9"
+#   2. git push origin v0.2.9
+#   3. This workflow derives the version from the tag, injects it into
+#      pyproject.toml, builds, publishes to PyPI via OIDC trusted publishing
+#      (no stored secret), and creates a GitHub Release with generated notes
+#      (dev tags publish to PyPI only — no GitHub Release).
+#
+# The tag must be a PEP 440 version with a leading `v`:
+#   v0.2.9   v0.2.9rc1   v0.2.9.dev1
+# PyPI rejects duplicate version uploads, so each tag must be a new version.
+# Plain `pip install pageindex` skips dev/rc pre-releases — install one
+# explicitly with `pip install pageindex==0.2.9.dev1`.
+#
+# One-time setup this workflow depends on:
+#   - PyPI: add a Trusted Publisher on the `pageindex` project pointing at
+#     repo VectifyAI/PageIndex, workflow `publish.yml`, environment `pypi`.
+#   - GitHub: create an Environment named `pypi` (Settings -> Environments).
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.13"]
+        agent-frameworks: [without, with]
+        pdfium: ["5"]
+        include:
+          - python-version: "3.10"
+            agent-frameworks: with
+            pdfium: "4"
+    name: test py${{ matrix.python-version }} (${{ matrix.agent-frameworks }} frameworks, pdfium ${{ matrix.pdfium }})
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -r requirements.txt pytest
+      # mirror tests.yml's install shapes: the gate must cover the framework
+      # tests, the no-framework import paths, and the pdfium 4.x insurance alike
+      - if: matrix.agent-frameworks == 'without'
+        run: pip uninstall -y openai-agents
+      - if: matrix.agent-frameworks == 'with'
+        run: pip install openai-agents claude-agent-sdk anthropic
+      - if: matrix.pdfium == '4'
+        run: pip install "pypdfium2<5"
+      - run: python -m pytest -q
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # OIDC trusted publishing to PyPI
+      contents: write   # create the GitHub Release
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Set version from tag and build
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade build packaging
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Publishing version: $VERSION"
+          # Fail early on a malformed tag instead of publishing a junk version.
+          export VERSION
+          python -c "import os; from packaging.version import Version; Version(os.environ['VERSION'])"
+          # The git tag is the single source of truth; overwrite the static
+          # placeholder in [tool.poetry] so the built artifacts carry $VERSION.
+          sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
+          grep '^version = ' pyproject.toml
+          python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # release/v1.14.0
+
+      - name: Create GitHub Release
+        # dev builds need an explicit pin to install; a Release for them
+        # only doubles the feed next to the stable that follows.
+        if: ${{ !contains(github.ref_name, 'dev') }}
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b  # v3.0.1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'dev') || contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') }}
+          generate_release_notes: true
+          files: dist/*
