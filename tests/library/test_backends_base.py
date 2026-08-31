@@ -66,15 +66,35 @@ def test_acomplete_retries_transient_then_succeeds(monkeypatch):
 
 
 def test_acomplete_gives_up_after_max_retries(monkeypatch):
+    from pageindex.utils import LLMRetriesExhausted
+
     async def no_sleep(seconds):
         pass
     monkeypatch.setattr("pageindex.backends.base.asyncio.sleep", no_sleep)
     run, calls = make_run([CliResult(1, "", "rate limit")] * 3)
     backend = EchoBackend("m1", run=run, max_retries=3)
-    with pytest.raises(CliBackendError) as exc:
+    with pytest.raises(LLMRetriesExhausted) as exc:
         asyncio.run(backend.acomplete("p"))
-    assert exc.value.retryable is False
+    assert exc.value.status_code is None
     assert len(calls) == 3
+
+
+def test_acomplete_exhausted_ladder_is_unrecoverable(monkeypatch):
+    """A sustained subscription failure typically carries no HTTP-style status
+    code. utils._is_unrecoverable must still classify an exhausted CLI retry
+    ladder as fatal, so summarize_tier aborts the run instead of burning
+    through every remaining node's own retry ladder against the same
+    exhausted rate limit."""
+    from pageindex import utils
+
+    async def no_sleep(seconds):
+        pass
+    monkeypatch.setattr("pageindex.backends.base.asyncio.sleep", no_sleep)
+    run, calls = make_run([CliResult(1, "", "rate limit")] * 3)
+    backend = EchoBackend("m1", run=run, max_retries=3)
+    with pytest.raises(utils.LLMRetriesExhausted) as exc:
+        asyncio.run(backend.acomplete("p"))
+    assert utils._is_unrecoverable(exc.value) is True
 
 
 def test_acomplete_does_not_retry_fatal_errors():

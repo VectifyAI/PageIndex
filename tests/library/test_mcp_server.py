@@ -63,3 +63,21 @@ def test_build_server_registers_tools():
     import asyncio
     names = {t.name for t in asyncio.run(server.list_tools())}
     assert names == {"list_books", "get_structure", "get_pages", "get_digest"}
+
+
+def test_mcp_tool_error_carries_the_original_message_through_the_real_transport(home, store):
+    """Regression: the raw functions raise LookupError/ValueError/KeyError, but
+    the installed mcp package strips any exception that isn't its own ToolError
+    down to a generic "Error executing tool <name>", discarding the message
+    find_book worked to produce. This must go through MCPServer.call_tool (the
+    real client-facing path), not the plain function object, or it would not
+    catch the regression."""
+    import asyncio
+
+    from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
+
+    server = mcp_server.build_server(LibraryConfig.load())
+    with pytest.raises(ToolError) as exc:
+        asyncio.run(server.call_tool("get_structure", {"book": "nonexistent"}))
+    assert not isinstance(exc.value, UnexpectedToolError)
+    assert "No book matches 'nonexistent'" in str(exc.value)

@@ -1,11 +1,11 @@
 """`books` — manage the personal book library.
 
-    books add BOOK.pdf [--profile diary] [--model claude-cli/sonnet] [--no-summaries] [--force]
+    books add BOOK.pdf [--profile nonfiction|diary] [--model M] [--no-summaries] [--force]
     books list [--json]
     books show BOOK [--depth N] [--tier summary|digest]
     books summarize BOOK [--tier summary|digest] [--model M] [--node ID ...] [--force]
-    books digest BOOK [--node ID] [--out DIR]          (Task 9)
-    books mcp                                          (Task 10)
+    books digest BOOK [--node ID]
+    books mcp
 """
 from __future__ import annotations
 

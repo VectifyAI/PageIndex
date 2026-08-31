@@ -109,6 +109,7 @@ class CliBackend:
                 return strip_fences(self.parse_output(result, workdir))
 
     async def acomplete(self, prompt: str) -> str:
+        from ..utils import LLMRetriesExhausted
         last: Exception | None = None
         for attempt in range(self.max_retries):
             try:
@@ -119,9 +120,14 @@ class CliBackend:
                     raise
                 if attempt < self.max_retries - 1:
                     await asyncio.sleep(min(60, 2 ** (attempt + 1)))
-        raise CliBackendError(
+        # A status-code-less exhausted ladder (the common shape of a sustained
+        # subscription rate/usage-limit failure) must abort the run rather than
+        # be treated as an ordinary per-node failure: utils._is_unrecoverable
+        # already treats LLMRetriesExhausted as fatal for anything but a 400,
+        # unlike CliBackendError which only status codes 401/403/404 make fatal.
+        raise LLMRetriesExhausted(
             f"{self.name} ({self.model}) failed after {self.max_retries} attempts: {last}",
-            status_code=getattr(last, "status_code", None), retryable=False)
+            status_code=getattr(last, "status_code", None))
 
     def complete(self, prompt: str) -> str:
         from ..utils import run_off_loop

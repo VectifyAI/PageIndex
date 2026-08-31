@@ -32,8 +32,10 @@ def find_dated_entries(page_texts: list[str], first_page: int = 1) -> list[dict]
 
 def build_diary_structure(entries: list[dict], end_page: int) -> list[dict]:
     """Year nodes containing Month leaves. A month runs from its first entry's
-    page to the page before the next month's first entry (same page when both
-    start on one page); the last month runs to end_page."""
+    page to the following month's start page — consecutive months deliberately
+    share their boundary page, so a diary entry that spills onto the page
+    where the next month's first entry also begins is not lost; the last
+    month runs to end_page."""
     months: list[dict] = []
     for entry in entries:
         key = (entry["year"], entry["month"])

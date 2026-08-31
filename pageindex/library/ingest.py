@@ -51,6 +51,13 @@ def add_book(pdf_path: str, cfg: LibraryConfig, *, profile: str | None = None,
                 "nodes": len(structure_to_list(store.get_tree(doc_id) or [])),
                 "pages": existing["pageNum"], "status": existing["status"],
                 "summary": None, "long_leaves": []}
+    if existing is not None and force:
+        old_nodes = structure_to_list(store.get_tree(doc_id) or [])
+        summary_count = sum(1 for n in old_nodes if n.get("summary"))
+        digest_count = sum(1 for n in old_nodes if n.get("digest"))
+        if summary_count or digest_count:
+            log(f"--force discards {summary_count} summaries and {digest_count} digests "
+                f"from the existing index")
 
     log(f"extracting structure from {os.path.basename(pdf_path)} …")
     result = extract_toc(pdf_path, use_embedded_toc=True)

@@ -62,6 +62,25 @@ def test_add_book_is_idempotent_unless_forced(home, pdf, fake_flash, fake_llm):
     assert forced["doc_id"] == first["doc_id"] and len(fake_llm) > calls
 
 
+def test_add_book_force_warns_about_discarded_summaries(home, pdf, fake_flash, fake_llm):
+    cfg = LibraryConfig.load()
+    logs = []
+    ingest.add_book(str(pdf), cfg, log=logs.append)  # first index: has summaries
+    logs.clear()
+    ingest.add_book(str(pdf), cfg, force=True, log=logs.append)
+    warnings = [m for m in logs if "--force discards" in m]
+    assert len(warnings) == 1
+    assert "summaries" in warnings[0] and "digests" in warnings[0]
+    assert "0 summaries" not in warnings[0]
+
+
+def test_add_book_force_no_warning_on_first_time_index(home, pdf, fake_flash, fake_llm):
+    logs = []
+    # force=True but nothing was previously indexed: no prior data to lose.
+    ingest.add_book(str(pdf), LibraryConfig.load(), force=True, log=logs.append)
+    assert not any("--force discards" in m for m in logs)
+
+
 def test_add_book_diary_profile_uses_splitter(home, pdf, fake_flash, fake_llm, monkeypatch):
     called = {}
 

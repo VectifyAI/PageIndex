@@ -25,6 +25,22 @@ INTRO_MAX_PAGES = 3
 DEFAULT_CONCURRENCY = 3
 
 
+def _expand_to_subtrees(structure: list[dict], node_ids: set[str]) -> set[str]:
+    """`node_ids` selects whole subtrees, not single nodes: "digest chapter 12"
+    means every node under chapter 12, not the chapter node alone with hollow
+    children. Returns the union of each selected node's id and every one of
+    its descendants' ids, so visit()'s bottom-up gather generates every
+    child's tier text before a selected parent's parent_text() reads it."""
+    by_id = {n.get("node_id"): n for n in utils.structure_to_list(structure)}
+    expanded: set[str] = set()
+    for node_id in node_ids:
+        node = by_id.get(node_id)
+        if node is None:
+            continue
+        expanded.update(n.get("node_id") for n in utils.structure_to_list(node))
+    return expanded
+
+
 def _intro_text(node: dict, page_texts: list[str], max_pages: int) -> str:
     children = node.get("nodes") or []
     first_child = children[0].get("start_index") if children else None
@@ -43,7 +59,7 @@ async def summarize_tier(structure: list[dict], page_texts: list[str], *, tier: 
                          concurrency: int | None = None) -> dict:
     if tier not in TIERS:
         raise ValueError(f"tier must be one of {TIERS}, got {tier!r}")
-    wanted = set(node_ids) if node_ids is not None else None
+    wanted = _expand_to_subtrees(structure, set(node_ids)) if node_ids is not None else None
     model_field = f"{tier}_model"
     semaphore = asyncio.Semaphore(concurrency or DEFAULT_CONCURRENCY)
     stats = {"generated": 0, "skipped": 0, "failed": 0, "errors": []}

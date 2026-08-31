@@ -4,6 +4,7 @@ Register once:  claude mcp add --scope user books -- <fork>/.venv/bin/books mcp
 """
 from __future__ import annotations
 
+import functools
 from typing import Callable
 
 from ..local_store import DocStore
@@ -76,13 +77,34 @@ def build_tools(cfg: LibraryConfig) -> dict[str, Callable]:
             "get_pages": get_pages, "get_digest": get_digest}
 
 
+def _as_mcp_tool(fn: Callable) -> Callable:
+    """The installed mcp package only passes a tool's own ToolError through to
+    the client unmodified; every other exception becomes the opaque
+    "Error executing tool <name>", discarding the original message. The plain
+    functions from build_tools() raise LookupError/ValueError/KeyError (e.g.
+    find_book's "No book matches ... Known: ..."), and existing tests call
+    those functions directly and assert on those exact exception types — so
+    this wraps a *copy* used only for MCP registration, translating those
+    three types into mcp.server.mcpserver.exceptions.ToolError with the
+    original message preserved, instead of changing the functions themselves."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except (LookupError, ValueError, KeyError) as exc:
+            raise ToolError(str(exc)) from exc
+    return wrapper
+
+
 def build_server(cfg: LibraryConfig):
     from mcp.server.mcpserver import MCPServer
     server = MCPServer("books", instructions=(
         "Personal book library. Start with list_books, then get_structure on the "
         "relevant book, then get_pages on tight page ranges. Always cite page numbers."))
     for name, func in build_tools(cfg).items():
-        server.tool(name=name)(func)
+        server.tool(name=name)(_as_mcp_tool(func))
     return server
 
 

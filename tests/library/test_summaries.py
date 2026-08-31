@@ -166,13 +166,17 @@ def test_unrecoverable_error_aborts_immediately_not_deferred(monkeypatch):
 
     monkeypatch.setattr("pageindex.utils.llm_acompletion", flaky)
 
+    # concurrency is pinned explicitly (matching today's DEFAULT_CONCURRENCY)
+    # rather than relying on the module default, so the margin this test
+    # depends on can't silently shrink if that constant is tuned later.
+
     # With the fix, unrecoverable error is raised immediately and stops processing.
     # With the old buggy code (deferred via fatal list), it would process the
     # entire tree (all 18 nodes) then raise.
     with pytest.raises(CliBackendError):
         asyncio.run(summaries.summarize_tier(
             structure, page_texts, tier="summary", profile="nonfiction",
-            model="m", book="B", small_node_tokens=0))
+            model="m", book="B", small_node_tokens=0, concurrency=3))
 
     # The key assertion: we made far fewer calls than total nodes.
     # With yield point, concurrent interleaving is real and measurable:
@@ -181,6 +185,27 @@ def test_unrecoverable_error_aborts_immediately_not_deferred(monkeypatch):
     # Setting threshold at 15 to clearly distinguish both behaviors.
     assert len(calls) < 15, \
         f"Expected early abort (<15 calls) but made {len(calls)} calls"
+
+
+def test_node_ids_selecting_a_parent_expands_to_its_whole_subtree(sample_tree, sample_pages, fake_llm):
+    """Regression for the fabricated-digest bug: `node_ids={"0000"}` selects a
+    parent, but a bottom-up visit must still generate every child first. Before
+    the fix, a non-selected child returned without generating anything, so the
+    parent's prompt was built from children whose digest field was still "" —
+    the model then fabricated plausible text from the parent's intro alone,
+    and that text got checkpointed as if it were a real subtree digest."""
+    result = asyncio.run(summaries.summarize_tier(
+        sample_tree, sample_pages, tier="digest", profile="nonfiction",
+        model="m", book="B", node_ids={"0000"}))
+    # every child of the selected parent now carries a real, non-empty digest
+    for child_id in ("0001", "0002"):
+        assert leaf(sample_tree, child_id).get("digest")
+    assert result["generated"] == 3  # 0000 (parent) + 0001 + 0002 (children)
+    # the parent's prompt was assembled from those real child digests, not
+    # from hollow {"digest": ""} placeholders
+    parent_prompt = next(p for m, p in fake_llm if "Subsection digests (JSON)" in p)
+    assert '"digest": ""' not in parent_prompt
+    assert "S1 via m" in parent_prompt  # the real content of child 0001's digest
 
 
 def test_summarize_book_checkpoints_and_marks_meta(store, sample_tree, sample_pages, fake_llm):
