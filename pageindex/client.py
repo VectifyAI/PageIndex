@@ -58,12 +58,15 @@ def _agents_sdk_model_name(model: str) -> str:
     return f"litellm/{model}"
 
 
-# The Anthropic-stack routes this SDK wires a transport for; a row is
-# an inventory fact, not a model judgment. Growth rule: a row per route
-# LiteLLM names and the anthropic SDK ships a client for (Mantle clears
-# both bars, no one has asked; Claude-on-AWS/GoogleCloud wait on
-# LiteLLM prefix names).
-_CLAUDE_ROUTES = ("bedrock", "vertex_ai", "azure_ai")
+# The Anthropic-stack routes this SDK wires a transport for, each with
+# its Claude Code env switch; a row is an inventory fact, not a model
+# judgment. Growth rule: a row per route LiteLLM names and the anthropic
+# SDK ships a client for (Mantle clears both bars, no one has asked;
+# Claude-on-AWS/GoogleCloud wait on LiteLLM prefix names).
+_ROUTE_ENV = {"bedrock": "CLAUDE_CODE_USE_BEDROCK",
+              "vertex_ai": "CLAUDE_CODE_USE_VERTEX",
+              "azure_ai": "CLAUDE_CODE_USE_FOUNDRY"}
+_CLAUDE_ROUTES = tuple(_ROUTE_ENV)
 
 
 def _claude_wire(model, surface: str) -> "tuple[str, str]":
@@ -82,11 +85,6 @@ def _claude_wire(model, surface: str) -> "tuple[str, str]":
         if wire.startswith(route + "/"):
             return wire[len(route) + 1:], route
     return wire.removeprefix("anthropic/"), "anthropic"
-
-
-_ROUTE_ENV = {"bedrock": "CLAUDE_CODE_USE_BEDROCK",
-              "vertex_ai": "CLAUDE_CODE_USE_VERTEX",
-              "azure_ai": "CLAUDE_CODE_USE_FOUNDRY"}
 
 
 def _yaml_names_chat(loader) -> bool:
@@ -345,7 +343,9 @@ class PageIndexClient:
             server that itself serves slashed model ids (vLLM, TGI). The
             Anthropic-native surfaces read the name by its routing
             prefix instead — bare names are Anthropic's own — and treat
-            the untouched stock default as no choice. Defaults to the
+            the untouched stock default as no choice. For a Claude model
+            used across both kinds of surface, the ``anthropic/``
+            spelling means the same thing everywhere. Defaults to the
             SDK default (strong); reads ``None`` on a cloud client where
             the managed chat answers.
         model (str, optional): Local mode only — one model for both roles:
@@ -1184,9 +1184,11 @@ class PageIndexClient:
                 win over defaults.
             backend: Connection overrides for this call's backend client,
                 merged over the client's ``chat_backend`` (per-call keys
-                win). Keys are the anthropic SDK's client params —
-                ``api_key``, ``base_url``, ``auth_token``, … — passed
-                verbatim; unknown keys raise.
+                win). Keys are the selected route's anthropic SDK client
+                params, passed verbatim — direct: ``api_key``,
+                ``base_url``, ``auth_token``, …; the cloud routes take
+                their own client's (``aws_region``, ``project_id``, …) —
+                and unknown keys raise.
         """
         if not self._local_chat:
             raise PageIndexAPIError(
@@ -1511,7 +1513,9 @@ class PageIndexClient:
             model: Model name, routing prefixes (``litellm/``,
                 ``anthropic/``, ``bedrock/``, ``vertex_ai/``,
                 ``azure_ai/``) stripped — your client is the transport
-                and judges the id; also
+                and judges the id, so pair a routed prefix with that
+                channel's own client class (``AnthropicBedrock``,
+                ``AnthropicVertex``, ``AnthropicFoundry``); also
                 resolves the ``max_tokens`` default. Unset: a
                 ``chat_model`` you set carries over; the stock default
                 raises rather than being sent.
@@ -1535,13 +1539,13 @@ class PageIndexClient:
         _validate_max_turns(max_turns)
         if not model and self._chat_model_stock:
             raise _needs_model("anthropic_runner_config()")
-        model, _ = _claude_wire(model or self.chat_model,
-                                "anthropic_runner_config()")
+        model, route = _claude_wire(model or self.chat_model,
+                                    "anthropic_runner_config()")
         scope = self._local_doc_scope(doc_id)
         return {
             "model": model,
             "max_tokens": (max_tokens if max_tokens is not None
-                           else _default_max_tokens(model, thinking)),
+                           else _default_max_tokens(model, thinking, route)),
             "system": build_agent_instructions(
                 self, doc_id, scoped=scope is not None,
                 include_management=include_management),
@@ -1624,7 +1628,10 @@ class PageIndexClient:
                 are stripped and the SDK judges the id. A ``bedrock/``,
                 ``vertex_ai/``, or ``azure_ai/`` prefix also rides along
                 as the matching ``CLAUDE_CODE_USE_*`` env switch, so
-                Claude Code serves that channel. Unset: a ``chat_model``
+                Claude Code serves that channel — the other switches
+                ride blank so an exported one cannot override the
+                prefix, and ``anthropic/`` blanks them all; bare names
+                leave ``env`` out. Unset: a ``chat_model``
                 you set is forwarded as written; the stock default, like
                 a managed-chat client, leaves the SDK's own default in
                 place.
@@ -1634,7 +1641,11 @@ class PageIndexClient:
         if not model and not self._chat_model_stock:
             model = self.chat_model
         route = None
+        explicit = False
         if model:
+            explicit = isinstance(model, str) and (
+                model.removeprefix("litellm/").startswith(
+                    tuple(r + "/" for r in _CLAUDE_ROUTES + ("anthropic",))))
             model, route = _claude_wire(model, "claude_agent_config()")
         scope = self._local_doc_scope(doc_id)
         return {
@@ -1648,9 +1659,15 @@ class PageIndexClient:
             "allowed_tools": [f"mcp__{server_name}"],
             **({"model": model} if model else {}),
             # Claude Code picks its transport from env switches; the SDK
-            # merges this over the inherited environment.
-            **({"env": {_ROUTE_ENV[route]: "1"}}
-               if route in _ROUTE_ENV else {}),
+            # merges this over the inherited environment, and the CLI
+            # reads any set switch by its own fixed precedence — so a
+            # written route prefix also blanks the other switches ("" is
+            # off to the CLI; "0" would read as on) rather than trusting
+            # a clean environment. Bare names name no channel and leave
+            # the environment alone.
+            **({"env": {switch: ("1" if name == route else "")
+                        for name, switch in _ROUTE_ENV.items()}}
+               if explicit else {}),
         }
 
     def agent_instructions(

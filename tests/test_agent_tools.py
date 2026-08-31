@@ -813,17 +813,32 @@ def test_claude_agent_config_local_chat_model(store_path):
 def test_claude_agent_config_route_prefix_sets_the_channel_switch(
         cloud_with_fake_bridge):
     # Claude Code picks its transport from env switches, not a client
-    # class — so here the routing prefix rides along as that switch.
+    # class — so here the routing prefix rides along as that switch. The
+    # SDK merges env OVER the inherited environment and the CLI reads any
+    # set switch by fixed precedence, so the other switches ride blank
+    # ("" is off to the CLI) — an exported CLAUDE_CODE_USE_* must not
+    # override a written prefix.
     cloud, _ = cloud_with_fake_bridge
+    switches = {"CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
+                "CLAUDE_CODE_USE_FOUNDRY"}
     for prefix, switch in (("bedrock", "CLAUDE_CODE_USE_BEDROCK"),
                            ("vertex_ai", "CLAUDE_CODE_USE_VERTEX"),
                            ("azure_ai", "CLAUDE_CODE_USE_FOUNDRY")):
         cloud.chat_model = f"{prefix}/claude-opus-4-6"
         config = cloud.claude_agent_config()
         assert config["model"] == "claude-opus-4-6"
-        assert config["env"] == {switch: "1"}
-    # Direct-route spellings need no switch: no env key at all.
+        assert set(config["env"]) == switches
+        assert config["env"][switch] == "1"
+        assert all(value == "" for key, value in config["env"].items()
+                   if key != switch)
+    # An explicit anthropic/ prefix forces first-party the same way:
+    # every switch blanked, so an inherited one cannot re-route it.
     cloud.chat_model = "anthropic/claude-opus-4-6"
+    config = cloud.claude_agent_config()
+    assert config["env"] == dict.fromkeys(switches, "")
+    # A bare name names a model, not a channel: env stays untouched so
+    # the user's own Claude Code environment keeps choosing.
+    cloud.chat_model = "claude-opus-4-6"
     assert "env" not in cloud.claude_agent_config()
 
 

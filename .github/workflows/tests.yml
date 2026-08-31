@@ -47,8 +47,10 @@ jobs:
 
   gate:
     needs: tests
-    # not always(): a cancel-in-progress run must not report a red gate
-    if: ${{ !cancelled() }}
+    # always(), because GitHub counts a SKIPPED required check as
+    # passing: skipping on cancel would green-light a commit with zero
+    # legs run. A cancelled run must go red here, not vanish.
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
       - run: test "${{ needs.tests.result }}" = "success"

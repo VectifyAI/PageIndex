@@ -2256,6 +2256,15 @@ def test_default_max_tokens_respects_output_ceilings():
                 {"type": "enabled", "budget_tokens": 10000}) == 18192
     assert lift("claude-sonnet-4-5",
                 {"type": "enabled", "budget_tokens": True}) == 8192
+    # The routed lanes hand over the STRIPPED wire id; the ceiling lookup
+    # must re-join the route's own spelling or the clamp silently dies on
+    # exactly the ids those channels use.
+    enabled60 = {"type": "enabled", "budget_tokens": 60000}
+    assert lift("us.anthropic.claude-sonnet-4-5-v1:0", enabled60,
+                route="bedrock") == 64000
+    assert lift("claude-sonnet-4@20250514", enabled60,
+                route="vertex_ai") == 64000
+    assert lift("claude-opus-4-1", enabled60, route="azure_ai") == 32000
 
 
 # ── own-model chat over cloud documents (the bridge) ──
@@ -2676,3 +2685,53 @@ def test_messages_unrelated_route_errors_still_propagate(client, monkeypatch):
         monkeypatch, RuntimeError("could not resolve credentials from session"))
     with pytest.raises(RuntimeError, match="credentials"):
         client.messages("q", model="claude-sonnet-4-5")
+
+
+@needs_anthropic
+def test_messages_names_the_missing_route_extra(client, monkeypatch):
+    """pageindex[anthropic] does not carry boto3 / google-auth; a route's
+    first request must name the anthropic extra that does, not leave a
+    bare ModuleNotFoundError whack-a-mole."""
+    _failing_runner_client(monkeypatch, ModuleNotFoundError(
+        "No module named 'botocore'", name="botocore"))
+    with pytest.raises(PageIndexAPIError, match=r"anthropic\[bedrock\]"):
+        client.messages("q", model="bedrock/anthropic.claude-sonnet-4-6-v1:0")
+    _failing_runner_client(monkeypatch, ModuleNotFoundError(
+        "No module named 'google.auth'", name="google.auth"))
+    with pytest.raises(PageIndexAPIError, match=r"anthropic\[vertex\]"):
+        list(client.messages("q", stream=True,
+                             model="vertex_ai/claude-sonnet-4-5"))
+    # A tool's own missing module is not the route's: it stays raw.
+    _failing_runner_client(monkeypatch, ModuleNotFoundError(
+        "No module named 'pandas'", name="pandas"))
+    with pytest.raises(ModuleNotFoundError, match="pandas"):
+        client.messages("q", model="bedrock/anthropic.claude-sonnet-4-6-v1:0")
+
+
+@needs_anthropic
+def test_messages_routed_auth_failure_skips_api_key_advice(
+        client, monkeypatch):
+    # AnthropicVertex has no api_key parameter at all: sending a routed
+    # user to ANTHROPIC_API_KEY is advice that cannot work.
+    _failing_runner_client(monkeypatch, TypeError(
+        "Could not resolve authentication method"))
+    with pytest.raises(PageIndexAPIError,
+                       match="Anthropic backend is not configured") as info:
+        client.messages("q", model="vertex_ai/claude-sonnet-4-5")
+    assert "ANTHROPIC_API_KEY" not in str(info.value)
+    # The direct route keeps the full remediation.
+    with pytest.raises(PageIndexAPIError, match="ANTHROPIC_API_KEY"):
+        client.messages("q", model="claude-sonnet-4-5")
+
+
+def test_route_tables_and_marks_agree():
+    """One route concept, three tables — the client's route/env map, this
+    module's client classes, and the marks predicate. A new route must
+    land in every one; a miss is a silent env no-op or full-price turns."""
+    from pageindex.client import _CLAUDE_ROUTES
+    assert set(local_chat._ROUTE_CLIENTS) == {"anthropic", *_CLAUDE_ROUTES}
+    for wire in ("anthropic/claude-opus-4-6",
+                 *(f"{route}/claude-opus-4-6" for route in _CLAUDE_ROUTES)):
+        assert local_chat._litellm_claude_marks(wire), wire
+    # Claude-gated on the cloud routes: other models get no marks.
+    assert local_chat._litellm_claude_marks("azure_ai/gpt-4o") is None
