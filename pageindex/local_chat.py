@@ -878,8 +878,8 @@ def _require_anthropic() -> None:
         from anthropic.lib.tools import ToolError  # noqa: F401
     except ImportError as exc:
         raise PageIndexAPIError(
-            "messages requires anthropic >= 0.122.0 (the tool "
-            "runner with ToolError) — pip install -U anthropic."
+            "messages requires the anthropic SDK tool runner "
+            "(with ToolError) — pip install -U anthropic."
         ) from exc
 
 

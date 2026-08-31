@@ -68,8 +68,9 @@ _CLAUDE_ROUTES = ("bedrock", "vertex_ai", "azure_ai")
 def _claude_wire(model, surface: str) -> "tuple[str, str]":
     """(wire id, route) for an Anthropic-native surface. The name is sent
     as written — the destination judges the id; only the routing prefix
-    is read: ``litellm/`` drops, ``bedrock/`` / ``vertex_ai/`` select
-    that transport, and ``anthropic/`` is the direct route's own prefix.
+    is read: ``litellm/`` drops, ``bedrock/`` / ``vertex_ai/`` /
+    ``azure_ai/`` select that transport, and ``anthropic/`` is the
+    direct route's own prefix.
     Anything else — bare ids, aliases, gateway names — ships verbatim on
     the direct route."""
     if not isinstance(model, str):
@@ -1451,7 +1452,7 @@ class PageIndexClient:
         tools involved. Local: the in-process tools — the same set
         ``messages()`` runs internally.
 
-        Requires ``anthropic>=0.108.0``
+        Requires the ``anthropic`` extra
         (``pip install 'pageindex[anthropic]'``), imported only when this
         method is called.
 
