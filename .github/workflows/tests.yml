@@ -20,22 +20,16 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.13"]
-        # "without" proves the package works with no agent framework
-        # installed; "with" covers the framework integration paths.
         agent-frameworks: [without, with]
     name: py${{ matrix.python-version }} (${{ matrix.agent-frameworks }} frameworks)
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      # requirements.txt works on every branch; the packaging metadata
-      # (pyproject) does not exist on all of them.
       - run: pip install -r requirements.txt pytest
       - if: matrix.agent-frameworks == 'with'
         run: pip install openai-agents claude-agent-sdk
-      # python -m pytest puts the repo root on sys.path, so the in-repo
-      # `pageindex` package is imported without an install step.
       - run: python -m pytest -q

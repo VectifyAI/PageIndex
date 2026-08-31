@@ -1,10 +1,10 @@
 """
 Agentic Vectorless RAG with PageIndex - Demo
 
-A simple example of building a document QA agent with self-hosted PageIndex
-and the OpenAI Agents SDK. Instead of vector similarity search and chunking,
-PageIndex builds a hierarchical tree index and uses agentic LLM reasoning for
-human-like, context-aware retrieval.
+A simple example of building a document QA agent with the PageIndex SDK in
+local mode and the OpenAI Agents SDK. Instead of vector similarity search and
+chunking, PageIndex builds a hierarchical tree index and uses agentic LLM
+reasoning for human-like, context-aware retrieval.
 
 Agent tools:
   - get_document()           — document metadata (status, page count, etc.)
@@ -12,11 +12,11 @@ Agent tools:
   - get_page_content()       — retrieve text content of specific pages
 
 Steps:
-  1 — Index a PDF and view its tree structure index
+  1 — Index a PDF locally and view its tree structure index
   2 — View document metadata
   3 — Ask a question (agent reasons over the index and auto-calls tools)
 
-Requirements: pip install openai-agents
+Requirements: pip install openai-agents; OPENAI_API_KEY in the environment.
 """
 import sys
 import json
@@ -39,12 +39,12 @@ PDF_URL = "https://arxiv.org/pdf/2603.15031"
 
 _EXAMPLES_DIR = Path(__file__).parent
 PDF_PATH = _EXAMPLES_DIR / "documents" / "attention-residuals.pdf"
-WORKSPACE = _EXAMPLES_DIR / "workspace"
+STORAGE_PATH = _EXAMPLES_DIR / ".pageindex"
 
 AGENT_SYSTEM_PROMPT = """
 You are PageIndex, a document QA assistant.
 TOOL USE:
-- Call get_document() first to confirm status and page/line count.
+- Call get_document() first to confirm status and page count.
 - Call get_document_structure() to identify relevant page ranges.
 - Call get_page_content(pages="5-7") with tight ranges; never fetch the whole document.
 - Before each tool call, output one short sentence explaining the reason.
@@ -62,27 +62,26 @@ def query_agent(client: PageIndexClient, doc_id: str, prompt: str, verbose: bool
     @function_tool
     def get_document() -> str:
         """Get document metadata: status, page count, name, and description."""
-        return client.get_document(doc_id)
+        return json.dumps(client.get_document(doc_id))
 
     @function_tool
     def get_document_structure() -> str:
         """Get the document's full tree structure (without text) to find relevant sections."""
-        return client.get_document_structure(doc_id)
+        return json.dumps(client.get_document_structure(doc_id), ensure_ascii=False)
 
     @function_tool
     def get_page_content(pages: str) -> str:
         """
-        Get the text content of specific pages or line numbers.
+        Get the text content of specific pages.
         Use tight ranges: e.g. '5-7' for pages 5 to 7, '3,8' for pages 3 and 8, '12' for page 12.
-        For Markdown documents, use line numbers from the structure's line_num field.
         """
-        return client.get_page_content(doc_id, pages)
+        return json.dumps(client.get_page_content(doc_id, pages), ensure_ascii=False)
 
     agent = Agent(
         name="PageIndex",
         instructions=AGENT_SYSTEM_PROMPT,
         tools=[get_document, get_document_structure, get_page_content],
-        model=client.retrieve_model,
+        model=getattr(client, "retrieve_model", None),
         # model_settings=ModelSettings(reasoning={"effort": "low", "summary": "auto"}),  # Uncomment to enable reasoning
     )
 
@@ -152,24 +151,25 @@ if __name__ == "__main__":
                         f.write(chunk)
         print("Download complete.\n")
 
-    # Setup
-    client = PageIndexClient(workspace=WORKSPACE)
+    # Setup: local mode — no PageIndex API key needed, your LLM key does the work
+    client = PageIndexClient(storage_path=str(STORAGE_PATH))
 
     # Step 1: Index PDF and view tree structure
     print("=" * 60)
     print("Step 1: Index PDF and view tree structure")
     print("=" * 60)
     doc_id = next(
-        (did for did, doc in client.documents.items() if doc.get('doc_name') == PDF_PATH.name),
+        (doc["id"] for doc in client.list_documents(limit=100)["documents"]
+         if doc["name"] == PDF_PATH.name),
         None,
     )
     if doc_id:
         print(f"\nLoaded cached doc_id: {doc_id}")
     else:
-        doc_id = client.index(PDF_PATH)
+        doc_id = client.submit_document(str(PDF_PATH))["doc_id"]
         print(f"\nIndexed. doc_id: {doc_id}")
     print("\nTree Structure (top-level sections):")
-    structure = json.loads(client.get_document_structure(doc_id))
+    structure = client.get_tree(doc_id, node_summary=True)["result"]
     utils.print_tree(structure)
 
     # Step 2: View document metadata
