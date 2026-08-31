@@ -237,7 +237,7 @@ def test_optimize_wins_over_deprecated_optimize_expand(tmp_path, monkeypatch):
     from pageindex.flash import api as flash_api
     seen = {}
 
-    def fake_optimize(structure, pages, do_expand, model):
+    def fake_optimize(structure, pages, do_expand, model, concurrency=None):
         seen["do_expand"] = do_expand
         return {"merges": 0}
 
@@ -356,7 +356,7 @@ def test_optimize_full_skips_expand_without_page_texts(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     calls = {}
 
-    def fake_optimize(structure, pages, do_expand, model):
+    def fake_optimize(structure, pages, do_expand, model, concurrency=None):
         calls["pages"] = pages
         calls["do_expand"] = do_expand
         return {"merges": 0}
@@ -382,7 +382,7 @@ def test_optimize_full_skips_expand_on_textless_pages(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     calls = {}
 
-    def fake_optimize(structure, pages, do_expand, model):
+    def fake_optimize(structure, pages, do_expand, model, concurrency=None):
         calls["do_expand"] = do_expand
         return {"merges": 0}
 
@@ -467,3 +467,15 @@ def test_flash_cli_rejects_empty_structure(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="try --mode standard"):
         _run_flash_cli(monkeypatch, tmp_path, [], [])
     assert not (tmp_path / "results").exists()
+
+
+def test_flash_cli_summary_concurrency_reaches_the_indexer(monkeypatch, tmp_path):
+    captured = _run_flash_cli(monkeypatch, tmp_path, ["--summary-concurrency", "8"],
+                              [{"title": "A", "start_index": 1, "end_index": 1}])
+    assert captured["summary_concurrency"] == 8
+
+
+def test_flash_cli_summary_max_words_reaches_the_indexer(monkeypatch, tmp_path):
+    captured = _run_flash_cli(monkeypatch, tmp_path, ["--summary-max-words", "80"],
+                              [{"title": "A", "start_index": 1, "end_index": 1}])
+    assert captured["summary_max_words"] == 80

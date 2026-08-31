@@ -9,6 +9,8 @@ import json
 import PyPDF2
 import copy
 import asyncio
+import heapq
+from contextlib import asynccontextmanager
 from io import BytesIO
 from dotenv import find_dotenv, load_dotenv
 load_dotenv(find_dotenv(usecwd=True))
@@ -69,7 +71,10 @@ def count_tokens(text, model=None):
     if not text:
         return 0
     import litellm
-    return litellm.token_counter(model=model, text=text)
+    try:
+        return litellm.token_counter(model=model, text=text)
+    except Exception:
+        return litellm.token_counter(model=None, text=text)
 
 
 def _strip_prefix(s, prefix):
@@ -513,14 +518,13 @@ def add_preface_if_needed(data):
 
 
 def get_page_tokens(pdf_path, model=None, pdf_parser="PyPDF2"):
-    import litellm
     if pdf_parser == "PyPDF2":
         pdf_reader = PyPDF2.PdfReader(pdf_path)
         page_list = []
         for page_num in range(len(pdf_reader.pages)):
             page = pdf_reader.pages[page_num]
             page_text = page.extract_text()
-            token_length = litellm.token_counter(model=model, text=page_text)
+            token_length = count_tokens(page_text, model=model)
             page_list.append((page_text, token_length))
         return page_list
     elif pdf_parser == "PyMuPDF":
@@ -533,7 +537,7 @@ def get_page_tokens(pdf_path, model=None, pdf_parser="PyPDF2"):
         page_list = []
         for page in doc:
             page_text = page.get_text()
-            token_length = litellm.token_counter(model=model, text=page_text)
+            token_length = count_tokens(page_text, model=model)
             page_list.append((page_text, token_length))
         return page_list
     else:
@@ -743,6 +747,48 @@ async def generate_summaries_for_structure(structure, model=None):
 SUMMARY_CONCURRENCY = 64        # simultaneous summary model calls
 SUMMARY_RAW_TEXT_TOKENS = 200   # leaves under this reuse their raw text as the summary
 SUMMARY_INTRO_MAX_PAGES = 3     # cap on leading pages fed into a parent summary
+SUMMARY_MAX_WORDS = 150         # word cap the summary prompts ask for
+
+
+class _PriorityGate:
+    """Semaphore that admits the highest-priority waiter first, FIFO within a priority."""
+
+    def __init__(self, permits):
+        if permits < 1:
+            raise ValueError("permits must be >= 1")
+        self._free = permits
+        self._waiters = []
+        self._seq = 0
+
+    @asynccontextmanager
+    async def slot(self, prio):
+        await self.acquire(prio)
+        try:
+            yield
+        finally:
+            self.release()
+
+    async def acquire(self, prio):
+        if self._free > 0 and not self._waiters:
+            self._free -= 1
+            return
+        fut = asyncio.get_running_loop().create_future()
+        heapq.heappush(self._waiters, (-prio, self._seq, fut))
+        self._seq += 1
+        try:
+            await fut
+        except asyncio.CancelledError:
+            if fut.done() and not fut.cancelled():
+                self.release()  # granted while cancelling: pass the permit on
+            raise
+
+    def release(self):
+        while self._waiters:
+            _, _, fut = heapq.heappop(self._waiters)
+            if not fut.done():
+                fut.set_result(None)  # the permit moves straight to this waiter
+                return
+        self._free += 1
 
 
 def get_intro_text(node, pdf_pages, max_pages=SUMMARY_INTRO_MAX_PAGES):
@@ -823,29 +869,83 @@ def strip_internal_keys(structure):
     return structure
 
 
-async def summarize_tree(structure, pdf_pages, model=None,
-                         small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
-                         max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None):
-    """Bottom-up summaries: leaves from their own pages, parents composed from
-    child summaries plus the pages no child covers. A parent's summary describes
-    its whole subtree (end_index union semantics). Nodes that already carry a
-    summary are left untouched; leaves under `small_node_tokens` use their raw
-    text as the summary without a model call."""
-    semaphore = asyncio.Semaphore(concurrency or SUMMARY_CONCURRENCY)
-    asked = answered = False
+def _subtree(nodes):
+    for node in nodes:
+        yield node
+        yield from _subtree(node.get('nodes') or [])
 
-    async def ask(prompt):
-        nonlocal asked, answered
-        asked = True
-        async with semaphore:
-            reply = await llm_acompletion(model, prompt)
+
+class SummaryScheduler:
+    """Bottom-up summaries, taking nodes as they are marked final.
+
+    A node's task waits for its mark (its children will not change any more),
+    then for its children's tasks, then makes its own call: leaves from their
+    own pages, parents composed from child summaries plus the pages no child
+    covers. Marked subtrees get their tasks deepest node first and queued
+    calls leave the gate deepest first: depth counts the calls left on a
+    node's path to the root, its own included."""
+
+    def __init__(self, structure, pdf_pages, model=None,
+                 small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
+                 max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None,
+                 max_words=None):
+        self.structure = structure
+        self._pdf_pages = pdf_pages
+        self._model = model
+        self._small_node_tokens = small_node_tokens
+        self._max_intro_pages = max_intro_pages
+        self._max_words = max_words or SUMMARY_MAX_WORDS
+        self._gate = _PriorityGate(concurrency or SUMMARY_CONCURRENCY)
+        self._asked = self._answered = False
+        self._marks = {}     # id(node) -> future resolved once the node is final
+        self._tasks = {}     # id(node) -> its summary task
+        self._finals = []    # (node, ids of its children when it was marked)
+
+    def mark_final(self, nodes):
+        """These nodes will not gain, lose or swap children: their summaries
+        may start. Their subtrees get tasks, deepest node first."""
+        nodes = list(nodes)
+        for node in nodes:
+            mark = self._mark(node)
+            if not mark.done():
+                mark.set_result(None)
+                self._finals.append((node, tuple(id(c) for c in node.get('nodes') or [])))
+        marked = {id(node) for node in nodes}
+        order = []
+
+        def walk(nodes, depth, inside):
+            for node in nodes:
+                inside_here = inside or id(node) in marked
+                if inside_here:
+                    order.append((depth, node))
+                walk(node.get('nodes') or [], depth + 1, inside_here)
+        walk(self.structure, 1, False)
+        for depth, node in sorted(order, key=lambda pair: -pair[0]):
+            self._task(node, depth)
+
+    def _mark(self, node):
+        mark = self._marks.get(id(node))
+        if mark is None:
+            mark = self._marks[id(node)] = asyncio.get_running_loop().create_future()
+        return mark
+
+    def _task(self, node, depth):
+        task = self._tasks.get(id(node))
+        if task is None:
+            task = self._tasks[id(node)] = asyncio.create_task(self._visit(node, depth))
+        return task
+
+    async def _ask(self, prompt, prio):
+        self._asked = True
+        async with self._gate.slot(prio):
+            reply = await llm_acompletion(self._model, prompt)
         if reply:
-            answered = True
+            self._answered = True
         return reply
 
-    async def leaf_summary(node):
-        text = get_text_of_pdf_pages(pdf_pages, node['start_index'], node['end_index'])
-        if count_tokens(text, model="gpt-4o") < small_node_tokens:
+    async def _leaf_summary(self, node, prio):
+        text = get_text_of_pdf_pages(self._pdf_pages, node['start_index'], node['end_index'])
+        if count_tokens(text, model=self._model) < self._small_node_tokens:
             return text.strip()
 
         # A node merged from same-page siblings carries a title joined from theirs.
@@ -862,34 +962,33 @@ async def summarize_tree(structure, pdf_pages, model=None,
 
         prompt = f"""You are given a text chunk from a document.
     Your task is to generate a concise description of everything that is covered in the text, summarizing all its points without omitting any type of content.
-    Keep the description concise and to the point, avoiding unnecessary details.{ask_title}
+    Keep the description concise and to the point, avoiding unnecessary details, within {self._max_words} words.{ask_title}
 
     Given Text: {text}
 
     Reply strictly in the following JSON format:
     {{{title_field}
-        "points": <a list of points covered in the text>,
         "summary": <a concise description of everything that is covered in the text, summarizing all its points without omitting any type of content>
     }}
 
     Follow strictly the above JSON return format. Do not include any other text!
     """
-        reply = await ask(prompt)
+        reply = await self._ask(prompt, prio)
         if retitle:
             written = parse_title(reply)
             if written:
                 node['title'] = written
         return parse_summary(reply)
 
-    async def parent_summary(node):
+    async def _parent_summary(self, node, prio):
         children = node['nodes']
-        intro = get_intro_text(node, pdf_pages, max_pages=max_intro_pages)
+        intro = get_intro_text(node, self._pdf_pages, max_pages=self._max_intro_pages)
         listing = json.dumps(
             [{'title': c.get('title', ''), 'summary': c.get('summary', '')} for c in children],
             ensure_ascii=False)
         prompt = f"""You are given a section of a document: the text that opens the section (possibly empty) and the titles and summaries of its subsections.
     Your task is to generate a concise description of everything that is covered in the whole section, summarizing all its points without omitting any type of content.
-    Keep the description concise and to the point, avoiding unnecessary details.
+    Keep the description concise and to the point, avoiding unnecessary details, within {self._max_words} words.
 
     Section Title: {node.get('title', '')}
 
@@ -899,18 +998,18 @@ async def summarize_tree(structure, pdf_pages, model=None,
 
     Reply strictly in the following JSON format:
     {{
-        "points": <a list of points covered in the section>,
         "summary": <a concise description of everything that is covered in the section, summarizing all its points without omitting any type of content>
     }}
 
     Follow strictly the above JSON return format. Do not include any other text!
     """
-        return parse_summary(await ask(prompt))
+        return parse_summary(await self._ask(prompt, prio))
 
-    async def visit(node):
+    async def _visit(self, node, depth):
+        await self._mark(node)
         children = node.get('nodes') or []
         if children:
-            done = await asyncio.gather(*(visit(child) for child in children),
+            done = await asyncio.gather(*(self._task(child, depth + 1) for child in children),
                                         return_exceptions=True)
             for result in done:
                 if isinstance(result, Exception) and _is_unrecoverable(result):
@@ -918,32 +1017,69 @@ async def summarize_tree(structure, pdf_pages, model=None,
         if node.get('summary'):
             return
         try:
-            node['summary'] = await (parent_summary(node) if children else leaf_summary(node))
+            node['summary'] = await (self._parent_summary(node, depth) if children
+                                     else self._leaf_summary(node, depth))
         except Exception as e:
             node['summary'] = ""
             if _is_unrecoverable(e):
                 raise
 
-    results = await asyncio.gather(*(visit(root) for root in structure),
-                                    return_exceptions=True)
-    for r in results:
-        if isinstance(r, Exception) and _is_unrecoverable(r):
-            raise r
+    async def finish(self):
+        """Wait for every summary; fails loud if the model never answered."""
+        # mark_final is a promise: the node stays in the tree and keeps its
+        # children. Verify it before awaiting anything - a broken promise
+        # leaves tasks whose marks can never arrive, a hang with no diagnosis.
+        live = {id(node) for node in _subtree(self.structure)}
+        for node, children in self._finals:
+            if id(node) not in live or tuple(id(c) for c in node.get('nodes') or []) != children:
+                name = node.get('title') or node.get('node_id') or '?'
+                raise RuntimeError(f"node {name!r} was dropped or changed "
+                                   "after it was marked final")
+        undecided = sum(1 for nid in live
+                        if not (mark := self._marks.get(nid)) or not mark.done())
+        if undecided:
+            raise RuntimeError(f"{undecided} node(s) were never marked final; "
+                               "their summaries would wait forever")
+        results = await asyncio.gather(*(self._task(root, 1) for root in self.structure),
+                                       return_exceptions=True)
+        for r in results:
+            if isinstance(r, Exception) and _is_unrecoverable(r):
+                raise r
 
-    # Raw-text leaves summarize without the model, so they cannot vouch for
-    # it: a run whose every model call failed still fails loud.
-    def _any_summary(nodes):
-        return any(n.get('summary') or _any_summary(n.get('nodes') or [])
-                   for n in nodes)
-    if (asked and not answered) or not _any_summary(structure):
-        raise RuntimeError(
-            "Summary generation failed for all nodes "
-            "(every summary call failed or returned empty; "
-            "check the model and its context limits)"
-        )
+        # Raw-text leaves summarize without the model, so they cannot vouch for
+        # it: a run whose every model call failed still fails loud.
+        def _any_summary(nodes):
+            return any(n.get('summary') or _any_summary(n.get('nodes') or [])
+                       for n in nodes)
+        if (self._asked and not self._answered) or not _any_summary(self.structure):
+            raise RuntimeError(
+                "Summary generation failed for all nodes "
+                "(every summary call failed or returned empty; "
+                "check the model and its context limits)"
+            )
 
-    strip_internal_keys(structure)
-    return structure
+        strip_internal_keys(self.structure)
+        return self.structure
+
+
+async def summarize_tree(structure, pdf_pages, model=None,
+                         small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
+                         max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None,
+                         max_words=None):
+    """Bottom-up summaries: leaves from their own pages, parents composed from
+    child summaries plus the pages no child covers. A parent's summary describes
+    its whole subtree (end_index union semantics). Nodes that already carry a
+    summary are left untouched; leaves under `small_node_tokens` use their raw
+    text as the summary without a model call; every prompt asks for at most
+    `max_words` words. Model calls run deepest node first, both in starting
+    order and in leaving the queue: depth counts the calls left on a node's
+    path to the root, its own included."""
+    scheduler = SummaryScheduler(structure, pdf_pages, model=model,
+                                 small_node_tokens=small_node_tokens,
+                                 max_intro_pages=max_intro_pages,
+                                 concurrency=concurrency, max_words=max_words)
+    scheduler.mark_final(list(_subtree(structure)))
+    return await scheduler.finish()
 
 
 def create_clean_structure_for_description(structure):

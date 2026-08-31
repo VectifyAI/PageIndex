@@ -32,6 +32,10 @@ class LocalIndexConfig(TypedDict, total=False):
     mode: Literal["local"]
     model: str
     summary_model: str
+    summary_max_words: int
+    summary_concurrency: int
+    use_embedded_toc: bool
+    optimize: Literal["full", "merge", "off"]
     backend: dict
     storage_path: Union[str, os.PathLike[str]]
 

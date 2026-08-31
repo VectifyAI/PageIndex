@@ -1187,6 +1187,151 @@ def test_summarize_tree_all_short_leaves_need_no_model(monkeypatch):
     assert out[0]["summary"] == "tiny"
 
 
+def test_summarize_tree_starts_the_deepest_leaf_first(monkeypatch):
+    """Visited level by level, the shallow leaves A and D would take both
+    permits before the deep leaf C even reached the gate. C must start first:
+    the parents still owed above it are what the run ends on."""
+    started = []
+
+    async def fake(model, prompt):
+        started.append(next(w for w in ("alpha", "gamma", "delta", "Section Title")
+                            if w in prompt))
+        for _ in range(8):      # enough loop turns for every leaf to reach the gate
+            await asyncio.sleep(0)
+        return '{"points": [], "summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", fake)
+    pdf_pages = [("alpha " * 5, 5), ("gamma " * 5, 5), ("delta " * 5, 5)]
+    structure = [{"title": "R", "start_index": 1, "end_index": 3, "nodes": [
+        {"title": "A", "start_index": 1, "end_index": 1},
+        {"title": "B", "start_index": 2, "end_index": 2, "nodes": [
+            {"title": "C", "start_index": 2, "end_index": 2}]},
+        {"title": "D", "start_index": 3, "end_index": 3}]}]
+    asyncio.run(pageindex.utils.summarize_tree(
+        structure, pdf_pages, small_node_tokens=0, concurrency=2))
+    assert started.index("gamma") < started.index("alpha")
+    assert started.index("gamma") < started.index("delta")
+    assert started.count("Section Title") == 2
+
+
+def test_summarize_tree_admits_a_ready_parent_before_a_queued_shallow_leaf(monkeypatch):
+    """With one permit the leaf D is already queued when C's child finishes
+    and C becomes ready. C has two calls left above it, D one, so C goes
+    first even though D asked earlier."""
+    started = []
+
+    async def fake(model, prompt):
+        started.append(next(w for w in ("Section Title: C", "Section Title",
+                                        "alpha", "epsilon", "delta")
+                            if w in prompt))
+        for _ in range(8):
+            await asyncio.sleep(0)
+        return '{"points": [], "summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", fake)
+    pdf_pages = [("alpha " * 5, 5), ("epsilon " * 5, 5), ("delta " * 5, 5)]
+    structure = [{"title": "R", "start_index": 1, "end_index": 3, "nodes": [
+        {"title": "B", "start_index": 2, "end_index": 2, "nodes": [
+            {"title": "C", "start_index": 2, "end_index": 2, "nodes": [
+                {"title": "E", "start_index": 2, "end_index": 2}]}]},
+        {"title": "A", "start_index": 1, "end_index": 1},
+        {"title": "D", "start_index": 3, "end_index": 3}]}]
+    asyncio.run(pageindex.utils.summarize_tree(
+        structure, pdf_pages, small_node_tokens=0, concurrency=1))
+    assert started.index("Section Title: C") < started.index("delta")
+
+
+def test_summary_scheduler_starts_a_marked_node_without_waiting_for_the_rest(monkeypatch):
+    """A node marked final summarizes right away while its siblings are still
+    unmarked; marking it again, or marking its parent later, never repeats
+    its call: the parent composes the summary already written."""
+    calls = []
+
+    async def fake(model, prompt):
+        calls.append(prompt)
+        return '{"points": [], "summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", fake)
+    pdf_pages = [("alpha " * 5, 5), ("beta " * 5, 5)]
+    leaf = {"title": "A", "start_index": 1, "end_index": 1}
+    root = {"title": "R", "start_index": 1, "end_index": 2, "nodes": [
+        leaf, {"title": "B", "start_index": 2, "end_index": 2}]}
+
+    async def scenario():
+        scheduler = pageindex.utils.SummaryScheduler([root], pdf_pages, small_node_tokens=0)
+        scheduler.mark_final([leaf])
+        scheduler.mark_final([leaf])
+        for _ in range(3):
+            await asyncio.sleep(0)
+        assert len(calls) == 1 and "alpha" in calls[0]
+        scheduler.mark_final(list(pageindex.utils._subtree([root])))
+        return await scheduler.finish()
+    asyncio.run(scenario())
+    assert len(calls) == 3
+    assert [n["summary"] for n in (leaf, root["nodes"][1], root)] == ["ok"] * 3
+
+
+def test_finish_fails_loud_when_a_final_node_changes_afterwards(monkeypatch):
+    """mark_final is a promise: the node stays in the tree and keeps its
+    children. finish() verifies it, so a run that broke the promise fails
+    with a diagnosis instead of shipping a tree missing a summarized
+    subtree."""
+    async def fake(model, prompt):
+        return '{"points": [], "summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", fake)
+    pdf_pages = [("alpha " * 5, 5), ("beta " * 5, 5)]
+    leaf = {"title": "A", "start_index": 1, "end_index": 1}
+    root = {"title": "R", "start_index": 1, "end_index": 2, "nodes": [leaf]}
+
+    async def scenario():
+        scheduler = pageindex.utils.SummaryScheduler([root], pdf_pages, small_node_tokens=0)
+        scheduler.mark_final(list(pageindex.utils._subtree([root])))
+        root["nodes"] = []            # the promise, broken
+        await scheduler.finish()
+    with pytest.raises(RuntimeError, match="marked final"):
+        asyncio.run(asyncio.wait_for(scenario(), 5))
+
+
+def test_finish_fails_loud_instead_of_waiting_on_a_node_never_marked(monkeypatch):
+    """A tasked node whose mark never arrives would park finish() forever,
+    indistinguishable from a slow model. Marking a proper subset must be
+    named as the protocol breach it is."""
+    async def fake(model, prompt):
+        return '{"points": [], "summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", fake)
+    pdf_pages = [("alpha " * 5, 5), ("beta " * 5, 5)]
+    leaf = {"title": "A", "start_index": 1, "end_index": 1}
+    root = {"title": "R", "start_index": 1, "end_index": 2, "nodes": [leaf]}
+
+    async def scenario():
+        scheduler = pageindex.utils.SummaryScheduler([root], pdf_pages, small_node_tokens=0)
+        scheduler.mark_final([root])  # tasks the subtree, marks only the root
+        await scheduler.finish()
+    with pytest.raises(RuntimeError, match="marked final"):
+        asyncio.run(asyncio.wait_for(scenario(), 5))
+
+    async def root_scenario():
+        other = {"title": "B", "start_index": 2, "end_index": 2}
+        scheduler = pageindex.utils.SummaryScheduler([root, other], pdf_pages, small_node_tokens=0)
+        scheduler.mark_final([root, leaf])  # a root nobody marked: tasked by finish() itself
+        await scheduler.finish()
+    with pytest.raises(RuntimeError, match="marked final"):
+        asyncio.run(asyncio.wait_for(root_scenario(), 5))
+
+
+def test_priority_gate_passes_the_permit_on_when_its_taker_is_cancelled():
+    """A waiter cancelled after the permit was granted but before it ran
+    must hand the permit on, or the pool shrinks by one for good."""
+    async def scenario():
+        gate = pageindex.utils._PriorityGate(1)
+        await gate.acquire(1)
+        waiter = asyncio.create_task(gate.acquire(1))
+        await asyncio.sleep(0)          # queued
+        gate.release()                  # granted to `waiter`, not yet resumed
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+        await asyncio.wait_for(gate.acquire(1), 1)   # hangs on a leaked permit
+    asyncio.run(scenario())
+
+
 def test_summarize_tree_partial_exhaustion_fails_loud(monkeypatch):
     """One lucky call must not vouch for a model that then went away: a
     ladder-exhausted node raises instead of silently blanking."""
@@ -1866,6 +2011,217 @@ def test_expand_queries_nodes_concurrently(monkeypatch):
     assert inflight["peak"] <= 32
 
 
+def _expand_fixture():
+    """Twelve pages; X spans nine of them, so expand looks at it and, when
+    the model offers 'Sub One' (page 4) and 'Sub Two' (page 8), splits it
+    into two leaves under the trigger. Bodies are long enough that every
+    leaf summary needs the model."""
+    body = "body " * 250
+    pages = [body] * 12
+    pages[3] = "Sub One\n" + body
+    pages[7] = "Sub Two\n" + body
+    lines = [[l for l in p.splitlines() if l.strip()] for p in pages]
+    tree = [{"title": "R", "start_index": 1, "end_index": 12, "node_id": "0000", "nodes": [
+        {"title": "A", "start_index": 1, "end_index": 3, "node_id": "0001"},
+        {"title": "X", "start_index": 4, "end_index": 12, "node_id": "0002"}]}]
+    return tree, pages, lines
+
+
+def test_final_nodes_holds_back_only_undecided_expand_candidates():
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, _, _ = _expand_fixture()
+    titles = lambda nodes: sorted(n["title"] for n in nodes)
+    assert titles(tree_optimize.final_nodes(tree, 5, set())) == ["A", "R"]
+    assert titles(tree_optimize.final_nodes(tree, 5, {"0002"})) == ["A", "R", "X"]
+    assert titles(tree_optimize.final_nodes(tree, 9, set())) == ["A", "R", "X"]
+
+
+def test_optimize_reports_final_nodes_as_expand_decides(monkeypatch):
+    """Before the first expand call, everything expand cannot touch is
+    reported final; the candidate and what it grows are reported the moment
+    it is decided; the closing report covers the whole tree."""
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, lines = _expand_fixture()
+    reports, replied_after = [], []
+
+    async def propose(model, prompt):
+        await asyncio.sleep(0.01)
+        replied_after.append(len(reports))
+        return {"subsections": [{"title": "Sub One", "page": 4},
+                                {"title": "Sub Two", "page": 8}]}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+    asyncio.run(tree_optimize.optimize(
+        tree, pages, lines, model="m", do_expand=True,
+        on_final=lambda nodes: reports.append(sorted(n["title"] for n in nodes))))
+    before_reply = [t for report in reports[:replied_after[0]] for t in report]
+    assert "R" in before_reply and "A" in before_reply and "X" not in before_reply
+    decided = next(r for r in reports[replied_after[0]:] if "X" in r)
+    assert decided == ["Sub One", "Sub Two", "X"]
+    assert reports[-1] == ["A", "R", "Sub One", "Sub Two", "X"]
+
+
+def test_optimize_reports_a_candidate_kept_collapsed_once_decided(monkeypatch):
+    """A candidate the model finds nothing in is final the moment its retry
+    ladder ends, not at the end of the run."""
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, lines = _expand_fixture()
+    reports = []
+
+    async def nothing(model, prompt):
+        return {"subsections": []}
+    monkeypatch.setattr(tree_optimize, "ask_model", nothing)
+    asyncio.run(tree_optimize.optimize(
+        tree, pages, lines, model="m", do_expand=True,
+        on_final=lambda nodes: reports.append(sorted(n["title"] for n in nodes))))
+    assert ["X"] in reports[:-1]
+
+
+def test_optimize_reports_a_candidate_kept_collapsed_for_too_little_gain_once_decided(monkeypatch):
+    """The other way to stay collapsed: the model proposes a split that does
+    not pay for itself. That node is final right then too."""
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, lines = _expand_fixture()
+    reports = []
+
+    async def propose(model, prompt):
+        return {"subsections": [{"title": "Sub One", "page": 4}, {"title": "Sub Two", "page": 8}]}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+    outcome = asyncio.run(tree_optimize.optimize(
+        tree, pages, lines, model="m", do_expand=True, min_gain_ratio=0.99,
+        on_final=lambda nodes: reports.append(sorted(n["title"] for n in nodes))))
+    assert outcome["kept_collapsed"] == 1 and ["X"] in reports[:-1]
+
+
+def test_merge_fuses_the_same_page_frontier_it_creates_at_once():
+    """Collapsing F leaves it on exactly G's page; the two must fuse right
+    then, not one round later (with a single round they never would)."""
+    import pageindex.tree_optimize as tree_optimize
+
+    tree = [{"title": "R", "start_index": 1, "end_index": 6, "node_id": "0000", "nodes": [
+        {"title": "F", "start_index": 1, "end_index": 1, "node_id": "0001", "nodes": [
+            {"title": "f1", "start_index": 1, "end_index": 1, "node_id": "0002"}]},
+        {"title": "G", "start_index": 1, "end_index": 1, "node_id": "0003"},
+        {"title": "H", "start_index": 2, "end_index": 5, "node_id": "0004"}]}]
+    outcome = asyncio.run(tree_optimize.optimize(
+        tree, None, None, do_expand=False, max_rounds=1))
+    assert outcome["merges"] == 1 and outcome["same_page_merges"] == 1
+    kept = tree[0]["nodes"]
+    assert [n["title"] for n in kept][1:] == ["H"] and kept[0].get("_same_page")
+
+
+def test_expand_fuses_same_page_children_before_reporting_them(monkeypatch):
+    """Two proposed headings on one page become one node as soon as they
+    are attached, so the report never carries a duplicate."""
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, lines = _expand_fixture()
+    pages[3] = "Sub One\nSub Two\n" + pages[3]
+    pages[4] = "Sub Three\n" + pages[4]
+    pages[8] = "Sub Four\n" + pages[8]
+    lines = [[l for l in p.splitlines() if l.strip()] for p in pages]
+
+    async def propose(model, prompt):
+        return {"subsections": [{"title": "Sub One", "page": 4}, {"title": "Sub Two", "page": 4},
+                                {"title": "Sub Three", "page": 5}, {"title": "Sub Four", "page": 9}]}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+
+    async def summarize(model, prompt):
+        return '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", summarize)
+    reports = []
+
+    async def run():
+        # the real scheduler: mark_final snapshots each node's children and
+        # finish() rejects a later change, so settling before the fusion fails here
+        scheduler = pageindex.utils.SummaryScheduler(tree, [(p, 0) for p in pages], model="m")
+
+        def on_final(nodes):
+            reports.append([(n["title"], len(n.get("nodes") or [])) for n in nodes])
+            scheduler.mark_final(nodes)
+        outcome = await tree_optimize.optimize(tree, pages, lines, model="m", do_expand=True,
+                                               max_rounds=1, on_final=on_final)
+        await scheduler.finish()
+        return outcome
+    outcome = asyncio.run(run())
+    assert outcome["expands"] == 1 and outcome["same_page_merges"] == 1
+    assert [n["title"] for n in tree[0]["nodes"][1]["nodes"]][1:] == ["Sub Three", "Sub Four"]
+    assert all(children != 4 for report in reports for _, children in report)
+    # the round entry agrees with the run counters: the fusion happened this round
+    assert [e["same_page"] for e in outcome["log"] if e["op"] == "round"] == [True]
+
+
+def test_expand_keeps_same_page_children_when_merging_is_off(monkeypatch):
+    """do_merge=False turns off every merge, the fusion inside expand
+    included: a caller who disabled merging keeps every proposed node and
+    every document title."""
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, lines = _expand_fixture()
+    pages[3] = "Sub One\nSub Two\n" + pages[3]
+    pages[4] = "Sub Three\n" + pages[4]
+    pages[8] = "Sub Four\n" + pages[8]
+    lines = [[l for l in p.splitlines() if l.strip()] for p in pages]
+
+    async def propose(model, prompt):
+        return {"subsections": [{"title": "Sub One", "page": 4}, {"title": "Sub Two", "page": 4},
+                                {"title": "Sub Three", "page": 5}, {"title": "Sub Four", "page": 9}]}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+    outcome = asyncio.run(tree_optimize.optimize(
+        tree, pages, lines, model="m", do_expand=True, do_merge=False, max_rounds=1))
+    children = tree[0]["nodes"][1]["nodes"]
+    assert [n["title"] for n in children] == ["Sub One", "Sub Two", "Sub Three", "Sub Four"]
+    assert outcome["same_page_merges"] == 0
+    assert not any(n.get("_same_page") for n in children)
+
+
+def test_flash_summaries_start_while_expand_is_still_deciding(tmp_path, monkeypatch):
+    """With expand on, summaries run on the same loop: a leaf expand cannot
+    touch is already being summarized when the model answers about X. Every
+    node is summarized exactly once and the tree matches the merge+expand
+    pass run on its own."""
+    from conftest import build_pdf
+    import copy
+    import pageindex.flash.api as flash_api
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, _ = _expand_fixture()
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: {
+        "structure": copy.deepcopy(tree), "page_texts": list(pages)})
+    started, replied_after, models = [], [], []
+
+    async def propose(model, prompt):
+        models.append(("expand", model))
+        await asyncio.sleep(0.05)
+        replied_after.append(len(started))
+        return {"subsections": [{"title": "Sub One", "page": 4},
+                                {"title": "Sub Two", "page": 8}]}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+
+    async def summarize(model, prompt):
+        models.append(("summary", model))
+        started.append(prompt)
+        await asyncio.sleep(0.01)
+        return '{"points": [], "summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", summarize)
+
+    result = flash_api.page_index_flash(str(pdf), summary_model="m", optimize_model="x")
+    assert replied_after[0] >= 1
+    assert result["optimize"]["expands"] == 1
+    nodes = list(pageindex.utils._subtree(result["structure"]))
+    assert [n["summary"] for n in nodes] == ["ok"] * 5 and len(started) == 5
+    assert set(models) == {("expand", "x"), ("summary", "m")}
+    shape = lambda nodes: [(n["title"], n["start_index"], n["end_index"],
+                            shape(n.get("nodes") or [])) for n in nodes]
+    alone = flash_api.page_index_flash(str(pdf), summary=False)
+    assert shape(result["structure"]) == shape(alone["structure"])
+
+
 def test_mode_declaration_top_level(monkeypatch):
     """mode= states where documents live; always optional, always
     checked, and mode="cloud" alone reads the env key."""
@@ -1967,3 +2323,159 @@ def test_blank_chat_model_carries_no_model_into_agent_config():
     client = PageIndexClient()
     client.chat_model = "   "
     assert "model" not in client.openai_agent_config()
+
+
+def test_summary_prompts_cap_words_and_omit_points(monkeypatch):
+    """Both summary prompts ask for the summary alone, within the word cap.
+    The points list the model wrote first was parsed and thrown away, and
+    with it gone the summary swallows its content unless a cap holds it."""
+    prompts = []
+
+    async def capture(model, prompt):
+        prompts.append(prompt)
+        return '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", capture)
+    pdf_pages = [("alpha " * 5, 5), ("beta " * 5, 5)]
+
+    def tree():
+        return [{"title": "R", "start_index": 1, "end_index": 2,
+                 "nodes": [{"title": "A", "start_index": 1, "end_index": 1},
+                           {"title": "B", "start_index": 2, "end_index": 2}]}]
+
+    asyncio.run(pageindex.utils.summarize_tree(tree(), pdf_pages, small_node_tokens=0))
+    assert len(prompts) == 3
+    assert all("within 150 words" in p and '"points"' not in p for p in prompts)
+
+    prompts.clear()
+    asyncio.run(pageindex.utils.summarize_tree(tree(), pdf_pages, small_node_tokens=0,
+                                               max_words=80))
+    assert len(prompts) == 3 and all("within 80 words" in p for p in prompts)
+
+
+def test_page_index_flash_plumbs_summary_max_words(tmp_path, monkeypatch):
+    """summary_max_words reaches the prompts on both summary paths: the
+    plain one and the one overlapped with expand."""
+    from conftest import build_pdf
+    import copy
+    import pageindex.flash.api as flash_api
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, _ = _expand_fixture()
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: {
+        "structure": copy.deepcopy(tree), "page_texts": list(pages)})
+
+    async def propose(model, prompt):
+        return {"subsections": [{"title": "Sub One", "page": 4},
+                                {"title": "Sub Two", "page": 8}]}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+    prompts = []
+
+    async def capture(model, prompt):
+        prompts.append(prompt)
+        return '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", capture)
+
+    for optimize in (False, "full"):
+        prompts.clear()
+        flash_api.page_index_flash(str(pdf), summary_model="m", optimize=optimize,
+                                   summary_max_words=80)
+        assert prompts and all("within 80 words" in p for p in prompts), optimize
+
+
+def test_summary_max_words_reaches_the_local_indexer():
+    """index["summary_max_words"] and the flat argument both land on the
+    local indexer; a non-int refuses in the constructor like every slot."""
+    from pageindex import PageIndexLocalClient
+    assert PageIndexLocalClient(index={"summary_max_words": 80})._api._summary_max_words == 80
+    assert PageIndexLocalClient(summary_max_words=80)._api._summary_max_words == 80
+    assert PageIndexLocalClient()._api._summary_max_words is None
+    with pytest.raises(PageIndexAPIError, match=r'index\["summary_max_words"\] must be a'):
+        PageIndexLocalClient(index={"summary_max_words": "80"})
+
+
+def test_flash_knobs_reach_the_local_indexer(tmp_path, sample_pdf, monkeypatch):
+    """summary_concurrency, use_embedded_toc and optimize are settable on the
+    client, flat or in the index slot, and land on page_index_flash the way
+    the CLI's flags do ("off" is no optimize pass at all)."""
+    from pageindex import PageIndexLocalClient
+    captured = {}
+    monkeypatch.setattr(pageindex.flash, "page_index_flash",
+                        lambda p, **kw: captured.update(kw) or {
+                            "structure": [{"title": "T", "start_index": 1,
+                                           "end_index": 1, "summary": "s", "nodes": []}]})
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda model, prompt, **kw: "d.")
+    monkeypatch.chdir(tmp_path)  # the default .pageindex store lands here
+
+    def run(**kwargs):
+        captured.clear()
+        PageIndexLocalClient(**kwargs).submit_document(sample_pdf)
+        return (captured.get("summary_concurrency"), captured["use_embedded_toc"],
+                captured["optimize"])
+
+    assert run(summary_concurrency=8, use_embedded_toc=False, optimize="merge") == (8, False, "merge")
+    assert run(index={"summary_concurrency": 8, "use_embedded_toc": False,
+                      "optimize": "off"}) == (8, False, False)
+    assert run() == (None, True, "full")
+    for kwargs, msg in (({"index": {"use_embedded_toc": "no"}},
+                         r'index\["use_embedded_toc"\] must be a bool'),
+                        ({"optimize": "sometimes"},
+                         r'optimize must be "full", "merge" or "off"'),
+                        ({"summary_concurrency": "8"}, "summary_concurrency must be a")):
+        with pytest.raises(PageIndexAPIError, match=msg):
+            PageIndexLocalClient(**kwargs)
+
+
+def test_summary_concurrency_caps_expand_too(tmp_path, monkeypatch):
+    """A user who lowers summary_concurrency for a tight quota gets the whole
+    indexing lane lowered: expand's own gate takes the same cap."""
+    from conftest import build_pdf
+    import pageindex.flash.api as flash_api
+    import pageindex.tree_optimize as tree_optimize
+
+    body = "body " * 250
+    pages = [body] * 30
+
+    def roots():
+        return [{"title": f"X{i}", "start_index": 1 + 10 * i, "end_index": 10 + 10 * i,
+                 "node_id": f"000{i}"} for i in range(3)]
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: {
+        "structure": roots(), "page_texts": list(pages)})
+    in_flight, peak = 0, 0
+
+    async def propose(model, prompt):
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.02)
+        in_flight -= 1
+        return {"subsections": []}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+
+    async def summarize(model, prompt):
+        return '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", summarize)
+
+    flash_api.page_index_flash(str(pdf), summary_model="m", summary_concurrency=1)
+    assert peak == 1
+    peak = 0
+    flash_api.page_index_flash(str(pdf), summary_model="m")  # control: the three overlap
+    assert peak == 3
+
+
+def test_count_tokens_falls_back_to_the_default_tokenizer(monkeypatch):
+    import litellm
+
+    def token_counter(model=None, text=None, **_):
+        if model is not None:
+            raise TypeError("TextInputSequence must be str")  # HF tokenizer on a lone surrogate
+        return 7
+    monkeypatch.setattr(litellm, "token_counter", token_counter)
+    assert pageindex.utils.count_tokens("x", model="groq/llama-3.1-8b-instant") == 7
+
+    monkeypatch.setattr(litellm, "token_counter", lambda model=None, text=None, **_: 3 if model else 7)
+    assert pageindex.utils.count_tokens("x", model="m") == 3  # the model's own count wins when it works

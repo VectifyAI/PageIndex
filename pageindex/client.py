@@ -58,7 +58,9 @@ def _agents_sdk_model_name(model: str) -> str:
     return f"litellm/{model}"
 
 
-_LOCAL_INDEX_KEYS = ("model", "summary_model", "backend", "storage_path")
+_LOCAL_INDEX_KEYS = ("model", "summary_model", "backend", "storage_path",
+                     "summary_max_words", "summary_concurrency",
+                     "use_embedded_toc", "optimize")
 
 # Near-synonyms of "cloud" that would otherwise parse as model names —
 # a silent wrong mode. They error, pointing at the real word.
@@ -83,7 +85,8 @@ def _env_cloud_key(spelling: str, inline: str = "api_key=...") -> str:
 # there as a PageIndexAPIError — never later, never silently.
 _ARG_TYPES: "dict[str, tuple[type, ...]]" = {
     "model": (str,), "index_model": (str,), "summary_model": (str,),
-    "chat_model": (str,), "retrieve_model": (str,),
+    "chat_model": (str,), "retrieve_model": (str,), "summary_max_words": (int,),
+    "summary_concurrency": (int,), "use_embedded_toc": (bool,), "optimize": (str,),
     "storage_path": (str, os.PathLike), "index_backend": (dict,),
     "chat_backend": (dict,)}
 
@@ -128,8 +131,8 @@ def _resolve_index_slot(index) -> "tuple[_CloudKey, dict[str, Any]]":
             'or "cloud".')
     if isinstance(index, Mapping):
         # None-valued keys mean "absent", exactly like the flat arguments.
-        conf = {name: value for name, value in index.items()
-                if value is not None}
+        conf: dict[str, Any] = {name: value for name, value in index.items()
+                                if value is not None}
         declared = _declared_mode(conf.pop("mode", None), "index")
         if not conf:
             if declared == "cloud":
@@ -167,12 +170,8 @@ def _resolve_index_slot(index) -> "tuple[_CloudKey, dict[str, Any]]":
                 'index declares mode "cloud" but carries local keys '
                 f"({', '.join(sorted(conf))}) — the cloud pipeline does "
                 'its own indexing; cloud takes "api_key" only.')
-        mapped = {"index_model": conf.get("model"),
-                  "summary_model": conf.get("summary_model"),
-                  "index_backend": conf.get("backend"),
-                  "storage_path": conf.get("storage_path")}
-        return None, {name: value for name, value in mapped.items()
-                      if value is not None}
+        rename = {"model": "index_model", "backend": "index_backend"}
+        return None, {rename.get(name, name): value for name, value in conf.items()}
     raise PageIndexAPIError("index must be a string or a dict.")
 
 
@@ -264,7 +263,9 @@ class PageIndexClient:
             ``"cloud"`` / ``"pageindex-cloud"`` (cloud, key from the
             environment), ``"local"``, a local index model name, or a
             dict: ``{"api_key": ...}`` for cloud, ``{"model",
-            "summary_model", "backend", "storage_path"}`` for local. An
+            "summary_model", "backend", "storage_path",
+            "summary_max_words", "summary_concurrency", "use_embedded_toc",
+            "optimize"}`` for local. An
             optional ``"mode"`` key (``"cloud"`` / ``"local"``) states
             the side and must agree with the other keys; ``{"mode":
             "cloud"}`` alone reads the key from the environment. Not
@@ -306,6 +307,18 @@ class PageIndexClient:
         summary_model (str, optional): Local mode only — legacy: overrides
             the model used for node summaries and document descriptions;
             ``index_model`` covers this.
+        summary_max_words (int, optional): Local mode only — the word cap
+            each node summary is asked to stay within. Defaults to 150.
+        summary_concurrency (int, optional): Local mode only — cap on
+            simultaneous indexing model calls per lane: the summaries, and
+            expand up to its own ceiling of 32. The lanes overlap, so up to
+            cap + min(32, cap) calls run at once. Defaults to 64.
+        use_embedded_toc (bool, optional): Local mode only — whether flash
+            indexing consumes the PDF's embedded bookmarks when they look
+            trustworthy. Defaults to True.
+        optimize (str, optional): Local mode only — the flash tree
+            refinement pass: ``"full"`` (merge + model expand, the
+            default), ``"merge"`` (deterministic merge only) or ``"off"``.
         retrieve_model (str, optional): Legacy name for ``chat_model`` —
             same meaning everywhere, cloud clients included.
         storage_path (str or os.PathLike, optional): Local mode only —
@@ -346,6 +359,10 @@ class PageIndexClient:
         chat_model: Optional[str] = None,
         model: Optional[str] = None,
         summary_model: Optional[str] = None,
+        summary_max_words: Optional[int] = None,
+        summary_concurrency: Optional[int] = None,
+        use_embedded_toc: Optional[bool] = None,
+        optimize: Optional[str] = None,
         retrieve_model: Optional[str] = None,
         storage_path: Optional[Union[str, os.PathLike[str]]] = None,
         index_backend: Optional[dict[str, Any]] = None,
@@ -363,6 +380,10 @@ class PageIndexClient:
             (("api_key", api_key),
              ("index_model", index_model),
              ("summary_model", summary_model),
+             ("summary_max_words", summary_max_words),
+             ("summary_concurrency", summary_concurrency),
+             ("use_embedded_toc", use_embedded_toc),
+             ("optimize", optimize),
              ("index_backend", index_backend),
              ("storage_path", storage_path), ("model", model))
             if value is not None}
@@ -443,10 +464,13 @@ class PageIndexClient:
                         f"got {type(value).__name__}.")
                 if isinstance(value, str):
                     value = conf[name] = value.strip()
-                if not value:
+                if not value and not isinstance(value, bool):
                     raise PageIndexAPIError(
                         f"{shown} is empty — it configures nothing. Pass a "
                         "real value, or drop the argument.")
+                if name == "optimize" and value not in ("full", "merge", "off"):
+                    raise PageIndexAPIError(
+                        f'{shown} must be "full", "merge" or "off", got {value!r}.')
 
         if cloud_key is not None:
             if index_conf:
@@ -506,6 +530,10 @@ class PageIndexClient:
                 model=self.model,
                 summary_model=self.summary_model,
                 index_backend=index_conf.get("index_backend"),
+                summary_max_words=index_conf.get("summary_max_words"),
+                summary_concurrency=index_conf.get("summary_concurrency"),
+                use_embedded_toc=index_conf.get("use_embedded_toc", True),
+                optimize=index_conf.get("optimize", "full"),
             )
             # LiteLLM's multi-second import would otherwise land on the
             # first chat call; failures resurface there with real context.
@@ -1651,6 +1679,10 @@ class PageIndexLocalClient(PageIndexClient):
         chat_model: Optional[str] = None,
         model: Optional[str] = None,
         summary_model: Optional[str] = None,
+        summary_max_words: Optional[int] = None,
+        summary_concurrency: Optional[int] = None,
+        use_embedded_toc: Optional[bool] = None,
+        optimize: Optional[str] = None,
         retrieve_model: Optional[str] = None,
         storage_path: Optional[Union[str, os.PathLike[str]]] = None,
         index_backend: Optional[dict[str, Any]] = None,
@@ -1659,5 +1691,8 @@ class PageIndexLocalClient(PageIndexClient):
         super().__init__(None, index=index, chat=chat,
                          index_model=index_model, chat_model=chat_model,
                          model=model, summary_model=summary_model,
+                         summary_max_words=summary_max_words,
+                         summary_concurrency=summary_concurrency,
+                         use_embedded_toc=use_embedded_toc, optimize=optimize,
                          retrieve_model=retrieve_model, storage_path=storage_path,
                          index_backend=index_backend, chat_backend=chat_backend)

@@ -33,6 +33,10 @@ if __name__ == "__main__":
                       help='(legacy) Same as --index-model')
     parser.add_argument('--summary-model', type=str, default=None,
                       help='Model for node summaries (falls back to config.yaml summary_model, then --index-model, then --model)')
+    parser.add_argument('--summary-max-words', type=int, default=None,
+                      help='Word cap for each node summary (flash mode; default 150)')
+    parser.add_argument('--summary-concurrency', type=int, default=None,
+                      help='Cap on simultaneous indexing model calls per lane (flash mode; default 64, expand tops out at 32)')
 
     parser.add_argument('--toc-check-pages', type=int, default=None,
                       help='Number of pages to check for table of contents (PDF only)')
@@ -66,14 +70,15 @@ if __name__ == "__main__":
         raise ValueError("Either --pdf_path or --md_path must be specified")
     if args.pdf_path and args.md_path:
         raise ValueError("Only one of --pdf_path or --md_path can be specified")
-    if args.optimize is not None and not (args.pdf_path and args.mode == 'flash'):
-        raise ValueError("--optimize requires Flash mode with --pdf_path")
+    for flag, value in (('--optimize', args.optimize),
+                        ('--embedded-toc', args.embedded_toc),
+                        ('--summary', args.summary),
+                        ('--summary-max-words', args.summary_max_words),
+                        ('--summary-concurrency', args.summary_concurrency)):
+        if value is not None and not (args.pdf_path and args.mode == 'flash'):
+            raise ValueError(f"{flag} requires Flash mode with --pdf_path")
     if args.optimize is None:
         args.optimize = 'full' if args.mode == 'flash' else 'off'
-    if args.embedded_toc is not None and not (args.pdf_path and args.mode == 'flash'):
-        raise ValueError("--embedded-toc requires Flash mode with --pdf_path")
-    if args.summary is not None and not (args.pdf_path and args.mode == 'flash'):
-        raise ValueError("--summary requires Flash mode with --pdf_path")
     if args.pdf_path and args.mode == 'flash':
         for flag, value in (('--toc-check-pages', args.toc_check_pages),
                             ('--max-pages-per-node', args.max_pages_per_node),
@@ -107,6 +112,8 @@ if __name__ == "__main__":
                 summary_model=summary_model,
                 use_embedded_toc=args.embedded_toc if args.embedded_toc is not None else True,
                 summary=will_summarize,
+                summary_max_words=args.summary_max_words,
+                summary_concurrency=args.summary_concurrency,
             )
             if not toc_with_page_number.get('structure'):
                 raise ValueError("PageIndex Flash could not extract a structure from this PDF; "
