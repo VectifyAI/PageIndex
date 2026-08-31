@@ -44,3 +44,10 @@ jobs:
       - if: matrix.pdfium == '4'
         run: pip install "pypdfium2<5"
       - run: python -m pytest -q
+
+  gate:
+    needs: tests
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.tests.result }}" = "success"
