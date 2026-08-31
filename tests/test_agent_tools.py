@@ -2510,6 +2510,58 @@ def test_wait_until_completed_does_not_poll_after_deadline(
     assert cloud._api.polls == 2
 
 
+def test_wait_bounds_cloud_request_and_rejects_late_completion(monkeypatch):
+    clock = _FakeClock()
+    monkeypatch.setattr(client_module, "time", clock)
+    request_timeouts = []
+
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"id": "pi-cloud", "status": "completed"}
+
+    def slow_get(url, headers, timeout):
+        request_timeouts.append(timeout)
+        clock.now += 1.5
+        return Response()
+
+    monkeypatch.setattr("pageindex.cloud_api.requests.get", slow_get)
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+
+    with pytest.raises(PageIndexAPIError, match="Timed out"):
+        cloud.wait_until_completed("pi-cloud", timeout=1)
+
+    assert request_timeouts == [1.0]
+
+
+def test_wait_cloud_request_keeps_existing_thirty_second_cap(monkeypatch):
+    clock = _FakeClock()
+    monkeypatch.setattr(client_module, "time", clock)
+    request_timeouts = []
+
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"id": "pi-cloud", "status": "completed"}
+
+    def quick_get(url, headers, timeout):
+        request_timeouts.append(timeout)
+        clock.now += 0.25
+        return Response()
+
+    monkeypatch.setattr("pageindex.cloud_api.requests.get", quick_get)
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+
+    document = cloud.wait_until_completed("pi-cloud", timeout=60)
+
+    assert document["status"] == "completed"
+    assert request_timeouts == [30.0]
+
+
 @pytest.mark.parametrize("status_code", [401, 403, 404])
 def test_wait_reraises_definite_poll_answers(
     fake_cloud_client, monkeypatch, status_code

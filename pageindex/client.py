@@ -629,7 +629,6 @@ class PageIndexClient:
         deadline = time.monotonic() + timeout_seconds
         poll_failures = 0
         last_status = None
-        first_poll = True
 
         def timeout_error() -> PageIndexAPIError:
             return PageIndexAPIError(
@@ -640,16 +639,23 @@ class PageIndexClient:
             )
 
         while True:
-            if not first_poll and time.monotonic() >= deadline:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 raise timeout_error()
-            first_poll = False
             status = None
             try:
-                document = self.get_document(doc_id)
-                status = document.get("status")
-                last_status = status
-                poll_failures = 0
+                bounded_get_document = getattr(
+                    self._api, "_get_document_with_timeout", None
+                )
+                if bounded_get_document is None:
+                    document = self.get_document(doc_id)
+                else:
+                    document = bounded_get_document(
+                        doc_id, timeout=min(30.0, remaining)
+                    )
             except (PageIndexAPIError, requests.RequestException) as exc:
+                if time.monotonic() >= deadline:
+                    raise timeout_error() from exc
                 if getattr(exc, "status_code", None) in (401, 403, 404):
                     raise  # a definite answer, not a poll failure
                 # Tolerate transient poll failures; a 30-minute wait should
@@ -661,6 +667,12 @@ class PageIndexClient:
                         f"{exc}. Processing continues in the cloud — poll "
                         "get_document(doc_id) for status."
                     ) from exc
+            else:
+                if time.monotonic() >= deadline:
+                    raise timeout_error()
+                status = document.get("status")
+                last_status = status
+                poll_failures = 0
 
             if status == "completed":
                 return document

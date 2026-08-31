@@ -318,10 +318,16 @@ class CloudAPI:
                 - createdAt (str): Creation timestamp in ISO format
                 - pageNum (int): Number of pages in the document
         """
+        return self._get_document_with_timeout(doc_id, timeout=30)
+
+    def _get_document_with_timeout(
+        self, doc_id: str, *, timeout: float
+    ) -> Dict[str, Any]:
+        """Fetch metadata with a caller-supplied request timeout."""
         response = requests.get(
             f"{self.BASE_URL}/doc/{_enc(doc_id)}/metadata/",
             headers=self._headers(),
-            timeout=30
+            timeout=timeout,
         )
         if response.status_code != 200:
             raise PageIndexAPIError(
