@@ -911,8 +911,16 @@ def _anthropic_client(backend=None, route="anthropic"):
         key = None
     if key in _ANTHROPIC_CLIENTS:
         return _ANTHROPIC_CLIENTS[key]
+    cls = getattr(anthropic, _ROUTE_CLIENTS[route], None)
+    if cls is None:
+        # A build predating this route's client class: same contract as
+        # the tool-runner probe, one step earlier.
+        raise PageIndexAPIError(
+            f"messages on this route needs the anthropic SDK's "
+            f"{_ROUTE_CLIENTS[route]} client, which this anthropic build "
+            "lacks — pip install -U anthropic.")
     try:
-        client = getattr(anthropic, _ROUTE_CLIENTS[route])(**kwargs)
+        client = cls(**kwargs)
     except (anthropic.AnthropicError, ValueError, TypeError) as exc:
         # Vertex/Foundry refuse a missing region or credential right at
         # construction, each with its own type; same contract for all.

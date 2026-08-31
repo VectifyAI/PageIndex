@@ -2610,6 +2610,18 @@ def test_anthropic_client_unconfigured_route_keeps_the_error_contract(
 
 
 @needs_anthropic
+def test_missing_route_client_class_names_the_upgrade(monkeypatch):
+    # A build predating a route's client class gets the tool-runner
+    # probe's contract, not a bare AttributeError.
+    import anthropic
+    monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
+    monkeypatch.delattr(anthropic, "AnthropicFoundry", raising=False)
+    with pytest.raises(PageIndexAPIError,
+                       match="AnthropicFoundry.*pip install -U anthropic"):
+        local_chat._anthropic_client(None, "azure_ai")
+
+
+@needs_anthropic
 def test_messages_names_the_missing_tool_runner(client, monkeypatch):
     # anthropic 0.108–0.121 constructs Bedrock/Vertex clients whose beta
     # surface has no tool runner: name the gap, not an AttributeError.
