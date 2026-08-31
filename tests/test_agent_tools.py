@@ -2383,7 +2383,21 @@ def test_cloud_agent_instructions_empty_raises(monkeypatch):
         cloud.agent_instructions()
 
 
-# ── submit_document(wait=True) ──
+# ── document completion polling ──
+
+
+class _FakeClock:
+    def __init__(self):
+        self.now = 0.0
+        self.sleeps = []
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
+
 
 class _FakeCloudAPI:
     def __init__(self, statuses):
@@ -2410,6 +2424,109 @@ def fake_cloud_client(tmp_path, monkeypatch):
         cloud._api = _FakeCloudAPI(statuses)
         return cloud
     return build
+
+
+def test_wait_until_completed_returns_final_document(fake_cloud_client):
+    cloud = fake_cloud_client(["processing", "completed"])
+
+    result = cloud.wait_until_completed("pi-fake")
+
+    assert result == {"id": "pi-fake", "status": "completed"}
+    assert cloud._api.polls == 2
+
+
+@pytest.mark.parametrize("parameter", ["timeout", "poll_interval"])
+@pytest.mark.parametrize(
+    "bad_value", [0, -1, float("nan"), float("inf"), True, "2"]
+)
+def test_wait_until_completed_rejects_invalid_timing(
+    fake_cloud_client, parameter, bad_value
+):
+    cloud = fake_cloud_client(["completed"])
+
+    with pytest.raises(ValueError, match=parameter):
+        cloud.wait_until_completed("pi-fake", **{parameter: bad_value})
+
+    assert cloud._api.polls == 0
+
+
+def test_wait_until_completed_uses_custom_initial_interval(
+    fake_cloud_client, monkeypatch
+):
+    clock = _FakeClock()
+    monkeypatch.setattr(client_module, "time", clock)
+    cloud = fake_cloud_client(["processing", "processing", "completed"])
+
+    cloud.wait_until_completed("pi-fake", poll_interval=4)
+
+    assert clock.sleeps == [4.0, 6.0]
+
+
+def test_wait_until_completed_does_not_poll_after_deadline(
+    fake_cloud_client, monkeypatch
+):
+    clock = _FakeClock()
+    monkeypatch.setattr(client_module, "time", clock)
+    cloud = fake_cloud_client(["processing"])
+
+    with pytest.raises(PageIndexAPIError, match="Timed out"):
+        cloud.wait_until_completed("pi-fake", timeout=3, poll_interval=2)
+
+    assert clock.sleeps == [2.0, 1.0]
+    assert cloud._api.polls == 2
+
+
+@pytest.mark.parametrize("status_code", [401, 403, 404])
+def test_wait_reraises_definite_poll_answers(
+    fake_cloud_client, monkeypatch, status_code
+):
+    cloud = fake_cloud_client(["processing"])
+    polls = {"n": 0}
+
+    def denied(doc_id):
+        polls["n"] += 1
+        raise PageIndexAPIError(
+            f"Failed to get document metadata: {status_code}",
+            status_code=status_code,
+        )
+
+    monkeypatch.setattr(cloud, "get_document", denied)
+    with pytest.raises(PageIndexAPIError, match=str(status_code)) as err:
+        cloud.wait_until_completed("pi-fake")
+
+    assert polls["n"] == 1
+    assert "Processing continues" not in str(err.value)
+
+
+def test_wait_timeout_keeps_last_successful_status(
+    fake_cloud_client, monkeypatch
+):
+    clock = _FakeClock()
+    monkeypatch.setattr(client_module, "time", clock)
+    cloud = fake_cloud_client(["processing"])
+    responses = iter([
+        {"id": "pi-fake", "status": "processing"},
+        PageIndexAPIError("temporary 502"),
+    ])
+
+    def poll(doc_id):
+        response = next(responses)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    monkeypatch.setattr(cloud, "get_document", poll)
+    with pytest.raises(PageIndexAPIError, match="last status: processing"):
+        cloud.wait_until_completed("pi-fake", timeout=1, poll_interval=0.5)
+
+
+def test_wait_completed_document_does_not_sleep(fake_cloud_client, monkeypatch):
+    clock = _FakeClock()
+    monkeypatch.setattr(client_module, "time", clock)
+    cloud = fake_cloud_client(["completed"])
+
+    assert cloud.wait_until_completed("pi-fake")["status"] == "completed"
+    assert clock.sleeps == []
 
 
 def test_submit_wait_polls_until_completed(fake_cloud_client):

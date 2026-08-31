@@ -1,11 +1,13 @@
 """PageIndex SDK client: the 0.2.x cloud surface, now with a local mode."""
 from __future__ import annotations
 
+import math
 import os
 import re
 import threading
 import time
 import warnings
+from numbers import Real
 from typing import Any, Callable, Iterator, Mapping, Optional, Union, cast
 
 from .errors import PageIndexAPIError
@@ -590,17 +592,57 @@ class PageIndexClient:
                 stacklevel=2,
             )
         if wait:
-            self._wait_until_ready(result["doc_id"])
+            self.wait_until_completed(result["doc_id"])
         return result
 
-    def _wait_until_ready(self, doc_id: str, timeout: float = 1800.0) -> None:
+    def wait_until_completed(
+        self,
+        doc_id: str,
+        timeout: float = 1800.0,
+        poll_interval: float = 2.0,
+    ) -> dict[str, Any]:
+        """Wait until an existing document is ready and return its metadata.
+
+        ``poll_interval`` is the initial delay. Repeated polls back off by 1.5x,
+        capped at 15 seconds (or the initial interval when it is larger).
+        """
         import requests
-        interval = 2.0
-        deadline = time.monotonic() + timeout
+
+        timings = {"timeout": timeout, "poll_interval": poll_interval}
+        for name, value in timings.items():
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, Real)
+                or not math.isfinite(float(value))
+                or value <= 0
+            ):
+                raise ValueError(f"{name} must be a finite number greater than 0")
+
+        timeout_seconds = float(timeout)
+        interval = float(poll_interval)
+        max_interval = max(15.0, interval)
+        deadline = time.monotonic() + timeout_seconds
         poll_failures = 0
+        last_status = None
+        first_poll = True
+
+        def timeout_error() -> PageIndexAPIError:
+            return PageIndexAPIError(
+                f"Timed out after {timeout_seconds:g}s waiting for document "
+                f"processing (doc_id: {doc_id}, last status: {last_status}). "
+                "Processing continues in the cloud — poll "
+                "get_document(doc_id) for status."
+            )
+
         while True:
+            if not first_poll and time.monotonic() >= deadline:
+                raise timeout_error()
+            first_poll = False
+            status = None
             try:
-                status = self.get_document(doc_id).get("status")
+                document = self.get_document(doc_id)
+                status = document.get("status")
+                last_status = status
                 poll_failures = 0
             except (PageIndexAPIError, requests.RequestException) as exc:
                 if getattr(exc, "status_code", None) in (401, 403, 404):
@@ -614,22 +656,19 @@ class PageIndexClient:
                         f"{exc}. Processing continues in the cloud — poll "
                         "get_document(doc_id) for status."
                     ) from exc
-                status = None
+
             if status == "completed":
-                return
+                return document
             if status == "failed":
                 raise PageIndexAPIError(
                     f"Document processing failed (doc_id: {doc_id})."
                 )
-            if time.monotonic() >= deadline:
-                raise PageIndexAPIError(
-                    f"Timed out after {int(timeout)}s waiting for document "
-                    f"processing (doc_id: {doc_id}, last status: {status}). "
-                    "Processing continues in the cloud — poll "
-                    "get_document(doc_id) for status."
-                )
-            time.sleep(interval)
-            interval = min(interval * 1.5, 15.0)
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise timeout_error()
+            time.sleep(min(interval, remaining))
+            interval = min(interval * 1.5, max_interval)
 
     # ---------- OCR FUNCTIONALITY ----------
 
