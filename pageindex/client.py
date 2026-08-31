@@ -60,8 +60,9 @@ def _agents_sdk_model_name(model: str) -> str:
 
 # The Anthropic-stack routes this SDK wires a transport for; a row is
 # an inventory fact, not a model judgment. Growth rule: a row per route
-# LiteLLM names and the anthropic SDK ships a client for (Mantle and
-# Claude-on-AWS/GoogleCloud wait on LiteLLM prefix names).
+# LiteLLM names and the anthropic SDK ships a client for (Mantle clears
+# both bars, no one has asked; Claude-on-AWS/GoogleCloud wait on
+# LiteLLM prefix names).
 _CLAUDE_ROUTES = ("bedrock", "vertex_ai", "azure_ai")
 
 
@@ -1126,10 +1127,12 @@ class PageIndexClient:
         Document QA over the Anthropic Messages protocol — Claude-native.
 
         Own-model chat only — local mode, or a cloud client constructed
-        with ``chat_model=``/``chat=``. Drives Anthropic's /v1/messages
-        via the Anthropic SDK's own tool runner (requires
-        ``pageindex[anthropic]``; ANTHROPIC_API_KEY selects the
-        backend). ``tool_use``/``tool_result`` round-trip is the
+        with ``chat_model=``/``chat=``. Drives the Messages API via the
+        Anthropic SDK's own tool runner (requires
+        ``pageindex[anthropic]``); the model's routing prefix picks the
+        transport — Anthropic directly by default (ANTHROPIC_API_KEY
+        selects the backend), or that channel's own SDK client.
+        ``tool_use``/``tool_result`` round-trip is the
         format's native behavior: the response is the
         final message envelope with cross-turn aggregated ``usage`` plus a
         ``messages`` field — the full new turn sequence, valid for verbatim
@@ -1574,7 +1577,7 @@ class PageIndexClient:
         recommended channel: it is guaranteed delivery, carries ``doc_id``
         targeting, and is the only channel local mode has.
 
-        Usage (or ``claude_agent_config()`` for all three slots in one
+        Usage (or ``claude_agent_config()`` for the whole bundle in one
         call)::
 
             options = ClaudeAgentOptions(
@@ -1604,7 +1607,8 @@ class PageIndexClient:
         (``agent_instructions``) and the server entry (``as_claude_mcp``,
         itself the tool gate) with its ``allowed_tools`` pre-approval,
         one ``include_management`` and ``server_name`` applied
-        everywhere. To customize (your own system prompt, extra
+        everywhere; a chosen model adds ``model`` (and its route's
+        ``env`` switch). To customize (your own system prompt, extra
         servers), switch to those methods directly.
 
         Args:

@@ -923,6 +923,15 @@ def _anthropic_client(backend=None, route="anthropic"):
     return client
 
 
+def _route_auth_failure(exc: BaseException) -> bool:
+    # Bedrock raises a bare RuntimeError when boto3 resolves no
+    # credentials; anything from the botocore / google.auth stacks is
+    # the route's credential machinery, not ours.
+    if isinstance(exc, RuntimeError):
+        return "credential" in str(exc).lower()
+    return type(exc).__module__.startswith(("botocore", "google.auth"))
+
+
 def _anthropic_system(client, extra_system, block: Optional[str]) -> list[dict]:
     """System blocks: cache_control marks the stable managed prefix only
     (the API allows 4 breakpoints total — the varying doc block and caller
@@ -1106,6 +1115,14 @@ def run_messages(client, messages, model: str, route: str = "anthropic",
                     "The Anthropic backend is not configured: set the "
                     "ANTHROPIC_API_KEY environment variable, or pass an "
                     f"api_key in chat_backend / backend. ({exc})") from exc
+            except Exception as exc:
+                # the cloud routes' request-time credential failures
+                # (their stacks' own types)
+                if route == "anthropic" or not _route_auth_failure(exc):
+                    raise
+                raise PageIndexAPIError(
+                    f"The Anthropic backend is not configured: {exc}"
+                ) from exc
             finally:
                 # runs on exhaustion and abandonment (GeneratorExit) alike
                 if owns_transport:
@@ -1124,6 +1141,13 @@ def run_messages(client, messages, model: str, route: str = "anthropic",
             "The Anthropic backend is not configured: set the "
             "ANTHROPIC_API_KEY environment variable, or pass an "
             f"api_key in chat_backend / backend. ({exc})") from exc
+    except Exception as exc:
+        # the cloud routes' request-time credential failures (their
+        # stacks' own types)
+        if route == "anthropic" or not _route_auth_failure(exc):
+            raise
+        raise PageIndexAPIError(
+            f"The Anthropic backend is not configured: {exc}") from exc
     finally:
         # safe here: the params read-back below does no HTTP
         if owns_transport:

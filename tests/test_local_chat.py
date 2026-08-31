@@ -2615,3 +2615,64 @@ def test_messages_names_the_missing_tool_runner(client, monkeypatch):
                         lambda backend=None, route="anthropic": _Runnerless())
     with pytest.raises(PageIndexAPIError, match="tool runner"):
         client.messages("q", model="bedrock/anthropic.claude-sonnet-4-6-v1:0")
+
+
+def _failing_runner_client(monkeypatch, exc):
+    # A transport whose runner dies on first turn — the shape of a
+    # request-time credential failure (auth resolves per request).
+    class _FailingRunner:
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            raise exc
+
+    class _Fake:
+        class beta:
+            class messages:
+                @staticmethod
+                def tool_runner(**kwargs):
+                    return _FailingRunner()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(local_chat, "_anthropic_client",
+                        lambda backend=None, route="anthropic": _Fake())
+
+
+@needs_anthropic
+def test_messages_wraps_route_credential_failures(client, monkeypatch):
+    """Bedrock resolves credentials per request and fails with a bare
+    RuntimeError; Vertex with google.auth's own types. Both must wrap
+    like the direct route's request-time failures."""
+    class _RefreshError(Exception):
+        pass
+
+    _RefreshError.__module__ = "google.auth.exceptions"
+
+    for exc in (RuntimeError("could not resolve credentials from session"),
+                _RefreshError("Reauthentication is needed")):
+        _failing_runner_client(monkeypatch, exc)
+        with pytest.raises(PageIndexAPIError,
+                           match="Anthropic backend is not configured"):
+            client.messages(
+                "q", model="bedrock/anthropic.claude-sonnet-4-6-v1:0")
+        with pytest.raises(PageIndexAPIError,
+                           match="Anthropic backend is not configured"):
+            list(client.messages("q", stream=True,
+                                 model="vertex_ai/claude-sonnet-4-5"))
+
+
+@needs_anthropic
+def test_messages_unrelated_route_errors_still_propagate(client, monkeypatch):
+    # The wrap takes credential failures only — a tool bug mid-run must
+    # not be relabeled "backend is not configured".
+    _failing_runner_client(monkeypatch, RuntimeError("boom"))
+    with pytest.raises(RuntimeError, match="boom"):
+        client.messages("q", model="bedrock/anthropic.claude-sonnet-4-6-v1:0")
+    # And the direct route keeps its canonical handlers untouched.
+    _failing_runner_client(
+        monkeypatch, RuntimeError("could not resolve credentials from session"))
+    with pytest.raises(RuntimeError, match="credentials"):
+        client.messages("q", model="claude-sonnet-4-5")
