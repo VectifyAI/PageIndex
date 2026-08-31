@@ -47,7 +47,8 @@ jobs:
 
   gate:
     needs: tests
-    if: always()
+    # not always(): a cancel-in-progress run must not report a red gate
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - run: test "${{ needs.tests.result }}" = "success"

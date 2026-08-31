@@ -2459,6 +2459,33 @@ def test_messages_no_backend_leak_when_tool_build_fails(bridge_client,
     assert all(fake.closed for fake in made)
 
 
+@needs_anthropic
+def test_messages_no_backend_leak_when_runner_build_fails(client, monkeypatch):
+    """A failure between transport construction and the runner handoff
+    (the runner rejecting a passthrough kwarg, say) must not strand the
+    per-call transport either."""
+    made = []
+
+    class FakeAnthropic:
+        def __init__(self):
+            self.closed = False
+
+            def explode(**kw):
+                raise TypeError("unexpected keyword argument 'thinking'")
+            self.beta = types.SimpleNamespace(
+                messages=types.SimpleNamespace(tool_runner=explode))
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(local_chat, "_anthropic_client",
+                        lambda backend=None, route="anthropic":
+                        made.append(FakeAnthropic()) or made[-1])
+    with pytest.raises(TypeError, match="thinking"):
+        client.messages("q", model="claude-test", max_tokens=100)
+    assert made and all(fake.closed for fake in made)
+
+
 @needs_agents
 def test_bridge_responses_lane_runs_cloud_tools(bridge_client, fake_model):
     """The Responses door on a bridge client: same engine, cloud tools,
@@ -2525,7 +2552,6 @@ def test_anthropic_client_route_picks_the_transport_class(monkeypatch):
     """The model's routing prefix selects the SDK client class — the
     bedrock/vertex ids only mean something to their own transports."""
     monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
-    pytest.importorskip("boto3")
     bedrock = local_chat._anthropic_client(
         {"aws_region": "us-east-1", "aws_access_key": "a",
          "aws_secret_key": "s"}, "bedrock")
@@ -2538,7 +2564,6 @@ def test_anthropic_client_route_picks_the_transport_class(monkeypatch):
 @needs_anthropic
 def test_anthropic_client_vertex_route(monkeypatch):
     monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
-    pytest.importorskip("google.auth")
     vertex = local_chat._anthropic_client(
         {"region": "us-east5", "project_id": "p", "access_token": "t"},
         "vertex_ai")

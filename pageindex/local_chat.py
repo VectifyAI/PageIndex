@@ -1061,29 +1061,34 @@ def run_messages(client, messages, model: str, route: str = "anthropic",
     # reuse; a caller-owned http_client survives regardless.
     owns_transport = ("http_client" not in (merged or {})
                       and backend_client not in _ANTHROPIC_CLIENTS.values())
-    if not hasattr(backend_client.beta.messages, "tool_runner"):
-        # An anthropic build predating this route's tool runner passes
-        # _require_anthropic (its probes are older): name the gap here.
+    try:
+        if not hasattr(backend_client.beta.messages, "tool_runner"):
+            # An anthropic build predating this route's tool runner passes
+            # _require_anthropic (its probes are older): name the gap here.
+            raise PageIndexAPIError(
+                "messages on this route needs the anthropic SDK's tool "
+                "runner, which this anthropic build lacks — "
+                "pip install -U anthropic.")
+        if max_tokens is None:
+            max_tokens = _default_max_tokens(model, thinking)
+        runner = backend_client.beta.messages.tool_runner(
+            max_tokens=max_tokens,
+            messages=prepared,
+            model=model,
+            tools=tools,
+            system=system_blocks,
+            stream=stream,
+            # Bounded like the OpenAI surfaces (their framework default is 10).
+            max_iterations=max_turns if max_turns is not None else 10,
+            **passthrough,
+            **cached,
+        )
+    except BaseException:
+        # A failure before the runner handoff must not strand the transport
+        # the branches below would have closed.
         if owns_transport:
             backend_client.close()
-        raise PageIndexAPIError(
-            "messages on this route needs the anthropic SDK's tool "
-            "runner, which this anthropic build lacks — "
-            "pip install -U anthropic.")
-    if max_tokens is None:
-        max_tokens = _default_max_tokens(model, thinking)
-    runner = backend_client.beta.messages.tool_runner(
-        max_tokens=max_tokens,
-        messages=prepared,
-        model=model,
-        tools=tools,
-        system=system_blocks,
-        stream=stream,
-        # Bounded like the OpenAI surfaces (their framework default is 10).
-        max_iterations=max_turns if max_turns is not None else 10,
-        **passthrough,
-        **cached,
-    )
+        raise
 
     if stream:
         def events() -> Iterator[Any]:
