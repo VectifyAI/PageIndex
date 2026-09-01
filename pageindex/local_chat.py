@@ -236,9 +236,10 @@ def _reported_model(model_name: str) -> str:
 def _litellm_claude_marks(wire: str) -> Optional[dict]:
     """Claude's prompt caching is opt-in per request: on Claude models
     routed through LiteLLM (Anthropic direct, Bedrock, Vertex — each
-    channel live-verified), mark the managed system prefix and the newest
-    message via LiteLLM's injection param so the loop's later turns and a
-    conversation's next calls read them instead of repaying full price.
+    live-verified — and Foundry, same injection), mark the managed system
+    prefix and the newest message via LiteLLM's injection param so the
+    loop's later turns and a conversation's next calls read them instead
+    of repaying full price.
     ``wire`` is the name LiteLLM itself resolves — each lane strips its
     own routing prefixes first, because the lanes normalize differently
     (the chat wire treats bare names as OpenAI shorthand; the Agents SDK
@@ -248,8 +249,9 @@ def _litellm_claude_marks(wire: str) -> Optional[dict]:
         model, provider, _, _ = get_llm_provider(model=wire)
     except Exception:
         return None
-    if provider == "anthropic" or (provider in ("bedrock", "vertex_ai")
-                                   and "claude" in model.lower()):
+    if provider == "anthropic" or (
+            provider in ("bedrock", "vertex_ai", "azure_ai")
+            and "claude" in model.lower()):
         # The stable prefix plus the newest message, so each turn re-reads
         # the turns before it. LiteLLM seeds nothing unprompted, so this
         # pair is the marks' sole source.
@@ -878,33 +880,50 @@ def _require_anthropic() -> None:
         from anthropic.lib.tools import ToolError  # noqa: F401
     except ImportError as exc:
         raise PageIndexAPIError(
-            "messages requires anthropic >= 0.108.0 (the tool "
-            "runner with ToolError) — pip install -U anthropic."
+            "messages requires the anthropic SDK tool runner "
+            "(with ToolError) — pip install -U anthropic."
         ) from exc
 
 
-_ANTHROPIC_CLIENTS: dict = {}  # backend key -> client, kept open for reuse
+_ANTHROPIC_CLIENTS: dict = {}  # (route, backend) key -> client, kept open
+
+# The transport class per routing prefix — the anthropic SDK ships one
+# client per channel, so a row here is what makes a route reachable.
+_ROUTE_CLIENTS = {"anthropic": "Anthropic", "bedrock": "AnthropicBedrock",
+                  "vertex_ai": "AnthropicVertex",
+                  "azure_ai": "AnthropicFoundry"}
 
 
-def _anthropic_client(backend=None):
+def _anthropic_client(backend=None, route="anthropic"):
     """The backend client — the seam tests replace with a fake transport.
-    One client per backend: each construction pays ~45 ms of SSL-context
-    build and a cold connection pool. A backend whose values defeat
-    hashing constructs per call, as before."""
+    ``route`` (declared by the model's prefix) picks the SDK client
+    class. One client per (route, backend): each construction pays
+    ~45 ms of SSL-context build and a cold connection pool. A backend
+    whose values defeat hashing constructs per call, as before."""
     import anthropic
     kwargs = _sdk_backend(backend)
     try:
-        key = tuple(sorted(
+        key = (route, tuple(sorted(
             (k, tuple(sorted(v.items())) if isinstance(v, dict) else v)
-            for k, v in kwargs.items()))
+            for k, v in kwargs.items())))
         hash(key)
     except TypeError:
         key = None
     if key in _ANTHROPIC_CLIENTS:
         return _ANTHROPIC_CLIENTS[key]
+    cls = getattr(anthropic, _ROUTE_CLIENTS[route], None)
+    if cls is None:
+        # A build predating this route's client class: same contract as
+        # the tool-runner probe, one step earlier.
+        raise PageIndexAPIError(
+            f"messages on this route needs the anthropic SDK's "
+            f"{_ROUTE_CLIENTS[route]} client, which this anthropic build "
+            "lacks — pip install -U anthropic.")
     try:
-        client = anthropic.Anthropic(**kwargs)
-    except TypeError as exc:
+        client = cls(**kwargs)
+    except (anthropic.AnthropicError, ValueError, TypeError) as exc:
+        # Vertex/Foundry refuse a missing region or credential right at
+        # construction, each with its own type; same contract for all.
         raise PageIndexAPIError(
             f"The Anthropic backend is not configured: {exc}") from exc
     if key is not None and len(_ANTHROPIC_CLIENTS) < 8:
@@ -988,23 +1007,18 @@ def _default_max_tokens(model: str, thinking=None) -> int:
     """The wire-required per-turn budget when the caller sets none: 8192,
     except the claude-3 generation whose output ceiling is 4096. The wire
     also requires max_tokens > thinking.budget_tokens, so an enabled
-    budget lifts the default above itself — clamped to the model's output
-    ceiling where LiteLLM's capability map knows it."""
+    budget lifts the default above itself. Pure arithmetic on the
+    caller's own inputs — whether the sum fits the model's output ceiling
+    is the API's own ruling (its 400 names both numbers), never a lookup
+    here."""
     budget = (thinking.get("budget_tokens")
               if isinstance(thinking, dict) else None)
     if isinstance(budget, int) and not isinstance(budget, bool):
-        want = budget + 8192
-        try:
-            import litellm
-            ceiling = (litellm.model_cost.get(model)
-                       or {}).get("max_output_tokens")
-        except Exception:
-            ceiling = None
-        return min(want, ceiling) if ceiling else want
+        return budget + 8192
     return 4096 if model.startswith(_CLAUDE_4096_MODELS) else 8192
 
 
-def run_messages(client, messages, model: str,
+def run_messages(client, messages, model: str, route: str = "anthropic",
                  max_tokens: Optional[int] = None,
                  stream: bool = False, doc_id=None, system=None,
                  temperature: Optional[float] = None,
@@ -1047,25 +1061,42 @@ def run_messages(client, messages, model: str,
     # network I/O, and a failure there must not strand the client below.
     tools = build_anthropic_tools(client, doc_ids=scope)
     merged = _merged_backend(client, backend)
-    backend_client = _anthropic_client(merged)
+    backend_client = _anthropic_client(merged, route)
     # Close only a per-call construction: cached clients stay open for
     # reuse; a caller-owned http_client survives regardless.
+    # list(): an atomic snapshot — a bare .values() scan breaks under a
+    # concurrent setdefault.
     owns_transport = ("http_client" not in (merged or {})
-                      and backend_client not in _ANTHROPIC_CLIENTS.values())
-    if max_tokens is None:
-        max_tokens = _default_max_tokens(model, thinking)
-    runner = backend_client.beta.messages.tool_runner(
-        max_tokens=max_tokens,
-        messages=prepared,
-        model=model,
-        tools=tools,
-        system=system_blocks,
-        stream=stream,
-        # Bounded like the OpenAI surfaces (their framework default is 10).
-        max_iterations=max_turns if max_turns is not None else 10,
-        **passthrough,
-        **cached,
-    )
+                      and backend_client
+                      not in list(_ANTHROPIC_CLIENTS.values()))
+    try:
+        if not hasattr(backend_client.beta.messages, "tool_runner"):
+            # An anthropic build predating this route's tool runner passes
+            # _require_anthropic (its probes are older): name the gap here.
+            raise PageIndexAPIError(
+                "messages on this route needs the anthropic SDK's tool "
+                "runner, which this anthropic build lacks — "
+                "pip install -U anthropic.")
+        if max_tokens is None:
+            max_tokens = _default_max_tokens(model, thinking)
+        runner = backend_client.beta.messages.tool_runner(
+            max_tokens=max_tokens,
+            messages=prepared,
+            model=model,
+            tools=tools,
+            system=system_blocks,
+            stream=stream,
+            # Bounded like the OpenAI surfaces (their framework default is 10).
+            max_iterations=max_turns if max_turns is not None else 10,
+            **passthrough,
+            **cached,
+        )
+    except BaseException:
+        # A failure before the runner handoff must not strand the transport
+        # the branches below would have closed.
+        if owns_transport:
+            backend_client.close()
+        raise
 
     if stream:
         def events() -> Iterator[Any]:
@@ -1075,14 +1106,6 @@ def run_messages(client, messages, model: str,
                         yield event
             except anthropic.AnthropicError as exc:
                 raise _model_backend_error(exc, "messages", client) from exc
-            except TypeError as exc:
-                # the SDK's request-time credential-resolution failure
-                if "authentication" not in str(exc).lower():
-                    raise
-                raise PageIndexAPIError(
-                    "The Anthropic backend is not configured: set the "
-                    "ANTHROPIC_API_KEY environment variable, or pass an "
-                    f"api_key in chat_backend / backend. ({exc})") from exc
             finally:
                 # runs on exhaustion and abandonment (GeneratorExit) alike
                 if owns_transport:
@@ -1093,14 +1116,6 @@ def run_messages(client, messages, model: str,
         turns = [turn for turn in runner]
     except anthropic.AnthropicError as exc:
         raise _model_backend_error(exc, "messages", client) from exc
-    except TypeError as exc:
-        # the SDK's request-time credential-resolution failure
-        if "authentication" not in str(exc).lower():
-            raise
-        raise PageIndexAPIError(
-            "The Anthropic backend is not configured: set the "
-            "ANTHROPIC_API_KEY environment variable, or pass an "
-            f"api_key in chat_backend / backend. ({exc})") from exc
     finally:
         # safe here: the params read-back below does no HTTP
         if owns_transport:

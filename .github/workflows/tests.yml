@@ -44,3 +44,13 @@ jobs:
       - if: matrix.pdfium == '4'
         run: pip install "pypdfium2<5"
       - run: python -m pytest -q
+
+  gate:
+    needs: tests
+    # always(), because GitHub counts a SKIPPED required check as
+    # passing: skipping on cancel would green-light a commit with zero
+    # legs run. A cancelled run must go red here, not vanish.
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.tests.result }}" = "success"

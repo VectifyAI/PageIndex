@@ -764,6 +764,74 @@ def test_claude_agent_config_local(client, store_path):
     assert renamed["allowed_tools"] == ["mcp__docs"]
 
 
+def test_claude_agent_config_forwards_a_claude_chat_model(cloud_with_fake_bridge):
+    # chat_model says who answers; the Claude Agent SDK takes Anthropic's
+    # own name, so LiteLLM's routing prefix is stripped.
+    for name in ("anthropic/claude-sonnet-4-6", "claude-sonnet-4-6",
+                 "litellm/anthropic/claude-sonnet-4-6"):
+        cloud = PageIndexCloudClient(api_key="pi-test-key", chat_model=name)
+        assert cloud.claude_agent_config()["model"] == "claude-sonnet-4-6"
+    # Names are sent as written — no model map gates them.
+    for name in ("anthropic/claude-3-5-sonnet-latest",
+                 "claude-3-5-sonnet-latest"):
+        cloud = PageIndexCloudClient(api_key="pi-test-key", chat_model=name)
+        assert cloud.claude_agent_config()["model"] == "claude-3-5-sonnet-latest"
+
+
+def test_claude_agent_config_carries_any_chosen_chat_model(
+        cloud_with_fake_bridge):
+    # A model you set is sent as written — the destination judges the id.
+    for name in ("gpt-4.1", "openrouter/anthropic/claude-sonnet-4-6"):
+        cloud = PageIndexCloudClient(api_key="pi-test-key", chat_model=name)
+        assert cloud.claude_agent_config()["model"] == name
+        # An explicit model may be the SDK's own name (an alias included)...
+        assert cloud.claude_agent_config(model="sonnet")["model"] == "sonnet"
+        # ... or the client's spelling, read exactly like chat_model.
+        for spelling in ("anthropic/claude-sonnet-4-6",
+                         "litellm/anthropic/claude-sonnet-4-6"):
+            assert (cloud.claude_agent_config(model=spelling)["model"]
+                    == "claude-sonnet-4-6")
+    # Explicitly writing the stock value is a choice too: it carries.
+    cloud = PageIndexCloudClient(api_key="pi-test-key", chat_model="gpt-5.6-sol")
+    assert cloud.claude_agent_config()["model"] == "gpt-5.6-sol"
+
+
+def test_claude_agent_config_managed_chat_sets_no_model(cloud_with_fake_bridge):
+    cloud, _ = cloud_with_fake_bridge
+    assert "model" not in cloud.claude_agent_config()
+
+
+def test_claude_agent_config_local_chat_model(store_path):
+    pytest.importorskip("claude_agent_sdk")
+    local = PageIndexLocalClient(storage_path=store_path,
+                                 chat_model="anthropic/claude-sonnet-4-6")
+    assert local.claude_agent_config()["model"] == "claude-sonnet-4-6"
+    assert "model" not in PageIndexLocalClient(
+        storage_path=store_path).claude_agent_config()
+
+
+def test_claude_agent_config_route_prefix_sets_the_channel_switch(
+        cloud_with_fake_bridge):
+    # Claude Code picks its transport from env switches, not a client
+    # class — a routing prefix rides along as that one switch, set to
+    # "1", and nothing else: the rest of the caller's environment is the
+    # caller's, and how the CLI weighs its own switches is the CLI's
+    # business, not this SDK's.
+    cloud, _ = cloud_with_fake_bridge
+    for prefix, switch in (("bedrock", "CLAUDE_CODE_USE_BEDROCK"),
+                           ("vertex_ai", "CLAUDE_CODE_USE_VERTEX"),
+                           ("azure_ai", "CLAUDE_CODE_USE_FOUNDRY")):
+        cloud.chat_model = f"{prefix}/claude-opus-4-6"
+        config = cloud.claude_agent_config()
+        assert config["model"] == "claude-opus-4-6"
+        assert config["env"] == {switch: "1"}
+    # anthropic/ and bare spellings name a model, not a channel: env
+    # stays out, so the same name means the same thing on every surface.
+    for spelling in ("anthropic/claude-opus-4-6", "claude-opus-4-6"):
+        cloud.chat_model = spelling
+        assert "env" not in cloud.claude_agent_config()
+
+
 def test_openai_agent_config_local(client, store_path):
     pytest.importorskip("agents")
     from agents import Agent
@@ -901,6 +969,39 @@ def test_openai_agent_config_cloud_omits_model(cloud_with_fake_bridge):
     assert config["instructions"] == "SERVER GUIDANCE"
     assert [tool.name for tool in config["tools"]] == ["search_documents",
                                                        "get_document"]
+
+
+def test_anthropic_runner_config_accepts_the_litellm_spelling(client):
+    pytest.importorskip("anthropic")
+    config = client.anthropic_runner_config(
+        model="anthropic/claude-3-opus-20240229")
+    assert config["model"] == "claude-3-opus-20240229"
+    assert config["max_tokens"] == 4096   # resolved on the stripped id
+
+
+def test_anthropic_runner_config_carries_a_claude_chat_model(client, store_path):
+    pytest.importorskip("anthropic")
+    local = PageIndexLocalClient(storage_path=store_path,
+                                 chat_model="anthropic/claude-3-opus-20240229")
+    config = local.anthropic_runner_config()
+    assert config["model"] == "claude-3-opus-20240229"
+    assert config["max_tokens"] == 4096
+    # The stock default was never chosen: nothing to send.
+    with pytest.raises(PageIndexAPIError, match="needs a model"):
+        client.anthropic_runner_config()
+
+
+def test_anthropic_runner_config_cleared_chat_model_needs_a_model(store_path):
+    """'' and None both mean "configures nothing": a cleared chat_model
+    must get the crafted refusal, never a {'model': ''} config or a
+    NoneType crash."""
+    pytest.importorskip("anthropic")
+    local = PageIndexLocalClient(storage_path=store_path,
+                                 chat_model="claude-sonnet-4-5")
+    for cleared in ("", None):
+        local.chat_model = cleared
+        with pytest.raises(PageIndexAPIError, match="needs a model"):
+            local.anthropic_runner_config()
 
 
 def test_anthropic_runner_config_shapes(client, store_path):
@@ -2670,3 +2771,93 @@ def test_cloud_tool_list_empty_raises(monkeypatch):
     cloud = PageIndexCloudClient(api_key="pi-test-key")
     with pytest.raises(PageIndexAPIError, match="no tools"):
         cloud.as_openai_tools()
+
+
+def test_claude_wire_reads_only_the_routing_prefix():
+    from pageindex.client import _claude_wire
+    assert _claude_wire("claude-sonnet-4-6", "t()") == (
+        "claude-sonnet-4-6", "anthropic")
+    assert _claude_wire("anthropic/claude-sonnet-4-6", "t()") == (
+        "claude-sonnet-4-6", "anthropic")
+    assert _claude_wire(
+        "bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0", "t()") == (
+        "anthropic.claude-3-5-sonnet-20241022-v2:0", "bedrock")
+    assert _claude_wire(
+        "litellm/bedrock/us.anthropic.claude-sonnet-4-6-v1:0", "t()") == (
+        "us.anthropic.claude-sonnet-4-6-v1:0", "bedrock")
+    assert _claude_wire("vertex_ai/claude-sonnet-4@20250514", "t()") == (
+        "claude-sonnet-4@20250514", "vertex_ai")
+    assert _claude_wire("azure_ai/claude-opus-4-6", "t()") == (
+        "claude-opus-4-6", "azure_ai")
+    # Unknown prefixes and bare names ship verbatim on the direct route.
+    assert _claude_wire("team/claude-prod", "t()") == (
+        "team/claude-prod", "anthropic")
+    assert _claude_wire("sonnet", "t()") == ("sonnet", "anthropic")
+    with pytest.raises(PageIndexAPIError, match="must be a str"):
+        _claude_wire(123, "t()")
+
+
+def test_stock_chat_model_never_impersonates_a_choice(store_path):
+    pytest.importorskip("anthropic")
+    from pageindex import PageIndexClient
+    # Flagged at construction; any spelling that names a model clears it.
+    stock = PageIndexLocalClient(storage_path=store_path)
+    assert stock._chat_model_stock
+    with pytest.raises(PageIndexAPIError, match="needs a model"):
+        stock.anthropic_runner_config()
+    for kwargs in ({"chat_model": "gpt-5.6-sol"}, {"retrieve_model": "gpt-4o"},
+                   {"model": "gpt-4.1-mini"}):
+        assert not PageIndexLocalClient(
+            storage_path=store_path, **kwargs)._chat_model_stock
+    # chat="local" alone names no model; managed chat has none at all.
+    assert PageIndexClient(api_key="pi-test-key",
+                           chat="local")._chat_model_stock
+    assert PageIndexCloudClient(api_key="pi-test-key")._chat_model_stock
+    # Assignment is a choice: the flag follows the write paths.
+    stock.chat_model = "anthropic/claude-opus-4-1"
+    assert not stock._chat_model_stock
+    assert stock.anthropic_runner_config()["model"] == "claude-opus-4-1"
+
+
+def test_config_yaml_chat_model_is_a_choice(store_path, monkeypatch,
+                                            cloud_with_fake_bridge):
+    # config.yaml is the third way to name a chat model; a key set there
+    # must read as chosen, exactly like the constructor spellings.
+    pytest.importorskip("anthropic")
+    import pageindex.utils
+    real = pageindex.utils.ConfigLoader._load_yaml
+
+    def with_chat_model(path):
+        loaded = dict(real(path))
+        loaded["chat_model"] = "anthropic/claude-sonnet-4-6"
+        return loaded
+
+    monkeypatch.setattr(pageindex.utils.ConfigLoader, "_load_yaml",
+                        staticmethod(with_chat_model))
+    local = PageIndexLocalClient(storage_path=store_path)
+    assert not local._chat_model_stock
+    assert local.anthropic_runner_config()["model"] == "claude-sonnet-4-6"
+    cloud = PageIndexCloudClient(api_key="pi-test-key", chat="local")
+    assert not cloud._chat_model_stock
+    assert cloud.claude_agent_config()["model"] == "claude-sonnet-4-6"
+
+    def with_blank_keys(path):
+        loaded = dict(real(path))
+        loaded["chat_model"] = None   # a bare "chat_model:" line
+        loaded["model"] = ""
+        return loaded
+
+    # Blank values mean "absent", exactly like the flat arguments.
+    monkeypatch.setattr(pageindex.utils.ConfigLoader, "_load_yaml",
+                        staticmethod(with_blank_keys))
+    assert PageIndexLocalClient(storage_path=store_path)._chat_model_stock
+
+
+def test_anthropic_runner_config_strips_the_route_prefix(store_path):
+    pytest.importorskip("anthropic")
+    local = PageIndexLocalClient(
+        storage_path=store_path,
+        chat_model="bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0")
+    config = local.anthropic_runner_config()
+    assert config["model"] == "anthropic.claude-3-5-sonnet-20241022-v2:0"
+    assert config["max_tokens"] == 8192
