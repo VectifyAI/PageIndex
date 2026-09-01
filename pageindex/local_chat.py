@@ -803,15 +803,19 @@ class ChatStream:
         """The run as typed event dicts: {"type": "thinking"|"answer",
         "delta": ...}, {"type": "tool_call", "call_id", "name",
         "arguments"}, {"type": "tool_result", "call_id", "name",
-        "output"} — full data, never clipped."""
-        if isinstance(self._events, str):
-            raise PageIndexAPIError(self._events)
-        self._claim("events")
-        if self._it is None:
-            if self._closed:
-                return iter(())
-            self._it = self._events()
-        return self._it
+        "output"} — full data, never clipped. Consuming — not merely
+        reading the attribute — claims the view, so debugger panes and
+        getattr probing stay side-effect free."""
+        def consume():
+            if isinstance(self._events, str):
+                raise PageIndexAPIError(self._events)
+            self._claim("events")
+            if self._it is None:
+                if self._closed:
+                    return
+                self._it = self._events()
+            yield from self._it
+        return consume()
 
     def close(self) -> None:
         """Stop the run: closes the open view, and the stream is dead

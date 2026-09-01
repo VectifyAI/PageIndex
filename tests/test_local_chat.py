@@ -500,6 +500,11 @@ def test_chat_process_weaves_thinking_and_tools(client, store_path,
 def test_chat_process_requires_stream(client):
     with pytest.raises(PageIndexAPIError, match="requires stream=True"):
         client.chat("q", show_process=True)
+    # falsy-but-not-False means ON (the ruled falsy-{} trap); the message
+    # must say how to turn it off, not claim the caller passed True
+    with pytest.raises(PageIndexAPIError,
+                       match="only show_process=False"):
+        client.chat("q", show_process=0)
 
 
 def _cloud_chunk(content=None, meta=None, choices=True):
@@ -689,12 +694,38 @@ def test_chat_stream_supports_next_and_one_view(client, store_path,
     stream = client.chat("q", stream=True)
     assert next(stream) == "The "  # iterator protocol survives the wrapper
     with pytest.raises(PageIndexAPIError, match="one view"):
-        stream.events
+        next(stream.events)
     fake_model([[_msg_item("The answer")]])
     stream = client.chat("q", stream=True)
-    assert stream.events is not None
+    assert next(stream.events)["type"] == "answer"
     with pytest.raises(PageIndexAPIError, match="one view"):
         next(stream)
+
+
+@needs_agents
+def test_chat_stream_events_read_is_inert(client, store_path, fake_model):
+    """Reading .events claims nothing — only consuming does. Debugger
+    panes, hasattr and getattr probing must not poison the text view."""
+    fake_model([[_msg_item("The answer")]])
+    stream = client.chat("q", stream=True)
+    assert hasattr(stream, "events")  # introspection, not consumption
+    stream.events
+    assert "".join(stream) == "The answer"
+
+
+def test_chat_stream_events_refusal_waits_for_consumption(monkeypatch):
+    """On managed, .events read is inert — getattr(stream, 'events',
+    None) must not explode — and the refusal raises on first
+    consumption, leaving the text view usable."""
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kwargs: iter([_cloud_chunk("x")]))
+    stream = cloud.chat("q", stream=True)
+    events = getattr(stream, "events", None)  # the standard probing idiom
+    assert events is not None
+    with pytest.raises(PageIndexAPIError, match="managed chat endpoint"):
+        next(events)
+    assert "".join(stream) == "x"
 
 
 @needs_agents
@@ -774,7 +805,7 @@ def test_chat_stream_managed_cloud(monkeypatch):
                                _cloud_chunk("answer")]))
     assert list(cloud.chat("q", stream=True)) == ["cloud ", "answer"]
     with pytest.raises(PageIndexAPIError, match="managed chat endpoint"):
-        cloud.chat("q", stream=True).events
+        next(cloud.chat("q", stream=True).events)
 
 
 def test_chat_process_config_chokes(client):

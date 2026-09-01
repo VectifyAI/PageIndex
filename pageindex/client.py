@@ -867,8 +867,9 @@ class PageIndexClient:
         if (show_process is not False and show_process is not None
                 and not stream):
             raise PageIndexAPIError(
-                "show_process=True shows the run as it happens and "
-                "requires stream=True.")
+                "show_process shows the run as it happens and requires "
+                "stream=True; only show_process=False (or None) means "
+                f"off — got {show_process!r}.")
         if stream:
             # the default means "on where available"
             resolved = True if show_process is None else show_process
