@@ -837,9 +837,9 @@ class PageIndexClient:
                 model's default behavior applies.
             show_process: Streamed own-model chat — weave the run into
                 the text stream for display: thinking flows as
-                "[thinking] " sections, each tool call as a "[tool] name
-                arguments" line with its clipped result, and the answer
-                unlabeled. **On by default**, weaving what the mode
+                "[thinking] " sections, each tool call as a "[tool_call]
+                name arguments" line with its "[tool_result]" line, and
+                the answer unlabeled. **On by default**, weaving what the mode
                 serves: the in-process agent's full run; on a managed
                 client, the tool calls the endpoint streams (its wire
                 carries no thinking and no tool results). Pass ``False``

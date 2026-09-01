@@ -481,7 +481,7 @@ def test_chat_cloud_unwraps_envelope(monkeypatch):
 def test_chat_process_weaves_thinking_and_tools(client, store_path,
                                                 fake_model):
     """show_process=True keeps the plain text stream but weaves the run in:
-    a "[thinking] " section per thinking burst, a "[tool] name args"
+    a "[thinking] " section per thinking burst, a "[tool_call] name args"
     line per call with its clipped result, and the answer unlabeled."""
     seed_doc(store_path, "pi-a", "report.pdf")
     fake = fake_model([
@@ -491,8 +491,8 @@ def test_chat_process_weaves_thinking_and_tools(client, store_path,
     fake.thinking_pieces = ("Need the ", "report")
     text = "".join(client.chat("What status?", stream=True, show_process=True))
     assert text.startswith("[thinking] Need the report")
-    assert '\n\n[tool] get_document {"doc_name": "report.pdf"}' in text
-    assert "\n  -> get_document: " in text
+    assert '\n\n[tool_call] get_document {"doc_name": "report.pdf"}' in text
+    assert "\n  [tool_result] get_document: " in text
     assert text.endswith("\n\nThe answer")
     assert "[answer]" not in text
 
@@ -557,7 +557,7 @@ def test_chat_process_managed_weaves_what_the_wire_serves(monkeypatch):
     text = "".join(cloud.chat("What status?", stream=True))
     assert seen["stream_metadata"] is True
     assert text == ('Let me check.\n\n'
-                    '[tool] get_document {"doc_name": "report.pdf"}\n\n'
+                    '[tool_call] get_document {"doc_name": "report.pdf"}\n\n'
                     'The answer')
     cloud, _ = _managed_cloud_with_tool_stream(monkeypatch)
     assert "".join(cloud.chat("q", stream=True, show_process=True)) == text
@@ -597,7 +597,7 @@ def test_chat_process_managed_open_block_never_leaks(monkeypatch):
                                              show_process=False))
         assert plain == "The answer"
         woven = "".join(cloud_with(tag).chat("q", stream=True))
-        assert '[tool] get_document {"doc_name": "report.pdf"}' in woven
+        assert '[tool_call] get_document {"doc_name": "report.pdf"}' in woven
 
 
 def test_chat_process_managed_non_string_argument_chunk(monkeypatch):
@@ -612,7 +612,7 @@ def test_chat_process_managed_non_string_argument_chunk(monkeypatch):
         _cloud_chunk("The answer"),
     ]))
     text = "".join(cloud.chat("q", stream=True))
-    assert "[tool] get_document" in text
+    assert "[tool_call] get_document" in text
     assert text.endswith("The answer")
 
 
@@ -632,17 +632,17 @@ def test_chat_process_dict_selects_parts(client, store_path, fake_model):
 
     no_thinking = run({"thinking": False})
     assert "[thinking]" not in no_thinking
-    assert "[tool] get_document" in no_thinking
-    assert "-> get_document: " in no_thinking
+    assert "[tool_call] get_document" in no_thinking
+    assert "[tool_result] get_document: " in no_thinking
 
     no_calls = run({"tool_calls": False})
-    assert "[tool]" not in no_calls
-    assert "\n\n-> get_document: " in no_calls  # results stand alone
+    assert "[tool_call]" not in no_calls
+    assert "\n\n[tool_result] get_document: " in no_calls  # results stand alone
     assert "[thinking] Need the report" in no_calls
 
     calls_only = run({"tool_results": False})
-    assert "[tool] get_document" in calls_only
-    assert "-> " not in calls_only
+    assert "[tool_call] get_document" in calls_only
+    assert "[tool_result]" not in calls_only
 
     assert run({}) == run(True)
 
@@ -656,7 +656,8 @@ def test_chat_process_max_chars_caps_lines(client, store_path, fake_model):
     ])
     text = "".join(client.chat("What status?", stream=True,
                                show_process={"max_chars": 10}))
-    line = next(ln for ln in text.splitlines() if ln.startswith("  -> "))
+    line = next(ln for ln in text.splitlines()
+                if ln.startswith("  [tool_result] "))
     body = line.split(": ", 1)[1]
     assert body[10:].startswith("... (+")
 
@@ -740,7 +741,7 @@ def test_chat_stream_shows_process_by_default(client, store_path,
     fake.thinking_pieces = ("Need the report",)
     text = "".join(client.chat("What status?", stream=True))
     assert "[thinking] Need the report" in text
-    assert "[tool] get_document" in text
+    assert "[tool_call] get_document" in text
     fake = fake_model([
         [_call_item("get_document", {"doc_name": "report.pdf"})],
         [_msg_item("The answer")],
@@ -847,13 +848,13 @@ def test_chat_process_parallel_calls_pair_results(client, store_path,
     ])
     text = "".join(client.chat("What status?", stream=True,
                                show_process=True))
-    assert "\n  -> " not in text  # nothing nests under the wrong call
-    assert '\n\n-> get_document {"doc_name": "report.pdf"}: ' in text
-    assert '\n-> get_document {"doc_name": "other.pdf"}: ' in text
-    assert '\n\n-> get_document {"doc_name": "other.pdf"}' not in text
+    assert "\n  [tool_result] " not in text  # nothing nests under the wrong call
+    assert '\n\n[tool_result] get_document {"doc_name": "report.pdf"}: ' in text
+    assert '\n[tool_result] get_document {"doc_name": "other.pdf"}: ' in text
+    assert '\n\n[tool_result] get_document {"doc_name": "other.pdf"}' not in text
     for doc in ("report.pdf", "other.pdf"):
         line = next(ln for ln in text.splitlines()
-                    if ln.startswith(f'-> get_document {{"doc_name": '
+                    if ln.startswith(f'[tool_result] get_document {{"doc_name": '
                                      f'"{doc}"}}: '))
         assert f'"{doc}"' in line.split("}: ", 1)[1]
 
@@ -2011,7 +2012,7 @@ def test_chat_stream_abandonment_cancels_pending_turn(client, store_path,
 
     fake._client = _Backend()
     stream = client.chat("q", stream=True)
-    assert next(stream).startswith("[tool] get_document")
+    assert next(stream).startswith("[tool_call] get_document")
     stream.close()
     assert len(pumps) == 1
     pumps[0].join(timeout=3.0)
