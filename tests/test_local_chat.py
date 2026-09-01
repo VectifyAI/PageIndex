@@ -563,7 +563,7 @@ def test_chat_process_managed_weaves_what_the_wire_serves(monkeypatch):
     assert "".join(cloud.chat("q", stream=True, show_process=True)) == text
     cloud, _ = _managed_cloud_with_tool_stream(monkeypatch)
     no_calls = "".join(cloud.chat("q", stream=True,
-                                  show_process={"tool_calls": False}))
+                                  show_process={"tool_call": False}))
     assert no_calls == "Let me check.The answer"
 
 
@@ -635,12 +635,12 @@ def test_chat_process_dict_selects_parts(client, store_path, fake_model):
     assert "[tool_call] get_document" in no_thinking
     assert "[tool_result] get_document: " in no_thinking
 
-    no_calls = run({"tool_calls": False})
+    no_calls = run({"tool_call": False})
     assert "[tool_call]" not in no_calls
     assert "\n\n[tool_result] get_document: " in no_calls  # results stand alone
     assert "[thinking] Need the report" in no_calls
 
-    calls_only = run({"tool_results": False})
+    calls_only = run({"tool_result": False})
     assert "[tool_call] get_document" in calls_only
     assert "[tool_result]" not in calls_only
 

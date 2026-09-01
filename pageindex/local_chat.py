@@ -615,8 +615,8 @@ def _clip(text, cap: int = 200) -> str:
     return f"{flat[:cap]}... (+{len(flat) - cap} chars)"
 
 
-_PROCESS_DEFAULTS = {"thinking": True, "tool_calls": True,
-                     "tool_results": True, "max_chars": 200}
+_PROCESS_DEFAULTS = {"thinking": True, "tool_call": True,
+                     "tool_result": True, "max_chars": 200}
 
 
 def _process_options(show_process) -> dict:
@@ -627,16 +627,16 @@ def _process_options(show_process) -> dict:
     if not isinstance(show_process, Mapping):
         raise PageIndexAPIError(
             "show_process must be True, False, or a dict with the keys "
-            "thinking / tool_calls / tool_results (bools) and max_chars "
+            "thinking / tool_call / tool_result (bools) and max_chars "
             "(int).")
     unknown = set(show_process) - set(_PROCESS_DEFAULTS)
     if unknown:
         raise PageIndexAPIError(
             "Unknown show_process keys: "
             f"{', '.join(sorted(map(repr, unknown)))} "
-            "— valid keys: thinking, tool_calls, tool_results, max_chars.")
+            "— valid keys: thinking, tool_call, tool_result, max_chars.")
     options = {**_PROCESS_DEFAULTS, **show_process}
-    for key in ("thinking", "tool_calls", "tool_results"):
+    for key in ("thinking", "tool_call", "tool_result"):
         if not isinstance(options[key], bool):
             raise PageIndexAPIError(f"show_process[{key!r}] must be a bool.")
     cap = options["max_chars"]
@@ -737,7 +737,7 @@ def _weave(events, options) -> Iterator[str]:
                         if section != "thinking" else "")
                 yield head + ev["delta"]
             elif kind == "tool_call":
-                if not options["tool_calls"]:
+                if not options["tool_call"]:
                     continue
                 arguments = ev["arguments"]
                 if not isinstance(arguments, str):
@@ -748,7 +748,7 @@ def _weave(events, options) -> Iterator[str]:
                 line = f"[tool_call] {ev['name']} {clipped}"
                 yield enter("tool") + line.rstrip()
             elif kind == "tool_result":
-                if not options["tool_results"]:
+                if not options["tool_result"]:
                     continue
                 out = _clip(ev["output"], cap)
                 if section == "tool" and ev["call_id"] == last_call:
