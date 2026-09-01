@@ -181,7 +181,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
         except Exception as e:
             if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
                 raise
-            print('************* Retrying *************')
+            logging.warning("Retrying LLM completion")
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
                 time.sleep(1)
@@ -213,7 +213,7 @@ async def llm_acompletion(model, prompt):
         except Exception as e:
             if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
                 raise
-            print('************* Retrying *************')
+            logging.warning("Retrying LLM completion")
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
                 await asyncio.sleep(1)
