@@ -753,7 +753,7 @@ def _weave(events, options) -> Iterator[str]:
                 out = _clip(ev["output"], cap)
                 if section == "tool" and ev["call_id"] == last_call:
                     # directly under its own call line
-                    yield f"\n  [tool_result] {ev['name']}: {out}"
+                    yield f"\n[tool_result] {ev['name']}: {out}"
                 else:
                     # parallel calls, or call lines hidden: standalone,
                     # arguments echoed to say whose result this is
