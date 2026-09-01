@@ -8,7 +8,7 @@ import queue
 import threading
 import time
 import uuid
-from typing import Any, Iterator, Optional, Union
+from typing import Any, Iterator, Mapping, Optional, Union
 
 from .agent_tools import _base_instructions, doc_targeting_block
 from .errors import PageIndexAPIError
@@ -581,6 +581,318 @@ def _responses_usage(raw_responses) -> dict:
             "total_tokens": prompt + completion}
 
 
+def _chat_agent(client, messages, doc_id, model, temperature=None,
+                top_p=None, reasoning_effort=None, extra_body=None,
+                max_tokens=None, backend=None, extra_headers=None,
+                ) -> "tuple[Any, list, str]":
+    """The chat lane's shared prologue: validated history, doc targeting,
+    and the configured agent. Returns (agent, input items, model name)."""
+    system_texts, history = _split_chat_messages(messages)
+    scope = client._local_doc_scope(doc_id)
+    block = _doc_block(client, doc_id, scoped=scope is not None)
+    items = ([{"role": "user", "content": block}] if block else []) + history
+    model_name = model or client.chat_model
+    managed = _managed_instructions(client, system_texts)
+    agent = _openai_agent(client, "chat", model_name, managed,
+                          temperature, top_p, doc_ids=scope,
+                          cache_key=_conversation_cache_key(
+                              model_name, managed, doc_id, history),
+                          reasoning_effort=reasoning_effort,
+                          extra_body=extra_body, max_tokens=max_tokens,
+                          backend=_merged_backend(client, backend),
+                          extra_headers=extra_headers)
+    return agent, items, model_name
+
+
+def _clip(text, cap: int = 200) -> str:
+    """One display line: whitespace flattened, capped for the terminal."""
+    flat = " ".join(str(text).split())
+    if len(flat) <= cap:
+        return flat
+    return f"{flat[:cap]}... (+{len(flat) - cap} chars)"
+
+
+_PROCESS_DEFAULTS = {"thinking": True, "tool_calls": True,
+                     "tool_results": True, "max_chars": 200}
+
+
+def _process_options(show_process) -> dict:
+    """chat(show_process=...) normalized: True (or {}) is all defaults, a
+    mapping overrides per key, anything else chokes loudly."""
+    if show_process is True:
+        return dict(_PROCESS_DEFAULTS)
+    if not isinstance(show_process, Mapping):
+        raise PageIndexAPIError(
+            "show_process must be True, False, or a dict with the keys "
+            "thinking / tool_calls / tool_results (bools) and max_chars "
+            "(int).")
+    unknown = sorted(set(show_process) - set(_PROCESS_DEFAULTS))
+    if unknown:
+        raise PageIndexAPIError(
+            f"Unknown show_process keys: {', '.join(map(repr, unknown))} "
+            "— valid keys: thinking, tool_calls, tool_results, max_chars.")
+    options = {**_PROCESS_DEFAULTS, **show_process}
+    for key in ("thinking", "tool_calls", "tool_results"):
+        if not isinstance(options[key], bool):
+            raise PageIndexAPIError(f"show_process[{key!r}] must be a bool.")
+    cap = options["max_chars"]
+    if not isinstance(cap, int) or isinstance(cap, bool) or cap < 1:
+        raise PageIndexAPIError(
+            "show_process['max_chars'] must be a positive int.")
+    return options
+
+
+async def _chat_events_agen(client, agent, items, run_kwargs):
+    """The chat stream's primitive: the run as typed event dicts —
+    thinking/answer deltas, each tool call (arguments parsed when JSON)
+    and its full result. Both ChatStream views are built on it."""
+    import openai
+    from agents import Runner
+    from agents.exceptions import AgentsException, MaxTurnsExceeded
+    from openai.types.responses import (
+        ResponseReasoningSummaryTextDeltaEvent,
+        ResponseReasoningTextDeltaEvent, ResponseTextDeltaEvent)
+    streamed = Runner.run_streamed(agent, input=items, **run_kwargs)
+    completed = False
+    names = {}  # call_id -> tool name, to label results
+    try:
+        async for event in streamed.stream_events():
+            if event.type == "raw_response_event":
+                data = event.data
+                if isinstance(data, ResponseTextDeltaEvent):
+                    yield {"type": "answer", "delta": data.delta}
+                elif isinstance(data, (
+                        ResponseReasoningTextDeltaEvent,
+                        ResponseReasoningSummaryTextDeltaEvent)):
+                    yield {"type": "thinking", "delta": data.delta}
+            elif event.type == "run_item_stream_event":
+                raw = getattr(event.item, "raw_item", None)
+                if event.name == "tool_called":
+                    name = getattr(raw, "name", None) or "tool"
+                    call_id = getattr(raw, "call_id", None)
+                    if call_id:
+                        names[call_id] = name
+                    arguments = getattr(raw, "arguments", "") or ""
+                    try:
+                        arguments = json.loads(arguments)
+                    except (ValueError, TypeError):
+                        pass
+                    yield {"type": "tool_call", "call_id": call_id,
+                           "name": name, "arguments": arguments}
+                elif event.name == "tool_output":
+                    call_id = (raw.get("call_id") if isinstance(raw, dict)
+                               else getattr(raw, "call_id", None))
+                    yield {"type": "tool_result", "call_id": call_id,
+                           "name": names.get(call_id, "tool"),
+                           "output": event.item.output}
+        completed = True
+    except (MaxTurnsExceeded, AgentsException, openai.OpenAIError) as exc:
+        raise _translate_run_error(exc, None, "chat", client) from exc
+    finally:
+        if not completed and hasattr(streamed, "cancel"):
+            streamed.cancel()  # abandoned/failed: stop the agent task
+        await _aclose_backend(agent)
+
+
+def _weave(events, options) -> Iterator[str]:
+    """Render the typed event stream as display text: a "[thinking] "
+    section per thinking burst, a "[tool] name args" line per call with
+    its clipped result, the answer unlabeled. options=None is the plain
+    answer-only view; closing this generator closes the source."""
+    try:
+        if options is None:
+            for ev in events:
+                if ev["type"] == "answer":
+                    yield ev["delta"]
+            return
+        section = None   # the open flowing section: thinking/answer/tool
+        opened = False   # anything yielded yet (first section takes no gap)
+        cap = options["max_chars"]
+
+        def enter(kind, label: str = "") -> str:
+            nonlocal section, opened
+            gap = "\n\n" if opened else ""
+            opened = True
+            section = kind
+            return gap + label
+
+        for ev in events:
+            kind = ev["type"]
+            if kind == "answer":
+                head = enter("answer") if section != "answer" else ""
+                yield head + ev["delta"]
+            elif kind == "thinking":
+                if not options["thinking"]:
+                    continue
+                head = (enter("thinking", "[thinking] ")
+                        if section != "thinking" else "")
+                yield head + ev["delta"]
+            elif kind == "tool_call":
+                if not options["tool_calls"]:
+                    continue
+                arguments = ev["arguments"]
+                if not isinstance(arguments, str):
+                    arguments = json.dumps(arguments, ensure_ascii=False)
+                line = f"[tool] {ev['name']} {_clip(arguments, cap)}"
+                yield enter("tool") + line.rstrip()
+            elif kind == "tool_result":
+                if not options["tool_results"]:
+                    continue
+                text = f"-> {ev['name']}: {_clip(ev['output'], cap)}"
+                # nested under its call line; its own paragraph when
+                # call lines are hidden
+                yield ("\n  " + text if options["tool_calls"]
+                       else enter("tool") + text)
+    finally:
+        close = getattr(events, "close", None)
+        if close is not None:
+            close()  # cancel the underlying run on abandonment
+
+
+class ChatStream:
+    """chat(stream=True)'s stream: iterate it for the answer text pieces
+    (with show_process, the woven display); read ``.events`` instead for
+    the typed process event dicts. One underlying run — consume exactly
+    one view; call chat() again for the other."""
+
+    def __init__(self, text, events):
+        self._text = text      # () -> Iterator[str]
+        self._events = events  # () -> Iterator[dict], or the refusal text
+        self._view: Optional[str] = None
+        self._it: Any = None
+        self._closed = False
+
+    def _claim(self, view: str) -> None:
+        if self._view is not None and self._view != view:
+            raise PageIndexAPIError(
+                f"This chat stream is being consumed as {self._view}; one "
+                "run serves one view — call chat() again for the other.")
+        self._view = view
+
+    def __iter__(self) -> "ChatStream":
+        return self
+
+    def __next__(self) -> str:
+        self._claim("text")
+        if self._it is None:
+            if self._closed:
+                raise StopIteration
+            self._it = self._text()
+        return next(self._it)
+
+    @property
+    def events(self) -> Iterator[dict]:
+        """The run as typed event dicts: {"type": "thinking"|"answer",
+        "delta": ...}, {"type": "tool_call", "call_id", "name",
+        "arguments"}, {"type": "tool_result", "call_id", "name",
+        "output"} — full data, never clipped."""
+        if isinstance(self._events, str):
+            raise PageIndexAPIError(self._events)
+        self._claim("events")
+        if self._it is None:
+            if self._closed:
+                return iter(())
+            self._it = self._events()
+        return self._it
+
+    def close(self) -> None:
+        """Stop the run: closes the open view, and the stream is dead
+        afterwards, like a closed generator (a run never consumed never
+        starts)."""
+        self._closed = True
+        close = getattr(self._it, "close", None)
+        if close is not None:
+            close()
+
+
+def _cloud_chunk_events(chunks) -> Iterator[dict]:
+    """Typed events from the managed endpoint's chunk stream: answer
+    deltas, and each tool call (name + accumulated arguments) from the
+    block_metadata tags — the endpoint interleaves tool-argument JSON
+    into delta.content, distinguished only by those tags. It streams no
+    thinking and no tool results. Chunks without block_metadata (an
+    older server) are answer text."""
+    tool = None  # [name, argument pieces] while inside a tool_use block
+    try:
+        for chunk in chunks:
+            if not isinstance(chunk, dict):
+                continue
+            meta = chunk.get("block_metadata") or {}
+            kind = meta.get("type")
+            if kind == "mcp_tool_use_start":
+                tool = [meta.get("tool_name") or "tool", []]
+                continue
+            choices = chunk.get("choices") or []
+            delta = (choices[0].get("delta") or {}) if choices else {}
+            content = delta.get("content")
+            if kind == "tool_use":
+                if tool is not None and content:
+                    tool[1].append(content)
+                continue
+            if kind == "tool_use_stop":
+                if tool is not None:
+                    name, pieces = tool
+                    arguments = "".join(pieces)
+                    try:
+                        arguments = json.loads(arguments)
+                    except ValueError:
+                        pass
+                    yield {"type": "tool_call", "call_id": None,
+                           "name": name, "arguments": arguments}
+                    tool = None
+                continue
+            if content:
+                yield {"type": "answer", "delta": content}
+    finally:
+        close = getattr(chunks, "close", None)
+        if close is not None:
+            close()
+
+
+def run_cloud_chat_stream(chunks,
+                          show_process: Union[bool, Mapping[str, Any]] = True,
+                          ) -> ChatStream:
+    """chat(stream=True) on a managed client: the text view weaves what
+    the endpoint serves — tool-call lines from its block_metadata tags
+    (that wire carries no thinking and no tool results); .events needs
+    the in-process agent."""
+    options = (None if show_process is False
+               else _process_options(show_process))
+    return ChatStream(
+        text=lambda: _weave(_cloud_chunk_events(chunks), options),
+        events=("chat events are produced by the in-process agent, "
+                "which the managed chat endpoint does not serve — "
+                "construct the client with chat_model=... (or a chat= "
+                "model) to run the agent in your process."))
+
+
+def run_chat_stream(client, messages, doc_id=None, model=None,
+                    reasoning_effort=None,
+                    show_process: Union[bool, Mapping[str, Any]] = False,
+                    ) -> ChatStream:
+    """chat(stream=True): validation and the agent build run here, eagerly;
+    the run itself starts when the returned stream's chosen view is first
+    consumed."""
+    options = (None if show_process is False or show_process is None
+               else _process_options(show_process))
+    _require_openai_agents("chat")
+    if isinstance(messages, str):
+        if not messages.strip():
+            raise PageIndexAPIError(
+                "messages must be a non-empty string or a list of "
+                "message dicts.")
+        messages = [{"role": "user", "content": messages}]
+    agent, items, _ = _chat_agent(client, messages, doc_id, model,
+                                  reasoning_effort=reasoning_effort)
+    run_kwargs = _run_kwargs(None)
+
+    def events():
+        return _stream_sync(
+            lambda: _chat_events_agen(client, agent, items, run_kwargs))
+
+    return ChatStream(text=lambda: _weave(events(), options), events=events)
+
+
 def run_chat_completions(client, messages, stream: bool = False,
                          doc_id=None, temperature: Optional[float] = None,
                          stream_metadata: bool = False,
@@ -603,21 +915,12 @@ def run_chat_completions(client, messages, stream: bool = False,
                "citations need."))
     _require_openai_agents("chat_completions")
     _validate_max_turns(max_turns)
-    system_texts, history = _split_chat_messages(messages)
-    scope = client._local_doc_scope(doc_id)
-    block = _doc_block(client, doc_id, scoped=scope is not None)
-    items = ([{"role": "user", "content": block}] if block else []) + history
-    model_name = model or client.chat_model
+    agent, items, model_name = _chat_agent(
+        client, messages, doc_id, model, temperature=temperature,
+        top_p=top_p, reasoning_effort=reasoning_effort,
+        extra_body=extra_body, max_tokens=max_tokens, backend=backend,
+        extra_headers=extra_headers)
     reported_model = _reported_model(model_name)
-    managed = _managed_instructions(client, system_texts)
-    agent = _openai_agent(client, "chat", model_name, managed,
-                          temperature, top_p, doc_ids=scope,
-                          cache_key=_conversation_cache_key(
-                              model_name, managed, doc_id, history),
-                          reasoning_effort=reasoning_effort,
-                          extra_body=extra_body, max_tokens=max_tokens,
-                          backend=_merged_backend(client, backend),
-                          extra_headers=extra_headers)
     recorded: dict = {}
     _record_chat_finish(agent, recorded)
     run_kwargs = _run_kwargs(max_turns)

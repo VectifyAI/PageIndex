@@ -6,9 +6,13 @@ import re
 import threading
 import time
 import warnings
-from typing import Any, Callable, Iterator, Mapping, Optional, Union, cast
+from typing import (TYPE_CHECKING, Any, Callable, Iterator, Mapping,
+                    Optional, Union, cast)
 
 from .errors import PageIndexAPIError
+
+if TYPE_CHECKING:
+    from .local_chat import ChatStream
 
 
 _litellm_preload_started = False
@@ -756,16 +760,19 @@ class PageIndexClient:
         stream: bool = False,
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
-    ) -> Union[str, Iterator[str]]:
+        show_process: Union[bool, Mapping[str, Any], None] = None,
+    ) -> Union[str, "ChatStream"]:
         """
         Ask a question about your documents, get the answer.
 
-        Thin sugar over ``chat_completions()`` in every mode — same
-        engine, same wire, minus the envelope. Multi-turn: keep your own
-        role/content list of the visible conversation (append each answer
-        as an assistant message) and pass it back. For usage accounting,
-        streaming metadata, or the tool-use process, use the protocol
-        surfaces: ``chat_completions()``, ``responses()``, ``messages()``.
+        Thin sugar over the same engine as ``chat_completions()`` in
+        every mode — same wire, minus the envelope. Multi-turn: keep your
+        own role/content list of the visible conversation (append each
+        answer as an assistant message; join a stream into one only with
+        ``show_process=False``) and pass it back. For usage
+        accounting, streaming metadata, or the full protocol transcripts,
+        use the protocol surfaces: ``chat_completions()``,
+        ``responses()``, ``messages()``.
 
         Args:
             messages: A question string, or role/content conversation
@@ -775,23 +782,75 @@ class PageIndexClient:
                 documents: also enforced at the tool layer, not just
                 prompted. Cloud documents: the managed chat scopes
                 server-side; own-model chat targets at the prompt level.
-            stream: Yield the answer as text chunks as it is produced.
+            stream: Return a ``ChatStream``: iterate it for the answer
+                as text chunks as they are produced, or read its
+                ``.events`` property instead for the run as typed event
+                dicts — thinking/answer deltas, each tool call and its
+                full result (own-model chat only; never clipped). One
+                run serves one view.
             model: Own-model chat only — backend model name (defaults
                 to ``chat_model``).
             reasoning_effort: Own-model chat only — how hard the model
                 thinks (``"low"`` / ``"medium"`` / ``"high"``; what a
                 backend accepts is its own). Unset sends nothing — the
                 model's default behavior applies.
+            show_process: Streamed own-model chat — weave the run into
+                the text stream for display: thinking flows as
+                "[thinking] " sections, each tool call as a "[tool] name
+                arguments" line with its clipped result, and the answer
+                unlabeled. **On by default**, weaving what the mode
+                serves: the in-process agent's full run; on a managed
+                client, the tool calls the endpoint streams (its wire
+                carries no thinking and no tool results). Pass ``False``
+                for the bare answer stream — do that before appending a
+                streamed answer to the conversation history.
+                ``True`` shows everything; a dict (typed as
+                ``pageindex.ChatProcessOptions``) selects the parts —
+                ``thinking`` / ``tool_calls`` / ``tool_results``, bools
+                defaulting on — and sets ``max_chars``, the per-line
+                summary cap in characters (default 200). Omitted keys
+                keep their defaults, so ``{"thinking": False}`` hides
+                only thinking and ``{}`` equals ``True``.
+                Thinking appears when the backend streams it
+                (e.g. Claude models with ``reasoning_effort``; OpenAI
+                models expose none on the chat protocol). The labels are
+                not a parse format, and a process stream must not be
+                appended back as conversation history — for the
+                machine-readable process use ``.events``, ``responses()``
+                or ``messages()``.
 
         Returns:
             - stream=False: the answer string
-            - stream=True: iterator of text chunks
+            - stream=True: a ``ChatStream`` — iterating it yields text
+              chunks (with show_process, the run's process woven in as
+              labeled sections); ``.events`` yields typed event dicts:
+              ``{"type": "thinking"|"answer", "delta": ...}``,
+              ``{"type": "tool_call", "call_id", "name", "arguments"}``,
+              ``{"type": "tool_result", "call_id", "name", "output"}``
         """
-        result = self.chat_completions(messages, stream=stream,
-                                       doc_id=doc_id, model=model,
-                                       reasoning_effort=reasoning_effort)
+        if (show_process is not False and show_process is not None
+                and not stream):
+            raise PageIndexAPIError(
+                "show_process=True shows the run as it happens and "
+                "requires stream=True.")
         if stream:
-            return cast(Iterator[str], result)
+            # the default means "on where available"
+            resolved = True if show_process is None else show_process
+            if self._local_chat:
+                from .local_chat import run_chat_stream
+                return run_chat_stream(self, messages, doc_id=doc_id,
+                                       model=model,
+                                       reasoning_effort=reasoning_effort,
+                                       show_process=resolved)
+            chunks = self.chat_completions(messages, stream=True,
+                                           stream_metadata=True,
+                                           doc_id=doc_id, model=model,
+                                           reasoning_effort=reasoning_effort)
+            from .local_chat import run_cloud_chat_stream
+            return run_cloud_chat_stream(
+                cast(Iterator[dict[str, Any]], chunks), resolved)
+        result = self.chat_completions(messages, doc_id=doc_id, model=model,
+                                       reasoning_effort=reasoning_effort)
         envelope = cast(dict[str, Any], result)
         try:
             return envelope["choices"][0]["message"]["content"] or ""

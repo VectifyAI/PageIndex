@@ -129,6 +129,13 @@ class FakeModel(Model):
         self._record(system_instructions, input)
         output = self.turns.pop(0)
         sequence = 0
+        for piece in getattr(self, "thinking_pieces", ()):
+            from openai.types.responses import ResponseReasoningTextDeltaEvent
+            sequence += 1
+            yield ResponseReasoningTextDeltaEvent(
+                type="response.reasoning_text.delta", delta=piece,
+                content_index=0, item_id="rs_1", output_index=0,
+                sequence_number=sequence)
         if getattr(self, "emit_created", False):
             from openai.types.responses import ResponseCreatedEvent
             sequence += 1
@@ -457,6 +464,289 @@ def test_chat_cloud_unwraps_envelope(monkeypatch):
 
     monkeypatch.setattr(cloud._api, "chat_completions", fake_cc)
     assert cloud.chat("q") == "cloud answer"
+
+
+@needs_agents
+def test_chat_process_weaves_thinking_and_tools(client, store_path,
+                                                fake_model):
+    """show_process=True keeps the plain text stream but weaves the run in:
+    a "[thinking] " section per thinking burst, a "[tool] name args"
+    line per call with its clipped result, and the answer unlabeled."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    fake.thinking_pieces = ("Need the ", "report")
+    text = "".join(client.chat("What status?", stream=True, show_process=True))
+    assert text.startswith("[thinking] Need the report")
+    assert '\n\n[tool] get_document {"doc_name": "report.pdf"}' in text
+    assert "\n  -> get_document: " in text
+    assert text.endswith("\n\nThe answer")
+    assert "[answer]" not in text
+
+
+def test_chat_process_requires_stream(client):
+    with pytest.raises(PageIndexAPIError, match="requires stream=True"):
+        client.chat("q", show_process=True)
+
+
+def _cloud_chunk(content=None, meta=None, choices=True):
+    chunk = {"id": "chatcmpl-x", "object": "chat.completion.chunk"}
+    if choices:
+        delta = {"content": content} if content is not None else {}
+        chunk["choices"] = [{"index": 0, "delta": delta,
+                             "finish_reason": None}]
+    if meta:
+        chunk["block_metadata"] = meta
+    return chunk
+
+
+def _managed_cloud_with_tool_stream(monkeypatch):
+    """A cloud client whose managed stream serves the live wire shape:
+    block_metadata-tagged text, a tool call, and untagged tail chunks."""
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    seen = {}
+
+    def fake_cc(**kwargs):
+        seen.update(kwargs)
+        return iter([
+            _cloud_chunk("", {"type": "text_block_start", "block_index": 1}),
+            _cloud_chunk("Let me check.", {"type": "text", "block_index": 1}),
+            _cloud_chunk(None, {"type": "text_stop", "block_index": 1}),
+            _cloud_chunk(None, {"type": "mcp_tool_use_start",
+                                "block_index": 2,
+                                "tool_name": "get_document",
+                                "server_name": "pageindex"}),
+            _cloud_chunk('{"doc_name": ', {"type": "tool_use",
+                                           "block_index": 2}),
+            _cloud_chunk('"report.pdf"}', {"type": "tool_use",
+                                           "block_index": 2}),
+            _cloud_chunk(None, {"type": "tool_use_stop", "block_index": 2}),
+            _cloud_chunk("", {"type": "text_block_start", "block_index": 3}),
+            _cloud_chunk("The answer", {"type": "text", "block_index": 3}),
+            _cloud_chunk(None, {"type": "text_stop", "block_index": 3}),
+            _cloud_chunk(None),                    # finish_reason chunk
+            _cloud_chunk(choices=False),           # usage chunk
+        ])
+
+    monkeypatch.setattr(cloud._api, "chat_completions", fake_cc)
+    return cloud, seen
+
+
+def test_chat_process_managed_weaves_what_the_wire_serves(monkeypatch):
+    """Managed streams weave the endpoint's block_metadata: tool-call
+    lines with name + accumulated arguments; no thinking, no results."""
+    cloud, seen = _managed_cloud_with_tool_stream(monkeypatch)
+    text = "".join(cloud.chat("What status?", stream=True))
+    assert seen["stream_metadata"] is True
+    assert text == ('Let me check.\n\n'
+                    '[tool] get_document {"doc_name": "report.pdf"}\n\n'
+                    'The answer')
+    cloud, _ = _managed_cloud_with_tool_stream(monkeypatch)
+    assert "".join(cloud.chat("q", stream=True, show_process=True)) == text
+    cloud, _ = _managed_cloud_with_tool_stream(monkeypatch)
+    no_calls = "".join(cloud.chat("q", stream=True,
+                                  show_process={"tool_calls": False}))
+    assert no_calls == "Let me check.The answer"
+
+
+def test_chat_process_managed_off_is_clean_answer(monkeypatch):
+    """show_process=False on managed: answer text only — the tool-call
+    JSON the wire interleaves into delta.content must not leak in."""
+    cloud, _ = _managed_cloud_with_tool_stream(monkeypatch)
+    plain = "".join(cloud.chat("q", stream=True, show_process=False))
+    assert plain == "Let me check.The answer"
+    assert "doc_name" not in plain
+
+
+@needs_agents
+def test_chat_process_dict_selects_parts(client, store_path, fake_model):
+    """Each key hides exactly its own line kind; omitted keys default on,
+    and {} means all defaults, not "off" (the falsy-dict trap)."""
+    def run(process):
+        seed_doc(store_path, "pi-a", "report.pdf")
+        fake = fake_model([
+            [_call_item("get_document", {"doc_name": "report.pdf"})],
+            [_msg_item("The answer")],
+        ])
+        fake.thinking_pieces = ("Need the report",)
+        return "".join(client.chat("What status?", stream=True,
+                                   show_process=process))
+
+    no_thinking = run({"thinking": False})
+    assert "[thinking]" not in no_thinking
+    assert "[tool] get_document" in no_thinking
+    assert "-> get_document: " in no_thinking
+
+    no_calls = run({"tool_calls": False})
+    assert "[tool]" not in no_calls
+    assert "\n\n-> get_document: " in no_calls  # results stand alone
+    assert "[thinking] Need the report" in no_calls
+
+    calls_only = run({"tool_results": False})
+    assert "[tool] get_document" in calls_only
+    assert "-> " not in calls_only
+
+    assert run({}) == run(True)
+
+
+@needs_agents
+def test_chat_process_max_chars_caps_lines(client, store_path, fake_model):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    text = "".join(client.chat("What status?", stream=True,
+                               show_process={"max_chars": 10}))
+    line = next(ln for ln in text.splitlines() if ln.startswith("  -> "))
+    body = line.split(": ", 1)[1]
+    assert body[10:].startswith("... (+")
+
+
+@needs_agents
+def test_chat_stream_events_typed_sequence(client, store_path, fake_model):
+    """.events is the typed view: full data, parsed arguments, no clip."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    fake.thinking_pieces = ("Need the report",)
+    events = list(client.chat("What status?", stream=True).events)
+    kinds = [ev["type"] for ev in events]
+    assert kinds == ["thinking", "tool_call", "tool_result",
+                     "thinking", "answer", "answer"]
+    call = events[1]
+    assert call["name"] == "get_document"
+    assert call["arguments"] == {"doc_name": "report.pdf"}  # parsed
+    assert call["call_id"] == "call_1"
+    result = events[2]
+    assert result["name"] == "get_document"
+    assert result["call_id"] == "call_1"
+    assert "... (+" not in str(result["output"])  # never clipped
+    assert '"next_steps"' in result["output"]
+    assert "".join(ev["delta"] for ev in events
+                   if ev["type"] == "answer") == "The answer"
+
+
+@needs_agents
+def test_chat_stream_supports_next_and_one_view(client, store_path,
+                                                fake_model):
+    fake_model([[_msg_item("The answer")]])
+    stream = client.chat("q", stream=True)
+    assert next(stream) == "The "  # iterator protocol survives the wrapper
+    with pytest.raises(PageIndexAPIError, match="one view"):
+        stream.events
+    fake_model([[_msg_item("The answer")]])
+    stream = client.chat("q", stream=True)
+    assert stream.events is not None
+    with pytest.raises(PageIndexAPIError, match="one view"):
+        next(stream)
+
+
+@needs_agents
+def test_chat_stream_shows_process_by_default(client, store_path,
+                                              fake_model):
+    """The text view weaves the process unless show_process=False."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    fake.thinking_pieces = ("Need the report",)
+    text = "".join(client.chat("What status?", stream=True))
+    assert "[thinking] Need the report" in text
+    assert "[tool] get_document" in text
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    fake.thinking_pieces = ("Need the report",)
+    plain = "".join(client.chat("What status?", stream=True,
+                                show_process=False))
+    assert plain == "The answer"
+
+
+def test_weave_close_closes_source():
+    closed = {}
+
+    def source():
+        try:
+            yield {"type": "answer", "delta": "a"}
+            yield {"type": "answer", "delta": "b"}
+        finally:
+            closed["yes"] = True
+
+    woven = local_chat._weave(source(), None)
+    assert next(woven) == "a"
+    woven.close()
+    assert closed.get("yes") is True
+
+
+@needs_agents
+def test_chat_stream_close_stops_the_run(client, store_path, fake_model):
+    fake_model([[_msg_item("The answer")]])
+    stream = client.chat("q", stream=True)
+    assert next(stream) == "The "
+    stream.close()
+    with pytest.raises(StopIteration):
+        next(stream)
+
+
+@needs_agents
+def test_chat_stream_closed_before_consumption_stays_dead(client, store_path,
+                                                          fake_model):
+    """close() on an unconsumed stream: the run must never start — a
+    later next() is StopIteration, .events is empty, the model untouched."""
+    fake = fake_model([[_msg_item("The answer")]])
+    stream = client.chat("q", stream=True)
+    stream.close()
+    with pytest.raises(StopIteration):
+        next(stream)
+    assert fake.inputs == []
+    fake = fake_model([[_msg_item("The answer")]])
+    stream = client.chat("q", stream=True)
+    stream.close()
+    assert list(stream.events) == []
+    assert fake.inputs == []
+
+
+def test_chat_stream_managed_cloud(monkeypatch):
+    """Old-wire chunks (no block_metadata) are answer text under any
+    show_process; .events needs the in-process agent."""
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    monkeypatch.setattr(
+        cloud._api, "chat_completions",
+        lambda **kwargs: iter([_cloud_chunk("cloud "),
+                               _cloud_chunk("answer")]))
+    assert list(cloud.chat("q", stream=True)) == ["cloud ", "answer"]
+    with pytest.raises(PageIndexAPIError, match="managed chat endpoint"):
+        cloud.chat("q", stream=True).events
+
+
+def test_chat_process_config_chokes(client):
+    for bad, match in [
+        ({"thinkng": False}, "Unknown show_process key"),
+        ("thinking", "show_process must be True, False, or a dict"),
+        ({"max_chars": True}, "positive int"),
+        ({"max_chars": 0}, "positive int"),
+        ({"thinking": 1}, "must be a bool"),
+    ]:
+        with pytest.raises(PageIndexAPIError, match=match):
+            client.chat("q", stream=True, show_process=bad)
+
+
+def test_chat_process_blank_chat_model_refuses(client):
+    client.chat_model = None
+    with pytest.raises(PageIndexAPIError, match="chat_model is empty"):
+        client.chat("q", stream=True, show_process=True)
+
+
+def test_clip_flattens_and_caps():
+    assert local_chat._clip("a\n  b\tc") == "a b c"
+    assert local_chat._clip("x" * 250) == "x" * 200 + "... (+50 chars)"
 
 
 # ── responses ──

@@ -3,11 +3,12 @@ from typing import TYPE_CHECKING as _TYPE_CHECKING
 
 from .client import PageIndexClient, PageIndexCloudClient, PageIndexLocalClient
 from .errors import PageIndexAPIError
-from .types import (ChatConfig, CloudIndexConfig, IndexConfig,
-                    LocalIndexConfig)
+from .types import (ChatConfig, ChatProcessOptions, CloudIndexConfig,
+                    IndexConfig, LocalIndexConfig)
 
 if _TYPE_CHECKING:
     from .flash import page_index_flash
+    from .local_chat import ChatStream
     from .page_index_classic import page_index, page_index_main
     from .page_index_md import md_to_tree
     from .tree_optimize import optimize_tree
@@ -16,11 +17,13 @@ __all__ = [
     "PageIndexClient", "PageIndexCloudClient", "PageIndexLocalClient",
     "PageIndexAPIError",
     "IndexConfig", "CloudIndexConfig", "LocalIndexConfig", "ChatConfig",
+    "ChatProcessOptions", "ChatStream",
     "page_index", "page_index_main", "page_index_flash",
     "optimize_tree", "md_to_tree",
 ]
 
 _LAZY = {
+    "ChatStream": ".local_chat",
     "page_index_flash": ".flash",
     "optimize_tree": ".tree_optimize",
     "md_to_tree": ".page_index_md",

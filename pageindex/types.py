@@ -46,4 +46,14 @@ class ChatConfig(TypedDict, total=False):
     backend: dict
 
 
+class ChatProcessOptions(TypedDict, total=False):
+    """``chat(show_process=...)``'s display config. Omitted keys default
+    on (``max_chars``: 200); ``show_process=True`` is all defaults."""
+
+    thinking: bool
+    tool_calls: bool
+    tool_results: bool
+    max_chars: int
+
+
 IndexConfig = Union[CloudIndexConfig, LocalIndexConfig]
