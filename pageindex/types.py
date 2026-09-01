@@ -51,8 +51,8 @@ class ChatProcessOptions(TypedDict, total=False):
     on (``max_chars``: 200); ``show_process=True`` is all defaults."""
 
     thinking: bool
-    tool_calls: bool
-    tool_results: bool
+    tool_call: bool
+    tool_result: bool
     max_chars: int
 
 

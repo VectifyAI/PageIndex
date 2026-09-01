@@ -842,7 +842,7 @@ class PageIndexClient:
                 streamed answer to the conversation history.
                 ``True`` shows everything; a dict (typed as
                 ``pageindex.ChatProcessOptions``) selects the parts —
-                ``thinking`` / ``tool_calls`` / ``tool_results``, bools
+                ``thinking`` / ``tool_call`` / ``tool_result``, bools
                 defaulting on — and sets ``max_chars``, the per-line
                 summary cap in characters (default 200). Omitted keys
                 keep their defaults, so ``{"thinking": False}`` hides
