@@ -492,7 +492,7 @@ def test_chat_process_weaves_thinking_and_tools(client, store_path,
     text = "".join(client.chat("What status?", stream=True, show_process=True))
     assert text.startswith("[thinking] Need the report")
     assert '\n\n[tool_call] get_document {"doc_name": "report.pdf"}' in text
-    assert "\n  [tool_result] get_document: " in text
+    assert '"report.pdf"}\n[tool_result] get_document: ' in text
     assert text.endswith("\n\nThe answer")
     assert "[answer]" not in text
 
@@ -657,7 +657,7 @@ def test_chat_process_max_chars_caps_lines(client, store_path, fake_model):
     text = "".join(client.chat("What status?", stream=True,
                                show_process={"max_chars": 10}))
     line = next(ln for ln in text.splitlines()
-                if ln.startswith("  [tool_result] "))
+                if ln.startswith("[tool_result] "))
     body = line.split(": ", 1)[1]
     assert body[10:].startswith("... (+")
 
@@ -848,7 +848,9 @@ def test_chat_process_parallel_calls_pair_results(client, store_path,
     ])
     text = "".join(client.chat("What status?", stream=True,
                                show_process=True))
-    assert "\n  [tool_result] " not in text  # nothing nests under the wrong call
+    # no result rides directly under a call that is not its own — the
+    # bare paired form is absent, every result echoes its arguments
+    assert "\n[tool_result] get_document: " not in text
     assert '\n\n[tool_result] get_document {"doc_name": "report.pdf"}: ' in text
     assert '\n[tool_result] get_document {"doc_name": "other.pdf"}: ' in text
     assert '\n\n[tool_result] get_document {"doc_name": "other.pdf"}' not in text
