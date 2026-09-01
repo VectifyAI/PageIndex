@@ -933,44 +933,6 @@ def _anthropic_client(backend=None, route="anthropic"):
     return client
 
 
-def _route_auth_failure(exc: BaseException) -> bool:
-    # Bedrock raises a bare RuntimeError when boto3 resolves no
-    # credentials; anything from the botocore / google.auth stacks is
-    # the route's credential machinery, not ours.
-    if isinstance(exc, RuntimeError):
-        return "credential" in str(exc).lower()
-    return type(exc).__module__.startswith(("botocore", "google.auth"))
-
-
-_ROUTE_EXTRAS = {"bedrock": ("anthropic[bedrock]", ("boto3", "botocore")),
-                 "vertex_ai": ("anthropic[vertex]", ("google",))}
-
-
-def _missing_route_extra(exc: ModuleNotFoundError,
-                         route: str) -> Optional[str]:
-    """pageindex[anthropic] carries the anthropic SDK alone; bedrock and
-    vertex import their own auth stacks per request. Name the extra that
-    installs the whole stack, not just the module that failed first."""
-    extra, roots = _ROUTE_EXTRAS.get(route, ("", ()))
-    if (exc.name or "").partition(".")[0] in roots:
-        return (f"The {route} route needs {exc.name} — pip install "
-                f"'{extra}' (the anthropic SDK's own extra). ({exc})")
-    return None
-
-
-def _not_configured(exc: BaseException, route: str) -> PageIndexAPIError:
-    # The api_key advice belongs to the direct route alone: the cloud
-    # routes' clients take their own credentials (AnthropicVertex has no
-    # api_key parameter at all).
-    if route != "anthropic":
-        return PageIndexAPIError(
-            f"The Anthropic backend is not configured: {exc}")
-    return PageIndexAPIError(
-        "The Anthropic backend is not configured: set the "
-        "ANTHROPIC_API_KEY environment variable, or pass an "
-        f"api_key in chat_backend / backend. ({exc})")
-
-
 def _anthropic_system(client, extra_system, block: Optional[str]) -> list[dict]:
     """System blocks: cache_control marks the stable managed prefix only
     (the API allows 4 breakpoints total — the varying doc block and caller
@@ -1041,28 +1003,18 @@ _CLAUDE_4096_MODELS = ("claude-3-opus", "claude-3-sonnet", "claude-3-haiku",
                        "claude-3-5-sonnet-20240620")
 
 
-def _default_max_tokens(model: str, thinking=None,
-                        route: str = "anthropic") -> int:
+def _default_max_tokens(model: str, thinking=None) -> int:
     """The wire-required per-turn budget when the caller sets none: 8192,
     except the claude-3 generation whose output ceiling is 4096. The wire
     also requires max_tokens > thinking.budget_tokens, so an enabled
-    budget lifts the default above itself — clamped to the model's output
-    ceiling where LiteLLM's capability map knows it, looked up in the
-    route's own spelling (each channel publishes its own ids and
-    ceilings; the stripped wire id misses them)."""
+    budget lifts the default above itself. Pure arithmetic on the
+    caller's own inputs — whether the sum fits the model's output ceiling
+    is the API's own ruling (its 400 names both numbers), never a lookup
+    here."""
     budget = (thinking.get("budget_tokens")
               if isinstance(thinking, dict) else None)
     if isinstance(budget, int) and not isinstance(budget, bool):
-        want = budget + 8192
-        try:
-            import litellm
-            wire = model if route == "anthropic" else f"{route}/{model}"
-            # get_model_info, not model_cost: it alone normalizes the
-            # bedrock region-namespaced ids.
-            ceiling = litellm.get_model_info(wire).get("max_output_tokens")
-        except Exception:
-            ceiling = None
-        return min(want, ceiling) if ceiling else want
+        return budget + 8192
     return 4096 if model.startswith(_CLAUDE_4096_MODELS) else 8192
 
 
@@ -1126,7 +1078,7 @@ def run_messages(client, messages, model: str, route: str = "anthropic",
                 "runner, which this anthropic build lacks — "
                 "pip install -U anthropic.")
         if max_tokens is None:
-            max_tokens = _default_max_tokens(model, thinking, route)
+            max_tokens = _default_max_tokens(model, thinking)
         runner = backend_client.beta.messages.tool_runner(
             max_tokens=max_tokens,
             messages=prepared,
@@ -1154,22 +1106,6 @@ def run_messages(client, messages, model: str, route: str = "anthropic",
                         yield event
             except anthropic.AnthropicError as exc:
                 raise _model_backend_error(exc, "messages", client) from exc
-            except TypeError as exc:
-                # the SDK's request-time credential-resolution failure
-                if "authentication" not in str(exc).lower():
-                    raise
-                raise _not_configured(exc, route) from exc
-            except ModuleNotFoundError as exc:
-                hint = _missing_route_extra(exc, route)
-                if hint is None:
-                    raise
-                raise PageIndexAPIError(hint) from exc
-            except Exception as exc:
-                # the cloud routes' request-time credential failures
-                # (their stacks' own types)
-                if route == "anthropic" or not _route_auth_failure(exc):
-                    raise
-                raise _not_configured(exc, route) from exc
             finally:
                 # runs on exhaustion and abandonment (GeneratorExit) alike
                 if owns_transport:
@@ -1180,22 +1116,6 @@ def run_messages(client, messages, model: str, route: str = "anthropic",
         turns = [turn for turn in runner]
     except anthropic.AnthropicError as exc:
         raise _model_backend_error(exc, "messages", client) from exc
-    except TypeError as exc:
-        # the SDK's request-time credential-resolution failure
-        if "authentication" not in str(exc).lower():
-            raise
-        raise _not_configured(exc, route) from exc
-    except ModuleNotFoundError as exc:
-        hint = _missing_route_extra(exc, route)
-        if hint is None:
-            raise
-        raise PageIndexAPIError(hint) from exc
-    except Exception as exc:
-        # the cloud routes' request-time credential failures (their
-        # stacks' own types)
-        if route == "anthropic" or not _route_auth_failure(exc):
-            raise
-        raise _not_configured(exc, route) from exc
     finally:
         # safe here: the params read-back below does no HTTP
         if owns_transport:

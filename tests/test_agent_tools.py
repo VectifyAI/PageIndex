@@ -813,33 +813,23 @@ def test_claude_agent_config_local_chat_model(store_path):
 def test_claude_agent_config_route_prefix_sets_the_channel_switch(
         cloud_with_fake_bridge):
     # Claude Code picks its transport from env switches, not a client
-    # class — so here the routing prefix rides along as that switch. The
-    # SDK merges env OVER the inherited environment and the CLI reads any
-    # set switch by fixed precedence, so the other switches ride blank
-    # ("" is off to the CLI) — an exported CLAUDE_CODE_USE_* must not
-    # override a written prefix.
+    # class — a routing prefix rides along as that one switch, set to
+    # "1", and nothing else: the rest of the caller's environment is the
+    # caller's, and how the CLI weighs its own switches is the CLI's
+    # business, not this SDK's.
     cloud, _ = cloud_with_fake_bridge
-    switches = {"CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
-                "CLAUDE_CODE_USE_FOUNDRY"}
     for prefix, switch in (("bedrock", "CLAUDE_CODE_USE_BEDROCK"),
                            ("vertex_ai", "CLAUDE_CODE_USE_VERTEX"),
                            ("azure_ai", "CLAUDE_CODE_USE_FOUNDRY")):
         cloud.chat_model = f"{prefix}/claude-opus-4-6"
         config = cloud.claude_agent_config()
         assert config["model"] == "claude-opus-4-6"
-        assert set(config["env"]) == switches
-        assert config["env"][switch] == "1"
-        assert all(value == "" for key, value in config["env"].items()
-                   if key != switch)
-    # An explicit anthropic/ prefix forces first-party the same way:
-    # every switch blanked, so an inherited one cannot re-route it.
-    cloud.chat_model = "anthropic/claude-opus-4-6"
-    config = cloud.claude_agent_config()
-    assert config["env"] == dict.fromkeys(switches, "")
-    # A bare name names a model, not a channel: env stays untouched so
-    # the user's own Claude Code environment keeps choosing.
-    cloud.chat_model = "claude-opus-4-6"
-    assert "env" not in cloud.claude_agent_config()
+        assert config["env"] == {switch: "1"}
+    # anthropic/ and bare spellings name a model, not a channel: env
+    # stays out, so the same name means the same thing on every surface.
+    for spelling in ("anthropic/claude-opus-4-6", "claude-opus-4-6"):
+        cloud.chat_model = spelling
+        assert "env" not in cloud.claude_agent_config()
 
 
 def test_openai_agent_config_local(client, store_path):
@@ -999,6 +989,19 @@ def test_anthropic_runner_config_carries_a_claude_chat_model(client, store_path)
     # The stock default was never chosen: nothing to send.
     with pytest.raises(PageIndexAPIError, match="needs a model"):
         client.anthropic_runner_config()
+
+
+def test_anthropic_runner_config_cleared_chat_model_needs_a_model(store_path):
+    """'' and None both mean "configures nothing": a cleared chat_model
+    must get the crafted refusal, never a {'model': ''} config or a
+    NoneType crash."""
+    pytest.importorskip("anthropic")
+    local = PageIndexLocalClient(storage_path=store_path,
+                                 chat_model="claude-sonnet-4-5")
+    for cleared in ("", None):
+        local.chat_model = cleared
+        with pytest.raises(PageIndexAPIError, match="needs a model"):
+            local.anthropic_runner_config()
 
 
 def test_anthropic_runner_config_shapes(client, store_path):

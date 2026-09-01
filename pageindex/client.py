@@ -76,15 +76,23 @@ def _claude_wire(model, surface: str) -> "tuple[str, str]":
     ``azure_ai/`` select that transport, and ``anthropic/`` is the
     direct route's own prefix.
     Anything else — bare ids, aliases, gateway names — ships verbatim on
-    the direct route."""
+    the direct route. A prefix with nothing after it names a route and
+    no model: refused, so no surface ships model='' or switches a
+    transport with no model chosen."""
     if not isinstance(model, str):
         raise PageIndexAPIError(
             f"{surface} model must be a str, got {type(model).__name__}.")
     wire = model.removeprefix("litellm/")
     for route in _CLAUDE_ROUTES:
         if wire.startswith(route + "/"):
-            return wire[len(route) + 1:], route
-    return wire.removeprefix("anthropic/"), "anthropic"
+            wire = wire[len(route) + 1:]
+            break
+    else:
+        wire, route = wire.removeprefix("anthropic/"), "anthropic"
+    if not wire:
+        raise PageIndexAPIError(
+            f"{surface} model {model!r} names a route but no model id.")
+    return wire, route
 
 
 def _yaml_names_chat(loader) -> bool:
@@ -1374,8 +1382,8 @@ class PageIndexClient:
         ``chat_backend`` does not travel with it.
 
         Prompt caching: OpenAI models cache server-side on their own;
-        LiteLLM-routed Claude (Anthropic, Bedrock, Vertex) gets its
-        cache marks from the bundled ``model_settings``. Pass
+        LiteLLM-routed Claude (Anthropic, Bedrock, Vertex, Foundry) gets
+        its cache marks from the bundled ``model_settings``. Pass
         ``model_settings`` here to layer your own on top — your fields
         win and ``extra_args`` merge. Replacing the returned key
         wholesale drops the marks instead.
@@ -1539,13 +1547,17 @@ class PageIndexClient:
         _validate_max_turns(max_turns)
         if not model and self._chat_model_stock:
             raise _needs_model("anthropic_runner_config()")
-        model, route = _claude_wire(model or self.chat_model,
-                                    "anthropic_runner_config()")
+        model = model or self.chat_model
+        if not model:
+            # A cleared chat_model ('' or None) configures nothing —
+            # same refusal as the stock default, never a {'model': ''}.
+            raise _needs_model("anthropic_runner_config()")
+        model, _ = _claude_wire(model, "anthropic_runner_config()")
         scope = self._local_doc_scope(doc_id)
         return {
             "model": model,
             "max_tokens": (max_tokens if max_tokens is not None
-                           else _default_max_tokens(model, thinking, route)),
+                           else _default_max_tokens(model, thinking)),
             "system": build_agent_instructions(
                 self, doc_id, scoped=scope is not None,
                 include_management=include_management),
@@ -1612,8 +1624,10 @@ class PageIndexClient:
         itself the tool gate) with its ``allowed_tools`` pre-approval,
         one ``include_management`` and ``server_name`` applied
         everywhere; a chosen model adds ``model`` (and its route's
-        ``env`` switch). To customize (your own system prompt, extra
-        servers), switch to those methods directly.
+        ``env`` switch) — those keys are then taken, so pop them from
+        the result before passing your own ``model=`` or ``env=``
+        alongside the unpack. To customize (your own system prompt,
+        extra servers), switch to those methods directly.
 
         Args:
             doc_id: Document ID or list of IDs to target, as in
@@ -1627,11 +1641,11 @@ class PageIndexClient:
                 or the SDK's own (aliases included) — routing prefixes
                 are stripped and the SDK judges the id. A ``bedrock/``,
                 ``vertex_ai/``, or ``azure_ai/`` prefix also rides along
-                as the matching ``CLAUDE_CODE_USE_*`` env switch, so
-                Claude Code serves that channel — the other switches
-                ride blank so an exported one cannot override the
-                prefix, and ``anthropic/`` blanks them all; bare names
-                leave ``env`` out. Unset: a ``chat_model``
+                as that channel's ``CLAUDE_CODE_USE_*`` env switch, set
+                to ``"1"`` — only that one: other switches in your
+                environment stay yours, weighed by the CLI's own rules.
+                ``anthropic/`` and bare spellings name a model, not a
+                channel, and leave ``env`` out. Unset: a ``chat_model``
                 you set is forwarded as written; the stock default, like
                 a managed-chat client, leaves the SDK's own default in
                 place.
@@ -1641,11 +1655,7 @@ class PageIndexClient:
         if not model and not self._chat_model_stock:
             model = self.chat_model
         route = None
-        explicit = False
         if model:
-            explicit = isinstance(model, str) and (
-                model.removeprefix("litellm/").startswith(
-                    tuple(r + "/" for r in _CLAUDE_ROUTES + ("anthropic",))))
             model, route = _claude_wire(model, "claude_agent_config()")
         scope = self._local_doc_scope(doc_id)
         return {
@@ -1658,16 +1668,13 @@ class PageIndexClient:
             # read-only endpoint on cloud, the registered set locally).
             "allowed_tools": [f"mcp__{server_name}"],
             **({"model": model} if model else {}),
-            # Claude Code picks its transport from env switches; the SDK
-            # merges this over the inherited environment, and the CLI
-            # reads any set switch by its own fixed precedence — so a
-            # written route prefix also blanks the other switches ("" is
-            # off to the CLI; "0" would read as on) rather than trusting
-            # a clean environment. Bare names name no channel and leave
-            # the environment alone.
-            **({"env": {switch: ("1" if name == route else "")
-                        for name, switch in _ROUTE_ENV.items()}}
-               if explicit else {}),
+            # Claude Code picks its transport from env switches; a route
+            # prefix rides along as that one switch (the SDK merges env
+            # over the inherited environment). Only the chosen switch:
+            # the rest of the caller's environment is the caller's, and
+            # how the CLI weighs its own switches is the CLI's business.
+            **({"env": {_ROUTE_ENV[route]: "1"}}
+               if route in _ROUTE_ENV else {}),
         }
 
     def agent_instructions(

@@ -1592,6 +1592,39 @@ def test_messages_carries_a_claude_chat_model(store_path, fake_anthropic):
 
 
 @needs_anthropic
+def test_messages_cleared_chat_model_gets_the_own_model_refusal(
+        store_path, fake_anthropic):
+    """'' and None both mean "configures nothing": clearing chat_model
+    drops the client back to no-own-chat, and messages() refuses in its
+    own voice — never model='' on the wire, never a NoneType crash."""
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "never"}], "end_turn")])
+    local = PageIndexLocalClient(storage_path=store_path,
+                                 chat_model="claude-sonnet-4-5")
+    for cleared in ("", None):
+        local.chat_model = cleared
+        with pytest.raises(PageIndexAPIError, match="chat_model="):
+            local.messages("q")
+    assert calls == []
+
+
+@needs_anthropic
+def test_messages_route_prefix_needs_a_model_id(store_path, fake_anthropic):
+    """A prefix-only name selects a channel and names nothing — sending
+    model='' (or switching transports with no model chosen) is the worst
+    of both; refuse it in this SDK's own voice."""
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "never"}], "end_turn")])
+    local = PageIndexLocalClient(storage_path=store_path,
+                                 chat_model="claude-sonnet-4-5")
+    for name in ("bedrock/", "vertex_ai/", "azure_ai/", "anthropic/",
+                 "litellm/"):
+        with pytest.raises(PageIndexAPIError, match="no model id"):
+            local.messages("q", model=name)
+    assert calls == []
+
+
+@needs_anthropic
 def test_messages_thinking_passes_through(client, fake_anthropic):
     """Anthropic-native thinking config, forwarded verbatim; unset sends
     nothing so the backend default applies."""
@@ -2158,20 +2191,19 @@ def test_messages_keeps_caller_owned_http_client_open(client):
 
 
 @needs_anthropic
-def test_messages_without_credentials_raises_contract_error(client,
-                                                            monkeypatch,
-                                                            tmp_path):
-    """No pre-check: the SDK's own request-time credential-resolution
-    failure is translated into the contract's PageIndexAPIError — for a
-    bare call, a credential-less backend dict, and the unset-env-var
-    shape ({"api_key": None}) alike."""
+def test_messages_without_credentials_raises_the_sdks_own_error(client,
+                                                                monkeypatch,
+                                                                tmp_path):
+    """No pre-check and no translation: the SDK's own request-time
+    credential-resolution failure propagates as itself (its text already
+    names api_key / auth_token) — for a bare call, a credential-less
+    backend dict, and the unset-env-var shape ({"api_key": None}) alike."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
     monkeypatch.delenv("ANTHROPIC_PROFILE", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))  # no ant-auth profile fallback
     for backend in (None, {"timeout": 30}, {"api_key": None}):
-        with pytest.raises(PageIndexAPIError,
-                           match="Anthropic backend is not configured"):
+        with pytest.raises(TypeError, match="authentication"):
             client.messages("q", model="claude-test", backend=backend)
 
 
@@ -2242,29 +2274,23 @@ def test_dump_block_omits_unset_response_defaults():
         "id": "tu_1", "input": {}, "name": "t", "type": "tool_use"}
 
 
-def test_default_max_tokens_respects_output_ceilings():
-    """A lifted thinking default must not overshoot the model's output
-    ceiling — the wire rejects max_tokens above it; bool is not a budget."""
+def test_default_max_tokens_is_pure_arithmetic(capsys):
+    """The thinking default is budget + 8192, full stop: the model's real
+    ceiling is the API's to enforce (its 400 names both numbers), so no
+    third-party lookup runs — no I/O, no hang, nothing printed, for any
+    spelling. bool is not a budget."""
     lift = local_chat._default_max_tokens
-    enabled = {"type": "enabled", "budget_tokens": 30000}
-    assert lift("claude-opus-4-1", enabled) == 32000
-    assert lift("claude-sonnet-4-5-20250929",
-                {"type": "enabled", "budget_tokens": 60000}) == 64000
+    enabled10 = {"type": "enabled", "budget_tokens": 10000}
     assert lift("claude-opus-4-1",
-                {"type": "enabled", "budget_tokens": 10000}) == 18192
-    assert lift("claude-test",
-                {"type": "enabled", "budget_tokens": 10000}) == 18192
+                {"type": "enabled", "budget_tokens": 30000}) == 38192
+    assert lift("claude-opus-4-1", enabled10) == 18192
+    assert lift("claude-test", enabled10) == 18192
+    assert lift("sonnet", enabled10) == 18192
+    assert lift("us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+                enabled10) == 18192
     assert lift("claude-sonnet-4-5",
                 {"type": "enabled", "budget_tokens": True}) == 8192
-    # The routed lanes hand over the STRIPPED wire id; the ceiling lookup
-    # must re-join the route's own spelling or the clamp silently dies on
-    # exactly the ids those channels use.
-    enabled60 = {"type": "enabled", "budget_tokens": 60000}
-    assert lift("us.anthropic.claude-sonnet-4-5-v1:0", enabled60,
-                route="bedrock") == 64000
-    assert lift("claude-sonnet-4@20250514", enabled60,
-                route="vertex_ai") == 64000
-    assert lift("claude-opus-4-1", enabled60, route="azure_ai") == 32000
+    assert capsys.readouterr().out == ""
 
 
 # ── own-model chat over cloud documents (the bridge) ──
@@ -2440,8 +2466,9 @@ def test_messages_auth_failure_teaches_architecture(bridge_client,
 @needs_anthropic
 def test_messages_no_backend_leak_when_tool_build_fails(bridge_client,
                                                         monkeypatch):
-    """build_anthropic_tools is network I/O on a bridge client — a
-    failure there must not strand an opened per-call transport."""
+    """build_anthropic_tools is network I/O on a bridge client, and it
+    runs before the transport exists — a failure there must construct no
+    transport to strand."""
     client, _ = bridge_client
     made = []
 
@@ -2465,7 +2492,10 @@ def test_messages_no_backend_leak_when_tool_build_fails(bridge_client,
         "pageindex.integrations.anthropic_sdk.build_anthropic_tools", boom)
     with pytest.raises(PageIndexAPIError, match="MCP server"):
         client.messages("q", model="claude-test", max_tokens=100)
-    assert all(fake.closed for fake in made)
+    # Tools are deliberately built BEFORE the transport, so a tool-build
+    # failure must find no transport constructed at all — if this list is
+    # ever non-empty, that ordering (and its no-leak guarantee) broke.
+    assert not made
 
 
 @needs_anthropic
@@ -2561,6 +2591,10 @@ def test_anthropic_client_route_picks_the_transport_class(monkeypatch):
     """The model's routing prefix selects the SDK client class — the
     bedrock/vertex ids only mean something to their own transports."""
     monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
+    # AnthropicBedrock defaults api_key from this env var, and refuses
+    # api_key alongside AWS credential kwargs — a developer machine that
+    # exports it must not fail this construction.
+    monkeypatch.delenv("AWS_BEARER_TOKEN_BEDROCK", raising=False)
     bedrock = local_chat._anthropic_client(
         {"aws_region": "us-east-1", "aws_access_key": "a",
          "aws_secret_key": "s"}, "bedrock")
@@ -2593,7 +2627,11 @@ def test_anthropic_client_foundry_route(monkeypatch):
 def test_anthropic_client_unconfigured_route_keeps_the_error_contract(
         monkeypatch):
     """Vertex and Foundry fail at construction (region, credentials) —
-    those failures must wrap like the direct route's request-time ones."""
+    those failures must wrap the constructors' documented refusals."""
+    # skip decided first: a skip after assertions would discard the
+    # vertex coverage those assertions already ran.
+    if not hasattr(anthropic, "AnthropicFoundry"):
+        pytest.skip("this anthropic build has no Foundry client")
     monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
     for name in ("CLOUD_ML_REGION", "GOOGLE_CLOUD_PROJECT",
                  "ANTHROPIC_FOUNDRY_API_KEY", "ANTHROPIC_FOUNDRY_BASE_URL",
@@ -2602,8 +2640,6 @@ def test_anthropic_client_unconfigured_route_keeps_the_error_contract(
     with pytest.raises(PageIndexAPIError,
                        match="Anthropic backend is not configured"):
         local_chat._anthropic_client(None, "vertex_ai")
-    if not hasattr(anthropic, "AnthropicFoundry"):
-        pytest.skip("this anthropic build has no Foundry client")
     with pytest.raises(PageIndexAPIError,
                        match="Anthropic backend is not configured"):
         local_chat._anthropic_client(None, "azure_ai")
@@ -2663,77 +2699,26 @@ def _failing_runner_client(monkeypatch, exc):
 
 
 @needs_anthropic
-def test_messages_wraps_route_credential_failures(client, monkeypatch):
-    """Bedrock resolves credentials per request and fails with a bare
-    RuntimeError; Vertex with google.auth's own types. Both must wrap
-    like the direct route's request-time failures."""
-    class _RefreshError(Exception):
-        pass
-
-    _RefreshError.__module__ = "google.auth.exceptions"
-
-    for exc in (RuntimeError("could not resolve credentials from session"),
-                _RefreshError("Reauthentication is needed")):
+def test_messages_request_failures_propagate_raw(client, monkeypatch):
+    """No second-guessing the transports: a request-time failure that is
+    not the anthropic SDK's own error type propagates as itself — the
+    stacks' original text and traceback are the diagnostic, on every
+    route and on both paths. (Construction-time misconfiguration still
+    wraps, in _anthropic_client — that is the constructors' documented
+    contract.)"""
+    cases = (RuntimeError("could not resolve credentials from session"),
+             TypeError("Could not resolve authentication method"),
+             ModuleNotFoundError("No module named 'botocore'",
+                                 name="botocore"))
+    for exc in cases:
         _failing_runner_client(monkeypatch, exc)
-        with pytest.raises(PageIndexAPIError,
-                           match="Anthropic backend is not configured"):
+        with pytest.raises(type(exc)):
             client.messages(
                 "q", model="bedrock/anthropic.claude-sonnet-4-6-v1:0")
-        with pytest.raises(PageIndexAPIError,
-                           match="Anthropic backend is not configured"):
+        _failing_runner_client(monkeypatch, exc)
+        with pytest.raises(type(exc)):
             list(client.messages("q", stream=True,
-                                 model="vertex_ai/claude-sonnet-4-5"))
-
-
-@needs_anthropic
-def test_messages_unrelated_route_errors_still_propagate(client, monkeypatch):
-    # The wrap takes credential failures only — a tool bug mid-run must
-    # not be relabeled "backend is not configured".
-    _failing_runner_client(monkeypatch, RuntimeError("boom"))
-    with pytest.raises(RuntimeError, match="boom"):
-        client.messages("q", model="bedrock/anthropic.claude-sonnet-4-6-v1:0")
-    # And the direct route keeps its canonical handlers untouched.
-    _failing_runner_client(
-        monkeypatch, RuntimeError("could not resolve credentials from session"))
-    with pytest.raises(RuntimeError, match="credentials"):
-        client.messages("q", model="claude-sonnet-4-5")
-
-
-@needs_anthropic
-def test_messages_names_the_missing_route_extra(client, monkeypatch):
-    """pageindex[anthropic] does not carry boto3 / google-auth; a route's
-    first request must name the anthropic extra that does, not leave a
-    bare ModuleNotFoundError whack-a-mole."""
-    _failing_runner_client(monkeypatch, ModuleNotFoundError(
-        "No module named 'botocore'", name="botocore"))
-    with pytest.raises(PageIndexAPIError, match=r"anthropic\[bedrock\]"):
-        client.messages("q", model="bedrock/anthropic.claude-sonnet-4-6-v1:0")
-    _failing_runner_client(monkeypatch, ModuleNotFoundError(
-        "No module named 'google.auth'", name="google.auth"))
-    with pytest.raises(PageIndexAPIError, match=r"anthropic\[vertex\]"):
-        list(client.messages("q", stream=True,
-                             model="vertex_ai/claude-sonnet-4-5"))
-    # A tool's own missing module is not the route's: it stays raw.
-    _failing_runner_client(monkeypatch, ModuleNotFoundError(
-        "No module named 'pandas'", name="pandas"))
-    with pytest.raises(ModuleNotFoundError, match="pandas"):
-        client.messages("q", model="bedrock/anthropic.claude-sonnet-4-6-v1:0")
-
-
-@needs_anthropic
-def test_messages_routed_auth_failure_skips_api_key_advice(
-        client, monkeypatch):
-    # AnthropicVertex has no api_key parameter at all: sending a routed
-    # user to ANTHROPIC_API_KEY is advice that cannot work.
-    _failing_runner_client(monkeypatch, TypeError(
-        "Could not resolve authentication method"))
-    with pytest.raises(PageIndexAPIError,
-                       match="Anthropic backend is not configured") as info:
-        client.messages("q", model="vertex_ai/claude-sonnet-4-5")
-    assert "ANTHROPIC_API_KEY" not in str(info.value)
-    # The direct route keeps the full remediation.
-    with pytest.raises(PageIndexAPIError, match="ANTHROPIC_API_KEY"):
-        client.messages("q", model="claude-sonnet-4-5")
+                                 model="claude-sonnet-4-5"))
 
 
 def test_route_tables_and_marks_agree():
