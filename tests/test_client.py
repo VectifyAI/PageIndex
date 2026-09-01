@@ -1969,6 +1969,20 @@ def test_blank_chat_model_carries_no_model_into_agent_config():
     assert "model" not in client.openai_agent_config()
 
 
+def test_preload_stamps_litellm_log_level(monkeypatch):
+    """The background preload stamps LITELLM_LOG before litellm's import
+    initializes its logger, so import-time WARNING chatter never reaches
+    stderr; setdefault, so a caller's explicit choice wins."""
+    import pageindex.client as client_mod
+    monkeypatch.setattr(client_mod, "_litellm_preload_started", True)
+    monkeypatch.delenv("LITELLM_LOG", raising=False)
+    client_mod._preload_litellm()
+    assert os.environ["LITELLM_LOG"] == "ERROR"
+    monkeypatch.setenv("LITELLM_LOG", "DEBUG")
+    client_mod._preload_litellm()
+    assert os.environ["LITELLM_LOG"] == "DEBUG"
+
+
 def test_retry_notice_logs_instead_of_stdout(monkeypatch, capsys, caplog):
     """A retried completion must not write into the caller's stdout — that
     channel belongs to answers and CLI output; the notice rides logging
