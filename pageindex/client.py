@@ -6,8 +6,8 @@ import re
 import threading
 import time
 import warnings
-from typing import (TYPE_CHECKING, Any, Callable, Iterator, Mapping,
-                    Optional, Union, cast)
+from typing import (TYPE_CHECKING, Any, Callable, Iterator, Literal, Mapping,
+                    Optional, Union, cast, overload)
 
 from .errors import PageIndexAPIError
 
@@ -752,6 +752,42 @@ class PageIndexClient:
         ).get_retrieval(retrieval_id=retrieval_id)
 
     # ---------- CHAT ----------
+
+    # stream picks the return type: the docstring's `.events` usage must
+    # type-check for py.typed consumers
+    @overload
+    def chat(
+        self,
+        messages: Union[str, list[dict[str, str]]],
+        doc_id: Optional[Union[str, list[str]]] = None,
+        stream: Literal[False] = False,
+        model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+        show_process: Union[bool, Mapping[str, Any], None] = None,
+    ) -> str: ...
+
+    @overload
+    def chat(
+        self,
+        messages: Union[str, list[dict[str, str]]],
+        doc_id: Optional[Union[str, list[str]]] = None,
+        *,
+        stream: Literal[True],
+        model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+        show_process: Union[bool, Mapping[str, Any], None] = None,
+    ) -> "ChatStream": ...
+
+    @overload
+    def chat(
+        self,
+        messages: Union[str, list[dict[str, str]]],
+        doc_id: Optional[Union[str, list[str]]] = None,
+        stream: bool = False,
+        model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+        show_process: Union[bool, Mapping[str, Any], None] = None,
+    ) -> Union[str, "ChatStream"]: ...
 
     def chat(
         self,

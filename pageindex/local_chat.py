@@ -628,10 +628,11 @@ def _process_options(show_process) -> dict:
             "show_process must be True, False, or a dict with the keys "
             "thinking / tool_calls / tool_results (bools) and max_chars "
             "(int).")
-    unknown = sorted(set(show_process) - set(_PROCESS_DEFAULTS))
+    unknown = set(show_process) - set(_PROCESS_DEFAULTS)
     if unknown:
         raise PageIndexAPIError(
-            f"Unknown show_process keys: {', '.join(map(repr, unknown))} "
+            "Unknown show_process keys: "
+            f"{', '.join(sorted(map(repr, unknown)))} "
             "— valid keys: thinking, tool_calls, tool_results, max_chars.")
     options = {**_PROCESS_DEFAULTS, **show_process}
     for key in ("thinking", "tool_calls", "tool_results"):
@@ -827,8 +828,8 @@ def _cloud_chunk_events(chunks) -> Iterator[dict]:
     deltas, and each tool call (name + accumulated arguments) from the
     block_metadata tags — the endpoint interleaves tool-argument JSON
     into delta.content, distinguished only by those tags. It streams no
-    thinking and no tool results. Chunks without block_metadata (an
-    older server) are answer text."""
+    thinking and no tool results. Outside a tool block, chunks without
+    block_metadata (an older server) are answer text."""
     tool = None  # [name, argument pieces] while inside a tool_use block
     try:
         for chunk in chunks:
@@ -842,14 +843,10 @@ def _cloud_chunk_events(chunks) -> Iterator[dict]:
             choices = chunk.get("choices") or []
             delta = (choices[0].get("delta") or {}) if choices else {}
             content = delta.get("content")
-            if kind == "tool_use":
-                if tool is not None and content:
-                    tool[1].append(content)
-                continue
             if kind == "tool_use_stop":
                 if tool is not None:
                     name, pieces = tool
-                    arguments = "".join(pieces)
+                    arguments = "".join(map(str, pieces))
                     try:
                         arguments = json.loads(arguments)
                     except ValueError:
@@ -857,6 +854,12 @@ def _cloud_chunk_events(chunks) -> Iterator[dict]:
                     yield {"type": "tool_call", "call_id": None,
                            "name": name, "arguments": arguments}
                     tool = None
+                continue
+            if kind == "tool_use" or tool is not None:
+                # inside an open block nothing is answer text: argument
+                # chunks accumulate under any tag rather than leaking
+                if tool is not None and content:
+                    tool[1].append(content)
                 continue
             if content:
                 yield {"type": "answer", "delta": content}

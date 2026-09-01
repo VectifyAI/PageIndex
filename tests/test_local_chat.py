@@ -129,13 +129,24 @@ class FakeModel(Model):
         self._record(system_instructions, input)
         output = self.turns.pop(0)
         sequence = 0
-        for piece in getattr(self, "thinking_pieces", ()):
-            from openai.types.responses import ResponseReasoningTextDeltaEvent
+        for index, piece in enumerate(getattr(self, "thinking_pieces", ())):
+            from openai.types.responses import (
+                ResponseReasoningSummaryTextDeltaEvent,
+                ResponseReasoningTextDeltaEvent)
             sequence += 1
-            yield ResponseReasoningTextDeltaEvent(
-                type="response.reasoning_text.delta", delta=piece,
-                content_index=0, item_id="rs_1", output_index=0,
-                sequence_number=sequence)
+            # litellm (every chat-protocol backend) delivers thinking as
+            # summary deltas; alternate so both accepted variants stay
+            # covered, production shape first
+            if index % 2:
+                yield ResponseReasoningTextDeltaEvent(
+                    type="response.reasoning_text.delta", delta=piece,
+                    content_index=0, item_id="rs_1", output_index=0,
+                    sequence_number=sequence)
+            else:
+                yield ResponseReasoningSummaryTextDeltaEvent(
+                    type="response.reasoning_summary_text.delta",
+                    delta=piece, item_id="rs_1", output_index=0,
+                    summary_index=0, sequence_number=sequence)
         if getattr(self, "emit_created", False):
             from openai.types.responses import ResponseCreatedEvent
             sequence += 1
@@ -560,6 +571,46 @@ def test_chat_process_managed_off_is_clean_answer(monkeypatch):
     assert "doc_name" not in plain
 
 
+def test_chat_process_managed_open_block_never_leaks(monkeypatch):
+    """Inside an open tool block nothing is answer text: argument chunks
+    under an unexpected tag (or none) accumulate into the call instead
+    of leaking into the show_process=False answer."""
+    def cloud_with(tag):
+        cloud = PageIndexCloudClient(api_key="pi-test-key")
+        monkeypatch.setattr(cloud._api, "chat_completions", lambda **kw: iter([
+            _cloud_chunk(None, {"type": "mcp_tool_use_start",
+                                "tool_name": "get_document"}),
+            _cloud_chunk('{"doc_name": ', {"type": "tool_use"}),
+            _cloud_chunk('"report.pdf"}', tag),
+            _cloud_chunk(None, {"type": "tool_use_stop"}),
+            _cloud_chunk("The answer"),
+        ]))
+        return cloud
+
+    for tag in ({"type": "input_json_delta"}, None):
+        plain = "".join(cloud_with(tag).chat("q", stream=True,
+                                             show_process=False))
+        assert plain == "The answer"
+        woven = "".join(cloud_with(tag).chat("q", stream=True))
+        assert '[tool] get_document {"doc_name": "report.pdf"}' in woven
+
+
+def test_chat_process_managed_non_string_argument_chunk(monkeypatch):
+    """A non-string delta.content inside a tool block degrades to a
+    raw-string argument instead of killing the stream."""
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    monkeypatch.setattr(cloud._api, "chat_completions", lambda **kw: iter([
+        _cloud_chunk(None, {"type": "mcp_tool_use_start",
+                            "tool_name": "get_document"}),
+        _cloud_chunk({"partial_json": "{"}, {"type": "tool_use"}),
+        _cloud_chunk(None, {"type": "tool_use_stop"}),
+        _cloud_chunk("The answer"),
+    ]))
+    text = "".join(cloud.chat("q", stream=True))
+    assert "[tool] get_document" in text
+    assert text.endswith("The answer")
+
+
 @needs_agents
 def test_chat_process_dict_selects_parts(client, store_path, fake_model):
     """Each key hides exactly its own line kind; omitted keys default on,
@@ -733,6 +784,7 @@ def test_chat_process_config_chokes(client):
         ({"max_chars": True}, "positive int"),
         ({"max_chars": 0}, "positive int"),
         ({"thinking": 1}, "must be a bool"),
+        ({1: True, "foo": 1}, "Unknown show_process key"),
     ]:
         with pytest.raises(PageIndexAPIError, match=match):
             client.chat("q", stream=True, show_process=bad)
@@ -1891,6 +1943,50 @@ def test_stream_abandonment_cancels_pending_turn(client, store_path,
     pumps[0].join(timeout=3.0)
     assert not pumps[0].is_alive()
     assert fake.deltas_emitted == 0  # turn 2 never produced output
+
+
+@needs_agents
+def test_chat_stream_abandonment_cancels_pending_turn(client, store_path,
+                                                      fake_model,
+                                                      monkeypatch):
+    """chat(stream=True)'s teardown mirrors the completions lane: closing
+    the stream mid-run cancels the blocked turn (pump thread exits)
+    instead of letting it run — and bill — in the background, and the
+    per-call backend client is closed before its loop ends."""
+    import threading
+    seed_doc(store_path, "pi-a", "report.pdf")
+    pumps = []
+    real_thread = threading.Thread
+
+    class _Tracking(real_thread):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            if getattr(kwargs.get("target"), "__name__", "") == "pump":
+                pumps.append(self)
+
+    monkeypatch.setattr(threading, "Thread", _Tracking)
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    fake.block_from = 2  # turn 2 hangs until cancelled
+    closes = []
+
+    class _Backend:
+        _pageindex_caller_http = False
+
+        async def close(self):
+            closes.append(True)
+
+    fake._client = _Backend()
+    stream = client.chat("q", stream=True)
+    assert next(stream).startswith("[tool] get_document")
+    stream.close()
+    assert len(pumps) == 1
+    pumps[0].join(timeout=3.0)
+    assert not pumps[0].is_alive()
+    assert fake.deltas_emitted == 0  # turn 2 never produced output
+    assert closes == [True]  # _aclose_backend ran on abandonment
 
 
 @needs_anthropic
