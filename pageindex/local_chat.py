@@ -1051,7 +1051,7 @@ def run_responses(client, input, model: Optional[str] = None,
             and all(isinstance(item, dict) for item in input)):
         items = list(input)
     else:
-        raise PageIndexAPIError("input must be a non-empty string or list "
+        raise PageIndexAPIError("messages must be a non-empty string or list "
                                 "of item dicts.")
     scope = client._local_doc_scope(doc_id)
     block = _doc_block(client, doc_id, scoped=scope is not None)
@@ -1077,6 +1077,7 @@ def run_responses(client, input, model: Optional[str] = None,
 
     response_id = f"resp_{uuid.uuid4().hex}"
     created_at = int(time.time())
+    given = extra_body or {}
 
     def envelope(transcript: list, raw_responses) -> dict:
         return {
@@ -1098,10 +1099,11 @@ def run_responses(client, input, model: Optional[str] = None,
             # Backend echo when captured; the request sends neither param.
             "tool_choice": recorded.get("tool_choice", "auto"),
             "parallel_tool_calls": recorded.get("parallel_tool_calls", True),
-            "temperature": temperature,
-            "top_p": top_p,
-            "reasoning": reasoning,
-            "max_output_tokens": max_output_tokens,
+            "temperature": given.get("temperature", temperature),
+            "top_p": given.get("top_p", top_p),
+            "reasoning": given.get("reasoning", reasoning),
+            "max_output_tokens": given.get("max_output_tokens",
+                                           max_output_tokens),
             "error": recorded.get("error"),
             "incomplete_details": recorded.get("incomplete_details"),
             "metadata": None,
@@ -1392,7 +1394,8 @@ def run_messages(client, messages, model: str,
     owns_transport = ("http_client" not in (merged or {})
                       and backend_client not in _ANTHROPIC_CLIENTS.values())
     if max_tokens is None:
-        max_tokens = _default_max_tokens(model, thinking)
+        max_tokens = _default_max_tokens(
+            model, (extra_body or {}).get("thinking", thinking))
     runner = backend_client.beta.messages.tool_runner(
         max_tokens=max_tokens,
         messages=prepared,

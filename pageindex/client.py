@@ -530,6 +530,21 @@ class PageIndexClient:
             return bool(model.strip())
         return model is not None
 
+    def _require_own_chat(self, lane: str) -> None:
+        # The one refusal for chat(protocol=...), the doors behind it, and
+        # instructions: shared, so the doors cannot drift from chat().
+        if self._local_chat:
+            return
+        if not getattr(self, "api_key", None):
+            raise PageIndexAPIError(
+                "chat_model is empty — it configures nothing, and a local "
+                "client has no managed chat to fall back to. Set "
+                "chat_model=... to run the agent with your own model.")
+        raise PageIndexAPIError(
+            f"{lane} drives your own chat model — construct the client "
+            "with chat_model=... (or a chat= model); the managed cloud chat "
+            "serves the answer lane and chat_completions() only.")
+
     if not TYPE_CHECKING:
         # The protocol doors live behind chat(protocol=...); their old
         # names are the vendor SDKs' own, so an agent-written
@@ -875,6 +890,24 @@ class PageIndexClient:
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
         *,
+        protocol: None = None,
+        instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
+        max_turns: Optional[int] = None,
+        backend: Optional[dict[str, Any]] = None,
+        extra_headers: Optional[dict[str, str]] = None,
+        extra_body: Optional[dict[str, Any]] = None,
+    ) -> Union[str, "ChatStream"]: ...
+
+    @overload
+    def chat(
+        self,
+        messages: Union[str, list[dict[str, Any]]],
+        doc_id: Optional[Union[str, list[str]]] = None,
+        stream: bool = False,
+        model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+        show_process: Union[bool, Mapping[str, Any], None] = None,
+        *,
         protocol: Optional[str] = None,
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
         max_turns: Optional[int] = None,
@@ -1028,12 +1061,6 @@ class PageIndexClient:
                 "protocol selects the wire: \"responses\" (OpenAI Responses) "
                 "or \"messages\" (Anthropic Messages), or leave it unset for "
                 f"the answer lane — got {protocol!r}.")
-        if (show_process is not False and show_process is not None
-                and not stream):
-            raise PageIndexAPIError(
-                "show_process shows the run as it happens and requires "
-                "stream=True; only show_process=False (or None) means "
-                f"off — got {show_process!r}.")
         if (protocol is not None and show_process is not False
                 and show_process is not None):
             raise PageIndexAPIError(
@@ -1041,18 +1068,19 @@ class PageIndexClient:
                 f"protocol={protocol!r} the run comes back as the protocol's "
                 "own transcript and events — drop show_process, or drop "
                 "protocol for the woven text stream.")
+        if (show_process is not False and show_process is not None
+                and not stream):
+            raise PageIndexAPIError(
+                "show_process shows the run as it happens and requires "
+                "stream=True; only show_process=False (or None) means "
+                f"off — got {show_process!r}.")
         if isinstance(instructions, list) and protocol != "messages":
             raise PageIndexAPIError(
                 "instructions blocks are the Messages protocol's shape — "
                 "with protocol=\"messages\" they append after the managed "
                 "system blocks; the other lanes take a string.")
         if protocol is not None:
-            if not self._local_chat:
-                raise PageIndexAPIError(
-                    f"chat(protocol={protocol!r}) drives your own chat model "
-                    "— construct the client with chat_model=... (or a chat= "
-                    "model); the managed cloud chat serves the answer lane "
-                    "and chat_completions() only.")
+            self._require_own_chat(f"chat(protocol={protocol!r})")
             if protocol == "responses":
                 return self._responses(
                     messages, model=model, stream=stream, doc_id=doc_id,
@@ -1062,7 +1090,7 @@ class PageIndexClient:
                                if reasoning_effort is not None else None),
                     extra_body=extra_body, extra_headers=extra_headers,
                     backend=backend)
-            if model is None:
+            if not model:
                 raise PageIndexAPIError(
                     "protocol=\"messages\" drives Anthropic's Messages API "
                     "with the Anthropic SDK — name the Claude model with "
@@ -1079,14 +1107,8 @@ class PageIndexClient:
                 messages, model=model, stream=stream, doc_id=doc_id,
                 system=instructions, max_turns=max_turns, extra_body=body,
                 extra_headers=extra_headers, backend=backend)
-        if instructions is not None:
-            if not self._local_chat:
-                raise PageIndexAPIError(
-                    "instructions drives your own chat model, which this "
-                    "client does not configure — construct the client with "
-                    "chat_model=... (or a chat= model) to run the agent in "
-                    "your process, or drop it to use the managed chat "
-                    "endpoint.")
+        if instructions:
+            self._require_own_chat("instructions")
             if isinstance(messages, str):
                 if not messages.strip():
                     raise PageIndexAPIError(
@@ -1311,8 +1333,8 @@ class PageIndexClient:
         Responses API; backends that only speak chat.completions should use
         ``chat_completions()``. Provider-prefixed models (``anthropic/…``)
         route through LiteLLM's chat.completions adapter and are therefore
-        refused here — use ``chat_completions()`` or ``messages()`` for
-        those.
+        refused here — use ``chat_completions()`` or
+        ``chat(protocol="messages")`` for those.
 
         Args:
             input: A user message string, or a list of Responses input items
@@ -1355,13 +1377,7 @@ class PageIndexClient:
                 ``api_key``, ``base_url``, ``organization``, … — passed
                 verbatim; unknown keys raise.
         """
-        if not self._local_chat:
-            raise PageIndexAPIError(
-                "chat(protocol='responses') drives your own chat model — "
-                "construct the "
-                "client with chat_model=... (or a chat= model); the managed "
-                "cloud chat serves chat_completions() only."
-            )
+        self._require_own_chat("chat(protocol='responses')")
         from .local_chat import run_responses
         return run_responses(
             self, input, model=model, stream=stream, doc_id=doc_id,
@@ -1447,13 +1463,7 @@ class PageIndexClient:
                 ``api_key``, ``base_url``, ``auth_token``, … — passed
                 verbatim; unknown keys raise.
         """
-        if not self._local_chat:
-            raise PageIndexAPIError(
-                "chat(protocol='messages') drives your own chat model — "
-                "construct the "
-                "client with chat_model=... (or a chat= model); the managed "
-                "cloud chat serves chat_completions() only."
-            )
+        self._require_own_chat("chat(protocol='messages')")
         from .local_chat import run_messages
         return run_messages(
             self, messages, model=model, max_tokens=max_tokens,

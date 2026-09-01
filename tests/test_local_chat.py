@@ -328,6 +328,11 @@ def test_cloud_guards():
     with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.chat([{"role": "user", "content": "x"}],
                    protocol="messages", model="m")
+    # the hidden doors refuse the same way: door X is chat(protocol=X)
+    with pytest.raises(PageIndexAPIError, match="own chat model"):
+        cloud._responses("x")
+    with pytest.raises(PageIndexAPIError, match="own chat model"):
+        cloud._messages("x", model="m")
     with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.chat("x", instructions="be brief")
     with pytest.raises(PageIndexAPIError, match="own chat model"):
@@ -1284,7 +1289,7 @@ def _anthropic_tool_use(tool_use_id="tu_1"):
 
 
 @needs_agents
-@pytest.mark.parametrize("surface", ["chat_completions", "_responses"])
+@pytest.mark.parametrize("surface", ["chat_completions", "_responses", "chat"])
 @pytest.mark.parametrize("streaming", [False, True])
 def test_max_turns_wrapped(client, store_path, fake_model, surface, streaming):
     """MaxTurnsExceeded is an engine-internal type; callers get the SDK's
@@ -1310,6 +1315,8 @@ def test_max_turns_rejects_non_positive(client, store_path, fake_model):
         client.chat_completions([{"role": "user", "content": "q"}],
                                 max_turns=0)
     # every door that takes max_turns validates it, the runner config too
+    with pytest.raises(PageIndexAPIError, match="positive integer"):
+        client.chat("q", max_turns=0, stream=True)
     with pytest.raises(PageIndexAPIError, match="positive integer"):
         client.anthropic_runner_config(model="claude-sonnet-4-5",
                                        max_turns=-1)
@@ -1539,6 +1546,15 @@ def test_sampling_knobs_ride_model_settings(client, store_path, fake_model,
     assert result["max_output_tokens"] == 321
     fake_model([[_msg_item("ok")]])
     assert client._responses("q")["max_output_tokens"] is None
+    # the public door has no knob for these; extra_body carries them to the
+    # wire, and the envelope must report what was sent, not the unset locals
+    fake_model([[_msg_item("ok")]])
+    result = client.chat("q", protocol="responses",
+                         extra_body={"max_output_tokens": 321, "top_p": 0.9,
+                                     "temperature": 0.2})
+    assert result["max_output_tokens"] == 321
+    assert result["top_p"] == 0.9
+    assert result["temperature"] == 0.2
 
 
 @needs_agents
@@ -1549,14 +1565,20 @@ def test_responses_envelope_echoes_reasoning(client, store_path, fake_model):
     assert result["reasoning"] == {"effort": "low"}
     fake_model([[_msg_item("ok")]])
     assert client._responses("q")["reasoning"] is None
+    fake_model([[_msg_item("ok")]])
+    result = client.chat("q", protocol="responses",
+                         extra_body={"reasoning": {"effort": "high"}})
+    assert result["reasoning"] == {"effort": "high"}
 
 
 @needs_agents
 def test_responses_input_validation(client, fake_model):
     fake_model([])
     for bad in ("", "   ", [], [1], None):
-        with pytest.raises(PageIndexAPIError, match="input must be"):
+        with pytest.raises(PageIndexAPIError, match="messages must be"):
             client._responses(bad)
+        with pytest.raises(PageIndexAPIError, match="messages must be"):
+            client.chat(bad, protocol="responses")
 
 
 @needs_agents
@@ -2382,6 +2404,16 @@ def test_messages_default_max_tokens_clears_thinking_budget(client, fake_anthrop
     client._messages("q", model="claude-test", max_tokens=11000,
                     thinking={"type": "enabled", "budget_tokens": 10000})
     assert calls[0]["max_tokens"] == 11000  # explicit value passes through
+    # the public door's spelling: thinking rides extra_body, same lift
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "c"}], "end_turn"),
+    ])
+    client.chat("q", protocol="messages", model="claude-test",
+                extra_body={"thinking": {"type": "enabled",
+                                         "budget_tokens": 10000}})
+    assert calls[0]["max_tokens"] == 10000 + 8192
+    assert calls[0]["thinking"] == {"type": "enabled",
+                                    "budget_tokens": 10000}
 
 
 @needs_anthropic
@@ -3055,10 +3087,13 @@ def test_chat_protocol_messages_is_the_door(client, monkeypatch):
 def test_chat_protocol_chokes(client, monkeypatch):
     monkeypatch.setattr(local_chat, "run_responses",
                         lambda c, input, **kw: "door")
-    with pytest.raises(PageIndexAPIError, match="protocol"):
+    with pytest.raises(PageIndexAPIError, match="protocol selects"):
         client.chat("q", protocol="grpc")
-    with pytest.raises(PageIndexAPIError, match="show_process"):
+    with pytest.raises(PageIndexAPIError, match="drop show_process"):
         client.chat("q", protocol="responses", stream=True, show_process=True)
+    # the protocol refusal first: "add stream=True" is no remedy here
+    with pytest.raises(PageIndexAPIError, match="drop show_process"):
+        client.chat("q", protocol="responses", show_process=True)
     with pytest.raises(PageIndexAPIError, match="instructions blocks"):
         client.chat("q", protocol="responses",
                     instructions=[{"type": "text", "text": "x"}])
@@ -3066,12 +3101,14 @@ def test_chat_protocol_chokes(client, monkeypatch):
         client.chat("q", instructions=[{"type": "text", "text": "x"}])
     with pytest.raises(PageIndexAPIError, match="model="):
         client.chat("q", protocol="messages")
+    with pytest.raises(PageIndexAPIError, match="model="):
+        client.chat("q", protocol="messages", model="")
 
 
 @needs_agents
 def test_chat_instructions_precede_history_system_rows(client, store_path,
                                                         fake_model, monkeypatch):
-    fake_model([[_msg_item("ok")], [_msg_item("ok")]])
+    fake_model([[_msg_item("ok")], [_msg_item("ok")], [_msg_item("ok")]])
     seen = {}
     real = local_chat._managed_instructions
 
@@ -3087,6 +3124,8 @@ def test_chat_instructions_precede_history_system_rows(client, store_path,
     assert seen["extra"] == ["analyst", "short"]
     client.chat("q", instructions="analyst")  # a bare question works too
     assert seen["extra"] == ["analyst"]
+    client.chat("q", instructions="")  # blank configures nothing, no row
+    assert seen["extra"] == []
 
 
 def test_chat_answer_lane_forwards_the_promoted_knobs(client, monkeypatch):
