@@ -58,6 +58,18 @@ def _mute_litellm_bridge_usage_warning() -> None:
         message=r"Pydantic serializer warnings:\s+"
                 r"(PydanticSerializationUnexpectedValue\()?Expected `ResponseAPIUsage`")
 
+
+def _mute_litellm_stdout_banners() -> None:
+    """litellm print()s a red "Provider List:" banner into stdout when a
+    provider lookup fails — its OpenRouter adapter probes supports_reasoning()
+    with the provider-stripped model name on every completion, so any model
+    missing from litellm's static map stamps the banner into the middle of a
+    streamed answer (get_llm_provider_logic, seen on 1.97). Flip litellm's own
+    embedder switch, as its Router does; it gates only this banner and the
+    "Give Feedback / Get Help" one — errors still raise with their full text."""
+    import litellm
+    litellm.suppress_debug_info = True
+
 # Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
 if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
     import warnings
@@ -150,6 +162,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
     backend = _llm_backend.get()
     model = _litellm_model(model)
     _repair_litellm_types()
+    _mute_litellm_stdout_banners()
     for i in range(max_retries):
         try:
             response = litellm.completion(**{
@@ -186,6 +199,7 @@ async def llm_acompletion(model, prompt):
     backend = _llm_backend.get()
     model = _litellm_model(model)
     _repair_litellm_types()
+    _mute_litellm_stdout_banners()
     for i in range(max_retries):
         try:
             response = await litellm.acompletion(**{

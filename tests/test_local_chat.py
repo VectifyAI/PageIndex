@@ -2087,6 +2087,21 @@ def test_litellm_lane_hides_the_bridge_usage_warning():
     assert any("Expected `int`" in m for m in seen)
 
 
+@needs_agents
+def test_litellm_lane_mutes_the_provider_list_banner(monkeypatch, capsys):
+    """litellm's OpenRouter adapter probes supports_reasoning() with the
+    provider-stripped model name, so any model missing from its static map
+    print()s a red "Provider List:" banner into the middle of the streamed
+    answer; building the lane's model flips litellm's embedder switch."""
+    litellm = pytest.importorskip("litellm")
+    monkeypatch.setattr(litellm, "suppress_debug_info", False)
+    local_chat._openai_model("chat", "openrouter/z-ai/not-in-the-map")
+    assert litellm.suppress_debug_info is True
+    with pytest.raises(litellm.BadRequestError):
+        litellm.get_llm_provider("z-ai/not-in-the-map")
+    assert "Provider List" not in capsys.readouterr().out
+
+
 def test_openai_protocol_predicate_follows_litellm_routing():
     pytest.importorskip("litellm")
     for name in ("gpt-5", "openai/gpt-4o", "litellm/gpt-4o",

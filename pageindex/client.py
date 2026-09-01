@@ -30,6 +30,8 @@ def _preload_litellm() -> None:
     def _import() -> None:
         try:
             import litellm  # noqa: F401
+            from .utils import _mute_litellm_stdout_banners
+            _mute_litellm_stdout_banners()
         except Exception:
             pass
 
