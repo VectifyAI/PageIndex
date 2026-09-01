@@ -96,15 +96,35 @@ class DocStore:
     @contextmanager
     def lock(self):
         """Cross-process mutex for check-then-write sequences (name
-        uniquing before save). fcntl is absent on Windows, where the
-        pre-existing best-effort behavior stays."""
+        uniquing before save)."""
+        self._root.mkdir(parents=True, exist_ok=True)
+        lock_path = self._root / ".lock"
         try:
             import fcntl
         except ImportError:
-            yield
+            import msvcrt
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
+            try:
+                # msvcrt locks a byte range, and an empty file has no byte
+                # to lock, so seed one exactly once. A concurrent seeder
+                # racing this write is harmless: same byte, and neither
+                # side holds the lock yet at this point.
+                if os.fstat(fd).st_size == 0:
+                    try:
+                        os.write(fd, b"\0")
+                    except OSError:
+                        pass
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+                try:
+                    yield
+                finally:
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+            finally:
+                os.close(fd)
             return
-        self._root.mkdir(parents=True, exist_ok=True)
-        with open(self._root / ".lock", "w") as handle:
+        with open(lock_path, "w") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX)
             try:
                 yield
