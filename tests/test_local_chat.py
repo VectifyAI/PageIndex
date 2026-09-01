@@ -749,6 +749,59 @@ def test_clip_flattens_and_caps():
     assert local_chat._clip("x" * 250) == "x" * 200 + "... (+50 chars)"
 
 
+@needs_agents
+def test_chat_process_parallel_calls_pair_results(client, store_path,
+                                                  fake_model):
+    """A result nests only under its own call line; parallel-call results
+    stand alone with their call's arguments echoed."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    seed_doc(store_path, "pi-b", "other.pdf")
+    fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"}),
+         _call_item("get_document", {"doc_name": "other.pdf"},
+                    call_id="call_2")],
+        [_msg_item("The answer")],
+    ])
+    text = "".join(client.chat("What status?", stream=True,
+                               show_process=True))
+    assert "\n  -> " not in text  # nothing nests under the wrong call
+    assert '\n\n-> get_document {"doc_name": "report.pdf"}: ' in text
+    assert '\n-> get_document {"doc_name": "other.pdf"}: ' in text
+    assert '\n\n-> get_document {"doc_name": "other.pdf"}' not in text
+    for doc in ("report.pdf", "other.pdf"):
+        line = next(ln for ln in text.splitlines()
+                    if ln.startswith(f'-> get_document {{"doc_name": '
+                                     f'"{doc}"}}: '))
+        assert f'"{doc}"' in line.split("}: ", 1)[1]
+
+
+@needs_agents
+def test_chat_stream_drops_empty_deltas(client, store_path, fake_model):
+    """Mid-stream empty deltas carry nothing and would only flip weave
+    sections; the event source drops them, like chat_completions."""
+    fake = fake_model([[_msg_item("The answer")]])
+    fake.pieces = ("The ", "", "answer")
+    assert list(client.chat("q", stream=True,
+                            show_process=False)) == ["The ", "answer"]
+    fake = fake_model([[_msg_item("The answer")]])
+    fake.pieces = ("The ", "", "answer")
+    fake.thinking_pieces = ("hm", "", "m")
+    deltas = [ev["delta"] for ev in client.chat("q", stream=True).events
+              if ev["type"] in ("answer", "thinking")]
+    assert "" not in deltas
+
+
+def test_chat_process_managed_validates_before_request(monkeypatch):
+    """A bad show_process must choke before the billed request is sent."""
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    calls = []
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kwargs: calls.append(kwargs) or iter(()))
+    with pytest.raises(PageIndexAPIError, match="Unknown show_process key"):
+        cloud.chat("q", stream=True, show_process={"thinkng": False})
+    assert calls == []
+
+
 # ── responses ──
 
 @needs_agents

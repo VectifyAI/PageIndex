@@ -1,4 +1,6 @@
-"""Own-model chat: document-QA agents over the local or cloud agent tools."""
+"""Own-model chat: document-QA agents over the local or cloud agent
+tools, plus the ChatStream views, which also weave the managed
+endpoint's chunk stream."""
 from __future__ import annotations
 
 import asyncio
@@ -660,11 +662,13 @@ async def _chat_events_agen(client, agent, items, run_kwargs):
             if event.type == "raw_response_event":
                 data = event.data
                 if isinstance(data, ResponseTextDeltaEvent):
-                    yield {"type": "answer", "delta": data.delta}
+                    if data.delta:
+                        yield {"type": "answer", "delta": data.delta}
                 elif isinstance(data, (
                         ResponseReasoningTextDeltaEvent,
                         ResponseReasoningSummaryTextDeltaEvent)):
-                    yield {"type": "thinking", "delta": data.delta}
+                    if data.delta:
+                        yield {"type": "thinking", "delta": data.delta}
             elif event.type == "run_item_stream_event":
                 raw = getattr(event.item, "raw_item", None)
                 if event.name == "tool_called":
@@ -708,6 +712,8 @@ def _weave(events, options) -> Iterator[str]:
         section = None   # the open flowing section: thinking/answer/tool
         opened = False   # anything yielded yet (first section takes no gap)
         cap = options["max_chars"]
+        last_call = None  # the [tool] line still open for nesting
+        call_args = {}    # call_id -> clipped arguments, to label orphans
 
         def enter(kind, label: str = "") -> str:
             nonlocal section, opened
@@ -733,16 +739,27 @@ def _weave(events, options) -> Iterator[str]:
                 arguments = ev["arguments"]
                 if not isinstance(arguments, str):
                     arguments = json.dumps(arguments, ensure_ascii=False)
-                line = f"[tool] {ev['name']} {_clip(arguments, cap)}"
+                clipped = _clip(arguments, cap)
+                last_call = ev["call_id"]
+                call_args[last_call] = clipped
+                line = f"[tool] {ev['name']} {clipped}"
                 yield enter("tool") + line.rstrip()
             elif kind == "tool_result":
                 if not options["tool_results"]:
                     continue
-                text = f"-> {ev['name']}: {_clip(ev['output'], cap)}"
-                # nested under its call line; its own paragraph when
-                # call lines are hidden
-                yield ("\n  " + text if options["tool_calls"]
-                       else enter("tool") + text)
+                out = _clip(ev["output"], cap)
+                if section == "tool" and ev["call_id"] == last_call:
+                    # directly under its own call line
+                    yield f"\n  -> {ev['name']}: {out}"
+                else:
+                    # parallel calls, or call lines hidden: standalone,
+                    # arguments echoed to say whose result this is
+                    args = call_args.get(ev["call_id"], "")
+                    head = f"-> {ev['name']} {args}".rstrip()
+                    gap = ("\n" if section == "tool" and last_call is None
+                           else enter("tool"))
+                    yield f"{gap}{head}: {out}"
+                last_call = None
     finally:
         close = getattr(events, "close", None)
         if close is not None:
@@ -797,8 +814,8 @@ class ChatStream:
 
     def close(self) -> None:
         """Stop the run: closes the open view, and the stream is dead
-        afterwards, like a closed generator (a run never consumed never
-        starts)."""
+        afterwards, like a closed generator (own-model chat: a run never
+        consumed never starts)."""
         self._closed = True
         close = getattr(self._it, "close", None)
         if close is not None:

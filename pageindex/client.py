@@ -842,11 +842,13 @@ class PageIndexClient:
                                        model=model,
                                        reasoning_effort=reasoning_effort,
                                        show_process=resolved)
+            from .local_chat import _process_options, run_cloud_chat_stream
+            if resolved is not False:
+                _process_options(resolved)  # choke before the request is sent
             chunks = self.chat_completions(messages, stream=True,
                                            stream_metadata=True,
                                            doc_id=doc_id, model=model,
                                            reasoning_effort=reasoning_effort)
-            from .local_chat import run_cloud_chat_stream
             return run_cloud_chat_stream(
                 cast(Iterator[dict[str, Any]], chunks), resolved)
         result = self.chat_completions(messages, doc_id=doc_id, model=model,
