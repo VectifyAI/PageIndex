@@ -3,7 +3,8 @@
 Cloud clients get one runnable tool per live cloud MCP tool — the server's
 input schemas pass through verbatim (MCP inputSchema and Messages API
 input_schema are the same shape), calls proxied over MCP. Local clients get
-the in-process tools — the same set messages() runs internally. Failed
+the in-process tools — the same set chat(protocol="messages") runs
+internally. Failed
 calls raise ToolError so the runner emits the tool_result with
 ``is_error: true`` and the envelope as its content.
 """

@@ -60,7 +60,8 @@ def _system_text(content: Any) -> str:
 def _split_chat_messages(messages) -> "tuple[list[str], list[dict]]":
     """Validate the chat_completions surface's messages: system/developer
     content joins the managed instructions; user/assistant history passes
-    through. Tool-history round-trips belong to responses()/messages()."""
+    through. Tool-history round-trips belong to the protocol lanes,
+    chat(protocol=...)."""
     if not isinstance(messages, list) or not messages:
         raise PageIndexAPIError("messages must be a non-empty list.")
     system_texts: list[str] = []
@@ -77,13 +78,13 @@ def _split_chat_messages(messages) -> "tuple[list[str], list[dict]]":
             if not isinstance(content, str):
                 raise PageIndexAPIError(
                     "chat_completions content must be a string; for "
-                    "structured items use responses() or messages()."
+                    "structured items use chat(protocol=...)."
                 )
             history.append({"role": role, "content": content})
         else:
             raise PageIndexAPIError(
                 f"Unsupported role for chat_completions: {role!r}. Tool "
-                "history round-trips belong to responses() or messages()."
+                "history round-trips belong to chat(protocol=...)."
             )
     if not history:
         raise PageIndexAPIError("messages must contain a user or assistant "
@@ -175,7 +176,8 @@ def _require_openai_agents(method: str) -> None:
             f"{method} with your own chat model requires the OpenAI "
             "Agents SDK — "
             "pip install openai-agents. "
-            "messages() runs on the anthropic extra instead."
+            "chat(protocol='messages') runs on the anthropic extra "
+            "instead."
         ) from exc
 
 
@@ -192,10 +194,11 @@ def _openai_model(protocol: str, model_name: str, backend=None):
         model_name = model_name.removeprefix("litellm/")
         if "/" in model_name and not model_name.startswith("openai/"):
             raise PageIndexAPIError(
-                f"responses() cannot drive '{model_name}': provider-prefixed "
-                "models route through LiteLLM, which speaks chat.completions, "
-                "not the Responses API. Use chat_completions() (or messages() "
-                "for Anthropic models), or point OPENAI_BASE_URL at a "
+                f"protocol='responses' cannot drive '{model_name}': "
+                "provider-prefixed models route through LiteLLM, which speaks "
+                "chat.completions, not the Responses API. Use chat() without "
+                "protocol, or chat_completions() (or protocol='messages' for "
+                "Anthropic models), or point OPENAI_BASE_URL at a "
                 "Responses-capable backend and use a bare or "
                 "'openai/'-prefixed model name."
             )
@@ -390,7 +393,7 @@ def _model_backend_error(exc, lane: str, client=None) -> PageIndexAPIError:
     function tools while reasoning is on) gets its documented exits
     appended, since the fix is a different route, not a retry. The exits
     are per-lane: of the chat lane's three, two are dead ends for a
-    responses() caller — it IS the other lane, and its reasoning knob is
+    Responses-lane caller — it IS the other lane, and its reasoning knob is
     ``reasoning``, not ``reasoning_effort``. On a cloud client an
     auth-shaped failure gets the own-model architecture spelled out —
     the misreading it corrects ("the cloud runs my model") surfaces
@@ -403,7 +406,8 @@ def _model_backend_error(exc, lane: str, client=None) -> PageIndexAPIError:
         )
         message += (
             ", pass reasoning_effort (older litellm routes explicit "
-            "efforts), or call responses() instead." if lane == "chat"
+            "efforts), or use chat(protocol='responses') instead."
+            if lane == "chat"
             else "."
         )
     if (getattr(client, "api_key", None)
@@ -693,7 +697,8 @@ async def _chat_events_agen(client, agent, items, run_kwargs):
                            "output": event.item.output}
         completed = True
     except (MaxTurnsExceeded, AgentsException, openai.OpenAIError) as exc:
-        raise _translate_run_error(exc, None, "chat", client) from exc
+        raise _translate_run_error(exc, run_kwargs.get("max_turns"),
+                                   "chat", client) from exc
     finally:
         if not completed and hasattr(streamed, "cancel"):
             streamed.cancel()  # abandoned/failed: stop the agent task
@@ -895,6 +900,8 @@ def run_cloud_chat_stream(chunks,
 def run_chat_stream(client, messages, doc_id=None, model=None,
                     reasoning_effort=None,
                     show_process: Union[bool, Mapping[str, Any]] = False,
+                    max_turns=None, backend=None, extra_headers=None,
+                    extra_body=None,
                     ) -> ChatStream:
     """chat(stream=True): validation and the agent build run here, eagerly;
     the run itself starts when the returned stream's chosen view is first
@@ -902,6 +909,7 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
     options = (None if show_process is False or show_process is None
                else _process_options(show_process))
     _require_openai_agents("chat")
+    _validate_max_turns(max_turns)
     if isinstance(messages, str):
         if not messages.strip():
             raise PageIndexAPIError(
@@ -909,8 +917,10 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
                 "message dicts.")
         messages = [{"role": "user", "content": messages}]
     agent, items, _ = _chat_agent(client, messages, doc_id, model,
-                                  reasoning_effort=reasoning_effort)
-    run_kwargs = _run_kwargs(None)
+                                  reasoning_effort=reasoning_effort,
+                                  extra_body=extra_body, backend=backend,
+                                  extra_headers=extra_headers)
+    run_kwargs = _run_kwargs(max_turns)
 
     def events():
         return _stream_sync(
@@ -1033,7 +1043,7 @@ def run_responses(client, input, model: Optional[str] = None,
                   extra_headers: Optional[dict] = None,
                   backend: Optional[dict] = None,
                   ) -> Union[dict, Iterator[dict]]:
-    _require_openai_agents("responses")
+    _require_openai_agents("chat(protocol='responses')")
     _validate_max_turns(max_turns)
     if isinstance(input, str) and input.strip():
         items = [{"role": "user", "content": input}]
@@ -1198,8 +1208,8 @@ def _require_anthropic() -> None:
         import anthropic  # noqa: F401
     except ImportError as exc:
         raise PageIndexAPIError(
-            "messages drives your own chat model and requires the "
-            "Anthropic SDK — "
+            "chat(protocol='messages') drives your own chat model and "
+            "requires the Anthropic SDK — "
             "pip install anthropic (or pip install 'pageindex[anthropic]')."
         ) from exc
     try:
@@ -1207,8 +1217,8 @@ def _require_anthropic() -> None:
         from anthropic.lib.tools import ToolError  # noqa: F401
     except ImportError as exc:
         raise PageIndexAPIError(
-            "messages requires anthropic >= 0.108.0 (the tool "
-            "runner with ToolError) — pip install -U anthropic."
+            "chat(protocol='messages') requires anthropic >= 0.108.0 (the "
+            "tool runner with ToolError) — pip install -U anthropic."
         ) from exc
 
 

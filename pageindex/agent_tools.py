@@ -1621,7 +1621,8 @@ def doc_targeting_block(client, doc_id, scoped: bool = False) -> Optional[str]:
     """The doc_id targeting text: names, metadata, and the directive to work
     within those documents. Shared by agent_instructions and the local chat
     surfaces (a leading conversation item on the OpenAI surfaces, a system
-    block on messages()). Raises when a doc_id's name is shadowed by a newer
+    block on the Messages lane). Raises when a doc_id's name is shadowed by a
+    newer
     same-name document — the name-addressed tools could not reach it. With
     ``scoped`` (surfaces whose tools resolve names inside the doc_id
     allowlist) only a same-name duplicate within the targeted set
