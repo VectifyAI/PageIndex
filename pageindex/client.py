@@ -296,7 +296,7 @@ class PageIndexClient:
             documents (structure and summaries). Defaults to the SDK
             default (fast and cheap).
         chat_model (str, optional): Your own model for the chat surfaces
-            (``chat``, ``chat_completions``, ``responses``), exposed as
+            (``chat``, ``chat_completions``), exposed as
             ``client.chat_model`` — on a cloud client, setting it runs
             the document-QA agent in your process over the cloud
             documents (page content then flows through your process to
@@ -555,7 +555,9 @@ class PageIndexClient:
             if name in ("responses", "messages"):
                 raise AttributeError(
                     f"{name}() moved: call chat(protocol={name!r}, ...) "
-                    "— the same protocol, engine, and envelope.")
+                    "— the same protocol, engine, and envelope. Pass the "
+                    "rest by keyword; its sampling and thinking fields "
+                    "ride extra_body under their wire names.")
             raise AttributeError(
                 f"{type(self).__name__!r} object has no attribute {name!r}")
 
@@ -957,11 +959,11 @@ class PageIndexClient:
 
         Args:
             messages: A question string, or the conversation history —
-                role/content messages on every lane. A leading ``system``
-                row joins the managed prompt on the answer lane only; the
-                protocol lanes pass rows to the wire as they are (use
-                ``instructions`` for persona there). With a protocol, also
-                that protocol's transcript items or content blocks.
+                role/content messages on every lane. ``system`` rows join
+                the managed prompt on the answer lane only, wherever they
+                sit; the protocol lanes pass rows to the wire as they are
+                (use ``instructions`` for persona there). With a protocol,
+                also that protocol's transcript items or content blocks.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls. Local
                 documents: also enforced at the tool layer, not just
@@ -1018,7 +1020,11 @@ class PageIndexClient:
                 string on every lane; with ``protocol="messages"`` also
                 a list of Messages system blocks. On the answer lane it
                 precedes any ``system`` rows in the history.
-            max_turns: Own-model chat only — cap on agent turns per call.
+            max_turns: Own-model chat only — cap on agent turns per call
+                (default 10). The OpenAI lanes raise at the cap;
+                ``protocol="messages"`` returns the truncated run
+                (``stop_reason: "tool_use"``, its ``messages`` valid for
+                continuation).
             backend: Own-model chat only — connection overrides for this
                 call's backend, merged over the client's ``chat_backend``
                 (per-call keys win): LiteLLM's connection params on the
@@ -1030,15 +1036,14 @@ class PageIndexClient:
                 answer lane — Anthropic beta flags ride
                 ``protocol="messages"``.
             extra_body: Own-model chat only — the provider's own request
-                fields beyond this method's parameters (``thinking``,
-                ``top_k``, ``max_output_tokens``, …), merged last so they
-                win — including over the fields the SDK writes
-                (``system``, ``input``): override those and the managed
-                prompt is yours to replace. Answer lane: LiteLLM's own
-                params, mapped or refused per provider (its named
-                sampling params are ``chat_completions()``'s); protocol
-                lanes: verbatim into the request body. Credentials belong
-                in ``backend``, never here.
+                fields beyond this method's parameters, in the lane's
+                wire names (Responses ``max_output_tokens``, Messages
+                ``thinking`` / ``top_k``), merged last so they win.
+                Answer lane: LiteLLM's own params, mapped or refused per
+                provider (its named sampling params are
+                ``chat_completions()``'s); protocol lanes: verbatim into
+                the request body. Credentials belong in ``backend``,
+                never here.
 
         Returns:
             - answer lane, stream=False: the answer string
@@ -1082,21 +1087,26 @@ class PageIndexClient:
         if protocol is not None:
             self._require_own_chat(f"chat(protocol={protocol!r})")
             if protocol == "responses":
+                body = extra_body
+                if reasoning_effort:
+                    # OpenAI's own effort field, beside the caller's other
+                    # reasoning keys — theirs still win.
+                    given = extra_body or {}
+                    body = {**given, "reasoning": {
+                        "effort": reasoning_effort,
+                        **given.get("reasoning", {})}}
                 return self._responses(
                     messages, model=model, stream=stream, doc_id=doc_id,
                     instructions=cast(Optional[str], instructions),
-                    max_turns=max_turns,
-                    reasoning=({"effort": reasoning_effort}
-                               if reasoning_effort is not None else None),
-                    extra_body=extra_body, extra_headers=extra_headers,
-                    backend=backend)
+                    max_turns=max_turns, extra_body=body,
+                    extra_headers=extra_headers, backend=backend)
             if not model:
                 raise PageIndexAPIError(
                     "protocol=\"messages\" drives Anthropic's Messages API "
                     "with the Anthropic SDK — name the Claude model with "
                     "model=... (there is no cross-vendor default to guess).")
             body = extra_body
-            if reasoning_effort is not None:
+            if reasoning_effort:
                 # Anthropic's own effort field, beside the caller's other
                 # output_config keys — theirs still win.
                 given = extra_body or {}

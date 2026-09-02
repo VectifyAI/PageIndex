@@ -77,13 +77,13 @@ def _split_chat_messages(messages) -> "tuple[list[str], list[dict]]":
             content = message.get("content")
             if not isinstance(content, str):
                 raise PageIndexAPIError(
-                    "chat_completions content must be a string; for "
+                    "content must be a string on this lane; for "
                     "structured items use chat(protocol=...)."
                 )
             history.append({"role": role, "content": content})
         else:
             raise PageIndexAPIError(
-                f"Unsupported role for chat_completions: {role!r}. Tool "
+                f"Unsupported role {role!r} on this lane. Tool "
                 "history round-trips belong to chat(protocol=...)."
             )
     if not history:
