@@ -33,8 +33,6 @@ def _preload_litellm() -> None:
     def _import() -> None:
         try:
             import litellm  # noqa: F401
-            from .utils import _quiet_litellm
-            _quiet_litellm()
         except Exception:
             pass
 

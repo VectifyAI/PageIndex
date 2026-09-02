@@ -881,10 +881,7 @@ def test_openai_agent_config_repairs_litellm_types(tmp_path, monkeypatch,
     process, outside our completion helpers — the LiteLLM repairs must
     run at config time, and only for LiteLLM-routed models."""
     pytest.importorskip("agents")
-    import pageindex.client
     import pageindex.utils
-    # The preload thread runs _quiet_litellm too; keep it out of the count.
-    monkeypatch.setattr(pageindex.client, "_litellm_preload_started", True)
     calls = []
     monkeypatch.setattr(pageindex.utils, repair,
                         lambda: calls.append(True))
