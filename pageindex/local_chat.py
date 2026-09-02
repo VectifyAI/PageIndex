@@ -1106,7 +1106,7 @@ def run_responses(client, input, model: Optional[str] = None,
                                            max_output_tokens),
             "error": recorded.get("error"),
             "incomplete_details": recorded.get("incomplete_details"),
-            "metadata": None,
+            "metadata": given.get("metadata"),
         }
 
     if not stream:
