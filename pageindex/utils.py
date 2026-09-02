@@ -74,9 +74,11 @@ def _quiet_litellm() -> None:
     and log with their full text."""
     import litellm
     litellm.suppress_debug_info = True
-    if os.environ.get("LITELLM_LOG", "ERROR").upper() == "ERROR":
+    level = getattr(logging, os.environ.get("LITELLM_LOG", "ERROR").upper(),
+                    logging.ERROR)
+    if level >= logging.ERROR:
         for name in ("LiteLLM", "LiteLLM Router", "LiteLLM Proxy", "litellm"):
-            logging.getLogger(name).setLevel(logging.ERROR)
+            logging.getLogger(name).setLevel(level)
 
 # Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
 if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
@@ -189,9 +191,9 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
         except Exception as e:
             if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
                 raise
-            logging.warning("Retrying LLM completion")
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
+                logging.warning("Retrying LLM completion")
                 time.sleep(1)
             else:
                 raise LLMRetriesExhausted(
@@ -221,9 +223,9 @@ async def llm_acompletion(model, prompt):
         except Exception as e:
             if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
                 raise
-            logging.warning("Retrying LLM completion")
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
+                logging.warning("Retrying LLM completion")
                 await asyncio.sleep(1)
             else:
                 raise LLMRetriesExhausted(
