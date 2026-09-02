@@ -246,6 +246,8 @@ def _litellm_claude_marks(wire: str) -> Optional[dict]:
     hands bare names to LiteLLM's own resolution)."""
     try:
         from litellm import get_llm_provider
+        from .utils import _quiet_litellm
+        _quiet_litellm()
         model, provider, _, _ = get_llm_provider(model=wire)
     except Exception:
         return None
@@ -281,6 +283,8 @@ def _openai_protocol(model_name: str) -> bool:
         return True
     try:
         import litellm
+        from .utils import _quiet_litellm
+        _quiet_litellm()
         _, provider, _, _ = litellm.get_llm_provider(model=wire)
     except Exception:
         return False

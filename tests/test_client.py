@@ -1975,7 +1975,9 @@ def test_preload_stamps_litellm_log_level(monkeypatch):
     stderr; setdefault, so a caller's explicit choice wins."""
     import pageindex.client as client_mod
     monkeypatch.setattr(client_mod, "_litellm_preload_started", True)
-    monkeypatch.delenv("LITELLM_LOG", raising=False)
+    # delenv on an absent name records no undo; setenv first so it does.
+    monkeypatch.setenv("LITELLM_LOG", "x")
+    monkeypatch.delenv("LITELLM_LOG")
     client_mod._preload_litellm()
     assert os.environ["LITELLM_LOG"] == "ERROR"
     monkeypatch.setenv("LITELLM_LOG", "DEBUG")
@@ -2004,3 +2006,18 @@ def test_retry_notice_logs_instead_of_stdout(monkeypatch, capsys, caplog):
     assert utils.llm_completion("openai/gpt-x", "hi") == "ok"
     assert capsys.readouterr().out == ""
     assert any("Retrying" in r.getMessage() for r in caplog.records)
+
+
+def test_retry_notice_only_when_a_retry_follows(monkeypatch, caplog):
+    """The notice announces a retry; the terminal attempt raises instead."""
+    litellm = pytest.importorskip("litellm")
+    from pageindex import utils
+
+    def broken(**kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(litellm, "completion", broken)
+    monkeypatch.setattr(utils.time, "sleep", lambda s: None)
+    with pytest.raises(utils.LLMRetriesExhausted):
+        utils.llm_completion("openai/gpt-x", "hi")
+    assert sum("Retrying" in r.getMessage() for r in caplog.records) == 9
