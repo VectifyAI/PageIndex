@@ -2690,6 +2690,36 @@ def test_litellm_lane_gates_litellm_logging(monkeypatch):
     assert gated.getEffectiveLevel() == logging.WARNING
 
 
+def test_provider_lookups_flip_the_switch_before_asking(monkeypatch, capsys):
+    """The lane asks litellm which provider serves a model before the
+    model is built, and openai_agent_config asks with no model built at
+    all; a failed ask print()s the banner, so the switch flips at the ask."""
+    litellm = pytest.importorskip("litellm")
+    for lookup in (local_chat._openai_protocol,
+                   local_chat._litellm_claude_marks):
+        monkeypatch.setattr(litellm, "suppress_debug_info", False)
+        assert not lookup("z-ai/not-in-the-map")
+        assert litellm.suppress_debug_info is True
+    assert "Provider List" not in capsys.readouterr().out
+
+
+def test_quiet_litellm_honors_a_quieter_level(monkeypatch):
+    """A caller asking for less than ERROR via LITELLM_LOG gets that level,
+    not the WARNING chatter the gate exists to remove."""
+    pytest.importorskip("litellm")
+    import logging
+    from pageindex.utils import _quiet_litellm
+    monkeypatch.setenv("LITELLM_LOG", "CRITICAL")
+    gated = logging.getLogger("LiteLLM")
+    prior = gated.level
+    gated.setLevel(logging.WARNING)
+    try:
+        _quiet_litellm()
+        assert gated.getEffectiveLevel() == logging.CRITICAL
+    finally:
+        gated.setLevel(prior)
+
+
 def test_openai_protocol_predicate_follows_litellm_routing():
     pytest.importorskip("litellm")
     for name in ("gpt-5", "openai/gpt-4o", "litellm/gpt-4o",
