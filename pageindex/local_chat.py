@@ -736,14 +736,14 @@ def _weave(events, options) -> Iterator[str]:
                         if section != "thinking" else "")
                 yield head + ev["delta"]
             elif kind == "tool_call":
-                if not options["tool_call"]:
-                    continue
                 arguments = ev["arguments"]
                 if not isinstance(arguments, str):
                     arguments = json.dumps(arguments, ensure_ascii=False)
                 clipped = _clip(arguments, cap)
+                call_args[ev["call_id"]] = clipped  # even with call lines hidden
+                if not options["tool_call"]:
+                    continue
                 last_call = ev["call_id"]
-                call_args[last_call] = clipped
                 line = f"[tool_call] {ev['name']} {clipped}"
                 yield enter("tool") + line.rstrip()
             elif kind == "tool_result":
@@ -815,7 +815,9 @@ class ChatStream:
                 if self._closed:
                     return
                 self._it = self._events()
-            yield from self._it
+            # no `yield from`: a dropped handle must not close the run
+            for ev in self._it:
+                yield ev
         return consume()
 
     def close(self) -> None:

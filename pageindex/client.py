@@ -830,7 +830,7 @@ class PageIndexClient:
                 thinks (``"low"`` / ``"medium"`` / ``"high"``; what a
                 backend accepts is its own). Unset sends nothing — the
                 model's default behavior applies.
-            show_process: Streamed own-model chat — weave the run into
+            show_process: Streamed chat — weave the run into
                 the text stream for display: thinking flows as
                 "[thinking] " sections, each tool call as a "[tool_call]
                 name arguments" line with its "[tool_result]" line, and
@@ -864,12 +864,14 @@ class PageIndexClient:
               ``{"type": "tool_call", "call_id", "name", "arguments"}``,
               ``{"type": "tool_result", "call_id", "name", "output"}``
         """
-        if (show_process is not False and show_process is not None
-                and not stream):
-            raise PageIndexAPIError(
-                "show_process shows the run as it happens and requires "
-                "stream=True; only show_process=False (or None) means "
-                f"off — got {show_process!r}.")
+        if show_process is not False and show_process is not None:
+            from .local_chat import _process_options
+            _process_options(show_process)  # a bad value chokes first
+            if not stream:
+                raise PageIndexAPIError(
+                    "show_process shows the run as it happens and requires "
+                    "stream=True; only show_process=False (or None) means "
+                    f"off — got {show_process!r}.")
         if stream:
             # the default means "on where available"
             resolved = True if show_process is None else show_process
@@ -879,9 +881,7 @@ class PageIndexClient:
                                        model=model,
                                        reasoning_effort=reasoning_effort,
                                        show_process=resolved)
-            from .local_chat import _process_options, run_cloud_chat_stream
-            if resolved is not False:
-                _process_options(resolved)  # choke before the request is sent
+            from .local_chat import run_cloud_chat_stream
             chunks = self.chat_completions(messages, stream=True,
                                            stream_metadata=True,
                                            doc_id=doc_id, model=model,

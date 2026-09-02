@@ -504,7 +504,13 @@ def test_chat_process_requires_stream(client):
     # must say how to turn it off, not claim the caller passed True
     with pytest.raises(PageIndexAPIError,
                        match="only show_process=False"):
-        client.chat("q", show_process=0)
+        client.chat("q", show_process={})
+    # an invalid value is refused as such, with or without stream=True —
+    # never told to add stream=True first
+    for kwargs in ({}, {"stream": True}):
+        with pytest.raises(PageIndexAPIError,
+                           match="must be True, False, or a dict"):
+            client.chat("q", show_process=0, **kwargs)
 
 
 def _cloud_chunk(content=None, meta=None, choices=True):
@@ -637,7 +643,8 @@ def test_chat_process_dict_selects_parts(client, store_path, fake_model):
 
     no_calls = run({"tool_call": False})
     assert "[tool_call]" not in no_calls
-    assert "\n\n[tool_result] get_document: " in no_calls  # results stand alone
+    # results stand alone, each echoing its call's arguments
+    assert '\n\n[tool_result] get_document {"doc_name": "report.pdf"}: ' in no_calls
     assert "[thinking] Need the report" in no_calls
 
     calls_only = run({"tool_result": False})
@@ -712,6 +719,23 @@ def test_chat_stream_events_read_is_inert(client, store_path, fake_model):
     assert hasattr(stream, "events")  # introspection, not consumption
     stream.events
     assert "".join(stream) == "The answer"
+
+
+@needs_agents
+def test_chat_stream_events_survive_partial_reads(client, store_path,
+                                                  fake_model):
+    """Peek at one event, then read the rest: the dropped .events handle
+    must not close the run underneath."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    stream = client.chat("What status?", stream=True)
+    first = next(stream.events)
+    rest = list(stream.events)
+    assert first["type"] == "tool_call"
+    assert [ev["type"] for ev in rest] == ["tool_result", "answer", "answer"]
 
 
 def test_chat_stream_events_refusal_waits_for_consumption(monkeypatch):
