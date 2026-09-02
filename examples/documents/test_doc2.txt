@@ -1,0 +1,9 @@
+# Second Document
+
+This is another test document to test merging.
+
+## Another Section
+Here is some other text.
+
+### Another Subsection
+More text here for doc 2.
