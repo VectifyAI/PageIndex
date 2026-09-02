@@ -983,12 +983,11 @@ class PageIndexClient:
                 spelling: LiteLLM's ``reasoning_effort``, Responses
                 ``reasoning.effort``, Messages ``output_config.effort``.
                 Unset sends nothing — the model's default applies.
-            show_process: Answer lane, streamed own-model chat — weave
-                the run into the text stream for display: thinking flows
-                as "[thinking] " sections, each tool call as a
-                "[tool_call] name arguments" line with its "[tool_result]"
-                line, and the answer unlabeled. **On by default**, weaving
-                what the mode
+            show_process: Answer lane, streamed chat — weave the run into
+                the text stream for display: thinking flows as
+                "[thinking] " sections, each tool call as a "[tool_call]
+                name arguments" line with its "[tool_result]" line, and
+                the answer unlabeled. **On by default**, weaving what the mode
                 serves: the in-process agent's full run; on a managed
                 client, the tool calls the endpoint streams (its wire
                 carries no thinking and no tool results). Pass ``False``
@@ -1068,12 +1067,14 @@ class PageIndexClient:
                 f"protocol={protocol!r} the run comes back as the protocol's "
                 "own transcript and events — drop show_process, or drop "
                 "protocol for the woven text stream.")
-        if (show_process is not False and show_process is not None
-                and not stream):
-            raise PageIndexAPIError(
-                "show_process shows the run as it happens and requires "
-                "stream=True; only show_process=False (or None) means "
-                f"off — got {show_process!r}.")
+        if show_process is not False and show_process is not None:
+            from .local_chat import _process_options
+            _process_options(show_process)  # a bad value chokes first
+            if not stream:
+                raise PageIndexAPIError(
+                    "show_process shows the run as it happens and requires "
+                    "stream=True; only show_process=False (or None) means "
+                    f"off — got {show_process!r}.")
         if isinstance(instructions, list) and protocol != "messages":
             raise PageIndexAPIError(
                 "instructions blocks are the Messages protocol's shape — "
@@ -1132,9 +1133,7 @@ class PageIndexClient:
                                        max_turns=max_turns, backend=backend,
                                        extra_headers=extra_headers,
                                        extra_body=extra_body)
-            from .local_chat import _process_options, run_cloud_chat_stream
-            if resolved is not False:
-                _process_options(resolved)  # choke before the request is sent
+            from .local_chat import run_cloud_chat_stream
             chunks = self.chat_completions(messages, stream=True,
                                            stream_metadata=True,
                                            doc_id=doc_id, model=model,
