@@ -1551,13 +1551,15 @@ def test_sampling_knobs_ride_model_settings(client, store_path, fake_model,
     fake_model([[_msg_item("ok")]])
     result = client.chat("q", protocol="responses",
                          extra_body={"max_output_tokens": 321, "top_p": 0.9,
-                                     "temperature": 0.2})
+                                     "temperature": 0.2,
+                                     "metadata": {"tag": "abc"}})
     assert result["max_output_tokens"] == 321
     assert result["top_p"] == 0.9
     assert result["temperature"] == 0.2
+    assert result["metadata"] == {"tag": "abc"}
     sent = seen["responses"].extra_body
-    assert {"max_output_tokens": 321, "top_p": 0.9,
-            "temperature": 0.2}.items() <= sent.items()
+    assert {"max_output_tokens": 321, "top_p": 0.9, "temperature": 0.2,
+            "metadata": {"tag": "abc"}}.items() <= sent.items()
 
 
 @needs_agents
