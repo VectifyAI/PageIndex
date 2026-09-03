@@ -1040,8 +1040,8 @@ class PageIndexClient:
                 wire names (Responses ``max_output_tokens``, Messages
                 ``thinking`` / ``top_k``), merged last so they win.
                 Answer lane: LiteLLM's own params, mapped or refused per
-                provider (its named sampling params are
-                ``chat_completions()``'s); protocol lanes: verbatim into
+                provider (``response_format`` has no door on
+                LiteLLM-routed models); protocol lanes: verbatim into
                 the request body. The managed prompt, conversation and
                 tools are not fields here (``system`` / ``instructions``
                 / ``input`` / ``messages`` / ``tools`` are refused);
