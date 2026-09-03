@@ -1281,6 +1281,7 @@ def _default_max_tokens(model: str, thinking=None) -> int:
     if isinstance(budget, int) and not isinstance(budget, bool):
         want = budget + 8192
         try:
+            from . import utils  # noqa: F401  — must precede litellm's import
             import litellm
             ceiling = (litellm.model_cost.get(model)
                        or {}).get("max_output_tokens")
