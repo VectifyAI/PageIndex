@@ -1253,7 +1253,10 @@ class PageIndexClient:
                 OpenAI-compatible backends take them verbatim in the
                 request body; LiteLLM-routed providers take them as
                 LiteLLM's own params (mapped or refused per provider).
-                Credentials belong in ``backend``, never here.
+                The managed prompt, conversation and tools are not
+                fields here (``system`` / ``instructions`` / ``input`` /
+                ``messages`` / ``tools`` are refused). Credentials belong
+                in ``backend``, never here.
             extra_headers: Own-model chat only — extra HTTP headers merged into
                 each backend request; caller headers win. One exception:
                 LiteLLM's anthropic adapter owns the ``anthropic-beta``
