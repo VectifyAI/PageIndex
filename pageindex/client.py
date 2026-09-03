@@ -9,6 +9,7 @@ import warnings
 from typing import (Any, Callable, Iterator, Literal, Mapping, Optional, Union,
                     cast, overload)
 
+# real, not TYPE_CHECKING: chat()'s hints must resolve at runtime
 from .chat_stream import ChatStream
 from .errors import PageIndexAPIError
 

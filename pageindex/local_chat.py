@@ -1,6 +1,6 @@
 """Own-model chat: document-QA agents over the local or cloud agent
-tools, plus the ChatStream views, which also weave the managed
-endpoint's chunk stream."""
+tools, and the runs behind both ChatStream views, which also weave the
+managed endpoint's chunk stream."""
 from __future__ import annotations
 
 import asyncio
