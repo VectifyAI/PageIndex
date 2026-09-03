@@ -300,8 +300,13 @@ def test_chat_completions_missing_framework(client, monkeypatch):
         client.chat_completions([{"role": "user", "content": "x"}])
 
 
-def test_cloud_guards():
+def test_cloud_guards(monkeypatch):
     cloud = PageIndexCloudClient(api_key="pi-test-key")
+    # empty is unset, as on the local lane — the managed chat serves it
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kw: {"choices": [{"message": {"content": "ok"}}]})
+    assert cloud.chat("x", model="", reasoning_effort="", extra_body={},
+                      extra_headers={}, backend={}) == "ok"
     with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.chat_completions([{"role": "user", "content": "x"}], model="m")
     with pytest.raises(PageIndexAPIError, match="own chat model"):
@@ -1486,6 +1491,10 @@ def test_reasoning_passthrough_reaches_each_engine(monkeypatch):
     agent = local_chat._openai_agent(None, "chat", "gpt-test", "sys",
                                      None, None)
     assert agent.model_settings.reasoning is None
+    assert agent.model_settings.extra_args is None
+    # "" is unset on this lane too, like the protocol lanes
+    agent = local_chat._openai_agent(None, "chat", "gpt-test", "sys",
+                                     None, None, reasoning_effort="")
     assert agent.model_settings.extra_args is None
 
 

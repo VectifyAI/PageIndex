@@ -1289,10 +1289,9 @@ class PageIndexClient:
                 "chat_model is empty — it configures nothing, and a local "
                 "client has no managed chat to fall back to. Set "
                 "chat_model=... to run the agent with your own model.")
-        if (model is not None or max_turns is not None or top_p is not None
-                or max_tokens is not None or reasoning_effort is not None
-                or extra_body is not None or extra_headers is not None
-                or backend is not None):
+        if (model or max_turns is not None or top_p is not None
+                or max_tokens is not None or reasoning_effort
+                or extra_body or extra_headers or backend):
             raise PageIndexAPIError(
                 "model, max_turns, top_p, max_tokens, reasoning_effort, "
                 "extra_body, extra_headers and backend drive your own chat "
