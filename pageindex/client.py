@@ -9,10 +9,8 @@ import warnings
 from typing import (TYPE_CHECKING, Any, Callable, Iterator, Literal, Mapping,
                     Optional, Union, cast, overload)
 
+from .chat_stream import ChatStream
 from .errors import PageIndexAPIError
-
-if TYPE_CHECKING:
-    from .local_chat import ChatStream
 
 
 _litellm_preload_started = False
@@ -826,7 +824,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
-    ) -> "ChatStream": ...
+    ) -> ChatStream: ...
 
     @overload
     def chat(
@@ -898,7 +896,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
-    ) -> Union[str, "ChatStream"]: ...
+    ) -> Union[str, ChatStream]: ...
 
     @overload
     def chat(
@@ -916,7 +914,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
-    ) -> Union[str, "ChatStream", dict[str, Any], Iterator[Any]]: ...
+    ) -> Union[str, ChatStream, dict[str, Any], Iterator[Any]]: ...
 
     def chat(
         self,
@@ -933,7 +931,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
-    ) -> Union[str, "ChatStream", dict[str, Any], Iterator[Any]]:
+    ) -> Union[str, ChatStream, dict[str, Any], Iterator[Any]]:
         """
         Ask a question about your documents.
 
