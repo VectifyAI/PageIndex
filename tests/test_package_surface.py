@@ -120,3 +120,33 @@ def test_import_leaves_litellm_env_untouched(tmp_path):
     out = subprocess.run([sys.executable, "-c", probe], env=env,
                          capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "ok"
+
+
+def test_chat_module_stamps_before_it_imports_litellm():
+    """local_chat imports litellm without utils on its import path; the
+    stamp has to be in place by then anyway."""
+    probe = ("import os\n"
+             "from pageindex import local_chat\n"
+             "local_chat._default_max_tokens('claude-sonnet-4-5',"
+             " {'budget_tokens': 4096})\n"
+             "print(os.environ.get('LITELLM_LOCAL_MODEL_COST_MAP'))\n")
+    env = {k: v for k, v in os.environ.items()
+           if k != "LITELLM_LOCAL_MODEL_COST_MAP"}
+    out = subprocess.run([sys.executable, "-c", probe], env=env,
+                         capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "True"
+
+
+def test_utils_import_keeps_litellm_off_the_network():
+    """utils' import sets litellm's no-fetch default; an explicit choice wins."""
+    probe = ("import os, pageindex.utils; "
+             "print(os.environ['LITELLM_LOCAL_MODEL_COST_MAP'])")
+    env = {k: v for k, v in os.environ.items()
+           if k != "LITELLM_LOCAL_MODEL_COST_MAP"}
+    fresh = subprocess.run([sys.executable, "-c", probe], env=env,
+                           capture_output=True, text=True, check=True)
+    assert fresh.stdout.strip() == "True"
+    env["LITELLM_LOCAL_MODEL_COST_MAP"] = "False"
+    chosen = subprocess.run([sys.executable, "-c", probe], env=env,
+                            capture_output=True, text=True, check=True)
+    assert chosen.stdout.strip() == "False"

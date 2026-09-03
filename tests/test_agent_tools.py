@@ -873,7 +873,8 @@ def test_non_string_doc_name_stays_not_found(client, store_path):
 
 
 @pytest.mark.parametrize("repair", ["_repair_litellm_types",
-                                    "_mute_litellm_bridge_usage_warning"])
+                                    "_mute_litellm_bridge_usage_warning",
+                                    "_quiet_litellm"])
 def test_openai_agent_config_repairs_litellm_types(tmp_path, monkeypatch,
                                                    repair):
     """The BYO path resolves its model through LiteLLM in the caller's

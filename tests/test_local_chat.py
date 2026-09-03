@@ -2087,6 +2087,63 @@ def test_litellm_lane_hides_the_bridge_usage_warning():
     assert any("Expected `int`" in m for m in seen)
 
 
+@needs_agents
+def test_litellm_lane_mutes_the_provider_list_banner(monkeypatch, capsys):
+    """litellm's OpenRouter adapter probes supports_reasoning() with the
+    provider-stripped model name, so any model missing from its static map
+    print()s a red "Provider List:" banner into the middle of the streamed
+    answer; building the lane's model flips litellm's embedder switch."""
+    litellm = pytest.importorskip("litellm")
+    monkeypatch.setattr(litellm, "suppress_debug_info", False)
+    local_chat._openai_model("chat", "openrouter/z-ai/not-in-the-map")
+    assert litellm.suppress_debug_info is True
+    with pytest.raises(litellm.BadRequestError):
+        litellm.get_llm_provider("z-ai/not-in-the-map")
+    assert "Provider List" not in capsys.readouterr().out
+
+
+@needs_agents
+def test_litellm_lane_gates_litellm_logging(monkeypatch, caplog):
+    """The lane defaults litellm's logger to ERROR; a level the host set stays."""
+    pytest.importorskip("litellm")
+    import logging
+    monkeypatch.delenv("LITELLM_LOG", raising=False)
+    caplog.set_level(logging.NOTSET, logger="LiteLLM")  # untouched
+    gated = logging.getLogger("LiteLLM")
+    local_chat._openai_model("chat", "openrouter/z-ai/not-in-the-map")
+    assert gated.level == logging.ERROR
+    assert not gated.isEnabledFor(logging.WARNING)
+    gated.setLevel(logging.WARNING)
+    local_chat._openai_model("chat", "openrouter/z-ai/not-in-the-map")
+    assert gated.level == logging.WARNING
+
+
+def test_provider_lookups_flip_the_switch_before_asking(monkeypatch, capsys):
+    """The lane asks litellm which provider serves a model before the
+    model is built, and openai_agent_config asks with no model built at
+    all; a failed ask print()s the banner, so the switch flips at the ask."""
+    litellm = pytest.importorskip("litellm")
+    for lookup in (local_chat._openai_protocol,
+                   local_chat._litellm_claude_marks):
+        monkeypatch.setattr(litellm, "suppress_debug_info", False)
+        assert not lookup("z-ai/not-in-the-map")
+        assert litellm.suppress_debug_info is True
+    assert "Provider List" not in capsys.readouterr().out
+
+
+def test_quiet_litellm_honors_the_chosen_default(monkeypatch, caplog):
+    """LITELLM_LOG picks the default, in both directions."""
+    pytest.importorskip("litellm")
+    import logging
+    from pageindex.utils import _quiet_litellm
+    gated = logging.getLogger("LiteLLM")
+    for chosen in (logging.CRITICAL, logging.DEBUG):
+        monkeypatch.setenv("LITELLM_LOG", logging.getLevelName(chosen))
+        caplog.set_level(logging.NOTSET, logger="LiteLLM")
+        _quiet_litellm()
+        assert gated.level == chosen
+
+
 def test_openai_protocol_predicate_follows_litellm_routing():
     pytest.importorskip("litellm")
     for name in ("gpt-5", "openai/gpt-4o", "litellm/gpt-4o",
