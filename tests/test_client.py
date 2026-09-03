@@ -1969,20 +1969,21 @@ def test_blank_chat_model_carries_no_model_into_agent_config():
     assert "model" not in client.openai_agent_config()
 
 
-def test_preload_stamps_litellm_log_level(monkeypatch):
-    """The background preload stamps LITELLM_LOG before litellm's import
-    initializes its logger, so import-time WARNING chatter never reaches
-    stderr; setdefault, so a caller's explicit choice wins."""
-    import pageindex.client as client_mod
-    monkeypatch.setattr(client_mod, "_litellm_preload_started", True)
-    # delenv on an absent name records no undo; setenv first so it does.
-    monkeypatch.setenv("LITELLM_LOG", "x")
-    monkeypatch.delenv("LITELLM_LOG")
-    client_mod._preload_litellm()
-    assert os.environ["LITELLM_LOG"] == "ERROR"
-    monkeypatch.setenv("LITELLM_LOG", "DEBUG")
-    client_mod._preload_litellm()
-    assert os.environ["LITELLM_LOG"] == "DEBUG"
+def test_utils_import_keeps_litellm_off_the_network():
+    """Every litellm lane imports utils first — the CLI pipeline never runs
+    the client's preload — so the no-fetch default is stamped there, ahead
+    of litellm's import; setdefault, so a caller's explicit choice wins."""
+    probe = ("import os, pageindex.utils; "
+             "print(os.environ['LITELLM_LOCAL_MODEL_COST_MAP'])")
+    env = {k: v for k, v in os.environ.items()
+           if k != "LITELLM_LOCAL_MODEL_COST_MAP"}
+    fresh = subprocess.run([sys.executable, "-c", probe], env=env,
+                           capture_output=True, text=True, check=True)
+    assert fresh.stdout.strip() == "True"
+    env["LITELLM_LOCAL_MODEL_COST_MAP"] = "False"
+    chosen = subprocess.run([sys.executable, "-c", probe], env=env,
+                            capture_output=True, text=True, check=True)
+    assert chosen.stdout.strip() == "False"
 
 
 def test_retry_notice_logs_instead_of_stdout(monkeypatch, capsys, caplog):

@@ -12,6 +12,11 @@ import asyncio
 from io import BytesIO
 from dotenv import find_dotenv, load_dotenv
 load_dotenv(find_dotenv(usecwd=True))
+# LiteLLM's import otherwise fetches its model map over the network — seconds
+# of blocking, a WARNING offline. Every litellm lane imports this module
+# first (the CLI never runs the client's preload); setdefault, so an explicit
+# user choice wins.
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 import logging
 import yaml
 from pathlib import Path
@@ -68,17 +73,18 @@ def _quiet_litellm() -> None:
     embedder switch, as its Router does; it gates only this banner and the
     "Give Feedback / Get Help" one. Its logger quiets the same way — WARNING
     chatter (remote-map fetch fallbacks, cost hiccups) is not actionable for
-    SDK callers — unless the caller picked a level via LITELLM_LOG, which
-    litellm honors at import and this respects. The dotted litellm name
-    covers the module-level loggers its adapters create; errors still raise
-    and log with their full text."""
+    SDK callers — as a default only: LITELLM_LOG picks the default, and a
+    level anyone set explicitly (the host, litellm's own _turn_on_debug())
+    stays theirs. The dotted litellm name covers the module-level loggers
+    its adapters create; errors still raise and log with their full text."""
     import litellm
     litellm.suppress_debug_info = True
     level = getattr(logging, os.environ.get("LITELLM_LOG", "ERROR").upper(),
                     logging.ERROR)
-    if level >= logging.ERROR:
-        for name in ("LiteLLM", "LiteLLM Router", "LiteLLM Proxy", "litellm"):
-            logging.getLogger(name).setLevel(level)
+    for name in ("LiteLLM", "LiteLLM Router", "LiteLLM Proxy", "litellm"):
+        logger = logging.getLogger(name)
+        if logger.level == logging.NOTSET:
+            logger.setLevel(level)
 
 # Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
 if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):

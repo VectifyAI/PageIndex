@@ -17,14 +17,6 @@ _litellm_preload_started = False
 def _preload_litellm() -> None:
     """Start litellm's multi-second import in the background, once per
     process — a per-client thread would churn under per-request clients."""
-    # LiteLLM's import otherwise fetches its model map over the network —
-    # seconds of blocking (or a hang offline). Stamped here, not at package
-    # import, so merely importing pageindex leaves the host process's own
-    # litellm untouched; setdefault, so an explicit user choice wins.
-    os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
-    # Its logger initializes from LITELLM_LOG at import; ERROR keeps
-    # WARNING chatter off the caller's stderr from the first record.
-    os.environ.setdefault("LITELLM_LOG", "ERROR")
     global _litellm_preload_started
     if _litellm_preload_started:
         return
