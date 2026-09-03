@@ -2104,19 +2104,16 @@ def test_litellm_lane_mutes_the_provider_list_banner(monkeypatch, capsys):
 
 @needs_agents
 def test_litellm_lane_gates_litellm_logging(monkeypatch, caplog):
-    """litellm's own logger sprays WARNING chatter (remote-map fetch
-    fallbacks, cost hiccups) onto stderr from inside requests; building
-    the lane's model gates it to ERROR — as a default only: a level the
-    host set itself stays the host's."""
+    """The lane defaults litellm's logger to ERROR; a level the host set stays."""
     pytest.importorskip("litellm")
     import logging
     monkeypatch.delenv("LITELLM_LOG", raising=False)
-    caplog.set_level(logging.NOTSET, logger="LiteLLM")  # untouched; restored
+    caplog.set_level(logging.NOTSET, logger="LiteLLM")  # untouched
     gated = logging.getLogger("LiteLLM")
     local_chat._openai_model("chat", "openrouter/z-ai/not-in-the-map")
     assert gated.level == logging.ERROR
     assert not gated.isEnabledFor(logging.WARNING)
-    gated.setLevel(logging.WARNING)  # the host's own choice
+    gated.setLevel(logging.WARNING)
     local_chat._openai_model("chat", "openrouter/z-ai/not-in-the-map")
     assert gated.level == logging.WARNING
 
@@ -2135,8 +2132,7 @@ def test_provider_lookups_flip_the_switch_before_asking(monkeypatch, capsys):
 
 
 def test_quiet_litellm_honors_the_chosen_default(monkeypatch, caplog):
-    """LITELLM_LOG picks the default in both directions: CRITICAL quiets
-    further than the gate, DEBUG opens litellm up."""
+    """LITELLM_LOG picks the default, in both directions."""
     pytest.importorskip("litellm")
     import logging
     from pageindex.utils import _quiet_litellm

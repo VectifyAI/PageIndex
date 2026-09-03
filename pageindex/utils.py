@@ -12,10 +12,7 @@ import asyncio
 from io import BytesIO
 from dotenv import find_dotenv, load_dotenv
 load_dotenv(find_dotenv(usecwd=True))
-# LiteLLM's import otherwise fetches its model map over the network — seconds
-# of blocking, a WARNING offline. Every litellm lane imports this module
-# first (the CLI never runs the client's preload); setdefault, so an explicit
-# user choice wins.
+# litellm's import fetches its model map over the network unless told not to.
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 import logging
 import yaml
@@ -65,18 +62,8 @@ def _mute_litellm_bridge_usage_warning() -> None:
 
 
 def _quiet_litellm() -> None:
-    """litellm print()s a red "Provider List:" banner into stdout when a
-    provider lookup fails — its OpenRouter adapter probes supports_reasoning()
-    with the provider-stripped model name on every completion, so any model
-    missing from litellm's static map stamps the banner into the middle of a
-    streamed answer (get_llm_provider_logic, seen on 1.97). Flip litellm's own
-    embedder switch, as its Router does; it gates only this banner and the
-    "Give Feedback / Get Help" one. Its logger quiets the same way — WARNING
-    chatter (remote-map fetch fallbacks, cost hiccups) is not actionable for
-    SDK callers — as a default only: LITELLM_LOG picks the default, and a
-    level anyone set explicitly (the host, litellm's own _turn_on_debug())
-    stays theirs. The dotted litellm name covers the module-level loggers
-    its adapters create; errors still raise and log with their full text."""
+    """Mute litellm's stdout "Provider List:" banner and default its loggers
+    to LITELLM_LOG (ERROR unset); a level set elsewhere stays."""
     import litellm
     litellm.suppress_debug_info = True
     level = getattr(logging, os.environ.get("LITELLM_LOG", "ERROR").upper(),
