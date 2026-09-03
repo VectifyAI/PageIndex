@@ -1043,8 +1043,11 @@ class PageIndexClient:
                 Answer lane: LiteLLM's own params, mapped or refused per
                 provider (its named sampling params are
                 ``chat_completions()``'s); protocol lanes: verbatim into
-                the request body. Credentials belong in ``backend``,
-                never here.
+                the request body. The managed prompt, conversation and
+                tools are not fields here (``system`` / ``instructions``
+                / ``input`` / ``messages`` / ``tools`` are refused);
+                extend the prompt with ``instructions=``. Credentials
+                belong in ``backend``, never here.
 
         Returns:
             - answer lane, stream=False: the answer string

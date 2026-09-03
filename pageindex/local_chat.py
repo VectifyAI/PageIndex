@@ -302,10 +302,26 @@ def _merged_backend(client, backend):
     return merged or None
 
 
+_SKELETON_KEYS = frozenset({"system", "instructions", "input", "messages",
+                            "tools"})
+
+
+def _refuse_skeleton(extra_body) -> None:
+    """The managed prompt, conversation and tools are the SDK's on every
+    lane; extra_body merges last, so a caller's copy would replace them."""
+    hit = sorted(_SKELETON_KEYS.intersection(extra_body or ()))
+    if hit:
+        raise PageIndexAPIError(
+            f"extra_body cannot carry {', '.join(hit)}: the managed prompt, "
+            "conversation and tools are the SDK's. Extend the prompt with "
+            "instructions=; the conversation is the first argument.")
+
+
 def _openai_agent(client, protocol: str, model_name: str, instructions: str,
                   temperature, top_p, doc_ids=None, cache_key=None,
                   reasoning=None, reasoning_effort=None, extra_body=None,
                   max_tokens=None, backend=None, extra_headers=None):
+    _refuse_skeleton(extra_body)
     from agents import Agent, ModelSettings
     from .integrations.openai_agents import build_openai_tools
     # ModelSettings.extra_body is the one channel all three engines put on
@@ -1365,6 +1381,7 @@ def run_messages(client, messages, model: str,
     _require_anthropic()
     import anthropic
     _validate_max_turns(max_turns)
+    _refuse_skeleton(extra_body)
     if isinstance(messages, str) and messages.strip():
         messages = [{"role": "user", "content": messages}]
     if (not isinstance(messages, list) or not messages
