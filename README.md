@@ -102,6 +102,26 @@ print(answer)
 - **`index=`: a basic model is sufficient.** The tree structure itself is extracted from the document layout without an LLM; the index model only summarizes and refines it, which a basic model does well.
 - **`chat=`: use the best model you can afford.** The chat model searches the tree to retrieve information. See [Query cost and accuracy](#query-cost-and-accuracy).
 
+### Model Providers
+
+Model names are LiteLLM's: a bare name is an OpenAI model, and `provider/model` reaches that provider — `anthropic/claude-sonnet-4-6`, `aiml/openai/gpt-5-5`. Each provider reads its own key from the environment.
+
+Aggregators are useful here because the two roles want different models: [aimlapi.com](https://aimlapi.com) serves 350+ chat models behind one OpenAI-compatible endpoint (`https://api.aimlapi.com/v1`) and one key, so a cheap index model and a strong chat model come from the same account.
+
+```python
+import os
+from pageindex import PageIndexClient
+
+os.environ["AIML_API_KEY"] = "your-aimlapi-key"   # LiteLLM's env var for aimlapi.com
+
+client = PageIndexClient(
+    index="aiml/openai/gpt-4o-mini",              # basic model, indexes the tree
+    chat="aiml/anthropic/claude-sonnet-4.5",      # strong model, searches the tree
+)
+```
+
+Model ids are aimlapi.com's own, prefixed with `aiml/`; the catalog is at `GET https://api.aimlapi.com/v1/models`. `AIML_API_BASE` overrides the endpoint. To keep the key out of the environment, use the flat argument spelling and pass it per lane: `index_model=`/`chat_model=` with `index_backend={"api_key": ...}` and `chat_backend={"api_key": ...}`.
+
 ### [Use PageIndex through the SDK client →](https://docs.pageindex.ai/getting-started)
 
 Configure other models, streaming, multi-document search, citations, and more.
