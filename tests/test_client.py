@@ -1958,6 +1958,16 @@ def test_local_client_blank_chat_model_refuses_at_chat_door(local_client):
         local_client.chat_model = blank
         with pytest.raises(PageIndexAPIError, match="chat_model is empty"):
             local_client.chat_completions("hi")
+        # the protocol and instructions knobs must not point a local
+        # client at the managed chat it does not have
+        with pytest.raises(PageIndexAPIError, match="chat_model is empty"):
+            local_client.chat("hi", protocol="responses")
+        with pytest.raises(PageIndexAPIError, match="chat_model is empty"):
+            local_client.chat("hi", instructions="brief")
+        with pytest.raises(PageIndexAPIError, match="chat_model is empty"):
+            local_client._responses("hi")
+        with pytest.raises(PageIndexAPIError, match="chat_model is empty"):
+            local_client._messages("hi", model="claude-x")
 
 
 def test_blank_chat_model_carries_no_model_into_agent_config():
