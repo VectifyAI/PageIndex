@@ -138,3 +138,18 @@ def test_import_leaves_litellm_env_untouched(tmp_path):
     out = subprocess.run([sys.executable, "-c", probe], env=env,
                          capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "ok"
+
+
+def test_utils_import_keeps_litellm_off_the_network():
+    """utils' import sets litellm's no-fetch default; an explicit choice wins."""
+    probe = ("import os, pageindex.utils; "
+             "print(os.environ['LITELLM_LOCAL_MODEL_COST_MAP'])")
+    env = {k: v for k, v in os.environ.items()
+           if k != "LITELLM_LOCAL_MODEL_COST_MAP"}
+    fresh = subprocess.run([sys.executable, "-c", probe], env=env,
+                           capture_output=True, text=True, check=True)
+    assert fresh.stdout.strip() == "True"
+    env["LITELLM_LOCAL_MODEL_COST_MAP"] = "False"
+    chosen = subprocess.run([sys.executable, "-c", probe], env=env,
+                            capture_output=True, text=True, check=True)
+    assert chosen.stdout.strip() == "False"
