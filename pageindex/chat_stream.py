@@ -1,4 +1,6 @@
-"""chat(stream=True)'s stream type — light, so client.py imports it."""
+"""chat(stream=True)'s return type: one run, one view — text or events."""
+from __future__ import annotations
+
 from typing import Any, Iterator, Optional
 
 from .errors import PageIndexAPIError
