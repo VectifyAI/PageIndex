@@ -1,10 +1,11 @@
 """PageIndex SDK."""
 from typing import TYPE_CHECKING as _TYPE_CHECKING
 
+from .chat_stream import ChatStream
 from .client import PageIndexClient, PageIndexCloudClient, PageIndexLocalClient
 from .errors import PageIndexAPIError
-from .types import (ChatConfig, CloudIndexConfig, IndexConfig,
-                    LocalIndexConfig)
+from .types import (ChatConfig, ChatProcessOptions, CloudIndexConfig,
+                    IndexConfig, LocalIndexConfig)
 
 if _TYPE_CHECKING:
     from .flash import page_index_flash
@@ -16,6 +17,7 @@ __all__ = [
     "PageIndexClient", "PageIndexCloudClient", "PageIndexLocalClient",
     "PageIndexAPIError",
     "IndexConfig", "CloudIndexConfig", "LocalIndexConfig", "ChatConfig",
+    "ChatProcessOptions", "ChatStream",
     "page_index", "page_index_main", "page_index_flash",
     "optimize_tree", "md_to_tree",
 ]
@@ -25,10 +27,10 @@ _LAZY = {
     "optimize_tree": ".tree_optimize",
     "md_to_tree": ".page_index_md",
 }
-_SUBMODULES = {"agent_tools", "client", "cloud_api", "errors", "flash",
-               "integrations", "local_api", "local_chat", "local_store",
-               "mcp_bridge", "page_index_classic", "page_index_md",
-               "tree_optimize", "types", "utils"}
+_SUBMODULES = {"agent_tools", "chat_stream", "client", "cloud_api", "errors",
+               "flash", "integrations", "local_api", "local_chat",
+               "local_store", "mcp_bridge", "page_index_classic",
+               "page_index_md", "tree_optimize", "types", "utils"}
 
 
 def __getattr__(name):
