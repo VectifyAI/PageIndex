@@ -2671,23 +2671,22 @@ def test_litellm_lane_mutes_the_provider_list_banner(monkeypatch, capsys):
 
 
 @needs_agents
-def test_litellm_lane_gates_litellm_logging(monkeypatch):
+def test_litellm_lane_gates_litellm_logging(monkeypatch, caplog):
     """litellm's own logger sprays WARNING chatter (remote-map fetch
     fallbacks, cost hiccups) onto stderr from inside requests; building
-    the lane's model gates it to ERROR — unless the caller picked a
-    level via LITELLM_LOG, which stays theirs."""
+    the lane's model gates it to ERROR — as a default only: a level the
+    host set itself stays the host's."""
     pytest.importorskip("litellm")
     import logging
     monkeypatch.delenv("LITELLM_LOG", raising=False)
+    caplog.set_level(logging.NOTSET, logger="LiteLLM")  # untouched; restored
     gated = logging.getLogger("LiteLLM")
-    gated.setLevel(logging.WARNING)
     local_chat._openai_model("chat", "openrouter/z-ai/not-in-the-map")
-    assert gated.getEffectiveLevel() == logging.ERROR
+    assert gated.level == logging.ERROR
     assert not gated.isEnabledFor(logging.WARNING)
-    monkeypatch.setenv("LITELLM_LOG", "DEBUG")
-    gated.setLevel(logging.WARNING)
+    gated.setLevel(logging.WARNING)  # the host's own choice
     local_chat._openai_model("chat", "openrouter/z-ai/not-in-the-map")
-    assert gated.getEffectiveLevel() == logging.WARNING
+    assert gated.level == logging.WARNING
 
 
 def test_provider_lookups_flip_the_switch_before_asking(monkeypatch, capsys):
@@ -2703,21 +2702,18 @@ def test_provider_lookups_flip_the_switch_before_asking(monkeypatch, capsys):
     assert "Provider List" not in capsys.readouterr().out
 
 
-def test_quiet_litellm_honors_a_quieter_level(monkeypatch):
-    """A caller asking for less than ERROR via LITELLM_LOG gets that level,
-    not the WARNING chatter the gate exists to remove."""
+def test_quiet_litellm_honors_the_chosen_default(monkeypatch, caplog):
+    """LITELLM_LOG picks the default in both directions: CRITICAL quiets
+    further than the gate, DEBUG opens litellm up."""
     pytest.importorskip("litellm")
     import logging
     from pageindex.utils import _quiet_litellm
-    monkeypatch.setenv("LITELLM_LOG", "CRITICAL")
     gated = logging.getLogger("LiteLLM")
-    prior = gated.level
-    gated.setLevel(logging.WARNING)
-    try:
+    for chosen in (logging.CRITICAL, logging.DEBUG):
+        monkeypatch.setenv("LITELLM_LOG", logging.getLevelName(chosen))
+        caplog.set_level(logging.NOTSET, logger="LiteLLM")
         _quiet_litellm()
-        assert gated.getEffectiveLevel() == logging.CRITICAL
-    finally:
-        gated.setLevel(prior)
+        assert gated.level == chosen
 
 
 def test_openai_protocol_predicate_follows_litellm_routing():
