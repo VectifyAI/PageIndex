@@ -819,11 +819,13 @@ class PageIndexClient:
                 prompted. Cloud documents: the managed chat scopes
                 server-side; own-model chat targets at the prompt level.
             stream: Return a ``ChatStream``: iterate it for the answer
-                as text chunks as they are produced, or read its
-                ``.events`` property instead for the run as typed event
-                dicts — thinking/answer deltas, each tool call and its
-                full result (own-model chat only; never clipped). One
-                run serves one view.
+                as text chunks as they are produced (``show_process``
+                is on by default, so the run's process arrives woven
+                in; ``show_process=False`` gives the bare answer), or
+                read its ``.events`` property instead for the run as
+                typed event dicts — thinking/answer deltas, each tool
+                call and its full result (own-model chat only; never
+                clipped). One run serves one view.
             model: Own-model chat only — backend model name (defaults
                 to ``chat_model``).
             reasoning_effort: Own-model chat only — how hard the model
@@ -858,8 +860,9 @@ class PageIndexClient:
         Returns:
             - stream=False: the answer string
             - stream=True: a ``ChatStream`` — iterating it yields text
-              chunks (with show_process, the run's process woven in as
-              labeled sections); ``.events`` yields typed event dicts:
+              chunks (with show_process, on by default, the run's process
+              woven in as labeled sections); ``.events`` yields typed
+              event dicts:
               ``{"type": "thinking"|"answer", "delta": ...}``,
               ``{"type": "tool_call", "call_id", "name", "arguments"}``,
               ``{"type": "tool_result", "call_id", "name", "output"}``

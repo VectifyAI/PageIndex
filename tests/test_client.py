@@ -1503,6 +1503,30 @@ def test_cloud_chat_stream_parsing(cloud, monkeypatch):
     assert {"object": "chat.completion.citations", "citations": []} in chunks
 
 
+def test_cloud_chat_stream_error_chunk_raises(cloud, monkeypatch):
+    """A server-side failure mid-stream arrives as a final {"error": ...}
+    chunk after the partial answer: every streaming surface raises on it
+    instead of ending as a short, seemingly complete answer."""
+    client, calls, fake = cloud
+    lines = [
+        b'data: {"choices": [{"delta": {"content": "Partial"}}]}',
+        b'data: {"error": {"message": "boom", "type": "internal_error"}}',
+    ]
+    _patch_requests(monkeypatch, lambda m, url, kw: FakeResponse(lines=lines))
+    for stream in (
+        lambda: client.chat_completions("q", stream=True),
+        lambda: client.chat_completions("q", stream=True,
+                                        stream_metadata=True),
+        lambda: client.chat("q", stream=True),
+    ):
+        it = stream()
+        first = next(it)  # the partial answer is still delivered
+        assert first in ("Partial",
+                         {"choices": [{"delta": {"content": "Partial"}}]})
+        with pytest.raises(PageIndexAPIError, match="boom"):
+            list(it)
+
+
 def test_cloud_chat_accepts_query_string(cloud):
     client, calls, fake = cloud
     fake.payload = {"choices": [{"message": {"content": "ok"}}]}
