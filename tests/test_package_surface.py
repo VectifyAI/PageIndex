@@ -75,7 +75,7 @@ def test_public_method_type_hints_resolve_at_runtime():
     hints = {name: typing.get_type_hints(fn) for name, fn
              in inspect.getmembers(PageIndexClient, inspect.isfunction)
              if not name.startswith("_")}
-    assert len(hints) > 10, f"the public-method walk collapsed: {sorted(hints)}"
+    assert len(hints) > 10, f"public-method walk collapsed: {sorted(hints)}"
     assert ChatStream in typing.get_args(hints["chat"]["return"])
     # the import path the class shipped under in 0.2.11-0.2.14
     assert pageindex.local_chat.ChatStream is ChatStream
