@@ -3138,6 +3138,31 @@ def test_chat_protocol_messages_is_the_door(client, monkeypatch):
     assert seen[-1][1]["extra_body"] is None
 
 
+def test_extra_body_refuses_skeleton_keys():
+    """The managed prompt, conversation and tools are the SDK's on every
+    lane; extra_body merges last, so a caller's copy would silently
+    replace them. Refused at the seam both openai-agents lanes share."""
+    for key in ("system", "instructions", "input", "messages", "tools"):
+        with pytest.raises(PageIndexAPIError, match="instructions="):
+            local_chat._openai_agent(None, "chat", "gpt-test", "sys",
+                                     None, None, extra_body={key: "x"})
+    with pytest.raises(PageIndexAPIError, match="instructions="):
+        local_chat._openai_agent(None, "responses", "gpt-test", "sys",
+                                 None, None, extra_body={"input": "x"})
+
+
+@needs_anthropic
+def test_messages_extra_body_refuses_skeleton_before_transport(client,
+                                                                monkeypatch):
+    made = []
+    monkeypatch.setattr(local_chat, "_anthropic_client",
+                        lambda backend=None: made.append(1))
+    with pytest.raises(PageIndexAPIError, match="instructions="):
+        local_chat.run_messages(client, "q", model="claude-x",
+                                extra_body={"system": "x"})
+    assert made == []
+
+
 def test_chat_protocol_chokes(client, monkeypatch):
     monkeypatch.setattr(local_chat, "run_responses",
                         lambda c, input, **kw: "door")
