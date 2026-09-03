@@ -318,7 +318,7 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
     # top-level kwarg on every supported openai-agents version, and the
     # channel admits values outside the OpenAI enum ("none").
     extra_args = _cache_extra_args(model_name)
-    if reasoning_effort is not None:
+    if reasoning_effort:
         extra_args = {**(extra_args or {}),
                       "reasoning_effort": reasoning_effort}
     conn = _sdk_backend(backend) if backend else {}
