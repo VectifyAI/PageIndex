@@ -5,10 +5,6 @@ from pageindex import *
 from pageindex.page_index_md import md_to_tree
 from pageindex.utils import ConfigLoader
 
-# Keep LiteLLM's import off the network (frozen bundled model-cost map);
-# an explicit user setting wins.
-os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
-
 if __name__ == "__main__":
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Process PDF or Markdown document and generate structure')
