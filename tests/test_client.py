@@ -2004,9 +2004,7 @@ def test_blank_chat_model_carries_no_model_into_agent_config():
 
 
 def test_utils_import_keeps_litellm_off_the_network():
-    """Every litellm lane imports utils first — the CLI pipeline never runs
-    the client's preload — so the no-fetch default is stamped there, ahead
-    of litellm's import; setdefault, so a caller's explicit choice wins."""
+    """utils' import sets litellm's no-fetch default; an explicit choice wins."""
     probe = ("import os, pageindex.utils; "
              "print(os.environ['LITELLM_LOCAL_MODEL_COST_MAP'])")
     env = {k: v for k, v in os.environ.items()
