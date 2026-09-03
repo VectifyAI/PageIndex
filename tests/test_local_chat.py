@@ -1523,6 +1523,36 @@ def test_reasoning_passthrough_reaches_each_engine(monkeypatch):
 
 
 @needs_agents
+def test_extra_body_model_settings_fields_ride_their_field(monkeypatch):
+    """LiteLLM-routed answer lane: openai-agents passes ModelSettings'
+    own fields to litellm by name beside **extra_args, so a caller's copy
+    in extra_args collided with them. Those ride their field, the
+    caller's value winning; the rest stay LiteLLM kwargs. OpenAI
+    destinations keep the request-body path."""
+    pytest.importorskip("litellm")
+    monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
+    monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
+                        lambda *a, **k: [])
+    agent = local_chat._openai_agent(None, "chat", "anthropic/claude-x",
+                                     "sys", 0.7, None,
+                                     extra_body={"temperature": 0.2,
+                                                 "top_k": 5})
+    settings = agent.model_settings
+    assert settings.temperature == 0.2
+    assert settings.extra_args["top_k"] == 5
+    assert "temperature" not in settings.extra_args
+    agent = local_chat._openai_agent(None, "chat", "gpt-test", "sys",
+                                     None, None,
+                                     extra_body={"temperature": 0.2})
+    assert agent.model_settings.temperature is None
+    assert agent.model_settings.extra_body == {"temperature": 0.2}
+    with pytest.raises(PageIndexAPIError, match="Invalid model settings"):
+        local_chat._openai_agent(None, "chat", "anthropic/claude-x", "sys",
+                                 None, None,
+                                 extra_body={"temperature": "hot"})
+
+
+@needs_agents
 def test_extra_body_passthrough_reaches_each_engine(monkeypatch):
     """Caller extras merge last — over the cache key on OpenAI
     destinations — and ride LiteLLM's own kwargs elsewhere, where

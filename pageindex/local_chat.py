@@ -4,6 +4,7 @@ endpoint's chunk stream."""
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import json
 import queue
@@ -351,22 +352,30 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
             if cache_key and openai_backend else None)
     # Caller extras merge last, so they win over ours; non-OpenAI
     # destinations take them as LiteLLM kwargs instead (see note above).
+    routed: dict[str, Any] = {}
     if extra_body:
         if openai_backend:
             body = {**(body or {}), **extra_body}
         else:
-            extra_args = {**(extra_args or {}), **extra_body}
+            # openai-agents passes ModelSettings' own fields to litellm by
+            # name beside **extra_args, so those ride their field.
+            own = {field.name for field in dataclasses.fields(ModelSettings)}
+            routed = {k: v for k, v in extra_body.items() if k in own}
+            rest = {k: v for k, v in extra_body.items() if k not in own}
+            if rest:
+                extra_args = {**(extra_args or {}), **rest}
     from pydantic import ValidationError
     try:
-        settings = ModelSettings(
-            temperature=temperature, top_p=top_p, max_tokens=max_tokens,
-            reasoning=reasoning,
+        settings = ModelSettings(**{
+            "temperature": temperature, "top_p": top_p,
+            "max_tokens": max_tokens, "reasoning": reasoning,
             # Streamed runs otherwise carry no usage at all (agents forwards
             # this as stream_options only on streaming calls).
-            include_usage=True,
-            extra_body=body,
-            extra_headers=extra_headers,
-            extra_args=extra_args)
+            "include_usage": True,
+            "extra_body": body,
+            "extra_headers": extra_headers,
+            "extra_args": extra_args,
+            **routed})
     except ValidationError as exc:
         raise PageIndexAPIError(f"Invalid model settings: {exc}") from exc
     return Agent(
