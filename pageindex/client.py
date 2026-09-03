@@ -6,13 +6,11 @@ import re
 import threading
 import time
 import warnings
-from typing import (TYPE_CHECKING, Any, Callable, Iterator, Literal, Mapping,
-                    Optional, Union, cast, overload)
+from typing import (Any, Callable, Iterator, Literal, Mapping, Optional, Union,
+                    cast, overload)
 
+from .chat_stream import ChatStream
 from .errors import PageIndexAPIError
-
-if TYPE_CHECKING:
-    from .local_chat import ChatStream
 
 
 _litellm_preload_started = False
@@ -776,7 +774,7 @@ class PageIndexClient:
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
-    ) -> "ChatStream": ...
+    ) -> ChatStream: ...
 
     @overload
     def chat(
@@ -787,7 +785,7 @@ class PageIndexClient:
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
-    ) -> Union[str, "ChatStream"]: ...
+    ) -> Union[str, ChatStream]: ...
 
     def chat(
         self,
@@ -797,7 +795,7 @@ class PageIndexClient:
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
-    ) -> Union[str, "ChatStream"]:
+    ) -> Union[str, ChatStream]:
         """
         Ask a question about your documents, get the answer.
 

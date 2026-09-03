@@ -53,14 +53,28 @@ def test_import_pageindex_is_lazy():
     probe = (
         "import sys; import pageindex; "
         "heavy = [m for m in ('pageindex.page_index_classic', 'pageindex.flash', "
-        "'pageindex.utils', 'pageindex.tree_optimize', 'numpy', 'PyPDF2') "
-        "if m in sys.modules]; "
+        "'pageindex.utils', 'pageindex.tree_optimize', "
+        "'pageindex.local_chat', 'numpy', 'PyPDF2') if m in sys.modules]; "
         "print(','.join(heavy) or 'clean'); "
         "print(type(pageindex.page_index_main).__name__)"
     )
     out = subprocess.run([sys.executable, "-c", probe],
                          capture_output=True, text=True, check=True)
     assert out.stdout.split() == ["clean", "function"]
+
+
+def test_public_method_type_hints_resolve_at_runtime():
+    """Tools that introspect signatures at runtime (agents' function_tool,
+    pydantic, doc generators) evaluate the annotations: every public
+    method's hints must resolve, ChatStream included."""
+    import inspect
+    import typing
+    from pageindex import ChatStream, PageIndexClient
+    for name, fn in inspect.getmembers(PageIndexClient, inspect.isfunction):
+        if not name.startswith("_"):
+            typing.get_type_hints(fn)
+    hints = typing.get_type_hints(PageIndexClient.chat)
+    assert hints["return"] == typing.Union[str, ChatStream]
 
 
 def test_sdk_submodules_reachable_and_dunder_probes_stay_lazy():
