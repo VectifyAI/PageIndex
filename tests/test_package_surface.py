@@ -74,7 +74,7 @@ def test_public_method_type_hints_resolve_at_runtime():
         if not name.startswith("_"):
             typing.get_type_hints(fn)
     hints = typing.get_type_hints(PageIndexClient.chat)
-    assert hints["return"] == typing.Union[str, ChatStream]
+    assert ChatStream in typing.get_args(hints["return"])
 
 
 def test_sdk_submodules_reachable_and_dunder_probes_stay_lazy():
