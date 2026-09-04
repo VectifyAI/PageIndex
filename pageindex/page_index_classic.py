@@ -528,9 +528,7 @@ def page_list_to_group_text(page_contents, token_lengths, max_tokens=20000, over
     average_tokens_per_part = math.ceil(((num_tokens / expected_parts_num) + max_tokens) / 2)
     
     for i, (page_content, page_tokens) in enumerate(zip(page_contents, token_lengths)):
-        # current_subset is still empty on the first page, so without this guard
-        # a first page over the average flushes an empty chunk -- which callers
-        # then hand to the model as a slice of the document.
+        # without the guard, an oversized first page flushes an empty chunk
         if current_subset and current_token_count + page_tokens > average_tokens_per_part:
 
             subsets.append(''.join(current_subset))

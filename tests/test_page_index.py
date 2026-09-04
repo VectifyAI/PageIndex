@@ -70,8 +70,6 @@ class PageListToGroupTextTest(unittest.TestCase):
     PAGES = ["PAGE-A", "PAGE-B", "PAGE-C"]
 
     def test_oversized_first_page_does_not_emit_an_empty_chunk(self):
-        # A first page over average_tokens_per_part used to flush the still-empty
-        # accumulator, and callers hand chunk 0 straight to the model.
         chunks = page_list_to_group_text(
             self.PAGES, [60000, 500, 500], max_tokens=20000
         )
@@ -88,8 +86,6 @@ class PageListToGroupTextTest(unittest.TestCase):
             self.assertIn(page, joined)
 
     def test_oversized_middle_page_is_unaffected(self):
-        # Only the first page can hit the empty-accumulator case; later splits
-        # re-seed from the overlap page.
         chunks = page_list_to_group_text(
             self.PAGES, [100, 60000, 100], max_tokens=20000
         )
