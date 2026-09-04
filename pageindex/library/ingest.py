@@ -9,7 +9,9 @@ from datetime import datetime, timezone
 from ..flash.api import _optimize as optimize_structure
 from ..flash.main import extract_toc
 from ..local_store import DocStore
-from ..utils import structure_to_list, write_node_id
+from ..page_index_classic import page_index_main
+from ..utils import ConfigLoader as _UpstreamConfigLoader
+from ..utils import get_page_tokens, structure_to_list, write_node_id
 from .config import LibraryConfig
 from .pages import leaf_spans
 from .splitters import apply_diary_profile
@@ -63,10 +65,25 @@ def add_book(pdf_path: str, cfg: LibraryConfig, *, profile: str | None = None,
     result = extract_toc(pdf_path, use_embedded_toc=True)
     structure = result.get("structure") or []
     page_texts = result.get("page_texts") or []
+    mode = "flash"
     if not structure:
-        raise IngestError("PageIndex Flash found no structure in this PDF; try a profile "
-                          "or upstream mode='standard' (needs an API model).")
-    optimize_structure(structure, page_texts, False, None)
+        # Flash's block-clustering can misread reading order on some layouts
+        # (e.g. old typeset letters), yielding no usable structure. Standard
+        # mode gets its page text from PyPDF2 instead, sidestepping that.
+        log("Flash found no structure; falling back to standard mode (LLM-based) …")
+        std_opt = _UpstreamConfigLoader().load({
+            "model": model, "if_add_node_id": "no", "if_add_node_summary": "no",
+            "if_add_doc_description": "no", "if_add_node_text": "no",
+        })
+        std_result = page_index_main(pdf_path, std_opt)
+        structure = std_result.get("structure") or []
+        if not structure:
+            raise IngestError("Neither Flash nor standard mode could extract a structure "
+                              "from this PDF.")
+        page_texts = [text for text, _ in get_page_tokens(pdf_path, model=model)]
+        mode = "standard"
+    else:
+        optimize_structure(structure, page_texts, False, None)
     if profile == "diary":
         structure = apply_diary_profile(structure, page_texts)
     write_node_id(structure)
@@ -79,7 +96,7 @@ def add_book(pdf_path: str, cfg: LibraryConfig, *, profile: str | None = None,
     meta = {
         "id": doc_id, "name": os.path.basename(pdf_path), "description": None,
         "status": "indexed", "createdAt": _now_iso(), "pageNum": len(page_texts),
-        "folderId": None, "mode": "flash",
+        "folderId": None, "mode": mode,
         "metadata": {"title": title, "profile": profile, "source": pdf_path,
                      "sha256": doc_id[3:], "summary_tier_done": False,
                      "digest_tier_done": False, **(metadata or {})},
