@@ -132,7 +132,3 @@ def build_server(cfg: LibraryConfig):
     for name, func in build_tools(cfg).items():
         server.tool(name=name)(_as_mcp_tool(func))
     return server
-
-
-def main() -> None:
-    build_server(LibraryConfig.load()).run("stdio")

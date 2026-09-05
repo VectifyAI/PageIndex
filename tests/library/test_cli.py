@@ -73,3 +73,60 @@ def test_digest_command_writes_file(indexed, capsys, home):
     path = capsys.readouterr().out.strip()
     assert path.endswith("digests/book-title/book.md")
     assert "# Book Title" in open(path).read()
+
+
+def test_mcp_stdio_is_still_the_default(monkeypatch, home):
+    from pageindex.library import mcp_server
+    calls = []
+
+    class FakeServer:
+        def run(self, transport, **kwargs):
+            calls.append((transport, kwargs))
+
+    monkeypatch.setattr(mcp_server, "build_server", lambda cfg: FakeServer())
+    assert cli.main(["mcp"]) == 0
+    assert calls == [("stdio", {})]
+
+
+def test_mcp_http_transport_binds_all_interfaces_on_given_port(monkeypatch, home):
+    from pageindex.library import mcp_server
+    calls = []
+
+    class FakeServer:
+        def run(self, transport, **kwargs):
+            calls.append((transport, kwargs))
+
+    monkeypatch.setattr(mcp_server, "build_server", lambda cfg: FakeServer())
+    assert cli.main(["mcp", "--transport", "http", "--port", "9001"]) == 0
+    assert calls == [("streamable-http",
+                      {"host": "0.0.0.0", "port": 9001, "stateless_http": True})]
+
+
+def test_mcp_http_transport_falls_back_to_port_env_var(monkeypatch, home):
+    from pageindex.library import mcp_server
+    calls = []
+
+    class FakeServer:
+        def run(self, transport, **kwargs):
+            calls.append((transport, kwargs))
+
+    monkeypatch.setattr(mcp_server, "build_server", lambda cfg: FakeServer())
+    monkeypatch.setenv("PORT", "8080")
+    assert cli.main(["mcp", "--transport", "http"]) == 0
+    assert calls == [("streamable-http",
+                      {"host": "0.0.0.0", "port": 8080, "stateless_http": True})]
+
+
+def test_mcp_http_transport_defaults_to_8080_with_no_port_source(monkeypatch, home):
+    from pageindex.library import mcp_server
+    calls = []
+
+    class FakeServer:
+        def run(self, transport, **kwargs):
+            calls.append((transport, kwargs))
+
+    monkeypatch.setattr(mcp_server, "build_server", lambda cfg: FakeServer())
+    monkeypatch.delenv("PORT", raising=False)
+    assert cli.main(["mcp", "--transport", "http"]) == 0
+    assert calls == [("streamable-http",
+                      {"host": "0.0.0.0", "port": 8080, "stateless_http": True})]

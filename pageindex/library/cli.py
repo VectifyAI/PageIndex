@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 from ..local_store import DocStore
@@ -52,7 +53,10 @@ def _parser() -> argparse.ArgumentParser:
     dg.add_argument("book")
     dg.add_argument("--node")
 
-    sub.add_parser("mcp", help="run the stdio MCP server for Claude Code")
+    mc = sub.add_parser("mcp", help="run the MCP server for Claude Code")
+    mc.add_argument("--transport", choices=["stdio", "http"], default="stdio")
+    mc.add_argument("--port", type=int, default=None,
+                    help="HTTP port (default: $PORT env var, else 8080)")
 
     return p
 
@@ -88,7 +92,12 @@ def main(argv: list[str] | None = None) -> int:
     store = DocStore(str(cfg.storage_path))
     if args.command == "mcp":
         from .mcp_server import build_server
-        build_server(cfg).run("stdio")
+        server = build_server(cfg)
+        if args.transport == "http":
+            port = args.port or int(os.environ.get("PORT", 8080))
+            server.run("streamable-http", host="0.0.0.0", port=port, stateless_http=True)
+        else:
+            server.run("stdio")
         return 0
     try:
         if args.command == "add":
