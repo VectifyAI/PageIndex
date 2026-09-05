@@ -4,8 +4,11 @@ import re
 import os
 try:
     from .utils import *
-except:
-    from utils import *
+except (ImportError, ValueError) as _e:
+    if "relative import" in str(_e).lower() or "no known parent package" in str(_e).lower():
+        from utils import *
+    else:
+        raise
 
 async def get_node_summary(node, summary_token_threshold=200, model=None):
     node_text = node.get('text')
