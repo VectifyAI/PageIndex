@@ -5,7 +5,8 @@ name: Publish to PyPI
 #   2. git push origin v0.2.9
 #   3. This workflow derives the version from the tag, injects it into
 #      pyproject.toml, builds, publishes to PyPI via OIDC trusted publishing
-#      (no stored secret), and creates a GitHub Release with generated notes.
+#      (no stored secret), and creates a GitHub Release with generated notes
+#      (dev tags publish to PyPI only — no GitHub Release).
 #
 # The tag must be a PEP 440 version with a leading `v`:
 #   v0.2.9   v0.2.9rc1   v0.2.9.dev1
@@ -32,7 +33,13 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.13"]
-    name: test py${{ matrix.python-version }}
+        agent-frameworks: [without, with]
+        pdfium: ["5"]
+        include:
+          - python-version: "3.10"
+            agent-frameworks: with
+            pdfium: "4"
+    name: test py${{ matrix.python-version }} (${{ matrix.agent-frameworks }} frameworks, pdfium ${{ matrix.pdfium }})
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
@@ -41,6 +48,14 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: pip install -r requirements.txt pytest
+      # mirror tests.yml's install shapes: the gate must cover the framework
+      # tests, the no-framework import paths, and the pdfium 4.x insurance alike
+      - if: matrix.agent-frameworks == 'without'
+        run: pip uninstall -y openai-agents
+      - if: matrix.agent-frameworks == 'with'
+        run: pip install openai-agents claude-agent-sdk anthropic
+      - if: matrix.pdfium == '4'
+        run: pip install "pypdfium2<5"
       - run: python -m pytest -q
 
   publish:
@@ -76,6 +91,9 @@ jobs:
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # release/v1.14.0
 
       - name: Create GitHub Release
+        # dev builds need an explicit pin to install; a Release for them
+        # only doubles the feed next to the stable that follows.
+        if: ${{ !contains(github.ref_name, 'dev') }}
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b  # v3.0.1
         with:
           tag_name: ${{ github.ref_name }}

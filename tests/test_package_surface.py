@@ -1,4 +1,5 @@
 """What `pip install pageindex` exposes: 0.2.8 helper compat and import cost."""
+import os
 import subprocess
 import sys
 
@@ -52,14 +53,32 @@ def test_import_pageindex_is_lazy():
     probe = (
         "import sys; import pageindex; "
         "heavy = [m for m in ('pageindex.page_index_classic', 'pageindex.flash', "
-        "'pageindex.utils', 'pageindex.tree_optimize', 'numpy', 'PyPDF2') "
-        "if m in sys.modules]; "
+        "'pageindex.utils', 'pageindex.tree_optimize', "
+        "'pageindex.local_chat', 'numpy', 'PyPDF2', "
+        "'agents', 'litellm', 'openai', 'anthropic') if m in sys.modules]; "
         "print(','.join(heavy) or 'clean'); "
         "print(type(pageindex.page_index_main).__name__)"
     )
     out = subprocess.run([sys.executable, "-c", probe],
                          capture_output=True, text=True, check=True)
     assert out.stdout.split() == ["clean", "function"]
+
+
+def test_public_method_type_hints_resolve_at_runtime():
+    """Tools that introspect signatures at runtime (agents' function_tool,
+    pydantic, doc generators) evaluate the annotations: every public
+    method's hints must resolve, ChatStream included."""
+    import inspect
+    import typing
+    import pageindex
+    from pageindex import ChatStream, PageIndexClient
+    hints = {name: typing.get_type_hints(fn) for name, fn
+             in inspect.getmembers(PageIndexClient, inspect.isfunction)
+             if not name.startswith("_")}
+    assert len(hints) > 10, f"public-method walk collapsed: {sorted(hints)}"
+    assert ChatStream in typing.get_args(hints["chat"]["return"])
+    assert pageindex.local_chat.ChatStream is ChatStream, (
+        "the import path the class shipped under in 0.2.11-0.2.14")
 
 
 def test_sdk_submodules_reachable_and_dunder_probes_stay_lazy():
@@ -101,3 +120,51 @@ def test_classic_compat_surface_still_reachable():
     out = subprocess.run([sys.executable, "-c", probe],
                          capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "ok"
+
+
+def test_import_leaves_litellm_env_untouched(tmp_path):
+    """Importing the package must not configure litellm for the host
+    process; constructing a local client (which will use litellm) does."""
+    env = {k: v for k, v in os.environ.items()
+           if k != "LITELLM_LOCAL_MODEL_COST_MAP"}
+    probe = (
+        "import os, pageindex\n"
+        "assert 'LITELLM_LOCAL_MODEL_COST_MAP' not in os.environ, "
+        "'stamped at import'\n"
+        f"pageindex.PageIndexLocalClient(storage_path={str(tmp_path / 's')!r})\n"
+        "assert os.environ['LITELLM_LOCAL_MODEL_COST_MAP'] == 'True'\n"
+        "print('ok')\n"
+    )
+    out = subprocess.run([sys.executable, "-c", probe], env=env,
+                         capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "ok"
+
+
+def test_chat_module_stamps_before_it_imports_litellm():
+    """local_chat imports litellm without utils on its import path; the
+    stamp has to be in place by then anyway."""
+    probe = ("import os\n"
+             "from pageindex import local_chat\n"
+             "local_chat._default_max_tokens('claude-sonnet-4-5',"
+             " {'budget_tokens': 4096})\n"
+             "print(os.environ.get('LITELLM_LOCAL_MODEL_COST_MAP'))\n")
+    env = {k: v for k, v in os.environ.items()
+           if k != "LITELLM_LOCAL_MODEL_COST_MAP"}
+    out = subprocess.run([sys.executable, "-c", probe], env=env,
+                         capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "True"
+
+
+def test_utils_import_keeps_litellm_off_the_network():
+    """utils' import sets litellm's no-fetch default; an explicit choice wins."""
+    probe = ("import os, pageindex.utils; "
+             "print(os.environ['LITELLM_LOCAL_MODEL_COST_MAP'])")
+    env = {k: v for k, v in os.environ.items()
+           if k != "LITELLM_LOCAL_MODEL_COST_MAP"}
+    fresh = subprocess.run([sys.executable, "-c", probe], env=env,
+                           capture_output=True, text=True, check=True)
+    assert fresh.stdout.strip() == "True"
+    env["LITELLM_LOCAL_MODEL_COST_MAP"] = "False"
+    chosen = subprocess.run([sys.executable, "-c", probe], env=env,
+                            capture_output=True, text=True, check=True)
+    assert chosen.stdout.strip() == "False"

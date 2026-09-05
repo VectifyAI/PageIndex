@@ -6,6 +6,7 @@ import logging
 import os
 import shutil
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -14,7 +15,10 @@ logger = logging.getLogger(__name__)
 def _write_json_atomic(path: Path, data) -> None:
     tmp = path.with_name(path.name + f".{uuid.uuid4().hex}.tmp")
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
+        # errors=: a lone surrogate (os.fsdecode'd path in metadata, an
+        # LLM-written \ud83d escape) must not crash the store after a whole
+        # indexing run — it is replaced instead.
+        with open(tmp, "w", encoding="utf-8", errors="replace") as f:
             json.dump(data, f, ensure_ascii=False)
             f.flush()
             os.fsync(f.fileno())
@@ -88,6 +92,24 @@ class DocStore:
             _write_json_atomic(self._manifest, {"docs": docs})
         except OSError:
             pass
+
+    @contextmanager
+    def lock(self):
+        """Cross-process mutex for check-then-write sequences (name
+        uniquing before save). fcntl is absent on Windows, where the
+        pre-existing best-effort behavior stays."""
+        try:
+            import fcntl
+        except ImportError:
+            yield
+            return
+        self._root.mkdir(parents=True, exist_ok=True)
+        with open(self._root / ".lock", "w") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
 
     # ── documents ──
     def save_document(self, doc_id: str, meta: dict, tree: list, pages: list) -> None:

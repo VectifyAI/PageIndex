@@ -9,11 +9,13 @@ guidance strings (tool descriptions) adapt to the local surface the same
 way the agent instructions do — they never teach capabilities that only
 exist on the cloud.
 
-Tools never raise for any invocation their signatures accept: every
-outcome, including errors, is returned as the same JSON envelope the cloud
-emits ({"success": true, ...} / {"error": ...}). Arguments outside a pruned
-local signature fail at the Python call boundary; the call_tool path
-answers them with the guided error envelope instead.
+Tools never raise: every outcome, including errors, is returned as the
+same JSON envelope the cloud emits ({"success": true, ...} /
+{"error": ...}) — arguments outside a pruned local signature come back as
+that envelope too, on the direct and the call_tool path alike, except
+browse_documents' ``recursive``: call_tool honors it, because the flat
+no-folders shape it asks for is trivially true here. One exception to
+never-raise: a cloud 401/403 re-raises PageIndexAPIError.
 """
 from __future__ import annotations
 
@@ -33,7 +35,6 @@ TOOL_RESPONSE_CHAR_LIMIT = 100_000
 STRUCTURE_FIRST_PAGE_THRESHOLD = 20
 
 _CHAR_BUDGET = int(TOOL_RESPONSE_CHAR_LIMIT * 0.95)
-_PAGES_SPEC_RE = re.compile(r"^(\d+(-\d+)?)(,\s*\d+(-\d+)?)*$")
 _MAX_REQUESTED_PAGES = 10_000
 _SIMILAR_NAMES_LIMIT = 3
 _TOOL_WAIT_TIMEOUT = 180.0  # "up to 3 minutes", per the wait_for_completion schema
@@ -328,15 +329,23 @@ def _dumps(payload: dict[str, Any]) -> str:
 
 # ── document listing / name resolution ──
 
-def _all_documents(client) -> list[dict[str, Any]]:
+def _all_documents(client, stop_ids=None) -> list[dict[str, Any]]:
     """Every document the client can list, newest first (both modes list
-    newest-first; paging preserves that order)."""
+    newest-first; paging preserves that order). With ``stop_ids``, paging
+    stops early once every one of those ids has been seen — for callers
+    that only need those entries; an id absent from the listing still
+    costs a full sweep."""
     documents: list[dict[str, Any]] = []
     offset = 0
+    remaining = {str(one_id) for one_id in stop_ids} if stop_ids else None
     while True:
         page = client.list_documents(limit=100, offset=offset)
         batch = page.get("documents") or []
         documents.extend(batch)
+        if remaining is not None:
+            remaining.difference_update(str(doc.get("id")) for doc in batch)
+            if not remaining:
+                return documents
         # Advance by what actually arrived — stepping by the requested
         # limit skips documents whenever a server caps its page size.
         offset += len(batch)
@@ -387,14 +396,14 @@ def _resolve_document(
     """Resolve doc_name to a list entry. Same-name duplicates resolve to the
     newest match. Returns (entry, None) or (None, error_payload_pair)."""
     if documents is None:
-        documents = _all_documents(client)
+        documents = _all_documents(client, stop_ids=allowed_ids)
     documents = _scope_documents(documents, allowed_ids)
     matches = [doc for doc in documents if doc.get("name") == doc_name]
     if matches:
         return max(matches, key=lambda d: d.get("createdAt") or ""), None
     names = [str(doc.get("name")) for doc in documents if doc.get("name")]
-    similar = difflib.get_close_matches(doc_name, names, n=_SIMILAR_NAMES_LIMIT,
-                                        cutoff=0.5)
+    similar = difflib.get_close_matches(str(doc_name), names,
+                                        n=_SIMILAR_NAMES_LIMIT, cutoff=0.5)
     message = (
         "Document not found. Did you mean: "
         + ", ".join(f'"{name}"' for name in similar) + "?"
@@ -423,7 +432,9 @@ def _refetch_entry(client, doc_id: str) -> Optional[dict[str, Any]]:
 
 
 def _await_completion(client, entry: dict[str, Any], wait: bool) -> dict[str, Any]:
-    """Re-poll a processing document for up to 3 minutes when wait is set."""
+    """Re-poll a processing document for up to 3 minutes when wait is set.
+    Local documents are stored already terminal, so the wait never engages
+    there."""
     doc_id = entry.get("id")
     if not wait or not doc_id or entry.get("status") in ("completed", "failed"):
         return entry
@@ -433,7 +444,7 @@ def _await_completion(client, entry: dict[str, Any], wait: bool) -> dict[str, An
         time.sleep(_TOOL_WAIT_INTERVAL)
         refreshed = _refetch_entry(client, doc_id)
         if refreshed is None:
-            return current
+            continue  # transient refetch failure: poll on to the deadline
         if refreshed.get("metadata") is None:
             # Status refetches omit (or null out) custom metadata; keep the
             # listing's copy.
@@ -503,69 +514,112 @@ def _folder_unsupported(param: str) -> tuple[dict, bool]:
 
 # ── page spec handling ──
 
-def _parse_page_spec(
-    pages: str, doc_name: str,
-) -> "tuple[Optional[list[int]], Optional[_ToolResult]]":
-    """Expand '1-3,7' into a sorted, deduplicated page list, or an error."""
-    invalid = _failure(
-        "Invalid page specification format",
-        {"doc_name": doc_name},
-        {
-            "summary": "Failed to parse the pages parameter",
-            "options": [
-                'Use valid formats: "5", "3,7,10", "5-10", or "1-3,7,9-12"',
-                "Ensure page numbers are positive integers",
-            ],
-        },
-        "INVALID_INPUT",
-    )
-    if not isinstance(pages, str) or not _PAGES_SPEC_RE.match(pages.strip()):
-        return None, invalid
-    too_many = _failure(
-        f"Too many pages requested (over {_MAX_REQUESTED_PAGES})",
-        {"doc_name": doc_name},
-        {
-            "summary": "The page specification spans too many pages",
-            "options": [
-                "Request a narrower page range",
-                "The response holds only a few pages per call - page through with several smaller requests",
-            ],
-        },
-        "INVALID_INPUT",
-    )
+class _PageSpecError(ValueError):
+    """Shared page-spec rejection; ``code`` picks the caller's rendering."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+# re.ASCII mirrors the ECMA regex semantics the contract's pattern carries
+_PAGE_SPEC_RE = re.compile(
+    TOOL_CONTRACT["get_page_content"]["schema"]["properties"]["pages"]["pattern"],
+    re.ASCII)
+
+
+def _expand_pages(pages) -> list[int]:
+    """Expand '1-3,7' into sorted distinct pages — the one parser for the
+    SDK surface and the tool layer, holding both to the contract's pages
+    pattern. Raises _PageSpecError with code 'invalid', 'too_many', or
+    'nonpositive'."""
+    if not isinstance(pages, str):
+        raise _PageSpecError("invalid",
+                             f"Invalid page specification: {pages!r}")
+    if not _PAGE_SPEC_RE.fullmatch(pages):
+        raise _PageSpecError(
+            "invalid", f"Invalid page specification '{pages}'")
+    too_many = (f"Page specification '{pages}' spans more than "
+                f"{_MAX_REQUESTED_PAGES} pages; request a narrower range")
     expanded: set[int] = set()
     for part in pages.split(","):
         part = part.strip()
-        if "-" in part:
-            start, end = (int(x) for x in part.split("-", 1))
-            if start > end:
-                return None, invalid
-        else:
-            start = end = int(part)
+        try:
+            if "-" in part:
+                start, end = (int(x) for x in part.split("-", 1))
+                if start > end:
+                    raise _PageSpecError(
+                        "invalid",
+                        f"Invalid range '{part}': start must be <= end")
+            else:
+                start = end = int(part)
+        except _PageSpecError:
+            raise
+        except ValueError as exc:
+            raise _PageSpecError(
+                "invalid", f"Invalid page specification '{pages}'") from exc
         # Bound each part arithmetically before materializing it: a spec like
         # "1-1000000000" would otherwise expand to billions of integers
         # inside the caller's process. The cap is on distinct pages, so
         # overlapping parts (a parent section plus its children) don't
         # double-count.
         if end - start + 1 > _MAX_REQUESTED_PAGES:
-            return None, too_many
+            raise _PageSpecError("too_many", too_many)
         expanded.update(range(start, end + 1))
         if len(expanded) > _MAX_REQUESTED_PAGES:
-            return None, too_many
-    if any(page < 1 for page in expanded):
+            raise _PageSpecError("too_many", too_many)
+    if min(expanded) < 1:
+        raise _PageSpecError(
+            "nonpositive",
+            "Invalid page numbers. Page numbers must be positive integers")
+    return sorted(expanded)
+
+
+def _parse_page_spec(
+    pages: str, doc_name: str,
+) -> "tuple[Optional[list[int]], Optional[_ToolResult]]":
+    """Expand '1-3,7' into a sorted, deduplicated page list, or an error."""
+    try:
+        return _expand_pages(pages), None
+    except _PageSpecError as exc:
+        if exc.code == "too_many":
+            return None, _failure(
+                f"Too many pages requested (over {_MAX_REQUESTED_PAGES})",
+                {"doc_name": doc_name},
+                {
+                    "summary": "The page specification spans too many pages",
+                    "options": [
+                        "Request a narrower page range",
+                        "The response holds only a few pages per call - page through with several smaller requests",
+                    ],
+                },
+                "INVALID_INPUT",
+            )
+        if exc.code == "nonpositive":
+            return None, _failure(
+                "Invalid page numbers. Page numbers must be positive integers",
+                {"doc_name": doc_name},
+                {
+                    "summary": "Invalid page numbers provided",
+                    "options": [
+                        "Page numbers must be positive integers (>= 1)",
+                        "Check the page specification format",
+                    ],
+                },
+                "INVALID_INPUT",
+            )
         return None, _failure(
-            "Invalid page numbers. Page numbers must be positive integers",
+            "Invalid page specification format",
             {"doc_name": doc_name},
             {
-                "summary": "Invalid page numbers provided",
+                "summary": "Failed to parse the pages parameter",
                 "options": [
-                    "Page numbers must be positive integers (>= 1)",
-                    "Check the page specification format",
+                    'Use valid formats: "5", "3,7,10", "5-10", or "1-3,7,9-12"',
+                    "Ensure page numbers are positive integers",
                 ],
             },
             "INVALID_INPUT",
         )
-    return sorted(expanded), None
 
 
 def _format_page_spec(pages: list[int]) -> str:
@@ -702,7 +756,8 @@ def _browse_documents(client, folder_id: str = "root", recursive: bool = False,
         window = listing.get("documents") or []
         total = listing.get("total")
     else:
-        scoped = _scope_documents(_all_documents(client), _allowed_ids)
+        scoped = _scope_documents(_all_documents(client, stop_ids=_allowed_ids),
+                                  _allowed_ids)
         window, total = scoped[offset:offset + limit], len(scoped)
     window_end = offset + len(window)
     has_more = bool(window) and (window_end < total if isinstance(total, int)
@@ -863,7 +918,9 @@ def _get_document_structure(client, doc_name: str,
         raw_tree = getattr(getattr(client, "_api", None), "raw_tree", None)
         tree = raw_tree(entry["id"]) if raw_tree is not None else None
         if tree is None:
-            tree = client.get_tree(entry["id"], node_summary=True).get("result")
+            # _format_structure strips text anyway — don't download it.
+            tree = client.get_tree(entry["id"], node_summary=True,
+                                   include_text=False).get("result")
     except PageIndexAPIError as exc:
         return _failure(
             f"Failed to retrieve document structure: {exc}",
@@ -1020,10 +1077,12 @@ def _get_page_content(client, doc_name: str, pages: str,
         markdown = item.get("markdown") if item else None
         text = (markdown if isinstance(markdown, str)
                 else f"Page {page} content not available")
-        if not included or budget - len(text) >= 0:
-            content.append({"page": page, "text": text})
+        entry = {"page": page, "text": text}
+        size = _serialized_size(entry) + 2  # +2: json ", " item separator
+        if not included or budget - size >= 0:
+            content.append(entry)
             included.append(page)
-            budget -= len(text)
+            budget -= size
         else:
             remaining.append(page)
 
@@ -1087,7 +1146,7 @@ def _remove_document(client, doc_names: list[str],
                         {"summary": "Too many documents in one call",
                          "options": ["Delete at most 10 documents per call"]},
                         "INVALID_INPUT")
-    documents = _all_documents(client)
+    documents = _all_documents(client, stop_ids=_allowed_ids)
     results = []
     for doc_name in doc_names:
         entry, error = _resolve_document(client, doc_name, documents=documents,
@@ -1126,11 +1185,11 @@ def tool_names(include_management: bool = False) -> tuple[str, ...]:
     return _READ_TOOLS + (_MANAGEMENT_TOOLS if include_management else ())
 
 
-def _coerce_bool_args(name: str, kwargs: dict[str, Any]) -> None:
+def _coerce_bool_args(schema: dict, kwargs: dict[str, Any]) -> None:
     """Models routinely send booleans as JSON strings ("false"); the bare
-    truthiness tests downstream would read those as True."""
-    properties = TOOL_CONTRACT.get(name, {}).get("schema", {}).get(
-        "properties", {})
+    truthiness tests downstream would read those as True. Runs on both
+    dispatch paths — call_tool and the cloud bridge invoker."""
+    properties = (schema or {}).get("properties", {})
     for key, spec in properties.items():
         value = kwargs.get(key)
         if spec.get("type") == "boolean" and isinstance(value, str):
@@ -1168,7 +1227,7 @@ def call_tool(client, name: str, arguments: dict[str, Any],
     # "omit if ..." semantics, same as the cloud bridge invoker).
     kwargs = {key: value for key, value in (arguments or {}).items()
               if not key.startswith("_") and value is not None}
-    _coerce_bool_args(name, kwargs)
+    _coerce_bool_args(TOOL_CONTRACT.get(name, {}).get("schema", {}), kwargs)
     try:
         if doc_ids is not None:
             ids = [doc_ids] if isinstance(doc_ids, str) else doc_ids
@@ -1229,9 +1288,11 @@ _LOCAL_DESCRIPTIONS: dict[str, str] = {
         'Folder browsing and semantic ranking (sort="relevance") are not '
         "supported in local mode yet — they work on PageIndex cloud."
     ),
-    "get_page_content": TOOL_CONTRACT["get_page_content"]["description"]
-    .replace(" Embedded image paths in the response feed into "
-             "`get_document_image()`.", ""),
+    # Drop the sentence naming the cloud-only image tool, whatever its
+    # wording; the contract-refresh test pins that something was removed.
+    "get_page_content": re.sub(
+        r"\s*[^.]*`get_document_image\(\)`[^.]*\.", "",
+        TOOL_CONTRACT["get_page_content"]["description"]),
 }
 
 _LOCAL_PARAM_DESCRIPTIONS: dict[tuple[str, str], str] = {
@@ -1261,9 +1322,6 @@ def _local_schema(name: str) -> dict[str, Any]:
     return schema
 
 
-def _docstring(name: str) -> str:
-    return _tool_docstring(_local_description(name),
-                           _local_schema(name)["properties"])
 
 
 _SCHEMA_TYPE_MAP = {"string": str, "integer": int, "number": float,
@@ -1298,17 +1356,23 @@ def _annotation_for(spec: dict) -> Any:
     return Optional[base] if nullable else base
 
 
-def _bridge_invoker(bridge, name: str) -> "Callable[[dict], tuple[str, bool]]":
-    """One cloud tool call proxied over MCP: None-valued arguments are
-    dropped (None ≡ omitted, matching the contract's "omit if ..."
-    semantics) and failures are contained in the error envelope. Returns
-    (envelope_text, is_error), like call_tool."""
+def _bridge_invoker(bridge, name: str, schema: dict,
+                    ) -> "Callable[[dict], tuple[str, bool]]":
+    """One cloud tool call proxied over MCP: string booleans are coerced
+    (same as call_tool), None-valued arguments are dropped (None ≡ omitted,
+    matching the contract's "omit if ..." semantics) and failures are
+    contained in the error envelope — except 401/403, which re-raise.
+    Returns (envelope_text, is_error), like call_tool."""
     def _invoke(arguments: dict[str, Any]) -> tuple[str, bool]:
         try:
             arguments = {key: value for key, value in arguments.items()
                          if value is not None}
+            _coerce_bool_args(schema, arguments)
             return bridge.call_tool(name, arguments)
         except Exception as exc:
+            if (isinstance(exc, PageIndexAPIError)
+                    and exc.status_code in (401, 403)):
+                raise
             payload, _ = _failure(
                 f"{name} failed: {exc}", None,
                 {"summary": "Unexpected error while running the tool",
@@ -1321,22 +1385,23 @@ def _bridge_invoker(bridge, name: str) -> "Callable[[dict], tuple[str, bool]]":
     return _invoke
 
 
-def _make_bridge_function(bridge, meta: dict) -> Callable[..., str]:
-    """One plain function for a cloud tool: real signature and docstring from
-    the server's schema, invocation proxied over MCP, errors contained."""
+def _make_tool_function(name: str, description: str, schema: dict,
+                        invoke: "Callable[[dict], tuple[str, bool]]",
+                        ) -> Callable[..., str]:
+    """One plain function for a tool: real signature and docstring from the
+    schema, errors contained by the invoker; arguments the signature
+    rejects come back as the guided envelope instead of raising."""
     import keyword
 
-    name = str(meta.get("name") or "")
-    schema = meta.get("inputSchema") or {}
     properties: dict[str, Any] = schema.get("properties") or {}
     required = set(schema.get("required") or [])
-    _invoke = _bridge_invoker(bridge, name)
+    _invoke = invoke
 
     params_usable = all(param.isidentifier() and not keyword.iskeyword(param)
                         and param != "_invoke"
                         for param in properties)
     if not params_usable:
-        def proxy(**kwargs: Any) -> str:
+        def inner(**kwargs: Any) -> str:
             return _invoke(kwargs)[0]
     else:
         ordered = ([p for p in properties if p in required]
@@ -1349,7 +1414,9 @@ def _make_bridge_function(bridge, meta: dict) -> Callable[..., str]:
         namespace: dict[str, Any] = {"_invoke": _invoke}
         exec(f"def _synthesized({rendered}):\n"
              f"    return _invoke({args_literal})[0]", namespace)
-        proxy = namespace["_synthesized"]
+        inner = namespace["_synthesized"]
+        # binding TypeErrors quote __qualname__, not __name__
+        inner.__name__ = inner.__qualname__ = name or "tool"
         annotations: dict[str, Any] = {}
         for p in ordered:
             annotation = _annotation_for(properties[p])
@@ -1359,9 +1426,26 @@ def _make_bridge_function(bridge, meta: dict) -> Callable[..., str]:
                 annotation = Optional[annotation]
             annotations[p] = annotation
         annotations["return"] = str
-        proxy.__annotations__ = annotations
+        inner.__annotations__ = annotations
+
+    def proxy(*args: Any, **kwargs: Any) -> str:
+        # The invoker lets only 401/403 auth failures through, so a
+        # TypeError here is the binding rejecting the arguments.
+        try:
+            return inner(*args, **kwargs)
+        except TypeError as exc:
+            payload, _ = _failure(
+                f"Invalid arguments for {name}: {exc}", None,
+                {"summary": "Invalid tool arguments",
+                 "options": [f"Check the {name}() parameter names "
+                             "and types"]},
+                "INVALID_INPUT",
+            )
+            return _dumps(payload)
+    proxy.__signature__ = inspect.signature(inner)  # type: ignore[attr-defined]
+    proxy.__annotations__ = dict(inner.__annotations__)
     proxy.__name__ = proxy.__qualname__ = name or "tool"
-    proxy.__doc__ = _tool_docstring(meta.get("description") or "", properties)
+    proxy.__doc__ = _tool_docstring(description or "", properties)
     return proxy
 
 
@@ -1369,53 +1453,48 @@ _BRIDGES: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
 _BRIDGES_LOCK = threading.Lock()
 
 
-def _cloud_bridge(client):
-    """One bridge per client: tool discovery and instructions share a single
-    MCP session. Weak-keyed off the instance so clients stay picklable; the
+def _cloud_bridge(client, gated: bool = False):
+    """One bridge per client and endpoint gate (``gated`` = the read-only
+    ?tools=read endpoint); tool discovery and instructions share a session
+    per gate. Weak-keyed off the instance so clients stay picklable; the
     lock closes the check-then-set race under concurrent first calls."""
     with _BRIDGES_LOCK:
-        bridge = _BRIDGES.get(client)
+        # A rotated api_key or moved BASE_URL rebuilds the bridges.
+        auth = (client.BASE_URL, client.api_key)
+        bridges, seen = _BRIDGES.get(client) or ({}, None)
+        if seen != auth:
+            bridges = {}
+        bridge = bridges.get(gated)
         if bridge is None:
             from .mcp_bridge import McpBridge
             bridge = McpBridge(
-                f"{client.BASE_URL}/mcp",
-                {"Authorization": f"Bearer {client.api_key}"},
+                f"{auth[0]}/mcp" + ("?tools=read" if gated else ""),
+                {"Authorization": f"Bearer {auth[1]}"},
             )
-            _BRIDGES[client] = bridge
+            bridges[gated] = bridge
+            _BRIDGES[client] = (bridges, auth)
         return bridge
 
 
-def _read_only_tools(tools_meta: list[dict]) -> list[dict]:
-    """The management gate for consumers without a framework permission
-    layer: only tools the server marks read-only, guarded against a server
-    annotation regression silently disabling every tool."""
-    filtered = [meta for meta in tools_meta
-                if (meta.get("annotations") or {}).get("readOnlyHint") is True]
-    if tools_meta and not filtered:
+def _require_doc_selection(doc_ids) -> None:
+    """An empty selection fails loud: washed to None it would mean
+    "everything", while the tool-layer allowlist would mean "nothing"."""
+    if doc_ids is not None and not doc_ids:
         raise PageIndexAPIError(
-            "The MCP server returned tools but none are annotated "
-            "read-only — a server annotation regression would otherwise "
-            "silently disable every tool. Pass include_management=True "
-            "to expose the unfiltered list."
-        )
-    return filtered
-
-
-def _build_cloud_agent_tools(client, include_management: bool) -> list[Callable[..., str]]:
-    bridge = _cloud_bridge(client)
-    tools_meta = bridge.list_tools()
-    if not include_management:
-        tools_meta = _read_only_tools(tools_meta)
-    return [_make_bridge_function(bridge, meta) for meta in tools_meta]
+            "doc_id is empty. Pass one or more document IDs, or omit "
+            "doc_id to give the agent the whole library.")
 
 
 def _require_local_scope(client, doc_ids) -> None:
-    """The allowlist is enforced in-process; cloud lookups run server-side,
-    so accepting doc_ids there would be advisory-only — refuse loudly."""
+    """The allowlist is enforced in-process; cloud tools take none, so
+    accepting doc_ids there would be advisory-only — refuse loudly."""
+    _require_doc_selection(doc_ids)
     if doc_ids is not None and getattr(client, "api_key", None):
         raise PageIndexAPIError(
-            "doc_ids scoping applies to local tools only — cloud calls "
-            "are scoped server-side."
+            "doc_ids scoping applies to local tools only — the managed "
+            "cloud chat scopes doc_id server-side, and own-model chat "
+            "over cloud documents targets documents at the prompt level, "
+            "without a tool-layer allowlist."
         )
 
 
@@ -1424,18 +1503,23 @@ def _tool_specs(client, include_management: bool = False, doc_ids=None,
     """(name, description, schema, invoke) per tool, for adapters that take
     the wire schema verbatim. ``invoke`` returns (envelope_text, is_error).
     Schemas are copies (frameworks keep the dict by reference). ``doc_ids``
-    is the local chat scope; cloud scoping is server-side."""
+    is the local chat scope."""
     _require_local_scope(client, doc_ids)
     if getattr(client, "api_key", None):
-        bridge = _cloud_bridge(client)
+        bridge = _cloud_bridge(client, gated=not include_management)
         tools_meta = bridge.list_tools()
-        if not include_management:
-            tools_meta = _read_only_tools(tools_meta)
+        if not tools_meta:
+            raise PageIndexAPIError(
+                "The MCP server returned no tools — a zero-tool agent would "
+                "answer from the model's own knowledge, not the documents, "
+                "with nothing to signal it."
+            )
         return [(str(meta.get("name") or "tool"),
                  meta.get("description") or "",
                  copy.deepcopy(meta.get("inputSchema"))
                  or {"type": "object", "properties": {}},
-                 _bridge_invoker(bridge, str(meta.get("name") or "tool")))
+                 _bridge_invoker(bridge, str(meta.get("name") or "tool"),
+                                 meta.get("inputSchema") or {}))
                 for meta in tools_meta]
 
     def local_invoke(name: str) -> "Callable[[dict], tuple[str, bool]]":
@@ -1448,62 +1532,22 @@ def _tool_specs(client, include_management: bool = False, doc_ids=None,
             for name in tool_names(include_management)]
 
 
-def build_agent_tools(client, include_management: bool = False) -> list[Callable[..., str]]:
+def build_agent_tools(client, include_management: bool = False,
+                      doc_ids=None) -> list[Callable[..., str]]:
     """Plain synchronous functions bound to `client`.
 
     Cloud: one function per tool of the live cloud MCP tool set, signatures
     synthesized from the server's schemas, calls proxied over MCP. Local:
     the built-in contract tools over the local store. Every function returns
     the JSON envelope as a string and never raises for arguments its
-    signature accepts (cloud-only parameters are absent from the local
+    signature accepts — except a cloud 401/403, which re-raises
+    PageIndexAPIError (cloud-only parameters are absent from the local
     signatures; the call_tool path answers them with the guided envelope).
+    ``doc_ids`` is the local allowlist, as in ``_tool_specs``.
     """
-    if getattr(client, "api_key", None):
-        return _build_cloud_agent_tools(client, include_management)
-
-    def browse_documents(offset: int = 0, limit: int = 10) -> str:
-        return call_tool(client, "browse_documents", {
-            "offset": offset, "limit": limit,
-        })[0]
-
-    def get_document(doc_name: str, wait_for_completion: bool = False) -> str:
-        return call_tool(client, "get_document", {
-            "doc_name": doc_name,
-            "wait_for_completion": wait_for_completion,
-        })[0]
-
-    def get_document_structure(doc_name: str, part: int = 1,
-                               wait_for_completion: bool = False) -> str:
-        return call_tool(client, "get_document_structure", {
-            "doc_name": doc_name, "part": part,
-            "wait_for_completion": wait_for_completion,
-        })[0]
-
-    def get_page_content(doc_name: str, pages: str,
-                         wait_for_completion: bool = False) -> str:
-        return call_tool(client, "get_page_content", {
-            "doc_name": doc_name, "pages": pages,
-            "wait_for_completion": wait_for_completion,
-        })[0]
-
-    def remove_document(doc_names: list[str]) -> str:
-        return call_tool(client, "remove_document", {
-            "doc_names": doc_names,
-        })[0]
-
-    functions = {
-        "browse_documents": browse_documents,
-        "get_document": get_document,
-        "get_document_structure": get_document_structure,
-        "get_page_content": get_page_content,
-        "remove_document": remove_document,
-    }
-    tools = []
-    for name in tool_names(include_management):
-        function = functions[name]
-        function.__doc__ = _docstring(name)
-        tools.append(function)
-    return tools
+    return [_make_tool_function(name, description, schema, invoke)
+            for name, description, schema, invoke
+            in _tool_specs(client, include_management, doc_ids)]
 
 
 # ── agent instructions ──
@@ -1557,12 +1601,13 @@ AGENT_INSTRUCTIONS = "\n\n".join([
 ])
 
 
-def _base_instructions(client) -> str:
-    """Cloud: the live instructions the MCP server serves for this key's
-    tool set. Local: the built-in subset instructions."""
+def _base_instructions(client, include_management: bool = False) -> str:
+    """Cloud: the live instructions the MCP server serves for the tool set
+    actually shipped. Local: the built-in subset instructions."""
     if not getattr(client, "api_key", None):
         return AGENT_INSTRUCTIONS
-    instructions = _cloud_bridge(client).instructions()
+    instructions = _cloud_bridge(
+        client, gated=not include_management).instructions()
     if not isinstance(instructions, str) or not instructions.strip():
         raise PageIndexAPIError(
             "The MCP server returned no agent instructions — refusing to "
@@ -1576,7 +1621,8 @@ def doc_targeting_block(client, doc_id, scoped: bool = False) -> Optional[str]:
     """The doc_id targeting text: names, metadata, and the directive to work
     within those documents. Shared by agent_instructions and the local chat
     surfaces (a leading conversation item on the OpenAI surfaces, a system
-    block on messages()). Raises when a doc_id's name is shadowed by a newer
+    block on the Messages lane). Raises when a doc_id's name is shadowed by a
+    newer
     same-name document — the name-addressed tools could not reach it. With
     ``scoped`` (surfaces whose tools resolve names inside the doc_id
     allowlist) only a same-name duplicate within the targeted set
@@ -1584,10 +1630,25 @@ def doc_targeting_block(client, doc_id, scoped: bool = False) -> Optional[str]:
     if doc_id is None:
         return None
     doc_ids = [doc_id] if isinstance(doc_id, str) else list(doc_id)
-    if not doc_ids:
-        return None
-    details = [client.get_document(one_id) for one_id in doc_ids]
-    listing = _all_documents(client)
+    _require_doc_selection(doc_ids)
+    details = []
+    missing = []
+    for one_id in doc_ids:
+        try:
+            details.append(client.get_document(one_id))
+        except PageIndexAPIError as exc:
+            # Batch only a definite not-found/denied (local raises carry no
+            # status); a cloud transport failure (429/5xx) propagates raw.
+            if exc.status_code not in (None, 403, 404):
+                raise
+            missing.append(str(one_id))
+    if missing:
+        raise PageIndexAPIError(
+            "Documents not found or access denied: " + ", ".join(missing))
+    # Scoped: the listing only backfills the target docs' metadata (list
+    # entries carry it, get_document does not — cloud parity), so paging
+    # can stop at those ids. Unscoped needs it all for the shadow check.
+    listing = _all_documents(client, stop_ids=doc_ids if scoped else None)
     documents = ([{**detail, "id": one_id}
                   for one_id, detail in zip(doc_ids, details)]
                  if scoped else listing)
@@ -1625,9 +1686,10 @@ def doc_targeting_block(client, doc_id, scoped: bool = False) -> Optional[str]:
     )
 
 
-def build_agent_instructions(client, doc_id=None, scoped: bool = False) -> str:
+def build_agent_instructions(client, doc_id=None, scoped: bool = False,
+                             include_management: bool = False) -> str:
     """Orchestration guidance for document QA agents; with doc_id, appends
     the target documents and directs the agent to work within them."""
-    base = _base_instructions(client)
+    base = _base_instructions(client, include_management)
     block = doc_targeting_block(client, doc_id, scoped=scoped)
     return base if block is None else base + "\n\n" + block

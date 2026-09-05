@@ -10,8 +10,10 @@ import PyPDF2
 import copy
 import asyncio
 from io import BytesIO
-from dotenv import load_dotenv
-load_dotenv()
+from dotenv import find_dotenv, load_dotenv
+load_dotenv(find_dotenv(usecwd=True))
+# litellm's import fetches its model map over the network unless told not to.
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 import logging
 import yaml
 from pathlib import Path
@@ -27,13 +29,6 @@ import re
 # helpers and their asyncio tasks without threading it through every call.
 _llm_backend: contextvars.ContextVar = contextvars.ContextVar(
     "pageindex_llm_backend", default=None)
-
-
-def _openai_sdk_kwargs(backend: dict) -> dict:
-    """The same backend dict works on both gateway paths: LiteLLM accepts
-    either endpoint spelling, the openai SDK only ``base_url``."""
-    return {("base_url" if key == "api_base" else key): value
-            for key, value in backend.items()}
 
 
 def _repair_litellm_types() -> None:
@@ -52,36 +47,38 @@ def _repair_litellm_types() -> None:
     except Exception:
         pass  # best-effort: a failed repair leaves litellm's own error
 
+
+def _mute_litellm_bridge_usage_warning() -> None:
+    """litellm's chat→Responses bridge (e.g. OpenAI gpt-5.4+ with function
+    tools) logs a chat-shaped usage dict inside a ResponseAPIUsage field
+    (litellm_logging._get_assembled_streaming_response, 1.97–1.98), and
+    pydantic reports it on every streamed turn. Hide exactly that message;
+    every other warning still surfaces."""
+    import warnings
+    warnings.filterwarnings(
+        "ignore",
+        message=r"Pydantic serializer warnings:\s+"
+                r"(PydanticSerializationUnexpectedValue\()?Expected `ResponseAPIUsage`")
+
+
+def _quiet_litellm() -> None:
+    """Mute litellm's stdout "Provider List:" banner and default its loggers
+    to LITELLM_LOG (ERROR unset); a level set elsewhere stays."""
+    import litellm
+    litellm.suppress_debug_info = True
+    level = getattr(logging, os.environ.get("LITELLM_LOG", "ERROR").upper(),
+                    logging.ERROR)
+    for name in ("LiteLLM", "LiteLLM Router", "LiteLLM Proxy", "litellm"):
+        logger = logging.getLogger(name)
+        if logger.level == logging.NOTSET:
+            logger.setLevel(level)
+
 # Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
 if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
+    import warnings
+    warnings.warn("CHATGPT_API_KEY is deprecated — set OPENAI_API_KEY "
+                  "instead.", FutureWarning)
     os.environ["OPENAI_API_KEY"] = os.getenv("CHATGPT_API_KEY")
-
-ATLASCLOUD_API_BASE = "https://api.atlascloud.ai/v1"
-ATLASCLOUD_MODEL_PREFIX = "atlascloud/"
-
-
-def prepare_litellm_call(model):
-    """Normalize PageIndex model aliases into LiteLLM completion kwargs."""
-    if not model:
-        return model, {}
-
-    model = model.removeprefix("litellm/")
-    if not model.startswith(ATLASCLOUD_MODEL_PREFIX):
-        return model, {}
-
-    atlas_model = model[len(ATLASCLOUD_MODEL_PREFIX):]
-    if not atlas_model:
-        raise ValueError("Atlas Cloud model must be provided after 'atlascloud/'.")
-
-    api_key = os.getenv("ATLASCLOUD_API_KEY")
-    if not api_key:
-        raise ValueError("ATLASCLOUD_API_KEY is required when using Atlas Cloud models.")
-
-    return f"openai/{atlas_model}", {
-        "api_base": os.getenv("ATLASCLOUD_API_BASE", ATLASCLOUD_API_BASE),
-        "api_key": api_key,
-    }
-
 
 def count_tokens(text, model=None):
     if not text:
@@ -96,130 +93,169 @@ def _strip_prefix(s, prefix):
     return s
 
 
-def _is_openai_model(model):
-    """Models without a provider prefix (no '/') use the openai SDK directly.
-    For other providers, use 'provider/model' format (e.g. 'anthropic/claude-sonnet-4-6')."""
-    if not model or model.startswith('litellm/'):
-        return False
-    return '/' not in model or model.startswith('openai/')
+def run_off_loop(func, *args):
+    """Run func now, or on a worker thread when this thread already runs an
+    asyncio loop (func may itself call asyncio.run)."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return func(*args)
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(func, *args).result()
 
 
-_openai_sync_client = None
-_openai_async_client = None
+ATLASCLOUD_MODEL_PREFIX = "atlascloud/"
+ATLASCLOUD_API_BASE = "https://api.atlascloud.ai/v1"
+
+
+def _atlascloud_kwargs(model):
+    """Credential kwargs for an ``atlascloud/`` model, or ``{}`` for anything else.
+
+    Atlas Cloud is reached over LiteLLM's ``openai/`` wire form, so the endpoint
+    and key have to travel as completion kwargs rather than being inferred from
+    the provider name."""
+    if not model or not model.removeprefix("litellm/").startswith(ATLASCLOUD_MODEL_PREFIX):
+        return {}
+    api_key = os.getenv("ATLASCLOUD_API_KEY")
+    if not api_key:
+        raise ValueError("ATLASCLOUD_API_KEY is required when using Atlas Cloud models.")
+    return {
+        "api_base": os.getenv("ATLASCLOUD_API_BASE", ATLASCLOUD_API_BASE),
+        "api_key": api_key,
+    }
+
+
+def _litellm_model(model):
+    """Normalize to LiteLLM's grammar (``litellm/`` strips, bare names get
+    the ``openai/`` wire form — same as the chat lane) and refuse an
+    unknown provider with the 404 the retry loop treats as unrecoverable.
+    Credentials are LiteLLM's own call, made at the first completion."""
+    if not model:
+        return model
+    model = _strip_prefix(model, "litellm/")
+    if model.startswith(ATLASCLOUD_MODEL_PREFIX):
+        atlas_model = model[len(ATLASCLOUD_MODEL_PREFIX):]
+        if not atlas_model:
+            raise ValueError("Atlas Cloud model must be provided after 'atlascloud/'.")
+        # Atlas Cloud speaks the OpenAI wire format; the endpoint arrives as a
+        # completion kwarg from _atlascloud_kwargs().
+        return f"openai/{atlas_model}"
+    if "/" not in model:
+        model = f"openai/{model}"
+    import litellm
+    provider = model.split("/", 1)[0]
+    providers = getattr(litellm, "provider_list", None)
+    # custom_provider_map providers join provider_list only at call time.
+    custom = {entry.get("provider") for entry
+              in getattr(litellm, "custom_provider_map", None) or []}
+    if providers and provider not in providers and provider not in custom:
+        raise litellm.NotFoundError(
+            f"'{model}' routes through LiteLLM, but '{provider}' is not a "
+            f"LiteLLM provider. For an OpenAI-compatible server serving "
+            f"this model id, use 'openai/{model}' and point "
+            f"OPENAI_BASE_URL at the server.",
+            llm_provider=None, model=model)
+    return model
 
 
 # Misconfiguration: no retry can fix a rejected key or a model that does not
-# exist, and every later call fails the same way. Deliberately not 400, which
-# also carries context_length_exceeded, a per-prompt failure the caller absorbs
-# today. An unknown status is a transport failure and stays retryable.
+# exist, and every later call fails the same way. An unknown status is a
+# transport failure and stays retryable.
 _UNRECOVERABLE_STATUS = frozenset({401, 403, 404})
+
+# A 400 (context_length_exceeded) is equally unfixable by retry — the prompt
+# will not shrink — but it is per-prompt: the ladder raises it immediately
+# and consumers absorb it instead of failing the run.
+_NO_RETRY_STATUS = _UNRECOVERABLE_STATUS | frozenset({400})
+
+
+class LLMRetriesExhausted(RuntimeError):
+    """The retry ladder gave up; carries the last error's status_code."""
+
+    def __init__(self, message, status_code=None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def _is_unrecoverable(exc: Exception) -> bool:
+    if isinstance(exc, LLMRetriesExhausted):
+        # 400 carries context_length_exceeded, the per-prompt failure the
+        # caller absorbs (see above); any other exhausted ladder is fatal.
+        return exc.status_code != 400
     return getattr(exc, "status_code", None) in _UNRECOVERABLE_STATUS
 
 
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
-    use_openai_sdk = _is_openai_model(model)
-    model, provider_kwargs = prepare_litellm_call(model)
-    if use_openai_sdk:
-        model = _strip_prefix(model, "openai/")
+    import litellm
     max_retries = 10
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
     backend = _llm_backend.get()
-    litellm_kwargs = {**provider_kwargs, **(backend or {})}
-    if use_openai_sdk:
-        import openai
-        if backend:
-            oai_client = openai.OpenAI(**{"max_retries": 0,
-                                          **_openai_sdk_kwargs(backend)})
-        else:
-            global _openai_sync_client
-            if _openai_sync_client is None:
-                _openai_sync_client = openai.OpenAI(max_retries=0)
-            oai_client = _openai_sync_client
+    atlas = _atlascloud_kwargs(model)
+    model = _litellm_model(model)
+    _repair_litellm_types()
+    _quiet_litellm()
     for i in range(max_retries):
         try:
-            if use_openai_sdk:
-                response = oai_client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                )
-            else:
-                import litellm
-                _repair_litellm_types()
-                response = litellm.completion(
-                    model=model,
-                    messages=messages,
-                    temperature=0,
-                    drop_params=True,
-                    **litellm_kwargs,
-                )
+            response = litellm.completion(**{
+                "model": model,
+                "messages": messages,
+                "drop_params": True,
+                # the loop is the retry policy; the merge lets a backend override win
+                "max_retries": 0,
+                **atlas,
+                **(backend or {}),
+            })
             content = response.choices[0].message.content
             if return_finish_reason:
                 finish_reason = "max_output_reached" if response.choices[0].finish_reason == "length" else "finished"
                 return content, finish_reason
             return content
         except Exception as e:
-            if _is_unrecoverable(e):
+            if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
                 raise
-            print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
+                logging.warning("Retrying LLM completion")
                 time.sleep(1)
             else:
-                raise RuntimeError(
-                    f"LLM completion failed after {max_retries} retries"
+                raise LLMRetriesExhausted(
+                    f"LLM completion failed after {max_retries} retries: {e}",
+                    status_code=getattr(e, "status_code", None),
                 ) from e
 
 
 async def llm_acompletion(model, prompt):
-    use_openai_sdk = _is_openai_model(model)
-    model, provider_kwargs = prepare_litellm_call(model)
-    if use_openai_sdk:
-        model = _strip_prefix(model, "openai/")
+    import litellm
     max_retries = 10
     messages = [{"role": "user", "content": prompt}]
     backend = _llm_backend.get()
-    litellm_kwargs = {**provider_kwargs, **(backend or {})}
-    if use_openai_sdk:
-        import openai
-        if backend:
-            oai_client = openai.AsyncOpenAI(**{"max_retries": 0,
-                                               **_openai_sdk_kwargs(backend)})
-        else:
-            global _openai_async_client
-            if _openai_async_client is None:
-                _openai_async_client = openai.AsyncOpenAI(max_retries=0)
-            oai_client = _openai_async_client
+    atlas = _atlascloud_kwargs(model)
+    model = _litellm_model(model)
+    _repair_litellm_types()
+    _quiet_litellm()
     for i in range(max_retries):
         try:
-            if use_openai_sdk:
-                response = await oai_client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                )
-            else:
-                import litellm
-                _repair_litellm_types()
-                response = await litellm.acompletion(
-                    model=model,
-                    messages=messages,
-                    temperature=0,
-                    drop_params=True,
-                    **litellm_kwargs,
-                )
+            response = await litellm.acompletion(**{
+                "model": model,
+                "messages": messages,
+                "drop_params": True,
+                "max_retries": 0,
+                **atlas,
+                **(backend or {}),
+            })
             return response.choices[0].message.content
         except Exception as e:
-            if _is_unrecoverable(e):
+            if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
                 raise
-            print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
+                logging.warning("Retrying LLM completion")
                 await asyncio.sleep(1)
             else:
-                raise RuntimeError(
-                    f"LLM completion failed after {max_retries} retries"
+                raise LLMRetriesExhausted(
+                    f"LLM completion failed after {max_retries} retries: {e}",
+                    status_code=getattr(e, "status_code", None),
                 ) from e
 
 
@@ -741,11 +777,14 @@ async def generate_summaries_for_structure(structure, model=None):
     summaries = await asyncio.gather(*tasks, return_exceptions=True)
 
     for node, summary in zip(nodes, summaries):
+        if isinstance(summary, Exception) and _is_unrecoverable(summary):
+            raise summary
         node['summary'] = "" if isinstance(summary, BaseException) else summary
     if nodes and not any(node['summary'] for node in nodes):
         raise RuntimeError(
             "Summary generation failed for all nodes "
-            "(check LLM credentials and model availability)"
+            "(every summary call failed or returned empty; "
+            "check the model and its context limits)"
         )
     return structure
 
@@ -842,10 +881,16 @@ async def summarize_tree(structure, pdf_pages, model=None,
     summary are left untouched; leaves under `small_node_tokens` use their raw
     text as the summary without a model call."""
     semaphore = asyncio.Semaphore(concurrency or SUMMARY_CONCURRENCY)
+    asked = answered = False
 
     async def ask(prompt):
+        nonlocal asked, answered
+        asked = True
         async with semaphore:
-            return await llm_acompletion(model, prompt)
+            reply = await llm_acompletion(model, prompt)
+        if reply:
+            answered = True
+        return reply
 
     async def leaf_summary(node):
         text = get_text_of_pdf_pages(pdf_pages, node['start_index'], node['end_index'])
@@ -914,25 +959,36 @@ async def summarize_tree(structure, pdf_pages, model=None,
     async def visit(node):
         children = node.get('nodes') or []
         if children:
-            await asyncio.gather(*(visit(child) for child in children),
-                                 return_exceptions=True)
+            done = await asyncio.gather(*(visit(child) for child in children),
+                                        return_exceptions=True)
+            for result in done:
+                if isinstance(result, Exception) and _is_unrecoverable(result):
+                    raise result
         if node.get('summary'):
             return
         try:
             node['summary'] = await (parent_summary(node) if children else leaf_summary(node))
-        except Exception:
+        except Exception as e:
             node['summary'] = ""
+            if _is_unrecoverable(e):
+                raise
 
-    await asyncio.gather(*(visit(root) for root in structure),
-                         return_exceptions=True)
+    results = await asyncio.gather(*(visit(root) for root in structure),
+                                    return_exceptions=True)
+    for r in results:
+        if isinstance(r, Exception) and _is_unrecoverable(r):
+            raise r
 
+    # Raw-text leaves summarize without the model, so they cannot vouch for
+    # it: a run whose every model call failed still fails loud.
     def _any_summary(nodes):
         return any(n.get('summary') or _any_summary(n.get('nodes') or [])
                    for n in nodes)
-    if not _any_summary(structure):
+    if (asked and not answered) or not _any_summary(structure):
         raise RuntimeError(
             "Summary generation failed for all nodes "
-            "(check LLM credentials and model availability)"
+            "(every summary call failed or returned empty; "
+            "check the model and its context limits)"
         )
 
     strip_internal_keys(structure)
@@ -972,8 +1028,12 @@ def generate_doc_description(structure, model=None):
     """
     try:
         return llm_completion(model, prompt)
-    except RuntimeError:
-        return ""
+    except Exception as e:
+        # Per-prompt 400: the unbounded whole-tree prompt overran the
+        # context; the indexed document survives with no description.
+        if getattr(e, "status_code", None) == 400:
+            return ""
+        raise
 
 
 def reorder_dict(data, key_order):
@@ -1128,3 +1188,4 @@ def print_tree(tree, exclude_fields=None, indent=0):
 def print_wrapped(text, width=100):
     for line in text.splitlines():
         print(textwrap.fill(line, width=width))
+

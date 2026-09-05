@@ -2,8 +2,8 @@
 # chat_model answers questions on the chat surfaces; set model to use one
 # for both. Unset keys use the SDK defaults shown below. Legacy keys
 # (model, summary_model, retrieve_model) keep working.
-# Indexing names without a provider prefix use the OpenAI SDK directly;
-# for other providers, use "provider/model" (e.g. "anthropic/claude-sonnet-4-6").
+# Model names are LiteLLM's: bare names are OpenAI models; for other
+# providers, use "provider/model" (e.g. "anthropic/claude-sonnet-4-6").
 # index_model: "gpt-5.6-luna"
 # chat_model: "gpt-5.6-sol"
 # Atlas Cloud example (requires ATLASCLOUD_API_KEY):

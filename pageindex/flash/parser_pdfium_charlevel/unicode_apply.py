@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import bisect
 import difflib
+import re
 from collections import Counter
-import pypdfium2.raw as pdfium_c
 
 from .text_normalize import _is_whitespace
 from .font_unicode import _font_unicode_map
@@ -14,16 +14,17 @@ from .code_walk import (
     _walk_codes,
 )
 
+_SURROGATES = re.compile("[\ud800-\udfff]")
+
 
 def _apply_font_unicode(
-    text_page,
     raw_chars: list[dict],
     objects: list[dict],
     show_codes: list[tuple[int | None, tuple[int, ...], float]],
     pdf_doc,
     map_cache: dict,
 ) -> None:
-    """Patch each char's unicode to span merger glyph Unicode (`map.get(code)  or  chr(code)`, content stream tokenizer glyph mapping) where PDFium's decode disagrees. Two granularities, both gated by _walk_codes' both-streams-exhaust rule: - object mode (when PDFium's text objects pair consistent with the page's show ops, the _assign_flush_ids precondition): each object's chars are walked against its own show op's codes. This is immune to PDFium's textpage segment reordering (e.g. math-heavy page margin labels emitted at a different page position than paint order) because chars keep stream order WITHIN an object; a desync rolls back only that object. - page mode (counts differ, e.g. PDFium splitting a TJ into several objects): all non-generated textpage chars are walked against all show ops' codes in paint order; any desync rolls back the whole page. """
+    """Patch each char's unicode to span merger glyph Unicode (`map.get(code)  or  chr(code)`, surrogate-band results replaced with U+FFFD, content stream tokenizer glyph mapping) where PDFium's decode disagrees. Two granularities, both gated by _walk_codes' both-streams-exhaust rule: - object mode (when PDFium's text objects pair consistent with the page's show ops, the _assign_flush_ids precondition): each object's chars are walked against its own show op's codes. This is immune to PDFium's textpage segment reordering (e.g. math-heavy page margin labels emitted at a different page position than paint order) because chars keep stream order WITHIN an object; a desync rolls back only that object. - page mode (counts differ, e.g. PDFium splitting a TJ into several objects): all non-generated chars from the extraction census (surrogate pairs already merged) are walked against all show ops' codes in paint order; any desync rolls back the whole page. """
     if not show_codes:
         return
 
@@ -39,9 +40,12 @@ def _apply_font_unicode(
         if entry is None:
             return None
         next_block, measure_item = entry
+        # Broken font data (uniD83D glyph names, surrogate-band CIDs) yields
+        # lone-surrogate targets; patched into chars they crash utf-8 saves.
         if next_block == 1:
-            return [measure_item.get(code) or chr(code) for code in other_numbers]
-        return [measure_item.get((other_numbers[key_value] << 8) | other_numbers[key_value + 1]) or chr((other_numbers[key_value] << 8) | other_numbers[key_value + 1])
+            return [_SURROGATES.sub("\ufffd", measure_item.get(code) or chr(code))
+                    for code in other_numbers]
+        return [_SURROGATES.sub("\ufffd", measure_item.get((other_numbers[key_value] << 8) | other_numbers[key_value + 1]) or chr((other_numbers[key_value] << 8) | other_numbers[key_value + 1]))
                 for key_value in range(0, len(other_numbers) - 1, 2)]
 
     def apply(patches: list[tuple[int, str]], drops: list[int],
@@ -287,14 +291,12 @@ def _apply_font_unicode(
                 _synthesize_dropped_glyphs(kept, raw_chars, chars_by_index)
         return
 
-    # Page mode.
-    seq: list[tuple[int, str]] = []
-    char_count = pdfium_c.FPDFText_CountChars(text_page)
-    for char_index in range(char_count):
-        if pdfium_c.FPDFText_IsGenerated(text_page, char_index) == 1:
-            continue
-        codepoint = pdfium_c.FPDFText_GetUnicode(text_page, char_index)
-        seq.append((char_index, chr(codepoint) if codepoint > 0 else "\x00"))
+    # Page mode. Walk the char census char_extract built (surrogate pairs
+    # already merged there): re-reading the textpage would split astral
+    # chars back into two lone-surrogate slots, desync the walk against
+    # their one-char cmap targets, and drop the whole page's patch.
+    seq = [(raw_char["i"], raw_char["ch"])
+           for raw_char in raw_chars if not raw_char["is_gen"]]
     targets: list[str] = []
     for font_index, encoded_text, _tz in show_codes:
         if not encoded_text:

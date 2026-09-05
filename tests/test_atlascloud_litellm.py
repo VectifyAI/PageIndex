@@ -9,11 +9,19 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from pageindex.utils import (
     ATLASCLOUD_API_BASE,
+    _atlascloud_kwargs,
+    _litellm_model,
     _llm_backend,
     llm_acompletion,
     llm_completion,
-    prepare_litellm_call,
 )
+
+
+def prepare_litellm_call(model):
+    """Test shim mirroring the pre-refactor helper: upstream now splits this
+    into `_litellm_model()` (name normalization) and `_atlascloud_kwargs()`
+    (credentials), and `llm_completion` merges the two."""
+    return _litellm_model(model), _atlascloud_kwargs(model)
 
 
 def completion_response(content):
@@ -28,8 +36,10 @@ def completion_response(content):
 
 
 def test_prepare_litellm_call_keeps_regular_models():
+    # Upstream's _litellm_model() now gives bare names the openai/ wire form;
+    # what matters here is that a non-Atlas model carries no Atlas credentials.
     model, kwargs = prepare_litellm_call("gpt-4o")
-    assert model == "gpt-4o"
+    assert model == "openai/gpt-4o"
     assert kwargs == {}
 
 
@@ -83,7 +93,7 @@ def test_llm_completion_routes_atlascloud_through_litellm(monkeypatch):
         "drop_params": True,
         "messages": [{"role": "user", "content": "hello"}],
         "model": "openai/qwen/qwen3.5-flash",
-        "temperature": 0,
+        "max_retries": 0,
     }]
 
 
@@ -133,5 +143,5 @@ def test_llm_acompletion_routes_atlascloud_through_litellm(monkeypatch):
         "drop_params": True,
         "messages": [{"role": "user", "content": "hello"}],
         "model": "openai/qwen/qwen3.5-flash",
-        "temperature": 0,
+        "max_retries": 0,
     }]

@@ -14,7 +14,8 @@ from .._version import sdk_version
 from ..errors import PageIndexAPIError
 
 
-def build_claude_mcp(client, include_management: bool = False, doc_ids=None):
+def build_claude_mcp(client, include_management: bool = False, doc_ids=None,
+                     server_name: str = "pageindex"):
     from ..agent_tools import _require_local_scope
     _require_local_scope(client, doc_ids)
     if getattr(client, "api_key", None):
@@ -34,14 +35,11 @@ def build_claude_mcp(client, include_management: bool = False, doc_ids=None):
             "as_claude_mcp in local mode requires the Claude Agent SDK — "
             "pip install claude-agent-sdk (or pip install 'pageindex[claude]')."
         ) from exc
-    from ..agent_tools import (TOOL_CONTRACT, _local_description,
-                               _local_schema, call_tool, tool_names)
+    from ..agent_tools import TOOL_CONTRACT, _tool_specs
 
-    def make_handler(name: str):
+    def make_handler(invoke):
         async def handler(arguments: dict[str, Any]) -> dict[str, Any]:
-            text, is_error = await asyncio.to_thread(
-                call_tool, client, name, arguments or {}, doc_ids
-            )
+            text, is_error = await asyncio.to_thread(invoke, arguments or {})
             result: dict[str, Any] = {"content": [{"type": "text", "text": text}]}
             if is_error:
                 result["is_error"] = True
@@ -59,9 +57,10 @@ def build_claude_mcp(client, include_management: bool = False, doc_ids=None):
         return {"annotations": ToolAnnotations(**annotations)}
 
     tools = [
-        tool(name, _local_description(name),
-             _local_schema(name), **tool_kwargs(name))(make_handler(name))
-        for name in tool_names(include_management)
+        tool(name, description, schema,
+             **tool_kwargs(name))(make_handler(invoke))
+        for name, description, schema, invoke
+        in _tool_specs(client, include_management, doc_ids)
     ]
-    return create_sdk_mcp_server(name="pageindex", version=sdk_version(),
+    return create_sdk_mcp_server(name=server_name, version=sdk_version(),
                                  tools=tools)

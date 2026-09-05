@@ -5,6 +5,7 @@ import pytest
 def _llm_key(monkeypatch):
     """Deterministic key presence for every test; missing-key tests delenv."""
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 
 
 def build_pdf(page_texts):

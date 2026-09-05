@@ -44,6 +44,7 @@ class McpBridge:
     def __init__(self, url: str, headers: dict[str, str]):
         self._url = url
         self._auth_headers = dict(headers)
+        self._session = requests.Session()  # agent tool calls come in bursts
         self._session_id: Optional[str] = None
         self._protocol_version: Optional[str] = None
         self._instructions: Optional[str] = None
@@ -65,8 +66,8 @@ class McpBridge:
         if protocol_version:
             headers["MCP-Protocol-Version"] = protocol_version
         try:
-            return requests.post(self._url, json=payload, headers=headers,
-                                 timeout=_TIMEOUT)
+            return self._session.post(self._url, json=payload,
+                                      headers=headers, timeout=_TIMEOUT)
         except requests.RequestException as exc:
             raise PageIndexAPIError(
                 f"Could not reach the PageIndex MCP server: {exc}"
@@ -85,11 +86,14 @@ class McpBridge:
             except ValueError as exc:
                 raise PageIndexAPIError(
                     f"MCP server returned a non-JSON response "
-                    f"(HTTP {response.status_code})."
+                    f"(HTTP {response.status_code}).",
+                    status_code=response.status_code,
                 ) from exc
         # Strict id correlation only — accepting any result-bearing message
         # would return a stale or mis-correlated reply as this call's.
-        reply = next((m for m in messages if m.get("id") == request_id), None)
+        reply = next((m for m in messages
+                      if isinstance(m, dict) and m.get("id") == request_id),
+                     None)
         if reply is None:
             raise PageIndexAPIError(
                 "MCP server response contained no reply matching the request."
@@ -129,7 +133,8 @@ class McpBridge:
         if response.status_code >= 400:
             raise PageIndexAPIError(
                 f"MCP request failed: HTTP {response.status_code} "
-                f"({response.text[:200]})"
+                f"({response.text[:200]})",
+                status_code=response.status_code,
             )
         return self._extract_result(response, request_id)
 
@@ -152,7 +157,8 @@ class McpBridge:
                 raise PageIndexAPIError(
                     f"Could not connect to the PageIndex MCP server: HTTP "
                     f"{response.status_code} ({response.text[:200]}). Check "
-                    "your API key."
+                    "your API key.",
+                    status_code=response.status_code,
                 )
             result = self._extract_result(response, request_id) or {}
             self._session_id = response.headers.get("Mcp-Session-Id")
@@ -179,13 +185,18 @@ class McpBridge:
     def list_tools(self) -> list[dict]:
         tools: list[dict] = []
         cursor: Optional[str] = None
-        while True:
+        # A server echoing its cursor (or cycling) must not hang the client:
+        # no-progress terminates, the page cap turns a cycle into an error.
+        for _ in range(50):
             params = {"cursor": cursor} if cursor else {}
             result = self._request("tools/list", params) or {}
             tools.extend(result.get("tools") or [])
-            cursor = result.get("nextCursor")
-            if not cursor:
+            next_cursor = result.get("nextCursor")
+            if not next_cursor or next_cursor == cursor:
                 return tools
+            cursor = next_cursor
+        raise PageIndexAPIError(
+            "MCP tools/list pagination did not terminate within 50 pages.")
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> "tuple[str, bool]":
         """Returns (text, is_error) — is_error is the server's MCP isError
@@ -204,6 +215,14 @@ class McpBridge:
                 # if tool results ever pass through as real multimodal input.
                 kind = block.get("mimeType") or block.get("type") or "binary"
                 size_kb = max(1, len(block["data"]) * 3 // 4096)
+                texts.append(f"[{kind} content omitted: ~{size_kb} KB]")
+            elif (isinstance(block, dict)
+                  and isinstance(block.get("resource"), dict)
+                  and isinstance(block["resource"].get("blob"), str)):
+                # EmbeddedResource nests its base64 one level down.
+                resource = block["resource"]
+                kind = resource.get("mimeType") or "binary"
+                size_kb = max(1, len(resource["blob"]) * 3 // 4096)
                 texts.append(f"[{kind} content omitted: ~{size_kb} KB]")
             else:
                 texts.append(json.dumps(block, ensure_ascii=False))
