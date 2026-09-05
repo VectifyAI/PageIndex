@@ -13,7 +13,8 @@ echo "Staging book-library data from $BOOK_LIBRARY_SRC ..."
 rm -rf "$REPO_ROOT/deploy/_book_library_data"
 mkdir -p "$REPO_ROOT/deploy/_book_library_data"
 rsync -a --exclude='.git' "$BOOK_LIBRARY_SRC/" "$REPO_ROOT/deploy/_book_library_data/"
-trap 'rm -rf "$REPO_ROOT/deploy/_book_library_data"' EXIT
+cp "$REPO_ROOT/deploy/Dockerfile" "$REPO_ROOT/Dockerfile"
+trap 'rm -rf "$REPO_ROOT/deploy/_book_library_data" "$REPO_ROOT/Dockerfile"' EXIT
 
 echo "Building via Cloud Build ..."
 gcloud builds submit "$REPO_ROOT" \
