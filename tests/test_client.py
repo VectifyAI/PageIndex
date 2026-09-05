@@ -811,16 +811,17 @@ def test_encrypted_pdf_raises_api_error(local_client, sample_pdf, tmp_path):
         local_client.submit_document(str(enc))
 
 
-def test_permission_only_encrypted_pdf_does_not_crash_on_aes(tmp_path, sample_pdf):
+@pytest.mark.parametrize("algorithm", ["AES-128", "AES-256"])
+def test_permission_only_encrypted_pdf_does_not_crash_on_aes(tmp_path, sample_pdf, algorithm):
     """Regression test for #426: permission-only encrypted PDF with empty user password
-    must not crash with DependencyError on pypdf."""
+    and AES encryption must not crash with DependencyError when pypdf[crypto] is present."""
     from pypdf import PdfReader, PdfWriter
 
     writer = PdfWriter()
     for page in PdfReader(sample_pdf).pages:
         writer.add_page(page)
-    writer.encrypt(user_password="", owner_password="owner-secret-key")
-    enc = tmp_path / "perm_only.pdf"
+    writer.encrypt(user_password="", owner_password="owner-secret-key", algorithm=algorithm)
+    enc = tmp_path / f"perm_only_{algorithm}.pdf"
     with open(enc, "wb") as f:
         writer.write(f)
 
