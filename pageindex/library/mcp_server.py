@@ -9,7 +9,7 @@ from typing import Callable
 
 from ..local_store import DocStore
 from .config import LibraryConfig
-from .digest import render_book_digest, render_node_digest
+from .digest import render_book_digest, render_node_digest, slugify
 from .ingest import find_book
 from .pages import parse_page_spec
 
@@ -73,8 +73,32 @@ def build_tools(cfg: LibraryConfig) -> dict[str, Callable]:
             return render_book_digest(meta, tree)
         return render_node_digest(meta, tree, node_id)
 
+    def list_digests() -> list[dict]:
+        """Saved cross-book topic digests under book-library/digests/ (written by
+        the book-digest skill), excluding the per-book digest folders that mirror
+        get_digest. Check this before a broad research question in case the topic
+        has already been written up — read the file directly if so."""
+        digests_dir = cfg.digests_dir
+        if not digests_dir.is_dir():
+            return []
+        book_slugs = {slugify((m.get("metadata") or {}).get("title") or m["name"])
+                      for m in store.list_metas()}
+        rows = []
+        for folder in sorted(digests_dir.iterdir()):
+            if not folder.is_dir() or folder.name in book_slugs:
+                continue
+            for path in sorted(folder.glob("*.md")):
+                title = path.stem
+                for line in path.read_text(encoding="utf-8").splitlines():
+                    if line.startswith("# "):
+                        title = line[2:].strip()
+                        break
+                rows.append({"topic": folder.name, "title": title, "path": str(path)})
+        return rows
+
     return {"list_books": list_books, "get_structure": get_structure,
-            "get_pages": get_pages, "get_digest": get_digest}
+            "get_pages": get_pages, "get_digest": get_digest,
+            "list_digests": list_digests}
 
 
 def _as_mcp_tool(fn: Callable) -> Callable:
@@ -101,8 +125,10 @@ def _as_mcp_tool(fn: Callable) -> Callable:
 def build_server(cfg: LibraryConfig):
     from mcp.server.mcpserver import MCPServer
     server = MCPServer("books", instructions=(
-        "Personal book library. Start with list_books, then get_structure on the "
-        "relevant book, then get_pages on tight page ranges. Always cite page numbers."))
+        "Personal book library. For a broad or cross-book question, check "
+        "list_digests first in case it's already been written up. Otherwise start "
+        "with list_books, then get_structure on the relevant book, then get_pages "
+        "on tight page ranges. Always cite page numbers."))
     for name, func in build_tools(cfg).items():
         server.tool(name=name)(_as_mcp_tool(func))
     return server

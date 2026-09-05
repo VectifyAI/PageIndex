@@ -103,9 +103,25 @@ def test_add_book_reports_long_leaves(home, pdf, fake_flash, fake_llm):
     assert ("Section B", 4, 4) not in out["long_leaves"]
 
 
-def test_add_book_empty_structure_raises(home, pdf, monkeypatch):
+def test_add_book_falls_back_to_standard_mode_when_flash_finds_nothing(home, pdf, monkeypatch):
+    monkeypatch.setattr(ingest, "extract_toc",
+                        lambda path, use_embedded_toc=True: {"structure": [], "page_texts": []})
+    std_structure = [{"title": "Ch 1", "start_index": 1, "end_index": 2, "nodes": []}]
+    monkeypatch.setattr(ingest, "page_index_main",
+                        lambda path, opt: {"doc_name": "x", "structure": std_structure})
+    monkeypatch.setattr(ingest, "get_page_tokens",
+                        lambda path, model=None: [("page one", 2), ("page two", 2)])
+    out = ingest.add_book(str(pdf), LibraryConfig.load(), summaries=False, log=lambda *_: None)
+    assert out["nodes"] == 1 and out["pages"] == 2
+    store = DocStore(str(LibraryConfig.load().storage_path))
+    assert store.get_meta(out["doc_id"])["mode"] == "standard"
+
+
+def test_add_book_raises_when_neither_mode_finds_a_structure(home, pdf, monkeypatch):
     monkeypatch.setattr(ingest, "extract_toc",
                         lambda path, use_embedded_toc=True: {"structure": [], "page_texts": ["x"]})
+    monkeypatch.setattr(ingest, "page_index_main",
+                        lambda path, opt: {"doc_name": "x", "structure": []})
     with pytest.raises(ingest.IngestError, match="standard"):
         ingest.add_book(str(pdf), LibraryConfig.load(), log=lambda *_: None)
 

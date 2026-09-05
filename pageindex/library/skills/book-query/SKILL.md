@@ -7,6 +7,10 @@ description: Answer a question from the personal book library (MCP server "books
 
 Answer strictly from the library; say so when the books do not cover it.
 
+0. `list_digests` once. If an existing topic digest plausibly covers the
+   question, read it (it's a plain file) and use it as a starting point —
+   still verify any load-bearing claim against `get_pages` before citing it,
+   since a saved digest can predate newly indexed books.
 1. `list_books` once. Pick the books whose description matches the question
    (all of them if the question is cross-book). Do not guess a book that is
    not listed.

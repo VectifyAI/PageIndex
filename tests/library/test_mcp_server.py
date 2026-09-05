@@ -58,11 +58,30 @@ def test_unknown_book_message(tools):
         tools["get_structure"]("nope")
 
 
+def test_list_digests_excludes_book_folders_and_reads_the_first_heading(tools, home):
+    digests = home / "digests"
+    book_folder = digests / "complete-works-i"
+    book_folder.mkdir(parents=True)
+    (book_folder / "book.md").write_text("# Complete Works I\n\nbook digest", encoding="utf-8")
+    topic_folder = digests / "the-goal-and-the-perfect-state"
+    topic_folder.mkdir(parents=True)
+    (topic_folder / "synthesis.md").write_text(
+        "# The Goal, in Babuji's own words\n\nbody", encoding="utf-8")
+    rows = tools["list_digests"]()
+    assert rows == [{"topic": "the-goal-and-the-perfect-state",
+                     "title": "The Goal, in Babuji's own words",
+                     "path": str(topic_folder / "synthesis.md")}]
+
+
+def test_list_digests_empty_when_no_digests_dir(tools):
+    assert tools["list_digests"]() == []
+
+
 def test_build_server_registers_tools():
     server = mcp_server.build_server(LibraryConfig.load())
     import asyncio
     names = {t.name for t in asyncio.run(server.list_tools())}
-    assert names == {"list_books", "get_structure", "get_pages", "get_digest"}
+    assert names == {"list_books", "get_structure", "get_pages", "get_digest", "list_digests"}
 
 
 def test_mcp_tool_error_carries_the_original_message_through_the_real_transport(home, store):

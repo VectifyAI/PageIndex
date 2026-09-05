@@ -15,10 +15,13 @@ Three shapes; ask which only if it is not obvious from the request.
    essay / flashcards), keeping page references.
 
 **Topic digest across books**:
-1. Follow the `book-query` procedure to gather all relevant nodes (read
+1. `list_digests` first. If one already covers this topic, tell the user and
+   ask whether to reuse/extend it or write a new one — do not silently
+   overwrite.
+2. Follow the `book-query` procedure to gather all relevant nodes (read
    `get_digest(book, node)` first, `get_pages` only where the digest lacks
    detail).
-2. Write a synthesis: one section per theme, each bullet cited
+3. Write a synthesis: one section per theme, each bullet cited
    `(Book, p. N)`; a closing "Where the books differ" section when they do.
 
 **Output**: write the file with the Write tool to
