@@ -1,0 +1,11 @@
+{
+  "name": "book-library-plugins",
+  "owner": { "name": "Utkarsh Agrawal" },
+  "plugins": [
+    {
+      "name": "books-plugin",
+      "source": "./plugins/books-plugin",
+      "description": "Query and digest a personal PageIndex book library"
+    }
+  ]
+}

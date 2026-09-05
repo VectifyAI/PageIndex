@@ -1,0 +1,6 @@
+{
+  "name": "books-plugin",
+  "version": "1.0.0",
+  "description": "Query and digest a personal PageIndex book library",
+  "mcpServers": "./.mcp.json"
+}
