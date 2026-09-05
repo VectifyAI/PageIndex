@@ -3,9 +3,24 @@ from unittest.mock import Mock, patch
 
 from pageindex.page_index_classic import (
     _secure_doc_text,
+    page_list_to_group_text,
     process_no_toc,
     process_toc_no_page_numbers,
 )
+
+
+class PageListToGroupTextTest(unittest.TestCase):
+    def test_oversized_first_page_does_not_create_empty_group(self):
+        groups = page_list_to_group_text(
+            ["PAGE-A", "PAGE-B", "PAGE-C"],
+            [60_000, 500, 500],
+            max_tokens=20_000,
+        )
+
+        self.assertEqual(
+            groups,
+            ["PAGE-A", "PAGE-APAGE-B", "PAGE-BPAGE-C"],
+        )
 
 
 class ProcessTocNoPageNumbersTest(unittest.TestCase):
