@@ -12,6 +12,8 @@ import asyncio
 from io import BytesIO
 from dotenv import find_dotenv, load_dotenv
 load_dotenv(find_dotenv(usecwd=True))
+# litellm's import fetches its model map over the network unless told not to.
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 import logging
 import yaml
 from pathlib import Path
@@ -57,6 +59,19 @@ def _mute_litellm_bridge_usage_warning() -> None:
         "ignore",
         message=r"Pydantic serializer warnings:\s+"
                 r"(PydanticSerializationUnexpectedValue\()?Expected `ResponseAPIUsage`")
+
+
+def _quiet_litellm() -> None:
+    """Mute litellm's stdout "Provider List:" banner and default its loggers
+    to LITELLM_LOG (ERROR unset); a level set elsewhere stays."""
+    import litellm
+    litellm.suppress_debug_info = True
+    level = getattr(logging, os.environ.get("LITELLM_LOG", "ERROR").upper(),
+                    logging.ERROR)
+    for name in ("LiteLLM", "LiteLLM Router", "LiteLLM Proxy", "litellm"):
+        logger = logging.getLogger(name)
+        if logger.level == logging.NOTSET:
+            logger.setLevel(level)
 
 # Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
 if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
@@ -150,6 +165,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
     backend = _llm_backend.get()
     model = _litellm_model(model)
     _repair_litellm_types()
+    _quiet_litellm()
     for i in range(max_retries):
         try:
             response = litellm.completion(**{
@@ -168,9 +184,9 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
         except Exception as e:
             if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
                 raise
-            print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
+                logging.warning("Retrying LLM completion")
                 time.sleep(1)
             else:
                 raise LLMRetriesExhausted(
@@ -186,6 +202,7 @@ async def llm_acompletion(model, prompt):
     backend = _llm_backend.get()
     model = _litellm_model(model)
     _repair_litellm_types()
+    _quiet_litellm()
     for i in range(max_retries):
         try:
             response = await litellm.acompletion(**{
@@ -199,9 +216,9 @@ async def llm_acompletion(model, prompt):
         except Exception as e:
             if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
                 raise
-            print('************* Retrying *************')
             logging.error(f"Error: {e}")
             if i < max_retries - 1:
+                logging.warning("Retrying LLM completion")
                 await asyncio.sleep(1)
             else:
                 raise LLMRetriesExhausted(

@@ -1503,6 +1503,30 @@ def test_cloud_chat_stream_parsing(cloud, monkeypatch):
     assert {"object": "chat.completion.citations", "citations": []} in chunks
 
 
+def test_cloud_chat_stream_error_chunk_raises(cloud, monkeypatch):
+    """A server-side failure mid-stream arrives as a final {"error": ...}
+    chunk after the partial answer: every streaming surface raises on it
+    instead of ending as a short, seemingly complete answer."""
+    client, calls, fake = cloud
+    lines = [
+        b'data: {"choices": [{"delta": {"content": "Partial"}}]}',
+        b'data: {"error": {"message": "boom", "type": "internal_error"}}',
+    ]
+    _patch_requests(monkeypatch, lambda m, url, kw: FakeResponse(lines=lines))
+    for stream in (
+        lambda: client.chat_completions("q", stream=True),
+        lambda: client.chat_completions("q", stream=True,
+                                        stream_metadata=True),
+        lambda: client.chat("q", stream=True),
+    ):
+        it = stream()
+        first = next(it)  # the partial answer is still delivered
+        assert first in ("Partial",
+                         {"choices": [{"delta": {"content": "Partial"}}]})
+        with pytest.raises(PageIndexAPIError, match="boom"):
+            list(it)
+
+
 def test_cloud_chat_accepts_query_string(cloud):
     client, calls, fake = cloud
     fake.payload = {"choices": [{"message": {"content": "ok"}}]}
@@ -1958,6 +1982,16 @@ def test_local_client_blank_chat_model_refuses_at_chat_door(local_client):
         local_client.chat_model = blank
         with pytest.raises(PageIndexAPIError, match="chat_model is empty"):
             local_client.chat_completions("hi")
+        # the protocol and instructions knobs must not point a local
+        # client at the managed chat it does not have
+        with pytest.raises(PageIndexAPIError, match="chat_model is empty"):
+            local_client.chat("hi", protocol="responses")
+        with pytest.raises(PageIndexAPIError, match="chat_model is empty"):
+            local_client.chat("hi", instructions="brief")
+        with pytest.raises(PageIndexAPIError, match="chat_model is empty"):
+            local_client._responses("hi")
+        with pytest.raises(PageIndexAPIError, match="chat_model is empty"):
+            local_client._messages("hi", model="claude-x")
 
 
 def test_blank_chat_model_carries_no_model_into_agent_config():
@@ -1967,3 +2001,41 @@ def test_blank_chat_model_carries_no_model_into_agent_config():
     client = PageIndexClient()
     client.chat_model = "   "
     assert "model" not in client.openai_agent_config()
+
+
+def test_retry_notice_logs_instead_of_stdout(monkeypatch, capsys, caplog):
+    """A retried completion must not write into the caller's stdout — that
+    channel belongs to answers and CLI output; the notice rides logging
+    beside the error it accompanies."""
+    litellm = pytest.importorskip("litellm")
+    from pageindex import utils
+    attempts = []
+
+    def flaky(**kwargs):
+        if not attempts:
+            attempts.append(1)
+            raise RuntimeError("boom")
+        message = types.SimpleNamespace(content="ok")
+        choice = types.SimpleNamespace(message=message, finish_reason="stop")
+        return types.SimpleNamespace(choices=[choice])
+
+    monkeypatch.setattr(litellm, "completion", flaky)
+    monkeypatch.setattr(utils.time, "sleep", lambda s: None)
+    assert utils.llm_completion("openai/gpt-x", "hi") == "ok"
+    assert capsys.readouterr().out == ""
+    assert any("Retrying" in r.getMessage() for r in caplog.records)
+
+
+def test_retry_notice_only_when_a_retry_follows(monkeypatch, caplog):
+    """The notice announces a retry; the terminal attempt raises instead."""
+    litellm = pytest.importorskip("litellm")
+    from pageindex import utils
+
+    def broken(**kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(litellm, "completion", broken)
+    monkeypatch.setattr(utils.time, "sleep", lambda s: None)
+    with pytest.raises(utils.LLMRetriesExhausted):
+        utils.llm_completion("openai/gpt-x", "hi")
+    assert sum("Retrying" in r.getMessage() for r in caplog.records) == 9

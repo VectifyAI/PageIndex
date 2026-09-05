@@ -17,7 +17,7 @@
 
 <h4 align="center">
   <a href="https://pageindex.ai/developer">🌐 Website</a>&nbsp; • &nbsp;
-  <a href="https://developer.pageindex.ai/">🖥️ Platform</a>&nbsp; • &nbsp;
+  <a href="https://developer.pageindex.ai/">☁️ Cloud</a>&nbsp; • &nbsp;
   <a href="https://docs.pageindex.ai">📖 Docs</a>&nbsp; • &nbsp;
   <a href="https://pageindex.ai/blog">📝 Blog</a>&nbsp; • &nbsp;
   <a href="https://ii2abc2jejf.typeform.com/to/tK3AXl8T">✉️ Contact</a>&nbsp;
@@ -31,7 +31,7 @@
 <summary><h2>Updates</h2></summary>
 
 - [Aug '26] 🔥 [**PageIndex SDK**](#quickstart): `pip install -U pageindex` now ships **local mode**: index, retrieve, and chat entirely on your machine with your own LLM key, or point the same client at PageIndex Cloud with an API key.
-- [Aug '26] ⚡ [**PageIndex Flash**](https://docs.pageindex.ai/sdk/documents): tree structure generation from PDFs in seconds, with structure extracted heuristically from the document's own layout info instead of built by an LLM.
+- [Aug '26] ⚡ [**PageIndex Flash**](https://pageindex.ai/blog/pageindex-flash): fast tree index generation for text-based PDFs, now the default indexing method in PageIndex SDK local mode.
 - [Scale PageIndex to Millions of Documents](https://pageindex.ai/blog/pageindex-filesystem): *PageIndex File System* is a file-level tree indexing layer that lets PageIndex reason over an entire corpus, not just a single document.
 - [PageIndex App](https://app.pageindex.ai): a human-like document analysis agent for long professional documents.<!-- Also available via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer). -->
 
@@ -102,7 +102,7 @@ print(answer)
 - **`index=`: a basic model is sufficient.** The tree structure itself is extracted from the document layout without an LLM; the index model only summarizes and refines it, which a basic model does well.
 - **`chat=`: use the best model you can afford.** The chat model searches the tree to retrieve information. See [Query cost and accuracy](#query-cost-and-accuracy).
 
-### [Use PageIndex through the SDK client →](https://docs.pageindex.ai/sdk/chat)
+### [Use PageIndex through the SDK client →](https://docs.pageindex.ai/getting-started)
 
 Configure other models, streaming, multi-document search, citations, and more.
 
@@ -119,8 +119,8 @@ Building a tree locally runs **about $0.001 per page** with `gpt-5.6-luna` as th
 
 <div align="center">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/index-cost-dark.png">
-  <img src="assets/index-cost-light.png" width="75%" alt="Indexing cost against document length, log-log, for nine PDFs from 9 to 1,098 pages. Points track a $0.0011-per-page reference line; the spread around it is text density, not length.">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/VectifyAI/PageIndex/main/assets/index-cost-dark.png">
+  <img src="https://raw.githubusercontent.com/VectifyAI/PageIndex/main/assets/index-cost-light.png" width="75%" alt="Indexing cost against document length, log-log, for nine PDFs from 9 to 1,098 pages. Points track a $0.0011-per-page reference line; the spread around it is text density, not length.">
 </picture>
 </div>
 
@@ -128,8 +128,8 @@ Indexing time also scales predictably with document length. In the same local se
 
 <div align="center">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/index-time-dark.png">
-  <img src="assets/index-time-light.png" width="75%" alt="Indexing time against document length, log-log, for nine PDFs from 9 to 1,098 pages. The measured indexing times range from about 13 seconds to 4.5 minutes and increase predictably with document length.">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/VectifyAI/PageIndex/main/assets/index-time-dark.png">
+  <img src="https://raw.githubusercontent.com/VectifyAI/PageIndex/main/assets/index-time-light.png" width="75%" alt="Indexing time against document length, log-log, for nine PDFs from 9 to 1,098 pages. The measured indexing times range from about 13 seconds to 4.5 minutes and increase predictably with document length.">
 </picture>
 </div>
 
@@ -141,8 +141,8 @@ Indexing time also scales predictably with document length. In the same local se
 
 <div align="center">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/results-dark.png">
-  <img src="assets/results-light.png" width="75%" alt="Accuracy against average cost per question. Each model forms a near-vertical reasoning-effort ladder; moving between models costs an order of magnitude a step.">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/VectifyAI/PageIndex/main/assets/results-dark.png">
+  <img src="https://raw.githubusercontent.com/VectifyAI/PageIndex/main/assets/results-light.png" width="75%" alt="Accuracy against average cost per question. Each model forms a near-vertical reasoning-effort ladder; moving between models costs an order of magnitude a step.">
 </picture>
 </div>
 
@@ -155,8 +155,8 @@ The alternative to retrieval is handing the model the whole PDF on every questio
 
 <div align="center">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/query-cost-dark.png">
-  <img src="assets/query-cost-light.png" width="75%" alt="Cost per query relative to PageIndex retrieval, for five PDFs from 52 to 805 pages. Passing the PDF natively costs 2.1x, 3.4x, 7.8x, and 16.6x more at 52, 85, 198, and 420 pages; at 805 pages it exceeds the model's context window.">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/VectifyAI/PageIndex/main/assets/query-cost-dark.png">
+  <img src="https://raw.githubusercontent.com/VectifyAI/PageIndex/main/assets/query-cost-light.png" width="75%" alt="Cost per query relative to PageIndex retrieval, for five PDFs from 52 to 805 pages. Passing the PDF natively costs 2.1x, 3.4x, 7.8x, and 16.6x more at 52, 85, 198, and 420 pages; at 805 pages it exceeds the model's context window.">
 </picture>
 </div>
 
@@ -167,8 +167,8 @@ PageIndex reached a state-of-the-art [**98.7% accuracy**](https://vectify.ai/blo
 <div align="center">
 <a href="https://github.com/VectifyAI/Mafin2.5-FinanceBench">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/financebench-dark.png">
-  <img src="assets/financebench-light.png" width="70%" alt="FinanceBench accuracy: PageIndex 98.7%, vector RAG 50%.">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/VectifyAI/PageIndex/main/assets/financebench-dark.png">
+  <img src="https://raw.githubusercontent.com/VectifyAI/PageIndex/main/assets/financebench-light.png" width="70%" alt="FinanceBench accuracy: PageIndex 98.7%, vector RAG 50%.">
 </picture>
 </a>
 </div>
@@ -193,8 +193,6 @@ client = PageIndexClient(
     index="cloud",                       # build and store the index in PageIndex Cloud
     chat="gpt-5.6-sol",                  # use your preferred compatible model for chat
 )
-
-
 doc_id = client.submit_document("report.pdf", wait=True)["doc_id"]
 print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 ```

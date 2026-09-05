@@ -1,16 +1,20 @@
-"""Own-model chat: document-QA agents over the local or cloud agent tools."""
+"""Own-model chat: document-QA agents over the local or cloud agent
+tools, and the runs behind both ChatStream views, which also weave the
+managed endpoint's chunk stream."""
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import json
 import queue
 import threading
 import time
 import uuid
-from typing import Any, Iterator, Optional, Union
+from typing import Any, Iterator, Mapping, Optional, Union
 
 from .agent_tools import _base_instructions, doc_targeting_block
+from .chat_stream import ChatStream
 from .errors import PageIndexAPIError
 
 CHAT_HEADER = (
@@ -58,7 +62,8 @@ def _system_text(content: Any) -> str:
 def _split_chat_messages(messages) -> "tuple[list[str], list[dict]]":
     """Validate the chat_completions surface's messages: system/developer
     content joins the managed instructions; user/assistant history passes
-    through. Tool-history round-trips belong to responses()/messages()."""
+    through. Tool-history round-trips belong to the protocol lanes,
+    chat(protocol=...)."""
     if not isinstance(messages, list) or not messages:
         raise PageIndexAPIError("messages must be a non-empty list.")
     system_texts: list[str] = []
@@ -74,14 +79,14 @@ def _split_chat_messages(messages) -> "tuple[list[str], list[dict]]":
             content = message.get("content")
             if not isinstance(content, str):
                 raise PageIndexAPIError(
-                    "chat_completions content must be a string; for "
-                    "structured items use responses() or messages()."
+                    "content must be a string on this lane; for "
+                    "structured items use chat(protocol=...)."
                 )
             history.append({"role": role, "content": content})
         else:
             raise PageIndexAPIError(
-                f"Unsupported role for chat_completions: {role!r}. Tool "
-                "history round-trips belong to responses() or messages()."
+                f"Unsupported role {role!r} on this lane. Tool "
+                "history round-trips belong to chat(protocol=...)."
             )
     if not history:
         raise PageIndexAPIError("messages must contain a user or assistant "
@@ -173,7 +178,8 @@ def _require_openai_agents(method: str) -> None:
             f"{method} with your own chat model requires the OpenAI "
             "Agents SDK — "
             "pip install openai-agents. "
-            "messages() runs on the anthropic extra instead."
+            "chat(protocol='messages') runs on the anthropic extra "
+            "instead."
         ) from exc
 
 
@@ -190,10 +196,11 @@ def _openai_model(protocol: str, model_name: str, backend=None):
         model_name = model_name.removeprefix("litellm/")
         if "/" in model_name and not model_name.startswith("openai/"):
             raise PageIndexAPIError(
-                f"responses() cannot drive '{model_name}': provider-prefixed "
-                "models route through LiteLLM, which speaks chat.completions, "
-                "not the Responses API. Use chat_completions() (or messages() "
-                "for Anthropic models), or point OPENAI_BASE_URL at a "
+                f"protocol='responses' cannot drive '{model_name}': "
+                "provider-prefixed models route through LiteLLM, which speaks "
+                "chat.completions, not the Responses API. Use chat() without "
+                "protocol, or chat_completions() (or protocol='messages' for "
+                "Anthropic models), or point OPENAI_BASE_URL at a "
                 "Responses-capable backend and use a bare or "
                 "'openai/'-prefixed model name."
             )
@@ -217,9 +224,10 @@ def _openai_model(protocol: str, model_name: str, backend=None):
             "installed. Run:  pip install 'litellm>=1.97'"
         )
     from .utils import (_litellm_model, _mute_litellm_bridge_usage_warning,
-                        _repair_litellm_types)
+                        _quiet_litellm, _repair_litellm_types)
     _repair_litellm_types()
     _mute_litellm_bridge_usage_warning()
+    _quiet_litellm()
     try:
         wire = _litellm_model(model_name)
     except litellm.NotFoundError as exc:
@@ -245,6 +253,8 @@ def _litellm_claude_marks(wire: str) -> Optional[dict]:
     hands bare names to LiteLLM's own resolution)."""
     try:
         from litellm import get_llm_provider
+        from .utils import _quiet_litellm
+        _quiet_litellm()
         model, provider, _, _ = get_llm_provider(model=wire)
     except Exception:
         return None
@@ -280,6 +290,8 @@ def _openai_protocol(model_name: str) -> bool:
         return True
     try:
         import litellm
+        from .utils import _quiet_litellm
+        _quiet_litellm()
         _, provider, _, _ = litellm.get_llm_provider(model=wire)
     except Exception:
         return False
@@ -296,10 +308,26 @@ def _merged_backend(client, backend):
     return merged or None
 
 
+_SKELETON_KEYS = frozenset({"system", "instructions", "input", "messages",
+                            "tools"})
+
+
+def _refuse_skeleton(extra_body) -> None:
+    """The managed prompt, conversation and tools are the SDK's on every
+    lane; extra_body merges last, so a caller's copy would replace them."""
+    hit = sorted(_SKELETON_KEYS.intersection(extra_body or ()))
+    if hit:
+        raise PageIndexAPIError(
+            f"extra_body cannot carry {', '.join(hit)}: the managed prompt, "
+            "conversation and tools are the SDK's. Extend the prompt with "
+            "instructions=; the conversation is the first argument.")
+
+
 def _openai_agent(client, protocol: str, model_name: str, instructions: str,
                   temperature, top_p, doc_ids=None, cache_key=None,
                   reasoning=None, reasoning_effort=None, extra_body=None,
                   max_tokens=None, backend=None, extra_headers=None):
+    _refuse_skeleton(extra_body)
     from agents import Agent, ModelSettings
     from .integrations.openai_agents import build_openai_tools
     # ModelSettings.extra_body is the one channel all three engines put on
@@ -312,7 +340,7 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
     # top-level kwarg on every supported openai-agents version, and the
     # channel admits values outside the OpenAI enum ("none").
     extra_args = _cache_extra_args(model_name)
-    if reasoning_effort is not None:
+    if reasoning_effort:
         extra_args = {**(extra_args or {}),
                       "reasoning_effort": reasoning_effort}
     conn = _sdk_backend(backend) if backend else {}
@@ -329,22 +357,30 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
             if cache_key and openai_backend else None)
     # Caller extras merge last, so they win over ours; non-OpenAI
     # destinations take them as LiteLLM kwargs instead (see note above).
+    routed: dict[str, Any] = {}
     if extra_body:
         if openai_backend:
             body = {**(body or {}), **extra_body}
         else:
-            extra_args = {**(extra_args or {}), **extra_body}
+            # openai-agents passes ModelSettings' own fields to litellm by
+            # name beside **extra_args, so those ride their field.
+            own = {field.name for field in dataclasses.fields(ModelSettings)}
+            routed = {k: v for k, v in extra_body.items() if k in own}
+            rest = {k: v for k, v in extra_body.items() if k not in own}
+            if rest:
+                extra_args = {**(extra_args or {}), **rest}
     from pydantic import ValidationError
     try:
-        settings = ModelSettings(
-            temperature=temperature, top_p=top_p, max_tokens=max_tokens,
-            reasoning=reasoning,
+        settings = ModelSettings(**{
+            "temperature": temperature, "top_p": top_p,
+            "max_tokens": max_tokens, "reasoning": reasoning,
             # Streamed runs otherwise carry no usage at all (agents forwards
             # this as stream_options only on streaming calls).
-            include_usage=True,
-            extra_body=body,
-            extra_headers=extra_headers,
-            extra_args=extra_args)
+            "include_usage": True,
+            "extra_body": body,
+            "extra_headers": extra_headers,
+            "extra_args": extra_args,
+            **routed})
     except ValidationError as exc:
         raise PageIndexAPIError(f"Invalid model settings: {exc}") from exc
     return Agent(
@@ -387,7 +423,7 @@ def _model_backend_error(exc, lane: str, client=None) -> PageIndexAPIError:
     function tools while reasoning is on) gets its documented exits
     appended, since the fix is a different route, not a retry. The exits
     are per-lane: of the chat lane's three, two are dead ends for a
-    responses() caller — it IS the other lane, and its reasoning knob is
+    Responses-lane caller — it IS the other lane, and its reasoning knob is
     ``reasoning``, not ``reasoning_effort``. On a cloud client an
     auth-shaped failure gets the own-model architecture spelled out —
     the misreading it corrects ("the cloud runs my model") surfaces
@@ -400,7 +436,8 @@ def _model_backend_error(exc, lane: str, client=None) -> PageIndexAPIError:
         )
         message += (
             ", pass reasoning_effort (older litellm routes explicit "
-            "efforts), or call responses() instead." if lane == "chat"
+            "efforts), or use chat(protocol='responses') instead."
+            if lane == "chat"
             else "."
         )
     if (getattr(client, "api_key", None)
@@ -581,6 +618,287 @@ def _responses_usage(raw_responses) -> dict:
             "total_tokens": prompt + completion}
 
 
+def _chat_agent(client, messages, doc_id, model, temperature=None,
+                top_p=None, reasoning_effort=None, extra_body=None,
+                max_tokens=None, backend=None, extra_headers=None,
+                ) -> "tuple[Any, list, str]":
+    """The chat lane's shared prologue: validated history, doc targeting,
+    and the configured agent. Returns (agent, input items, model name)."""
+    system_texts, history = _split_chat_messages(messages)
+    scope = client._local_doc_scope(doc_id)
+    block = _doc_block(client, doc_id, scoped=scope is not None)
+    items = ([{"role": "user", "content": block}] if block else []) + history
+    model_name = model or client.chat_model
+    managed = _managed_instructions(client, system_texts)
+    agent = _openai_agent(client, "chat", model_name, managed,
+                          temperature, top_p, doc_ids=scope,
+                          cache_key=_conversation_cache_key(
+                              model_name, managed, doc_id, history),
+                          reasoning_effort=reasoning_effort,
+                          extra_body=extra_body, max_tokens=max_tokens,
+                          backend=_merged_backend(client, backend),
+                          extra_headers=extra_headers)
+    return agent, items, model_name
+
+
+def _clip(text, cap: int = 200) -> str:
+    """One display line: whitespace flattened, capped for the terminal."""
+    flat = " ".join(str(text).split())
+    if len(flat) <= cap:
+        return flat
+    return f"{flat[:cap]}... (+{len(flat) - cap} chars)"
+
+
+_PROCESS_DEFAULTS = {"thinking": True, "tool_call": True,
+                     "tool_result": True, "max_chars": 200}
+
+
+def _process_options(show_process) -> dict:
+    """chat(show_process=...) normalized: True (or {}) is all defaults, a
+    mapping overrides per key, anything else chokes loudly."""
+    if show_process is True:
+        return dict(_PROCESS_DEFAULTS)
+    if not isinstance(show_process, Mapping):
+        raise PageIndexAPIError(
+            "show_process must be True, False, or a dict with the keys "
+            "thinking / tool_call / tool_result (bools) and max_chars "
+            "(int).")
+    unknown = set(show_process) - set(_PROCESS_DEFAULTS)
+    if unknown:
+        raise PageIndexAPIError(
+            "Unknown show_process keys: "
+            f"{', '.join(sorted(map(repr, unknown)))} "
+            "— valid keys: thinking, tool_call, tool_result, max_chars.")
+    options = {**_PROCESS_DEFAULTS, **show_process}
+    for key in ("thinking", "tool_call", "tool_result"):
+        if not isinstance(options[key], bool):
+            raise PageIndexAPIError(f"show_process[{key!r}] must be a bool.")
+    cap = options["max_chars"]
+    if not isinstance(cap, int) or isinstance(cap, bool) or cap < 1:
+        raise PageIndexAPIError(
+            "show_process['max_chars'] must be a positive int.")
+    return options
+
+
+async def _chat_events_agen(client, agent, items, run_kwargs):
+    """The chat stream's primitive: the run as typed event dicts —
+    thinking/answer deltas, each tool call (arguments parsed when JSON)
+    and its full result. Both ChatStream views are built on it."""
+    import openai
+    from agents import Runner
+    from agents.exceptions import AgentsException, MaxTurnsExceeded
+    from openai.types.responses import (
+        ResponseReasoningSummaryTextDeltaEvent,
+        ResponseReasoningTextDeltaEvent, ResponseTextDeltaEvent)
+    streamed = Runner.run_streamed(agent, input=items, **run_kwargs)
+    completed = False
+    names = {}  # call_id -> tool name, to label results
+    try:
+        async for event in streamed.stream_events():
+            if event.type == "raw_response_event":
+                data = event.data
+                if isinstance(data, ResponseTextDeltaEvent):
+                    if data.delta:
+                        yield {"type": "answer", "delta": data.delta}
+                elif isinstance(data, (
+                        ResponseReasoningTextDeltaEvent,
+                        ResponseReasoningSummaryTextDeltaEvent)):
+                    if data.delta:
+                        yield {"type": "thinking", "delta": data.delta}
+            elif event.type == "run_item_stream_event":
+                raw = getattr(event.item, "raw_item", None)
+                if event.name == "tool_called":
+                    name = getattr(raw, "name", None) or "tool"
+                    call_id = getattr(raw, "call_id", None)
+                    if call_id:
+                        names[call_id] = name
+                    arguments = getattr(raw, "arguments", "") or ""
+                    try:
+                        arguments = json.loads(arguments)
+                    except (ValueError, TypeError):
+                        pass
+                    yield {"type": "tool_call", "call_id": call_id,
+                           "name": name, "arguments": arguments}
+                elif event.name == "tool_output":
+                    call_id = (raw.get("call_id") if isinstance(raw, dict)
+                               else getattr(raw, "call_id", None))
+                    yield {"type": "tool_result", "call_id": call_id,
+                           "name": names.get(call_id, "tool"),
+                           "output": event.item.output}
+        completed = True
+    except (MaxTurnsExceeded, AgentsException, openai.OpenAIError) as exc:
+        raise _translate_run_error(exc, run_kwargs.get("max_turns"),
+                                   "chat", client) from exc
+    finally:
+        if not completed and hasattr(streamed, "cancel"):
+            streamed.cancel()  # abandoned/failed: stop the agent task
+        await _aclose_backend(agent)
+
+
+def _weave(events, options) -> Iterator[str]:
+    """Render the typed event stream as display text: a "[thinking] "
+    section per thinking burst, a "[tool_call] name args" line per call
+    with its "[tool_result]" line, the answer unlabeled — labels are the
+    event type names. options=None is the plain answer-only view;
+    closing this generator closes the source."""
+    try:
+        if options is None:
+            for ev in events:
+                if ev["type"] == "answer":
+                    yield ev["delta"]
+            return
+        section = None   # the open flowing section: thinking/answer/tool
+        opened = False   # anything yielded yet (first section takes no gap)
+        cap = options["max_chars"]
+        last_call = None  # the [tool_call] line still open for nesting
+        call_args = {}    # call_id -> clipped arguments, to label orphans
+
+        def enter(kind, label: str = "") -> str:
+            nonlocal section, opened
+            gap = "\n\n" if opened else ""
+            opened = True
+            section = kind
+            return gap + label
+
+        for ev in events:
+            kind = ev["type"]
+            if kind == "answer":
+                head = enter("answer") if section != "answer" else ""
+                yield head + ev["delta"]
+            elif kind == "thinking":
+                if not options["thinking"]:
+                    continue
+                head = (enter("thinking", "[thinking] ")
+                        if section != "thinking" else "")
+                yield head + ev["delta"]
+            elif kind == "tool_call":
+                arguments = ev["arguments"]
+                if not isinstance(arguments, str):
+                    arguments = json.dumps(arguments, ensure_ascii=False)
+                clipped = _clip(arguments, cap)
+                call_args[ev["call_id"]] = clipped  # even with call lines hidden
+                if not options["tool_call"]:
+                    continue
+                last_call = ev["call_id"]
+                line = f"[tool_call] {ev['name']} {clipped}"
+                yield enter("tool") + line.rstrip()
+            elif kind == "tool_result":
+                if not options["tool_result"]:
+                    continue
+                out = _clip(ev["output"], cap)
+                if section == "tool" and ev["call_id"] == last_call:
+                    # directly under its own call line
+                    yield f"\n[tool_result] {ev['name']}: {out}"
+                else:
+                    # parallel calls, or call lines hidden: standalone,
+                    # arguments echoed to say whose result this is
+                    args = call_args.get(ev["call_id"], "")
+                    head = f"[tool_result] {ev['name']} {args}".rstrip()
+                    gap = ("\n" if section == "tool" and last_call is None
+                           else enter("tool"))
+                    yield f"{gap}{head}: {out}"
+                last_call = None
+    finally:
+        close = getattr(events, "close", None)
+        if close is not None:
+            close()  # cancel the underlying run on abandonment
+
+
+def _cloud_chunk_events(chunks) -> Iterator[dict]:
+    """Typed events from the managed endpoint's chunk stream: answer
+    deltas, and each tool call (name + accumulated arguments) from the
+    block_metadata tags — the endpoint interleaves tool-argument JSON
+    into delta.content, distinguished only by those tags. It streams no
+    thinking and no tool results. Outside a tool block, chunks without
+    block_metadata (an older server) are answer text."""
+    tool = None  # [name, argument pieces] while inside a tool_use block
+    try:
+        for chunk in chunks:
+            if not isinstance(chunk, dict):
+                continue
+            meta = chunk.get("block_metadata") or {}
+            kind = meta.get("type")
+            if kind == "mcp_tool_use_start":
+                tool = [meta.get("tool_name") or "tool", []]
+                continue
+            choices = chunk.get("choices") or []
+            delta = (choices[0].get("delta") or {}) if choices else {}
+            content = delta.get("content")
+            if kind == "tool_use_stop":
+                if tool is not None:
+                    name, pieces = tool
+                    arguments = "".join(map(str, pieces))
+                    try:
+                        arguments = json.loads(arguments)
+                    except ValueError:
+                        pass
+                    yield {"type": "tool_call", "call_id": None,
+                           "name": name, "arguments": arguments}
+                    tool = None
+                continue
+            if kind == "tool_use" or tool is not None:
+                # inside an open block nothing is answer text: argument
+                # chunks accumulate under any tag rather than leaking
+                if tool is not None and content:
+                    tool[1].append(content)
+                continue
+            if content:
+                yield {"type": "answer", "delta": content}
+    finally:
+        close = getattr(chunks, "close", None)
+        if close is not None:
+            close()
+
+
+def run_cloud_chat_stream(chunks,
+                          show_process: Union[bool, Mapping[str, Any]] = True,
+                          ) -> ChatStream:
+    """chat(stream=True) on a managed client: the text view weaves what
+    the endpoint serves — tool-call lines from its block_metadata tags
+    (that wire carries no thinking and no tool results); .events needs
+    the in-process agent."""
+    options = (None if show_process is False
+               else _process_options(show_process))
+    return ChatStream(
+        text=lambda: _weave(_cloud_chunk_events(chunks), options),
+        events=("chat events are produced by the in-process agent, "
+                "which the managed chat endpoint does not serve — "
+                "construct the client with chat_model=... (or a chat= "
+                "model) to run the agent in your process."))
+
+
+def run_chat_stream(client, messages, doc_id=None, model=None,
+                    reasoning_effort=None,
+                    show_process: Union[bool, Mapping[str, Any]] = False,
+                    max_turns=None, backend=None, extra_headers=None,
+                    extra_body=None,
+                    ) -> ChatStream:
+    """chat(stream=True): validation and the agent build run here, eagerly;
+    the run itself starts when the returned stream's chosen view is first
+    consumed."""
+    options = (None if show_process is False or show_process is None
+               else _process_options(show_process))
+    _require_openai_agents("chat")
+    _validate_max_turns(max_turns)
+    if isinstance(messages, str):
+        if not messages.strip():
+            raise PageIndexAPIError(
+                "messages must be a non-empty string or a list of "
+                "message dicts.")
+        messages = [{"role": "user", "content": messages}]
+    agent, items, _ = _chat_agent(client, messages, doc_id, model,
+                                  reasoning_effort=reasoning_effort,
+                                  extra_body=extra_body, backend=backend,
+                                  extra_headers=extra_headers)
+    run_kwargs = _run_kwargs(max_turns)
+
+    def events():
+        return _stream_sync(
+            lambda: _chat_events_agen(client, agent, items, run_kwargs))
+
+    return ChatStream(text=lambda: _weave(events(), options), events=events)
+
+
 def run_chat_completions(client, messages, stream: bool = False,
                          doc_id=None, temperature: Optional[float] = None,
                          stream_metadata: bool = False,
@@ -603,21 +921,12 @@ def run_chat_completions(client, messages, stream: bool = False,
                "citations need."))
     _require_openai_agents("chat_completions")
     _validate_max_turns(max_turns)
-    system_texts, history = _split_chat_messages(messages)
-    scope = client._local_doc_scope(doc_id)
-    block = _doc_block(client, doc_id, scoped=scope is not None)
-    items = ([{"role": "user", "content": block}] if block else []) + history
-    model_name = model or client.chat_model
+    agent, items, model_name = _chat_agent(
+        client, messages, doc_id, model, temperature=temperature,
+        top_p=top_p, reasoning_effort=reasoning_effort,
+        extra_body=extra_body, max_tokens=max_tokens, backend=backend,
+        extra_headers=extra_headers)
     reported_model = _reported_model(model_name)
-    managed = _managed_instructions(client, system_texts)
-    agent = _openai_agent(client, "chat", model_name, managed,
-                          temperature, top_p, doc_ids=scope,
-                          cache_key=_conversation_cache_key(
-                              model_name, managed, doc_id, history),
-                          reasoning_effort=reasoning_effort,
-                          extra_body=extra_body, max_tokens=max_tokens,
-                          backend=_merged_backend(client, backend),
-                          extra_headers=extra_headers)
     recorded: dict = {}
     _record_chat_finish(agent, recorded)
     run_kwargs = _run_kwargs(max_turns)
@@ -704,7 +1013,7 @@ def run_responses(client, input, model: Optional[str] = None,
                   extra_headers: Optional[dict] = None,
                   backend: Optional[dict] = None,
                   ) -> Union[dict, Iterator[dict]]:
-    _require_openai_agents("responses")
+    _require_openai_agents("chat(protocol='responses')")
     _validate_max_turns(max_turns)
     if isinstance(input, str) and input.strip():
         items = [{"role": "user", "content": input}]
@@ -712,7 +1021,7 @@ def run_responses(client, input, model: Optional[str] = None,
             and all(isinstance(item, dict) for item in input)):
         items = list(input)
     else:
-        raise PageIndexAPIError("input must be a non-empty string or list "
+        raise PageIndexAPIError("messages must be a non-empty string or list "
                                 "of item dicts.")
     scope = client._local_doc_scope(doc_id)
     block = _doc_block(client, doc_id, scoped=scope is not None)
@@ -738,6 +1047,7 @@ def run_responses(client, input, model: Optional[str] = None,
 
     response_id = f"resp_{uuid.uuid4().hex}"
     created_at = int(time.time())
+    given = extra_body or {}
 
     def envelope(transcript: list, raw_responses) -> dict:
         return {
@@ -759,13 +1069,14 @@ def run_responses(client, input, model: Optional[str] = None,
             # Backend echo when captured; the request sends neither param.
             "tool_choice": recorded.get("tool_choice", "auto"),
             "parallel_tool_calls": recorded.get("parallel_tool_calls", True),
-            "temperature": temperature,
-            "top_p": top_p,
-            "reasoning": reasoning,
-            "max_output_tokens": max_output_tokens,
+            "temperature": given.get("temperature", temperature),
+            "top_p": given.get("top_p", top_p),
+            "reasoning": given.get("reasoning", reasoning),
+            "max_output_tokens": given.get("max_output_tokens",
+                                           max_output_tokens),
             "error": recorded.get("error"),
             "incomplete_details": recorded.get("incomplete_details"),
-            "metadata": None,
+            "metadata": given.get("metadata"),
         }
 
     if not stream:
@@ -869,8 +1180,8 @@ def _require_anthropic() -> None:
         import anthropic  # noqa: F401
     except ImportError as exc:
         raise PageIndexAPIError(
-            "messages drives your own chat model and requires the "
-            "Anthropic SDK — "
+            "chat(protocol='messages') drives your own chat model and "
+            "requires the Anthropic SDK — "
             "pip install anthropic (or pip install 'pageindex[anthropic]')."
         ) from exc
     try:
@@ -878,8 +1189,8 @@ def _require_anthropic() -> None:
         from anthropic.lib.tools import ToolError  # noqa: F401
     except ImportError as exc:
         raise PageIndexAPIError(
-            "messages requires anthropic >= 0.108.0 (the tool "
-            "runner with ToolError) — pip install -U anthropic."
+            "chat(protocol='messages') requires anthropic >= 0.108.0 (the "
+            "tool runner with ToolError) — pip install -U anthropic."
         ) from exc
 
 
@@ -995,6 +1306,7 @@ def _default_max_tokens(model: str, thinking=None) -> int:
     if isinstance(budget, int) and not isinstance(budget, bool):
         want = budget + 8192
         try:
+            from . import utils  # noqa: F401  — must precede litellm's import
             import litellm
             ceiling = (litellm.model_cost.get(model)
                        or {}).get("max_output_tokens")
@@ -1022,6 +1334,7 @@ def run_messages(client, messages, model: str,
     _require_anthropic()
     import anthropic
     _validate_max_turns(max_turns)
+    _refuse_skeleton(extra_body)
     if isinstance(messages, str) and messages.strip():
         messages = [{"role": "user", "content": messages}]
     if (not isinstance(messages, list) or not messages
@@ -1053,7 +1366,8 @@ def run_messages(client, messages, model: str,
     owns_transport = ("http_client" not in (merged or {})
                       and backend_client not in _ANTHROPIC_CLIENTS.values())
     if max_tokens is None:
-        max_tokens = _default_max_tokens(model, thinking)
+        max_tokens = _default_max_tokens(
+            model, (extra_body or {}).get("thinking", thinking))
     runner = backend_client.beta.messages.tool_runner(
         max_tokens=max_tokens,
         messages=prepared,

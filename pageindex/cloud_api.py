@@ -272,6 +272,10 @@ class CloudAPI:
 
                         try:
                             chunk = json.loads(data)
+                            if chunk.get("error"):
+                                raise PageIndexAPIError(
+                                    "Chat completion failed mid-stream: "
+                                    f"{chunk['error']}")
                             choices = chunk.get("choices") or [{}]
                             content = choices[0].get("delta", {}).get("content", "")
                             if content:
@@ -294,6 +298,10 @@ class CloudAPI:
 
                         try:
                             chunk = json.loads(data)
+                            if chunk.get("error"):
+                                raise PageIndexAPIError(
+                                    "Chat completion failed mid-stream: "
+                                    f"{chunk['error']}")
                             yield chunk
                         except json.JSONDecodeError:
                             continue

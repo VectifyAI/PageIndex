@@ -129,6 +129,24 @@ class FakeModel(Model):
         self._record(system_instructions, input)
         output = self.turns.pop(0)
         sequence = 0
+        for index, piece in enumerate(getattr(self, "thinking_pieces", ())):
+            from openai.types.responses import (
+                ResponseReasoningSummaryTextDeltaEvent,
+                ResponseReasoningTextDeltaEvent)
+            sequence += 1
+            # litellm (every chat-protocol backend) delivers thinking as
+            # summary deltas; alternate so both accepted variants stay
+            # covered, production shape first
+            if index % 2:
+                yield ResponseReasoningTextDeltaEvent(
+                    type="response.reasoning_text.delta", delta=piece,
+                    content_index=0, item_id="rs_1", output_index=0,
+                    sequence_number=sequence)
+            else:
+                yield ResponseReasoningSummaryTextDeltaEvent(
+                    type="response.reasoning_summary_text.delta",
+                    delta=piece, item_id="rs_1", output_index=0,
+                    summary_index=0, sequence_number=sequence)
         if getattr(self, "emit_created", False):
             from openai.types.responses import ResponseCreatedEvent
             sequence += 1
@@ -245,7 +263,7 @@ def test_chat_completions_validation(client, store_path, fake_model):
     with pytest.raises(PageIndexAPIError, match="managed chat endpoint"):
         client.chat_completions([{"role": "user", "content": "x"}],
                                 enable_citations=True)
-    with pytest.raises(PageIndexAPIError, match="responses\\(\\) or messages"):
+    with pytest.raises(PageIndexAPIError, match="chat\\(protocol="):
         client.chat_completions([{"role": "tool", "content": "x"}])
     with pytest.raises(PageIndexAPIError, match="must be a string"):
         client.chat_completions([{"role": "user", "content": [1]}])
@@ -282,8 +300,13 @@ def test_chat_completions_missing_framework(client, monkeypatch):
         client.chat_completions([{"role": "user", "content": "x"}])
 
 
-def test_cloud_guards():
+def test_cloud_guards(monkeypatch):
     cloud = PageIndexCloudClient(api_key="pi-test-key")
+    # empty is unset, as on the local lane — the managed chat serves it
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kw: {"choices": [{"message": {"content": "ok"}}]})
+    assert cloud.chat("x", model="", reasoning_effort="", extra_body={},
+                      extra_headers={}, backend={}) == "ok"
     with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.chat_completions([{"role": "user", "content": "x"}], model="m")
     with pytest.raises(PageIndexAPIError, match="own chat model"):
@@ -306,10 +329,19 @@ def test_cloud_guards():
         cloud.chat_completions([{"role": "user", "content": "x"}],
                                extra_headers={"x-beta": "1"})
     with pytest.raises(PageIndexAPIError, match="own chat model"):
-        cloud.responses("x")
+        cloud.chat("x", protocol="responses")
     with pytest.raises(PageIndexAPIError, match="own chat model"):
-        cloud.messages([{"role": "user", "content": "x"}], model="m",
-                       max_tokens=10)
+        cloud.chat([{"role": "user", "content": "x"}],
+                   protocol="messages", model="m")
+    # the hidden doors refuse the same way: door X is chat(protocol=X)
+    with pytest.raises(PageIndexAPIError, match="own chat model"):
+        cloud._responses("x")
+    with pytest.raises(PageIndexAPIError, match="own chat model"):
+        cloud._messages("x", model="m")
+    with pytest.raises(PageIndexAPIError, match="own chat model"):
+        cloud.chat("x", instructions="be brief")
+    with pytest.raises(PageIndexAPIError, match="own chat model"):
+        cloud.chat("x", max_turns=2)
 
 
 @needs_agents
@@ -459,6 +491,441 @@ def test_chat_cloud_unwraps_envelope(monkeypatch):
     assert cloud.chat("q") == "cloud answer"
 
 
+@needs_agents
+def test_chat_process_weaves_thinking_and_tools(client, store_path,
+                                                fake_model):
+    """show_process=True keeps the plain text stream but weaves the run in:
+    a "[thinking] " section per thinking burst, a "[tool_call] name args"
+    line per call with its clipped result, and the answer unlabeled."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    fake.thinking_pieces = ("Need the ", "report")
+    text = "".join(client.chat("What status?", stream=True, show_process=True))
+    assert text.startswith("[thinking] Need the report")
+    assert '\n\n[tool_call] get_document {"doc_name": "report.pdf"}' in text
+    assert '"report.pdf"}\n[tool_result] get_document: ' in text
+    assert text.endswith("\n\nThe answer")
+    assert "[answer]" not in text
+
+
+def test_chat_process_requires_stream(client):
+    with pytest.raises(PageIndexAPIError, match="requires stream=True"):
+        client.chat("q", show_process=True)
+    # falsy-but-not-False means ON (the ruled falsy-{} trap); the message
+    # must say how to turn it off, not claim the caller passed True
+    with pytest.raises(PageIndexAPIError,
+                       match="only show_process=False"):
+        client.chat("q", show_process={})
+    # an invalid value is refused as such, with or without stream=True —
+    # never told to add stream=True first
+    for kwargs in ({}, {"stream": True}):
+        with pytest.raises(PageIndexAPIError,
+                           match="must be True, False, or a dict"):
+            client.chat("q", show_process=0, **kwargs)
+
+
+def _cloud_chunk(content=None, meta=None, choices=True):
+    chunk = {"id": "chatcmpl-x", "object": "chat.completion.chunk"}
+    if choices:
+        delta = {"content": content} if content is not None else {}
+        chunk["choices"] = [{"index": 0, "delta": delta,
+                             "finish_reason": None}]
+    if meta:
+        chunk["block_metadata"] = meta
+    return chunk
+
+
+def _managed_cloud_with_tool_stream(monkeypatch):
+    """A cloud client whose managed stream serves the live wire shape:
+    block_metadata-tagged text, a tool call, and untagged tail chunks."""
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    seen = {}
+
+    def fake_cc(**kwargs):
+        seen.update(kwargs)
+        return iter([
+            _cloud_chunk("", {"type": "text_block_start", "block_index": 1}),
+            _cloud_chunk("Let me check.", {"type": "text", "block_index": 1}),
+            _cloud_chunk(None, {"type": "text_stop", "block_index": 1}),
+            _cloud_chunk(None, {"type": "mcp_tool_use_start",
+                                "block_index": 2,
+                                "tool_name": "get_document",
+                                "server_name": "pageindex"}),
+            _cloud_chunk('{"doc_name": ', {"type": "tool_use",
+                                           "block_index": 2}),
+            _cloud_chunk('"report.pdf"}', {"type": "tool_use",
+                                           "block_index": 2}),
+            _cloud_chunk(None, {"type": "tool_use_stop", "block_index": 2}),
+            _cloud_chunk("", {"type": "text_block_start", "block_index": 3}),
+            _cloud_chunk("The answer", {"type": "text", "block_index": 3}),
+            _cloud_chunk(None, {"type": "text_stop", "block_index": 3}),
+            _cloud_chunk(None),                    # finish_reason chunk
+            _cloud_chunk(choices=False),           # usage chunk
+        ])
+
+    monkeypatch.setattr(cloud._api, "chat_completions", fake_cc)
+    return cloud, seen
+
+
+def test_chat_process_managed_weaves_what_the_wire_serves(monkeypatch):
+    """Managed streams weave the endpoint's block_metadata: tool-call
+    lines with name + accumulated arguments; no thinking, no results."""
+    cloud, seen = _managed_cloud_with_tool_stream(monkeypatch)
+    text = "".join(cloud.chat("What status?", stream=True))
+    assert seen["stream_metadata"] is True
+    assert text == ('Let me check.\n\n'
+                    '[tool_call] get_document {"doc_name": "report.pdf"}\n\n'
+                    'The answer')
+    cloud, _ = _managed_cloud_with_tool_stream(monkeypatch)
+    assert "".join(cloud.chat("q", stream=True, show_process=True)) == text
+    cloud, _ = _managed_cloud_with_tool_stream(monkeypatch)
+    no_calls = "".join(cloud.chat("q", stream=True,
+                                  show_process={"tool_call": False}))
+    assert no_calls == "Let me check.The answer"
+
+
+def test_chat_process_managed_off_is_clean_answer(monkeypatch):
+    """show_process=False on managed: answer text only — the tool-call
+    JSON the wire interleaves into delta.content must not leak in."""
+    cloud, _ = _managed_cloud_with_tool_stream(monkeypatch)
+    plain = "".join(cloud.chat("q", stream=True, show_process=False))
+    assert plain == "Let me check.The answer"
+    assert "doc_name" not in plain
+
+
+def test_chat_process_managed_open_block_never_leaks(monkeypatch):
+    """Inside an open tool block nothing is answer text: argument chunks
+    under an unexpected tag (or none) accumulate into the call instead
+    of leaking into the show_process=False answer."""
+    def cloud_with(tag):
+        cloud = PageIndexCloudClient(api_key="pi-test-key")
+        monkeypatch.setattr(cloud._api, "chat_completions", lambda **kw: iter([
+            _cloud_chunk(None, {"type": "mcp_tool_use_start",
+                                "tool_name": "get_document"}),
+            _cloud_chunk('{"doc_name": ', {"type": "tool_use"}),
+            _cloud_chunk('"report.pdf"}', tag),
+            _cloud_chunk(None, {"type": "tool_use_stop"}),
+            _cloud_chunk("The answer"),
+        ]))
+        return cloud
+
+    for tag in ({"type": "input_json_delta"}, None):
+        plain = "".join(cloud_with(tag).chat("q", stream=True,
+                                             show_process=False))
+        assert plain == "The answer"
+        woven = "".join(cloud_with(tag).chat("q", stream=True))
+        assert '[tool_call] get_document {"doc_name": "report.pdf"}' in woven
+
+
+def test_chat_process_managed_non_string_argument_chunk(monkeypatch):
+    """A non-string delta.content inside a tool block degrades to a
+    raw-string argument instead of killing the stream."""
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    monkeypatch.setattr(cloud._api, "chat_completions", lambda **kw: iter([
+        _cloud_chunk(None, {"type": "mcp_tool_use_start",
+                            "tool_name": "get_document"}),
+        _cloud_chunk({"partial_json": "{"}, {"type": "tool_use"}),
+        _cloud_chunk(None, {"type": "tool_use_stop"}),
+        _cloud_chunk("The answer"),
+    ]))
+    text = "".join(cloud.chat("q", stream=True))
+    assert "[tool_call] get_document" in text
+    assert text.endswith("The answer")
+
+
+@needs_agents
+def test_chat_process_dict_selects_parts(client, store_path, fake_model):
+    """Each key hides exactly its own line kind; omitted keys default on,
+    and {} means all defaults, not "off" (the falsy-dict trap)."""
+    def run(process):
+        seed_doc(store_path, "pi-a", "report.pdf")
+        fake = fake_model([
+            [_call_item("get_document", {"doc_name": "report.pdf"})],
+            [_msg_item("The answer")],
+        ])
+        fake.thinking_pieces = ("Need the report",)
+        return "".join(client.chat("What status?", stream=True,
+                                   show_process=process))
+
+    no_thinking = run({"thinking": False})
+    assert "[thinking]" not in no_thinking
+    assert "[tool_call] get_document" in no_thinking
+    assert "[tool_result] get_document: " in no_thinking
+
+    no_calls = run({"tool_call": False})
+    assert "[tool_call]" not in no_calls
+    # results stand alone, each echoing its call's arguments
+    assert '\n\n[tool_result] get_document {"doc_name": "report.pdf"}: ' in no_calls
+    assert "[thinking] Need the report" in no_calls
+
+    calls_only = run({"tool_result": False})
+    assert "[tool_call] get_document" in calls_only
+    assert "[tool_result]" not in calls_only
+
+    assert run({}) == run(True)
+
+
+@needs_agents
+def test_chat_process_max_chars_caps_lines(client, store_path, fake_model):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    text = "".join(client.chat("What status?", stream=True,
+                               show_process={"max_chars": 10}))
+    line = next(ln for ln in text.splitlines()
+                if ln.startswith("[tool_result] "))
+    body = line.split(": ", 1)[1]
+    assert body[10:].startswith("... (+")
+
+
+@needs_agents
+def test_chat_stream_events_typed_sequence(client, store_path, fake_model):
+    """.events is the typed view: full data, parsed arguments, no clip."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    fake.thinking_pieces = ("Need the report",)
+    events = list(client.chat("What status?", stream=True).events)
+    kinds = [ev["type"] for ev in events]
+    assert kinds == ["thinking", "tool_call", "tool_result",
+                     "thinking", "answer", "answer"]
+    call = events[1]
+    assert call["name"] == "get_document"
+    assert call["arguments"] == {"doc_name": "report.pdf"}  # parsed
+    assert call["call_id"] == "call_1"
+    result = events[2]
+    assert result["name"] == "get_document"
+    assert result["call_id"] == "call_1"
+    assert "... (+" not in str(result["output"])  # never clipped
+    assert '"next_steps"' in result["output"]
+    assert "".join(ev["delta"] for ev in events
+                   if ev["type"] == "answer") == "The answer"
+
+
+@needs_agents
+def test_chat_stream_supports_next_and_one_view(client, store_path,
+                                                fake_model):
+    fake_model([[_msg_item("The answer")]])
+    stream = client.chat("q", stream=True)
+    assert next(stream) == "The "  # iterator protocol survives the wrapper
+    with pytest.raises(PageIndexAPIError, match="one view"):
+        next(stream.events)
+    fake_model([[_msg_item("The answer")]])
+    stream = client.chat("q", stream=True)
+    assert next(stream.events)["type"] == "answer"
+    with pytest.raises(PageIndexAPIError, match="one view"):
+        next(stream)
+
+
+@needs_agents
+def test_chat_stream_events_read_is_inert(client, store_path, fake_model):
+    """Reading .events claims nothing — only consuming does. Debugger
+    panes, hasattr and getattr probing must not poison the text view."""
+    fake_model([[_msg_item("The answer")]])
+    stream = client.chat("q", stream=True)
+    assert hasattr(stream, "events")  # introspection, not consumption
+    stream.events
+    assert "".join(stream) == "The answer"
+
+
+@needs_agents
+def test_chat_stream_events_survive_partial_reads(client, store_path,
+                                                  fake_model):
+    """Peek at one event, then read the rest: the dropped .events handle
+    must not close the run underneath."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    stream = client.chat("What status?", stream=True)
+    first = next(stream.events)
+    rest = list(stream.events)
+    assert first["type"] == "tool_call"
+    assert [ev["type"] for ev in rest] == ["tool_result", "answer", "answer"]
+
+
+def test_chat_stream_events_refusal_waits_for_consumption(monkeypatch):
+    """On managed, .events read is inert — getattr(stream, 'events',
+    None) must not explode — and the refusal raises on first
+    consumption, leaving the text view usable."""
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kwargs: iter([_cloud_chunk("x")]))
+    stream = cloud.chat("q", stream=True)
+    events = getattr(stream, "events", None)  # the standard probing idiom
+    assert events is not None
+    with pytest.raises(PageIndexAPIError, match="managed chat endpoint"):
+        next(events)
+    assert "".join(stream) == "x"
+
+
+@needs_agents
+def test_chat_stream_shows_process_by_default(client, store_path,
+                                              fake_model):
+    """The text view weaves the process unless show_process=False."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    fake.thinking_pieces = ("Need the report",)
+    text = "".join(client.chat("What status?", stream=True))
+    assert "[thinking] Need the report" in text
+    assert "[tool_call] get_document" in text
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    fake.thinking_pieces = ("Need the report",)
+    plain = "".join(client.chat("What status?", stream=True,
+                                show_process=False))
+    assert plain == "The answer"
+
+
+def test_weave_close_closes_source():
+    closed = {}
+
+    def source():
+        try:
+            yield {"type": "answer", "delta": "a"}
+            yield {"type": "answer", "delta": "b"}
+        finally:
+            closed["yes"] = True
+
+    woven = local_chat._weave(source(), None)
+    assert next(woven) == "a"
+    woven.close()
+    assert closed.get("yes") is True
+
+
+@needs_agents
+def test_chat_stream_close_stops_the_run(client, store_path, fake_model):
+    fake_model([[_msg_item("The answer")]])
+    stream = client.chat("q", stream=True)
+    assert next(stream) == "The "
+    stream.close()
+    with pytest.raises(StopIteration):
+        next(stream)
+
+
+@needs_agents
+def test_chat_stream_closed_before_consumption_stays_dead(client, store_path,
+                                                          fake_model):
+    """close() on an unconsumed stream: the run must never start — a
+    later next() is StopIteration, .events is empty, the model untouched."""
+    fake = fake_model([[_msg_item("The answer")]])
+    stream = client.chat("q", stream=True)
+    stream.close()
+    with pytest.raises(StopIteration):
+        next(stream)
+    assert fake.inputs == []
+    fake = fake_model([[_msg_item("The answer")]])
+    stream = client.chat("q", stream=True)
+    stream.close()
+    assert list(stream.events) == []
+    assert fake.inputs == []
+
+
+def test_chat_stream_managed_cloud(monkeypatch):
+    """Old-wire chunks (no block_metadata) are answer text under any
+    show_process; .events needs the in-process agent."""
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    monkeypatch.setattr(
+        cloud._api, "chat_completions",
+        lambda **kwargs: iter([_cloud_chunk("cloud "),
+                               _cloud_chunk("answer")]))
+    assert list(cloud.chat("q", stream=True)) == ["cloud ", "answer"]
+    with pytest.raises(PageIndexAPIError, match="managed chat endpoint"):
+        next(cloud.chat("q", stream=True).events)
+
+
+def test_chat_process_config_chokes(client):
+    for bad, match in [
+        ({"thinkng": False}, "Unknown show_process key"),
+        ("thinking", "show_process must be True, False, or a dict"),
+        ({"max_chars": True}, "positive int"),
+        ({"max_chars": 0}, "positive int"),
+        ({"thinking": 1}, "must be a bool"),
+        ({1: True, "foo": 1}, "Unknown show_process key"),
+    ]:
+        with pytest.raises(PageIndexAPIError, match=match):
+            client.chat("q", stream=True, show_process=bad)
+
+
+def test_chat_process_blank_chat_model_refuses(client):
+    client.chat_model = None
+    with pytest.raises(PageIndexAPIError, match="chat_model is empty"):
+        client.chat("q", stream=True, show_process=True)
+
+
+def test_clip_flattens_and_caps():
+    assert local_chat._clip("a\n  b\tc") == "a b c"
+    assert local_chat._clip("x" * 250) == "x" * 200 + "... (+50 chars)"
+
+
+@needs_agents
+def test_chat_process_parallel_calls_pair_results(client, store_path,
+                                                  fake_model):
+    """A result nests only under its own call line; parallel-call results
+    stand alone with their call's arguments echoed."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    seed_doc(store_path, "pi-b", "other.pdf")
+    fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"}),
+         _call_item("get_document", {"doc_name": "other.pdf"},
+                    call_id="call_2")],
+        [_msg_item("The answer")],
+    ])
+    text = "".join(client.chat("What status?", stream=True,
+                               show_process=True))
+    # no result rides directly under a call that is not its own — the
+    # bare paired form is absent, every result echoes its arguments
+    assert "\n[tool_result] get_document: " not in text
+    assert '\n\n[tool_result] get_document {"doc_name": "report.pdf"}: ' in text
+    assert '\n[tool_result] get_document {"doc_name": "other.pdf"}: ' in text
+    assert '\n\n[tool_result] get_document {"doc_name": "other.pdf"}' not in text
+    for doc in ("report.pdf", "other.pdf"):
+        line = next(ln for ln in text.splitlines()
+                    if ln.startswith(f'[tool_result] get_document {{"doc_name": '
+                                     f'"{doc}"}}: '))
+        assert f'"{doc}"' in line.split("}: ", 1)[1]
+
+
+@needs_agents
+def test_chat_stream_drops_empty_deltas(client, store_path, fake_model):
+    """Mid-stream empty deltas carry nothing and would only flip weave
+    sections; the event source drops them, like chat_completions."""
+    fake = fake_model([[_msg_item("The answer")]])
+    fake.pieces = ("The ", "", "answer")
+    assert list(client.chat("q", stream=True,
+                            show_process=False)) == ["The ", "answer"]
+    fake = fake_model([[_msg_item("The answer")]])
+    fake.pieces = ("The ", "", "answer")
+    fake.thinking_pieces = ("hm", "", "m")
+    deltas = [ev["delta"] for ev in client.chat("q", stream=True).events
+              if ev["type"] in ("answer", "thinking")]
+    assert "" not in deltas
+
+
+def test_chat_process_managed_validates_before_request(monkeypatch):
+    """A bad show_process must choke before the billed request is sent."""
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    calls = []
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kwargs: calls.append(kwargs) or iter(()))
+    with pytest.raises(PageIndexAPIError, match="Unknown show_process key"):
+        cloud.chat("q", stream=True, show_process={"thinkng": False})
+    assert calls == []
+
+
 # ── responses ──
 
 @needs_agents
@@ -468,7 +935,7 @@ def test_responses_end_to_end(client, store_path, fake_model):
         [_call_item("get_document", {"doc_name": "report.pdf"})],
         [_msg_item("The answer")],
     ])
-    result = client.responses("What status?")
+    result = client._responses("What status?")
     assert result["id"].startswith("resp_")
     assert result["object"] == "response"
     assert result["status"] == "completed"
@@ -496,13 +963,13 @@ def test_responses_round_trip_extends_prefix(client, store_path, fake_model):
         [_call_item("get_document", {"doc_name": "report.pdf"})],
         [_msg_item("The answer")],
     ])
-    result = client.responses("What status?")
+    result = client._responses("What status?")
 
     second = fake_model([[_msg_item("Done")]])
     follow_up = ([{"role": "user", "content": "What status?"}]
                  + result["items"]
                  + [{"role": "user", "content": "and now?"}])
-    client.responses(follow_up)
+    client._responses(follow_up)
     previous_final = first.inputs[-1]
     assert second.inputs[0][:len(previous_final)] == previous_final
 
@@ -516,13 +983,13 @@ def test_responses_round_trip_prefix_with_doc_id(client, store_path, fake_model)
         [_call_item("get_document", {"doc_name": "report.pdf"})],
         [_msg_item("The answer")],
     ])
-    result = client.responses("What status?", doc_id="pi-a")
+    result = client._responses("What status?", doc_id="pi-a")
 
     second = fake_model([[_msg_item("Done")]])
     follow_up = ([{"role": "user", "content": "What status?"}]
                  + result["items"]
                  + [{"role": "user", "content": "and now?"}])
-    client.responses(follow_up, doc_id="pi-a")
+    client._responses(follow_up, doc_id="pi-a")
     previous_final = first.inputs[-1]
     assert second.inputs[0][:len(previous_final)] == previous_final
 
@@ -546,16 +1013,16 @@ def test_doc_id_conversations_get_distinct_cache_keys(client, store_path,
     monkeypatch.setattr(local_chat, "_conversation_cache_key", spy)
 
     fake_model([[_msg_item("a")]])
-    result = client.responses("What is the CAGR?", doc_id="pi-a")
+    result = client._responses("What is the CAGR?", doc_id="pi-a")
     fake_model([[_msg_item("b")]])
-    client.responses("Summarize section 3.", doc_id="pi-a")
+    client._responses("Summarize section 3.", doc_id="pi-a")
     assert keys[0] != keys[1]  # unrelated conversations never pool
 
     fake_model([[_msg_item("c")]])
     follow_up = ([{"role": "user", "content": "What is the CAGR?"}]
                  + result["items"]
                  + [{"role": "user", "content": "and now?"}])
-    client.responses(follow_up, doc_id="pi-a")
+    client._responses(follow_up, doc_id="pi-a")
     assert keys[2] == keys[0]  # a continuation keeps its conversation's key
 
     fake_model([[_msg_item("d")]])
@@ -566,7 +1033,7 @@ def test_doc_id_conversations_get_distinct_cache_keys(client, store_path,
 
     seed_doc(store_path, "pi-b", "contract.pdf")
     fake_model([[_msg_item("f")]])
-    client.responses("What is the CAGR?", doc_id="pi-b")
+    client._responses("What is the CAGR?", doc_id="pi-b")
     assert keys[5] != keys[0]  # same opener, different doc: no pooling
 
 
@@ -577,7 +1044,7 @@ def test_responses_stream_passthrough(client, store_path, fake_model):
         [_call_item("get_document", {"doc_name": "report.pdf"})],
         [_msg_item("The answer")],
     ])
-    events = list(client.responses("q", stream=True))
+    events = list(client._responses("q", stream=True))
     types = [event.get("type") for event in events]
     assert "response.output_text.delta" in types
     assert not [event for event in events
@@ -610,7 +1077,7 @@ def test_responses_stream_opens_with_created(client, store_path, fake_model):
         [_msg_item("The answer")],
     ])
     fake.emit_created = True  # two turns emit two; one must pass through
-    events = list(client.responses("q", stream=True))
+    events = list(client._responses("q", stream=True))
     created = [e for e in events if e["type"] == "response.created"]
     assert len(created) == 1 and events[0] is created[0]
     assert events[0]["sequence_number"] == 1
@@ -633,7 +1100,7 @@ def test_responses_envelope_validates_as_official_response(client, store_path,
         [_call_item("get_document", {"doc_name": "report.pdf"})],
         [_msg_item("The answer")],
     ])
-    result = client.responses("What status?")
+    result = client._responses("What status?")
     parsed = Response.model_validate(result)
     assert [item.type for item in parsed.output] == ["function_call",
                                                      "message"]
@@ -653,7 +1120,7 @@ def test_responses_stream_events_validate_as_official_events(
         [_msg_item("The answer")],
     ])
     adapter = TypeAdapter(ResponseStreamEvent)
-    events = list(client.responses("q", stream=True))
+    events = list(client._responses("q", stream=True))
     assert events
     for event in events:
         adapter.validate_python(event)
@@ -726,7 +1193,7 @@ def test_messages_end_to_end(client, store_path, fake_anthropic):
         _anthropic_message([{"type": "text", "text": "The answer"}],
                            "end_turn"),
     ])
-    result = client.messages([{"role": "user", "content": "What status?"}],
+    result = client._messages([{"role": "user", "content": "What status?"}],
                              model="claude-test", max_tokens=100)
     assert result["stop_reason"] == "end_turn"
     assert result["content"][0]["text"] == "The answer"
@@ -755,7 +1222,7 @@ def test_messages_doc_block_and_system(client, store_path, fake_anthropic):
     calls = fake_anthropic([
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn"),
     ])
-    client.messages([{"role": "user", "content": "hi"}], model="claude-test",
+    client._messages([{"role": "user", "content": "hi"}], model="claude-test",
                     max_tokens=100, doc_id=doc_id, system="Answer in French.")
     system = calls[0]["system"]
     assert "The user has specified document: report.pdf" in system[1]["text"]
@@ -786,7 +1253,7 @@ def test_messages_stream_passthrough(client, store_path, fake_anthropic):
         "",
     ])
     fake_anthropic([sse])
-    events = list(client.messages([{"role": "user", "content": "q"}],
+    events = list(client._messages([{"role": "user", "content": "q"}],
                                   model="claude-test", max_tokens=100,
                                   stream=True))
     types = [event.type for event in events]
@@ -798,24 +1265,24 @@ def test_messages_accepts_query_string(client, fake_anthropic):
     calls = fake_anthropic([
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn"),
     ])
-    result = client.messages("What status?", model="claude-test")
+    result = client._messages("What status?", model="claude-test")
     assert result["content"][0]["text"] == "ok"
     assert calls[0]["messages"] == [{"role": "user",
                                      "content": "What status?"}]
     # The wire-required budget is table-setting, not a user obligation.
     assert calls[0]["max_tokens"] == 8192
     with pytest.raises(PageIndexAPIError, match="non-empty string"):
-        client.messages("   ", model="claude-test")
+        client._messages("   ", model="claude-test")
 
 
 @needs_anthropic
 def test_messages_validation(client, fake_anthropic):
     fake_anthropic([])
     with pytest.raises(PageIndexAPIError, match="non-empty"):
-        client.messages([], model="claude-test", max_tokens=100)
+        client._messages([], model="claude-test", max_tokens=100)
     with pytest.raises(PageIndexAPIError,
                        match="Documents not found or access denied"):
-        client.messages([{"role": "user", "content": "x"}],
+        client._messages([{"role": "user", "content": "x"}],
                         model="claude-test", max_tokens=100, doc_id="ghost")
 
 
@@ -832,14 +1299,14 @@ def test_messages_raises_when_runner_params_unreadable(client, fake_anthropic,
     monkeypatch.setattr(BetaToolRunner, "set_messages_params",
                         lambda self, params: None)
     with pytest.raises(PageIndexAPIError, match="anthropic version"):
-        client.messages([{"role": "user", "content": "hi"}],
+        client._messages([{"role": "user", "content": "hi"}],
                         model="claude-test", max_tokens=100)
 
 
 def test_messages_missing_framework(client, monkeypatch):
     monkeypatch.setitem(sys.modules, "anthropic", None)
     with pytest.raises(PageIndexAPIError, match="pageindex\\[anthropic\\]"):
-        client.messages([{"role": "user", "content": "x"}],
+        client._messages([{"role": "user", "content": "x"}],
                         model="claude-test", max_tokens=100)
 
 
@@ -851,7 +1318,7 @@ def _anthropic_tool_use(tool_use_id="tu_1"):
 
 
 @needs_agents
-@pytest.mark.parametrize("surface", ["chat_completions", "responses"])
+@pytest.mark.parametrize("surface", ["chat_completions", "_responses", "chat"])
 @pytest.mark.parametrize("streaming", [False, True])
 def test_max_turns_wrapped(client, store_path, fake_model, surface, streaming):
     """MaxTurnsExceeded is an engine-internal type; callers get the SDK's
@@ -877,6 +1344,8 @@ def test_max_turns_rejects_non_positive(client, store_path, fake_model):
         client.chat_completions([{"role": "user", "content": "q"}],
                                 max_turns=0)
     # every door that takes max_turns validates it, the runner config too
+    with pytest.raises(PageIndexAPIError, match="positive integer"):
+        client.chat("q", max_turns=0, stream=True)
     with pytest.raises(PageIndexAPIError, match="positive integer"):
         client.anthropic_runner_config(model="claude-sonnet-4-5",
                                        max_turns=-1)
@@ -917,7 +1386,7 @@ def test_responses_stream_single_completed_monotonic_sequence(
         [_call_item("get_document", {"doc_name": "report.pdf"})],
         [_msg_item("The answer")],
     ])
-    events = list(client.responses("q", stream=True))
+    events = list(client._responses("q", stream=True))
     completed = [event for event in events
                  if event.get("type") == "response.completed"]
     assert len(completed) == 1 and events[-1] is completed[0]
@@ -932,7 +1401,7 @@ def test_responses_envelope_fields_and_cache_group(client, store_path,
                                                    fake_model):
     seed_doc(store_path, "pi-a", "report.pdf")
     fake_model([[_msg_item("ok")]])
-    result = client.responses("q")
+    result = client._responses("q")
     names = {tool["name"] for tool in result["tools"]}
     assert names == {"browse_documents", "get_document",
                      "get_document_structure", "get_page_content"}
@@ -946,20 +1415,21 @@ def test_responses_envelope_fields_and_cache_group(client, store_path,
 def test_sol_class_refusal_names_its_exits():
     """The chatcmpl+tools-while-reasoning 400 is a lane problem, not a
     retry problem — the wrapped error must name every exit that is real
-    for the caller's lane. Chat has three; a responses() caller gets only
+    for the caller's lane. Chat has three; a Responses-lane caller gets only
     the litellm upgrade (it IS the other lane, and its reasoning knob is
     ``reasoning``, not ``reasoning_effort``)."""
     refusal = Exception(
         "Error code: 400 - Function tools with reasoning_effort are not "
         "supported for gpt-5.6-sol in /v1/chat/completions.")
     chat = str(local_chat._model_backend_error(refusal, "chat"))
-    assert "responses()" in chat and "litellm" in chat
+    assert "chat(protocol='responses')" in chat and "litellm" in chat
     assert "pass reasoning_effort" in chat
     resp = str(local_chat._model_backend_error(refusal, "responses"))
     assert "upgrade litellm" in resp
-    assert "responses()" not in resp and "pass reasoning_effort" not in resp
+    assert "protocol='responses'" not in resp
+    assert "pass reasoning_effort" not in resp
     plain = local_chat._model_backend_error(Exception("rate limited"), "chat")
-    assert "responses()" not in str(plain)
+    assert "protocol='responses'" not in str(plain)
 
 
 def test_conversation_cache_key_stable_per_conversation():
@@ -1046,6 +1516,40 @@ def test_reasoning_passthrough_reaches_each_engine(monkeypatch):
                                      None, None)
     assert agent.model_settings.reasoning is None
     assert agent.model_settings.extra_args is None
+    # "" is unset on this lane too, like the protocol lanes
+    agent = local_chat._openai_agent(None, "chat", "gpt-test", "sys",
+                                     None, None, reasoning_effort="")
+    assert agent.model_settings.extra_args is None
+
+
+@needs_agents
+def test_extra_body_model_settings_fields_ride_their_field(monkeypatch):
+    """LiteLLM-routed answer lane: openai-agents passes ModelSettings'
+    own fields to litellm by name beside **extra_args, so a caller's copy
+    in extra_args collided with them. Those ride their field, the
+    caller's value winning; the rest stay LiteLLM kwargs. OpenAI
+    destinations keep the request-body path."""
+    pytest.importorskip("litellm")
+    monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
+    monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
+                        lambda *a, **k: [])
+    agent = local_chat._openai_agent(None, "chat", "anthropic/claude-x",
+                                     "sys", 0.7, None,
+                                     extra_body={"temperature": 0.2,
+                                                 "top_k": 5})
+    settings = agent.model_settings
+    assert settings.temperature == 0.2
+    assert settings.extra_args["top_k"] == 5
+    assert "temperature" not in settings.extra_args
+    agent = local_chat._openai_agent(None, "chat", "gpt-test", "sys",
+                                     None, None,
+                                     extra_body={"temperature": 0.2})
+    assert agent.model_settings.temperature is None
+    assert agent.model_settings.extra_body == {"temperature": 0.2}
+    with pytest.raises(PageIndexAPIError, match="Invalid model settings"):
+        local_chat._openai_agent(None, "chat", "anthropic/claude-x", "sys",
+                                 None, None,
+                                 extra_body={"temperature": "hot"})
 
 
 @needs_agents
@@ -1100,29 +1604,69 @@ def test_sampling_knobs_ride_model_settings(client, store_path, fake_model,
     assert seen["chat"].top_p == 0.9
     assert seen["chat"].max_tokens == 256
     fake_model([[_msg_item("ok")]])
-    result = client.responses("q", max_output_tokens=321)
+    result = client._responses("q", max_output_tokens=321)
     assert seen["responses"].max_tokens == 321
     assert result["max_output_tokens"] == 321
     fake_model([[_msg_item("ok")]])
-    assert client.responses("q")["max_output_tokens"] is None
+    assert client._responses("q")["max_output_tokens"] is None
+    # the public door has no knob for these; extra_body carries them to the
+    # wire, and the envelope must report what was sent, not the unset locals
+    fake_model([[_msg_item("ok")]])
+    result = client.chat("q", protocol="responses",
+                         extra_body={"max_output_tokens": 321, "top_p": 0.9,
+                                     "temperature": 0.2,
+                                     "metadata": {"tag": "abc"}})
+    assert result["max_output_tokens"] == 321
+    assert result["top_p"] == 0.9
+    assert result["temperature"] == 0.2
+    assert result["metadata"] == {"tag": "abc"}
+    sent = seen["responses"].extra_body
+    assert {"max_output_tokens": 321, "top_p": 0.9, "temperature": 0.2,
+            "metadata": {"tag": "abc"}}.items() <= sent.items()
 
 
 @needs_agents
-def test_responses_envelope_echoes_reasoning(client, store_path, fake_model):
+def test_responses_envelope_echoes_reasoning(client, store_path, fake_model,
+                                             monkeypatch):
     seed_doc(store_path, "pi-a", "report.pdf")
     fake_model([[_msg_item("ok")]])
-    result = client.responses("q", reasoning={"effort": "low"})
+    result = client._responses("q", reasoning={"effort": "low"})
     assert result["reasoning"] == {"effort": "low"}
     fake_model([[_msg_item("ok")]])
-    assert client.responses("q")["reasoning"] is None
+    assert client._responses("q")["reasoning"] is None
+    seen = {}
+    real = local_chat._openai_agent
+
+    def spy(*args, **kwargs):
+        agent = real(*args, **kwargs)
+        seen[args[1]] = agent.model_settings
+        return agent
+
+    monkeypatch.setattr(local_chat, "_openai_agent", spy)
+    fake_model([[_msg_item("ok")]])
+    result = client.chat("q", protocol="responses",
+                         extra_body={"reasoning": {"effort": "high"}})
+    assert result["reasoning"] == {"effort": "high"}
+    assert seen["responses"].extra_body["reasoning"] == {"effort": "high"}
+    # effort joins the caller's reasoning object on the one channel to the
+    # wire; a separate reasoning= would be replaced whole by extra_body's
+    fake_model([[_msg_item("ok")]])
+    result = client.chat("q", protocol="responses", reasoning_effort="high",
+                         extra_body={"reasoning": {"summary": "auto"}})
+    assert seen["responses"].reasoning is None
+    assert seen["responses"].extra_body["reasoning"] == {
+        "summary": "auto", "effort": "high"}
+    assert result["reasoning"] == {"summary": "auto", "effort": "high"}
 
 
 @needs_agents
 def test_responses_input_validation(client, fake_model):
     fake_model([])
     for bad in ("", "   ", [], [1], None):
-        with pytest.raises(PageIndexAPIError, match="input must be"):
-            client.responses(bad)
+        with pytest.raises(PageIndexAPIError, match="messages must be"):
+            client._responses(bad)
+        with pytest.raises(PageIndexAPIError, match="messages must be"):
+            client.chat(bad, protocol="responses")
 
 
 @needs_agents
@@ -1216,7 +1760,7 @@ def test_responses_refuses_litellm_routed_models(store_path):
     client = PageIndexLocalClient(storage_path=store_path,
                                   retrieve_model="anthropic/claude-x")
     with pytest.raises(PageIndexAPIError, match="chat_completions"):
-        client.responses("q")
+        client._responses("q")
 
 
 @needs_agents
@@ -1247,7 +1791,7 @@ def test_envelope_model_strips_openai_routing_prefix(store_path, fake_model):
     result = client.chat_completions("q")
     assert result["model"] == "gpt-5.2"
     fake_model([[_msg_item("ok")]])
-    result = client.responses("q")
+    result = client._responses("q")
     assert result["model"] == "gpt-5.2"
 
 
@@ -1305,7 +1849,7 @@ def test_responses_envelope_reports_backend_truncation(client, store_path,
 
     fake._client = types.SimpleNamespace(
         responses=types.SimpleNamespace(create=create))
-    result = client.responses("q")
+    result = client._responses("q")
     assert result["status"] == "incomplete"
     assert result["incomplete_details"] == {"reason": "max_output_tokens"}
     assert result["error"] is None
@@ -1325,7 +1869,7 @@ def test_responses_envelope_reports_backend_tool_params(client, store_path,
 
     fake._client = types.SimpleNamespace(
         responses=types.SimpleNamespace(create=create))
-    result = client.responses("q")
+    result = client._responses("q")
     assert result["tool_choice"] == "none"
     assert result["parallel_tool_calls"] is False
 
@@ -1334,7 +1878,7 @@ def test_responses_envelope_reports_backend_tool_params(client, store_path,
 def test_chat_completions_wraps_framework_errors(client, store_path,
                                                  fake_model, monkeypatch):
     """Both chat_completions paths surface engine failures as the SDK's
-    own error type, like responses()."""
+    own error type, like the protocol lanes."""
     from agents.exceptions import ModelBehaviorError
     seed_doc(store_path, "pi-a", "report.pdf")
     fake = fake_model([[_msg_item("never terminal")]])
@@ -1361,7 +1905,7 @@ def test_responses_stream_wraps_framework_errors(client, store_path,
     fake = fake_model([[_msg_item("never terminal")]])
     fake.no_terminal = True
     with pytest.raises(PageIndexAPIError, match="agent backend failed"):
-        list(client.responses("q", stream=True))
+        list(client._responses("q", stream=True))
 
 
 class _TerminalModel(FakeModel):
@@ -1410,7 +1954,7 @@ def test_responses_stream_backend_terminal_states_are_events(
     fake.terminal = terminal
     monkeypatch.setattr(local_chat, "_openai_model",
                         lambda protocol, model_name, backend=None: fake)
-    events = list(client.responses("q", stream=True))
+    events = list(client._responses("q", stream=True))
     assert events[0]["type"] == "response.output_text.delta"
     last = events[-1]
     assert last["type"] == f"response.{terminal}"
@@ -1445,12 +1989,12 @@ def test_provider_errors_wrap_as_sdk_errors(client, store_path, fake_model,
     with pytest.raises(PageIndexAPIError, match="model backend failed"):
         client.chat_completions("q")
     with pytest.raises(PageIndexAPIError, match="model backend failed"):
-        client.responses("q")
+        client._responses("q")
     monkeypatch.setattr(fake, "stream_response", conn_err_stream)
     with pytest.raises(PageIndexAPIError, match="model backend failed"):
         list(client.chat_completions("q", stream=True))
     with pytest.raises(PageIndexAPIError, match="model backend failed"):
-        list(client.responses("q", stream=True))
+        list(client._responses("q", stream=True))
 
 
 @needs_anthropic
@@ -1472,9 +2016,9 @@ def test_messages_provider_errors_wrap_as_sdk_errors(client, store_path,
     monkeypatch.setattr(local_chat, "_anthropic_client",
                         lambda backend=None: fake)
     with pytest.raises(PageIndexAPIError, match="model backend failed"):
-        client.messages("q", model="claude-test")
+        client._messages("q", model="claude-test")
     with pytest.raises(PageIndexAPIError, match="model backend failed"):
-        list(client.messages("q", model="claude-test", stream=True))
+        list(client._messages("q", model="claude-test", stream=True))
 
 
 @needs_agents
@@ -1550,21 +2094,65 @@ def test_stream_abandonment_cancels_pending_turn(client, store_path,
     assert fake.deltas_emitted == 0  # turn 2 never produced output
 
 
+@needs_agents
+def test_chat_stream_abandonment_cancels_pending_turn(client, store_path,
+                                                      fake_model,
+                                                      monkeypatch):
+    """chat(stream=True)'s teardown mirrors the completions lane: closing
+    the stream mid-run cancels the blocked turn (pump thread exits)
+    instead of letting it run — and bill — in the background, and the
+    per-call backend client is closed before its loop ends."""
+    import threading
+    seed_doc(store_path, "pi-a", "report.pdf")
+    pumps = []
+    real_thread = threading.Thread
+
+    class _Tracking(real_thread):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            if getattr(kwargs.get("target"), "__name__", "") == "pump":
+                pumps.append(self)
+
+    monkeypatch.setattr(threading, "Thread", _Tracking)
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    fake.block_from = 2  # turn 2 hangs until cancelled
+    closes = []
+
+    class _Backend:
+        _pageindex_caller_http = False
+
+        async def close(self):
+            closes.append(True)
+
+    fake._client = _Backend()
+    stream = client.chat("q", stream=True)
+    assert next(stream).startswith("[tool_call] get_document")
+    stream.close()
+    assert len(pumps) == 1
+    pumps[0].join(timeout=3.0)
+    assert not pumps[0].is_alive()
+    assert fake.deltas_emitted == 0  # turn 2 never produced output
+    assert closes == [True]  # _aclose_backend ran on abandonment
+
+
 @needs_anthropic
 def test_messages_max_tokens_default_resolves_per_model(client, fake_anthropic):
     """The wire-required budget must not exceed the model's ceiling: the
     claude-3 generation caps output at 4096."""
     calls = fake_anthropic([
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
-    client.messages("q", model="claude-3-opus-20240229")
+    client._messages("q", model="claude-3-opus-20240229")
     assert calls[0]["max_tokens"] == 4096
     calls = fake_anthropic([
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
-    client.messages("q", model="claude-sonnet-4-5")
+    client._messages("q", model="claude-sonnet-4-5")
     assert calls[0]["max_tokens"] == 8192
     calls = fake_anthropic([
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
-    client.messages("q", model="claude-3-opus-20240229", max_tokens=1234)
+    client._messages("q", model="claude-3-opus-20240229", max_tokens=1234)
     assert calls[0]["max_tokens"] == 1234
 
 
@@ -1574,12 +2162,12 @@ def test_messages_thinking_passes_through(client, fake_anthropic):
     nothing so the backend default applies."""
     calls = fake_anthropic([
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
-    client.messages("q", model="claude-sonnet-4-5",
+    client._messages("q", model="claude-sonnet-4-5",
                     thinking={"type": "adaptive"})
     assert calls[0]["thinking"] == {"type": "adaptive"}
     calls = fake_anthropic([
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
-    client.messages("q", model="claude-sonnet-4-5")
+    client._messages("q", model="claude-sonnet-4-5")
     assert "thinking" not in calls[0]
 
 
@@ -1589,12 +2177,12 @@ def test_messages_extra_body_merges_into_the_wire_body(client, fake_anthropic):
     asserted on the captured wire body, not the SDK call."""
     calls = fake_anthropic([
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
-    client.messages("q", model="claude-sonnet-4-5",
+    client._messages("q", model="claude-sonnet-4-5",
                     extra_body={"service_tier": "auto"})
     assert calls[0]["service_tier"] == "auto"
     calls = fake_anthropic([
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
-    client.messages("q", model="claude-sonnet-4-5")
+    client._messages("q", model="claude-sonnet-4-5")
     assert "service_tier" not in calls[0]
 
 
@@ -1613,7 +2201,7 @@ def test_messages_tool_error_flagged_and_scoped(client, store_path,
                            "tool_use"),
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn"),
     ])
-    client.messages("q", model="claude-test", doc_id="pi-a")
+    client._messages("q", model="claude-test", doc_id="pi-a")
     tool_result = calls[1]["messages"][-1]["content"][0]
     assert tool_result["type"] == "tool_result"
     assert tool_result.get("is_error") is True
@@ -1629,7 +2217,7 @@ def test_messages_envelope_json_and_no_internal_fields(client, store_path,
         _anthropic_message([{"type": "text", "text": "The answer"}],
                            "end_turn"),
     ])
-    result = client.messages([{"role": "user", "content": "q"}],
+    result = client._messages([{"role": "user", "content": "q"}],
                              model="claude-test", max_tokens=100)
     dumped = json.dumps(result)  # the whole envelope must serialize
     assert "parsed_output" not in dumped
@@ -1645,7 +2233,7 @@ def test_messages_max_turns_truncation_round_trippable(client, store_path,
         _anthropic_message([_anthropic_tool_use()], "tool_use"),
         _anthropic_message([_anthropic_tool_use("tu_2")], "tool_use"),
     ])
-    result = client.messages([{"role": "user", "content": "q"}],
+    result = client._messages([{"role": "user", "content": "q"}],
                              model="claude-test", max_tokens=100, max_turns=1)
     assert len(calls) == 1
     assert result["stop_reason"] == "tool_use"
@@ -1673,7 +2261,7 @@ def test_messages_tool_use_cut_by_max_tokens_not_duplicated(client,
         _anthropic_message([_anthropic_tool_use()], "max_tokens"),
         _anthropic_message([_anthropic_tool_use("tu_2")], "tool_use"),
     ])
-    result = client.messages([{"role": "user", "content": "q"}],
+    result = client._messages([{"role": "user", "content": "q"}],
                              model="claude-test", max_tokens=100, max_turns=1)
     assert len(calls) == 1
     assert result["stop_reason"] == "max_tokens"
@@ -1699,7 +2287,7 @@ def test_messages_refusal_with_tool_use_stays_appendable(client, store_path,
         _anthropic_message([{"type": "text", "text": "I can't help."},
                             _anthropic_tool_use()], "refusal"),
     ])
-    result = client.messages([{"role": "user", "content": "q"}],
+    result = client._messages([{"role": "user", "content": "q"}],
                              model="claude-test", max_tokens=100)
     assert result["stop_reason"] == "refusal"
     message, = result["messages"]
@@ -1718,7 +2306,7 @@ def test_messages_default_cap(client, store_path, fake_anthropic):
         _anthropic_message([_anthropic_tool_use(f"tu_{index}")], "tool_use")
         for index in range(30)
     ])
-    result = client.messages([{"role": "user", "content": "q"}],
+    result = client._messages([{"role": "user", "content": "q"}],
                              model="claude-test", max_tokens=100)
     assert len(calls) == 10  # bounded like the OpenAI surfaces
     assert result["stop_reason"] == "tool_use"
@@ -1730,13 +2318,13 @@ def test_messages_edge_validation(client, store_path, fake_anthropic):
     calls = fake_anthropic([
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn"),
     ])
-    client.messages([{"role": "user", "content": "q"}], model="claude-test",
+    client._messages([{"role": "user", "content": "q"}], model="claude-test",
                     max_tokens=100, system="   ")
     assert all(block["text"].strip() for block in calls[0]["system"])
     with pytest.raises(PageIndexAPIError, match="message dicts"):
-        client.messages(["not a dict"], model="claude-test", max_tokens=100)
+        client._messages(["not a dict"], model="claude-test", max_tokens=100)
     with pytest.raises(PageIndexAPIError, match="doc_id"):
-        client.messages([{"role": "user", "content": "q"}],
+        client._messages([{"role": "user", "content": "q"}],
                         model="claude-test", max_tokens=100, doc_id=123)
 
 
@@ -1787,13 +2375,13 @@ def test_messages_top_level_cache_control(client, store_path, fake_anthropic):
     seed_doc(store_path, "pi-a", "report.pdf")
     calls = fake_anthropic([
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
-    client.messages("q", model="claude-test", max_tokens=50)
+    client._messages("q", model="claude-test", max_tokens=50)
     assert calls[0]["cache_control"] == {"type": "ephemeral"}
     marked = [{"type": "text", "text": f"b{i}",
                "cache_control": {"type": "ephemeral"}} for i in range(3)]
     calls = fake_anthropic([
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
-    client.messages("q", model="claude-test", max_tokens=50, system=marked)
+    client._messages("q", model="claude-test", max_tokens=50, system=marked)
     assert "cache_control" not in calls[0]
 
 
@@ -1825,7 +2413,7 @@ def test_messages_backend_merges_and_reaches_the_client(client, fake_anthropic,
         lambda backend=None: (seen.setdefault("backend", backend),
                               fixture_client())[1])
     client.chat_backend = {"base_url": "http://cb"}
-    client.messages("q", model="claude-sonnet-4-5", backend={"api_key": "z"})
+    client._messages("q", model="claude-sonnet-4-5", backend={"api_key": "z"})
     assert seen["backend"] == {"base_url": "http://cb", "api_key": "z"}
 
 
@@ -1872,7 +2460,7 @@ def test_messages_extra_headers_reach_the_wire(client, monkeypatch):
             transport=anthropic_httpx.MockTransport(handler)))
     monkeypatch.setattr(local_chat, "_anthropic_client",
                         lambda backend=None: fake)
-    client.messages("q", model="claude-sonnet-4-5",
+    client._messages("q", model="claude-sonnet-4-5",
                     extra_headers={"anthropic-beta": "context-1m-2025"})
     assert seen["beta"] == "context-1m-2025"
 
@@ -1893,7 +2481,7 @@ def test_messages_default_max_tokens_clears_thinking_budget(client, fake_anthrop
     calls = fake_anthropic([
         _anthropic_message([{"type": "text", "text": "a"}], "end_turn"),
     ])
-    client.messages("q", model="claude-test",
+    client._messages("q", model="claude-test",
                     thinking={"type": "enabled", "budget_tokens": 10000})
     assert calls[0]["max_tokens"] == 10000 + 8192
     assert calls[0]["thinking"] == {"type": "enabled",
@@ -1901,9 +2489,19 @@ def test_messages_default_max_tokens_clears_thinking_budget(client, fake_anthrop
     calls = fake_anthropic([  # fresh fake: each run closes its client
         _anthropic_message([{"type": "text", "text": "b"}], "end_turn"),
     ])
-    client.messages("q", model="claude-test", max_tokens=11000,
+    client._messages("q", model="claude-test", max_tokens=11000,
                     thinking={"type": "enabled", "budget_tokens": 10000})
     assert calls[0]["max_tokens"] == 11000  # explicit value passes through
+    # the public door's spelling: thinking rides extra_body, same lift
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "c"}], "end_turn"),
+    ])
+    client.chat("q", protocol="messages", model="claude-test",
+                extra_body={"thinking": {"type": "enabled",
+                                         "budget_tokens": 10000}})
+    assert calls[0]["max_tokens"] == 10000 + 8192
+    assert calls[0]["thinking"] == {"type": "enabled",
+                                    "budget_tokens": 10000}
 
 
 @needs_anthropic
@@ -1951,7 +2549,7 @@ def test_messages_reuses_cached_client_across_runs(client, monkeypatch):
         raise AssertionError("cache hit expected — no new construction")
     monkeypatch.setattr(anthropic, "Anthropic", boom)
     for _ in range(2):
-        result = client.messages("q", model="claude-test", max_tokens=64,
+        result = client._messages("q", model="claude-test", max_tokens=64,
                                  backend={"api_key": "test"})
         assert result["stop_reason"] == "end_turn"
 
@@ -2087,6 +2685,63 @@ def test_litellm_lane_hides_the_bridge_usage_warning():
     assert any("Expected `int`" in m for m in seen)
 
 
+@needs_agents
+def test_litellm_lane_mutes_the_provider_list_banner(monkeypatch, capsys):
+    """litellm's OpenRouter adapter probes supports_reasoning() with the
+    provider-stripped model name, so any model missing from its static map
+    print()s a red "Provider List:" banner into the middle of the streamed
+    answer; building the lane's model flips litellm's embedder switch."""
+    litellm = pytest.importorskip("litellm")
+    monkeypatch.setattr(litellm, "suppress_debug_info", False)
+    local_chat._openai_model("chat", "openrouter/z-ai/not-in-the-map")
+    assert litellm.suppress_debug_info is True
+    with pytest.raises(litellm.BadRequestError):
+        litellm.get_llm_provider("z-ai/not-in-the-map")
+    assert "Provider List" not in capsys.readouterr().out
+
+
+@needs_agents
+def test_litellm_lane_gates_litellm_logging(monkeypatch, caplog):
+    """The lane defaults litellm's logger to ERROR; a level the host set stays."""
+    pytest.importorskip("litellm")
+    import logging
+    monkeypatch.delenv("LITELLM_LOG", raising=False)
+    caplog.set_level(logging.NOTSET, logger="LiteLLM")  # untouched
+    gated = logging.getLogger("LiteLLM")
+    local_chat._openai_model("chat", "openrouter/z-ai/not-in-the-map")
+    assert gated.level == logging.ERROR
+    assert not gated.isEnabledFor(logging.WARNING)
+    gated.setLevel(logging.WARNING)
+    local_chat._openai_model("chat", "openrouter/z-ai/not-in-the-map")
+    assert gated.level == logging.WARNING
+
+
+def test_provider_lookups_flip_the_switch_before_asking(monkeypatch, capsys):
+    """The lane asks litellm which provider serves a model before the
+    model is built, and openai_agent_config asks with no model built at
+    all; a failed ask print()s the banner, so the switch flips at the ask."""
+    litellm = pytest.importorskip("litellm")
+    for lookup in (local_chat._openai_protocol,
+                   local_chat._litellm_claude_marks):
+        monkeypatch.setattr(litellm, "suppress_debug_info", False)
+        assert not lookup("z-ai/not-in-the-map")
+        assert litellm.suppress_debug_info is True
+    assert "Provider List" not in capsys.readouterr().out
+
+
+def test_quiet_litellm_honors_the_chosen_default(monkeypatch, caplog):
+    """LITELLM_LOG picks the default, in both directions."""
+    pytest.importorskip("litellm")
+    import logging
+    from pageindex.utils import _quiet_litellm
+    gated = logging.getLogger("LiteLLM")
+    for chosen in (logging.CRITICAL, logging.DEBUG):
+        monkeypatch.setenv("LITELLM_LOG", logging.getLevelName(chosen))
+        caplog.set_level(logging.NOTSET, logger="LiteLLM")
+        _quiet_litellm()
+        assert gated.level == chosen
+
+
 def test_openai_protocol_predicate_follows_litellm_routing():
     pytest.importorskip("litellm")
     for name in ("gpt-5", "openai/gpt-4o", "litellm/gpt-4o",
@@ -2124,11 +2779,11 @@ def test_messages_keeps_caller_owned_http_client_open(client):
     body = _anthropic_message([{"type": "text", "text": "a"}], "end_turn")
     shared = anthropic_httpx.Client(transport=anthropic_httpx.MockTransport(
         lambda request: anthropic_httpx.Response(200, json=body)))
-    out = client.messages("q", model="claude-test",
+    out = client._messages("q", model="claude-test",
                           backend={"api_key": "t", "http_client": shared})
     assert out["content"][0]["text"] == "a"
     assert not shared.is_closed
-    client.messages("q", model="claude-test",
+    client._messages("q", model="claude-test",
                     backend={"api_key": "t", "http_client": shared})
     shared.close()
 
@@ -2148,7 +2803,7 @@ def test_messages_without_credentials_raises_contract_error(client,
     for backend in (None, {"timeout": 30}, {"api_key": None}):
         with pytest.raises(PageIndexAPIError,
                            match="Anthropic backend is not configured"):
-            client.messages("q", model="claude-test", backend=backend)
+            client._messages("q", model="claude-test", backend=backend)
 
 
 def test_cache_extra_args_follow_wire_normalization():
@@ -2331,8 +2986,8 @@ def test_bridge_gate_and_citations(monkeypatch):
 
     monkeypatch.setattr(local_chat, "run_responses", fake_responses)
     monkeypatch.setattr(local_chat, "run_messages", fake_messages)
-    client.responses("q")
-    client.messages("q", model="mm")
+    client._responses("q")
+    client._messages("q", model="mm")
     assert called["responses"] is client and called["messages"] is client
 
 
@@ -2360,7 +3015,7 @@ def test_bridge_auth_failure_error_teaches_architecture():
 
 def test_bridge_auth_note_managed_exit_is_chat_lane_only():
     """The managed-chat exit ("drop the chat model") is real only for
-    chat_completions(); responses() and messages() refuse a client
+    chat_completions(); the protocol lanes refuse a client
     without an own model, so on those lanes the note keeps the
     credentials advice and drops the exit that would send the caller in
     a circle."""
@@ -2398,9 +3053,9 @@ def test_messages_auth_failure_teaches_architecture(bridge_client,
 
     monkeypatch.setattr(local_chat, "_anthropic_client", fresh_fake)
     with pytest.raises(PageIndexAPIError, match="provider credentials"):
-        client.messages("q", model="claude-test", max_tokens=100)
+        client._messages("q", model="claude-test", max_tokens=100)
     with pytest.raises(PageIndexAPIError, match="provider credentials"):
-        list(client.messages("q", model="claude-test", max_tokens=100,
+        list(client._messages("q", model="claude-test", max_tokens=100,
                              stream=True))
 
 
@@ -2431,7 +3086,7 @@ def test_messages_no_backend_leak_when_tool_build_fails(bridge_client,
     monkeypatch.setattr(
         "pageindex.integrations.anthropic_sdk.build_anthropic_tools", boom)
     with pytest.raises(PageIndexAPIError, match="MCP server"):
-        client.messages("q", model="claude-test", max_tokens=100)
+        client._messages("q", model="claude-test", max_tokens=100)
     assert all(fake.closed for fake in made)
 
 
@@ -2444,7 +3099,7 @@ def test_bridge_responses_lane_runs_cloud_tools(bridge_client, fake_model):
         [_call_item("get_document", {"doc_name": "r.pdf"})],
         [_msg_item("Done")],
     ])
-    result = client.responses("What?")
+    result = client._responses("What?")
     assert result["object"] == "response" and result["status"] == "completed"
     assert "Done" in json.dumps(result["output"])
     assert bridge.calls == [("get_document", {"doc_name": "r.pdf"})]
@@ -2461,7 +3116,7 @@ def test_bridge_messages_lane_runs_cloud_tools(bridge_client, fake_anthropic):
         _anthropic_message([{"type": "text", "text": "The answer"}],
                            "end_turn"),
     ])
-    result = client.messages("What?", model="claude-test", max_tokens=64)
+    result = client._messages("What?", model="claude-test", max_tokens=64)
     assert result["content"][0]["text"] == "The answer"
     wire = calls[0]
     assert wire["tools"][0]["name"] == "get_document"
@@ -2478,3 +3133,167 @@ def test_bridge_openai_agent_config_carries_configured_model(bridge_client):
     config = client.openai_agent_config()
     assert config["model"] == "fake-model"
     assert "CLOUD LIVE INSTRUCTIONS" in config["instructions"]
+
+
+# ── chat(protocol=): the protocol doors behind the front door ──
+
+def test_old_door_names_point_at_chat_protocol(client):
+    for name in ("responses", "messages"):
+        with pytest.raises(AttributeError, match=f"chat\\(protocol={name!r}"):
+            getattr(client, name)
+        assert not hasattr(client, name)
+    with pytest.raises(AttributeError, match="no attribute 'no_such_thing'"):
+        client.no_such_thing
+
+
+def test_chat_protocol_responses_is_the_door(client, monkeypatch):
+    seen = []
+    monkeypatch.setattr(local_chat, "run_responses",
+                        lambda c, input, **kw: seen.append((input, kw)) or "door")
+    knobs = dict(doc_id="pi-a", model="gpt-x", max_turns=3,
+                 backend={"api_key": "k"}, extra_headers={"x": "1"},
+                 instructions="be brief")
+    assert client.chat("q", protocol="responses", reasoning_effort="low",
+                       extra_body={"seed": 1}, **knobs) == "door"
+    assert client._responses("q", extra_body={"seed": 1,
+                                              "reasoning": {"effort": "low"}},
+                             **knobs) == "door"
+    assert seen[0] == seen[1]
+    assert seen[0][1]["reasoning"] is None
+    # OpenAI's own effort field; the caller's extra_body still wins
+    client.chat("q", protocol="responses", reasoning_effort="low",
+                extra_body={"reasoning": {"effort": "high"}})
+    assert seen[-1][1]["extra_body"] == {"reasoning": {"effort": "high"}}
+    # a caller's other reasoning keys survive; only effort is ours
+    client.chat("q", protocol="responses", reasoning_effort="low",
+                extra_body={"reasoning": {"summary": "auto"}})
+    assert seen[-1][1]["extra_body"] == {
+        "reasoning": {"summary": "auto", "effort": "low"}}
+    # "" is unset, like model="" and instructions=""
+    client.chat("q", protocol="responses", reasoning_effort="",
+                extra_body={"seed": 1})
+    assert seen[-1][1]["extra_body"] == {"seed": 1}
+    assert seen[-1][1]["reasoning"] is None
+    # the default for the stream view is silently off on a protocol lane
+    assert client.chat("q", protocol="responses", stream=True) == "door"
+    assert seen[-1][1]["stream"] is True
+
+
+def test_chat_protocol_messages_is_the_door(client, monkeypatch):
+    seen = []
+    monkeypatch.setattr(local_chat, "run_messages",
+                        lambda c, messages, **kw: seen.append((messages, kw)) or "door")
+    blocks = [{"type": "text", "text": "persona",
+               "cache_control": {"type": "ephemeral"}}]
+    knobs = dict(doc_id="pi-a", model="claude-x", max_turns=3,
+                 backend={"api_key": "k"}, extra_headers={"anthropic-beta": "b"})
+    history = [{"role": "user", "content": [{"type": "text", "text": "q"}]}]
+    assert client.chat(history, protocol="messages", reasoning_effort="low",
+                       instructions=blocks, extra_body={"top_k": 5},
+                       **knobs) == "door"
+    assert client._messages(history, system=blocks,
+                            extra_body={"output_config": {"effort": "low"},
+                                        "top_k": 5},
+                            **knobs) == "door"
+    assert seen[0] == seen[1]
+    # Anthropic's own effort field; the caller's extra_body still wins
+    client.chat("q", protocol="messages", model="claude-x",
+                reasoning_effort="low",
+                extra_body={"output_config": {"effort": "max"}})
+    assert seen[-1][1]["extra_body"] == {"output_config": {"effort": "max"}}
+    assert seen[-1][0] == "q"
+    # a caller's other output_config keys survive; only effort is ours
+    client.chat("q", protocol="messages", model="claude-x",
+                reasoning_effort="low",
+                extra_body={"output_config": {"format": {"type": "json"}}})
+    assert seen[-1][1]["extra_body"] == {
+        "output_config": {"format": {"type": "json"}, "effort": "low"}}
+    # "" is unset, like model="" and instructions=""
+    client.chat("q", protocol="messages", model="claude-x",
+                reasoning_effort="")
+    assert seen[-1][1]["extra_body"] is None
+
+
+def test_extra_body_refuses_skeleton_keys():
+    """The managed prompt, conversation and tools are the SDK's on every
+    lane; extra_body merges last, so a caller's copy would silently
+    replace them. Refused at the seam both openai-agents lanes share."""
+    for key in ("system", "instructions", "input", "messages", "tools"):
+        with pytest.raises(PageIndexAPIError, match="instructions="):
+            local_chat._openai_agent(None, "chat", "gpt-test", "sys",
+                                     None, None, extra_body={key: "x"})
+    with pytest.raises(PageIndexAPIError, match="instructions="):
+        local_chat._openai_agent(None, "responses", "gpt-test", "sys",
+                                 None, None, extra_body={"input": "x"})
+
+
+@needs_anthropic
+def test_messages_extra_body_refuses_skeleton_before_transport(client,
+                                                                monkeypatch):
+    made = []
+    monkeypatch.setattr(local_chat, "_anthropic_client",
+                        lambda backend=None: made.append(1))
+    with pytest.raises(PageIndexAPIError, match="instructions="):
+        local_chat.run_messages(client, "q", model="claude-x",
+                                extra_body={"system": "x"})
+    assert made == []
+
+
+def test_chat_protocol_chokes(client, monkeypatch):
+    monkeypatch.setattr(local_chat, "run_responses",
+                        lambda c, input, **kw: "door")
+    with pytest.raises(PageIndexAPIError, match="protocol selects"):
+        client.chat("q", protocol="grpc")
+    with pytest.raises(PageIndexAPIError, match="drop show_process"):
+        client.chat("q", protocol="responses", stream=True, show_process=True)
+    # the protocol refusal first: "add stream=True" is no remedy here
+    with pytest.raises(PageIndexAPIError, match="drop show_process"):
+        client.chat("q", protocol="responses", show_process=True)
+    with pytest.raises(PageIndexAPIError, match="instructions blocks"):
+        client.chat("q", protocol="responses",
+                    instructions=[{"type": "text", "text": "x"}])
+    with pytest.raises(PageIndexAPIError, match="instructions blocks"):
+        client.chat("q", instructions=[{"type": "text", "text": "x"}])
+    with pytest.raises(PageIndexAPIError, match="model="):
+        client.chat("q", protocol="messages")
+    with pytest.raises(PageIndexAPIError, match="model="):
+        client.chat("q", protocol="messages", model="")
+
+
+@needs_agents
+def test_chat_instructions_precede_history_system_rows(client, store_path,
+                                                        fake_model, monkeypatch):
+    fake_model([[_msg_item("ok")], [_msg_item("ok")], [_msg_item("ok")]])
+    seen = {}
+    real = local_chat._managed_instructions
+
+    def spy(c, extra):
+        seen["extra"] = list(extra)
+        return real(c, extra)
+
+    monkeypatch.setattr(local_chat, "_managed_instructions", spy)
+    answer = client.chat([{"role": "system", "content": "short"},
+                          {"role": "user", "content": "q"}],
+                         instructions="analyst")
+    assert answer == "ok"
+    assert seen["extra"] == ["analyst", "short"]
+    client.chat("q", instructions="analyst")  # a bare question works too
+    assert seen["extra"] == ["analyst"]
+    client.chat("q", instructions="")  # blank configures nothing, no row
+    assert seen["extra"] == []
+
+
+def test_chat_answer_lane_forwards_the_promoted_knobs(client, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(local_chat, "run_chat_completions",
+                        lambda c, messages, **kw: seen.update(kw) or {
+                            "choices": [{"message": {"content": "a"}}]})
+    knobs = dict(max_turns=2, backend={"api_key": "k"},
+                 extra_headers={"x": "1"}, extra_body={"seed": 1})
+    assert client.chat("q", **knobs) == "a"
+    assert {k: seen[k] for k in knobs} == knobs
+    streamed = {}
+    monkeypatch.setattr(local_chat, "run_chat_stream",
+                        lambda c, messages, **kw: streamed.update(kw) or "s")
+    assert client.chat("q", stream=True, **knobs) == "s"
+    assert {k: streamed[k] for k in knobs} == knobs
