@@ -691,14 +691,43 @@ def convert_physical_index_to_int(data):
     return data
 
 
+_ROMAN_REGEX = re.compile(r"^m{0,4}(cm|cd|d?c{0,3})(xc|xl|l?x{0,3})(ix|iv|v?i{0,3})$", re.IGNORECASE)
+_ROMAN_VALUES = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
+
+
+def roman_to_int(s: str) -> int | None:
+    """Convert a Roman numeral string (e.g. 'iv', 'xii', 'IV') to an integer.
+    Returns None if s is not a valid Roman numeral."""
+    if not isinstance(s, str):
+        return None
+    cleaned = s.strip()
+    if not cleaned or not _ROMAN_REGEX.match(cleaned):
+        return None
+    total = 0
+    prev = 0
+    for ch in reversed(cleaned.lower()):
+        val = _ROMAN_VALUES.get(ch, 0)
+        if val < prev:
+            total -= val
+        else:
+            total += val
+        prev = val
+    return total if total > 0 else None
+
+
 def convert_page_to_int(data):
     for item in data:
-        if 'page' in item and isinstance(item['page'], str):
-            try:
-                item['page'] = int(item['page'])
-            except ValueError:
-                # Keep original value if conversion fails
-                pass
+        if 'page' in item and item['page'] is not None:
+            if isinstance(item['page'], int):
+                continue
+            if isinstance(item['page'], str):
+                cleaned = item['page'].strip()
+                try:
+                    item['page'] = int(cleaned)
+                except ValueError:
+                    roman_val = roman_to_int(cleaned)
+                    if roman_val is not None:
+                        item['page'] = roman_val
     return data
 
 
