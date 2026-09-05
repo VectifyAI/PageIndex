@@ -1,6 +1,8 @@
-"""stdio MCP server exposing the library to Claude Code.
+"""MCP server exposing the library to Claude Code, over stdio (local) or
+Streamable HTTP (cloud-hosted — see BookLibraryCloud_ARCHITECTURE.md).
 
-Register once:  claude mcp add --scope user books -- <fork>/.venv/bin/books mcp
+Local stdio, register once:  claude mcp add --scope user books -- <fork>/.venv/bin/books mcp
+Cloud-hosted: installed via the books-plugin Claude Code plugin instead.
 """
 from __future__ import annotations
 

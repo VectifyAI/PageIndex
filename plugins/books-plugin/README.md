@@ -7,8 +7,13 @@ Query and digest a personal PageIndex book library from Claude Code.
     claude plugin marketplace add utkarsh04agrawal/PageIndex
     claude plugin install books-plugin@book-library-plugins
 
-This gives you the `/book-query` and `/book-digest` skills, already wired
-to the shared library — no further setup.
+This gives you the `/book-query` skill fully working out of the box,
+already wired to the shared library — no further setup. `/book-digest`
+works for reading and answering, but its "save a digest" step writes to
+`~/github/repos/book-library/digests/` and its book/chapter path calls the
+local `books summarize` CLI — both assume the library owner's machine, so
+those two things won't work for you unless you're also running the library
+locally.
 
 ## Install (phone / Claude.ai web)
 

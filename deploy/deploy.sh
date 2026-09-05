@@ -7,7 +7,7 @@ PROJECT_ID="${1:?Usage: deploy.sh <GCP_PROJECT_ID> [REGION]}"
 REGION="${2:-us-central1}"
 SERVICE=books-mcp
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BOOK_LIBRARY_SRC="/Users/utkarshagrawal/github/repos/book-library"
+BOOK_LIBRARY_SRC="${BOOK_LIBRARY_SRC:-/Users/utkarshagrawal/github/repos/book-library}"
 
 echo "Staging book-library data from $BOOK_LIBRARY_SRC ..."
 rm -rf "$REPO_ROOT/deploy/_book_library_data"
