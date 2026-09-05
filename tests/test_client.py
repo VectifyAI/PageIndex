@@ -715,11 +715,11 @@ def test_submit_rejects_structure_beyond_stored_pages(local_client, sample_pdf,
     assert local_client._api._store.list_metas() == []
 
 
-def test_submit_survives_pypdf2_lone_surrogates(local_client, sample_pdf,
-                                                monkeypatch):
-    """PyPDF2 decodes broken ToUnicode with surrogatepass; the store gets U+FFFD, not a utf-8-fatal str."""
-    import PyPDF2
-    monkeypatch.setattr(PyPDF2.PageObject, "extract_text",
+def test_submit_survives_pypdf_lone_surrogates(local_client, sample_pdf,
+                                               monkeypatch):
+    """pypdf decodes broken ToUnicode with surrogatepass; the store gets U+FFFD, not a utf-8-fatal str."""
+    import pypdf
+    monkeypatch.setattr(pypdf.PageObject, "extract_text",
                         lambda self: "\ud83dello broken")
     monkeypatch.setattr(
         pageindex.flash, "page_index_flash",
@@ -798,7 +798,7 @@ def test_corrupt_pdf_raises_api_error(local_client, tmp_path):
 
 
 def test_encrypted_pdf_raises_api_error(local_client, sample_pdf, tmp_path):
-    from PyPDF2 import PdfReader, PdfWriter
+    from pypdf import PdfReader, PdfWriter
 
     writer = PdfWriter()
     for page in PdfReader(sample_pdf).pages:
@@ -809,6 +809,25 @@ def test_encrypted_pdf_raises_api_error(local_client, sample_pdf, tmp_path):
         writer.write(f)
     with pytest.raises(PageIndexAPIError, match="could not read PDF"):
         local_client.submit_document(str(enc))
+
+
+def test_permission_only_encrypted_pdf_does_not_crash_on_aes(tmp_path, sample_pdf):
+    """Regression test for #426: permission-only encrypted PDF with empty user password
+    must not crash with DependencyError on pypdf."""
+    from pypdf import PdfReader, PdfWriter
+
+    writer = PdfWriter()
+    for page in PdfReader(sample_pdf).pages:
+        writer.add_page(page)
+    writer.encrypt(user_password="", owner_password="owner-secret-key")
+    enc = tmp_path / "perm_only.pdf"
+    with open(enc, "wb") as f:
+        writer.write(f)
+
+    reader = PdfReader(str(enc))
+    assert len(reader.pages) > 0
+    text = reader.pages[0].extract_text()
+    assert text is not None
 
 
 def test_submit_explicit_standard_mode(local_client, sample_pdf, monkeypatch):

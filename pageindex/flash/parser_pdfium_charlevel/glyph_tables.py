@@ -16,7 +16,7 @@ from .cmap_parse import _parse_int
 # font's encoding (dictionary /Encoding BaseEncoding+Differences, or an embedded
 # Type1 program's builtin encoding) to a glyph name, maps that name through the
 # bundled glyph table, and otherwise falls back to the raw charcode. The map is
-# rebuilt from the PDF's own font dictionaries via the PyPDF2 xref channel
+# rebuilt from the PDF's own font dictionaries via the pypdf xref channel
 # (font metadata only, no text decode), then applied where PDFium's output
 # disagrees.
 #
