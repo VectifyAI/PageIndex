@@ -1,0 +1,12 @@
+.git/
+.venv/
+.pytest_cache/
+__pycache__/
+tests/
+cookbook/
+examples/
+assets/
+.github/
+.claude/
+*.egg-info/
+.DS_Store

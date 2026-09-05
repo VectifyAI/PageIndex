@@ -8,3 +8,4 @@ logs/
 dist/
 results/
 *.egg-info/
+deploy/_book_library_data/
