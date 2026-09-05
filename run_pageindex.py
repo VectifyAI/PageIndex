@@ -7,9 +7,10 @@ from pageindex.utils import ConfigLoader
 
 if __name__ == "__main__":
     # Set up argument parser
-    parser = argparse.ArgumentParser(description='Process PDF or Markdown document and generate structure')
+    parser = argparse.ArgumentParser(description='Process PDF, Markdown, or Text document and generate structure')
     parser.add_argument('--pdf_path', type=str, help='Path to the PDF file')
     parser.add_argument('--md_path', type=str, help='Path to the Markdown file')
+    parser.add_argument('--txt_path', type=str, help='Path to the plain text (.txt) file')
     parser.add_argument('--mode', choices=['flash', 'standard'], default='flash',
                       help='Processing mode (default: flash)')
     parser.add_argument('--flash', action='store_true', default=False,
@@ -58,10 +59,11 @@ if __name__ == "__main__":
         args.mode = 'flash'
 
     # Validate that exactly one file type is specified
-    if not args.pdf_path and not args.md_path:
-        raise ValueError("Either --pdf_path or --md_path must be specified")
-    if args.pdf_path and args.md_path:
-        raise ValueError("Only one of --pdf_path or --md_path can be specified")
+    specified_files = [p for p in (args.pdf_path, args.md_path, args.txt_path) if p is not None]
+    if len(specified_files) == 0:
+        raise ValueError("Either --pdf_path, --md_path, or --txt_path must be specified")
+    if len(specified_files) > 1:
+        raise ValueError("Only one of --pdf_path, --md_path, or --txt_path can be specified")
     if args.optimize is not None and not (args.pdf_path and args.mode == 'flash'):
         raise ValueError("--optimize requires Flash mode with --pdf_path")
     if args.optimize is None:
@@ -198,4 +200,41 @@ if __name__ == "__main__":
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(toc_with_page_number, f, indent=2, ensure_ascii=False)
         
+        print(f'Tree structure saved to: {output_file}')
+    elif args.txt_path:
+        from pageindex.page_index_txt import txt_to_tree
+        from pageindex.utils import ConfigLoader
+        config_loader = ConfigLoader()
+
+        user_opt = {
+            'index_model': args.index_model,
+            'model': args.model,
+            'summary_model': args.summary_model,
+        }
+
+        opt = config_loader.load({k: v for k, v in user_opt.items() if v is not None})
+
+        toc_with_page_number = asyncio.run(txt_to_tree(
+            txt_path=args.txt_path,
+            if_thinning=args.if_thinning.lower() == 'yes',
+            min_token_threshold=args.thinning_threshold,
+            if_add_node_summary=args.if_add_node_summary,
+            summary_token_threshold=args.summary_token_threshold,
+            model=opt.model,
+            summary_model=opt.summary_model,
+            if_add_doc_description=args.if_add_doc_description,
+            if_add_node_text=args.if_add_node_text,
+            if_add_node_id=args.if_add_node_id
+        ))
+
+        print('Parsing done, saving to file...')
+
+        txt_name = os.path.splitext(os.path.basename(args.txt_path))[0]
+        output_dir = './results'
+        output_file = f'{output_dir}/{txt_name}_structure.json'
+        os.makedirs(output_dir, exist_ok=True)
+
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(toc_with_page_number, f, indent=2, ensure_ascii=False)
+
         print(f'Tree structure saved to: {output_file}')
