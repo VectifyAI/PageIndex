@@ -643,14 +643,22 @@ def _chat_agent(client, messages, doc_id, model, temperature=None,
 
 def _output_text(output) -> str:
     """A tool result for the display: a string as it is, the framework's
-    structured items by their text (anything else as JSON)."""
+    structured items by their text, anything else as JSON with a data
+    URL's base64 payload elided."""
     if isinstance(output, str):
         return output
-    items = output if isinstance(output, list) else [output]
-    return "\n".join(
-        item["text"] if isinstance(item, dict) and item.get("type") == "text"
-        else json.dumps(item, ensure_ascii=False)
-        for item in items)
+    lines = []
+    for item in output if isinstance(output, list) else [output]:
+        kind = item.get("type") if isinstance(item, dict) else None
+        if kind == "text":
+            lines.append(item["text"])
+        elif kind == "image" and str(item.get("image_url", "")).startswith("data:"):
+            head, _, _ = item["image_url"].partition(",")
+            lines.append(json.dumps({**item, "image_url": head + ",..."},
+                                    ensure_ascii=False))
+        else:
+            lines.append(json.dumps(item, ensure_ascii=False))
+    return "\n".join(lines)
 
 
 def _clip(text, cap: int = 200) -> str:
