@@ -704,7 +704,8 @@ def test_chat_stream_events_typed_sequence(client, store_path, fake_model):
     assert result["name"] == "get_document"
     assert result["call_id"] == "call_1"
     assert "... (+" not in str(result["output"])  # never clipped
-    assert '"next_steps"' in result["output"]
+    # The result as the framework recorded it: its text item.
+    assert '"next_steps"' in result["output"]["text"]
     assert "".join(ev["delta"] for ev in events
                    if ev["type"] == "answer") == "The answer"
 
@@ -1685,12 +1686,33 @@ def test_doc_id_scopes_tools_to_targeted_documents(client, store_path,
     client.chat_completions("q", doc_id="pi-a")
 
     def tool_outputs(items):
-        return [item["output"] for item in items
+        # function_call_output.output: the framework's structured text item
+        return [item["output"][0]["text"] for item in items
                 if item.get("type") == "function_call_output"]
 
     assert "NOT_FOUND" in tool_outputs(fake.inputs[1])[-1]
     browse = json.loads(tool_outputs(fake.inputs[2])[-1])
     assert [doc["name"] for doc in browse["documents"]] == ["report.pdf"]
+
+
+@needs_agents
+def test_malformed_tool_arguments_answer_the_model(client, store_path,
+                                                    fake_model):
+    """A truncated argument string reaches the tool (strict schemas are
+    off). The tools are the framework's own MCP conversion, so its failure
+    pipeline hands the model an error message and the run goes on: no
+    aborted run, no SDK envelope."""
+    from openai.types.responses import ResponseFunctionToolCall
+    seed_doc(store_path, "pi-a", "report.pdf")
+    bad_call = ResponseFunctionToolCall(
+        id="fc_1", type="function_call", call_id="call_1",
+        name="get_document", arguments="{not json", status="completed")
+    fake = fake_model([[bad_call], [_msg_item("The answer")]])
+    result = client.chat_completions("What?")
+    assert result["choices"][0]["message"]["content"] == "The answer"
+    outputs = [item["output"] for item in fake.inputs[1]
+               if item.get("type") == "function_call_output"]
+    assert "Invalid JSON" in json.dumps(outputs[-1])
 
 
 @needs_agents
@@ -2910,8 +2932,8 @@ class FakeBridge:
 
     def call_tool(self, name, arguments):
         self.calls.append((name, arguments))
-        return json.dumps({"status": "success",
-                           "data": {"doc": "cloud-doc"}}), False
+        return [{"type": "text", "text": json.dumps(
+            {"status": "success", "data": {"doc": "cloud-doc"}})}], False
 
 
 @pytest.fixture
@@ -2943,6 +2965,26 @@ def test_bridge_chat_runs_engine_over_cloud_tools(bridge_client, fake_model):
     assert "READING WORKFLOW" not in fake.instructions[0]
     # The tool result made it back into turn 2.
     assert "cloud-doc" in json.dumps(fake.inputs[1])
+
+
+@needs_agents
+def test_process_display_elides_image_payloads(bridge_client, fake_model):
+    """A [tool_result] line shows an image item as it is, minus the base64
+    payload; the model still receives the image itself."""
+    client, bridge = bridge_client
+    bridge.call_tool = lambda name, arguments: (
+        [{"type": "text", "text": "page 1"},
+         {"type": "image", "mimeType": "image/png", "data": "A" * 8192}],
+        False)
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "r.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    text = "".join(client.chat("What?", stream=True))
+    assert ('[tool_result] get_document: page 1 {"type": "image", '
+            '"image_url": "data:image/png;base64,..."}') in text
+    assert "AAAA" not in text
+    assert "AAAA" in json.dumps(fake.inputs[1])  # the model got the image
 
 
 @needs_agents

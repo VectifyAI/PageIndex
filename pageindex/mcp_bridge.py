@@ -198,32 +198,37 @@ class McpBridge:
         raise PageIndexAPIError(
             "MCP tools/list pagination did not terminate within 50 pages.")
 
-    def call_tool(self, name: str, arguments: dict[str, Any]) -> "tuple[str, bool]":
-        """Returns (text, is_error) — is_error is the server's MCP isError
-        marking, which callers must carry to their framework's own error
-        channel."""
+    def call_tool(self, name: str, arguments: dict[str, Any],
+                  ) -> "tuple[list[dict], bool]":
+        """Returns (content, is_error): the MCP content blocks untouched,
+        for each adapter to render what its framework carries (render_text
+        is the text-only rendering), and the server's isError marking,
+        which callers must carry to their framework's own error channel."""
         result = self._request("tools/call",
                                {"name": name, "arguments": arguments}) or {}
-        is_error = bool(result.get("isError"))
-        texts = []
-        for block in result.get("content") or []:
-            if isinstance(block, dict) and block.get("type") == "text":
-                texts.append(block.get("text", ""))
-            elif isinstance(block, dict) and isinstance(block.get("data"), str):
-                # Base64 payloads (image/audio) become a metadata stub —
-                # dumped verbatim they hand the model the raw blob. Revisit
-                # if tool results ever pass through as real multimodal input.
-                kind = block.get("mimeType") or block.get("type") or "binary"
-                size_kb = max(1, len(block["data"]) * 3 // 4096)
-                texts.append(f"[{kind} content omitted: ~{size_kb} KB]")
-            elif (isinstance(block, dict)
-                  and isinstance(block.get("resource"), dict)
-                  and isinstance(block["resource"].get("blob"), str)):
-                # EmbeddedResource nests its base64 one level down.
-                resource = block["resource"]
-                kind = resource.get("mimeType") or "binary"
-                size_kb = max(1, len(resource["blob"]) * 3 // 4096)
-                texts.append(f"[{kind} content omitted: ~{size_kb} KB]")
-            else:
-                texts.append(json.dumps(block, ensure_ascii=False))
-        return "\n".join(texts), is_error
+        return list(result.get("content") or []), bool(result.get("isError"))
+
+
+def render_text(blocks: list) -> str:
+    """The text-only rendering of MCP content: text verbatim, base64
+    payloads as a size stub (dumped whole they hand the model the raw
+    blob)."""
+    texts = []
+    for block in blocks:
+        if isinstance(block, dict) and block.get("type") == "text":
+            texts.append(block.get("text", ""))
+        elif isinstance(block, dict) and isinstance(block.get("data"), str):
+            kind = block.get("mimeType") or block.get("type") or "binary"
+            size_kb = max(1, len(block["data"]) * 3 // 4096)
+            texts.append(f"[{kind} content omitted: ~{size_kb} KB]")
+        elif (isinstance(block, dict)
+              and isinstance(block.get("resource"), dict)
+              and isinstance(block["resource"].get("blob"), str)):
+            # EmbeddedResource nests its base64 one level down.
+            resource = block["resource"]
+            kind = resource.get("mimeType") or "binary"
+            size_kb = max(1, len(resource["blob"]) * 3 // 4096)
+            texts.append(f"[{kind} content omitted: ~{size_kb} KB]")
+        else:
+            texts.append(json.dumps(block, ensure_ascii=False))
+    return "\n".join(texts)

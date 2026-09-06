@@ -651,22 +651,9 @@ def test_as_openai_tools_invocation_runs_call_tool(client, store_path):
     tool = {t.name: t for t in client.as_openai_tools()}["get_document"]
     out = asyncio.run(tool.on_invoke_tool(
         None, json.dumps({"doc_name": "report.pdf", "folder_id": None})))
-    payload = json.loads(out)
+    # The framework's own MCP conversion: a text result is its text item.
+    payload = json.loads(out["text"])
     assert payload["success"] is True and payload["name"] == "report.pdf"
-
-
-def test_as_openai_tools_malformed_args_answer_the_model(client, store_path):
-    """strict_json_schema is off, so a truncated or non-object argument
-    string is reachable; raising here aborted the caller's whole run —
-    the model must get the guided envelope back and retry instead."""
-    pytest.importorskip("agents")
-    seed_doc(store_path, "pi-a", "report.pdf")
-    tool = {t.name: t for t in client.as_openai_tools()}["get_document"]
-    for bad in ('{not json', '[1, 2]', '"x"', 'null'):
-        out = asyncio.run(tool.on_invoke_tool(None, bad))
-        payload = json.loads(out)
-        assert payload["errorCode"] == "INVALID_INPUT"
-        assert "JSON object" in payload["error"]
 
 
 def test_as_openai_tools_cloud_object_params_survive(monkeypatch):
@@ -696,7 +683,7 @@ def test_as_openai_tools_cloud_object_params_survive(monkeypatch):
                      "inputSchema": schema}]
 
         def call_tool(self, name, arguments):
-            return json.dumps({"success": True}), False
+            return _text_block(json.dumps({"success": True})), False
 
     monkeypatch.setattr(mcp_bridge, "McpBridge", _ObjBridge)
     cloud = PageIndexCloudClient(api_key="pi-test-key")
@@ -953,10 +940,10 @@ def test_openai_agent_config_doc_scope_enforced_in_tools(client, store_path):
              for tool in client.openai_agent_config(doc_id="pi-a")["tools"]}
     out = asyncio.run(tools["get_page_content"].on_invoke_tool(
         None, json.dumps({"doc_name": "payroll.pdf", "pages": "1"})))
-    assert json.loads(out)["errorCode"] == "NOT_FOUND"
+    assert json.loads(out["text"])["errorCode"] == "NOT_FOUND"
     out = asyncio.run(tools["browse_documents"].on_invoke_tool(None, "{}"))
     assert [doc["name"]
-            for doc in json.loads(out)["documents"]] == ["report.pdf"]
+            for doc in json.loads(out["text"])["documents"]] == ["report.pdf"]
 
 
 def test_anthropic_runner_config_doc_scope_enforced_in_tools(client,
@@ -972,7 +959,7 @@ def test_anthropic_runner_config_doc_scope_enforced_in_tools(client,
     with pytest.raises(ToolError, match="NOT_FOUND"):
         tools["get_page_content"].call({"doc_name": "payroll.pdf",
                                         "pages": "1"})
-    browse = json.loads(tools["browse_documents"].call({}))
+    browse = json.loads(tools["browse_documents"].call({})[0]["text"])
     assert [doc["name"] for doc in browse["documents"]] == ["report.pdf"]
 
 
@@ -1065,10 +1052,10 @@ def test_bridge_invoker_reraises_auth_failures():
         def call_tool(self, name, arguments):
             raise PageIndexAPIError("HTTP 503", status_code=503)
 
-    text, is_error = agent_tools_module._bridge_invoker(
+    blocks, is_error = agent_tools_module._bridge_invoker(
         Down(), "get_document", {})({})
     assert is_error
-    assert json.loads(text)["errorCode"] == "INTERNAL_ERROR"
+    assert json.loads(blocks[0]["text"])["errorCode"] == "INTERNAL_ERROR"
 
 
 def test_cloud_bridge_gates_the_endpoint(monkeypatch):
@@ -1137,7 +1124,8 @@ def test_as_anthropic_tools_local_in_process(client, store_path):
     assert browse.input_schema == _local_schema("browse_documents")
     assert browse.description == _local_description("browse_documents")
     seed_doc(store_path, "pi-a", "report.pdf")
-    assert "report.pdf" in browse.call({})
+    # Results are the Anthropic SDK's own MCP conversion: content blocks.
+    assert "report.pdf" in browse.call({})[0]["text"]
 
 
 def test_as_anthropic_tools_async_flavor(client, store_path):
@@ -1148,7 +1136,7 @@ def test_as_anthropic_tools_async_flavor(client, store_path):
     assert [tool.name for tool in tools] == list(tool_names())
     seed_doc(store_path, "pi-a", "report.pdf")
     browse = {tool.name: tool for tool in tools}["browse_documents"]
-    assert "report.pdf" in asyncio.run(browse.call({}))
+    assert "report.pdf" in asyncio.run(browse.call({}))[0]["text"]
 
 
 def test_as_anthropic_tools_local_management_opt_in(client):
@@ -1168,8 +1156,8 @@ def test_as_anthropic_tools_local_failures_raise_toolerror(client, store_path):
     tools = {tool.name: tool for tool in client.as_anthropic_tools()}
     with pytest.raises(ToolError) as excinfo:
         tools["get_document"].call({"doc_name": "ghost.pdf"})
-    assert json.loads(excinfo.value.content)["errorCode"] == "NOT_FOUND"
-    assert "report.pdf" in tools["browse_documents"].call({})
+    assert json.loads(excinfo.value.content[0]["text"])["errorCode"] == "NOT_FOUND"
+    assert "report.pdf" in tools["browse_documents"].call({})[0]["text"]
 
 
 def test_as_anthropic_tools_cloud_iserror_raises_toolerror(
@@ -1181,10 +1169,10 @@ def test_as_anthropic_tools_cloud_iserror_raises_toolerror(
     cloud, created = cloud_with_fake_bridge
     tools = cloud.as_anthropic_tools()
     created["bridge"].call_tool = lambda name, arguments: (
-        '{"error": "denied"}', True)
+        _text_block('{"error": "denied"}'), True)
     with pytest.raises(ToolError) as excinfo:
         tools[0].call({"query": "q"})
-    assert json.loads(excinfo.value.content)["error"] == "denied"
+    assert json.loads(excinfo.value.content[0]["text"])["error"] == "denied"
 
 
 def test_as_anthropic_tools_cloud_schemas_pass_through(cloud_with_fake_bridge):
@@ -1201,7 +1189,7 @@ def test_as_anthropic_tools_cloud_schemas_pass_through(cloud_with_fake_bridge):
     # Calls route over the bridge; None-valued arguments mean "omitted".
     out = tools[1].call({"doc_name": "x.pdf", "folder_id": None})
     assert bridge.calls == [("get_document", {"doc_name": "x.pdf"})]
-    assert json.loads(out)["success"] is True
+    assert json.loads(out[0]["text"])["success"] is True
 
 
 def test_as_anthropic_tools_cloud_async_flavor(cloud_with_fake_bridge):
@@ -1212,7 +1200,7 @@ def test_as_anthropic_tools_cloud_async_flavor(cloud_with_fake_bridge):
     assert all(isinstance(tool, BetaAsyncFunctionTool) for tool in tools)
     out = asyncio.run(tools[1].call({"doc_name": "x.pdf"}))
     assert created["bridge"].calls == [("get_document", {"doc_name": "x.pdf"})]
-    assert json.loads(out)["success"] is True
+    assert json.loads(out[0]["text"])["success"] is True
 
 
 def test_as_anthropic_tools_cloud_management_opt_in(cloud_with_fake_bridge):
@@ -1239,7 +1227,7 @@ def test_as_anthropic_tools_cloud_contains_bridge_errors(cloud_with_fake_bridge)
     created["bridge"].call_tool = boom
     with pytest.raises(ToolError) as excinfo:
         tools[0].call({"query": "q"})
-    payload = json.loads(excinfo.value.content)
+    payload = json.loads(excinfo.value.content[0]["text"])
     assert payload["errorCode"] == "INTERNAL_ERROR"
     assert "bridge down" in payload["error"]
 
@@ -1254,6 +1242,11 @@ def test_agent_tools_work_without_frameworks(client, store_path, monkeypatch):
 
 
 # ── cloud agent_tools: MCP bridge ──
+
+def _text_block(text):
+    """A tool result as the bridge returns it: MCP content blocks."""
+    return [{"type": "text", "text": text}]
+
 
 class _FakeBridge:
     def __init__(self, url, headers):
@@ -1319,8 +1312,8 @@ class _FakeBridge:
 
     def call_tool(self, name, arguments):
         self.calls.append((name, arguments))
-        return json.dumps({"success": True, "tool": name,
-                           "args": arguments}), False
+        return _text_block(json.dumps({"success": True, "tool": name,
+                                       "args": arguments})), False
 
 
 @pytest.fixture
@@ -1389,7 +1382,7 @@ def test_cloud_agent_tools_null_description_survives():
 
     class _Bridge:
         def call_tool(self, name, arguments):
-            return json.dumps({"success": True}), False
+            return _text_block(json.dumps({"success": True})), False
 
     tool = _synth(_Bridge(), {
         "name": "search_documents",
@@ -1531,8 +1524,9 @@ def test_mcp_bridge_protocol(monkeypatch):
     assert list_headers["Authorization"] == "Bearer k"
 
     # First tools/call 404s (expired session) → re-initialize → retry succeeds.
-    text, is_error = bridge.call_tool("t1", {"a": 1})
-    assert (text, is_error) == ("hello\nworld", False)
+    blocks, is_error = bridge.call_tool("t1", {"a": 1})
+    assert (blocks, is_error) == ([{"type": "text", "text": "hello"},
+                                   {"type": "text", "text": "world"}], False)
     methods = [p["payload"]["method"] for p in posts]
     assert methods.count("initialize") == 2
     # The expired session's negotiated state must not leak into the new
@@ -1670,25 +1664,141 @@ def test_mcp_bridge_init_notification_bars_concurrent_requests(monkeypatch):
     assert events.count(("start", "initialize")) == 1
 
 
-def test_mcp_bridge_blob_blocks_become_stubs():
-    """Non-text content used to be json.dumps'd wholesale, handing the
-    model the raw base64 payload of an image tool's response."""
-    from pageindex.mcp_bridge import McpBridge
+_BLOB = "A" * 8192  # ~6 KB decoded
+
+
+def test_mcp_bridge_hands_content_blocks_through():
+    """The bridge used to flatten every result to text, dropping images
+    before any adapter could carry them; render_text is now the text-only
+    rendering, and it still never hands the model a raw base64 payload."""
+    from pageindex.mcp_bridge import McpBridge, render_text
 
     bridge = McpBridge("https://api.pageindex.ai/mcp", {})
-    blob = "A" * 8192  # ~6 KB decoded
-    bridge._request = lambda method, params: {"content": [
+    content = [
         {"type": "text", "text": "Page 3 of report.pdf"},
-        {"type": "image", "mimeType": "image/png", "data": blob},
+        {"type": "image", "mimeType": "image/png", "data": _BLOB},
         {"type": "resource",
-         "resource": {"mimeType": "image/jpeg", "blob": blob}},
-    ]}
-    text, is_error = bridge.call_tool("get_document_image", {})
-    assert not is_error
+         "resource": {"mimeType": "image/jpeg", "blob": _BLOB}},
+    ]
+    bridge._request = lambda method, params: {"content": content}
+    assert bridge.call_tool("get_document_image", {}) == (content, False)
+    text = render_text(content)
     assert "Page 3 of report.pdf" in text
     assert "AAAA" not in text
     assert "[image/png content omitted: ~6 KB]" in text
     assert "[image/jpeg content omitted: ~6 KB]" in text
+
+
+class _ImageBridge:
+    """A cloud tool whose result is multimodal: text and a PNG."""
+    is_error = False
+
+    def __init__(self, url, headers):
+        pass
+
+    def list_tools(self):
+        return [{"name": "get_document_image", "description": "d",
+                 "annotations": {"readOnlyHint": True},
+                 "inputSchema": {"type": "object",
+                                 "properties": {"image_path": {"type": "string"}},
+                                 "required": ["image_path"]}}]
+
+    def call_tool(self, name, arguments):
+        return [{"type": "text", "text": "page 1"},
+                {"type": "image", "mimeType": "image/png", "data": "QUJD"},
+                ], self.is_error
+
+
+def test_agent_tools_functions_render_images_as_stubs(monkeypatch):
+    """The str-returning surface keeps the size stub, never the blob."""
+    import pageindex.mcp_bridge as mcp_bridge
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _ImageBridge)
+    fn = PageIndexCloudClient(api_key="pi-test-key").agent_tools()[0]
+    assert fn(image_path="x") == "page 1\n[image/png content omitted: ~1 KB]"
+
+
+def test_openai_mcp_server_carries_mcp_types(client, store_path, monkeypatch):
+    """The in-process server hands the framework MCP types on both sides,
+    local and cloud alike: tools from the specs, results validated as
+    CallToolResult with the content untouched."""
+    pytest.importorskip("agents")
+    from mcp.types import ImageContent, TextContent
+    from pageindex.integrations.openai_agents import build_mcp_server
+    seed_doc(store_path, "pi-a", "report.pdf")
+    local = build_mcp_server(client)
+    assert [tool.name for tool in asyncio.run(local.list_tools())] == list(tool_names())
+    result = asyncio.run(local.call_tool("get_document", {"doc_name": "ghost.pdf"}))
+    # Attribute names differ between mcp 1.x and 2.x; the wire aliases don't.
+    wire = result.model_dump(by_alias=True, exclude_none=True)
+    assert wire["isError"] and isinstance(result.content[0], TextContent)
+    assert json.loads(wire["content"][0]["text"])["errorCode"] == "NOT_FOUND"
+
+    import pageindex.mcp_bridge as mcp_bridge
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _ImageBridge)
+    cloud = build_mcp_server(PageIndexCloudClient(api_key="pi-test-key"))
+    result = asyncio.run(cloud.call_tool("get_document_image", {"image_path": "x"}))
+    wire = result.model_dump(by_alias=True, exclude_none=True)
+    assert not wire["isError"] and isinstance(result.content[1], ImageContent)
+    assert wire["content"][1] == {"type": "image", "data": "QUJD",
+                                  "mimeType": "image/png"}
+
+
+def test_as_openai_tools_images_reach_the_model(monkeypatch):
+    """Images ride as the framework's own image output (a data URL) — the
+    framework's MCP conversion, not the SDK's."""
+    pytest.importorskip("agents")
+    import pageindex.mcp_bridge as mcp_bridge
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _ImageBridge)
+    tool = PageIndexCloudClient(api_key="pi-test-key").as_openai_tools()[0]
+    out = asyncio.run(tool.on_invoke_tool(None, '{"image_path": "x"}'))
+    assert out == [{"type": "text", "text": "page 1"},
+                   {"type": "image", "image_url": "data:image/png;base64,QUJD"}]
+
+
+def test_as_anthropic_tools_images_reach_the_model(monkeypatch):
+    """Images ride as base64 image blocks, on the error channel too — the
+    Anthropic SDK's MCP conversion, not the SDK's."""
+    pytest.importorskip("anthropic")
+    from anthropic.lib.tools import ToolError
+    import pageindex.mcp_bridge as mcp_bridge
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _ImageBridge)
+    tool = PageIndexCloudClient(api_key="pi-test-key").as_anthropic_tools()[0]
+    content = [{"type": "text", "text": "page 1"},
+               {"type": "image", "source": {"type": "base64",
+                                            "media_type": "image/png",
+                                            "data": "QUJD"}}]
+    assert tool.call({"image_path": "x"}) == content
+    monkeypatch.setattr(_ImageBridge, "is_error", True)
+    with pytest.raises(ToolError) as excinfo:
+        tool.call({"image_path": "x"})
+    assert excinfo.value.content == content
+
+
+def test_integrations_carry_mcp_and_render_nothing():
+    """The rule behind the adapters: tool results reach a framework as MCP
+    content and the framework renders them. The SDK's only text rendering
+    (render_text) serves the str-returning plain functions."""
+    integrations = Path(__file__).resolve().parents[1] / "pageindex" / "integrations"
+    for path in integrations.glob("*.py"):
+        assert "render_text" not in path.read_text(encoding="utf-8"), path.name
+
+
+def test_as_claude_mcp_local_handler_passes_blocks_through(client, monkeypatch):
+    """The in-process SDK MCP server speaks MCP: content blocks go out as
+    they came in, images included, with the error marking."""
+    claude_agent_sdk = pytest.importorskip("claude_agent_sdk")
+    import pageindex.agent_tools as agent_tools
+    blocks = [{"type": "text", "text": "page 1"},
+              {"type": "image", "mimeType": "image/png", "data": "QUJD"}]
+    monkeypatch.setattr(agent_tools, "_tool_specs", lambda *args, **kwargs: [
+        ("get_page_content", "d", {"type": "object", "properties": {}},
+         lambda arguments: (blocks, True))])
+    captured = {}
+    monkeypatch.setattr(claude_agent_sdk, "create_sdk_mcp_server",
+                        lambda **kwargs: captured.update(kwargs))
+    client.as_claude_mcp()
+    result = asyncio.run(captured["tools"][0].handler({}))
+    assert result == {"content": blocks, "is_error": True}
 
 
 # ── review-round regressions ──
@@ -1712,7 +1822,7 @@ def test_synth_binding_error_names_the_tool():
 
     class _Bridge:
         def call_tool(self, name, args):
-            return json.dumps(args), False
+            return _text_block(json.dumps(args)), False
 
     meta = {"name": "browse_documents", "description": "d",
             "inputSchema": TOOL_CONTRACT["browse_documents"]["schema"]}
@@ -1733,7 +1843,7 @@ def test_bridge_invoker_coerces_string_booleans():
     class _Bridge:
         def call_tool(self, name, args):
             seen.update(args)
-            return "{}", False
+            return _text_block("{}"), False
 
     invoke = _bridge_invoker(_Bridge(), "get_document",
                              TOOL_CONTRACT["get_document"]["schema"])
@@ -1749,7 +1859,7 @@ def test_synth_optional_no_default_param_is_nullable():
 
     class _Bridge:
         def call_tool(self, name, args):
-            return json.dumps(args), False
+            return _text_block(json.dumps(args)), False
 
     meta = {"name": "browse_documents",
             "description": "d",
@@ -1766,7 +1876,7 @@ def test_synth_array_params_keep_their_item_type():
 
     class _Bridge:
         def call_tool(self, name, args):
-            return json.dumps(args), False
+            return _text_block(json.dumps(args)), False
 
     meta = {"name": "remove_documents", "description": "d",
             "inputSchema": {
@@ -1796,7 +1906,7 @@ def test_synth_escape_hatches():
     class _Bridge:
         def call_tool(self, name, args):
             calls.append((name, args))
-            return "ok", False
+            return _text_block("ok"), False
 
     # Tool named "_invoke" must not recurse into itself.
     invoke_named = _synth(_Bridge(), {
@@ -1916,7 +2026,8 @@ def test_bridge_call_tool_surfaces_iserror(monkeypatch):
         Session=lambda: types.SimpleNamespace(post=fake_post),
         RequestException=requests_mod.RequestException))
     bridge = McpBridge("https://api.pageindex.ai/mcp", {})
-    assert bridge.call_tool("t", {}) == ('{"error": "denied"}', True)
+    assert bridge.call_tool("t", {}) == (
+        [{"type": "text", "text": '{"error": "denied"}'}], True)
 
 
 def test_bridge_rejects_mismatched_reply_id(monkeypatch):
@@ -2174,21 +2285,23 @@ def test_live_cloud_envelope_field_parity(tmp_path):
     exist in the live cloud tool's response for the analogous call — a cloud
     rename of a shared field (has_more, next_offset, content, ...) fails
     here. Guidance wording is deliberately localized and not compared."""
-    from pageindex.mcp_bridge import McpBridge
+    from pageindex.mcp_bridge import McpBridge, render_text
     bridge = McpBridge("https://api.pageindex.ai/mcp",
                        {"Authorization": f"Bearer {LIVE_KEY}"})
-    cloud_browse = json.loads(
-        bridge.call_tool("browse_documents", {"limit": 2})[0])
+
+    def call(name, arguments):
+        return json.loads(render_text(bridge.call_tool(name, arguments)[0]))
+
+    cloud_browse = call("browse_documents", {"limit": 2})
     assert cloud_browse.get("success") is True and cloud_browse["documents"]
     doc_name = cloud_browse["documents"][0]["name"]
     cloud = {
         "browse_documents": cloud_browse,
-        "get_document": json.loads(bridge.call_tool(
-            "get_document", {"doc_name": doc_name})[0]),
-        "get_document_structure": json.loads(bridge.call_tool(
-            "get_document_structure", {"doc_name": doc_name})[0]),
-        "get_page_content": json.loads(bridge.call_tool(
-            "get_page_content", {"doc_name": doc_name, "pages": "1"})[0]),
+        "get_document": call("get_document", {"doc_name": doc_name}),
+        "get_document_structure": call("get_document_structure",
+                                       {"doc_name": doc_name}),
+        "get_page_content": call("get_page_content",
+                                 {"doc_name": doc_name, "pages": "1"}),
     }
 
     store = str(tmp_path / "store")

@@ -3,7 +3,8 @@
 Cloud clients get the remote PageIndex MCP config — the framework connects
 directly, and include_management picks the endpoint (the read-only
 ``?tools=read`` URL by default); local clients get an in-process SDK MCP
-server over the same tool contract, gated the same way at registration.
+server over the same tool contract, gated the same way at registration,
+its results passed through as the MCP content they are.
 """
 from __future__ import annotations
 
@@ -39,8 +40,8 @@ def build_claude_mcp(client, include_management: bool = False, doc_ids=None,
 
     def make_handler(invoke):
         async def handler(arguments: dict[str, Any]) -> dict[str, Any]:
-            text, is_error = await asyncio.to_thread(invoke, arguments or {})
-            result: dict[str, Any] = {"content": [{"type": "text", "text": text}]}
+            blocks, is_error = await asyncio.to_thread(invoke, arguments or {})
+            result: dict[str, Any] = {"content": blocks}
             if is_error:
                 result["is_error"] = True
             return result

@@ -1546,7 +1546,9 @@ class PageIndexClient:
         ``get_document_structure``, ``get_page_content``).
 
         Each function takes JSON-serializable arguments, returns a JSON
-        string, and reports failures inside that JSON instead of raising —
+        string (binary results such as ``get_document_image`` as a size
+        stub — a string cannot carry an image; the framework adapters
+        can), and reports failures inside that JSON instead of raising —
         except a cloud 401/403, which raises PageIndexAPIError.
 
         Args:
@@ -1571,11 +1573,12 @@ class PageIndexClient:
         call).
 
         Cloud (default): the full live read tool set (search, folders,
-        images — as enabled for your key) as plain function tools,
-        discovered from the PageIndex MCP server and executed from your
-        process — works with any model backend. Binary tool results
-        (e.g. ``get_document_image``) arrive as text placeholder stubs
-        on this in-process path. Pass ``hosted=True`` to
+        images — as enabled for your key) as function tools, discovered
+        from the PageIndex MCP server and executed from your process —
+        works with any model backend. The tools are the framework's own
+        MCP conversion, so results reach the model in its shapes: text
+        as text, images (e.g. ``get_document_image``) as images. Pass
+        ``hosted=True`` to
         hand the connection to OpenAI instead: one hosted MCP tool, tool
         calls executed server-side (lowest latency; requires an
         OpenAI-hosted model on the Responses API). The framework's own
@@ -1715,8 +1718,9 @@ class PageIndexClient:
         enabled for your key), discovered from the PageIndex MCP server
         and executed from your process; the server's input schemas pass
         through verbatim (MCP and the Messages API share the schema
-        shape), and binary tool results (e.g. ``get_document_image``)
-        arrive as text placeholder stubs on this in-process path. The
+        shape), and results are the Anthropic SDK's own MCP conversion:
+        content block lists, text as text and images (e.g.
+        ``get_document_image``) as image blocks. The
         server-side alternative is the Messages API's beta
         MCP connector — ``mcp_servers=[{"type": "url", "name":
         "pageindex", "url": f"{BASE_URL}/mcp?tools=read",

@@ -641,6 +641,26 @@ def _chat_agent(client, messages, doc_id, model, temperature=None,
     return agent, items, model_name
 
 
+def _output_text(output) -> str:
+    """A tool result for the display: a string as it is, the framework's
+    structured items by their text, anything else as JSON with a data
+    URL's base64 payload elided."""
+    if isinstance(output, str):
+        return output
+    lines = []
+    for item in output if isinstance(output, list) else [output]:
+        kind = item.get("type") if isinstance(item, dict) else None
+        if kind == "text":
+            lines.append(item["text"])
+        elif kind == "image" and str(item.get("image_url", "")).startswith("data:"):
+            head, _, _ = item["image_url"].partition(",")
+            lines.append(json.dumps({**item, "image_url": head + ",..."},
+                                    ensure_ascii=False))
+        else:
+            lines.append(json.dumps(item, ensure_ascii=False))
+    return "\n".join(lines)
+
+
 def _clip(text, cap: int = 200) -> str:
     """One display line: whitespace flattened, capped for the terminal."""
     flat = " ".join(str(text).split())
@@ -785,7 +805,7 @@ def _weave(events, options) -> Iterator[str]:
             elif kind == "tool_result":
                 if not options["tool_result"]:
                     continue
-                out = _clip(ev["output"], cap)
+                out = _clip(_output_text(ev["output"]), cap)
                 if section == "tool" and ev["call_id"] == last_call:
                     # directly under its own call line
                     yield f"\n[tool_result] {ev['name']}: {out}"

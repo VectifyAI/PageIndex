@@ -42,9 +42,10 @@ class ChatStream:
         """The run as typed event dicts: {"type": "thinking"|"answer",
         "delta": ...}, {"type": "tool_call", "call_id", "name",
         "arguments"}, {"type": "tool_result", "call_id", "name",
-        "output"} — full data, never clipped. Consuming — not merely
-        reading the attribute — claims the view, so debugger panes and
-        getattr probing stay side-effect free."""
+        "output"} — the result as the framework recorded it (a string,
+        or its structured text/image items), never clipped. Consuming —
+        not merely reading the attribute — claims the view, so debugger
+        panes and getattr probing stay side-effect free."""
         def consume():
             if isinstance(self._events, str):
                 raise PageIndexAPIError(self._events)
