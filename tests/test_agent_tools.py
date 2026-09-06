@@ -1728,16 +1728,19 @@ def test_openai_mcp_server_carries_mcp_types(client, store_path, monkeypatch):
     local = build_mcp_server(client)
     assert [tool.name for tool in asyncio.run(local.list_tools())] == list(tool_names())
     result = asyncio.run(local.call_tool("get_document", {"doc_name": "ghost.pdf"}))
-    assert result.isError and isinstance(result.content[0], TextContent)
-    assert json.loads(result.content[0].text)["errorCode"] == "NOT_FOUND"
+    # Attribute names differ between mcp 1.x and 2.x; the wire aliases don't.
+    wire = result.model_dump(by_alias=True, exclude_none=True)
+    assert wire["isError"] and isinstance(result.content[0], TextContent)
+    assert json.loads(wire["content"][0]["text"])["errorCode"] == "NOT_FOUND"
 
     import pageindex.mcp_bridge as mcp_bridge
     monkeypatch.setattr(mcp_bridge, "McpBridge", _ImageBridge)
     cloud = build_mcp_server(PageIndexCloudClient(api_key="pi-test-key"))
     result = asyncio.run(cloud.call_tool("get_document_image", {"image_path": "x"}))
-    assert not result.isError
-    assert isinstance(result.content[1], ImageContent)
-    assert (result.content[1].mimeType, result.content[1].data) == ("image/png", "QUJD")
+    wire = result.model_dump(by_alias=True, exclude_none=True)
+    assert not wire["isError"] and isinstance(result.content[1], ImageContent)
+    assert wire["content"][1] == {"type": "image", "data": "QUJD",
+                                  "mimeType": "image/png"}
 
 
 def test_as_openai_tools_images_reach_the_model(monkeypatch):
