@@ -2968,6 +2968,26 @@ def test_bridge_chat_runs_engine_over_cloud_tools(bridge_client, fake_model):
 
 
 @needs_agents
+def test_process_display_elides_image_payloads(bridge_client, fake_model):
+    """A [tool_result] line shows an image item as it is, minus the base64
+    payload; the model still receives the image itself."""
+    client, bridge = bridge_client
+    bridge.call_tool = lambda name, arguments: (
+        [{"type": "text", "text": "page 1"},
+         {"type": "image", "mimeType": "image/png", "data": "A" * 8192}],
+        False)
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "r.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    text = "".join(client.chat("What?", stream=True))
+    assert ('[tool_result] get_document: page 1 {"type": "image", '
+            '"image_url": "data:image/png;base64,..."}') in text
+    assert "AAAA" not in text
+    assert "AAAA" in json.dumps(fake.inputs[1])  # the model got the image
+
+
+@needs_agents
 def test_bridge_doc_id_targets_at_prompt_level(bridge_client, fake_model,
                                                monkeypatch):
     """On cloud tools there is no local allowlist: doc_id becomes the
