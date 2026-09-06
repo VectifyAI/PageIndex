@@ -30,6 +30,7 @@ import weakref
 from typing import Any, Callable, Optional
 
 from .errors import PageIndexAPIError
+from .mcp_bridge import render_text
 
 TOOL_RESPONSE_CHAR_LIMIT = 100_000
 STRUCTURE_FIRST_PAGE_THRESHOLD = 20
@@ -1357,13 +1358,13 @@ def _annotation_for(spec: dict) -> Any:
 
 
 def _bridge_invoker(bridge, name: str, schema: dict,
-                    ) -> "Callable[[dict], tuple[str, bool]]":
+                    ) -> "Callable[[dict], tuple[list, bool]]":
     """One cloud tool call proxied over MCP: string booleans are coerced
     (same as call_tool), None-valued arguments are dropped (None ≡ omitted,
     matching the contract's "omit if ..." semantics) and failures are
     contained in the error envelope — except 401/403, which re-raise.
-    Returns (envelope_text, is_error), like call_tool."""
-    def _invoke(arguments: dict[str, Any]) -> tuple[str, bool]:
+    Returns (content blocks, is_error), like the bridge."""
+    def _invoke(arguments: dict[str, Any]) -> tuple[list, bool]:
         try:
             arguments = {key: value for key, value in arguments.items()
                          if value is not None}
@@ -1381,16 +1382,17 @@ def _bridge_invoker(bridge, name: str, schema: dict,
                                "try the request again"},
                 "INTERNAL_ERROR",
             )
-            return _dumps(payload), True
+            return [{"type": "text", "text": _dumps(payload)}], True
     return _invoke
 
 
 def _make_tool_function(name: str, description: str, schema: dict,
-                        invoke: "Callable[[dict], tuple[str, bool]]",
+                        invoke: "Callable[[dict], tuple[list, bool]]",
                         ) -> Callable[..., str]:
     """One plain function for a tool: real signature and docstring from the
-    schema, errors contained by the invoker; arguments the signature
-    rejects come back as the guided envelope instead of raising."""
+    schema, the result rendered as text, errors contained by the invoker;
+    arguments the signature rejects come back as the guided envelope
+    instead of raising."""
     import keyword
 
     properties: dict[str, Any] = schema.get("properties") or {}
@@ -1398,11 +1400,11 @@ def _make_tool_function(name: str, description: str, schema: dict,
     _invoke = invoke
 
     params_usable = all(param.isidentifier() and not keyword.iskeyword(param)
-                        and param != "_invoke"
+                        and param not in ("_invoke", "_render")
                         for param in properties)
     if not params_usable:
         def inner(**kwargs: Any) -> str:
-            return _invoke(kwargs)[0]
+            return render_text(_invoke(kwargs)[0])
     else:
         ordered = ([p for p in properties if p in required]
                    + [p for p in properties if p not in required])
@@ -1411,9 +1413,10 @@ def _make_tool_function(name: str, description: str, schema: dict,
             for p in ordered
         )
         args_literal = "{" + ", ".join(f"'{p}': {p}" for p in ordered) + "}"
-        namespace: dict[str, Any] = {"_invoke": _invoke}
+        namespace: dict[str, Any] = {"_invoke": _invoke,
+                                     "_render": render_text}
         exec(f"def _synthesized({rendered}):\n"
-             f"    return _invoke({args_literal})[0]", namespace)
+             f"    return _render(_invoke({args_literal})[0])", namespace)
         inner = namespace["_synthesized"]
         # binding TypeErrors quote __qualname__, not __name__
         inner.__name__ = inner.__qualname__ = name or "tool"
@@ -1499,11 +1502,12 @@ def _require_local_scope(client, doc_ids) -> None:
 
 
 def _tool_specs(client, include_management: bool = False, doc_ids=None,
-                ) -> "list[tuple[str, str, dict, Callable[[dict], tuple[str, bool]]]]":
+                ) -> "list[tuple[str, str, dict, Callable[[dict], tuple[list, bool]]]]":
     """(name, description, schema, invoke) per tool, for adapters that take
-    the wire schema verbatim. ``invoke`` returns (envelope_text, is_error).
-    Schemas are copies (frameworks keep the dict by reference). ``doc_ids``
-    is the local chat scope."""
+    the wire schema verbatim. ``invoke`` returns (content blocks, is_error):
+    the MCP content as the server sent it, one text block from the local
+    tools. Schemas are copies (frameworks keep the dict by reference).
+    ``doc_ids`` is the local chat scope."""
     _require_local_scope(client, doc_ids)
     if getattr(client, "api_key", None):
         bridge = _cloud_bridge(client, gated=not include_management)
@@ -1522,9 +1526,11 @@ def _tool_specs(client, include_management: bool = False, doc_ids=None,
                                  meta.get("inputSchema") or {}))
                 for meta in tools_meta]
 
-    def local_invoke(name: str) -> "Callable[[dict], tuple[str, bool]]":
-        def invoke(arguments: dict) -> tuple[str, bool]:
-            return call_tool(client, name, arguments, doc_ids=doc_ids)
+    def local_invoke(name: str) -> "Callable[[dict], tuple[list, bool]]":
+        def invoke(arguments: dict) -> tuple[list, bool]:
+            text, is_error = call_tool(client, name, arguments,
+                                       doc_ids=doc_ids)
+            return [{"type": "text", "text": text}], is_error
         return invoke
 
     return [(name, _local_description(name), _local_schema(name),
@@ -1539,7 +1545,8 @@ def build_agent_tools(client, include_management: bool = False,
     Cloud: one function per tool of the live cloud MCP tool set, signatures
     synthesized from the server's schemas, calls proxied over MCP. Local:
     the built-in contract tools over the local store. Every function returns
-    the JSON envelope as a string and never raises for arguments its
+    the JSON envelope as a string (binary content, such as a cloud page
+    image, as a size stub) and never raises for arguments its
     signature accepts — except a cloud 401/403, which re-raises
     PageIndexAPIError (cloud-only parameters are absent from the local
     signatures; the call_tool path answers them with the guided envelope).

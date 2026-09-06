@@ -30,6 +30,7 @@ requests = ">=2.28.0"
 openai = ">=1.70.0"
 # Older releases crash on current openai before the request is sent.
 openai-agents = ">=0.18.1"
+mcp = ">=1.19.0,<3"
 litellm = ">=1.97.0"
 PyPDF2 = ">=3.0.0"
 pypdfium2 = ">=5"

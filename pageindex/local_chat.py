@@ -641,6 +641,18 @@ def _chat_agent(client, messages, doc_id, model, temperature=None,
     return agent, items, model_name
 
 
+def _output_text(output) -> str:
+    """A tool result for the display: a string as it is, the framework's
+    structured items by their text (anything else as JSON)."""
+    if isinstance(output, str):
+        return output
+    items = output if isinstance(output, list) else [output]
+    return "\n".join(
+        item["text"] if isinstance(item, dict) and item.get("type") == "text"
+        else json.dumps(item, ensure_ascii=False)
+        for item in items)
+
+
 def _clip(text, cap: int = 200) -> str:
     """One display line: whitespace flattened, capped for the terminal."""
     flat = " ".join(str(text).split())
@@ -785,7 +797,7 @@ def _weave(events, options) -> Iterator[str]:
             elif kind == "tool_result":
                 if not options["tool_result"]:
                     continue
-                out = _clip(ev["output"], cap)
+                out = _clip(_output_text(ev["output"]), cap)
                 if section == "tool" and ev["call_id"] == last_call:
                     # directly under its own call line
                     yield f"\n[tool_result] {ev['name']}: {out}"
