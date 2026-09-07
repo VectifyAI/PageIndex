@@ -413,7 +413,11 @@ def test_env_not_loaded_from_install_dir(tmp_path, tmp_path_factory):
     the cwd tree holds none."""
     site = tmp_path / "site"
     site.mkdir()
-    (site / "pageindex").symlink_to(Path(__file__).parent.parent / "pageindex")
+    try:
+        (site / "pageindex").symlink_to(Path(__file__).parent.parent / "pageindex")
+    except OSError:
+        import shutil
+        shutil.copytree(Path(__file__).parent.parent / "pageindex", site / "pageindex")
     (tmp_path / ".env").write_text("PAGEINDEX_API_KEY=pi-leaked\n")
     cwd = tmp_path_factory.mktemp("elsewhere")
     (cwd / "app.py").write_text(
@@ -1074,11 +1078,37 @@ def test_data_file_as_directory_fails_loud(local_client, indexed_doc, tmp_path):
 
 
 def test_list_documents_skips_unsafe_directory_names(
-    local_client, indexed_doc, tmp_path
+    local_client, indexed_doc, tmp_path, monkeypatch
 ):
-    bad_dir = tmp_path / "store" / "docs" / "bad\\name"
-    bad_dir.mkdir()
-    (bad_dir / "doc.json").write_text("{}")
+    try:
+        bad_dir = tmp_path / "store" / "docs" / "bad\\name"
+        bad_dir.mkdir()
+        (bad_dir / "doc.json").write_text("{}")
+    except OSError:
+        # On Windows, backslashes are path separators and cannot exist in
+        # filesystem directory names. Inject an unsafe entry via scandir instead.
+        class FakeEntry:
+            name = "bad\\name"
+            def is_dir(self):
+                return True
+
+        real_scandir = os.scandir
+
+        class FakeScan:
+            def __init__(self, path):
+                self._path = Path(path)
+                self._real = real_scandir(path)
+                self._is_docs = (self._path == tmp_path / "store" / "docs")
+            def __enter__(self):
+                entries = list(self._real.__enter__())
+                if self._is_docs:
+                    entries.append(FakeEntry())
+                return entries
+            def __exit__(self, *args):
+                return self._real.__exit__(*args)
+
+        monkeypatch.setattr(os, "scandir", FakeScan)
+
     listing = local_client.list_documents()
     assert [d["id"] for d in listing["documents"]] == [indexed_doc]
 
