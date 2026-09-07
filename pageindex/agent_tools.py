@@ -1644,8 +1644,9 @@ def doc_targeting_block(client, doc_id, scoped: bool = False) -> Optional[str]:
         try:
             details.append(client.get_document(one_id))
         except PageIndexAPIError as exc:
-            # Batch only a definite not-found/denied (local raises carry no
-            # status); a cloud transport failure (429/5xx) propagates raw.
+            # Batch only a definite not-found/denied (including legacy
+            # client-side errors without a status); cloud transport failures
+            # (429/5xx) propagate raw.
             if exc.status_code not in (None, 403, 404):
                 raise
             missing.append(str(one_id))

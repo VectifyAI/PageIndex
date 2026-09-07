@@ -333,7 +333,10 @@ class LocalAPI:
     def get_document(self, doc_id: str) -> dict[str, Any]:
         meta = self._store.get_meta(doc_id)
         if meta is None:
-            raise PageIndexAPIError("Failed to get document metadata: Document not found")
+            raise PageIndexAPIError(
+                "Failed to get document metadata: Document not found",
+                status_code=404,
+            )
         return {key: meta.get(key) for key in
                 ("id", "name", "description", "status", "createdAt", "pageNum", "folderId")}
 
