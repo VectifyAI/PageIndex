@@ -20,7 +20,7 @@
   <a href="https://developer.pageindex.ai/">☁️ Cloud</a>&nbsp; • &nbsp;
   <a href="https://docs.pageindex.ai">📖 Docs</a>&nbsp; • &nbsp;
   <a href="https://pageindex.ai/blog">📝 Blog</a>&nbsp; • &nbsp;
-  <a href="https://ii2abc2jejf.typeform.com/to/tK3AXl8T">✉️ Contact</a>&nbsp;
+  <a href="https://pageindex.ai/contact">✉️ Contact</a>&nbsp;
 </h4>
   
 </div>
