@@ -20,7 +20,7 @@ _SURROGATES = re.compile("[\ud800-\udfff]")
 
 
 def _scrub_surrogates(text: str) -> str:
-    """Lone surrogates (surrogateescape'd names, PyPDF2's surrogatepass
+    """Lone surrogates (surrogateescape'd names, pypdf's surrogatepass
     decodes) cannot encode to UTF-8; replace with U+FFFD."""
     return _SURROGATES.sub("\ufffd", text)
 
@@ -179,7 +179,7 @@ class LocalAPI:
 
     @staticmethod
     def _check_page_bounds(structure: list, page_count: int) -> None:
-        """The tree (pdfium) and stored pages (PyPDF2) come from different
+        """The tree (pdfium) and stored pages (pypdf) come from different
         parsers; a span outside 1..page_count IndexErrors every later read."""
         stack = list(structure)
         while stack:
@@ -196,10 +196,10 @@ class LocalAPI:
 
     @staticmethod
     def _extract_page_texts(file_path: str) -> list[str]:
-        import PyPDF2
+        import pypdf
         with open(file_path, "rb") as f:
-            reader = PyPDF2.PdfReader(f)
-            # PyPDF2 decodes broken ToUnicode maps with surrogatepass; lone
+            reader = pypdf.PdfReader(f)
+            # pypdf decodes broken ToUnicode maps with surrogatepass; lone
             # surrogates would crash every utf-8 JSON save downstream.
             return [_scrub_surrogates(page.extract_text() or "")
                     for page in reader.pages]

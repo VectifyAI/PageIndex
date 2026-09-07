@@ -1,8 +1,8 @@
-"""Raw PDF object access (PyPDF2-backed) and PDF lexical primitives."""
+"""Raw PDF object access (pypdf-backed) and PDF lexical primitives."""
 
 from __future__ import annotations
 
-from PyPDF2.generic import (
+from pypdf.generic import (
     IndirectObject as PdfIndirectRef, NameObject as PdfName, NumberObject as PdfNumber,
     FloatObject as PdfFloat, BooleanObject as PdfBoolean,
     DictionaryObject as PdfDictionary, ArrayObject as PdfArray,
@@ -103,7 +103,7 @@ class _PdfPage:
 
 
 class _PdfDoc:
-    """PyPDF2-backed adapter for raw object and stream access PDFium cannot expose."""
+    """pypdf-backed adapter for raw object and stream access PDFium cannot expose."""
 
     __slots__ = ("_reader", "_virtual")
 

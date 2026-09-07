@@ -32,7 +32,7 @@ openai = ">=1.70.0"
 openai-agents = ">=0.18.1"
 mcp = ">=1.19.0,<3"
 litellm = ">=1.97.0"
-PyPDF2 = ">=3.0.0"
+pypdf = { version = ">=4.0.0", extras = ["crypto"] }
 pypdfium2 = ">=5"
 sortedcontainers = ">=2.4.0"
 regex = ">=2024.0.0"
