@@ -110,6 +110,18 @@ Configure other models, streaming, multi-document search, citations, and more.
 
 Drop PageIndex tools into the OpenAI Agents SDK, the Claude Agent SDK, or any other framework.
 
+### Indexing Markdown Documents via CLI
+
+PageIndex also supports indexing Markdown documents directly from the command line:
+
+```bash
+python3 run_pageindex.py --md_path document.md --if-add-node-summary yes
+```
+
+- `--summary-token-threshold <int>` (default: `200`): Cost optimization for Markdown indexing. When a node contains fewer tokens than this threshold, its raw text is copied verbatim into `summary` without an LLM call. Set to `0` to force LLM summary generation for all nodes.
+- `--if-thinning yes/no` (default: `no`): Whether to apply tree thinning for small Markdown sections.
+- `--thinning-threshold <int>` (default: `5000`): Minimum token threshold when tree thinning is enabled.
+
 
 # Benchmarks
 
