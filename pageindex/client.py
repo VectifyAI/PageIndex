@@ -531,7 +531,8 @@ class PageIndexClient:
         raise PageIndexAPIError(
             f"{lane} drives your own chat model — construct the client "
             "with chat_model=... (or a chat= model); the managed cloud chat "
-            "serves the answer lane and chat_completions() only.")
+            "serves the answer lane and chat(protocol=\"chat_completions\") "
+            "only.")
 
     if not TYPE_CHECKING:
         # The protocol doors live behind chat(protocol=...); their old
@@ -933,10 +934,14 @@ class PageIndexClient:
         join a stream into one only with ``show_process=False``) and pass
         it back.
 
-        The protocol lanes (``protocol="responses"`` / ``"messages"``):
-        own-model chat driven natively over the OpenAI Responses API or
-        Anthropic's Messages API. Input and output are that protocol's own
-        shapes — the history may carry its transcript (Responses items, or
+        The protocol lanes: ``protocol="chat_completions"`` is the answer
+        lane's own engine with its envelope kept — the Chat Completions
+        response (``choices``/``usage``), or its chunk dicts when
+        streaming; it is the one protocol the managed cloud chat serves
+        too. ``protocol="responses"`` / ``"messages"``: own-model chat
+        driven natively over the OpenAI Responses API or Anthropic's
+        Messages API. Input and output are that protocol's own shapes —
+        the history may carry its transcript (Responses items, or
         Messages content blocks with prior tool_use/tool_result
         round-trips), and the return is its response envelope, streaming
         its native events. A round-tripped transcript continues the
@@ -948,10 +953,12 @@ class PageIndexClient:
         Args:
             messages: A question string, or the conversation history —
                 role/content messages on every lane. ``system`` rows join
-                the managed prompt on the answer lane only, wherever they
-                sit; the protocol lanes pass rows to the wire as they are
-                (use ``instructions`` for persona there). With a protocol,
-                also that protocol's transcript items or content blocks.
+                the managed prompt on the answer lane and
+                ``protocol="chat_completions"`` only, wherever they sit;
+                the other protocol lanes pass rows to the wire as they
+                are (use ``instructions`` for persona there). With a
+                protocol, also that protocol's transcript items or
+                content blocks.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls. Local
                 documents: also enforced at the tool layer, not just
@@ -1024,14 +1031,16 @@ class PageIndexClient:
                 LiteLLM's anthropic adapter owns ``anthropic-beta`` on the
                 answer lane — Anthropic beta flags ride
                 ``protocol="messages"``.
-            extra_body: Own-model chat only — the provider's own request
-                fields beyond this method's parameters, in the lane's
-                wire names (Responses ``max_output_tokens``, Messages
-                ``thinking`` / ``top_k``), merged last so they win.
-                Answer lane: LiteLLM's own params, mapped or refused per
-                provider (``response_format`` has no door on
-                LiteLLM-routed models); protocol lanes: verbatim into
-                the request body. The managed prompt, conversation and
+            extra_body: The wire's own request fields beyond this
+                method's parameters, in the lane's wire names (Responses
+                ``max_output_tokens``, Messages ``thinking`` / ``top_k``;
+                the managed chat endpoint's ``temperature`` /
+                ``enable_citations``), merged last so they win.
+                Own-model answer lane: LiteLLM's own params, mapped or
+                refused per provider (``response_format`` has no door on
+                LiteLLM-routed models); protocol lanes and the managed
+                endpoint: verbatim into the request body. The managed
+                prompt, conversation and
                 tools are not fields here (``system`` / ``instructions``
                 / ``input`` / ``messages`` / ``tools`` are refused);
                 extend the prompt with ``instructions=``. Credentials
@@ -1047,17 +1056,20 @@ class PageIndexClient:
               ``{"type": "tool_call", "call_id", "name", "arguments"}``,
               ``{"type": "tool_result", "call_id", "name", "output"}``
             - protocol lane, stream=False: the protocol's response
-              envelope — Responses: ``output`` plus an ``items``
+              envelope — Chat Completions: ``choices`` and ``usage``;
+              Responses: ``output`` plus an ``items``
               transcript and cross-turn ``usage``; Messages: the final
               message with a ``messages`` turn sequence and aggregated
               ``usage``
             - protocol lane, stream=True: an iterator of the protocol's
               own stream events
         """
-        if protocol not in (None, "responses", "messages"):
+        if protocol not in (None, "chat_completions", "responses",
+                            "messages"):
             raise PageIndexAPIError(
-                "protocol selects the wire: \"responses\" (OpenAI Responses) "
-                "or \"messages\" (Anthropic Messages), or leave it unset for "
+                "protocol selects the wire: \"chat_completions\" (OpenAI Chat "
+                "Completions), \"responses\" (OpenAI Responses) or "
+                "\"messages\" (Anthropic Messages), or leave it unset for "
                 f"the answer lane — got {protocol!r}.")
         if (protocol is not None and show_process is not False
                 and show_process is not None):
@@ -1079,7 +1091,7 @@ class PageIndexClient:
                 "instructions blocks are the Messages protocol's shape — "
                 "with protocol=\"messages\" they append after the managed "
                 "system blocks; the other lanes take a string.")
-        if protocol is not None:
+        if protocol in ("responses", "messages"):
             self._require_own_chat(f"chat(protocol={protocol!r})")
             if protocol == "responses":
                 body = extra_body
@@ -1125,6 +1137,12 @@ class PageIndexClient:
                 # then the history's own system rows.
                 messages = [{"role": "system", "content": instructions},
                             *messages]
+        if protocol == "chat_completions":
+            return self.chat_completions(
+                messages, stream=stream, stream_metadata=True, doc_id=doc_id,
+                model=model, max_turns=max_turns,
+                reasoning_effort=reasoning_effort, extra_body=extra_body,
+                extra_headers=extra_headers, backend=backend)
         if stream:
             # the default means "on where available"
             resolved = True if show_process is None else show_process
@@ -1179,7 +1197,10 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
     ) -> Union[dict[str, Any], Iterator[str], Iterator[dict[str, Any]]]:
         """
-        PageIndex Chat Completions: document QA in one call.
+        Kept for existing code — new code calls ``chat()``. Everything
+        here is ``chat(protocol="chat_completions")``: the same engine
+        and envelope, with this method's sampling fields riding
+        ``extra_body`` under their wire names.
 
         With no chat model configured (a plain cloud client): the managed
         hosted chat endpoint. With one — local mode, or a cloud client
@@ -1238,9 +1259,9 @@ class PageIndexClient:
                 its own thinking control, and the values mean what the
                 backend says they mean. Unset sends nothing (the
                 backend's default applies).
-            extra_body: Own-model chat only — extra request fields beyond this
-                method's parameters, merged last so they win.
-                OpenAI-compatible backends take them verbatim in the
+            extra_body: Extra request fields beyond this method's
+                parameters, merged last so they win. The managed endpoint
+                and OpenAI-compatible backends take them verbatim in the
                 request body; LiteLLM-routed providers take them as
                 LiteLLM's own params (mapped or refused per provider).
                 The managed prompt, conversation and tools are not
@@ -1287,20 +1308,22 @@ class PageIndexClient:
                 "chat_model=... to run the agent with your own model.")
         if (model or max_turns is not None or top_p is not None
                 or max_tokens is not None or reasoning_effort
-                or extra_body or extra_headers or backend):
+                or extra_headers or backend):
             raise PageIndexAPIError(
                 "model, max_turns, top_p, max_tokens, reasoning_effort, "
-                "extra_body, extra_headers and backend drive your own chat "
+                "extra_headers and backend drive your own chat "
                 "model, which this client does not configure — construct "
                 "the client with chat_model=... (or a chat= model) to run the "
                 "agent in your process, or drop them to use the managed "
                 "chat endpoint, which selects its own model."
             )
         from .cloud_api import CloudAPI
+        from .local_chat import _refuse_skeleton
+        _refuse_skeleton(extra_body)
         return cast(CloudAPI, self._api).chat_completions(
             messages=messages, stream=stream, doc_id=doc_id,
             temperature=temperature, stream_metadata=stream_metadata,
-            enable_citations=enable_citations,
+            enable_citations=enable_citations, extra_body=extra_body,
         )
 
     def _responses(
@@ -1336,10 +1359,11 @@ class PageIndexClient:
 
         Requires a backend that supports the
         Responses API; backends that only speak chat.completions should use
-        ``chat_completions()``. Provider-prefixed models (``anthropic/…``)
-        route through LiteLLM's chat.completions adapter and are therefore
-        refused here — use ``chat_completions()`` or
-        ``chat(protocol="messages")`` for those.
+        ``chat(protocol="chat_completions")``. Provider-prefixed models
+        (``anthropic/…``) route through LiteLLM's chat.completions adapter
+        and are therefore refused here — use
+        ``chat(protocol="chat_completions")`` or ``chat(protocol="messages")``
+        for those.
 
         Args:
             input: A user message string, or a list of Responses input items

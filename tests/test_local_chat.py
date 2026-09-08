@@ -313,9 +313,6 @@ def test_cloud_guards(monkeypatch):
         cloud.chat_completions([{"role": "user", "content": "x"}],
                                reasoning_effort="low")
     with pytest.raises(PageIndexAPIError, match="own chat model"):
-        cloud.chat_completions([{"role": "user", "content": "x"}],
-                               extra_body={"service_tier": "auto"})
-    with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.chat_completions([{"role": "user", "content": "x"}], top_p=0.9)
     with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.chat_completions([{"role": "user", "content": "x"}],
@@ -3214,6 +3211,64 @@ def test_old_door_names_point_at_chat_protocol(client):
         assert not hasattr(client, name)
     with pytest.raises(AttributeError, match="no attribute 'no_such_thing'"):
         client.no_such_thing
+
+
+def test_chat_protocol_chat_completions_is_the_door(client, monkeypatch):
+    seen = []
+    monkeypatch.setattr(local_chat, "run_chat_completions",
+                        lambda c, messages, **kw: seen.append((messages, kw))
+                        or "door")
+    knobs = dict(doc_id="pi-a", model="gpt-x", max_turns=3,
+                 reasoning_effort="low", backend={"api_key": "k"},
+                 extra_headers={"x": "1"}, extra_body={"seed": 1})
+    for streaming in (False, True):
+        assert client.chat("q", protocol="chat_completions", stream=streaming,
+                           **knobs) == "door"
+        # the protocol's own stream is its chunk dicts, never text pieces
+        assert client.chat_completions("q", stream=streaming,
+                                       stream_metadata=True,
+                                       **knobs) == "door"
+        assert seen[-2] == seen[-1]
+    assert seen[0][0] == [{"role": "user", "content": "q"}]
+    # instructions join the managed prompt as a leading system row
+    client.chat("q", protocol="chat_completions", instructions="be brief")
+    assert seen[-1][0] == [{"role": "system", "content": "be brief"},
+                           {"role": "user", "content": "q"}]
+    with pytest.raises(PageIndexAPIError, match="show_process"):
+        client.chat("q", protocol="chat_completions", stream=True,
+                    show_process=True)
+    # the old door stays open for existing code, silently
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert client.chat_completions("q") == "door"
+
+
+def test_chat_protocol_chat_completions_serves_managed_cloud(monkeypatch):
+    """Unlike the own-model protocols, the managed cloud chat speaks
+    chat.completions itself, so the lane opens without a chat model;
+    the own-model knobs still refuse there."""
+    from pageindex import PageIndexClient
+    cloud = PageIndexClient(api_key="pi-k")
+    seen = []
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kw: seen.append(kw) or {"choices": []})
+    assert cloud.chat("q", protocol="chat_completions") == {"choices": []}
+    assert seen[-1] == {"messages": [{"role": "user", "content": "q"}],
+                        "stream": False, "doc_id": None, "temperature": None,
+                        "stream_metadata": True, "enable_citations": False,
+                        "extra_body": None}
+    # the endpoint's own fields ride extra_body under their wire names
+    cloud.chat("q", protocol="chat_completions",
+               extra_body={"temperature": 0.2, "enable_citations": True})
+    assert seen[-1]["extra_body"] == {"temperature": 0.2,
+                                      "enable_citations": True}
+    with pytest.raises(PageIndexAPIError, match="extra_body cannot carry"):
+        cloud.chat("q", extra_body={"messages": []})
+    with pytest.raises(PageIndexAPIError, match="chat_model="):
+        cloud.chat("q", protocol="chat_completions", model="m")
+    with pytest.raises(PageIndexAPIError, match="chat_model="):
+        cloud.chat("q", protocol="chat_completions", instructions="x")
 
 
 def test_chat_protocol_responses_is_the_door(client, monkeypatch):
