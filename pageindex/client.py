@@ -1031,14 +1031,16 @@ class PageIndexClient:
                 LiteLLM's anthropic adapter owns ``anthropic-beta`` on the
                 answer lane — Anthropic beta flags ride
                 ``protocol="messages"``.
-            extra_body: Own-model chat only — the provider's own request
-                fields beyond this method's parameters, in the lane's
-                wire names (Responses ``max_output_tokens``, Messages
-                ``thinking`` / ``top_k``), merged last so they win.
-                Answer lane: LiteLLM's own params, mapped or refused per
-                provider (``response_format`` has no door on
-                LiteLLM-routed models); protocol lanes: verbatim into
-                the request body. The managed prompt, conversation and
+            extra_body: The wire's own request fields beyond this
+                method's parameters, in the lane's wire names (Responses
+                ``max_output_tokens``, Messages ``thinking`` / ``top_k``;
+                the managed chat endpoint's ``temperature`` /
+                ``enable_citations``), merged last so they win.
+                Own-model answer lane: LiteLLM's own params, mapped or
+                refused per provider (``response_format`` has no door on
+                LiteLLM-routed models); protocol lanes and the managed
+                endpoint: verbatim into the request body. The managed
+                prompt, conversation and
                 tools are not fields here (``system`` / ``instructions``
                 / ``input`` / ``messages`` / ``tools`` are refused);
                 extend the prompt with ``instructions=``. Credentials
@@ -1255,9 +1257,9 @@ class PageIndexClient:
                 its own thinking control, and the values mean what the
                 backend says they mean. Unset sends nothing (the
                 backend's default applies).
-            extra_body: Own-model chat only — extra request fields beyond this
-                method's parameters, merged last so they win.
-                OpenAI-compatible backends take them verbatim in the
+            extra_body: Extra request fields beyond this method's
+                parameters, merged last so they win. The managed endpoint
+                and OpenAI-compatible backends take them verbatim in the
                 request body; LiteLLM-routed providers take them as
                 LiteLLM's own params (mapped or refused per provider).
                 The managed prompt, conversation and tools are not
@@ -1304,20 +1306,22 @@ class PageIndexClient:
                 "chat_model=... to run the agent with your own model.")
         if (model or max_turns is not None or top_p is not None
                 or max_tokens is not None or reasoning_effort
-                or extra_body or extra_headers or backend):
+                or extra_headers or backend):
             raise PageIndexAPIError(
                 "model, max_turns, top_p, max_tokens, reasoning_effort, "
-                "extra_body, extra_headers and backend drive your own chat "
+                "extra_headers and backend drive your own chat "
                 "model, which this client does not configure — construct "
                 "the client with chat_model=... (or a chat= model) to run the "
                 "agent in your process, or drop them to use the managed "
                 "chat endpoint, which selects its own model."
             )
         from .cloud_api import CloudAPI
+        from .local_chat import _refuse_skeleton
+        _refuse_skeleton(extra_body)
         return cast(CloudAPI, self._api).chat_completions(
             messages=messages, stream=stream, doc_id=doc_id,
             temperature=temperature, stream_metadata=stream_metadata,
-            enable_citations=enable_citations,
+            enable_citations=enable_citations, extra_body=extra_body,
         )
 
     def _responses(

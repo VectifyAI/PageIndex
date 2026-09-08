@@ -1537,6 +1537,16 @@ def test_cloud_chat_accepts_query_string(cloud):
         client._chat_completions("   ")
 
 
+def test_cloud_chat_extra_body_merges_into_payload(cloud):
+    client, calls, fake = cloud
+    fake.payload = {"choices": [{"message": {"content": "ok"}}]}
+    client.chat("q", doc_id="pi-1",
+                extra_body={"temperature": 0.2, "enable_citations": True})
+    assert calls[-1]["json"] == {
+        "messages": [{"role": "user", "content": "q"}], "stream": False,
+        "doc_id": "pi-1", "temperature": 0.2, "enable_citations": True}
+
+
 def test_parse_pages_overlap_counts_union():
     from pageindex.client import _parse_pages
     pages = _parse_pages("1-5000,2000-9000")

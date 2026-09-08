@@ -313,9 +313,6 @@ def test_cloud_guards(monkeypatch):
         cloud._chat_completions([{"role": "user", "content": "x"}],
                                reasoning_effort="low")
     with pytest.raises(PageIndexAPIError, match="own chat model"):
-        cloud._chat_completions([{"role": "user", "content": "x"}],
-                               extra_body={"service_tier": "auto"})
-    with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud._chat_completions([{"role": "user", "content": "x"}], top_p=0.9)
     with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud._chat_completions([{"role": "user", "content": "x"}],
@@ -3226,7 +3223,15 @@ def test_chat_protocol_chat_completions_serves_managed_cloud(monkeypatch):
     assert cloud.chat("q", protocol="chat_completions") == {"choices": []}
     assert seen[-1] == {"messages": [{"role": "user", "content": "q"}],
                         "stream": False, "doc_id": None, "temperature": None,
-                        "stream_metadata": True, "enable_citations": False}
+                        "stream_metadata": True, "enable_citations": False,
+                        "extra_body": None}
+    # the endpoint's own fields ride extra_body under their wire names
+    cloud.chat("q", protocol="chat_completions",
+               extra_body={"temperature": 0.2, "enable_citations": True})
+    assert seen[-1]["extra_body"] == {"temperature": 0.2,
+                                      "enable_citations": True}
+    with pytest.raises(PageIndexAPIError, match="extra_body cannot carry"):
+        cloud.chat("q", extra_body={"messages": []})
     with pytest.raises(PageIndexAPIError, match="chat_model="):
         cloud.chat("q", protocol="chat_completions", model="m")
     with pytest.raises(PageIndexAPIError, match="chat_model="):

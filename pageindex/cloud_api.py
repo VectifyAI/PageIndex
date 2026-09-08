@@ -197,7 +197,8 @@ class CloudAPI:
         doc_id: Optional[Union[str, List[str]]] = None,
         temperature: Optional[float] = None,
         stream_metadata: bool = False,
-        enable_citations: bool = False
+        enable_citations: bool = False,
+        extra_body: Optional[Dict[str, Any]] = None,
     ) -> Union[Dict[str, Any], Iterator[str], Iterator[Dict[str, Any]]]:
         """
         PageIndex Chat Completions. Optionally scoped to specific PageIndex documents.
@@ -209,6 +210,7 @@ class CloudAPI:
             temperature (Optional[float], optional): Sampling temperature. Default is None (uses API default).
             stream_metadata (bool, optional): If True and stream=True, return raw chunks with metadata instead of just text. Default is False.
             enable_citations (bool, optional): Enable citation instructions in responses. Default is False.
+            extra_body (Optional[Dict[str, Any]], optional): Extra request fields, merged into the payload last.
 
         Returns:
             Union[Dict[str, Any], Iterator[str], Iterator[Dict[str, Any]]]:
@@ -229,6 +231,8 @@ class CloudAPI:
 
         if enable_citations:
             payload["enable_citations"] = enable_citations
+
+        payload.update(extra_body or {})
 
         response = requests.post(
             f"{self.BASE_URL}/chat/completions/",
