@@ -1362,8 +1362,10 @@ def _bridge_invoker(bridge, name: str, schema: dict,
     """One cloud tool call proxied over MCP: string booleans are coerced
     (same as call_tool), None-valued arguments are dropped (None ≡ omitted,
     matching the contract's "omit if ..." semantics) and failures are
-    contained in the error envelope — except 401/403, which re-raise.
-    Returns (content blocks, is_error), like the bridge."""
+    contained in the error envelope — except auth failures and what
+    survived the bridge's own retries (401/403/429/5xx), which re-raise:
+    the model can act on neither. Returns (content blocks, is_error), like
+    the bridge."""
     def _invoke(arguments: dict[str, Any]) -> tuple[list, bool]:
         try:
             arguments = {key: value for key, value in arguments.items()
@@ -1371,8 +1373,9 @@ def _bridge_invoker(bridge, name: str, schema: dict,
             _coerce_bool_args(schema, arguments)
             return bridge.call_tool(name, arguments)
         except Exception as exc:
-            if (isinstance(exc, PageIndexAPIError)
-                    and exc.status_code in (401, 403)):
+            if isinstance(exc, PageIndexAPIError) and (
+                    exc.status_code in (401, 403, 429)
+                    or (exc.status_code or 0) >= 500):
                 raise
             payload, _ = _failure(
                 f"{name} failed: {exc}", None,

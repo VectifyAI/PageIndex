@@ -3122,7 +3122,7 @@ def test_messages_no_backend_leak_when_tool_build_fails(bridge_client,
                         lambda backend=None: made.append(FakeAnthropic())
                         or made[-1])
 
-    def boom(client, doc_ids=None):
+    def boom(client, doc_ids=None, **kwargs):
         raise PageIndexAPIError("Could not reach the PageIndex MCP server")
 
     monkeypatch.setattr(
@@ -3339,3 +3339,123 @@ def test_chat_answer_lane_forwards_the_promoted_knobs(client, monkeypatch):
                         lambda c, messages, **kw: streamed.update(kw) or "s")
     assert client.chat("q", stream=True, **knobs) == "s"
     assert {k: streamed[k] for k in knobs} == knobs
+
+
+# ── a tool failure that survived the bridge's retries fails the run fast ──
+
+@needs_agents
+def test_translate_run_error_unwraps_a_tool_failure():
+    """A failure the invoker re-raised leaves the run wrapped in the
+    framework's exception; the caller gets it back with its status."""
+    from agents.exceptions import AgentsException
+    wrapped = AgentsException("Error invoking MCP tool get_document")
+    wrapped.__cause__ = PageIndexAPIError("MCP request failed: HTTP 429",
+                                          status_code=429)
+    err = local_chat._translate_run_error(wrapped, None, "chat")
+    assert err.status_code == 429 and "HTTP 429" in str(err)
+    plain = local_chat._translate_run_error(AgentsException("boom"), None,
+                                            "chat")
+    assert plain.status_code is None and "agent backend failed" in str(plain)
+
+
+def test_model_backend_error_keeps_the_status_code():
+    limited = Exception("rate limited")
+    limited.status_code = 429
+    assert local_chat._model_backend_error(limited, "chat").status_code == 429
+    assert local_chat._model_backend_error(
+        Exception("x"), "chat").status_code is None
+
+
+def _rate_limited(name, arguments):
+    raise PageIndexAPIError("MCP request failed: HTTP 429", status_code=429)
+
+
+@needs_agents
+def test_bridge_chat_fails_fast_on_a_rate_limited_tool(bridge_client,
+                                                        fake_model):
+    """A 429 that survived the bridge's retries ends the run with its
+    status — no second model turn over an error envelope."""
+    client, bridge = bridge_client
+    bridge.call_tool = _rate_limited
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "r.pdf"})],
+        [_msg_item("never reached")],
+    ])
+    with pytest.raises(PageIndexAPIError, match="HTTP 429") as info:
+        client.chat_completions("What?")
+    assert info.value.status_code == 429
+    assert len(fake.instructions) == 1
+
+
+@needs_anthropic
+def test_messages_fail_fast_on_a_rate_limited_tool(bridge_client, monkeypatch):
+    """The Anthropic runner turns every tool exception into an is_error
+    result; the SDK runs the turn's tools itself and raises before the
+    runner spends another model call, streamed or not."""
+    client, bridge = bridge_client
+    bridge.call_tool = _rate_limited
+
+    class FakeTurn:
+        stop_reason = "tool_use"
+
+        def __iter__(self):
+            return iter(())
+
+        def get_final_message(self):
+            return self
+
+    class FakeRunner:
+        def __init__(self, tools):
+            self.tools = {tool.name: tool for tool in tools}
+            self.model_calls = 0
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            self.model_calls += 1
+            assert self.model_calls == 1, "a second model turn ran"
+            return FakeTurn()
+
+        def generate_tool_call_response(self):
+            try:
+                self.tools["get_document"].call({"doc_name": "r.pdf"})
+            except Exception as exc:  # the runner's own catch-all
+                return {"role": "user", "content": [
+                    {"type": "tool_result", "content": str(exc),
+                     "is_error": True}]}
+
+    class FakeAnthropic:
+        beta = types.SimpleNamespace(messages=types.SimpleNamespace(
+            tool_runner=lambda **kw: FakeRunner(kw["tools"])))
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(local_chat, "_anthropic_client",
+                        lambda backend=None: FakeAnthropic())
+    with pytest.raises(PageIndexAPIError, match="HTTP 429") as info:
+        client._messages("q", model="claude-test", max_tokens=100)
+    assert info.value.status_code == 429
+    with pytest.raises(PageIndexAPIError, match="HTTP 429"):
+        list(client._messages("q", model="claude-test", max_tokens=100,
+                              stream=True))
+
+
+@needs_agents
+def test_bridge_chat_keeps_model_slips_model_visible(bridge_client,
+                                                     fake_model):
+    """Only the invoker's re-raised failures escape: a model-side slip (bad
+    JSON arguments) still comes back to the model as text and the run
+    goes on."""
+    from openai.types.responses import ResponseFunctionToolCall
+    client, bridge = bridge_client
+    fake = fake_model([
+        [ResponseFunctionToolCall(id="fc_1", type="function_call",
+                                  call_id="call_1", name="get_document",
+                                  arguments="{not json", status="completed")],
+        [_msg_item("Recovered")],
+    ])
+    result = client.chat_completions("What?")
+    assert result["choices"][0]["message"]["content"] == "Recovered"
+    assert len(fake.instructions) == 2 and bridge.calls == []

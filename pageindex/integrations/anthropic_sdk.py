@@ -15,13 +15,18 @@ MCP types and renders nothing.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, Optional
 
 from ..errors import PageIndexAPIError
 
 
 def build_anthropic_tools(client, include_management: bool = False,
-                          asynchronous: bool = False, doc_ids=None) -> list:
+                          asynchronous: bool = False, doc_ids=None,
+                          failures: Optional[list] = None) -> list:
+    """``failures`` collects the PageIndex failures the invoker re-raises
+    (auth, post-retry transport), which the runner would otherwise flatten
+    into is_error results; chat(protocol="messages") reads it between
+    turns to fail fast."""
     try:
         from anthropic import beta_async_tool, beta_tool
         from anthropic.lib.tools import ToolError
@@ -41,7 +46,12 @@ def build_anthropic_tools(client, include_management: bool = False,
         moves the blocking bridge/store call into a worker thread so it
         never blocks the caller's event loop."""
         def run(kwargs: dict) -> list:
-            blocks, is_error = invoke(kwargs)
+            try:
+                blocks, is_error = invoke(kwargs)
+            except PageIndexAPIError as exc:
+                if failures is not None:
+                    failures.append(exc)
+                raise
             result = CallToolResult.model_validate(
                 {"content": blocks, "isError": is_error})
             content = [mcp_content(block) for block in result.content]

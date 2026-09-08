@@ -16,7 +16,18 @@ from __future__ import annotations
 
 import asyncio
 
-from ..errors import PageIndexAPIError
+from ..errors import PageIndexAPIError, _pageindex_cause
+
+
+def _tool_failure(ctx, error):
+    """The framework's tool-failure formatter, narrowed: a PageIndex failure
+    the invoker re-raised (auth, post-retry transport) escapes the run
+    instead of becoming model-visible text; anything else keeps the
+    framework default."""
+    from agents.tool import default_tool_error_function
+    if _pageindex_cause(error) is not None:
+        raise error
+    return default_tool_error_function(ctx, error)
 
 
 def build_mcp_server(client, include_management: bool = False, doc_ids=None):
@@ -29,7 +40,7 @@ def build_mcp_server(client, include_management: bool = False, doc_ids=None):
 
     class _ToolServer(MCPServer):
         def __init__(self):
-            super().__init__()
+            super().__init__(failure_error_function=_tool_failure)
             self.tools = [mcp_types.Tool(name=name, description=description,
                                          inputSchema=schema)
                           for name, description, schema, _ in specs]

@@ -15,7 +15,7 @@ from typing import Any, Iterator, Mapping, Optional, Union
 
 from .agent_tools import _base_instructions, doc_targeting_block
 from .chat_stream import ChatStream
-from .errors import PageIndexAPIError
+from .errors import PageIndexAPIError, _pageindex_cause
 
 CHAT_HEADER = (
     "You are PageIndex by Vectify AI, a document-focused assistant. "
@@ -451,7 +451,8 @@ def _model_backend_error(exc, lane: str, client=None) -> PageIndexAPIError:
             ", or drop the chat model configuration to use the managed "
             "cloud chat." if lane == "chat" else "."
         )
-    return PageIndexAPIError(message)
+    return PageIndexAPIError(message,
+                             status_code=getattr(exc, "status_code", None))
 
 
 def _translate_run_error(exc, max_turns, lane, client=None) -> PageIndexAPIError:
@@ -460,6 +461,10 @@ def _translate_run_error(exc, max_turns, lane, client=None) -> PageIndexAPIError
     if isinstance(exc, MaxTurnsExceeded):
         return _wrap_max_turns(max_turns)
     if isinstance(exc, AgentsException):
+        cause = _pageindex_cause(exc)
+        if cause is not None:
+            # a tool failure the invoker re-raised, wrapped on its way out
+            return PageIndexAPIError(str(cause), status_code=cause.status_code)
         return PageIndexAPIError(f"The agent backend failed: {exc}")
     return _model_backend_error(exc, lane, client)
 
@@ -1336,6 +1341,16 @@ def _default_max_tokens(model: str, thinking=None) -> int:
     return 4096 if model.startswith(_CLAUDE_4096_MODELS) else 8192
 
 
+def _messages_fail_fast(runner, message, failures: list) -> None:
+    """Run the turn's tools now (the runner reuses the cached result) so a
+    failure the invoker re-raised surfaces here, not as an is_error result
+    the runner would spend another model call on."""
+    if getattr(message, "stop_reason", None) == "tool_use":
+        runner.generate_tool_call_response()
+    if failures:
+        raise failures[0]
+
+
 def run_messages(client, messages, model: str,
                  max_tokens: Optional[int] = None,
                  stream: bool = False, doc_id=None, system=None,
@@ -1378,7 +1393,8 @@ def run_messages(client, messages, model: str,
         if _cache_marks(system_blocks, prepared) < 4 else {})
     # Tools before the transport: on a bridge client building them is
     # network I/O, and a failure there must not strand the client below.
-    tools = build_anthropic_tools(client, doc_ids=scope)
+    failures: list = []
+    tools = build_anthropic_tools(client, doc_ids=scope, failures=failures)
     merged = _merged_backend(client, backend)
     backend_client = _anthropic_client(merged)
     # Close only a per-call construction: cached clients stay open for
@@ -1407,6 +1423,8 @@ def run_messages(client, messages, model: str,
                 for turn_stream in runner:
                     for event in turn_stream:
                         yield event
+                    _messages_fail_fast(runner, turn_stream.get_final_message(),
+                                        failures)
             except anthropic.AnthropicError as exc:
                 raise _model_backend_error(exc, "messages", client) from exc
             except TypeError as exc:
@@ -1424,7 +1442,10 @@ def run_messages(client, messages, model: str,
         return events()
 
     try:
-        turns = [turn for turn in runner]
+        turns = []
+        for turn in runner:
+            turns.append(turn)
+            _messages_fail_fast(runner, turn, failures)
     except anthropic.AnthropicError as exc:
         raise _model_backend_error(exc, "messages", client) from exc
     except TypeError as exc:
