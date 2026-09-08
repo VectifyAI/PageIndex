@@ -940,7 +940,8 @@ class PageIndexClient:
         streaming; it is the one protocol the managed cloud chat serves
         too. ``protocol="responses"`` / ``"messages"``: own-model chat
         driven natively over the OpenAI Responses API or Anthropic's
-        Messages API. Input and output are that protocol's own shapes — the history may carry its transcript (Responses items, or
+        Messages API. Input and output are that protocol's own shapes —
+        the history may carry its transcript (Responses items, or
         Messages content blocks with prior tool_use/tool_result
         round-trips), and the return is its response envelope, streaming
         its native events. A round-tripped transcript continues the
@@ -952,10 +953,12 @@ class PageIndexClient:
         Args:
             messages: A question string, or the conversation history —
                 role/content messages on every lane. ``system`` rows join
-                the managed prompt on the answer lane only, wherever they
-                sit; the protocol lanes pass rows to the wire as they are
-                (use ``instructions`` for persona there). With a protocol,
-                also that protocol's transcript items or content blocks.
+                the managed prompt on the answer lane and
+                ``protocol="chat_completions"`` only, wherever they sit;
+                the other protocol lanes pass rows to the wire as they
+                are (use ``instructions`` for persona there). With a
+                protocol, also that protocol's transcript items or
+                content blocks.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls. Local
                 documents: also enforced at the tool layer, not just
