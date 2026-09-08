@@ -827,7 +827,7 @@ class PageIndexClient:
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
         *,
-        protocol: Literal["responses", "messages"],
+        protocol: Literal["chat_completions", "responses", "messages"],
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
         max_turns: Optional[int] = None,
         backend: Optional[dict[str, Any]] = None,
@@ -845,7 +845,7 @@ class PageIndexClient:
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
-        protocol: Literal["responses"],
+        protocol: Literal["chat_completions", "responses"],
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
         max_turns: Optional[int] = None,
         backend: Optional[dict[str, Any]] = None,
@@ -1004,12 +1004,15 @@ class PageIndexClient:
                 models expose none on the chat protocol). The labels are
                 not a parse format, and a process stream must not be
                 appended back as conversation history — for the
-                machine-readable process use ``.events``, or a protocol
-                lane's transcript. A protocol lane returns that
-                transcript itself, so ``show_process`` is an error there.
-            protocol: ``None`` for the answer lane, or ``"responses"`` /
-                ``"messages"`` — the wire protocol, engine, and
-                input/output shapes of this call. Own-model chat only.
+                machine-readable process use ``.events``, or the
+                Responses / Messages lane's transcript. A protocol lane
+                returns its own shape, so ``show_process`` is an error
+                there.
+            protocol: ``None`` for the answer lane, or
+                ``"chat_completions"`` / ``"responses"`` / ``"messages"``
+                — the wire protocol, engine, and input/output shapes of
+                this call. Own-model chat only, except
+                ``"chat_completions"``, which the managed chat serves too.
             instructions: Own-model chat only — persona or extra guidance
                 appended after the managed system prompt (which stays: it
                 carries the tool guidance and the document context). A
@@ -1075,8 +1078,8 @@ class PageIndexClient:
                 and show_process is not None):
             raise PageIndexAPIError(
                 "show_process weaves the answer lane's run; with "
-                f"protocol={protocol!r} the run comes back as the protocol's "
-                "own transcript and events — drop show_process, or drop "
+                f"protocol={protocol!r} the return is the protocol's own "
+                "envelope and events — drop show_process, or drop "
                 "protocol for the woven text stream.")
         if show_process is not False and show_process is not None:
             from .local_chat import _process_options
