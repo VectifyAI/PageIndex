@@ -199,7 +199,8 @@ def _openai_model(protocol: str, model_name: str, backend=None):
                 f"protocol='responses' cannot drive '{model_name}': "
                 "provider-prefixed models route through LiteLLM, which speaks "
                 "chat.completions, not the Responses API. Use chat() without "
-                "protocol, or chat_completions() (or protocol='messages' for "
+                "protocol, or protocol='chat_completions' (or protocol='messages' "
+                "for "
                 "Anthropic models), or point OPENAI_BASE_URL at a "
                 "Responses-capable backend and use a bare or "
                 "'openai/'-prefixed model name."
@@ -939,7 +940,7 @@ def run_chat_completions(client, messages, stream: bool = False,
                if getattr(client, "api_key", None) else
                "local mode does not store the block-level OCR data "
                "citations need."))
-    _require_openai_agents("chat_completions")
+    _require_openai_agents("chat(protocol='chat_completions')")
     _validate_max_turns(max_turns)
     agent, items, model_name = _chat_agent(
         client, messages, doc_id, model, temperature=temperature,

@@ -284,7 +284,7 @@ class PageIndexClient:
             documents (structure and summaries). Defaults to the SDK
             default (fast and cheap).
         chat_model (str, optional): Your own model for the chat surfaces
-            (``chat``, ``chat_completions``), exposed as
+            (``chat`` and its protocol lanes), exposed as
             ``client.chat_model`` — on a cloud client, setting it runs
             the document-QA agent in your process over the cloud
             documents (page content then flows through your process to
@@ -531,7 +531,8 @@ class PageIndexClient:
         raise PageIndexAPIError(
             f"{lane} drives your own chat model — construct the client "
             "with chat_model=... (or a chat= model); the managed cloud chat "
-            "serves the answer lane and chat_completions() only.")
+            "serves the answer lane and chat(protocol=\"chat_completions\") "
+            "only.")
 
     if not TYPE_CHECKING:
         # The protocol doors live behind chat(protocol=...); their old
@@ -540,7 +541,7 @@ class PageIndexClient:
         # a __getattr__ the type checker can see would silence every
         # attribute typo on the client.
         def __getattr__(self, name):
-            if name in ("responses", "messages"):
+            if name in ("chat_completions", "responses", "messages"):
                 raise AttributeError(
                     f"{name}() moved: call chat(protocol={name!r}, ...) "
                     "— the same protocol, engine, and envelope. Pass the "
@@ -755,11 +756,11 @@ class PageIndexClient:
 
         Cloud-only: the cloud API marks this endpoint deprecated in favor of
         chat completions, so local mode does not implement it — raises
-        PageIndexAPIError. Use ``chat_completions`` instead.
+        PageIndexAPIError. Use ``chat`` instead.
         """
         return self._require_cloud(
             "submit_query is cloud-only — the retrieval API is deprecated in "
-            "favor of chat completions; use chat_completions instead."
+            "favor of chat completions; use chat instead."
         ).submit_query(doc_id=doc_id, query=query, thinking=thinking)
 
     def get_retrieval(self, retrieval_id: str) -> dict[str, Any]:
@@ -768,11 +769,11 @@ class PageIndexClient:
 
         Cloud-only: the cloud API marks this endpoint deprecated in favor of
         chat completions, so local mode does not implement it — raises
-        PageIndexAPIError. Use ``chat_completions`` instead.
+        PageIndexAPIError. Use ``chat`` instead.
         """
         return self._require_cloud(
             "get_retrieval is cloud-only — the retrieval API is deprecated in "
-            "favor of chat completions; use chat_completions instead."
+            "favor of chat completions; use chat instead."
         ).get_retrieval(retrieval_id=retrieval_id)
 
     # ---------- CHAT ----------
@@ -926,17 +927,20 @@ class PageIndexClient:
         Ask a question about your documents.
 
         The answer lane (no ``protocol``): thin sugar over the same engine
-        as ``chat_completions()`` in every mode — same wire, minus the
-        envelope. Returns the answer string (a ``ChatStream`` when
+        as ``protocol="chat_completions"`` in every mode — same wire, minus
+        the envelope. Returns the answer string (a ``ChatStream`` when
         streaming). Multi-turn: keep your own role/content list of the
         visible conversation (append each answer as an assistant message;
         join a stream into one only with ``show_process=False``) and pass
         it back.
 
-        The protocol lanes (``protocol="responses"`` / ``"messages"``):
-        own-model chat driven natively over the OpenAI Responses API or
-        Anthropic's Messages API. Input and output are that protocol's own
-        shapes — the history may carry its transcript (Responses items, or
+        The protocol lanes: ``protocol="chat_completions"`` is the answer
+        lane's own engine with its envelope kept — the Chat Completions
+        response (``choices``/``usage``), or its chunk dicts when
+        streaming; it is the one protocol the managed cloud chat serves
+        too. ``protocol="responses"`` / ``"messages"``: own-model chat
+        driven natively over the OpenAI Responses API or Anthropic's
+        Messages API. Input and output are that protocol's own shapes — the history may carry its transcript (Responses items, or
         Messages content blocks with prior tool_use/tool_result
         round-trips), and the return is its response envelope, streaming
         its native events. A round-tripped transcript continues the
@@ -1047,17 +1051,20 @@ class PageIndexClient:
               ``{"type": "tool_call", "call_id", "name", "arguments"}``,
               ``{"type": "tool_result", "call_id", "name", "output"}``
             - protocol lane, stream=False: the protocol's response
-              envelope — Responses: ``output`` plus an ``items``
+              envelope — Chat Completions: ``choices`` and ``usage``;
+              Responses: ``output`` plus an ``items``
               transcript and cross-turn ``usage``; Messages: the final
               message with a ``messages`` turn sequence and aggregated
               ``usage``
             - protocol lane, stream=True: an iterator of the protocol's
               own stream events
         """
-        if protocol not in (None, "responses", "messages"):
+        if protocol not in (None, "chat_completions", "responses",
+                            "messages"):
             raise PageIndexAPIError(
-                "protocol selects the wire: \"responses\" (OpenAI Responses) "
-                "or \"messages\" (Anthropic Messages), or leave it unset for "
+                "protocol selects the wire: \"chat_completions\" (OpenAI Chat "
+                "Completions), \"responses\" (OpenAI Responses) or "
+                "\"messages\" (Anthropic Messages), or leave it unset for "
                 f"the answer lane — got {protocol!r}.")
         if (protocol is not None and show_process is not False
                 and show_process is not None):
@@ -1079,7 +1086,7 @@ class PageIndexClient:
                 "instructions blocks are the Messages protocol's shape — "
                 "with protocol=\"messages\" they append after the managed "
                 "system blocks; the other lanes take a string.")
-        if protocol is not None:
+        if protocol in ("responses", "messages"):
             self._require_own_chat(f"chat(protocol={protocol!r})")
             if protocol == "responses":
                 body = extra_body
@@ -1125,6 +1132,12 @@ class PageIndexClient:
                 # then the history's own system rows.
                 messages = [{"role": "system", "content": instructions},
                             *messages]
+        if protocol == "chat_completions":
+            return self._chat_completions(
+                messages, stream=stream, stream_metadata=True, doc_id=doc_id,
+                model=model, max_turns=max_turns,
+                reasoning_effort=reasoning_effort, extra_body=extra_body,
+                extra_headers=extra_headers, backend=backend)
         if stream:
             # the default means "on where available"
             resolved = True if show_process is None else show_process
@@ -1138,21 +1151,21 @@ class PageIndexClient:
                                        extra_headers=extra_headers,
                                        extra_body=extra_body)
             from .local_chat import run_cloud_chat_stream
-            chunks = self.chat_completions(messages, stream=True,
-                                           stream_metadata=True,
-                                           doc_id=doc_id, model=model,
-                                           reasoning_effort=reasoning_effort,
-                                           max_turns=max_turns,
-                                           backend=backend,
-                                           extra_headers=extra_headers,
-                                           extra_body=extra_body)
+            chunks = self._chat_completions(messages, stream=True,
+                                            stream_metadata=True,
+                                            doc_id=doc_id, model=model,
+                                            reasoning_effort=reasoning_effort,
+                                            max_turns=max_turns,
+                                            backend=backend,
+                                            extra_headers=extra_headers,
+                                            extra_body=extra_body)
             return run_cloud_chat_stream(
                 cast(Iterator[dict[str, Any]], chunks), resolved)
-        result = self.chat_completions(messages, doc_id=doc_id, model=model,
-                                       reasoning_effort=reasoning_effort,
-                                       max_turns=max_turns, backend=backend,
-                                       extra_headers=extra_headers,
-                                       extra_body=extra_body)
+        result = self._chat_completions(messages, doc_id=doc_id, model=model,
+                                        reasoning_effort=reasoning_effort,
+                                        max_turns=max_turns, backend=backend,
+                                        extra_headers=extra_headers,
+                                        extra_body=extra_body)
         envelope = cast(dict[str, Any], result)
         try:
             return envelope["choices"][0]["message"]["content"] or ""
@@ -1161,7 +1174,7 @@ class PageIndexClient:
                 "The chat response carries no answer: "
                 f"{str(envelope)[:200]}") from exc
 
-    def chat_completions(
+    def _chat_completions(
         self,
         messages: Union[str, list[dict[str, str]]],
         stream: bool = False,
@@ -1179,7 +1192,8 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
     ) -> Union[dict[str, Any], Iterator[str], Iterator[dict[str, Any]]]:
         """
-        PageIndex Chat Completions: document QA in one call.
+        The engine behind ``chat()`` and ``chat(protocol="chat_completions")``:
+        document QA over the OpenAI Chat Completions protocol.
 
         With no chat model configured (a plain cloud client): the managed
         hosted chat endpoint. With one — local mode, or a cloud client
@@ -1336,10 +1350,11 @@ class PageIndexClient:
 
         Requires a backend that supports the
         Responses API; backends that only speak chat.completions should use
-        ``chat_completions()``. Provider-prefixed models (``anthropic/…``)
-        route through LiteLLM's chat.completions adapter and are therefore
-        refused here — use ``chat_completions()`` or
-        ``chat(protocol="messages")`` for those.
+        ``chat(protocol="chat_completions")``. Provider-prefixed models
+        (``anthropic/…``) route through LiteLLM's chat.completions adapter
+        and are therefore refused here — use
+        ``chat(protocol="chat_completions")`` or ``chat(protocol="messages")``
+        for those.
 
         Args:
             input: A user message string, or a list of Responses input items
@@ -1911,7 +1926,7 @@ class PageIndexClient:
         SDK release. Raises PageIndexAPIError if the server cannot be
         reached. Local: the built-in guidance for the in-process tools.
 
-        With ``doc_id`` (str or list, same shape as ``chat_completions``),
+        With ``doc_id`` (str or list, same shape as ``chat``),
         appends the target documents' names and metadata and directs the
         agent to work within them. Raises PageIndexAPIError if a doc_id
         does not exist, or if its name is shadowed by a newer same-name

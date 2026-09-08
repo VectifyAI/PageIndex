@@ -212,7 +212,7 @@ def test_chat_completions_end_to_end(client, store_path, fake_model):
         [_call_item("get_document", {"doc_name": "report.pdf"})],
         [_msg_item("The answer")],
     ])
-    result = client.chat_completions(
+    result = client._chat_completions(
         [{"role": "user", "content": "What status?"}])
     assert result["id"].startswith("chatcmpl-")
     assert result["object"] == "chat.completion"
@@ -237,7 +237,7 @@ def test_chat_completions_end_to_end(client, store_path, fake_model):
 def test_chat_completions_system_and_doc_block(client, store_path, fake_model):
     doc_id = seed_doc(store_path, "pi-a", "report.pdf")
     fake = fake_model([[_msg_item("ok")]])
-    client.chat_completions(
+    client._chat_completions(
         [{"role": "system", "content": "Answer in French."},
          {"role": "user", "content": "hi"}],
         doc_id=doc_id)
@@ -250,40 +250,40 @@ def test_chat_completions_system_and_doc_block(client, store_path, fake_model):
 def test_chat_completions_accepts_query_string(client, store_path, fake_model):
     seed_doc(store_path, "pi-a", "report.pdf")
     fake = fake_model([[_msg_item("Answer")]])
-    result = client.chat_completions("What status?")
+    result = client._chat_completions("What status?")
     assert result["choices"][0]["message"]["content"] == "Answer"
     assert fake.inputs[0][-1] == {"role": "user", "content": "What status?"}
     with pytest.raises(PageIndexAPIError, match="non-empty string"):
-        client.chat_completions("   ")
+        client._chat_completions("   ")
 
 
 @needs_agents
 def test_chat_completions_validation(client, store_path, fake_model):
     fake_model([[_msg_item("ok")]])
     with pytest.raises(PageIndexAPIError, match="managed chat endpoint"):
-        client.chat_completions([{"role": "user", "content": "x"}],
+        client._chat_completions([{"role": "user", "content": "x"}],
                                 enable_citations=True)
     with pytest.raises(PageIndexAPIError, match="chat\\(protocol="):
-        client.chat_completions([{"role": "tool", "content": "x"}])
+        client._chat_completions([{"role": "tool", "content": "x"}])
     with pytest.raises(PageIndexAPIError, match="must be a string"):
-        client.chat_completions([{"role": "user", "content": [1]}])
+        client._chat_completions([{"role": "user", "content": [1]}])
     with pytest.raises(PageIndexAPIError, match="non-empty"):
-        client.chat_completions([])
+        client._chat_completions([])
     with pytest.raises(PageIndexAPIError,
                        match="Documents not found or access denied: a, b"):
-        client.chat_completions([{"role": "user", "content": "x"}],
+        client._chat_completions([{"role": "user", "content": "x"}],
                                 doc_id=["a", "b"])
 
 
 @needs_agents
 def test_chat_completions_stream_modes(client, store_path, fake_model):
     fake_model([[_msg_item("The answer")]])
-    pieces = list(client.chat_completions(
+    pieces = list(client._chat_completions(
         [{"role": "user", "content": "q"}], stream=True))
     assert pieces == ["The ", "answer"]
 
     fake_model([[_msg_item("The answer")]])
-    chunks = list(client.chat_completions(
+    chunks = list(client._chat_completions(
         [{"role": "user", "content": "q"}], stream=True,
         stream_metadata=True))
     assert chunks[0]["choices"][0]["delta"] == {"role": "assistant",
@@ -297,7 +297,7 @@ def test_chat_completions_stream_modes(client, store_path, fake_model):
 def test_chat_completions_missing_framework(client, monkeypatch):
     monkeypatch.setitem(sys.modules, "agents", None)
     with pytest.raises(PageIndexAPIError, match="pip install openai-agents"):
-        client.chat_completions([{"role": "user", "content": "x"}])
+        client._chat_completions([{"role": "user", "content": "x"}])
 
 
 def test_cloud_guards(monkeypatch):
@@ -308,25 +308,25 @@ def test_cloud_guards(monkeypatch):
     assert cloud.chat("x", model="", reasoning_effort="", extra_body={},
                       extra_headers={}, backend={}) == "ok"
     with pytest.raises(PageIndexAPIError, match="own chat model"):
-        cloud.chat_completions([{"role": "user", "content": "x"}], model="m")
+        cloud._chat_completions([{"role": "user", "content": "x"}], model="m")
     with pytest.raises(PageIndexAPIError, match="own chat model"):
-        cloud.chat_completions([{"role": "user", "content": "x"}],
+        cloud._chat_completions([{"role": "user", "content": "x"}],
                                reasoning_effort="low")
     with pytest.raises(PageIndexAPIError, match="own chat model"):
-        cloud.chat_completions([{"role": "user", "content": "x"}],
+        cloud._chat_completions([{"role": "user", "content": "x"}],
                                extra_body={"service_tier": "auto"})
     with pytest.raises(PageIndexAPIError, match="own chat model"):
-        cloud.chat_completions([{"role": "user", "content": "x"}], top_p=0.9)
+        cloud._chat_completions([{"role": "user", "content": "x"}], top_p=0.9)
     with pytest.raises(PageIndexAPIError, match="own chat model"):
-        cloud.chat_completions([{"role": "user", "content": "x"}],
+        cloud._chat_completions([{"role": "user", "content": "x"}],
                                max_tokens=256)
     with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.chat("x", reasoning_effort="low")
     with pytest.raises(PageIndexAPIError, match="own chat model"):
-        cloud.chat_completions([{"role": "user", "content": "x"}],
+        cloud._chat_completions([{"role": "user", "content": "x"}],
                                backend={"api_key": "k"})
     with pytest.raises(PageIndexAPIError, match="own chat model"):
-        cloud.chat_completions([{"role": "user", "content": "x"}],
+        cloud._chat_completions([{"role": "user", "content": "x"}],
                                extra_headers={"x-beta": "1"})
     with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.chat("x", protocol="responses")
@@ -415,7 +415,7 @@ def test_cache_marker_reaches_the_anthropic_wire(client, store_path,
 
     monkeypatch.setattr(AsyncHTTPHandler, "post", fake_apost)
     monkeypatch.setattr(HTTPHandler, "post", fake_post)
-    result = client.chat_completions(
+    result = client._chat_completions(
         "hi", model="anthropic/claude-3-5-sonnet-20240620")
     assert "/v1/messages" in captured["url"]
     assert '"cache_control"' in json.dumps(captured["body"])
@@ -1027,9 +1027,9 @@ def test_doc_id_conversations_get_distinct_cache_keys(client, store_path,
     assert keys[2] == keys[0]  # a continuation keeps its conversation's key
 
     fake_model([[_msg_item("d")]])
-    client.chat_completions("What is the CAGR?", doc_id="pi-a")
+    client._chat_completions("What is the CAGR?", doc_id="pi-a")
     fake_model([[_msg_item("e")]])
-    client.chat_completions("Summarize section 3.", doc_id="pi-a")
+    client._chat_completions("Summarize section 3.", doc_id="pi-a")
     assert keys[3] != keys[4]  # same property on the chat surface
 
     seed_doc(store_path, "pi-b", "contract.pdf")
@@ -1319,7 +1319,7 @@ def _anthropic_tool_use(tool_use_id="tu_1"):
 
 
 @needs_agents
-@pytest.mark.parametrize("surface", ["chat_completions", "_responses", "chat"])
+@pytest.mark.parametrize("surface", ["_chat_completions", "_responses", "chat"])
 @pytest.mark.parametrize("streaming", [False, True])
 def test_max_turns_wrapped(client, store_path, fake_model, surface, streaming):
     """MaxTurnsExceeded is an engine-internal type; callers get the SDK's
@@ -1342,7 +1342,7 @@ def test_max_turns_wrapped(client, store_path, fake_model, surface, streaming):
 def test_max_turns_rejects_non_positive(client, store_path, fake_model):
     seed_doc(store_path, "pi-a", "report.pdf")
     with pytest.raises(PageIndexAPIError, match="positive integer"):
-        client.chat_completions([{"role": "user", "content": "q"}],
+        client._chat_completions([{"role": "user", "content": "q"}],
                                 max_turns=0)
     # every door that takes max_turns validates it, the runner config too
     with pytest.raises(PageIndexAPIError, match="positive integer"):
@@ -1355,13 +1355,13 @@ def test_max_turns_rejects_non_positive(client, store_path, fake_model):
 def test_enable_citations_rejected_before_framework_check(client, monkeypatch):
     monkeypatch.setitem(sys.modules, "agents", None)
     with pytest.raises(PageIndexAPIError, match="managed chat endpoint"):
-        client.chat_completions([{"role": "user", "content": "x"}],
+        client._chat_completions([{"role": "user", "content": "x"}],
                                 enable_citations=True)
     # A cloud own-model client is told the real gate — managed vs own
     # chat — never "cloud-only": it is on the cloud.
     cloud = PageIndexClient(api_key="pi-k", chat_model="m")
     with pytest.raises(PageIndexAPIError) as err:
-        cloud.chat_completions([{"role": "user", "content": "x"}],
+        cloud._chat_completions([{"role": "user", "content": "x"}],
                                enable_citations=True)
     assert "cloud-only" not in str(err.value)
     assert "drop the chat model" in str(err.value)
@@ -1370,7 +1370,7 @@ def test_enable_citations_rejected_before_framework_check(client, monkeypatch):
 @needs_agents
 def test_chat_stream_role_chunk_even_with_empty_output(client, fake_model):
     fake_model([[]])
-    chunks = list(client.chat_completions([{"role": "user", "content": "q"}],
+    chunks = list(client._chat_completions([{"role": "user", "content": "q"}],
                                           stream=True, stream_metadata=True))
     assert chunks[0]["choices"][0]["delta"] == {"role": "assistant",
                                                "content": ""}
@@ -1601,7 +1601,7 @@ def test_sampling_knobs_ride_model_settings(client, store_path, fake_model,
 
     monkeypatch.setattr(local_chat, "_openai_agent", spy)
     fake_model([[_msg_item("ok")]])
-    client.chat_completions("q", top_p=0.9, max_tokens=256)
+    client._chat_completions("q", top_p=0.9, max_tokens=256)
     assert seen["chat"].top_p == 0.9
     assert seen["chat"].max_tokens == 256
     fake_model([[_msg_item("ok")]])
@@ -1683,7 +1683,7 @@ def test_doc_id_scopes_tools_to_targeted_documents(client, store_path,
         [_call_item("browse_documents", {}, "call_2")],
         [_msg_item("done")],
     ])
-    client.chat_completions("q", doc_id="pi-a")
+    client._chat_completions("q", doc_id="pi-a")
 
     def tool_outputs(items):
         # function_call_output.output: the framework's structured text item
@@ -1708,7 +1708,7 @@ def test_malformed_tool_arguments_answer_the_model(client, store_path,
         id="fc_1", type="function_call", call_id="call_1",
         name="get_document", arguments="{not json", status="completed")
     fake = fake_model([[bad_call], [_msg_item("The answer")]])
-    result = client.chat_completions("What?")
+    result = client._chat_completions("What?")
     assert result["choices"][0]["message"]["content"] == "The answer"
     outputs = [item["output"] for item in fake.inputs[1]
                if item.get("type") == "function_call_output"]
@@ -1723,7 +1723,7 @@ def test_empty_doc_id_is_refused(client, store_path):
     documents don't exist, with no signal the scope was empty."""
     seed_doc(store_path, "pi-a", "report.pdf")
     with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
-        client.chat_completions("q", doc_id=[])
+        client._chat_completions("q", doc_id=[])
     with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
         client.as_openai_tools(doc_id=[])
     with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
@@ -1794,10 +1794,10 @@ def test_envelope_model_strips_litellm_routing_prefix(store_path, fake_model):
                                   retrieve_model="anthropic/claude-x")
     assert client.retrieve_model == "anthropic/claude-x"
     fake_model([[_msg_item("ok")]])
-    result = client.chat_completions("q")
+    result = client._chat_completions("q")
     assert result["model"] == "anthropic/claude-x"
     fake_model([[_msg_item("ok")]])
-    chunks = list(client.chat_completions("q", stream=True,
+    chunks = list(client._chat_completions("q", stream=True,
                                           stream_metadata=True))
     assert {c["model"] for c in chunks} == {"anthropic/claude-x"}
 
@@ -1810,7 +1810,7 @@ def test_envelope_model_strips_openai_routing_prefix(store_path, fake_model):
     client = PageIndexLocalClient(storage_path=store_path,
                                   retrieve_model="openai/gpt-5.2")
     fake_model([[_msg_item("ok")]])
-    result = client.chat_completions("q")
+    result = client._chat_completions("q")
     assert result["model"] == "gpt-5.2"
     fake_model([[_msg_item("ok")]])
     result = client._responses("q")
@@ -1906,7 +1906,7 @@ def test_chat_completions_wraps_framework_errors(client, store_path,
     fake = fake_model([[_msg_item("never terminal")]])
     fake.no_terminal = True
     with pytest.raises(PageIndexAPIError, match="agent backend failed"):
-        list(client.chat_completions("q", stream=True))
+        list(client._chat_completions("q", stream=True))
 
     fake = fake_model([[_msg_item("x")]])
 
@@ -1915,7 +1915,7 @@ def test_chat_completions_wraps_framework_errors(client, store_path,
 
     monkeypatch.setattr(fake, "get_response", boom)
     with pytest.raises(PageIndexAPIError, match="agent backend failed"):
-        client.chat_completions("q")
+        client._chat_completions("q")
 
 
 @needs_agents
@@ -2009,12 +2009,12 @@ def test_provider_errors_wrap_as_sdk_errors(client, store_path, fake_model,
     fake = fake_model([[_msg_item("x")], [_msg_item("x")]])
     monkeypatch.setattr(fake, "get_response", conn_err)
     with pytest.raises(PageIndexAPIError, match="model backend failed"):
-        client.chat_completions("q")
+        client._chat_completions("q")
     with pytest.raises(PageIndexAPIError, match="model backend failed"):
         client._responses("q")
     monkeypatch.setattr(fake, "stream_response", conn_err_stream)
     with pytest.raises(PageIndexAPIError, match="model backend failed"):
-        list(client.chat_completions("q", stream=True))
+        list(client._chat_completions("q", stream=True))
     with pytest.raises(PageIndexAPIError, match="model backend failed"):
         list(client._responses("q", stream=True))
 
@@ -2059,7 +2059,7 @@ def test_chat_stream_close_at_opening_chunk_cancels_run(client, store_path,
         return iter(())  # drive the async generator by hand instead
 
     monkeypatch.setattr(local_chat, "_stream_sync", capture)
-    client.chat_completions("q", stream=True, stream_metadata=True)
+    client._chat_completions("q", stream=True, stream_metadata=True)
 
     async def drive():
         agen = captured["factory"]()
@@ -2106,7 +2106,7 @@ def test_stream_abandonment_cancels_pending_turn(client, store_path,
         [_msg_item("The answer")],
     ])
     fake.block_from = 2  # turn 2 hangs until cancelled
-    stream = client.chat_completions([{"role": "user", "content": "q"}],
+    stream = client._chat_completions([{"role": "user", "content": "q"}],
                                      stream=True, stream_metadata=True)
     next(stream)  # the opening role chunk
     stream.close()
@@ -2642,9 +2642,9 @@ def test_chat_completions_reports_native_finish_reason(client, store_path,
 
     fake = TruncatingModel([[_msg_item("cut ")], [_msg_item("cut ")]])
     monkeypatch.setattr(local_chat, "_openai_model", lambda *a: fake)
-    result = client.chat_completions("q")
+    result = client._chat_completions("q")
     assert result["choices"][0]["finish_reason"] == "length"
-    chunks = list(client.chat_completions("q", stream=True,
+    chunks = list(client._chat_completions("q", stream=True,
                                           stream_metadata=True))
     assert chunks[-2]["choices"][0]["finish_reason"] == "length"
 
@@ -2846,7 +2846,7 @@ def test_bad_model_settings_wrap_as_contract_error(client):
     translated into the contract's PageIndexAPIError like every other
     door failure."""
     with pytest.raises(PageIndexAPIError, match="Invalid model settings"):
-        client.chat_completions("q", temperature="hot")
+        client._chat_completions("q", temperature="hot")
 
 
 @needs_agents
@@ -2957,7 +2957,7 @@ def test_bridge_chat_runs_engine_over_cloud_tools(bridge_client, fake_model):
         [_call_item("get_document", {"doc_name": "r.pdf"})],
         [_msg_item("The answer")],
     ])
-    result = client.chat_completions("What?")
+    result = client._chat_completions("What?")
     assert result["choices"][0]["message"]["content"] == "The answer"
     assert bridge.calls == [("get_document", {"doc_name": "r.pdf"})]
     assert fake.instructions[0].startswith(CHAT_HEADER)
@@ -3004,7 +3004,7 @@ def test_bridge_doc_id_targets_at_prompt_level(bridge_client, fake_model,
         lambda **kw: {"documents": [{"id": "pi-a", "name": "r.pdf"}],
                       "total": 1})
     fake = fake_model([[_msg_item("ok")]])
-    client.chat_completions("q", doc_id="pi-a")
+    client._chat_completions("q", doc_id="pi-a")
     first = fake.inputs[0][0]
     assert "specified document" in first["content"]
     assert "r.pdf" in first["content"]
@@ -3014,7 +3014,7 @@ def test_bridge_gate_and_citations(monkeypatch):
     from pageindex import PageIndexClient
     client = PageIndexClient(api_key="pi-k", chat_model="m")
     with pytest.raises(PageIndexAPIError, match="drop the chat model"):
-        client.chat_completions("x", enable_citations=True)
+        client._chat_completions("x", enable_citations=True)
 
     called = {}
 
@@ -3180,12 +3180,57 @@ def test_bridge_openai_agent_config_carries_configured_model(bridge_client):
 # ── chat(protocol=): the protocol doors behind the front door ──
 
 def test_old_door_names_point_at_chat_protocol(client):
-    for name in ("responses", "messages"):
+    for name in ("chat_completions", "responses", "messages"):
         with pytest.raises(AttributeError, match=f"chat\\(protocol={name!r}"):
             getattr(client, name)
         assert not hasattr(client, name)
     with pytest.raises(AttributeError, match="no attribute 'no_such_thing'"):
         client.no_such_thing
+
+
+def test_chat_protocol_chat_completions_is_the_door(client, monkeypatch):
+    seen = []
+    monkeypatch.setattr(local_chat, "run_chat_completions",
+                        lambda c, messages, **kw: seen.append((messages, kw))
+                        or "door")
+    knobs = dict(doc_id="pi-a", model="gpt-x", max_turns=3,
+                 reasoning_effort="low", backend={"api_key": "k"},
+                 extra_headers={"x": "1"}, extra_body={"seed": 1})
+    for streaming in (False, True):
+        assert client.chat("q", protocol="chat_completions", stream=streaming,
+                           **knobs) == "door"
+        # the protocol's own stream is its chunk dicts, never text pieces
+        assert client._chat_completions("q", stream=streaming,
+                                        stream_metadata=True,
+                                        **knobs) == "door"
+        assert seen[-2] == seen[-1]
+    assert seen[0][0] == [{"role": "user", "content": "q"}]
+    # instructions join the managed prompt as a leading system row
+    client.chat("q", protocol="chat_completions", instructions="be brief")
+    assert seen[-1][0] == [{"role": "system", "content": "be brief"},
+                           {"role": "user", "content": "q"}]
+    with pytest.raises(PageIndexAPIError, match="show_process"):
+        client.chat("q", protocol="chat_completions", stream=True,
+                    show_process=True)
+
+
+def test_chat_protocol_chat_completions_serves_managed_cloud(monkeypatch):
+    """Unlike the own-model protocols, the managed cloud chat speaks
+    chat.completions itself, so the lane opens without a chat model;
+    the own-model knobs still refuse there."""
+    from pageindex import PageIndexClient
+    cloud = PageIndexClient(api_key="pi-k")
+    seen = []
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kw: seen.append(kw) or {"choices": []})
+    assert cloud.chat("q", protocol="chat_completions") == {"choices": []}
+    assert seen[-1] == {"messages": [{"role": "user", "content": "q"}],
+                        "stream": False, "doc_id": None, "temperature": None,
+                        "stream_metadata": True, "enable_citations": False}
+    with pytest.raises(PageIndexAPIError, match="chat_model="):
+        cloud.chat("q", protocol="chat_completions", model="m")
+    with pytest.raises(PageIndexAPIError, match="chat_model="):
+        cloud.chat("q", protocol="chat_completions", instructions="x")
 
 
 def test_chat_protocol_responses_is_the_door(client, monkeypatch):

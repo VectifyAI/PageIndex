@@ -1354,9 +1354,9 @@ def test_folders_are_cloud_only(local_client):
 # ── local: retrieval endpoints are cloud-only ──
 
 def test_retrieval_endpoints_cloud_only(local_client):
-    with pytest.raises(PageIndexAPIError, match="use chat_completions"):
+    with pytest.raises(PageIndexAPIError, match="use chat instead"):
         local_client.submit_query("any", "q")
-    with pytest.raises(PageIndexAPIError, match="use chat_completions"):
+    with pytest.raises(PageIndexAPIError, match="use chat instead"):
         local_client.get_retrieval("any")
 
 
@@ -1366,7 +1366,7 @@ def test_chat_completions_local_needs_openai_agents(local_client, monkeypatch):
     import sys
     monkeypatch.setitem(sys.modules, "agents", None)
     with pytest.raises(PageIndexAPIError, match="pip install openai-agents"):
-        local_client.chat_completions(
+        local_client._chat_completions(
             messages=[{"role": "user", "content": "q"}])
 
 
@@ -1468,7 +1468,7 @@ def test_cloud_errors_carry_status_code(cloud, monkeypatch, sample_pdf):
         lambda: client.get_tree("pi-1"),
         lambda: client.submit_query("pi-1", "q"),
         lambda: client.get_retrieval("r-1"),
-        lambda: client.chat_completions(
+        lambda: client._chat_completions(
             messages=[{"role": "user", "content": "q"}]),
         lambda: client.get_document("pi-1"),
         lambda: client.delete_document("pi-1"),
@@ -1493,11 +1493,11 @@ def test_cloud_chat_stream_parsing(cloud, monkeypatch):
         b"data: [DONE]",
     ]
     _patch_requests(monkeypatch, lambda m, url, kw: FakeResponse(lines=lines))
-    pieces = list(client.chat_completions(
+    pieces = list(client._chat_completions(
         messages=[{"role": "user", "content": "q"}], stream=True))
     assert pieces == ["Hi", " there"]
 
-    chunks = list(client.chat_completions(
+    chunks = list(client._chat_completions(
         messages=[{"role": "user", "content": "q"}], stream=True,
         stream_metadata=True))
     assert {"object": "chat.completion.citations", "citations": []} in chunks
@@ -1514,8 +1514,8 @@ def test_cloud_chat_stream_error_chunk_raises(cloud, monkeypatch):
     ]
     _patch_requests(monkeypatch, lambda m, url, kw: FakeResponse(lines=lines))
     for stream in (
-        lambda: client.chat_completions("q", stream=True),
-        lambda: client.chat_completions("q", stream=True,
+        lambda: client._chat_completions("q", stream=True),
+        lambda: client._chat_completions("q", stream=True,
                                         stream_metadata=True),
         lambda: client.chat("q", stream=True),
     ):
@@ -1530,11 +1530,11 @@ def test_cloud_chat_stream_error_chunk_raises(cloud, monkeypatch):
 def test_cloud_chat_accepts_query_string(cloud):
     client, calls, fake = cloud
     fake.payload = {"choices": [{"message": {"content": "ok"}}]}
-    client.chat_completions("What status?")
+    client._chat_completions("What status?")
     assert calls[-1]["json"]["messages"] == [
         {"role": "user", "content": "What status?"}]
     with pytest.raises(PageIndexAPIError, match="non-empty string"):
-        client.chat_completions("   ")
+        client._chat_completions("   ")
 
 
 def test_parse_pages_overlap_counts_union():
@@ -1664,7 +1664,7 @@ def test_chat_wraps_answerless_cloud_reply(monkeypatch):
     client = PageIndexClient(api_key="pi-k")
     for reply in ({"id": "x", "object": "chat.completion", "choices": []},
                   {"id": "x"}):
-        monkeypatch.setattr(client, "chat_completions",
+        monkeypatch.setattr(client, "_chat_completions",
                             lambda *a, _r=reply, **k: _r)
         with pytest.raises(PageIndexAPIError, match="carries no answer"):
             client.chat("hi")
@@ -1981,7 +1981,7 @@ def test_local_client_blank_chat_model_refuses_at_chat_door(local_client):
     for blank in ("", "   ", None):
         local_client.chat_model = blank
         with pytest.raises(PageIndexAPIError, match="chat_model is empty"):
-            local_client.chat_completions("hi")
+            local_client._chat_completions("hi")
         # the protocol and instructions knobs must not point a local
         # client at the managed chat it does not have
         with pytest.raises(PageIndexAPIError, match="chat_model is empty"):
