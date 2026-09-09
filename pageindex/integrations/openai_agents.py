@@ -73,8 +73,6 @@ def build_openai_tools(client, include_management: bool = False,
             "as_openai_tools requires the OpenAI Agents SDK — "
             "pip install openai-agents."
         ) from exc
-    from ..agent_tools import _require_local_scope
-    _require_local_scope(client, doc_ids)
     if getattr(client, "api_key", None) and hosted:
         # include_management picks the endpoint — the URL itself is the
         # gate (?tools=read serves only readOnlyHint-annotated tools), so

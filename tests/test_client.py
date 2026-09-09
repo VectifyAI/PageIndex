@@ -857,7 +857,7 @@ def test_submit_with_metadata(local_client, sample_pdf, monkeypatch):
     assert local_client.get_tree(doc_id)["metadata"] == tags
     assert local_client.get_ocr(doc_id)["metadata"] == tags
     assert local_client.list_documents()["documents"][0]["metadata"] == tags
-    assert "metadata" not in local_client.get_document(doc_id)
+    assert local_client.get_document(doc_id)["metadata"] == tags
 
 
 def test_submit_metadata_validation(local_client, sample_pdf, monkeypatch):
