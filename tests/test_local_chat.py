@@ -3336,7 +3336,6 @@ def _citing(bridge):
             "type": "text", "text": f"CITATIONS — {fmt}"}}]
 
     bridge.get_prompt = get_prompt
-    return bridge
 
 
 @needs_agents
