@@ -2,9 +2,10 @@ import asyncio
 import json
 import re
 import os
-try:
+if __package__:
     from .utils import *
-except:
+else:
+    # Run as a script (no parent package): resolve utils from the same directory.
     from utils import *
 
 async def get_node_summary(node, summary_token_threshold=200, model=None):
