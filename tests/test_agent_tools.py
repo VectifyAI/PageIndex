@@ -2987,8 +2987,7 @@ def _fake_requests(monkeypatch, fake_post):
     Session posts through ``fake_post`` — patching the shared module would
     leak process-wide."""
     import requests as requests_mod
-    import pageindex.mcp_bridge as mcp_bridge
-    monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
+    monkeypatch.setattr("pageindex.mcp_bridge.requests", types.SimpleNamespace(
         Session=lambda: types.SimpleNamespace(post=fake_post),
         RequestException=requests_mod.RequestException))
 
