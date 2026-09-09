@@ -1245,15 +1245,27 @@ def test_messages_end_to_end(client, store_path, fake_anthropic):
 
 @needs_anthropic
 def test_messages_doc_block_and_system(client, store_path, fake_anthropic):
+    """The doc block leads the conversation as a user message, as on the
+    OpenAI lanes; system stays the cached header plus the caller's own;
+    the returned new-turn slice still starts after the caller's history."""
     doc_id = seed_doc(store_path, "pi-a", "report.pdf")
     calls = fake_anthropic([
+        _anthropic_message(
+            [{"type": "tool_use", "id": "tu_1", "name": "get_document",
+              "input": {"doc_name": "report.pdf"}}], "tool_use"),
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn"),
     ])
-    client._messages([{"role": "user", "content": "hi"}], model="claude-test",
-                    max_tokens=100, doc_id=doc_id, system="Answer in French.")
+    result = client._messages([{"role": "user", "content": "hi"}],
+                              model="claude-test", max_tokens=100,
+                              doc_id=doc_id, system="Answer in French.")
+    first, second = calls[0]["messages"][:2]
+    assert first["role"] == "user"
+    assert "The user has specified document: report.pdf" in first["content"]
+    assert second == {"role": "user", "content": "hi"}
     system = calls[0]["system"]
-    assert "The user has specified document: report.pdf" in system[1]["text"]
-    assert system[-1]["text"] == "Answer in French."
+    assert [block["text"] for block in system[1:]] == ["Answer in French."]
+    roles = [message["role"] for message in result["messages"]]
+    assert roles == ["assistant", "user", "assistant"]
 
 
 @needs_anthropic
@@ -1751,9 +1763,7 @@ def test_empty_doc_id_is_refused(client, store_path):
     with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
         client.chat_completions("q", doc_id=[])
     with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
-        client.as_openai_tools(doc_id=[])
-    with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
-        client.agent_instructions(doc_id=[])
+        client.document_context([])
 
 
 @needs_agents
@@ -3017,18 +3027,12 @@ def test_process_display_elides_image_payloads(bridge_client, fake_model):
 def test_bridge_doc_id_targets_at_prompt_level(bridge_client, fake_model,
                                                monkeypatch):
     """On cloud tools there is no local allowlist: doc_id becomes the
-    prompt-level targeting block only. (Had the tool layer received the
-    doc_ids, _require_local_scope would raise on a cloud client — this
-    call succeeding is the proof it did not.)"""
+    prompt-level targeting block only."""
     client, _ = bridge_client
     monkeypatch.setattr(client, "get_document",
                         lambda doc_id: {"name": "r.pdf", "description": "d",
                                         "status": "completed",
                                         "metadata": None})
-    monkeypatch.setattr(
-        client, "list_documents",
-        lambda **kw: {"documents": [{"id": "pi-a", "name": "r.pdf"}],
-                      "total": 1})
     fake = fake_model([[_msg_item("ok")]])
     client.chat_completions("q", doc_id="pi-a")
     first = fake.inputs[0][0]

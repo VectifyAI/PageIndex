@@ -50,10 +50,11 @@ def query_agent(client: PageIndexLocalClient, doc_id: str, prompt: str, verbose:
     """
     agent = Agent(
         **client.openai_agent_config(
-            doc_id=doc_id,
             # model_settings=ModelSettings(reasoning={"effort": "low", "summary": "auto"}),  # from agents.model_settings import ModelSettings
         ),
     )
+    # Document targeting is conversation content: it leads the first message.
+    prompt = client.document_context(doc_id) + "\n\n" + prompt
 
     async def _run():
         streamed_run = Runner.run_streamed(agent, prompt)

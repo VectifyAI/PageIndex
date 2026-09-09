@@ -738,11 +738,10 @@ def test_claude_agent_config_is_sugar_over_the_explicit_form(
     assert renamed["allowed_tools"] == ["mcp__docs"]
 
 
-def test_claude_agent_config_local(client, store_path):
+def test_claude_agent_config_local(client):
     pytest.importorskip("claude_agent_sdk")
-    seed_doc(store_path, "pi-a", "report.pdf")
-    config = client.claude_agent_config(doc_id="pi-a")
-    assert "report.pdf" in config["system_prompt"]
+    config = client.claude_agent_config()
+    assert config["system_prompt"] == AGENT_INSTRUCTIONS
     assert config["allowed_tools"] == ["mcp__pageindex"]
     assert config["mcp_servers"]["pageindex"]["name"] == "pageindex"
     # The SDK server's declared identity follows the registration key.
@@ -751,13 +750,12 @@ def test_claude_agent_config_local(client, store_path):
     assert renamed["allowed_tools"] == ["mcp__docs"]
 
 
-def test_openai_agent_config_local(client, store_path):
+def test_openai_agent_config_local(client):
     pytest.importorskip("agents")
     from agents import Agent
-    seed_doc(store_path, "pi-a", "report.pdf")
-    config = client.openai_agent_config(doc_id="pi-a")
+    config = client.openai_agent_config()
     assert config["name"] == "PageIndex"
-    assert "report.pdf" in config["instructions"]
+    assert config["instructions"] == AGENT_INSTRUCTIONS
     assert [tool.name for tool in config["tools"]] == list(tool_names())
     assert config["model"] == client.retrieve_model
     assert client.openai_agent_config(model="gpt-x")["model"] == "gpt-x"
@@ -891,17 +889,15 @@ def test_openai_agent_config_cloud_omits_model(cloud_with_fake_bridge):
                                                        "get_document"]
 
 
-def test_anthropic_runner_config_shapes(client, store_path):
+def test_anthropic_runner_config_shapes(client):
     pytest.importorskip("anthropic")
     import anthropic
     from anthropic.lib.tools import BetaAsyncFunctionTool
-    seed_doc(store_path, "pi-a", "report.pdf")
-    config = client.anthropic_runner_config(model="claude-3-opus-20240229",
-                                            doc_id="pi-a")
+    config = client.anthropic_runner_config(model="claude-3-opus-20240229")
     assert config["max_tokens"] == 4096
     assert config["max_iterations"] == 10
     assert config["cache_control"] == {"type": "ephemeral"}
-    assert "report.pdf" in config["system"]
+    assert config["system"] == AGENT_INSTRUCTIONS
     assert [tool.name for tool in config["tools"]] == list(tool_names())
     assert (client.anthropic_runner_config(model="claude-sonnet-4-5")
             ["max_tokens"] == 8192)
@@ -927,104 +923,6 @@ def test_anthropic_runner_config_cloud(cloud_with_fake_bridge):
     assert config["system"] == "SERVER GUIDANCE"
     assert [tool.name for tool in config["tools"]] == ["search_documents",
                                                        "get_document"]
-
-
-# ── config helpers: doc_id is structural in the tools, not just prompted ──
-
-def test_openai_agent_config_doc_scope_enforced_in_tools(client, store_path):
-    pytest.importorskip("agents")
-    seed_doc(store_path, "pi-a", "report.pdf")
-    seed_doc(store_path, "pi-b", "payroll.pdf",
-             created_at="2026-08-02T10:00:00.123000")
-    tools = {tool.name: tool
-             for tool in client.openai_agent_config(doc_id="pi-a")["tools"]}
-    out = asyncio.run(tools["get_page_content"].on_invoke_tool(
-        None, json.dumps({"doc_name": "payroll.pdf", "pages": "1"})))
-    assert json.loads(out["text"])["errorCode"] == "NOT_FOUND"
-    out = asyncio.run(tools["browse_documents"].on_invoke_tool(None, "{}"))
-    assert [doc["name"]
-            for doc in json.loads(out["text"])["documents"]] == ["report.pdf"]
-
-
-def test_anthropic_runner_config_doc_scope_enforced_in_tools(client,
-                                                             store_path):
-    pytest.importorskip("anthropic")
-    from anthropic.lib.tools import ToolError
-    seed_doc(store_path, "pi-a", "report.pdf")
-    seed_doc(store_path, "pi-b", "payroll.pdf",
-             created_at="2026-08-02T10:00:00.123000")
-    config = client.anthropic_runner_config(model="claude-sonnet-4-5",
-                                            doc_id="pi-a")
-    tools = {tool.name: tool for tool in config["tools"]}
-    with pytest.raises(ToolError, match="NOT_FOUND"):
-        tools["get_page_content"].call({"doc_name": "payroll.pdf",
-                                        "pages": "1"})
-    browse = json.loads(tools["browse_documents"].call({})[0]["text"])
-    assert [doc["name"] for doc in browse["documents"]] == ["report.pdf"]
-
-
-def test_claude_agent_config_doc_scope_enforced_in_tools(client, store_path,
-                                                         monkeypatch):
-    """claude_agent_config(doc_id=...) must wire scope all the way into the
-    handlers it registers — an out-of-scope document returns NOT_FOUND. The
-    assertion has to drive those handlers, or build_claude_mcp's doc_ids
-    pass-through goes unguarded."""
-    claude_agent_sdk = pytest.importorskip("claude_agent_sdk")
-    seed_doc(store_path, "pi-a", "report.pdf")
-    seed_doc(store_path, "pi-b", "payroll.pdf",
-             created_at="2026-08-02T10:00:00.123000")
-
-    registered = {}
-    create_server = claude_agent_sdk.create_sdk_mcp_server
-
-    def capture(**kwargs):
-        registered.update(kwargs)
-        return create_server(**kwargs)
-
-    monkeypatch.setattr(claude_agent_sdk, "create_sdk_mcp_server", capture)
-    config = client.claude_agent_config(doc_id="pi-a")
-    assert "report.pdf" in config["system_prompt"]
-    handlers = {spec.name: spec.handler for spec in registered["tools"]}
-    result = asyncio.run(handlers["get_page_content"](
-        {"doc_name": "payroll.pdf", "pages": "1"}))
-    assert result.get("is_error")
-    assert json.loads(result["content"][0]["text"])["errorCode"] == "NOT_FOUND"
-    browse = asyncio.run(handlers["browse_documents"]({}))
-    listed = json.loads(browse["content"][0]["text"])["documents"]
-    assert [doc["name"] for doc in listed] == ["report.pdf"]
-
-
-def test_openai_agent_config_scoped_shadow_check(client, store_path):
-    """The bundles' tools resolve names inside the allowlist, so a same-name
-    document outside the target set must not block — only an in-set
-    duplicate shadows."""
-    pytest.importorskip("agents")
-    seed_doc(store_path, "pi-old", "report.pdf")
-    seed_doc(store_path, "pi-new", "report.pdf",
-             created_at="2026-08-02T10:00:00.123000")
-    config = client.openai_agent_config(doc_id="pi-old")
-    assert "report.pdf" in config["instructions"]
-    with pytest.raises(PageIndexAPIError, match="shadowed"):
-        client.openai_agent_config(doc_id=["pi-old", "pi-new"])
-
-
-def test_anthropic_runner_config_scoped_shadow_check(client, store_path):
-    pytest.importorskip("anthropic")
-    seed_doc(store_path, "pi-old", "report.pdf")
-    seed_doc(store_path, "pi-new", "report.pdf",
-             created_at="2026-08-02T10:00:00.123000")
-    config = client.anthropic_runner_config(model="claude-sonnet-4-5",
-                                            doc_id="pi-old")
-    assert "report.pdf" in config["system"]
-
-
-def test_claude_agent_config_scoped_shadow_check(client, store_path):
-    pytest.importorskip("claude_agent_sdk")
-    seed_doc(store_path, "pi-old", "report.pdf")
-    seed_doc(store_path, "pi-new", "report.pdf",
-             created_at="2026-08-02T10:00:00.123000")
-    config = client.claude_agent_config(doc_id="pi-old")
-    assert "report.pdf" in config["system_prompt"]
 
 
 def test_anthropic_runner_config_thinking_lifts_max_tokens(client):
@@ -1110,30 +1008,6 @@ def test_cloud_bridge_gates_the_endpoint(monkeypatch):
     cloud.agent_instructions()
     cloud.agent_instructions(include_management=True)
     assert len(created) == 2  # cached per gate
-
-
-def test_doc_scope_rejected_on_cloud_openai():
-    pytest.importorskip("agents")
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
-    with pytest.raises(PageIndexAPIError, match="server-side"):
-        cloud.as_openai_tools(doc_id="pi-a")
-    # The hosted branch returns before _tool_specs — it must reject too,
-    # not silently drop the allowlist.
-    with pytest.raises(PageIndexAPIError, match="server-side"):
-        cloud.as_openai_tools(hosted=True, doc_id="pi-a")
-
-
-def test_doc_scope_rejected_on_cloud_anthropic():
-    pytest.importorskip("anthropic")
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
-    with pytest.raises(PageIndexAPIError, match="server-side"):
-        cloud.as_anthropic_tools(doc_id="pi-a")
-
-
-def test_doc_scope_rejected_on_cloud_claude():
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
-    with pytest.raises(PageIndexAPIError, match="server-side"):
-        cloud.as_claude_mcp(doc_id="pi-a")
 
 
 def test_as_anthropic_tools_missing_dependency(client, monkeypatch):
@@ -2405,18 +2279,24 @@ def test_agent_instructions_default(client):
     assert 'sort="relevance"' not in text  # cloud-side capability
 
 
-def test_agent_instructions_with_doc_id(client, store_path):
+def test_document_context(client, store_path):
+    """Document targeting is conversation content the caller places; the
+    instructions stay static."""
     seed_doc(store_path, "pi-a", "report.pdf")
-    text = client.agent_instructions(doc_id="pi-a")
-    assert text.startswith(AGENT_INSTRUCTIONS)
+    text = client.document_context("pi-a")
     assert "The user has specified document: report.pdf" in text
+    with pytest.raises(TypeError):
+        client.agent_instructions(doc_id="pi-a")
 
     seed_doc(store_path, "pi-b", "other.pdf")
-    multi = client.agent_instructions(doc_id=["pi-a", "pi-b"])
+    multi = client.document_context(["pi-a", "pi-b"])
     assert "The user has specified documents: report.pdf, other.pdf" in multi
 
     with pytest.raises(PageIndexAPIError):
-        client.agent_instructions(doc_id="pi-missing")
+        client.document_context("pi-missing")
+    for bad in (None, 123):
+        with pytest.raises(PageIndexAPIError, match="string or a list"):
+            client.document_context(bad)
 
 
 def test_local_instructions_name_only_local_tools():
@@ -2731,16 +2611,12 @@ def test_submit_wait_reraises_definite_poll_answers(fake_cloud_client,
     assert "Processing continues" not in str(err.value)
 
 
-def test_config_helpers_reject_empty_doc_id_on_cloud():
-    """An explicitly empty scope must not silently widen to the whole
-    library — cloud has no tool-layer allowlist to enforce it."""
+def test_document_context_rejects_empty_doc_id():
+    """An explicitly empty selection must not silently widen to the whole
+    library."""
     cloud = PageIndexCloudClient(api_key="pi-test-key")
     with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
-        cloud.openai_agent_config(doc_id=[])
-    with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
-        cloud.anthropic_runner_config(model="claude-sonnet-4-5", doc_id=[])
-    with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
-        cloud.claude_agent_config(doc_id=[])
+        cloud.document_context([])
 
 
 def test_doc_targeting_keeps_transport_errors_out_of_not_found():
@@ -2763,6 +2639,24 @@ def test_doc_targeting_keeps_transport_errors_out_of_not_found():
         with pytest.raises(PageIndexAPIError,
                            match="Documents not found or access denied: pi-a"):
             agent_tools_module.doc_targeting_block(Stub(status), "pi-a")
+
+
+def test_doc_targeting_is_one_lookup_per_document():
+    """The block comes from get_document alone, never a listing sweep, and
+    renders like the cloud's managed chat: one document is an object,
+    several are a list, the metadata row as it is."""
+    class Client:
+        def get_document(self, doc_id):
+            return {"id": doc_id, "name": f"{doc_id}.pdf",
+                    "status": "completed",
+                    "metadata": {"quarter": "Q3", "nested": {"x": 1}}}
+
+    single = agent_tools_module.doc_targeting_block(Client(), "pi-a")
+    assert "Document metadata: {" in single
+    assert '"quarter": "Q3"' in single and '"nested": {"x": 1}' in single
+    block = agent_tools_module.doc_targeting_block(Client(), ["pi-a", "pi-b"])
+    assert "The user has specified documents: pi-a.pdf, pi-b.pdf" in block
+    assert "Documents metadata: [" in block
 
 
 def test_call_tool_coerces_string_booleans(client, store_path, monkeypatch):
@@ -2838,16 +2732,16 @@ def test_browse_documents_pages_by_rows_returned():
     assert payload["has_more"] is False and payload["next_offset"] is None
 
 
-def test_agent_instructions_carry_user_metadata(client, store_path):
+def test_document_context_carries_user_metadata(client, store_path):
     """The targeting block promises names and metadata; local get_document
     keeps the 7-key detail wire shape, so the tags come from the listing."""
     seed_doc(store_path, "pi-1", "report.pdf",
              metadata={"quarter": "Q3", "year": 2025})
-    text = client.agent_instructions(doc_id="pi-1")
+    text = client.document_context("pi-1")
     assert '"quarter": "Q3"' in text and '"year": 2025' in text
 
 
-# ── wait-poll resilience, instruction scoping, agent_tools doc_id ──
+# ── wait-poll resilience, document targeting ──
 
 def test_await_completion_polls_through_transient_refetch_failure(monkeypatch):
     """A refetch that fails once must not end the wait early — the caller
@@ -2866,36 +2760,6 @@ def test_await_completion_polls_through_transient_refetch_failure(monkeypatch):
         Flaky(), {"id": "pi-x", "status": "processing"}, wait=True)
     assert result["status"] == "completed"
     assert calls["n"] == 2
-
-
-def test_agent_instructions_doc_id_shadow_check(client, store_path):
-    seed_doc(store_path, "pi-old", "report.pdf",
-             created_at="2026-08-01T10:00:00.123000")
-    seed_doc(store_path, "pi-new", "report.pdf",
-             created_at="2026-08-05T10:00:00.123000")
-    # standalone instructions get the strict check; only the *_agent_config
-    # bundles (which build the tools too) relax it
-    with pytest.raises(PageIndexAPIError, match="shadowed"):
-        client.agent_instructions(doc_id="pi-old")
-
-
-def test_agent_tools_doc_id_scopes_the_functions(client, store_path):
-    seed_doc(store_path, "pi-a", "alpha.pdf")
-    seed_doc(store_path, "pi-b", "secret.pdf")
-    funcs = {fn.__name__: fn for fn in client.agent_tools(doc_id="pi-a")}
-    blocked = json.loads(funcs["get_page_content"](doc_name="secret.pdf",
-                                                   pages="1"))
-    assert "success" not in blocked
-    assert blocked["errorCode"] == "NOT_FOUND"
-    allowed = json.loads(funcs["get_page_content"](doc_name="alpha.pdf",
-                                                   pages="1"))
-    assert allowed["success"] is True
-
-
-def test_agent_tools_doc_id_refused_on_cloud():
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
-    with pytest.raises(PageIndexAPIError, match="local tools only"):
-        cloud.agent_tools(doc_id="pi-a")
 
 
 def test_cloud_tool_list_empty_raises(monkeypatch):

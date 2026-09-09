@@ -32,19 +32,6 @@ def _managed_instructions(client, extra_system: list[str]) -> str:
     return "\n\n".join([CHAT_HEADER, base, *extra_system])
 
 
-def _doc_block(client, doc_id, scoped: bool) -> Optional[str]:
-    if doc_id is None:
-        return None
-    if not isinstance(doc_id, (str, list)):
-        raise PageIndexAPIError("doc_id must be a string or a list of "
-                                "strings.")
-    # scoped: local surfaces also pass doc_id into the tool layer, so name
-    # resolution happens inside the allowlist — only a duplicate name
-    # within the targeted set shadows. Cloud tools take no allowlist
-    # (targeting is prompt-level), so the whole library shadows.
-    return doc_targeting_block(client, doc_id, scoped=scoped)
-
-
 def _system_text(content: Any) -> str:
     """Text of a system/developer message: a string, or text parts joined."""
     if isinstance(content, str):
@@ -649,7 +636,7 @@ def _chat_agent(client, messages, doc_id, model, temperature=None,
     and the configured agent. Returns (agent, input items, model name)."""
     system_texts, history = _split_chat_messages(messages)
     scope = client._local_doc_scope(doc_id)
-    block = _doc_block(client, doc_id, scoped=scope is not None)
+    block = doc_targeting_block(client, doc_id)
     items = ([{"role": "user", "content": block}] if block else []) + history
     model_name = model or client.chat_model
     managed = _managed_instructions(client, system_texts)
@@ -1066,7 +1053,7 @@ def run_responses(client, input, model: Optional[str] = None,
         raise PageIndexAPIError("messages must be a non-empty string or list "
                                 "of item dicts.")
     scope = client._local_doc_scope(doc_id)
-    block = _doc_block(client, doc_id, scoped=scope is not None)
+    block = doc_targeting_block(client, doc_id)
     conversation = items
     if block:
         items = [{"role": "user", "content": block}] + items
@@ -1267,16 +1254,13 @@ def _anthropic_client(backend=None):
     return client
 
 
-def _anthropic_system(client, extra_system, block: Optional[str]) -> list[dict]:
+def _anthropic_system(client, extra_system) -> list[dict]:
     """System blocks: cache_control marks the stable managed prefix only
-    (the API allows 4 breakpoints total — the varying doc block and caller
-    blocks must not consume the budget); the doc block and caller system
-    content follow as their own blocks."""
+    (the API allows 4 breakpoints total — caller blocks must not consume
+    the budget); caller system content follows as its own blocks."""
     blocks = [{"type": "text",
                "text": CHAT_HEADER + "\n\n" + _base_instructions(client),
                "cache_control": {"type": "ephemeral"}}]
-    if block:
-        blocks.append({"type": "text", "text": block})
     if extra_system is None:
         return blocks
     if isinstance(extra_system, str):
@@ -1384,14 +1368,16 @@ def run_messages(client, messages, model: str,
         raise PageIndexAPIError("messages must be a non-empty string or a "
                                 "list of message dicts.")
     scope = client._local_doc_scope(doc_id)
-    block = _doc_block(client, doc_id, scoped=scope is not None)
+    block = doc_targeting_block(client, doc_id)
     prepared = [dict(message) for message in messages]
+    if block:
+        prepared = [{"role": "user", "content": block}] + prepared
     passthrough = {key: value for key, value in {
         "temperature": temperature, "top_p": top_p, "top_k": top_k,
         "stop_sequences": stop_sequences, "thinking": thinking,
         "extra_body": extra_body, "extra_headers": extra_headers,
     }.items() if value is not None}
-    system_blocks = _anthropic_system(client, system, block)
+    system_blocks = _anthropic_system(client, system)
     # Top-level cache_control: the server re-marks the newest block each
     # turn, so the loop re-reads the growing conversation from cache.
     # Counts toward the 4-breakpoint limit (live-verified 400 past it).

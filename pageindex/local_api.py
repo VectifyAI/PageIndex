@@ -335,7 +335,8 @@ class LocalAPI:
         if meta is None:
             raise PageIndexAPIError("Failed to get document metadata: Document not found")
         return {key: meta.get(key) for key in
-                ("id", "name", "description", "status", "createdAt", "pageNum", "folderId")}
+                ("id", "name", "description", "status", "createdAt", "pageNum",
+                 "folderId", "metadata")}
 
     def delete_document(self, doc_id: str) -> dict[str, Any]:
         if not self._store.delete_document(doc_id):
