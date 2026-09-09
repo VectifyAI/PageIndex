@@ -1704,6 +1704,7 @@ class PageIndexClient:
 
     def openai_agent_config(
         self,
+        *,
         include_management: bool = False,
         model: Optional[str] = None,
         model_settings: Optional[Any] = None,
@@ -1827,6 +1828,7 @@ class PageIndexClient:
     def anthropic_runner_config(
         self,
         model: str,
+        *,
         include_management: bool = False,
         asynchronous: bool = False,
         max_tokens: Optional[int] = None,
@@ -1883,7 +1885,7 @@ class PageIndexClient:
             "cache_control": {"type": "ephemeral"},
         }
 
-    def as_claude_mcp(self, include_management: bool = False,
+    def as_claude_mcp(self, include_management: bool = False, *,
                       server_name: str = "pageindex"):
         """
         ``mcp_servers`` entry for the Claude Agent SDK.
@@ -1921,6 +1923,7 @@ class PageIndexClient:
 
     def claude_agent_config(
         self,
+        *,
         include_management: bool = False,
         server_name: str = "pageindex",
     ) -> dict[str, Any]:
@@ -1954,7 +1957,7 @@ class PageIndexClient:
             "allowed_tools": [f"mcp__{server_name}"],
         }
 
-    def agent_instructions(self, include_management: bool = False) -> str:
+    def agent_instructions(self, *, include_management: bool = False) -> str:
         """
         Orchestration guidance for document QA agents — pass as the agent's
         system prompt (or append to your own).

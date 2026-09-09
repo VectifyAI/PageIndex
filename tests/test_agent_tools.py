@@ -2299,6 +2299,20 @@ def test_document_context(client, store_path):
             client.document_context(bad)
 
 
+def test_removed_doc_id_positional_slot_raises(client):
+    """doc_id sat in the positional list on these; keyword-only tails make a
+    stale positional call raise instead of landing on include_management
+    or server_name."""
+    for stale in (lambda: client.agent_instructions("pi-a"),
+                  lambda: client.openai_agent_config("pi-a"),
+                  lambda: client.anthropic_runner_config(
+                      "claude-sonnet-4-5", "pi-a"),
+                  lambda: client.claude_agent_config("pi-a"),
+                  lambda: client.as_claude_mcp(False, "pi-a")):
+        with pytest.raises(TypeError):
+            stale()
+
+
 def test_local_instructions_name_only_local_tools():
     """The local instructions are trimmed from the cloud server's; every
     tool they name must exist in the local registry, or the trim drifted."""
