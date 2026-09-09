@@ -2451,8 +2451,8 @@ def test_cloud_agent_instructions_served_live(monkeypatch):
 def test_citation_prompt_cloud(monkeypatch):
     """The citation prompt is the server's cited_answer prompt, fetched
     over the same bridge session as agent_tools(); format rides as the
-    prompt's argument; PageIndex chat's cite format by default, "" leaves
-    the server's default."""
+    prompt's argument; PageIndex chat's cite format by default ("" is
+    unset, so the default too)."""
     import pageindex.mcp_bridge as mcp_bridge
     created = []
 
@@ -2473,11 +2473,11 @@ def test_citation_prompt_cloud(monkeypatch):
     cloud.agent_tools()
     assert cloud.citation_prompt() == "CITATIONS — cite"
     assert cloud.citation_prompt(format="markdown") == "CITATIONS — markdown"
-    assert cloud.citation_prompt(format="") == "CITATIONS — markdown"
+    assert cloud.citation_prompt(format="") == "CITATIONS — cite"
     assert len(created) == 1
     assert created[0].prompts == [("cited_answer", {"format": "cite"}),
                                   ("cited_answer", {"format": "markdown"}),
-                                  ("cited_answer", None)]
+                                  ("cited_answer", {"format": "cite"})]
 
 
 def test_citation_prompt_empty_raises(monkeypatch):
@@ -2499,7 +2499,7 @@ def test_citation_prompt_local_frozen_copy(client):
     local tools named."""
     from pageindex.agent_tools import LOCAL_CITATION_PROMPTS
     assert client.citation_prompt() == LOCAL_CITATION_PROMPTS["cite"]
-    assert client.citation_prompt(format="") == LOCAL_CITATION_PROMPTS["markdown"]
+    assert client.citation_prompt(format="") == LOCAL_CITATION_PROMPTS["cite"]
     for fmt in ("markdown", "cite", "footnote"):
         text = client.citation_prompt(format=fmt)
         assert text == LOCAL_CITATION_PROMPTS[fmt]
@@ -2526,14 +2526,13 @@ def test_live_local_citation_prompts_match_cloud():
 @pytest.mark.skipif(not LIVE_KEY, reason="PAGEINDEX_API_KEY not set")
 def test_live_cloud_citation_prompt_formats():
     """The real server serves cited_answer in all three formats, each a
-    distinct rendering of the same rules; bare == markdown."""
+    distinct rendering of the same rules."""
     cloud = PageIndexCloudClient(api_key=LIVE_KEY)
     texts = {fmt: cloud.citation_prompt(format=fmt)
              for fmt in ("markdown", "cite", "footnote")}
     assert all("CITATIONS" in text for text in texts.values())
     assert len(set(texts.values())) == 3
     assert cloud.citation_prompt() == texts["cite"]
-    assert cloud.citation_prompt(format="") == texts["markdown"]  # server default
 
 
 def test_cloud_bridge_cache_threadsafe_and_pickle_clean(monkeypatch):

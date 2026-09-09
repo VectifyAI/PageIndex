@@ -1039,9 +1039,10 @@ class PageIndexClient:
                 PageIndex MCP server's ``cited_answer`` prompt, joining
                 the system prompt after the managed prompt and before
                 ``instructions``; local documents get the SDK's copy
-                (pages only); other formats: ``citation_prompt()``
-                passed through ``instructions=``. Managed chat: its own
-                citations (``chat_completions``'s ``enable_citations``).
+                (pages only); another format (own-model chat only):
+                ``citation_prompt()`` passed through ``instructions=``
+                instead. Managed chat: its own citations
+                (``chat_completions``'s ``enable_citations``).
             max_turns: Own-model chat only — cap on agent turns per call
                 (default 10). The OpenAI lanes raise at the cap;
                 ``protocol="messages"`` returns the truncated run
@@ -1122,6 +1123,11 @@ class PageIndexClient:
                 "system blocks; the other lanes take a string.")
         from .local_chat import _refuse_skeleton
         _refuse_skeleton(extra_body)
+        if citations and citations is not True:
+            raise PageIndexAPIError(
+                "citations must be True or False — for another format pass "
+                "citation_prompt(format=...) as instructions= (own-model "
+                "chat).")
         enable_citations = False
         if citations:
             if self._local_chat:
@@ -1293,7 +1299,7 @@ class PageIndexClient:
             stream_metadata: With stream=True, yield chunk dicts instead of
                 text pieces.
             enable_citations: Managed chat only — own-model chat raises
-                (the in-process engine has no citation machinery).
+                (cite there with ``chat(citations=True)``).
             model: Own-model chat only — backend model name (defaults to
                 ``chat_model``). The managed endpoint selects its own.
             max_turns: Own-model chat only — cap on agent turns per call.
@@ -2016,9 +2022,10 @@ class PageIndexClient:
         The citation discipline for cited answers — grounding rules plus
         how each citation is written — as served by the PageIndex MCP
         server's ``cited_answer`` prompt — what own-model
-        ``chat(citations=...)`` adds. Fetch it here to append to
+        ``chat(citations=True)`` adds. Fetch it here to append to
         ``agent_instructions()`` for an agent you build with a framework,
-        or to pass another format through ``instructions=`` — it is
+        or to pass another format through own-model ``chat``'s
+        ``instructions=`` in place of ``citations=True`` — it is
         guidance, so it belongs in the system prompt.
 
         ``format`` picks how a citation is written: ``"cite"`` (the
@@ -2030,7 +2037,7 @@ class PageIndexClient:
         same prompt (page-level — local page content has no blocks).
         """
         from .agent_tools import fetch_citation_prompt
-        return fetch_citation_prompt(self, format)
+        return fetch_citation_prompt(self, format or "cite")
 
     # ---------- FOLDER MANAGEMENT ----------
 
