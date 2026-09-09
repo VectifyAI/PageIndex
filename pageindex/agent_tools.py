@@ -14,8 +14,9 @@ same JSON envelope the cloud emits ({"success": true, ...} /
 {"error": ...}) — arguments outside a pruned local signature come back as
 that envelope too, on the direct and the call_tool path alike, except
 browse_documents' ``recursive``: call_tool honors it, because the flat
-no-folders shape it asks for is trivially true here. One exception to
-never-raise: a cloud 401/403 re-raises PageIndexAPIError.
+no-folders shape it asks for is trivially true here. The exceptions to
+never-raise, all cloud: a 401/403, a 429/5xx that outlived the bridge's
+retries and an unreachable server re-raise PageIndexAPIError.
 """
 from __future__ import annotations
 
@@ -28,6 +29,8 @@ import threading
 import time
 import weakref
 from typing import Any, Callable, Optional
+
+import requests
 
 from .errors import PageIndexAPIError
 from .mcp_bridge import render_text
@@ -1362,10 +1365,10 @@ def _bridge_invoker(bridge, name: str, schema: dict,
     """One cloud tool call proxied over MCP: string booleans are coerced
     (same as call_tool), None-valued arguments are dropped (None ≡ omitted,
     matching the contract's "omit if ..." semantics) and failures are
-    contained in the error envelope — except auth failures and what
-    survived the bridge's own retries (401/403/429/5xx), which re-raise:
-    the model can act on neither. Returns (content blocks, is_error), like
-    the bridge."""
+    contained in the error envelope — except auth failures, what
+    survived the bridge's own retries (401/403/429/5xx) and an unreachable
+    server, which re-raise: the model can act on none of them. Returns
+    (content blocks, is_error), like the bridge."""
     def _invoke(arguments: dict[str, Any]) -> tuple[list, bool]:
         try:
             arguments = {key: value for key, value in arguments.items()
@@ -1375,7 +1378,8 @@ def _bridge_invoker(bridge, name: str, schema: dict,
         except Exception as exc:
             if isinstance(exc, PageIndexAPIError) and (
                     exc.status_code in (401, 403, 429)
-                    or (exc.status_code or 0) >= 500):
+                    or (exc.status_code or 0) >= 500
+                    or isinstance(exc.__cause__, requests.RequestException)):
                 raise
             payload, _ = _failure(
                 f"{name} failed: {exc}", None,
@@ -1435,8 +1439,8 @@ def _make_tool_function(name: str, description: str, schema: dict,
         inner.__annotations__ = annotations
 
     def proxy(*args: Any, **kwargs: Any) -> str:
-        # The invoker lets only 401/403 auth failures through, so a
-        # TypeError here is the binding rejecting the arguments.
+        # The invoker lets only PageIndexAPIError through, so a TypeError
+        # here is the binding rejecting the arguments.
         try:
             return inner(*args, **kwargs)
         except TypeError as exc:
@@ -1550,7 +1554,8 @@ def build_agent_tools(client, include_management: bool = False,
     the built-in contract tools over the local store. Every function returns
     the JSON envelope as a string (binary content, such as a cloud page
     image, as a size stub) and never raises for arguments its
-    signature accepts — except a cloud 401/403, which re-raises
+    signature accepts — except a cloud 401/403, a 429/5xx that outlived
+    the bridge's retries or an unreachable server, which re-raise
     PageIndexAPIError (cloud-only parameters are absent from the local
     signatures; the call_tool path answers them with the guided envelope).
     ``doc_ids`` is the local allowlist, as in ``_tool_specs``.

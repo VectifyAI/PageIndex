@@ -1549,7 +1549,8 @@ class PageIndexClient:
         string (binary results such as ``get_document_image`` as a size
         stub — a string cannot carry an image; the framework adapters
         can), and reports failures inside that JSON instead of raising —
-        except a cloud 401/403, which raises PageIndexAPIError.
+        except a cloud 401/403, a 429/5xx that outlived the bridge's
+        retries or an unreachable server, which raise PageIndexAPIError.
 
         Args:
             include_management (bool): Also expose tools that modify the

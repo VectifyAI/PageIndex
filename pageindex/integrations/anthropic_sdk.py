@@ -6,7 +6,11 @@ input_schema are the same shape), calls proxied over MCP. Local clients get
 the in-process tools — the same set chat(protocol="messages") runs
 internally. Failed
 calls raise ToolError so the runner emits the tool_result with
-``is_error: true`` and the envelope as its content.
+``is_error: true`` and the envelope as its content; the failures the
+invoker re-raises (auth, rate limit, unreachable server) propagate as
+PageIndexAPIError, which a caller-owned runner flattens into an is_error
+result carrying the exception text and chat(protocol="messages") reads
+off ``failures`` to fail fast.
 
 Tool results are MCP content, rendered by the Anthropic SDK's own MCP
 conversion (text as text, images as image blocks); the SDK carries the

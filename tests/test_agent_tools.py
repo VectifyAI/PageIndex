@@ -1040,8 +1040,8 @@ def test_anthropic_runner_config_thinking_lifts_max_tokens(client):
 
 def test_bridge_invoker_reraises_auth_and_transport_failures():
     """Auth failures and what survives the bridge's own retries (429/5xx)
-    escape to the caller; a status-less failure stays a model-visible
-    envelope."""
+    escape to the caller; a status-less JSON-RPC failure (the model's own
+    bad arguments) stays a model-visible envelope."""
     def failing(exc):
         class Bridge:
             def call_tool(self, name, arguments):
@@ -2094,6 +2094,19 @@ def test_bridge_transport_error_is_pageindex_error(monkeypatch):
         bridge.list_tools()
 
 
+def test_handshake_failure_blames_the_key_only_on_auth_statuses(monkeypatch):
+    """A rate-limited or failing handshake is not a key problem."""
+    import types
+    from pageindex.mcp_bridge import McpBridge
+    bridge = McpBridge("https://api.pageindex.ai/mcp", {})
+    for status, blames_key in ((401, True), (429, False), (503, False)):
+        monkeypatch.setattr(bridge, "_post", lambda payload, *a, s=status: (
+            types.SimpleNamespace(status_code=s, text="no", headers={})))
+        with pytest.raises(PageIndexAPIError, match=f"HTTP {status}") as info:
+            bridge.list_tools()
+        assert ("Check your API key" in str(info.value)) is blames_key
+
+
 def test_await_completion_preserves_metadata_over_null_refetch(monkeypatch):
     """A status refetch that nulls out metadata must not clobber the
     listing's copy (setdefault is a no-op on an existing None value)."""
@@ -2793,7 +2806,7 @@ class _McpStub:
     follow the scripted statuses (a 200 carries a text result), the last
     one repeating."""
 
-    def __init__(self, statuses, delay=0.0, retry_after="1"):
+    def __init__(self, statuses, delay=0.0):
         import http.server
         import threading
         stub = self
@@ -2828,7 +2841,7 @@ class _McpStub:
                                       "result": result}).encode()
                 self.send_response(status)
                 if status == 429:
-                    self.send_header("Retry-After", retry_after)
+                    self.send_header("Retry-After", "1")  # ignored
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
@@ -2852,8 +2865,8 @@ class _McpStub:
 def mcp_stub():
     stubs = []
 
-    def make(statuses, delay=0.0, retry_after="1"):
-        stubs.append(_McpStub(statuses, delay, retry_after))
+    def make(statuses, delay=0.0):
+        stubs.append(_McpStub(statuses, delay))
         return stubs[-1]
 
     yield make
@@ -2863,7 +2876,8 @@ def mcp_stub():
 
 def test_bridge_retries_rate_limits_below_the_tool_layer(mcp_stub, monkeypatch):
     """Two 429s then a 200: the call succeeds without the model ever seeing
-    an error, and the waits follow the server's Retry-After."""
+    an error, and the waits are the fixed backoff, not the server's
+    Retry-After."""
     import urllib3.util.retry as retry_module
     from pageindex.mcp_bridge import McpBridge
     slept = []
@@ -2872,32 +2886,21 @@ def test_bridge_retries_rate_limits_below_the_tool_layer(mcp_stub, monkeypatch):
     assert McpBridge(stub.url, {}).call_tool("get_document", {}) == (
         [{"type": "text", "text": "ok"}], False)
     assert stub.calls == 3
-    assert slept == [1, 1]
+    assert slept == [2]
 
 
-def test_bridge_rate_limit_exhausted_raises_with_status(mcp_stub, monkeypatch):
-    """Three retries and still 429: the caller gets the status."""
+@pytest.mark.parametrize("status", [429, 504])
+def test_bridge_rate_limit_exhausted_raises_with_status(mcp_stub, monkeypatch,
+                                                        status):
+    """Three retries and still failing: the caller gets the status."""
     import urllib3.util.retry as retry_module
     from pageindex.mcp_bridge import McpBridge
     monkeypatch.setattr(retry_module.time, "sleep", lambda seconds: None)
-    stub = mcp_stub([429])
-    with pytest.raises(PageIndexAPIError, match="HTTP 429") as info:
+    stub = mcp_stub([status])
+    with pytest.raises(PageIndexAPIError, match=f"HTTP {status}") as info:
         McpBridge(stub.url, {}).call_tool("get_document", {})
-    assert info.value.status_code == 429
+    assert info.value.status_code == status
     assert stub.calls == 4
-
-
-def test_bridge_does_not_wait_out_a_quota_length_retry_after(mcp_stub,
-                                                             monkeypatch):
-    """Retry-After past a minute is a quota, not a blip: the backoff runs
-    instead (0 s, then 2 s) and the caller hears about it in seconds."""
-    import urllib3.util.retry as retry_module
-    from pageindex.mcp_bridge import McpBridge
-    slept = []
-    monkeypatch.setattr(retry_module.time, "sleep", slept.append)
-    stub = mcp_stub([429, 429, 200], retry_after="3600")
-    assert McpBridge(stub.url, {}).call_tool("get_document", {})[1] is False
-    assert slept == [2]
 
 
 def test_bridge_read_timeout_is_not_retried(mcp_stub, monkeypatch):
@@ -2909,6 +2912,21 @@ def test_bridge_read_timeout_is_not_retried(mcp_stub, monkeypatch):
     with pytest.raises(PageIndexAPIError, match="Could not reach"):
         mcp_bridge.McpBridge(stub.url, {}).call_tool("get_document", {})
     assert stub.calls == 1
+
+
+def test_bridge_invoker_reraises_an_unreachable_server(mcp_stub, monkeypatch):
+    """A server the bridge could not reach after its own connection retries
+    escapes to the caller like a 429: the model cannot reach it either."""
+    import urllib3.util.retry as retry_module
+    from pageindex.mcp_bridge import McpBridge
+    monkeypatch.setattr(retry_module.time, "sleep", lambda seconds: None)
+    stub = mcp_stub([200])
+    stub.close()
+    bridge = McpBridge(stub.url, {})
+    bridge._session.trust_env = False  # a local HTTP proxy would answer 502
+    invoke = agent_tools_module._bridge_invoker(bridge, "get_document", {})
+    with pytest.raises(PageIndexAPIError, match="Could not reach"):
+        invoke({})
 
 
 class _RateLimitedBridge(_ImageBridge):
