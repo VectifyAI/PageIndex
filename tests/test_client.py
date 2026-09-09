@@ -1354,9 +1354,9 @@ def test_folders_are_cloud_only(local_client):
 # ── local: retrieval endpoints are cloud-only ──
 
 def test_retrieval_endpoints_cloud_only(local_client):
-    with pytest.raises(PageIndexAPIError, match="use chat_completions"):
+    with pytest.raises(PageIndexAPIError, match=r"use chat\(\)"):
         local_client.submit_query("any", "q")
-    with pytest.raises(PageIndexAPIError, match="use chat_completions"):
+    with pytest.raises(PageIndexAPIError, match=r"use chat\(\)"):
         local_client.get_retrieval("any")
 
 

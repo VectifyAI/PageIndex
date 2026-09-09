@@ -62,8 +62,8 @@ def _system_text(content: Any) -> str:
 def _split_chat_messages(messages) -> "tuple[list[str], list[dict]]":
     """Validate the chat_completions surface's messages: system/developer
     content joins the managed instructions; user/assistant history passes
-    through. Tool-history round-trips belong to the protocol lanes,
-    chat(protocol=...)."""
+    through. Tool-history round-trips belong to chat(protocol="responses")
+    or chat(protocol="messages")."""
     if not isinstance(messages, list) or not messages:
         raise PageIndexAPIError("messages must be a non-empty list.")
     system_texts: list[str] = []
@@ -80,13 +80,15 @@ def _split_chat_messages(messages) -> "tuple[list[str], list[dict]]":
             if not isinstance(content, str):
                 raise PageIndexAPIError(
                     "content must be a string on this lane; for "
-                    "structured items use chat(protocol=...)."
+                    "structured items use chat(protocol=\"responses\") "
+                    "or chat(protocol=\"messages\")."
                 )
             history.append({"role": role, "content": content})
         else:
             raise PageIndexAPIError(
-                f"Unsupported role {role!r} on this lane. Tool "
-                "history round-trips belong to chat(protocol=...)."
+                f"Unsupported role {role!r} on this lane. Tool history "
+                "round-trips belong to chat(protocol=\"responses\") or "
+                "chat(protocol=\"messages\")."
             )
     if not history:
         raise PageIndexAPIError("messages must contain a user or assistant "

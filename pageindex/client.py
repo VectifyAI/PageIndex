@@ -756,11 +756,11 @@ class PageIndexClient:
 
         Cloud-only: the cloud API marks this endpoint deprecated in favor of
         chat completions, so local mode does not implement it — raises
-        PageIndexAPIError. Use ``chat_completions`` instead.
+        PageIndexAPIError. Use ``chat()`` instead.
         """
         return self._require_cloud(
             "submit_query is cloud-only — the retrieval API is deprecated in "
-            "favor of chat completions; use chat_completions instead."
+            "favor of chat completions; use chat() instead."
         ).submit_query(doc_id=doc_id, query=query, thinking=thinking)
 
     def get_retrieval(self, retrieval_id: str) -> dict[str, Any]:
@@ -769,11 +769,11 @@ class PageIndexClient:
 
         Cloud-only: the cloud API marks this endpoint deprecated in favor of
         chat completions, so local mode does not implement it — raises
-        PageIndexAPIError. Use ``chat_completions`` instead.
+        PageIndexAPIError. Use ``chat()`` instead.
         """
         return self._require_cloud(
             "get_retrieval is cloud-only — the retrieval API is deprecated in "
-            "favor of chat completions; use chat_completions instead."
+            "favor of chat completions; use chat() instead."
         ).get_retrieval(retrieval_id=retrieval_id)
 
     # ---------- CHAT ----------
@@ -952,9 +952,10 @@ class PageIndexClient:
 
         Args:
             messages: A question string, or the conversation history —
-                role/content messages on every lane. ``system`` rows join
-                the managed prompt on the answer lane and
-                ``protocol="chat_completions"`` only, wherever they sit;
+                role/content messages on every lane. With your own chat
+                model, ``system`` rows join the managed prompt on the
+                answer lane and ``protocol="chat_completions"``, wherever
+                they sit (the managed endpoint forwards them verbatim);
                 the other protocol lanes pass rows to the wire as they
                 are (use ``instructions`` for persona there). With a
                 protocol, also that protocol's transcript items or
@@ -1039,15 +1040,15 @@ class PageIndexClient:
                 ``max_output_tokens``, Messages ``thinking`` / ``top_k``;
                 the managed chat endpoint's ``temperature`` /
                 ``enable_citations``), merged last so they win.
-                Own-model answer lane: LiteLLM's own params, mapped or
-                refused per provider (``response_format`` has no door on
-                LiteLLM-routed models); protocol lanes and the managed
-                endpoint: verbatim into the request body. The managed
-                prompt, conversation and
-                tools are not fields here (``system`` / ``instructions``
-                / ``input`` / ``messages`` / ``tools`` are refused);
-                extend the prompt with ``instructions=``. Credentials
-                belong in ``backend``, never here.
+                Own-model answer lane and ``protocol="chat_completions"``:
+                LiteLLM's own params, mapped or refused per provider
+                (``response_format`` has no door on LiteLLM-routed
+                models); Responses, Messages and the managed endpoint:
+                verbatim into the request body. The managed prompt,
+                conversation and tools are not fields here (``system`` /
+                ``instructions`` / ``input`` / ``messages`` / ``tools``
+                are refused); extend the prompt with ``instructions=``.
+                Credentials belong in ``backend``, never here.
 
         Returns:
             - answer lane, stream=False: the answer string
@@ -1203,7 +1204,9 @@ class PageIndexClient:
         Kept for existing code — new code calls ``chat()``. Everything
         here is ``chat(protocol="chat_completions")``: the same engine
         and envelope, with this method's sampling fields riding
-        ``extra_body`` under their wire names.
+        ``extra_body`` under their wire names. The one exception is the
+        text-only stream (``stream=True`` without ``stream_metadata``):
+        that is ``chat(stream=True, show_process=False)``.
 
         With no chat model configured (a plain cloud client): the managed
         hosted chat endpoint. With one — local mode, or a cloud client

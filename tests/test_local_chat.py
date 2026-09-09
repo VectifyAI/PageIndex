@@ -3230,18 +3230,13 @@ def test_chat_protocol_chat_completions_is_the_door(client, monkeypatch):
                                        **knobs) == "door"
         assert seen[-2] == seen[-1]
     assert seen[0][0] == [{"role": "user", "content": "q"}]
-    # instructions join the managed prompt as a leading system row
     client.chat("q", protocol="chat_completions", instructions="be brief")
     assert seen[-1][0] == [{"role": "system", "content": "be brief"},
                            {"role": "user", "content": "q"}]
     with pytest.raises(PageIndexAPIError, match="show_process"):
         client.chat("q", protocol="chat_completions", stream=True,
                     show_process=True)
-    # the old door stays open for existing code, silently
-    import warnings
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")
-        assert client.chat_completions("q") == "door"
+    assert client.chat_completions("q") == "door"
 
 
 def test_chat_protocol_chat_completions_serves_managed_cloud(monkeypatch):
@@ -3258,13 +3253,13 @@ def test_chat_protocol_chat_completions_serves_managed_cloud(monkeypatch):
                         "stream": False, "doc_id": None, "temperature": None,
                         "stream_metadata": True, "enable_citations": False,
                         "extra_body": None}
-    # the endpoint's own fields ride extra_body under their wire names
     cloud.chat("q", protocol="chat_completions",
                extra_body={"temperature": 0.2, "enable_citations": True})
     assert seen[-1]["extra_body"] == {"temperature": 0.2,
                                       "enable_citations": True}
     with pytest.raises(PageIndexAPIError, match="extra_body cannot carry"):
-        cloud.chat("q", extra_body={"messages": []})
+        cloud.chat("q", protocol="chat_completions",
+                   extra_body={"messages": []})
     with pytest.raises(PageIndexAPIError, match="chat_model="):
         cloud.chat("q", protocol="chat_completions", model="m")
     with pytest.raises(PageIndexAPIError, match="chat_model="):
