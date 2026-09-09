@@ -958,7 +958,8 @@ def run_chat_completions(client, messages, stream: bool = False,
     if enable_citations:
         raise PageIndexAPIError(
             "enable_citations needs the managed chat endpoint — "
-            + ("drop the chat model configuration to use it."
+            + ("drop the chat model configuration to use it, or cite "
+               "with your own model via chat(citations=True)."
                if getattr(client, "api_key", None) else
                "local mode does not store the block-level OCR data "
                "citations need."))
