@@ -1341,12 +1341,8 @@ def _default_max_tokens(model: str, thinking=None) -> int:
     return 4096 if model.startswith(_CLAUDE_4096_MODELS) else 8192
 
 
-def _messages_fail_fast(runner, message, failures: list) -> None:
-    """Run the turn's tools now (the runner reuses the cached result) so a
-    failure the invoker re-raised surfaces here, not as an is_error result
-    the runner would spend another model call on."""
-    if getattr(message, "stop_reason", None) == "tool_use":
-        runner.generate_tool_call_response()
+def _messages_fail_fast(failures: list) -> None:
+    """Surface PageIndex failures the tool runner absorbed."""
     if failures:
         raise failures[0]
 
@@ -1416,6 +1412,18 @@ def run_messages(client, messages, model: str,
         **passthrough,
         **cached,
     )
+    # Check after the runner itself executes tools, before it can advance
+    # to another model call or exit at max_iterations. Older Anthropic
+    # versions also execute max_tokens turns; newer ones skip them. Keep
+    # the runner's own stop rules and result caching in both cases.
+    generate_tool_response = runner.generate_tool_call_response
+
+    def checked_tool_response():
+        response = generate_tool_response()
+        _messages_fail_fast(failures)
+        return response
+
+    runner.generate_tool_call_response = checked_tool_response
 
     if stream:
         def events() -> Iterator[Any]:
@@ -1423,8 +1431,7 @@ def run_messages(client, messages, model: str,
                 for turn_stream in runner:
                     for event in turn_stream:
                         yield event
-                    _messages_fail_fast(runner, turn_stream.get_final_message(),
-                                        failures)
+                _messages_fail_fast(failures)
             except anthropic.AnthropicError as exc:
                 raise _model_backend_error(exc, "messages", client) from exc
             except TypeError as exc:
@@ -1442,10 +1449,8 @@ def run_messages(client, messages, model: str,
         return events()
 
     try:
-        turns = []
-        for turn in runner:
-            turns.append(turn)
-            _messages_fail_fast(runner, turn, failures)
+        turns = list(runner)
+        _messages_fail_fast(failures)
     except anthropic.AnthropicError as exc:
         raise _model_backend_error(exc, "messages", client) from exc
     except TypeError as exc:
