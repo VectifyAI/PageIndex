@@ -2,8 +2,10 @@
 
 Backs the cloud branches of ``client.agent_tools()`` and
 ``client.agent_instructions()``: ``tools/list`` discovers the live tool set,
-``tools/call`` executes a tool, and the ``initialize`` handshake carries the
-server's agent instructions. Synchronous, requests-only.
+``tools/call`` executes a tool, ``prompts/list`` / ``prompts/get`` fetch the
+server's prompts (e.g. ``cited_answer``), and the ``initialize`` handshake
+carries the server's agent instructions and capabilities. Synchronous,
+requests-only.
 Works against both stateful and stateless servers: a session id returned by
 ``initialize`` is echoed back, and a session-carrying request rejected with
 HTTP 404 (the spec's expired-session status) re-initializes once and
@@ -58,6 +60,7 @@ class McpBridge:
         self._session_id: Optional[str] = None
         self._protocol_version: Optional[str] = None
         self._instructions: Optional[str] = None
+        self._capabilities: dict[str, Any] = {}
         self._initialized = False
         self._lock = threading.RLock()
         self._next_id = 0
@@ -176,6 +179,9 @@ class McpBridge:
             self._protocol_version = result.get("protocolVersion",
                                                 _PROTOCOL_VERSION)
             self._instructions = result.get("instructions")
+            capabilities = result.get("capabilities")
+            self._capabilities = (capabilities
+                                  if isinstance(capabilities, dict) else {})
             self._initialized = True
             # Sent inside the lock so no concurrent thread can slip a
             # request between the handshake and this notification.
@@ -193,21 +199,55 @@ class McpBridge:
         self._ensure_initialized()
         return self._instructions
 
-    def list_tools(self) -> list[dict]:
-        tools: list[dict] = []
+    def _list_paginated(self, method: str, key: str) -> list[dict]:
+        items: list[dict] = []
         cursor: Optional[str] = None
         # A server echoing its cursor (or cycling) must not hang the client:
         # no-progress terminates, the page cap turns a cycle into an error.
         for _ in range(50):
             params = {"cursor": cursor} if cursor else {}
-            result = self._request("tools/list", params) or {}
-            tools.extend(result.get("tools") or [])
+            result = self._request(method, params) or {}
+            items.extend(result.get(key) or [])
             next_cursor = result.get("nextCursor")
             if not next_cursor or next_cursor == cursor:
-                return tools
+                return items
             cursor = next_cursor
         raise PageIndexAPIError(
-            "MCP tools/list pagination did not terminate within 50 pages.")
+            f"MCP {method} pagination did not terminate within 50 pages.")
+
+    def list_tools(self) -> list[dict]:
+        return self._list_paginated("tools/list", "tools")
+
+    def _require_prompts(self) -> None:
+        """Prompts are an optional server capability; a server without it
+        answers -32601 to prompts/*, which reads as a protocol fault rather
+        than the real cause."""
+        self._ensure_initialized()
+        if "prompts" not in self._capabilities:
+            raise PageIndexAPIError(
+                f"The MCP server at {self._url} does not serve prompts.")
+
+    def list_prompts(self) -> list[dict]:
+        """The server's prompt catalog (``prompts/list``): name, title,
+        description and declared arguments per entry."""
+        self._require_prompts()
+        return self._list_paginated("prompts/list", "prompts")
+
+    def get_prompt(self, name: str,
+                   arguments: Optional[dict[str, Any]] = None,
+                   ) -> "tuple[Optional[str], list[dict]]":
+        """Returns (description, messages): the prompt's ``PromptMessage``
+        list untouched — each ``{"role", "content"}`` — for callers to place
+        as their framework carries it (render_prompt_text is the text-only
+        rendering). Argument values travel as strings, per the MCP prompt
+        contract; None means "no arguments", not an empty object."""
+        self._require_prompts()
+        params: dict[str, Any] = {"name": name}
+        if arguments is not None:
+            params["arguments"] = {key: str(value)
+                                   for key, value in arguments.items()}
+        result = self._request("prompts/get", params) or {}
+        return result.get("description"), list(result.get("messages") or [])
 
     def call_tool(self, name: str, arguments: dict[str, Any],
                   ) -> "tuple[list[dict], bool]":
@@ -243,3 +283,19 @@ def render_text(blocks: list) -> str:
         else:
             texts.append(json.dumps(block, ensure_ascii=False))
     return "\n".join(texts)
+
+
+def render_prompt_text(messages: list) -> str:
+    """The text-only rendering of prompt messages, roles dropped: the
+    server's prompts are standing guidance (grounding and citation rules),
+    which a system prompt carries as plain text. A message's content is one
+    block per the 2025-06-18 schema; a list is accepted for forward
+    compatibility."""
+    blocks: list = []
+    for message in messages:
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, list):
+            blocks.extend(content)
+        elif content is not None:
+            blocks.append(content)
+    return render_text(blocks)
