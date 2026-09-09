@@ -794,6 +794,7 @@ class PageIndexClient:
         show_process: Union[bool, Mapping[str, Any], None] = None,
         protocol: None = None,
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
+        citations: bool = False,
         max_turns: Optional[int] = None,
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
@@ -812,6 +813,7 @@ class PageIndexClient:
         show_process: Union[bool, Mapping[str, Any], None] = None,
         protocol: None = None,
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
+        citations: bool = False,
         max_turns: Optional[int] = None,
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
@@ -830,6 +832,7 @@ class PageIndexClient:
         show_process: Union[bool, Mapping[str, Any], None] = None,
         protocol: Literal["chat_completions", "responses", "messages"],
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
+        citations: bool = False,
         max_turns: Optional[int] = None,
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
@@ -848,6 +851,7 @@ class PageIndexClient:
         show_process: Union[bool, Mapping[str, Any], None] = None,
         protocol: Literal["chat_completions", "responses"],
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
+        citations: bool = False,
         max_turns: Optional[int] = None,
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
@@ -866,6 +870,7 @@ class PageIndexClient:
         show_process: Union[bool, Mapping[str, Any], None] = None,
         protocol: Literal["messages"],
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
+        citations: bool = False,
         max_turns: Optional[int] = None,
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
@@ -884,6 +889,7 @@ class PageIndexClient:
         show_process: Union[bool, Mapping[str, Any], None] = None,
         protocol: None = None,
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
+        citations: bool = False,
         max_turns: Optional[int] = None,
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
@@ -903,6 +909,7 @@ class PageIndexClient:
         protocol: Optional[Literal["chat_completions", "responses",
                                    "messages"]] = None,
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
+        citations: bool = False,
         max_turns: Optional[int] = None,
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
@@ -921,6 +928,7 @@ class PageIndexClient:
         protocol: Optional[Literal["chat_completions", "responses",
                                    "messages"]] = None,
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
+        citations: bool = False,
         max_turns: Optional[int] = None,
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
@@ -1025,6 +1033,15 @@ class PageIndexClient:
                 a list of Messages system blocks. On the answer lane and
                 ``protocol="chat_completions"`` it precedes any ``system``
                 rows in the history.
+            citations: Cite every claim the way PageIndex chat does —
+                ``<cite doc="…" page="…"/>`` tags, ``block="…"`` added
+                where the cloud document has blocks. The guidance is the
+                PageIndex MCP server's ``cited_answer`` prompt, joining
+                the system prompt after the managed prompt and before
+                ``instructions``; local documents get the SDK's copy
+                (pages only); other formats: ``citation_prompt()``
+                passed through ``instructions=``. Managed chat: its own
+                citations (``chat_completions``'s ``enable_citations``).
             max_turns: Own-model chat only — cap on agent turns per call
                 (default 10). The OpenAI lanes raise at the cap;
                 ``protocol="messages"`` returns the truncated run
@@ -1105,6 +1122,19 @@ class PageIndexClient:
                 "system blocks; the other lanes take a string.")
         from .local_chat import _refuse_skeleton
         _refuse_skeleton(extra_body)
+        enable_citations = False
+        if citations:
+            if self._local_chat:
+                from .agent_tools import fetch_citation_prompt
+                text = fetch_citation_prompt(self, "cite")
+                if isinstance(instructions, list):
+                    instructions = [{"type": "text", "text": text},
+                                    *instructions]
+                else:
+                    instructions = (f"{text}\n\n{instructions}"
+                                    if instructions else text)
+            else:
+                enable_citations = True
         if protocol in ("responses", "messages"):
             self._require_own_chat(f"chat(protocol={protocol!r})")
             if protocol == "responses":
@@ -1154,6 +1184,7 @@ class PageIndexClient:
         if protocol == "chat_completions":
             return self.chat_completions(
                 messages, stream=stream, stream_metadata=True, doc_id=doc_id,
+                enable_citations=enable_citations,
                 model=model, max_turns=max_turns,
                 reasoning_effort=reasoning_effort, extra_body=extra_body,
                 extra_headers=extra_headers, backend=backend)
@@ -1172,6 +1203,7 @@ class PageIndexClient:
             from .local_chat import run_cloud_chat_stream
             chunks = self.chat_completions(messages, stream=True,
                                            stream_metadata=True,
+                                           enable_citations=enable_citations,
                                            doc_id=doc_id, model=model,
                                            reasoning_effort=reasoning_effort,
                                            max_turns=max_turns,
@@ -1181,6 +1213,7 @@ class PageIndexClient:
             return run_cloud_chat_stream(
                 cast(Iterator[dict[str, Any]], chunks), resolved)
         result = self.chat_completions(messages, doc_id=doc_id, model=model,
+                                       enable_citations=enable_citations,
                                        reasoning_effort=reasoning_effort,
                                        max_turns=max_turns, backend=backend,
                                        extra_headers=extra_headers,
@@ -1977,6 +2010,27 @@ class PageIndexClient:
         from .agent_tools import build_agent_instructions
         return build_agent_instructions(
             self, doc_id, include_management=include_management)
+
+    def citation_prompt(self, format: str = "cite") -> str:
+        """
+        The citation discipline for cited answers — grounding rules plus
+        how each citation is written — as served by the PageIndex MCP
+        server's ``cited_answer`` prompt — what own-model
+        ``chat(citations=...)`` adds. Fetch it here to append to
+        ``agent_instructions()`` for an agent you build with a framework,
+        or to pass another format through ``instructions=`` — it is
+        guidance, so it belongs in the system prompt.
+
+        ``format`` picks how a citation is written: ``"cite"`` (the
+        ``<cite doc= page= block=/>`` tags PageIndex chat writes and
+        renders — the default), ``"markdown"`` (a bracketed
+        ``[doc, p. N]`` reference, for hosts that strip tags) or
+        ``"footnote"`` (Markdown footnotes); the server rejects any
+        other value. Local documents: the SDK's frozen copy of the
+        same prompt (page-level — local page content has no blocks).
+        """
+        from .agent_tools import fetch_citation_prompt
+        return fetch_citation_prompt(self, format)
 
     # ---------- FOLDER MANAGEMENT ----------
 

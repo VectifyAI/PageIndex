@@ -34,7 +34,7 @@ from typing import Any, Callable, Optional
 import requests
 
 from .errors import PageIndexAPIError
-from .mcp_bridge import render_text
+from .mcp_bridge import render_prompt_text, render_text
 
 TOOL_RESPONSE_CHAR_LIMIT = 100_000
 STRUCTURE_FIRST_PAGE_THRESHOLD = 20
@@ -1639,6 +1639,67 @@ AGENT_INSTRUCTIONS = "\n\n".join([
     _AFTER_DISCOVERY,
     _PERSISTENCE,
 ])
+
+
+# Frozen from the cloud MCP server's ``cited_answer`` prompt (pageindex-chat
+# server/mcp/prompts/cited-answer.ts, one text per format; "markdown" is its
+# default), minus the bullet naming the cloud-only get_document_image() tool.
+# The live parity test pins the rest verbatim. Local page content carries no
+# block_id, so the block rules stay dormant and citations resolve to pages.
+LOCAL_CITATION_PROMPTS: dict[str, str] = {
+    "markdown": """\
+GROUNDING
+- Answer only from the user's PageIndex documents. Call get_page_content() and state only what was actually read there.
+- Never fill a gap from general knowledge. When the documents do not answer the question, say so.
+
+CITATIONS
+- Cite only statements supported by tool outputs, as a bracketed reference: [{docName}, p. {pageNumber}] or [{docName}, p. {pageNumber}, block {blockId}]. Place immediately after the claim.
+- When page content includes block_id values, citations MUST be block-level: copy the exact block_id of the supporting block. Page-only cites are allowed ONLY when the tool output carries no block_id (legacy documents, structure outlines). NEVER invent or alter block_id values.
+- For a claim drawn from multiple blocks on one page, add one reference per supporting block (at most 3); beyond that, cite the single strongest block.
+- Each reference must reference a SINGLE page integer. For multi-page citations, use separate references.""",
+    "cite": """\
+GROUNDING
+- Answer only from the user's PageIndex documents. Call get_page_content() and state only what was actually read there.
+- Never fill a gap from general knowledge. When the documents do not answer the question, say so.
+
+CITATIONS
+- Cite only statements supported by tool outputs: <cite doc="{docName}" page="{pageNumber}"/> or <cite doc="{docName}" page="{pageNumber}" block="{blockId}"/>. Place immediately after the claim.
+- When page content includes block_id values, citations MUST be block-level: copy the exact block_id of the supporting block. Page-only cites are allowed ONLY when the tool output carries no block_id (legacy documents, structure outlines). NEVER invent or alter block_id values.
+- For a claim drawn from multiple blocks on one page, add one tag per supporting block (at most 3); beyond that, cite the single strongest block.
+- Each tag must reference a SINGLE page integer. For multi-page citations, use separate tags.
+- Close every answer with a "Sources" section: one plain-text line per cited block, formatted `- <document name>, page <page> (block <block_id>)`. Keep it even when the inline tags are present — a client that strips unknown HTML tags would otherwise leave the answer with no visible citations at all.""",
+    "footnote": """\
+GROUNDING
+- Answer only from the user's PageIndex documents. Call get_page_content() and state only what was actually read there.
+- Never fill a gap from general knowledge. When the documents do not answer the question, say so.
+
+CITATIONS
+- Cite only statements supported by tool outputs, as a Markdown footnote: put [^n] immediately after the claim and define it at the end of the answer as [^n]: {docName}, p. {pageNumber} or [^n]: {docName}, p. {pageNumber}, block {blockId}.
+- When page content includes block_id values, citations MUST be block-level: copy the exact block_id of the supporting block. Page-only cites are allowed ONLY when the tool output carries no block_id (legacy documents, structure outlines). NEVER invent or alter block_id values.
+- For a claim drawn from multiple blocks on one page, add one footnote per supporting block (at most 3); beyond that, cite the single strongest block.
+- Each footnote must reference a SINGLE page integer. For multi-page citations, use separate footnotes.
+- Number footnotes from 1 in order of first use; reuse a number when the same page and block support another claim. Every marker needs a definition and every definition a marker.""",
+}
+
+
+def fetch_citation_prompt(client, format: Optional[str] = None) -> str:
+    """The MCP server's ``cited_answer`` prompt as system-prompt text;
+    ``format`` rides as its one argument (None: the server's default).
+    Local: the frozen copy, page-level."""
+    if not getattr(client, "api_key", None):
+        try:
+            return LOCAL_CITATION_PROMPTS[format or "markdown"]
+        except KeyError:
+            raise PageIndexAPIError(
+                f"citations format {format!r} is not one of "
+                f"{', '.join(LOCAL_CITATION_PROMPTS)}.") from None
+    _, messages = _cloud_bridge(client, gated=True).get_prompt(
+        "cited_answer", {"format": format} if format else None)
+    text = render_prompt_text(messages)
+    if not text.strip():
+        raise PageIndexAPIError(
+            "The MCP server returned an empty cited_answer prompt.")
+    return text
 
 
 def _base_instructions(client, include_management: bool = False) -> str:
