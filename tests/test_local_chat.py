@@ -337,8 +337,6 @@ def test_cloud_guards(monkeypatch):
     with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud._messages("x", model="m")
     with pytest.raises(PageIndexAPIError, match="own chat model"):
-        cloud.chat("x", instructions="be brief")
-    with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.chat("x", max_turns=2)
 
 
@@ -3845,3 +3843,116 @@ def test_bridge_chat_keeps_model_slips_model_visible(bridge_client,
     result = client.chat_completions("What?")
     assert result["choices"][0]["message"]["content"] == "Recovered"
     assert len(fake.instructions) == 2 and bridge.calls == []
+
+
+# ── client-level instructions: after the managed base, on every surface ──
+
+def test_client_instructions_follow_the_managed_base_everywhere(store_path):
+    from pageindex.agent_tools import AGENT_INSTRUCTIONS
+    client = PageIndexLocalClient(storage_path=store_path,
+                                  instructions="PERSONA")
+    assert client.agent_instructions() == AGENT_INSTRUCTIONS + "\n\nPERSONA"
+    # the chat lanes' prompt: header, base, client, then the call's texts
+    managed = local_chat._managed_instructions(client, ["CALL", "HISTORY"])
+    marks = [managed.index(m) for m in
+             (CHAT_HEADER, AGENT_INSTRUCTIONS, "PERSONA", "CALL", "HISTORY")]
+    assert marks == sorted(marks)
+    # Messages lane: inside the cached managed block, before the call's
+    blocks = local_chat._anthropic_system(client, "CALL", None)
+    assert blocks[0]["text"].endswith("\n\nPERSONA")
+    assert blocks[1]["text"] == "CALL"
+    # unset: the base alone, byte-identical to before
+    plain = PageIndexLocalClient(storage_path=store_path)
+    assert plain.agent_instructions() == AGENT_INSTRUCTIONS
+
+
+def test_bridge_client_instructions_follow_the_live_instructions(
+        bridge_client):
+    client, _ = bridge_client
+    client.instructions = "PERSONA"  # a plain attribute, read per call
+    assert client.agent_instructions() == "CLOUD LIVE INSTRUCTIONS\n\nPERSONA"
+
+
+@needs_agents
+def test_openai_agent_config_carries_client_instructions(store_path):
+    client = PageIndexLocalClient(storage_path=store_path,
+                                  instructions="PERSONA")
+    assert client.openai_agent_config()["instructions"].endswith("PERSONA")
+
+
+def test_anthropic_runner_config_carries_client_instructions(store_path):
+    pytest.importorskip("anthropic")
+    client = PageIndexLocalClient(storage_path=store_path,
+                                  instructions="PERSONA")
+    assert client.anthropic_runner_config("claude-x")["system"].endswith(
+        "PERSONA")
+
+
+def test_claude_agent_config_carries_client_instructions(store_path):
+    pytest.importorskip("claude_agent_sdk")
+    client = PageIndexLocalClient(storage_path=store_path,
+                                  instructions="PERSONA")
+    assert client.claude_agent_config()["system_prompt"].endswith("PERSONA")
+
+
+def test_managed_chat_sends_one_leading_system_row(monkeypatch):
+    """The managed endpoint takes one system message, first: the client's
+    instructions, the call's, and the history's system rows (any
+    position) fold into it, in that order."""
+    cloud = PageIndexCloudClient(api_key="pi-k", instructions="PERSONA")
+    seen = {}
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kw: seen.update(kw) or {
+                            "choices": [{"message": {"content": "ok"}}]})
+    history = [{"role": "user", "content": "q1"},
+               {"role": "assistant", "content": "a1"},
+               {"role": "system", "content": "HISTORY"},
+               {"role": "user", "content": "q2"}]
+    assert cloud.chat(history, instructions="CALL") == "ok"
+    assert seen["messages"] == [
+        {"role": "system", "content": "PERSONA\n\nCALL\n\nHISTORY"},
+        {"role": "user", "content": "q1"},
+        {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": "q2"}]
+    # a bare question, and the streamed door, ride the same fold
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kw: seen.update(kw) or iter([]))
+    assert list(cloud.chat("q", stream=True, show_process=False)) == []
+    assert seen["messages"] == [{"role": "system", "content": "PERSONA"},
+                                {"role": "user", "content": "q"}]
+    # developer rows are system text here too, as on the own-model lane
+    cloud.chat_completions([{"role": "user", "content": "q"},
+                            {"role": "developer", "content": "DEV"}])
+    assert seen["messages"][0] == {"role": "system",
+                                   "content": "PERSONA\n\nDEV"}
+
+
+def test_managed_chat_forwards_untouched_when_nothing_to_fold(monkeypatch):
+    cloud = PageIndexCloudClient(api_key="pi-k")
+    seen = {}
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kw: seen.update(kw) or {
+                            "choices": [{"message": {"content": "ok"}}]})
+    messages = [{"role": "user", "content": "q"}]
+    cloud.chat(messages)
+    assert seen["messages"] is messages
+    leading = [{"role": "system", "content": "S"},
+               {"role": "user", "content": "q"}]
+    cloud.chat(leading)
+    assert seen["messages"] == leading
+
+
+def test_managed_chat_history_contract_matches_the_own_model_lane(
+        monkeypatch):
+    """One answer-lane contract on both engines: text history only. The
+    endpoint refuses tool rows and structured content itself (400/422);
+    the SDK says so first, with the protocol-lane pointer."""
+    cloud = PageIndexCloudClient(api_key="pi-k")
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kw: pytest.fail("must not reach the wire"))
+    with pytest.raises(PageIndexAPIError, match="Unsupported role"):
+        cloud.chat([{"role": "user", "content": "q"},
+                    {"role": "tool", "tool_call_id": "c", "content": "x"}])
+    with pytest.raises(PageIndexAPIError, match="content must be a string"):
+        cloud.chat([{"role": "user",
+                     "content": [{"type": "text", "text": "q"}]}])

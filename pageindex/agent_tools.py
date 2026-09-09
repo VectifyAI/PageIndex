@@ -1691,16 +1691,19 @@ def _base_instructions(client, include_management: bool = False) -> str:
     """Cloud: the live instructions the MCP server serves for the tool set
     actually shipped. Local: the built-in subset instructions."""
     if not getattr(client, "api_key", None):
-        return AGENT_INSTRUCTIONS
-    instructions = _cloud_bridge(
-        client, gated=not include_management).instructions()
-    if not isinstance(instructions, str) or not instructions.strip():
-        raise PageIndexAPIError(
-            "The MCP server returned no agent instructions — refusing to "
-            "substitute the SDK's local-subset guidance, which does not "
-            "cover the cloud tool set."
-        )
-    return instructions
+        base = AGENT_INSTRUCTIONS
+    else:
+        base = _cloud_bridge(
+            client, gated=not include_management).instructions()
+        if not isinstance(base, str) or not base.strip():
+            raise PageIndexAPIError(
+                "The MCP server returned no agent instructions — refusing "
+                "to substitute the SDK's local-subset guidance, which does "
+                "not cover the cloud tool set."
+            )
+    # The client's standing instructions follow the base on every surface.
+    own = getattr(client, "instructions", None)
+    return f"{base}\n\n{own}" if own else base
 
 
 def doc_targeting_block(client, doc_id) -> Optional[str]:

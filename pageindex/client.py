@@ -318,6 +318,14 @@ class PageIndexClient:
             ``backend`` keys win over it. The dict reaches whichever
             door runs, in that door's vocabulary (see each method) —
             ``api_key`` / ``base_url`` mean the same thing on all three.
+        instructions (str, optional): Standing guidance for the answering
+            agent — persona, language, format — appended after the
+            managed system prompt on every chat surface, the managed
+            cloud chat included, and in ``agent_instructions()`` and the
+            ``*_agent_config()`` bundles. Not a chat-side spelling: it
+            combines with any ``chat=`` and never selects own-model chat.
+            ``chat(instructions=...)`` adds to it per call. Indexing
+            has no prompt to extend.
 
     PageIndexCloudClient / PageIndexLocalClient pin the index side at
     construction instead of inferring it from api_key.
@@ -347,12 +355,20 @@ class PageIndexClient:
         storage_path: Optional[Union[str, os.PathLike[str]]] = None,
         index_backend: Optional[dict[str, Any]] = None,
         chat_backend: Optional[dict[str, Any]] = None,
+        instructions: Optional[str] = None,
     ):
         if api_key == "":
             raise PageIndexAPIError(
                 "api_key is an empty string. Pass a real PageIndex API key for "
                 "cloud mode, or omit api_key entirely for local mode."
             )
+        if instructions is not None and not isinstance(instructions, str):
+            raise PageIndexAPIError(
+                f"instructions must be a str, got {type(instructions).__name__} "
+                "— Messages system blocks go on chat(protocol=\"messages\", "
+                "instructions=[...]).")
+        # Blank configures nothing, as chat(instructions="") does.
+        self.instructions = (instructions or "").strip() or None
         # Each side picks one spelling — its slot, or the flat arguments.
         # ``model`` sets every role, so it claims both sides.
         index_flat: dict[str, Any] = {
@@ -519,9 +535,8 @@ class PageIndexClient:
         return model is not None
 
     def _require_own_chat(self, lane: str) -> None:
-        # The one refusal for the Responses / Messages lanes, the doors
-        # behind them, and instructions: shared, so the doors cannot drift
-        # from chat().
+        # The one refusal for the Responses / Messages lanes and the doors
+        # behind them: shared, so the doors cannot drift from chat().
         if self._local_chat:
             return
         if not getattr(self, "api_key", None):
@@ -1040,13 +1055,15 @@ class PageIndexClient:
                 — the wire protocol, engine, and input/output shapes of
                 this call. Own-model chat only, except
                 ``"chat_completions"``, which the managed chat serves too.
-            instructions: Own-model chat only — persona or extra guidance
+            instructions: Persona or extra guidance for this call,
                 appended after the managed system prompt (which stays: it
-                carries the tool guidance and the document context). A
-                string on every lane; with ``protocol="messages"`` also
-                a list of Messages system blocks. On the answer lane and
+                carries the tool guidance and the document context) and
+                the client's own ``instructions``. A string on every
+                lane; with ``protocol="messages"`` also a list of
+                Messages system blocks. On the answer lane and
                 ``protocol="chat_completions"`` it precedes any ``system``
-                rows in the history.
+                rows in the history; the managed cloud chat receives them
+                all as its one leading system message.
             citations: Own-model chat: cite every claim the way PageIndex
                 chat does — ``<cite doc="…" page="…"/>`` tags, ``block="…"``
                 added where the cloud document has blocks. The guidance is
@@ -1192,7 +1209,6 @@ class PageIndexClient:
                 system=instructions, max_turns=max_turns, extra_body=body,
                 extra_headers=extra_headers, backend=backend)
         if instructions:
-            self._require_own_chat("instructions")
             if isinstance(messages, str):
                 if not messages.strip():
                     raise PageIndexAPIError(
@@ -1303,10 +1319,11 @@ class PageIndexClient:
         Args:
             messages: Conversation messages with 'role' and 'content' keys,
                 or a bare query string (it becomes a single user message).
-                Own-model chat also accepts system/developer messages —
-                their content is appended to the managed system prompt —
-                and takes text history only: tool-role turns are rejected
-                (the managed endpoint forwards them verbatim), and message
+                System/developer messages, wherever they sit, join the
+                managed system prompt after the client's ``instructions``
+                (the managed endpoint receives them as its one leading
+                system message); the history is text only: tool-role
+                turns are rejected on both engines, and message
                 fields beyond role/content are dropped.
             stream: Enable streaming responses.
             doc_id: Document ID or list of IDs to scope the conversation.
@@ -1406,6 +1423,17 @@ class PageIndexClient:
                 "agent in your process, or drop them to use the managed "
                 "chat endpoint, which selects its own model."
             )
+        # One answer-lane contract on both engines (text history; the
+        # endpoint refuses tool rows and structured content itself). It
+        # takes a single system message, first: the client's instructions
+        # and the history's system rows fold into it; with neither, the
+        # messages go as they are.
+        from .local_chat import _split_chat_messages
+        system_texts, history = _split_chat_messages(messages)
+        texts = [t for t in [self.instructions, *system_texts] if t]
+        if texts:
+            messages = [{"role": "system", "content": "\n\n".join(texts)},
+                        *history]
         from .cloud_api import CloudAPI
         return cast(CloudAPI, self._api).chat_completions(
             messages=messages, stream=stream, doc_id=doc_id,
@@ -2009,6 +2037,7 @@ class PageIndexClient:
         ``agent_tools()`` — server-side guidance updates arrive without an
         SDK release. Raises PageIndexAPIError if the server cannot be
         reached. Local: the built-in guidance for the in-process tools.
+        The client's ``instructions``, if set, follow the guidance.
 
         Static by design: document targeting is conversation content, not
         guidance — see ``document_context()``.
@@ -2138,6 +2167,7 @@ class PageIndexCloudClient(PageIndexClient):
         chat_model: Optional[str] = None,
         retrieve_model: Optional[str] = None,
         chat_backend: Optional[dict[str, Any]] = None,
+        instructions: Optional[str] = None,
     ):
         if index is None:
             if api_key is None:
@@ -2152,7 +2182,7 @@ class PageIndexCloudClient(PageIndexClient):
                 )
         super().__init__(api_key, index=index, chat=chat,
                          chat_model=chat_model, retrieve_model=retrieve_model,
-                         chat_backend=chat_backend)
+                         chat_backend=chat_backend, instructions=instructions)
 
 
 class PageIndexLocalClient(PageIndexClient):
@@ -2173,9 +2203,11 @@ class PageIndexLocalClient(PageIndexClient):
         storage_path: Optional[Union[str, os.PathLike[str]]] = None,
         index_backend: Optional[dict[str, Any]] = None,
         chat_backend: Optional[dict[str, Any]] = None,
+        instructions: Optional[str] = None,
     ):
         super().__init__(None, index=index, chat=chat,
                          index_model=index_model, chat_model=chat_model,
                          model=model, summary_model=summary_model,
                          retrieve_model=retrieve_model, storage_path=storage_path,
-                         index_backend=index_backend, chat_backend=chat_backend)
+                         index_backend=index_backend, chat_backend=chat_backend,
+                         instructions=instructions)
