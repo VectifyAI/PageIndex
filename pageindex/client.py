@@ -367,7 +367,6 @@ class PageIndexClient:
                 f"instructions must be a str, got {type(instructions).__name__} "
                 "— Messages system blocks go on chat(protocol=\"messages\", "
                 "instructions=[...]).")
-        # Blank configures nothing, as chat(instructions="") does.
         self.instructions = (instructions or "").strip() or None
         # Each side picks one spelling — its slot, or the flat arguments.
         # ``model`` sets every role, so it claims both sides.
@@ -1322,9 +1321,10 @@ class PageIndexClient:
                 System/developer messages, wherever they sit, join the
                 managed system prompt after the client's ``instructions``
                 (the managed endpoint receives them as its one leading
-                system message); the history is text only: tool-role
-                turns are rejected on both engines, and message
-                fields beyond role/content are dropped.
+                system message). Own-model chat takes text history only:
+                tool-role turns are rejected and fields beyond
+                role/content are dropped; the managed endpoint receives
+                the rest of the history verbatim.
             stream: Enable streaming responses.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
@@ -1423,14 +1423,18 @@ class PageIndexClient:
                 "agent in your process, or drop them to use the managed "
                 "chat endpoint, which selects its own model."
             )
-        # One answer-lane contract on both engines (text history; the
-        # endpoint refuses tool rows and structured content itself). It
-        # takes a single system message, first: the client's instructions
-        # and the history's system rows fold into it.
-        from .local_chat import _split_chat_messages
-        system_texts, history = _split_chat_messages(messages)
-        texts = [t for t in [self.instructions, *system_texts]
-                 if t and t.strip()]
+        # The endpoint takes one system message, first: the client's
+        # instructions and the history's system rows fold into it.
+        from .local_chat import _system_text
+        texts = [self.instructions] if self.instructions else []
+        history = []
+        for message in messages:
+            role = message.get("role") if isinstance(message, dict) else None
+            if role in ("system", "developer"):
+                texts.append(_system_text(message.get("content")))
+            else:
+                history.append(message)
+        texts = [t for t in texts if t.strip()]
         messages = ([{"role": "system", "content": "\n\n".join(texts)}]
                     if texts else []) + history
         from .cloud_api import CloudAPI
@@ -1970,10 +1974,11 @@ class PageIndexClient:
         in-process server — match it to the key you register the entry
         under (cloud entries carry no name).
 
-        Cloud hosts that surface MCP server instructions receive the same
-        guidance ``agent_instructions()`` returns natively — passing both
-        duplicates the text (harmless). ``system_prompt`` stays the
-        recommended channel: it is guaranteed delivery, and the only
+        Cloud hosts that surface MCP server instructions receive the tool
+        guidance natively — not the client's ``instructions``, which only
+        ``system_prompt`` carries; passing both duplicates the guidance
+        (harmless). ``system_prompt`` stays the recommended channel: it is
+        guaranteed delivery, and the only
         channel local mode has.
 
         Usage (or ``claude_agent_config()`` for all three slots in one

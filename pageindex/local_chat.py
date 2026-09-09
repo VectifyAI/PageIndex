@@ -29,7 +29,8 @@ def _managed_instructions(client, extra_system: list[str]) -> str:
     # Local: the built-in subset guidance. Own-model chat over cloud
     # documents: the live instructions the MCP server serves.
     base: str = _base_instructions(client)
-    return "\n\n".join([CHAT_HEADER, base, *extra_system])
+    return "\n\n".join([CHAT_HEADER, base,
+                        *[t for t in extra_system if t.strip()]])
 
 
 def _system_text(content: Any) -> str:

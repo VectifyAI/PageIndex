@@ -1701,7 +1701,6 @@ def _base_instructions(client, include_management: bool = False) -> str:
                 "to substitute the SDK's local-subset guidance, which does "
                 "not cover the cloud tool set."
             )
-    # The client's standing instructions follow the base on every surface.
     own = getattr(client, "instructions", None)
     return f"{base}\n\n{own}" if own else base
 

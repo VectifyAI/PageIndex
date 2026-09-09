@@ -2173,14 +2173,11 @@ def test_instructions_stored_on_every_constructor(tmp_path):
                                 instructions="p").instructions == "p"
     assert PageIndexCloudClient(api_key="pi-k",
                                 instructions="p").instructions == "p"
-    # not a chat-side spelling: combines with a string chat= slot, and
-    # never selects own-model chat on its own
-    assert PageIndexClient(api_key="pi-k", chat="gpt-x",
-                           instructions="p").instructions == "p"
+    both = PageIndexClient(api_key="pi-k", chat="gpt-x", instructions="p")
+    assert (both.chat_model, both.instructions) == ("gpt-x", "p")
     managed = PageIndexClient(api_key="pi-k", instructions="p")
     assert managed.chat_model is None and managed.instructions == "p"
     assert PageIndexClient(storage_path=store).instructions is None
-    # blank configures nothing, as chat(instructions="") does
     assert PageIndexClient(storage_path=store,
                            instructions="  ").instructions is None
 

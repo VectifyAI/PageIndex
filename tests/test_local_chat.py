@@ -3852,7 +3852,6 @@ def test_client_instructions_follow_the_managed_base_everywhere(store_path):
     client = PageIndexLocalClient(storage_path=store_path,
                                   instructions="PERSONA")
     assert client.agent_instructions() == AGENT_INSTRUCTIONS + "\n\nPERSONA"
-    # the chat lanes' prompt: header, base, client, then the call's texts
     managed = local_chat._managed_instructions(client, ["CALL", "HISTORY"])
     marks = [managed.index(m) for m in
              (CHAT_HEADER, AGENT_INSTRUCTIONS, "PERSONA", "CALL", "HISTORY")]
@@ -3861,15 +3860,25 @@ def test_client_instructions_follow_the_managed_base_everywhere(store_path):
     blocks = local_chat._anthropic_system(client, "CALL", None)
     assert blocks[0]["text"].endswith("\n\nPERSONA")
     assert blocks[1]["text"] == "CALL"
-    # unset: the base alone, byte-identical to before
     plain = PageIndexLocalClient(storage_path=store_path)
     assert plain.agent_instructions() == AGENT_INSTRUCTIONS
+
+
+@needs_agents
+def test_chat_reaches_the_model_with_client_instructions(store_path,
+                                                          fake_model):
+    client = PageIndexLocalClient(storage_path=store_path,
+                                  instructions="PERSONA")
+    fake = fake_model([[_msg_item("ok")]])
+    assert client.chat([{"role": "system", "content": "CALL"},
+                        {"role": "user", "content": "hi"}]) == "ok"
+    assert fake.instructions[0].endswith("\n\nPERSONA\n\nCALL")
 
 
 def test_bridge_client_instructions_follow_the_live_instructions(
         bridge_client):
     client, _ = bridge_client
-    client.instructions = "PERSONA"  # a plain attribute, read per call
+    client.instructions = "PERSONA"
     assert client.agent_instructions() == "CLOUD LIVE INSTRUCTIONS\n\nPERSONA"
 
 
@@ -3896,9 +3905,7 @@ def test_claude_agent_config_carries_client_instructions(store_path):
 
 
 def test_managed_chat_sends_one_leading_system_row(monkeypatch):
-    """The managed endpoint takes one system message, first: the client's
-    instructions, the call's, and the history's system rows (any
-    position) fold into it, in that order."""
+    """One system row first: the client's, the call's, then the history's."""
     cloud = PageIndexCloudClient(api_key="pi-k", instructions="PERSONA")
     seen = {}
     monkeypatch.setattr(cloud._api, "chat_completions",
@@ -3914,23 +3921,19 @@ def test_managed_chat_sends_one_leading_system_row(monkeypatch):
         {"role": "user", "content": "q1"},
         {"role": "assistant", "content": "a1"},
         {"role": "user", "content": "q2"}]
-    # a bare question, and the streamed door, ride the same fold
     monkeypatch.setattr(cloud._api, "chat_completions",
                         lambda **kw: seen.update(kw) or iter([]))
     assert list(cloud.chat("q", stream=True, show_process=False)) == []
     assert seen["messages"] == [{"role": "system", "content": "PERSONA"},
                                 {"role": "user", "content": "q"}]
-    # developer rows are system text here too, as on the own-model lane
     cloud.chat_completions([{"role": "user", "content": "q"},
                             {"role": "developer", "content": "DEV"}])
     assert seen["messages"][0] == {"role": "system",
                                    "content": "PERSONA\n\nDEV"}
 
 
-def test_managed_chat_sends_the_canonical_history(monkeypatch):
-    """No client instructions: the payload is the history as given, a
-    leading system row kept in place; blank system rows and fields
-    beyond role/content are dropped, as on the own-model lane."""
+def test_managed_chat_forwards_the_rest_of_the_history_verbatim(monkeypatch):
+    """Only system rows fold; blank ones drop; the rest goes as given."""
     cloud = PageIndexCloudClient(api_key="pi-k")
     seen = {}
     monkeypatch.setattr(cloud._api, "chat_completions",
@@ -3940,22 +3943,11 @@ def test_managed_chat_sends_the_canonical_history(monkeypatch):
                {"role": "user", "content": "q"}]
     cloud.chat(leading)
     assert seen["messages"] == leading
-    cloud.chat([{"role": "user", "content": "q", "name": "ray"},
-                {"role": "system", "content": "   "}])
-    assert seen["messages"] == [{"role": "user", "content": "q"}]
-
-
-def test_managed_chat_history_contract_matches_the_own_model_lane(
-        monkeypatch):
-    """One answer-lane contract on both engines: text history only. The
-    endpoint refuses tool rows and structured content itself (400/422);
-    the SDK says so first, with the protocol-lane pointer."""
-    cloud = PageIndexCloudClient(api_key="pi-k")
-    monkeypatch.setattr(cloud._api, "chat_completions",
-                        lambda **kw: pytest.fail("must not reach the wire"))
-    with pytest.raises(PageIndexAPIError, match="Unsupported role"):
-        cloud.chat([{"role": "user", "content": "q"},
-                    {"role": "tool", "tool_call_id": "c", "content": "x"}])
-    with pytest.raises(PageIndexAPIError, match="content must be a string"):
-        cloud.chat([{"role": "user",
-                     "content": [{"type": "text", "text": "q"}]}])
+    history = [{"role": "user", "content": [{"type": "text", "text": "q"}],
+                "name": "ray"},
+               {"role": "assistant", "content": None,
+                "tool_calls": [{"id": "c"}]},
+               {"role": "tool", "tool_call_id": "c", "content": "x"},
+               {"role": "system", "content": "   "}]
+    cloud.chat(history)
+    assert seen["messages"] == history[:-1]
