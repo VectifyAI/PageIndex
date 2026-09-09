@@ -3380,7 +3380,8 @@ def test_chat_citations_on_protocol_lanes(bridge_client, monkeypatch):
 
 
 def test_chat_citations_managed(monkeypatch):
-    """Managed chat: citations=True is the endpoint's enable_citations."""
+    """Managed chat: citations=True is the endpoint's enable_citations; a
+    format name raises rather than silently meaning True."""
     cloud = PageIndexCloudClient(api_key="pi-test-key")
     seen = []
     monkeypatch.setattr(
@@ -3394,11 +3395,14 @@ def test_chat_citations_managed(monkeypatch):
     assert seen[-1]["enable_citations"] is True
     cloud.chat("q")
     assert seen[-1]["enable_citations"] is False
+    with pytest.raises(PageIndexAPIError, match="True or False"):
+        cloud.chat("q", citations="cite")
 
 
 def test_chat_citations_local_documents_use_the_frozen_copy(client, monkeypatch):
     """Local documents: the frozen copy joins the system prompt the same
-    way (pages are all local content has)."""
+    way (pages are all local content has); a format name raises rather
+    than silently meaning cite."""
     from pageindex.agent_tools import LOCAL_CITATION_PROMPTS
     seen = []
     monkeypatch.setattr(
@@ -3410,6 +3414,8 @@ def test_chat_citations_local_documents_use_the_frozen_copy(client, monkeypatch)
                            LOCAL_CITATION_PROMPTS["cite"] + "\n\nanalyst"}
     client.chat("q")
     assert seen[-1][0]["role"] == "user"
+    with pytest.raises(PageIndexAPIError, match="True or False"):
+        client.chat("q", citations="markdown")
 
 
 def test_chat_answer_lane_forwards_the_promoted_knobs(client, monkeypatch):

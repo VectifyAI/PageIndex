@@ -1649,19 +1649,19 @@ CITATIONS
 }
 
 
-def fetch_citation_prompt(client, format: Optional[str] = None) -> str:
+def fetch_citation_prompt(client, format: str) -> str:
     """The MCP server's ``cited_answer`` prompt as system-prompt text;
-    ``format`` rides as its one argument (None: the server's default).
-    Local: the frozen copy, page-level."""
+    ``format`` rides as its one argument. Local: the frozen copy,
+    page-level."""
     if not getattr(client, "api_key", None):
         try:
-            return LOCAL_CITATION_PROMPTS[format or "markdown"]
+            return LOCAL_CITATION_PROMPTS[format]
         except KeyError:
             raise PageIndexAPIError(
                 f"citations format {format!r} is not one of "
                 f"{', '.join(LOCAL_CITATION_PROMPTS)}.") from None
     _, messages = _cloud_bridge(client, gated=True).get_prompt(
-        "cited_answer", {"format": format} if format else None)
+        "cited_answer", {"format": format})
     text = render_prompt_text(messages)
     if not text.strip():
         raise PageIndexAPIError(
