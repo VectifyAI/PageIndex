@@ -3325,6 +3325,94 @@ def test_chat_instructions_precede_history_system_rows(client, store_path,
     assert seen["extra"] == []
 
 
+def _citing(bridge):
+    """Teach a FakeBridge the cited_answer prompt, recording each fetch."""
+    bridge.prompts = []
+
+    def get_prompt(name, arguments=None):
+        bridge.prompts.append((name, arguments))
+        fmt = (arguments or {}).get("format", "markdown")
+        return "Cited answers", [{"role": "user", "content": {
+            "type": "text", "text": f"CITATIONS — {fmt}"}}]
+
+    bridge.get_prompt = get_prompt
+    return bridge
+
+
+@needs_agents
+def test_chat_citations_join_the_managed_prompt(bridge_client, fake_model):
+    """citations=True on own-model chat: the server's cited_answer prompt
+    (PageIndex chat's cite format) joins the system prompt after the
+    managed prompt and before the caller's instructions; off fetches
+    nothing."""
+    client, bridge = bridge_client
+    _citing(bridge)
+    fake = fake_model([[_msg_item("ok")], [_msg_item("ok")]])
+    assert client.chat("q", citations=True, instructions="analyst") == "ok"
+    system = fake.instructions[0]
+    assert (system.index("CLOUD LIVE INSTRUCTIONS")
+            < system.index("CITATIONS — cite") < system.index("analyst"))
+    assert bridge.prompts == [("cited_answer", {"format": "cite"})]
+    client.chat("q")
+    assert "CITATIONS" not in fake.instructions[1]
+    assert len(bridge.prompts) == 1
+
+
+def test_chat_citations_on_protocol_lanes(bridge_client, monkeypatch):
+    """The protocol lanes carry the same guidance in their instructions /
+    system: prepended to a string, a leading block before caller blocks."""
+    client, bridge = bridge_client
+    _citing(bridge)
+    seen = []
+    monkeypatch.setattr(local_chat, "run_responses",
+                        lambda c, input, **kw: seen.append(kw) or "door")
+    monkeypatch.setattr(local_chat, "run_messages",
+                        lambda c, messages, **kw: seen.append(kw) or "door")
+    client.chat("q", protocol="responses", citations=True,
+                instructions="be brief")
+    assert seen[-1]["instructions"] == "CITATIONS — cite\n\nbe brief"
+    blocks = [{"type": "text", "text": "persona"}]
+    client.chat("q", protocol="messages", model="claude-x", citations=True,
+                instructions=blocks)
+    assert seen[-1]["system"] == [
+        {"type": "text", "text": "CITATIONS — cite"}, *blocks]
+    client.chat("q", protocol="messages", model="claude-x", citations=True)
+    assert seen[-1]["system"] == "CITATIONS — cite"
+
+
+def test_chat_citations_managed(monkeypatch):
+    """Managed chat: citations=True is the endpoint's enable_citations."""
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    seen = []
+    monkeypatch.setattr(
+        cloud._api, "chat_completions",
+        lambda **kw: seen.append(kw) or (
+            iter([_cloud_chunk("ok")]) if kw.get("stream")
+            else {"choices": [{"message": {"content": "ok"}}]}))
+    assert cloud.chat("q", citations=True) == "ok"
+    assert seen[-1]["enable_citations"] is True
+    assert "".join(cloud.chat("q", stream=True, citations=True)) == "ok"
+    assert seen[-1]["enable_citations"] is True
+    cloud.chat("q")
+    assert seen[-1]["enable_citations"] is False
+
+
+def test_chat_citations_local_documents_use_the_frozen_copy(client, monkeypatch):
+    """Local documents: the frozen copy joins the system prompt the same
+    way (pages are all local content has)."""
+    from pageindex.agent_tools import LOCAL_CITATION_PROMPTS
+    seen = []
+    monkeypatch.setattr(
+        local_chat, "run_chat_completions",
+        lambda c, messages, **kw: seen.append(messages) or {
+            "choices": [{"message": {"content": "ok"}}]})
+    assert client.chat("q", citations=True, instructions="analyst") == "ok"
+    assert seen[-1][0] == {"role": "system", "content":
+                           LOCAL_CITATION_PROMPTS["cite"] + "\n\nanalyst"}
+    client.chat("q")
+    assert seen[-1][0]["role"] == "user"
+
+
 def test_chat_answer_lane_forwards_the_promoted_knobs(client, monkeypatch):
     seen = {}
     monkeypatch.setattr(local_chat, "run_chat_completions",

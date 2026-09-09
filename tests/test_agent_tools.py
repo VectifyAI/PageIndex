@@ -2404,6 +2404,94 @@ def test_cloud_agent_instructions_served_live(monkeypatch):
     assert len(created) == 1
 
 
+def test_citation_prompt_cloud(monkeypatch):
+    """The citation prompt is the server's cited_answer prompt, fetched
+    over the same bridge session as agent_tools(); format rides as the
+    prompt's argument; PageIndex chat's cite format by default, "" leaves
+    the server's default."""
+    import pageindex.mcp_bridge as mcp_bridge
+    created = []
+
+    class _Bridge(_FakeBridge):
+        def __init__(self, url, headers):
+            super().__init__(url, headers)
+            created.append(self)
+            self.prompts = []
+
+        def get_prompt(self, name, arguments=None):
+            self.prompts.append((name, arguments))
+            fmt = (arguments or {}).get("format", "markdown")
+            return "Cited answers", [{"role": "user", "content": {
+                "type": "text", "text": f"CITATIONS — {fmt}"}}]
+
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _Bridge)
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud.agent_tools()
+    assert cloud.citation_prompt() == "CITATIONS — cite"
+    assert cloud.citation_prompt(format="markdown") == "CITATIONS — markdown"
+    assert cloud.citation_prompt(format="") == "CITATIONS — markdown"
+    assert len(created) == 1
+    assert created[0].prompts == [("cited_answer", {"format": "cite"}),
+                                  ("cited_answer", {"format": "markdown"}),
+                                  ("cited_answer", None)]
+
+
+def test_citation_prompt_empty_raises(monkeypatch):
+    """No silent empty guidance: a prompt with no text raises."""
+    import pageindex.mcp_bridge as mcp_bridge
+
+    class _Bridge(_FakeBridge):
+        def get_prompt(self, name, arguments=None):
+            return None, []
+
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _Bridge)
+    with pytest.raises(PageIndexAPIError, match="empty cited_answer prompt"):
+        PageIndexCloudClient(api_key="pi-test-key").citation_prompt()
+
+
+def test_citation_prompt_local_frozen_copy(client):
+    """Local documents get the SDK's frozen copy of the server's prompt:
+    one text per format, PageIndex chat's cite format by default, only
+    local tools named."""
+    from pageindex.agent_tools import LOCAL_CITATION_PROMPTS
+    assert client.citation_prompt() == LOCAL_CITATION_PROMPTS["cite"]
+    assert client.citation_prompt(format="") == LOCAL_CITATION_PROMPTS["markdown"]
+    for fmt in ("markdown", "cite", "footnote"):
+        text = client.citation_prompt(format=fmt)
+        assert text == LOCAL_CITATION_PROMPTS[fmt]
+        assert "CITATIONS" in text and "get_document_image" not in text
+        named = set(re.findall(r"\b(\w+)\(", text))
+        assert named and named <= set(tool_names(include_management=True))
+    with pytest.raises(PageIndexAPIError, match="markdown, cite, footnote"):
+        client.citation_prompt(format="bogus")
+
+
+@pytest.mark.skipif(not LIVE_KEY, reason="PAGEINDEX_API_KEY not set")
+def test_live_local_citation_prompts_match_cloud():
+    """The frozen local copies are the server's texts minus the one bullet
+    naming get_document_image(); any other server edit fails here."""
+    from pageindex.agent_tools import LOCAL_CITATION_PROMPTS
+    cloud = PageIndexCloudClient(api_key=LIVE_KEY)
+    for fmt, frozen in LOCAL_CITATION_PROMPTS.items():
+        live = cloud.citation_prompt(format=fmt).split("\n")
+        dropped = [line for line in live if "get_document_image()" in line]
+        assert len(dropped) == 1, fmt
+        assert "\n".join(line for line in live if line not in dropped) == frozen
+
+
+@pytest.mark.skipif(not LIVE_KEY, reason="PAGEINDEX_API_KEY not set")
+def test_live_cloud_citation_prompt_formats():
+    """The real server serves cited_answer in all three formats, each a
+    distinct rendering of the same rules; bare == markdown."""
+    cloud = PageIndexCloudClient(api_key=LIVE_KEY)
+    texts = {fmt: cloud.citation_prompt(format=fmt)
+             for fmt in ("markdown", "cite", "footnote")}
+    assert all("CITATIONS" in text for text in texts.values())
+    assert len(set(texts.values())) == 3
+    assert cloud.citation_prompt() == texts["cite"]
+    assert cloud.citation_prompt(format="") == texts["markdown"]  # server default
+
+
 def test_cloud_bridge_cache_threadsafe_and_pickle_clean(monkeypatch):
     """One bridge per client even under concurrent first calls, and the
     bridge lives off the instance so cloud clients stay picklable."""
