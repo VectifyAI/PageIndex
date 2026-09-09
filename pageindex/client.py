@@ -1426,14 +1426,13 @@ class PageIndexClient:
         # One answer-lane contract on both engines (text history; the
         # endpoint refuses tool rows and structured content itself). It
         # takes a single system message, first: the client's instructions
-        # and the history's system rows fold into it; with neither, the
-        # messages go as they are.
+        # and the history's system rows fold into it.
         from .local_chat import _split_chat_messages
         system_texts, history = _split_chat_messages(messages)
-        texts = [t for t in [self.instructions, *system_texts] if t]
-        if texts:
-            messages = [{"role": "system", "content": "\n\n".join(texts)},
-                        *history]
+        texts = [t for t in [self.instructions, *system_texts]
+                 if t and t.strip()]
+        messages = ([{"role": "system", "content": "\n\n".join(texts)}]
+                    if texts else []) + history
         from .cloud_api import CloudAPI
         return cast(CloudAPI, self._api).chat_completions(
             messages=messages, stream=stream, doc_id=doc_id,

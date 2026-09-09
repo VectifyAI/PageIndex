@@ -3927,19 +3927,22 @@ def test_managed_chat_sends_one_leading_system_row(monkeypatch):
                                    "content": "PERSONA\n\nDEV"}
 
 
-def test_managed_chat_forwards_untouched_when_nothing_to_fold(monkeypatch):
+def test_managed_chat_sends_the_canonical_history(monkeypatch):
+    """No client instructions: the payload is the history as given, a
+    leading system row kept in place; blank system rows and fields
+    beyond role/content are dropped, as on the own-model lane."""
     cloud = PageIndexCloudClient(api_key="pi-k")
     seen = {}
     monkeypatch.setattr(cloud._api, "chat_completions",
                         lambda **kw: seen.update(kw) or {
                             "choices": [{"message": {"content": "ok"}}]})
-    messages = [{"role": "user", "content": "q"}]
-    cloud.chat(messages)
-    assert seen["messages"] is messages
     leading = [{"role": "system", "content": "S"},
                {"role": "user", "content": "q"}]
     cloud.chat(leading)
     assert seen["messages"] == leading
+    cloud.chat([{"role": "user", "content": "q", "name": "ray"},
+                {"role": "system", "content": "   "}])
+    assert seen["messages"] == [{"role": "user", "content": "q"}]
 
 
 def test_managed_chat_history_contract_matches_the_own_model_lane(
