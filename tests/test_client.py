@@ -1,6 +1,7 @@
 """SDK surface tests: PageIndexClient in local and cloud mode."""
 import asyncio
 import importlib
+import inspect
 import json
 import os
 import re
@@ -1617,6 +1618,13 @@ def test_cloud_chat_folder_id_rides_the_wire(cloud):
     assert len(calls) == 1
     client.chat_completions("q", folder_id="")
     assert "folder_id" not in calls[-1]["json"]
+
+
+def test_folder_id_is_keyword_only_on_every_chat_surface():
+    for method in (PageIndexClient.chat, PageIndexClient.chat_completions,
+                   PageIndexClient._responses, PageIndexClient._messages):
+        param = inspect.signature(method).parameters["folder_id"]
+        assert param.kind is inspect.Parameter.KEYWORD_ONLY, method.__name__
 
 
 def test_parse_pages_overlap_counts_union():

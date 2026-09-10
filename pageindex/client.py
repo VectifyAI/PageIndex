@@ -1267,6 +1267,7 @@ class PageIndexClient:
         extra_body: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         backend: Optional[dict[str, Any]] = None,
+        *,
         folder_id: Optional[str] = None,
     ) -> Union[dict[str, Any], Iterator[str], Iterator[dict[str, Any]]]:
         """
@@ -1428,6 +1429,7 @@ class PageIndexClient:
         extra_body: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         backend: Optional[dict[str, Any]] = None,
+        *,
         folder_id: Optional[str] = None,
     ) -> Union[dict[str, Any], Iterator[dict[str, Any]]]:
         """
@@ -1526,6 +1528,7 @@ class PageIndexClient:
         extra_body: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         backend: Optional[dict[str, Any]] = None,
+        *,
         folder_id: Optional[str] = None,
     ) -> Union[dict[str, Any], Iterator[Any]]:
         """
@@ -1757,9 +1760,9 @@ class PageIndexClient:
         instructions and ``as_openai_tools`` as the tools; clients with a
         configured ``chat_model`` — local mode, or cloud with
         ``chat_model=`` — also carry it (a plain cloud client omits
-        ``model`` so the framework default applies). To target documents
-        or a folder, prepend ``document_context(doc_id)`` /
-        ``folder_context(folder_id)`` to your first message; to
+        ``model`` so the framework default applies). To target a folder
+        or documents, prepend ``folder_context(folder_id)`` /
+        ``document_context(doc_id)`` to your first message; to
         customize further, switch to those methods directly. You run this
         config in your own environment, so its model auth comes from
         there — ``chat_backend`` does not travel with it.
@@ -1890,9 +1893,9 @@ class PageIndexClient:
         growing prompt from cache (pop the key if you place your own
         breakpoints — the API allows four). Unlike the chat lane,
         ``system`` here is the bare instructions string, without the chat
-        header or its block-level breakpoint. To target documents or a
-        folder, prepend ``document_context(doc_id)`` /
-        ``folder_context(folder_id)`` to your first message; to
+        header or its block-level breakpoint. To target a folder or
+        documents, prepend ``folder_context(folder_id)`` /
+        ``document_context(doc_id)`` to your first message; to
         customize further, switch to those methods directly.
 
         Args:
@@ -1975,8 +1978,8 @@ class PageIndexClient:
         (``agent_instructions``) and the server entry (``as_claude_mcp``,
         itself the tool gate) with its ``allowed_tools`` pre-approval,
         one ``include_management`` and ``server_name`` applied
-        everywhere. To target documents or a folder, prepend
-        ``document_context(doc_id)`` / ``folder_context(folder_id)`` to
+        everywhere. To target a folder or documents, prepend
+        ``folder_context(folder_id)`` / ``document_context(doc_id)`` to
         your prompt; to customize (your own system prompt, extra
         servers), switch to those methods directly.
 

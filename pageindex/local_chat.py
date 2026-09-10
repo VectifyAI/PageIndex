@@ -418,7 +418,8 @@ def _conversation_cache_key(model_name: str, instructions: str, doc_id,
     opening question against different documents is different
     conversations."""
     scope = [doc_id] if isinstance(doc_id, str) else doc_id
-    seed = json.dumps([model_name, instructions, scope, folder_id,
+    seed = json.dumps([model_name, instructions, scope,
+                       *([folder_id] if folder_id else []),
                        items[0] if items else None],
                       sort_keys=True, default=str)
     return "pageindex-" + hashlib.sha256(seed.encode()).hexdigest()[:16]

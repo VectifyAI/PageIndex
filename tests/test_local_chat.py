@@ -1036,6 +1036,16 @@ def test_doc_id_conversations_get_distinct_cache_keys(client, store_path,
     assert keys[5] != keys[0]  # same opener, different doc: no pooling
 
 
+def test_folder_less_cache_key_is_the_pre_folder_key():
+    """Adding folder_id to the seed must not rotate every existing
+    conversation's prompt_cache_key on upgrade."""
+    items = [{"role": "user", "content": "hi"}]
+    key = local_chat._conversation_cache_key("m", "sys", "d1", items)
+    assert key == "pageindex-b0ab095344ee8f89"
+    assert local_chat._conversation_cache_key(
+        "m", "sys", "d1", items, "f-1") != key
+
+
 @needs_agents
 def test_responses_stream_passthrough(client, store_path, fake_model):
     seed_doc(store_path, "pi-a", "report.pdf")

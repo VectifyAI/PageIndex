@@ -2656,16 +2656,21 @@ def test_doc_targeting_keeps_transport_errors_out_of_not_found():
 
 def test_doc_targeting_is_one_lookup_per_document():
     """One get_document per id, rendered like the cloud's managed chat."""
+    calls = []
+
     class Client:
         def get_document(self, doc_id):
+            calls.append(doc_id)
             return {"id": doc_id, "name": f"{doc_id}.pdf",
                     "status": "completed",
                     "metadata": {"quarter": "Q3", "nested": {"x": 1}}}
 
     single = agent_tools_module.doc_targeting_block(Client(), "pi-a")
+    assert calls == ["pi-a"]
     assert "Document metadata: {" in single
     assert '"quarter": "Q3"' in single and '"nested": {"x": 1}' in single
     block = agent_tools_module.doc_targeting_block(Client(), ["pi-a", "pi-b"])
+    assert calls == ["pi-a", "pi-a", "pi-b"]
     assert "The user has specified documents: pi-a.pdf, pi-b.pdf" in block
     assert "Documents metadata: [" in block
 
