@@ -313,18 +313,32 @@ def _merged_backend(client, backend):
 
 _SKELETON_KEYS = frozenset({"system", "instructions", "input", "messages",
                             "tools"})
+_ARGUMENT_KEYS = frozenset({"stream", "doc_id"})
 
 
 def _refuse_skeleton(extra_body) -> None:
     """The managed prompt, conversation and tools are the SDK's on every
-    lane; extra_body merges last, so a caller's copy would replace them."""
-    hit = sorted(_SKELETON_KEYS.intersection(extra_body or ()))
+    lane; extra_body merges last, so a caller's copy would replace them.
+    Fields with their own argument select the SDK's parser and scope, so
+    they are refused here too."""
+    if extra_body is None:
+        return
+    if not isinstance(extra_body, Mapping):
+        raise PageIndexAPIError(
+            "extra_body must be a dict of request fields, got "
+            f"{type(extra_body).__name__}.")
+    hit = sorted(_SKELETON_KEYS.intersection(extra_body))
     if hit:
         raise PageIndexAPIError(
             f"extra_body cannot carry {', '.join(hit)}: the managed prompt, "
             "conversation and tools are the SDK's. Extend the prompt with "
-            "instructions= (own chat model) or a system row in messages "
-            "(managed chat); the conversation is the first argument.")
+            "instructions= or a leading system row; pass the conversation "
+            "as messages, the first argument.")
+    hit = sorted(_ARGUMENT_KEYS.intersection(extra_body))
+    if hit:
+        raise PageIndexAPIError(
+            f"extra_body cannot carry {', '.join(hit)}: use "
+            f"{' / '.join(key + '=' for key in hit)} instead.")
 
 
 def _openai_agent(client, protocol: str, model_name: str, instructions: str,

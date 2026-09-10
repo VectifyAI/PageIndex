@@ -3273,8 +3273,9 @@ def test_chat_takes_only_messages_by_position():
     params = list(inspect.signature(PageIndexClient.chat).parameters.values())
     assert [p.name for p in params[:2]] == ["self", "messages"]
     assert {p.kind for p in params[2:]} == {inspect.Parameter.KEYWORD_ONLY}
-    with pytest.raises(TypeError):
-        PageIndexClient(api_key="pi-k").chat("q", True, "pi-1")
+    cloud = PageIndexClient(api_key="pi-k")
+    with pytest.raises(TypeError, match="positional"):
+        cloud.chat("q", True, "pi-1")
 
 
 def test_chat_protocol_responses_is_the_door(client, monkeypatch):
@@ -3356,6 +3357,46 @@ def test_extra_body_refuses_skeleton_keys():
     with pytest.raises(PageIndexAPIError, match="instructions="):
         local_chat._openai_agent(None, "responses", "gpt-test", "sys",
                                  None, None, extra_body={"input": "x"})
+
+
+def test_extra_body_refuses_non_dicts_and_argument_keys():
+    """The same gate: a non-dict would be splatted into the payload as
+    fabricated fields; stream / doc_id select the SDK's parser and scope,
+    so they ride their own arguments on every lane."""
+    for bad in (["ab"], "messages", 5, [("a", 1)]):
+        with pytest.raises(PageIndexAPIError,
+                           match="extra_body must be a dict"):
+            local_chat._refuse_skeleton(bad)
+    for key in ("stream", "doc_id"):
+        with pytest.raises(PageIndexAPIError,
+                           match=rf"extra_body cannot carry {key}: use {key}="):
+            local_chat._refuse_skeleton({key: True})
+    local_chat._refuse_skeleton(None)
+    local_chat._refuse_skeleton({})
+    local_chat._refuse_skeleton({"service_tier": "auto"})
+
+
+def test_chat_refuses_bad_extra_body_before_any_lane(client, monkeypatch):
+    """chat() and chat_completions() check extra_body before entering a
+    lane, so no lane does I/O (or, on Responses, an effort merge) on a
+    bad value."""
+    entered = []
+    for door in ("run_chat_completions", "run_responses", "run_messages"):
+        monkeypatch.setattr(local_chat, door,
+                            lambda c, *a, **kw: entered.append(1))
+    for protocol, knobs in ((None, {}), ("chat_completions", {}),
+                            ("responses", {}),
+                            ("messages", {"model": "claude-x"})):
+        with pytest.raises(PageIndexAPIError,
+                           match="extra_body must be a dict"):
+            client.chat("q", protocol=protocol, reasoning_effort="low",
+                        extra_body=["ab"], **knobs)
+        with pytest.raises(PageIndexAPIError, match="cannot carry stream"):
+            client.chat("q", protocol=protocol, extra_body={"stream": True},
+                        **knobs)
+    with pytest.raises(PageIndexAPIError, match="cannot carry stream"):
+        client.chat_completions("q", extra_body={"stream": True})
+    assert entered == []
 
 
 @needs_anthropic

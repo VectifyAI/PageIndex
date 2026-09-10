@@ -1053,10 +1053,10 @@ class PageIndexClient:
                 (``response_format`` is unsupported there). The managed
                 prompt, conversation and tools are not fields here (``system`` /
                 ``instructions`` / ``input`` / ``messages`` / ``tools``
-                are refused); extend the prompt with ``instructions=``.
-                The managed endpoint also refuses ``stream`` and
-                ``doc_id`` here; use ``stream=`` and ``doc_id=`` instead.
-                Credentials belong in ``backend``, never here.
+                are refused); extend the prompt with ``instructions=`` or a
+                leading system row in ``messages``. ``stream`` / ``doc_id``
+                are refused too: each has its own argument. Credentials
+                belong in ``backend``, never here.
 
         Returns:
             - answer lane, stream=False: the answer string
@@ -1103,6 +1103,8 @@ class PageIndexClient:
                 "instructions blocks are the Messages protocol's shape — "
                 "with protocol=\"messages\" they append after the managed "
                 "system blocks; the other lanes take a string.")
+        from .local_chat import _refuse_skeleton
+        _refuse_skeleton(extra_body)
         if protocol in ("responses", "messages"):
             self._require_own_chat(f"chat(protocol={protocol!r})")
             if protocol == "responses":
@@ -1280,10 +1282,9 @@ class PageIndexClient:
                 LiteLLM's own params (mapped or refused per provider).
                 The managed prompt, conversation and tools are not
                 fields here (``system`` / ``instructions`` / ``input`` /
-                ``messages`` / ``tools`` are refused). The managed
-                endpoint also refuses ``stream`` and ``doc_id`` here; use
-                ``stream=`` and ``doc_id=`` instead. Credentials belong in
-                ``backend``, never here.
+                ``messages`` / ``tools`` are refused), nor are ``stream``
+                / ``doc_id``: each has its own argument. Credentials belong
+                in ``backend``, never here.
             extra_headers: Own-model chat only — extra HTTP headers merged into
                 each backend request; caller headers win. One exception:
                 LiteLLM's anthropic adapter owns the ``anthropic-beta``
@@ -1307,6 +1308,8 @@ class PageIndexClient:
                     "messages must be a non-empty string or a list of "
                     "message dicts.")
             messages = [{"role": "user", "content": messages}]
+        from .local_chat import _refuse_skeleton
+        _refuse_skeleton(extra_body)
         if self._local_chat:
             from .local_chat import run_chat_completions
             return run_chat_completions(
@@ -1334,8 +1337,6 @@ class PageIndexClient:
                 "chat endpoint, which selects its own model."
             )
         from .cloud_api import CloudAPI
-        from .local_chat import _refuse_skeleton
-        _refuse_skeleton(extra_body)
         return cast(CloudAPI, self._api).chat_completions(
             messages=messages, stream=stream, doc_id=doc_id,
             temperature=temperature, stream_metadata=stream_metadata,
@@ -1961,7 +1962,7 @@ class PageIndexClient:
         SDK release. Raises PageIndexAPIError if the server cannot be
         reached. Local: the built-in guidance for the in-process tools.
 
-        With ``doc_id`` (str or list, same shape as ``chat_completions``),
+        With ``doc_id`` (str or list, same shape as ``chat``),
         appends the target documents' names and metadata and directs the
         agent to work within them. Raises PageIndexAPIError if a doc_id
         does not exist, or if its name is shadowed by a newer same-name

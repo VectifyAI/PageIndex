@@ -1541,10 +1541,12 @@ def test_cloud_chat_extra_body_merges_into_payload(cloud):
     client, calls, fake = cloud
     fake.payload = {"choices": [{"message": {"content": "ok"}}]}
     client.chat("q", doc_id="pi-1",
-                extra_body={"temperature": 0.2, "enable_citations": True})
+                extra_body={"temperature": 0.2, "enable_citations": True,
+                            "service_tier": "auto"})
     assert calls[-1]["json"] == {
         "messages": [{"role": "user", "content": "q"}], "stream": False,
-        "doc_id": "pi-1", "temperature": 0.2, "enable_citations": True}
+        "doc_id": "pi-1", "temperature": 0.2, "enable_citations": True,
+        "service_tier": "auto"}
 
 
 @pytest.mark.parametrize("stream", [False, True])
@@ -1564,6 +1566,17 @@ def test_cloud_chat_rejects_extra_body_stream_before_request(
         getattr(client, method)("q", stream=stream,
                                 extra_body={"stream": extra_stream},
                                 **options)
+    assert calls == []
+
+
+@pytest.mark.parametrize("bad", [["ab"], "messages", 5, [("a", 1)]])
+@pytest.mark.parametrize("method", ["chat", "chat_completions"])
+def test_cloud_chat_rejects_non_dict_extra_body_before_request(
+        cloud, bad, method):
+    client, calls, fake = cloud
+    fake.payload = {"choices": [{"message": {"content": "ok"}}]}
+    with pytest.raises(PageIndexAPIError, match="extra_body must be a dict"):
+        getattr(client, method)("q", extra_body=bad)
     assert calls == []
 
 
