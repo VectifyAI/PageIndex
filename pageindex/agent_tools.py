@@ -1395,12 +1395,9 @@ def _bridge_invoker(bridge, name: str, schema: dict,
                          if value is not None}
             _coerce_bool_args(schema, arguments)
             blocks, is_error = bridge.call_tool(name, arguments)
-            if is_error:
-                _raise_account_limit(blocks)
-            return blocks, is_error
         except Exception as exc:
             if isinstance(exc, PageIndexAPIError) and (
-                    exc.status_code in (401, 402, 403, 429)
+                    exc.status_code in (401, 403, 429)
                     or (exc.status_code or 0) >= 500
                     or (exc.status_code is None and isinstance(
                         exc.__cause__, requests.RequestException))):
@@ -1414,6 +1411,9 @@ def _bridge_invoker(bridge, name: str, schema: dict,
                 "INTERNAL_ERROR",
             )
             return [{"type": "text", "text": _dumps(payload)}], True
+        if is_error:
+            _raise_account_limit(blocks)
+        return blocks, is_error
     return _invoke
 
 

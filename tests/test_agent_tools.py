@@ -2895,6 +2895,7 @@ class _McpStub:
 @pytest.fixture
 def mcp_stub(monkeypatch):
     monkeypatch.setenv("NO_PROXY", "127.0.0.1")  # keep the machine's proxy out
+    monkeypatch.setenv("no_proxy", "127.0.0.1")  # requests reads this spelling first
     stubs = []
 
     def make(statuses, delay=0.0):
