@@ -364,9 +364,10 @@ class PageIndexClient:
             )
         if instructions is not None and not isinstance(instructions, str):
             raise PageIndexAPIError(
-                f"instructions must be a str, got {type(instructions).__name__} "
-                "— Messages system blocks go on chat(protocol=\"messages\", "
-                "instructions=[...]).")
+                f"instructions must be a str, got {type(instructions).__name__}. "
+                "Pass the guidance as text; Messages system blocks belong to "
+                "chat(protocol=\"messages\", model=..., instructions=[...]) on "
+                "a client with chat_model=... set.")
         self.instructions = (instructions or "").strip() or None
         # Each side picks one spelling — its slot, or the flat arguments.
         # ``model`` sets every role, so it claims both sides.
