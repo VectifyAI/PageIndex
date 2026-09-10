@@ -2448,6 +2448,94 @@ def test_cloud_agent_instructions_served_live(monkeypatch):
     assert len(created) == 1
 
 
+def test_citation_prompt_cloud(monkeypatch):
+    """The citation prompt is the server's cited_answer prompt, fetched
+    over the same bridge session as agent_tools(); format rides as the
+    prompt's argument; PageIndex chat's cite format by default ("" is
+    unset, so the default too)."""
+    import pageindex.mcp_bridge as mcp_bridge
+    created = []
+
+    class _Bridge(_FakeBridge):
+        def __init__(self, url, headers):
+            super().__init__(url, headers)
+            created.append(self)
+            self.prompts = []
+
+        def get_prompt(self, name, arguments=None):
+            self.prompts.append((name, arguments))
+            fmt = (arguments or {}).get("format", "markdown")
+            return "Cited answers", [{"role": "user", "content": {
+                "type": "text", "text": f"CITATIONS — {fmt}"}}]
+
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _Bridge)
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud.agent_tools()
+    assert cloud.citation_prompt() == "CITATIONS — cite"
+    assert cloud.citation_prompt(format="markdown") == "CITATIONS — markdown"
+    assert cloud.citation_prompt(format="") == "CITATIONS — cite"
+    assert len(created) == 1
+    assert created[0].prompts == [("cited_answer", {"format": "cite"}),
+                                  ("cited_answer", {"format": "markdown"}),
+                                  ("cited_answer", {"format": "cite"})]
+
+
+def test_citation_prompt_empty_raises(monkeypatch):
+    """No silent empty guidance: a prompt with no text raises."""
+    import pageindex.mcp_bridge as mcp_bridge
+
+    class _Bridge(_FakeBridge):
+        def get_prompt(self, name, arguments=None):
+            return None, []
+
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _Bridge)
+    with pytest.raises(PageIndexAPIError, match="empty cited_answer prompt"):
+        PageIndexCloudClient(api_key="pi-test-key").citation_prompt()
+
+
+def test_citation_prompt_local_frozen_copy(client):
+    """Local documents get the SDK's frozen copy of the server's prompt:
+    one text per format, PageIndex chat's cite format by default, only
+    local tools named."""
+    from pageindex.agent_tools import LOCAL_CITATION_PROMPTS
+    assert len(set(LOCAL_CITATION_PROMPTS.values())) == 3
+    assert client.citation_prompt() == LOCAL_CITATION_PROMPTS["cite"]
+    assert client.citation_prompt(format="") == LOCAL_CITATION_PROMPTS["cite"]
+    for fmt in ("markdown", "cite", "footnote"):
+        text = client.citation_prompt(format=fmt)
+        assert text == LOCAL_CITATION_PROMPTS[fmt]
+        assert "CITATIONS" in text and "get_document_image" not in text
+        named = set(re.findall(r"\b(\w+)\(", text))
+        assert named and named <= set(tool_names(include_management=True))
+    with pytest.raises(PageIndexAPIError, match="markdown, cite, footnote"):
+        client.citation_prompt(format="bogus")
+
+
+@pytest.mark.skipif(not LIVE_KEY, reason="PAGEINDEX_API_KEY not set")
+def test_live_local_citation_prompts_match_cloud():
+    """The frozen local copies are the server's texts minus the one bullet
+    naming get_document_image(); any other server edit fails here."""
+    from pageindex.agent_tools import LOCAL_CITATION_PROMPTS
+    cloud = PageIndexCloudClient(api_key=LIVE_KEY)
+    for fmt, frozen in LOCAL_CITATION_PROMPTS.items():
+        live = cloud.citation_prompt(format=fmt).split("\n")
+        dropped = [line for line in live if "get_document_image()" in line]
+        assert len(dropped) == 1, fmt
+        assert "\n".join(line for line in live if line not in dropped) == frozen
+
+
+@pytest.mark.skipif(not LIVE_KEY, reason="PAGEINDEX_API_KEY not set")
+def test_live_cloud_citation_prompt_formats():
+    """The real server serves cited_answer in all three formats, each a
+    distinct rendering of the same rules."""
+    cloud = PageIndexCloudClient(api_key=LIVE_KEY)
+    texts = {fmt: cloud.citation_prompt(format=fmt)
+             for fmt in ("markdown", "cite", "footnote")}
+    assert all("CITATIONS" in text for text in texts.values())
+    assert len(set(texts.values())) == 3
+    assert cloud.citation_prompt() == texts["cite"]
+
+
 def test_cloud_bridge_cache_threadsafe_and_pickle_clean(monkeypatch):
     """One bridge per client even under concurrent first calls, and the
     bridge lives off the instance so cloud clients stay picklable."""
@@ -2980,3 +3068,126 @@ def test_as_openai_tools_transport_failure_escapes_the_run(monkeypatch):
     with pytest.raises(Exception) as info:
         asyncio.run(tool.on_invoke_tool(None, '{"image_path": "x"}'))
     assert _pageindex_cause(info.value).status_code == 429
+
+
+def _fake_requests(monkeypatch, fake_post):
+    """Swap the bridge module's own ``requests`` binding for a fake whose
+    Session posts through ``fake_post`` — patching the shared module would
+    leak process-wide."""
+    import requests as requests_mod
+    monkeypatch.setattr("pageindex.mcp_bridge.requests", types.SimpleNamespace(
+        Session=lambda: types.SimpleNamespace(
+            post=fake_post, mount=lambda *a, **k: None),
+        RequestException=requests_mod.RequestException))
+
+
+class _JsonResp:
+    def __init__(self, status, body=None, headers=None):
+        self.status_code = status
+        self._body = body
+        self.headers = headers or {"Content-Type": "application/json"}
+        self.text = json.dumps(body) if body else ""
+        self.content = self.text.encode("utf-8")
+
+    def json(self):
+        if self._body is None:
+            raise ValueError("no body")
+        return self._body
+
+
+def test_mcp_bridge_prompts(monkeypatch):
+    """prompts/list paginates like tools/list; prompts/get sends arguments
+    only when given (stringified — the prompt contract carries strings)
+    and hands the messages back untouched."""
+    from pageindex.mcp_bridge import McpBridge, render_prompt_text
+
+    posts = []
+    catalog = {None: {"prompts": [{"name": "cited_answer",
+                                   "arguments": [{"name": "format",
+                                                  "required": False}]}],
+                      "nextCursor": "p2"},
+               "p2": {"prompts": [{"name": "other"}]}}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        posts.append(json)
+        method, rid = json.get("method"), json.get("id")
+        if method == "initialize":
+            return _JsonResp(200, {"jsonrpc": "2.0", "id": rid, "result": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {"tools": {}, "prompts": {"listChanged": False}},
+                "instructions": "SERVER GUIDANCE"}})
+        if method == "notifications/initialized":
+            return _JsonResp(202)
+        if method == "prompts/list":
+            page = catalog[(json.get("params") or {}).get("cursor")]
+            return _JsonResp(200, {"jsonrpc": "2.0", "id": rid, "result": page})
+        if method == "prompts/get":
+            params = json["params"]
+            if params["name"] != "cited_answer":
+                return _JsonResp(200, {"jsonrpc": "2.0", "id": rid, "error": {
+                    "code": -32602,
+                    "message": f"Prompt {params['name']} not found"}})
+            fmt = (params.get("arguments") or {}).get("format", "markdown")
+            return _JsonResp(200, {"jsonrpc": "2.0", "id": rid, "result": {
+                "description": "Cited answers",
+                "messages": [{"role": "user", "content": {
+                    "type": "text", "text": f"CITATIONS — {fmt}"}}]}})
+        raise AssertionError(f"unexpected method {method}")
+
+    _fake_requests(monkeypatch, fake_post)
+    bridge = McpBridge("https://api.pageindex.ai/mcp", {"Authorization": "Bearer k"})
+
+    assert [p["name"] for p in bridge.list_prompts()] == ["cited_answer", "other"]
+
+    description, messages = bridge.get_prompt("cited_answer")
+    assert description == "Cited answers"
+    assert messages == [{"role": "user", "content": {"type": "text",
+                                                     "text": "CITATIONS — markdown"}}]
+    # None ≡ no arguments on the wire, not an empty object.
+    assert "arguments" not in posts[-1]["params"]
+    assert render_prompt_text(messages) == "CITATIONS — markdown"
+
+    _, messages = bridge.get_prompt("cited_answer", {"format": "cite"})
+    assert posts[-1]["params"]["arguments"] == {"format": "cite"}
+    assert render_prompt_text(messages) == "CITATIONS — cite"
+
+    with pytest.raises(PageIndexAPIError, match="-32602: Prompt nope not found"):
+        bridge.get_prompt("nope")
+
+
+def test_mcp_bridge_prompts_require_server_capability(monkeypatch):
+    """A server without the prompts capability would answer -32601 to
+    prompts/*; the bridge names the real cause instead, and never sends
+    the request."""
+    from pageindex.mcp_bridge import McpBridge
+
+    methods = []
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        methods.append(json.get("method"))
+        if json.get("method") == "initialize":
+            return _JsonResp(200, {"jsonrpc": "2.0", "id": json["id"], "result": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {"tools": {}, "resources": {}}}})
+        return _JsonResp(202)
+
+    _fake_requests(monkeypatch, fake_post)
+    bridge = McpBridge("https://api.pageindex.ai/mcp", {})
+    with pytest.raises(PageIndexAPIError, match="does not serve prompts"):
+        bridge.list_prompts()
+    with pytest.raises(PageIndexAPIError, match="does not serve prompts"):
+        bridge.get_prompt("cited_answer")
+    assert "prompts/list" not in methods and "prompts/get" not in methods
+
+
+def test_render_prompt_text_flattens_messages():
+    from pageindex.mcp_bridge import render_prompt_text
+
+    assert render_prompt_text([
+        {"role": "user", "content": {"type": "text", "text": "a"}},
+        {"role": "assistant", "content": {"type": "text", "text": "b"}},
+        {"role": "user", "content": {"type": "image", "data": "QUJD",
+                                     "mimeType": "image/png"}},
+        {"role": "user"},
+    ]) == "a\nb\n[image/png content omitted: ~1 KB]"
+    assert render_prompt_text([]) == ""
