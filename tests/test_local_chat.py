@@ -3345,7 +3345,7 @@ def test_chat_protocol_chat_completions_serves_managed_cloud(monkeypatch):
     assert seen[-1] == {"messages": [{"role": "user", "content": "q"}],
                         "stream": False, "doc_id": None, "temperature": None,
                         "stream_metadata": True, "enable_citations": False,
-                        "extra_body": None}
+                        "extra_body": None, "folder_id": None}
     cloud.chat("q", protocol="chat_completions",
                extra_body={"temperature": 0.2, "enable_citations": True})
     assert seen[-1]["extra_body"] == {"temperature": 0.2,
