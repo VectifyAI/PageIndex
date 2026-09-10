@@ -3353,8 +3353,6 @@ def test_chat_protocol_chat_completions_serves_managed_cloud(monkeypatch):
                    extra_body={"messages": []})
     with pytest.raises(PageIndexAPIError, match="chat_model="):
         cloud.chat("q", protocol="chat_completions", model="m")
-    with pytest.raises(PageIndexAPIError, match="chat_model="):
-        cloud.chat("q", protocol="chat_completions", instructions="x")
 
 
 def test_chat_takes_only_messages_by_position():
@@ -3856,7 +3854,7 @@ def test_client_instructions_follow_the_managed_base_everywhere(store_path):
     marks = [managed.index(m) for m in
              (CHAT_HEADER, AGENT_INSTRUCTIONS, "PERSONA", "CALL", "HISTORY")]
     assert marks == sorted(marks)
-    blocks = local_chat._anthropic_system(client, "CALL", None)
+    blocks = local_chat._anthropic_system(client, "CALL")
     assert blocks[0]["text"].endswith("\n\nPERSONA")
     assert blocks[1]["text"] == "CALL"
     plain = PageIndexLocalClient(storage_path=store_path)
