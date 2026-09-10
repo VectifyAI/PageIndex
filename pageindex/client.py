@@ -957,9 +957,10 @@ class PageIndexClient:
                 answer lane and ``protocol="chat_completions"``, wherever
                 they sit (the managed endpoint forwards them verbatim);
                 the other protocol lanes pass rows to the wire as they
-                are (use ``instructions`` for persona there). With a
-                protocol, also that protocol's transcript items or
-                content blocks.
+                are (use ``instructions`` for persona there). Responses
+                and Messages also accept their native transcript items
+                or content blocks; own-model Chat Completions takes text
+                history only.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls. Local
                 documents: also enforced at the tool layer, not just
@@ -1018,8 +1019,9 @@ class PageIndexClient:
                 appended after the managed system prompt (which stays: it
                 carries the tool guidance and the document context). A
                 string on every lane; with ``protocol="messages"`` also
-                a list of Messages system blocks. On the answer lane it
-                precedes any ``system`` rows in the history.
+                a list of Messages system blocks. On the answer lane and
+                ``protocol="chat_completions"`` it precedes any ``system``
+                rows in the history.
             max_turns: Own-model chat only — cap on agent turns per call
                 (default 10). The OpenAI lanes raise at the cap;
                 ``protocol="messages"`` returns the truncated run
@@ -1028,24 +1030,25 @@ class PageIndexClient:
             backend: Own-model chat only — connection overrides for this
                 call's backend, merged over the client's ``chat_backend``
                 (per-call keys win): LiteLLM's connection params on the
-                answer lane, the openai / anthropic SDK's client params
-                on the protocol lanes. Passed through verbatim.
+                answer lane and ``protocol="chat_completions"``; the
+                openai / anthropic SDK's client params on Responses /
+                Messages. Passed through verbatim.
             extra_headers: Own-model chat only — extra HTTP headers
                 merged into each backend request; caller headers win.
                 LiteLLM's anthropic adapter owns ``anthropic-beta`` on the
-                answer lane — Anthropic beta flags ride
-                ``protocol="messages"``.
+                answer lane and ``protocol="chat_completions"`` —
+                Anthropic beta flags ride ``protocol="messages"``.
             extra_body: The wire's own request fields beyond this
                 method's parameters, in the lane's wire names (Responses
                 ``max_output_tokens``, Messages ``thinking`` / ``top_k``;
                 the managed chat endpoint's ``temperature`` /
                 ``enable_citations``), merged last so they win.
-                Own-model answer lane and ``protocol="chat_completions"``:
+                The managed endpoint, Responses / Messages, and
+                OpenAI-compatible chat backends take these verbatim in
+                the request body. Other own-model chat backends take
                 LiteLLM's own params, mapped or refused per provider
-                (``response_format`` has no door on LiteLLM-routed
-                models); Responses, Messages and the managed endpoint:
-                verbatim into the request body. The managed prompt,
-                conversation and tools are not fields here (``system`` /
+                (``response_format`` is unsupported there). The managed
+                prompt, conversation and tools are not fields here (``system`` /
                 ``instructions`` / ``input`` / ``messages`` / ``tools``
                 are refused); extend the prompt with ``instructions=``.
                 The managed endpoint also refuses ``stream`` here; use
