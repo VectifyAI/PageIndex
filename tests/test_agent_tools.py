@@ -2498,6 +2498,7 @@ def test_citation_prompt_local_frozen_copy(client):
     one text per format, PageIndex chat's cite format by default, only
     local tools named."""
     from pageindex.agent_tools import LOCAL_CITATION_PROMPTS
+    assert len(set(LOCAL_CITATION_PROMPTS.values())) == 3
     assert client.citation_prompt() == LOCAL_CITATION_PROMPTS["cite"]
     assert client.citation_prompt(format="") == LOCAL_CITATION_PROMPTS["cite"]
     for fmt in ("markdown", "cite", "footnote"):
@@ -3183,10 +3184,9 @@ def test_render_prompt_text_flattens_messages():
 
     assert render_prompt_text([
         {"role": "user", "content": {"type": "text", "text": "a"}},
-        # A list-valued content is accepted for forward compatibility.
-        {"role": "assistant", "content": [{"type": "text", "text": "b"},
-                                          {"type": "image", "data": "QUJD",
-                                           "mimeType": "image/png"}]},
+        {"role": "assistant", "content": {"type": "text", "text": "b"}},
+        {"role": "user", "content": {"type": "image", "data": "QUJD",
+                                     "mimeType": "image/png"}},
         {"role": "user"},
     ]) == "a\nb\n[image/png content omitted: ~1 KB]"
     assert render_prompt_text([]) == ""

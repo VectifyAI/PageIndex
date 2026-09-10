@@ -288,14 +288,10 @@ def render_text(blocks: list) -> str:
 def render_prompt_text(messages: list) -> str:
     """The text-only rendering of prompt messages, roles dropped: the
     server's prompts are standing guidance (grounding and citation rules),
-    which a system prompt carries as plain text. A message's content is one
-    block per the 2025-06-18 schema; a list is accepted for forward
-    compatibility."""
+    which a system prompt carries as plain text."""
     blocks: list = []
     for message in messages:
         content = message.get("content") if isinstance(message, dict) else None
-        if isinstance(content, list):
-            blocks.extend(content)
-        elif content is not None:
+        if content is not None:
             blocks.append(content)
     return render_text(blocks)
