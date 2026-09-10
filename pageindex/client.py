@@ -593,8 +593,8 @@ class PageIndexClient:
             beta_headers (list[str], optional): Cloud-only beta feature headers.
             folder_id (str, optional): Cloud-only folder (workspace) ID.
             metadata (dict, optional): Your own JSON-serializable tags for the
-                document; returned in get_tree/get_ocr responses and
-                list_documents entries (both modes).
+                document; returned in get_document/get_tree/get_ocr responses
+                and list_documents entries (both modes).
             wait (bool): Return only once the document is ready for use.
                 Cloud: polls status until "completed" (raises on "failed" or
                 after 30 minutes). Local: indexing is synchronous already, so
@@ -1898,7 +1898,7 @@ class PageIndexClient:
         (or prepend it to the prompt text where the framework takes a
         string). Conversation content, not system prompt: it varies per
         request, so keeping it out of the system prompt leaves the cached
-        prefix stable, and a later turn can move on to another document.
+        prefix stable.
 
         ``doc_id``: a document ID or list of IDs, as in ``chat``. Raises
         PageIndexAPIError if a document does not exist.

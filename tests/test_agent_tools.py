@@ -2236,8 +2236,7 @@ def test_agent_instructions_default(client):
 
 
 def test_document_context(client, store_path):
-    """Document targeting is conversation content the caller places; the
-    instructions stay static."""
+    """Targeting is conversation content; the instructions stay static."""
     seed_doc(store_path, "pi-a", "report.pdf")
     text = client.document_context("pi-a")
     assert "The user has specified document: report.pdf" in text
@@ -2256,15 +2255,15 @@ def test_document_context(client, store_path):
 
 
 def test_removed_doc_id_positional_slot_raises(client):
-    """doc_id sat in the positional list on these; keyword-only tails make a
-    stale positional call raise instead of landing on include_management
-    or server_name."""
+    """A stale positional doc_id raises instead of landing on the next slot."""
+    from pageindex.integrations.claude_agent_sdk import build_claude_mcp
     for stale in (lambda: client.agent_instructions("pi-a"),
                   lambda: client.openai_agent_config("pi-a"),
                   lambda: client.anthropic_runner_config(
                       "claude-sonnet-4-5", "pi-a"),
                   lambda: client.claude_agent_config("pi-a"),
-                  lambda: client.as_claude_mcp(False, "pi-a")):
+                  lambda: client.as_claude_mcp(False, "pi-a"),
+                  lambda: build_claude_mcp(client, False, "pi-a")):
         with pytest.raises(TypeError):
             stale()
 
@@ -2524,9 +2523,7 @@ def test_doc_targeting_keeps_transport_errors_out_of_not_found():
 
 
 def test_doc_targeting_is_one_lookup_per_document():
-    """The block comes from get_document alone, never a listing sweep, and
-    renders like the cloud's managed chat: one document is an object,
-    several are a list, the metadata row as it is."""
+    """One get_document per id, rendered like the cloud's managed chat."""
     class Client:
         def get_document(self, doc_id):
             return {"id": doc_id, "name": f"{doc_id}.pdf",
@@ -2615,8 +2612,7 @@ def test_browse_documents_pages_by_rows_returned():
 
 
 def test_document_context_carries_user_metadata(client, store_path):
-    """The targeting block promises names and metadata; local get_document
-    keeps the 7-key detail wire shape, so the tags come from the listing."""
+    """The targeting block carries the user's tags from get_document."""
     seed_doc(store_path, "pi-1", "report.pdf",
              metadata={"quarter": "Q3", "year": 2025})
     text = client.document_context("pi-1")

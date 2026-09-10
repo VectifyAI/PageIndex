@@ -1615,9 +1615,7 @@ def doc_targeting_block(client, doc_id) -> Optional[str]:
     renders its own: the documents' metadata rows and the directive to
     work within them. Conversation content, never system prompt: the chat
     lanes prepend it as the first user message, and document_context()
-    hands it to callers who own the conversation. One get_document per id
-    and nothing else: names are unique per library (uploads suffix a taken
-    name), so the name-addressed tools cannot land on another document."""
+    hands it to callers who own the conversation."""
     if doc_id is None:
         return None
     if not isinstance(doc_id, (str, list)):

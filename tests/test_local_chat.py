@@ -1219,9 +1219,7 @@ def test_messages_end_to_end(client, store_path, fake_anthropic):
 
 @needs_anthropic
 def test_messages_doc_block_and_system(client, store_path, fake_anthropic):
-    """The doc block leads the conversation as a user message, as on the
-    OpenAI lanes; system stays the cached header plus the caller's own;
-    the returned new-turn slice still starts after the caller's history."""
+    """Doc block leads as a user message; system keeps the cached header."""
     doc_id = seed_doc(store_path, "pi-a", "report.pdf")
     calls = fake_anthropic([
         _anthropic_message(

@@ -312,7 +312,7 @@ class CloudAPI:
 
     def get_document(self, doc_id: str) -> Dict[str, Any]:
         """
-        Get document metadata including id, name, description, status, createdAt, and pageNum.
+        Get document metadata.
 
         Args:
             doc_id (str): Document ID.
@@ -325,6 +325,8 @@ class CloudAPI:
                 - status (str): Processing status (e.g., "queued", "processing", "completed", "failed")
                 - createdAt (str): Creation timestamp in ISO format
                 - pageNum (int): Number of pages in the document
+                - folderId (str | None): Containing folder ID
+                - metadata (dict | None): Your own tags from submit_document
         """
         response = requests.get(
             f"{self.BASE_URL}/doc/{_enc(doc_id)}/metadata/",

@@ -15,7 +15,7 @@ from .._version import sdk_version
 from ..errors import PageIndexAPIError
 
 
-def build_claude_mcp(client, include_management: bool = False,
+def build_claude_mcp(client, include_management: bool = False, *,
                      server_name: str = "pageindex"):
     if getattr(client, "api_key", None):
         # include_management picks the endpoint — the URL itself is the
