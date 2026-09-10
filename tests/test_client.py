@@ -1547,6 +1547,26 @@ def test_cloud_chat_extra_body_merges_into_payload(cloud):
         "doc_id": "pi-1", "temperature": 0.2, "enable_citations": True}
 
 
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("extra_stream", [False, True])
+@pytest.mark.parametrize("method, options", [
+    ("chat", {}),
+    ("chat", {"protocol": "chat_completions"}),
+    ("chat_completions", {}),
+    ("chat_completions", {"stream_metadata": True}),
+])
+def test_cloud_chat_rejects_extra_body_stream_before_request(
+        cloud, stream, extra_stream, method, options):
+    client, calls, fake = cloud
+    fake.payload = {"choices": [{"message": {"content": "ok"}}]}
+    with pytest.raises(PageIndexAPIError,
+                       match=r"extra_body cannot carry stream.*stream="):
+        getattr(client, method)("q", stream=stream,
+                                extra_body={"stream": extra_stream},
+                                **options)
+    assert calls == []
+
+
 def test_parse_pages_overlap_counts_union():
     from pageindex.client import _parse_pages
     pages = _parse_pages("1-5000,2000-9000")
