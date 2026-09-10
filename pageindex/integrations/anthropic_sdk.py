@@ -7,10 +7,10 @@ the in-process tools — the same set chat(protocol="messages") runs
 internally. Failed
 calls raise ToolError so the runner emits the tool_result with
 ``is_error: true`` and the envelope as its content; the failures the
-invoker re-raises (auth, rate limit, unreachable server) propagate as
+invoker re-raises (auth, limits, unreachable server) propagate as
 PageIndexAPIError, which a caller-owned runner flattens into an is_error
-result carrying the exception text and chat(protocol="messages") reads
-off ``failures`` to fail fast.
+result carrying the exception text, or land in ``failures`` when one is
+supplied, for chat(protocol="messages") to fail fast on between turns.
 
 Tool results are MCP content, rendered by the Anthropic SDK's own MCP
 conversion (text as text, images as image blocks); the SDK carries the
@@ -27,10 +27,8 @@ from ..errors import PageIndexAPIError
 def build_anthropic_tools(client, include_management: bool = False,
                           asynchronous: bool = False, doc_ids=None,
                           failures: Optional[list] = None) -> list:
-    """``failures`` collects the PageIndex failures the invoker re-raises
-    (auth, post-retry transport), which the runner would otherwise flatten
-    into is_error results; chat(protocol="messages") reads it between
-    turns to fail fast."""
+    """``failures`` records the invoker's re-raised failures for
+    chat(protocol="messages") to fail fast on."""
     try:
         from anthropic import beta_async_tool, beta_tool
         from anthropic.lib.tools import ToolError

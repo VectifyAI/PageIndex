@@ -1550,7 +1550,8 @@ class PageIndexClient:
         stub — a string cannot carry an image; the framework adapters
         can), and reports failures inside that JSON instead of raising —
         except a cloud 401/403, a 429/5xx that outlived the bridge's
-        retries or an unreachable server, which raise PageIndexAPIError.
+        retries, an unreachable server or a RATE_LIMITED /
+        USAGE_LIMIT_REACHED tool error, which raise PageIndexAPIError.
 
         Args:
             include_management (bool): Also expose tools that modify the
@@ -1571,7 +1572,11 @@ class PageIndexClient:
         """
         Tools for the OpenAI Agents SDK — pass to ``Agent(tools=...)``
         (or ``openai_agent_config()`` for all the Agent slots in one
-        call).
+        call). In-process cloud tools abort the run on a 401/403, a
+        429/5xx that outlived the bridge's retries, an unreachable server
+        or a RATE_LIMITED / USAGE_LIMIT_REACHED tool error: the
+        framework's AgentsException, the PageIndexAPIError as its
+        ``__cause__``.
 
         Cloud (default): the full live read tool set (search, folders,
         images — as enabled for your key) as function tools, discovered
@@ -1713,7 +1718,11 @@ class PageIndexClient:
         The default flavor is for the sync ``Anthropic`` client; pass
         ``asynchronous=True`` for ``AsyncAnthropic``. For a manual
         ``messages.create`` loop, serialize with
-        ``[tool.to_dict() for tool in ...]``.
+        ``[tool.to_dict() for tool in ...]``. A cloud 401/403, a 429/5xx
+        that outlived the bridge's retries, an unreachable server or a
+        RATE_LIMITED / USAGE_LIMIT_REACHED tool error raises
+        PageIndexAPIError, which the tool runner flattens into an
+        is_error result.
 
         Cloud: the full live read tool set (search, folders, images — as
         enabled for your key), discovered from the PageIndex MCP server

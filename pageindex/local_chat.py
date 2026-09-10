@@ -1406,10 +1406,8 @@ def run_messages(client, messages, model: str,
         **passthrough,
         **cached,
     )
-    # Check after the runner itself executes tools, before it can advance
-    # to another model call or exit at max_iterations. Older Anthropic
-    # versions also execute max_tokens turns; newer ones skip them. Keep
-    # the runner's own stop rules and result caching in both cases.
+    # Older Anthropic versions also execute tools on max_tokens turns, newer
+    # ones skip them: check right after the runner's own tool step.
     generate_tool_response = runner.generate_tool_call_response
 
     def checked_tool_response():

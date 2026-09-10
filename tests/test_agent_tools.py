@@ -1041,7 +1041,11 @@ def test_anthropic_runner_config_thinking_lifts_max_tokens(client):
 def test_bridge_invoker_reraises_auth_and_transport_failures():
     """Auth failures and what survives the bridge's own retries (429/5xx)
     escape to the caller; a status-less JSON-RPC failure (the model's own
-    bad arguments) stays a model-visible envelope."""
+    bad arguments) stays a model-visible envelope, and so does a non-JSON
+    200 body: its JSONDecodeError is a RequestException too, but the server
+    was reached."""
+    import requests
+
     def failing(exc):
         class Bridge:
             def call_tool(self, name, arguments):
@@ -1056,6 +1060,33 @@ def test_bridge_invoker_reraises_auth_and_transport_failures():
         PageIndexAPIError("MCP error -32602: bad params"))({})
     assert is_error
     assert json.loads(blocks[0]["text"])["errorCode"] == "INTERNAL_ERROR"
+    garbled = PageIndexAPIError("non-JSON response (HTTP 200).", status_code=200)
+    garbled.__cause__ = requests.exceptions.JSONDecodeError("bad", "<html>", 0)
+    blocks, is_error = failing(garbled)({})
+    assert is_error
+    assert json.loads(blocks[0]["text"])["errorCode"] == "INTERNAL_ERROR"
+
+
+def test_bridge_invoker_reraises_account_limits():
+    """The cloud answers upstream throttling and an exhausted quota as a
+    normal tool error (HTTP 200 + errorCode): the model can act on neither,
+    so they escape like a post-retry 429; every other code stays a
+    model-visible envelope."""
+    def answering(payload):
+        class Bridge:
+            def call_tool(self, name, arguments):
+                return [{"type": "text", "text": json.dumps(payload)}], True
+        return agent_tools_module._bridge_invoker(Bridge(), "get_document", {})
+
+    for code, status in (("RATE_LIMITED", 429), ("USAGE_LIMIT_REACHED", 402)):
+        with pytest.raises(PageIndexAPIError,
+                           match=r"limit \(retry_after_seconds: 7\)") as info:
+            answering({"error": "limit", "errorCode": code,
+                       "retry_after_seconds": 7})({})
+        assert info.value.status_code == status
+    blocks, is_error = answering({"error": "gone", "errorCode": "NOT_FOUND"})({})
+    assert is_error
+    assert json.loads(blocks[0]["text"])["errorCode"] == "NOT_FOUND"
 
 
 def test_cloud_bridge_gates_the_endpoint(monkeypatch):
@@ -2862,7 +2893,8 @@ class _McpStub:
 
 
 @pytest.fixture
-def mcp_stub():
+def mcp_stub(monkeypatch):
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")  # keep the machine's proxy out
     stubs = []
 
     def make(statuses, delay=0.0):
@@ -2889,7 +2921,7 @@ def test_bridge_retries_rate_limits_below_the_tool_layer(mcp_stub, monkeypatch):
     assert slept == [2]
 
 
-@pytest.mark.parametrize("status", [429, 504])
+@pytest.mark.parametrize("status", [429, 504, 529])
 def test_bridge_rate_limit_exhausted_raises_with_status(mcp_stub, monkeypatch,
                                                         status):
     """Three retries and still failing: the caller gets the status."""
@@ -2923,7 +2955,6 @@ def test_bridge_invoker_reraises_an_unreachable_server(mcp_stub, monkeypatch):
     stub = mcp_stub([200])
     stub.close()
     bridge = McpBridge(stub.url, {})
-    bridge._session.trust_env = False  # a local HTTP proxy would answer 502
     invoke = agent_tools_module._bridge_invoker(bridge, "get_document", {})
     with pytest.raises(PageIndexAPIError, match="Could not reach"):
         invoke({})

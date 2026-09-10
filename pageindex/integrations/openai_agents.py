@@ -21,7 +21,7 @@ from ..errors import PageIndexAPIError, _pageindex_cause
 
 def _tool_failure(ctx, error):
     """The framework's tool-failure formatter, narrowed: a PageIndex failure
-    the invoker re-raised (auth, post-retry transport) escapes the run
+    the invoker re-raised (auth, limits, post-retry transport) escapes the run
     instead of becoming model-visible text; anything else keeps the
     framework default."""
     from agents.tool import default_tool_error_function
