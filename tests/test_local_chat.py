@@ -1004,8 +1004,8 @@ def test_doc_id_conversations_get_distinct_cache_keys(client, store_path,
     keys = []
     real = local_chat._conversation_cache_key
 
-    def spy(model_name, instructions, doc_id, items):
-        key = real(model_name, instructions, doc_id, items)
+    def spy(model_name, instructions, doc_id, items, folder_id=None):
+        key = real(model_name, instructions, doc_id, items, folder_id)
         keys.append(key)
         return key
 
@@ -1034,6 +1034,16 @@ def test_doc_id_conversations_get_distinct_cache_keys(client, store_path,
     fake_model([[_msg_item("f")]])
     client._responses("What is the CAGR?", doc_id="pi-b")
     assert keys[5] != keys[0]  # same opener, different doc: no pooling
+
+
+def test_folder_less_cache_key_is_the_pre_folder_key():
+    """Adding folder_id to the seed must not rotate every existing
+    conversation's prompt_cache_key on upgrade."""
+    items = [{"role": "user", "content": "hi"}]
+    key = local_chat._conversation_cache_key("m", "sys", "d1", items)
+    assert key == "pageindex-b0ab095344ee8f89"
+    assert local_chat._conversation_cache_key(
+        "m", "sys", "d1", items, "f-1") != key
 
 
 @needs_agents
@@ -1245,15 +1255,25 @@ def test_messages_end_to_end(client, store_path, fake_anthropic):
 
 @needs_anthropic
 def test_messages_doc_block_and_system(client, store_path, fake_anthropic):
+    """Doc block leads as a user message; system keeps the cached header."""
     doc_id = seed_doc(store_path, "pi-a", "report.pdf")
     calls = fake_anthropic([
+        _anthropic_message(
+            [{"type": "tool_use", "id": "tu_1", "name": "get_document",
+              "input": {"doc_name": "report.pdf"}}], "tool_use"),
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn"),
     ])
-    client._messages([{"role": "user", "content": "hi"}], model="claude-test",
-                    max_tokens=100, doc_id=doc_id, system="Answer in French.")
+    result = client._messages([{"role": "user", "content": "hi"}],
+                              model="claude-test", max_tokens=100,
+                              doc_id=doc_id, system="Answer in French.")
+    first, second = calls[0]["messages"][:2]
+    assert first["role"] == "user"
+    assert "The user has specified document: report.pdf" in first["content"]
+    assert second == {"role": "user", "content": "hi"}
     system = calls[0]["system"]
-    assert "The user has specified document: report.pdf" in system[1]["text"]
-    assert system[-1]["text"] == "Answer in French."
+    assert [block["text"] for block in system[1:]] == ["Answer in French."]
+    roles = [message["role"] for message in result["messages"]]
+    assert roles == ["assistant", "user", "assistant"]
 
 
 @needs_anthropic
@@ -1751,9 +1771,7 @@ def test_empty_doc_id_is_refused(client, store_path):
     with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
         client.chat_completions("q", doc_id=[])
     with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
-        client.as_openai_tools(doc_id=[])
-    with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
-        client.agent_instructions(doc_id=[])
+        client.document_context([])
 
 
 @needs_agents
@@ -3017,23 +3035,97 @@ def test_process_display_elides_image_payloads(bridge_client, fake_model):
 def test_bridge_doc_id_targets_at_prompt_level(bridge_client, fake_model,
                                                monkeypatch):
     """On cloud tools there is no local allowlist: doc_id becomes the
-    prompt-level targeting block only. (Had the tool layer received the
-    doc_ids, _require_local_scope would raise on a cloud client — this
-    call succeeding is the proof it did not.)"""
+    prompt-level targeting block only."""
     client, _ = bridge_client
     monkeypatch.setattr(client, "get_document",
                         lambda doc_id: {"name": "r.pdf", "description": "d",
                                         "status": "completed",
                                         "metadata": None})
-    monkeypatch.setattr(
-        client, "list_documents",
-        lambda **kw: {"documents": [{"id": "pi-a", "name": "r.pdf"}],
-                      "total": 1})
     fake = fake_model([[_msg_item("ok")]])
     client.chat_completions("q", doc_id="pi-a")
     first = fake.inputs[0][0]
     assert "specified document" in first["content"]
     assert "r.pdf" in first["content"]
+
+
+def test_targeting_block_orders_folder_before_documents(bridge_client,
+                                                        monkeypatch):
+    """The folder block leads the document block, joined as the managed
+    chat joins them; "root" and no folder place nothing of their own."""
+    from pageindex.agent_tools import targeting_block
+    client, _ = bridge_client
+    monkeypatch.setattr(client, "list_folders", lambda: {"folders": [
+        {"id": "f-1", "name": "Team", "description": None}]})
+    monkeypatch.setattr(client, "get_document",
+                        lambda doc_id: {"name": "r.pdf", "status": "completed"})
+    both = targeting_block(client, "pi-a", "f-1")
+    assert both is not None
+    folder, doc = both.split("\n\n")
+    assert folder.startswith("The user has specified folder: Team\n")
+    assert 'Folder metadata: {"id": "f-1", "name": "Team"}\n' in folder
+    assert doc.startswith("The user has specified document: r.pdf\n")
+    assert targeting_block(client, "pi-a", "root") == doc
+    assert targeting_block(client, None, "f-1") == folder
+    assert targeting_block(client, None, None) is None
+
+
+@needs_agents
+def test_bridge_folder_id_targets_ahead_of_documents(bridge_client, fake_model,
+                                                     monkeypatch):
+    """folder_id is prompt-level targeting on cloud tools, one leading
+    user message with the folder block ahead of the document block."""
+    client, _ = bridge_client
+    monkeypatch.setattr(client, "list_folders", lambda: {"folders": [
+        {"id": "f-1", "name": "Team", "description": "shared"}]})
+    monkeypatch.setattr(client, "get_document",
+                        lambda doc_id: {"name": "r.pdf", "status": "completed"})
+    fake = fake_model([[_msg_item("ok")]])
+    with pytest.raises(PageIndexAPIError, match="not found"):
+        client.chat_completions("q", folder_id="f-9")
+    client.chat_completions("q", doc_id="pi-a", folder_id="f-1")
+    first, question = fake.inputs[0][:2]
+    assert first["content"].startswith("The user has specified folder: Team\n")
+    assert "The user has specified document: r.pdf" in first["content"]
+    assert question == {"role": "user", "content": "q"}
+
+
+@needs_agents
+def test_bridge_folder_id_reaches_the_protocol_lanes(bridge_client, fake_model,
+                                                     monkeypatch):
+    """chat(protocol="responses") threads folder_id to its engine."""
+    client, _ = bridge_client
+    monkeypatch.setattr(client, "list_folders", lambda: {"folders": [
+        {"id": "f-1", "name": "Team"}]})
+    fake = fake_model([[_msg_item("ok")]])
+    client.chat("q", protocol="responses", folder_id="f-1")
+    assert fake.inputs[0][0]["content"].startswith(
+        "The user has specified folder: Team\n")
+    assert fake.inputs[0][1] == {"role": "user", "content": "q"}
+
+
+@needs_anthropic
+def test_bridge_folder_id_reaches_the_messages_lane(bridge_client,
+                                                    fake_anthropic,
+                                                    monkeypatch):
+    """chat(protocol="messages") threads folder_id to its engine."""
+    client, _ = bridge_client
+    monkeypatch.setattr(client, "list_folders", lambda: {"folders": [
+        {"id": "f-1", "name": "Team"}]})
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
+    client.chat("q", protocol="messages", model="claude-test",
+                folder_id="f-1")
+    first, second = calls[0]["messages"][:2]
+    assert first["content"].startswith("The user has specified folder: Team\n")
+    assert second == {"role": "user", "content": "q"}
+
+
+@needs_agents
+def test_folder_id_is_cloud_only(client):
+    """A local library has no folders: folder_id refuses before any model
+    call, like the folder methods."""
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        client.chat_completions("q", folder_id="f-1")
 
 
 def test_bridge_gate_and_citations(monkeypatch):
@@ -3253,7 +3345,7 @@ def test_chat_protocol_chat_completions_serves_managed_cloud(monkeypatch):
     assert seen[-1] == {"messages": [{"role": "user", "content": "q"}],
                         "stream": False, "doc_id": None, "temperature": None,
                         "stream_metadata": True, "enable_citations": False,
-                        "extra_body": None}
+                        "extra_body": None, "folder_id": None}
     cloud.chat("q", protocol="chat_completions",
                extra_body={"temperature": 0.2, "enable_citations": True})
     assert seen[-1]["extra_body"] == {"temperature": 0.2,

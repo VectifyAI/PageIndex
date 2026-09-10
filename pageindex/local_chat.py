@@ -13,7 +13,7 @@ import time
 import uuid
 from typing import Any, Iterator, Mapping, Optional, Union
 
-from .agent_tools import _base_instructions, doc_targeting_block
+from .agent_tools import _base_instructions, targeting_block
 from .chat_stream import ChatStream
 from .errors import PageIndexAPIError, _pageindex_cause
 
@@ -30,19 +30,6 @@ def _managed_instructions(client, extra_system: list[str]) -> str:
     # documents: the live instructions the MCP server serves.
     base: str = _base_instructions(client)
     return "\n\n".join([CHAT_HEADER, base, *extra_system])
-
-
-def _doc_block(client, doc_id, scoped: bool) -> Optional[str]:
-    if doc_id is None:
-        return None
-    if not isinstance(doc_id, (str, list)):
-        raise PageIndexAPIError("doc_id must be a string or a list of "
-                                "strings.")
-    # scoped: local surfaces also pass doc_id into the tool layer, so name
-    # resolution happens inside the allowlist — only a duplicate name
-    # within the targeted set shadows. Cloud tools take no allowlist
-    # (targeting is prompt-level), so the whole library shadows.
-    return doc_targeting_block(client, doc_id, scoped=scoped)
 
 
 def _system_text(content: Any) -> str:
@@ -417,7 +404,7 @@ def _validate_max_turns(max_turns) -> None:
 
 
 def _conversation_cache_key(model_name: str, instructions: str, doc_id,
-                            items) -> str:
+                            items, folder_id=None) -> str:
     """Stable per-conversation cache-routing key, sent as the OpenAI
     ``prompt_cache_key`` through ModelSettings.extra_body (openai-agents
     0.20 no longer derives it from RunConfig.group_id — verified against a
@@ -427,10 +414,12 @@ def _conversation_cache_key(model_name: str, instructions: str, doc_id,
     Callers pass the conversation's own items, never the SDK-prepended
     doc-targeting block: that block is byte-identical for every
     conversation about a document and would pool them all under one key.
-    doc_id carries the targeting identity instead — the same opening
-    question against different documents is different conversations."""
+    doc_id and folder_id carry the targeting identity instead — the same
+    opening question against different documents is different
+    conversations."""
     scope = [doc_id] if isinstance(doc_id, str) else doc_id
     seed = json.dumps([model_name, instructions, scope,
+                       *([folder_id] if folder_id else []),
                        items[0] if items else None],
                       sort_keys=True, default=str)
     return "pageindex-" + hashlib.sha256(seed.encode()).hexdigest()[:16]
@@ -644,19 +633,21 @@ def _responses_usage(raw_responses) -> dict:
 def _chat_agent(client, messages, doc_id, model, temperature=None,
                 top_p=None, reasoning_effort=None, extra_body=None,
                 max_tokens=None, backend=None, extra_headers=None,
+                folder_id=None,
                 ) -> "tuple[Any, list, str]":
     """The chat lane's shared prologue: validated history, doc targeting,
     and the configured agent. Returns (agent, input items, model name)."""
     system_texts, history = _split_chat_messages(messages)
     scope = client._local_doc_scope(doc_id)
-    block = _doc_block(client, doc_id, scoped=scope is not None)
+    block = targeting_block(client, doc_id, folder_id)
     items = ([{"role": "user", "content": block}] if block else []) + history
     model_name = model or client.chat_model
     managed = _managed_instructions(client, system_texts)
     agent = _openai_agent(client, "chat", model_name, managed,
                           temperature, top_p, doc_ids=scope,
                           cache_key=_conversation_cache_key(
-                              model_name, managed, doc_id, history),
+                              model_name, managed, doc_id, history,
+                              folder_id),
                           reasoning_effort=reasoning_effort,
                           extra_body=extra_body, max_tokens=max_tokens,
                           backend=_merged_backend(client, backend),
@@ -914,7 +905,7 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
                     reasoning_effort=None,
                     show_process: Union[bool, Mapping[str, Any]] = False,
                     max_turns=None, backend=None, extra_headers=None,
-                    extra_body=None,
+                    extra_body=None, folder_id=None,
                     ) -> ChatStream:
     """chat(stream=True): validation and the agent build run here, eagerly;
     the run itself starts when the returned stream's chosen view is first
@@ -932,7 +923,8 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
     agent, items, _ = _chat_agent(client, messages, doc_id, model,
                                   reasoning_effort=reasoning_effort,
                                   extra_body=extra_body, backend=backend,
-                                  extra_headers=extra_headers)
+                                  extra_headers=extra_headers,
+                                  folder_id=folder_id)
     run_kwargs = _run_kwargs(max_turns)
 
     def events():
@@ -954,6 +946,7 @@ def run_chat_completions(client, messages, stream: bool = False,
                          extra_body: Optional[dict] = None,
                          extra_headers: Optional[dict] = None,
                          backend: Optional[dict] = None,
+                         folder_id: Optional[str] = None,
                          ) -> Union[dict, Iterator[str], Iterator[dict]]:
     if enable_citations:
         raise PageIndexAPIError(
@@ -967,7 +960,7 @@ def run_chat_completions(client, messages, stream: bool = False,
         client, messages, doc_id, model, temperature=temperature,
         top_p=top_p, reasoning_effort=reasoning_effort,
         extra_body=extra_body, max_tokens=max_tokens, backend=backend,
-        extra_headers=extra_headers)
+        extra_headers=extra_headers, folder_id=folder_id)
     reported_model = _reported_model(model_name)
     recorded: dict = {}
     _record_chat_finish(agent, recorded)
@@ -1054,6 +1047,7 @@ def run_responses(client, input, model: Optional[str] = None,
                   extra_body: Optional[dict] = None,
                   extra_headers: Optional[dict] = None,
                   backend: Optional[dict] = None,
+                  folder_id: Optional[str] = None,
                   ) -> Union[dict, Iterator[dict]]:
     _require_openai_agents("chat(protocol='responses')")
     _validate_max_turns(max_turns)
@@ -1066,7 +1060,7 @@ def run_responses(client, input, model: Optional[str] = None,
         raise PageIndexAPIError("messages must be a non-empty string or list "
                                 "of item dicts.")
     scope = client._local_doc_scope(doc_id)
-    block = _doc_block(client, doc_id, scoped=scope is not None)
+    block = targeting_block(client, doc_id, folder_id)
     conversation = items
     if block:
         items = [{"role": "user", "content": block}] + items
@@ -1076,7 +1070,8 @@ def run_responses(client, input, model: Optional[str] = None,
     agent = _openai_agent(client, "responses", model_name, managed,
                           temperature, top_p, doc_ids=scope,
                           cache_key=_conversation_cache_key(
-                              model_name, managed, doc_id, conversation),
+                              model_name, managed, doc_id, conversation,
+                              folder_id),
                           reasoning=reasoning, extra_body=extra_body,
                           max_tokens=max_output_tokens,
                           backend=_merged_backend(client, backend),
@@ -1267,16 +1262,13 @@ def _anthropic_client(backend=None):
     return client
 
 
-def _anthropic_system(client, extra_system, block: Optional[str]) -> list[dict]:
+def _anthropic_system(client, extra_system) -> list[dict]:
     """System blocks: cache_control marks the stable managed prefix only
-    (the API allows 4 breakpoints total — the varying doc block and caller
-    blocks must not consume the budget); the doc block and caller system
-    content follow as their own blocks."""
+    (the API allows 4 breakpoints total — caller blocks must not consume
+    the budget); caller system content follows as its own blocks."""
     blocks = [{"type": "text",
                "text": CHAT_HEADER + "\n\n" + _base_instructions(client),
                "cache_control": {"type": "ephemeral"}}]
-    if block:
-        blocks.append({"type": "text", "text": block})
     if extra_system is None:
         return blocks
     if isinstance(extra_system, str):
@@ -1370,6 +1362,7 @@ def run_messages(client, messages, model: str,
                  extra_body: Optional[dict] = None,
                  extra_headers: Optional[dict] = None,
                  backend: Optional[dict] = None,
+                 folder_id: Optional[str] = None,
                  ) -> Union[dict, Iterator[Any]]:
     from .integrations.anthropic_sdk import build_anthropic_tools
 
@@ -1384,14 +1377,16 @@ def run_messages(client, messages, model: str,
         raise PageIndexAPIError("messages must be a non-empty string or a "
                                 "list of message dicts.")
     scope = client._local_doc_scope(doc_id)
-    block = _doc_block(client, doc_id, scoped=scope is not None)
+    block = targeting_block(client, doc_id, folder_id)
     prepared = [dict(message) for message in messages]
+    if block:
+        prepared = [{"role": "user", "content": block}] + prepared
     passthrough = {key: value for key, value in {
         "temperature": temperature, "top_p": top_p, "top_k": top_k,
         "stop_sequences": stop_sequences, "thinking": thinking,
         "extra_body": extra_body, "extra_headers": extra_headers,
     }.items() if value is not None}
-    system_blocks = _anthropic_system(client, system, block)
+    system_blocks = _anthropic_system(client, system)
     # Top-level cache_control: the server re-marks the newest block each
     # turn, so the loop re-reads the growing conversation from cache.
     # Counts toward the 4-breakpoint limit (live-verified 400 past it).

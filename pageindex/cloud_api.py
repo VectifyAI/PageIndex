@@ -199,6 +199,7 @@ class CloudAPI:
         stream_metadata: bool = False,
         enable_citations: bool = False,
         extra_body: Optional[Dict[str, Any]] = None,
+        folder_id: Optional[str] = None,
     ) -> Union[Dict[str, Any], Iterator[str], Iterator[Dict[str, Any]]]:
         """
         PageIndex Chat Completions. Optionally scoped to specific PageIndex documents.
@@ -211,6 +212,7 @@ class CloudAPI:
             stream_metadata (bool, optional): If True and stream=True, return raw chunks with metadata instead of just text. Default is False.
             enable_citations (bool, optional): Enable citation instructions in responses. Default is False.
             extra_body (Optional[Dict[str, Any]], optional): Extra request fields, merged into the payload last.
+            folder_id (Optional[str], optional): Folder ID to steer discovery toward one folder; "root" means the whole library.
 
         Returns:
             Union[Dict[str, Any], Iterator[str], Iterator[Dict[str, Any]]]:
@@ -225,6 +227,9 @@ class CloudAPI:
 
         if doc_id is not None:
             payload["doc_id"] = doc_id
+
+        if folder_id:
+            payload["folder_id"] = folder_id
 
         if temperature is not None:
             payload["temperature"] = temperature
@@ -316,7 +321,7 @@ class CloudAPI:
 
     def get_document(self, doc_id: str) -> Dict[str, Any]:
         """
-        Get document metadata including id, name, description, status, createdAt, and pageNum.
+        Get document metadata.
 
         Args:
             doc_id (str): Document ID.
@@ -329,6 +334,8 @@ class CloudAPI:
                 - status (str): Processing status (e.g., "queued", "processing", "completed", "failed")
                 - createdAt (str): Creation timestamp in ISO format
                 - pageNum (int): Number of pages in the document
+                - folderId (str | None): Containing folder ID
+                - metadata (dict | None): Your own tags from submit_document
         """
         response = requests.get(
             f"{self.BASE_URL}/doc/{_enc(doc_id)}/metadata/",

@@ -1519,27 +1519,14 @@ def _require_doc_selection(doc_ids) -> None:
             "doc_id to give the agent the whole library.")
 
 
-def _require_local_scope(client, doc_ids) -> None:
-    """The allowlist is enforced in-process; cloud tools take none, so
-    accepting doc_ids there would be advisory-only — refuse loudly."""
-    _require_doc_selection(doc_ids)
-    if doc_ids is not None and getattr(client, "api_key", None):
-        raise PageIndexAPIError(
-            "doc_ids scoping applies to local tools only — the managed "
-            "cloud chat scopes doc_id server-side, and own-model chat "
-            "over cloud documents targets documents at the prompt level, "
-            "without a tool-layer allowlist."
-        )
-
-
 def _tool_specs(client, include_management: bool = False, doc_ids=None,
                 ) -> "list[tuple[str, str, dict, Callable[[dict], tuple[list, bool]]]]":
     """(name, description, schema, invoke) per tool, for adapters that take
     the wire schema verbatim. ``invoke`` returns (content blocks, is_error):
     the MCP content as the server sent it, one text block from the local
     tools. Schemas are copies (frameworks keep the dict by reference).
-    ``doc_ids`` is the local chat scope."""
-    _require_local_scope(client, doc_ids)
+    ``doc_ids`` is the local chat scope, already validated and dropped on
+    cloud by ``_local_doc_scope``."""
     if getattr(client, "api_key", None):
         bridge = _cloud_bridge(client, gated=not include_management)
         tools_meta = bridge.list_tools()
@@ -1570,7 +1557,7 @@ def _tool_specs(client, include_management: bool = False, doc_ids=None,
 
 
 def build_agent_tools(client, include_management: bool = False,
-                      doc_ids=None) -> list[Callable[..., str]]:
+                      ) -> list[Callable[..., str]]:
     """Plain synchronous functions bound to `client`.
 
     Cloud: one function per tool of the live cloud MCP tool set, signatures
@@ -1583,11 +1570,10 @@ def build_agent_tools(client, include_management: bool = False,
     USAGE_LIMIT_REACHED tool error, which re-raise
     PageIndexAPIError (cloud-only parameters are absent from the local
     signatures; the call_tool path answers them with the guided envelope).
-    ``doc_ids`` is the local allowlist, as in ``_tool_specs``.
     """
     return [_make_tool_function(name, description, schema, invoke)
             for name, description, schema, invoke
-            in _tool_specs(client, include_management, doc_ids)]
+            in _tool_specs(client, include_management)]
 
 
 # ── agent instructions ──
@@ -1717,18 +1703,17 @@ def _base_instructions(client, include_management: bool = False) -> str:
     return instructions
 
 
-def doc_targeting_block(client, doc_id, scoped: bool = False) -> Optional[str]:
-    """The doc_id targeting text: names, metadata, and the directive to work
-    within those documents. Shared by agent_instructions and the local chat
-    surfaces (a leading conversation item on the OpenAI surfaces, a system
-    block on the Messages lane). Raises when a doc_id's name is shadowed by a
-    newer
-    same-name document — the name-addressed tools could not reach it. With
-    ``scoped`` (surfaces whose tools resolve names inside the doc_id
-    allowlist) only a same-name duplicate within the targeted set
-    shadows."""
+def doc_targeting_block(client, doc_id) -> Optional[str]:
+    """The doc_id targeting text, rendered as the cloud's managed chat
+    renders its own: the documents' metadata rows and the directive to
+    work within them. Conversation content, never system prompt: the chat
+    lanes prepend it as the first user message, and document_context()
+    hands it to callers who own the conversation."""
     if doc_id is None:
         return None
+    if not isinstance(doc_id, (str, list)):
+        raise PageIndexAPIError("doc_id must be a string or a list of "
+                                "strings.")
     doc_ids = [doc_id] if isinstance(doc_id, str) else list(doc_id)
     _require_doc_selection(doc_ids)
     details = []
@@ -1745,51 +1730,59 @@ def doc_targeting_block(client, doc_id, scoped: bool = False) -> Optional[str]:
     if missing:
         raise PageIndexAPIError(
             "Documents not found or access denied: " + ", ".join(missing))
-    # Scoped: the listing only backfills the target docs' metadata (list
-    # entries carry it, get_document does not — cloud parity), so paging
-    # can stop at those ids. Unscoped needs it all for the shadow check.
-    listing = _all_documents(client, stop_ids=doc_ids if scoped else None)
-    documents = ([{**detail, "id": one_id}
-                  for one_id, detail in zip(doc_ids, details)]
-                 if scoped else listing)
-    for one_id, detail in zip(doc_ids, details):
-        entry, _ = _resolve_document(client, str(detail.get("name")),
-                                     documents=documents)
-        if entry is not None and entry.get("id") != one_id:
-            raise PageIndexAPIError(
-                f'Document "{detail.get("name")}" (doc_id: {one_id}) is '
-                "shadowed by a newer document with the same name (doc_id: "
-                f'{entry.get("id")}). The tools address documents by name '
-                "and would read the newer one. Rename or remove the "
-                "duplicate, or pass the newer doc_id."
-            )
-    by_id = {doc.get("id"): doc for doc in listing}
-    for one_id, detail in zip(doc_ids, details):
-        if detail.get("metadata") is None:
-            tags = _flat_metadata(by_id.get(one_id, {}).get("metadata"))
-            if tags is not None:
-                detail["metadata"] = tags
-    context = json.dumps(details, ensure_ascii=False)
     if len(details) == 1:
         return (
             f"The user has specified document: {details[0].get('name')}\n"
-            f"Document metadata: {context}\n"
+            f"Document metadata: {json.dumps(details[0], ensure_ascii=False)}\n"
             "Use this document's name to retrieve its content with "
             "get_document_structure() and get_page_content()."
         )
     names = ", ".join(str(item.get("name")) for item in details)
     return (
         f"The user has specified documents: {names}\n"
-        f"Documents metadata: {context}\n"
+        f"Documents metadata: {json.dumps(details, ensure_ascii=False)}\n"
         "Use these documents' names to retrieve their content with "
         "get_document_structure() and get_page_content()."
     )
 
 
-def build_agent_instructions(client, doc_id=None, scoped: bool = False,
-                             include_management: bool = False) -> str:
-    """Orchestration guidance for document QA agents; with doc_id, appends
-    the target documents and directs the agent to work within them."""
-    base = _base_instructions(client, include_management)
-    block = doc_targeting_block(client, doc_id, scoped=scoped)
-    return base if block is None else base + "\n\n" + block
+def folder_targeting_block(client, folder_id) -> Optional[str]:
+    """The folder_id targeting text, rendered as the cloud's managed chat
+    renders its own: the folder's name and metadata and the directive to
+    discover its documents there. None for no folder — None, "", and
+    "root", the library itself, which the managed chat leaves untargeted.
+    A folder proper is cloud-only: local libraries have none."""
+    if folder_id is None:
+        return None
+    if not isinstance(folder_id, str):
+        raise PageIndexAPIError("folder_id must be a string.")
+    if folder_id in ("", "root"):
+        return None
+    if not getattr(client, "api_key", None):
+        raise PageIndexAPIError(
+            "folder_id is cloud-only — folders are not supported in local "
+            "mode. Create the client with an api_key to use folders.")
+    folders = client.list_folders().get("folders") or []
+    folder = next((f for f in folders if f.get("id") == folder_id), None)
+    if folder is None:
+        raise PageIndexAPIError(
+            f"Folder not found or access denied: {folder_id}")
+    metadata = {key: folder[key] for key in ("id", "name", "description")
+                if folder.get(key)}
+    return (
+        f"The user has specified folder: {folder.get('name')}\n"
+        f"Folder metadata: {json.dumps(metadata, ensure_ascii=False)}\n"
+        "Discover its documents with "
+        f'browse_documents(folder_id="{folder_id}", recursive=true) '
+        f'or search_documents(query, folder_id="{folder_id}", '
+        "recursive=true)."
+    )
+
+
+def targeting_block(client, doc_id, folder_id=None) -> Optional[str]:
+    """The chat lanes' leading user message: the folder block, then the
+    document block, joined as the managed chat joins them; None when
+    there is nothing to place."""
+    blocks = [folder_targeting_block(client, folder_id),
+              doc_targeting_block(client, doc_id)]
+    return "\n\n".join(block for block in blocks if block) or None
