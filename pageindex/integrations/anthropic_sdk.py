@@ -53,9 +53,12 @@ def build_anthropic_tools(client, include_management: bool = False,
             try:
                 blocks, is_error = invoke(kwargs)
             except PageIndexAPIError as exc:
-                if failures is not None:
-                    failures.append(exc)
-                raise
+                if failures is None:
+                    raise
+                failures.append(exc)
+                # the runner logs a traceback for anything but ToolError;
+                # the lane raises exc itself before the runner advances
+                raise ToolError(str(exc)) from exc
             result = CallToolResult.model_validate(
                 {"content": blocks, "isError": is_error})
             content = [mcp_content(block) for block in result.content]

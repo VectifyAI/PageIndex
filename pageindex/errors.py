@@ -7,7 +7,7 @@ class PageIndexAPIError(Exception):
         self.status_code = status_code
 
 
-def _pageindex_cause(exc):
+def _pageindex_cause(exc: BaseException | None) -> PageIndexAPIError | None:
     """The PageIndexAPIError behind a framework's wrapper exception, if any."""
     while exc is not None:
         if isinstance(exc, PageIndexAPIError):

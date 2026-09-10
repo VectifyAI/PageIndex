@@ -3416,6 +3416,21 @@ def test_bridge_chat_fails_fast_on_a_rate_limited_tool(bridge_client,
 
 
 @needs_anthropic
+def test_messages_fail_fast_is_quiet(bridge_client, fake_anthropic, caplog):
+    """The runner's own tool-error logging never reports the failure the
+    lane is about to raise."""
+    client, bridge = bridge_client
+    bridge.call_tool = _rate_limited
+    fake_anthropic([_anthropic_message(
+        [{"type": "tool_use", "id": "tu_1", "name": "get_document",
+          "input": {"doc_name": "r.pdf"}}], "tool_use")])
+    with pytest.raises(PageIndexAPIError, match="HTTP 429"):
+        client.chat("q", protocol="messages", model="claude-test",
+                    extra_body={"max_tokens": 100})
+    assert not [r for r in caplog.records if r.name.startswith("anthropic")]
+
+
+@needs_anthropic
 @pytest.mark.parametrize("stop_reason", ["tool_use", "max_tokens", "refusal"])
 @pytest.mark.parametrize("stream", [False, True])
 @pytest.mark.parametrize("max_turns", [1, 2])

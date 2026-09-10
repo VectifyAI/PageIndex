@@ -1341,12 +1341,6 @@ def _default_max_tokens(model: str, thinking=None) -> int:
     return 4096 if model.startswith(_CLAUDE_4096_MODELS) else 8192
 
 
-def _messages_fail_fast(failures: list) -> None:
-    """Surface PageIndex failures the tool runner absorbed."""
-    if failures:
-        raise failures[0]
-
-
 def run_messages(client, messages, model: str,
                  max_tokens: Optional[int] = None,
                  stream: bool = False, doc_id=None, system=None,
@@ -1420,7 +1414,8 @@ def run_messages(client, messages, model: str,
 
     def checked_tool_response():
         response = generate_tool_response()
-        _messages_fail_fast(failures)
+        if failures:
+            raise failures[0]
         return response
 
     runner.generate_tool_call_response = checked_tool_response
@@ -1431,7 +1426,6 @@ def run_messages(client, messages, model: str,
                 for turn_stream in runner:
                     for event in turn_stream:
                         yield event
-                _messages_fail_fast(failures)
             except anthropic.AnthropicError as exc:
                 raise _model_backend_error(exc, "messages", client) from exc
             except TypeError as exc:
@@ -1450,7 +1444,6 @@ def run_messages(client, messages, model: str,
 
     try:
         turns = list(runner)
-        _messages_fail_fast(failures)
     except anthropic.AnthropicError as exc:
         raise _model_backend_error(exc, "messages", client) from exc
     except TypeError as exc:
