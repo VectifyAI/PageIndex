@@ -2160,3 +2160,29 @@ def test_retry_notice_only_when_a_retry_follows(monkeypatch, caplog):
     with pytest.raises(utils.LLMRetriesExhausted):
         utils.llm_completion("openai/gpt-x", "hi")
     assert sum("Retrying" in r.getMessage() for r in caplog.records) == 9
+
+
+# ── client-level instructions ──
+
+def test_instructions_stored_on_every_constructor(tmp_path):
+    from pageindex import PageIndexCloudClient, PageIndexLocalClient
+    store = str(tmp_path / "store")
+    assert PageIndexClient(storage_path=store,
+                           instructions=" persona ").instructions == "persona"
+    assert PageIndexLocalClient(storage_path=store,
+                                instructions="p").instructions == "p"
+    assert PageIndexCloudClient(api_key="pi-k",
+                                instructions="p").instructions == "p"
+    both = PageIndexClient(api_key="pi-k", chat="gpt-x", instructions="p")
+    assert (both.chat_model, both.instructions) == ("gpt-x", "p")
+    managed = PageIndexClient(api_key="pi-k", instructions="p")
+    assert managed.chat_model is None and managed.instructions == "p"
+    assert PageIndexClient(storage_path=store).instructions is None
+    assert PageIndexClient(storage_path=store,
+                           instructions="  ").instructions is None
+
+
+def test_instructions_must_be_a_string(tmp_path):
+    with pytest.raises(PageIndexAPIError, match="instructions must be a str"):
+        PageIndexClient(storage_path=str(tmp_path / "s"),
+                        instructions=[{"type": "text", "text": "x"}])

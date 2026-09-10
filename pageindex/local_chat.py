@@ -29,7 +29,8 @@ def _managed_instructions(client, extra_system: list[str]) -> str:
     # Local: the built-in subset guidance. Own-model chat over cloud
     # documents: the live instructions the MCP server serves.
     base: str = _base_instructions(client)
-    return "\n\n".join([CHAT_HEADER, base, *extra_system])
+    return "\n\n".join([CHAT_HEADER, base,
+                        *[t for t in extra_system if t.strip()]])
 
 
 def _system_text(content: Any) -> str:
@@ -37,9 +38,9 @@ def _system_text(content: Any) -> str:
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        texts = [part.get("text") for part in content
+        texts = [part["text"] for part in content
                  if isinstance(part, dict) and isinstance(part.get("text"), str)]
-        if texts:
+        if texts and len(texts) == len(content):
             return "\n".join(texts)
     raise PageIndexAPIError(
         "system message content must be a string or a list of text parts."
@@ -51,7 +52,8 @@ def _split_chat_messages(messages) -> "tuple[list[str], list[dict]]":
     content joins the managed instructions; user/assistant history passes
     through. Tool-history round-trips belong to chat(protocol="responses")
     or chat(protocol="messages")."""
-    if not isinstance(messages, list) or not messages:
+    messages = list(messages)
+    if not messages:
         raise PageIndexAPIError("messages must be a non-empty list.")
     system_texts: list[str] = []
     history: list[dict] = []

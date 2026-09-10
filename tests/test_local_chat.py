@@ -337,8 +337,6 @@ def test_cloud_guards(monkeypatch):
     with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud._messages("x", model="m")
     with pytest.raises(PageIndexAPIError, match="own chat model"):
-        cloud.chat("x", instructions="be brief")
-    with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.chat("x", max_turns=2)
 
 
@@ -3355,8 +3353,6 @@ def test_chat_protocol_chat_completions_serves_managed_cloud(monkeypatch):
                    extra_body={"messages": []})
     with pytest.raises(PageIndexAPIError, match="chat_model="):
         cloud.chat("q", protocol="chat_completions", model="m")
-    with pytest.raises(PageIndexAPIError, match="chat_model="):
-        cloud.chat("q", protocol="chat_completions", instructions="x")
 
 
 def test_chat_takes_only_messages_by_position():
@@ -3845,3 +3841,138 @@ def test_bridge_chat_keeps_model_slips_model_visible(bridge_client,
     result = client.chat_completions("What?")
     assert result["choices"][0]["message"]["content"] == "Recovered"
     assert len(fake.instructions) == 2 and bridge.calls == []
+
+
+# ── client-level instructions: after the managed base, on every surface ──
+
+def test_client_instructions_follow_the_managed_base_everywhere(store_path):
+    from pageindex.agent_tools import AGENT_INSTRUCTIONS
+    client = PageIndexLocalClient(storage_path=store_path,
+                                  instructions="PERSONA")
+    assert client.agent_instructions() == AGENT_INSTRUCTIONS + "\n\nPERSONA"
+    managed = local_chat._managed_instructions(client, ["CALL", "HISTORY"])
+    marks = [managed.index(m) for m in
+             (CHAT_HEADER, AGENT_INSTRUCTIONS, "PERSONA", "CALL", "HISTORY")]
+    assert marks == sorted(marks)
+    blocks = local_chat._anthropic_system(client, "CALL")
+    assert blocks[0]["text"].endswith("\n\nPERSONA")
+    assert blocks[1]["text"] == "CALL"
+    plain = PageIndexLocalClient(storage_path=store_path)
+    assert plain.agent_instructions() == AGENT_INSTRUCTIONS
+
+
+@needs_agents
+def test_chat_reaches_the_model_with_client_instructions(store_path,
+                                                          fake_model):
+    client = PageIndexLocalClient(storage_path=store_path,
+                                  instructions="PERSONA")
+    fake = fake_model([[_msg_item("ok")]])
+    assert client.chat([{"role": "system", "content": "CALL"},
+                        {"role": "user", "content": "hi"}]) == "ok"
+    assert fake.instructions[0].endswith("\n\nPERSONA\n\nCALL")
+
+
+def test_bridge_client_instructions_follow_the_live_instructions(
+        bridge_client):
+    client, _ = bridge_client
+    client.instructions = "PERSONA"
+    assert client.agent_instructions() == "CLOUD LIVE INSTRUCTIONS\n\nPERSONA"
+
+
+@needs_agents
+def test_openai_agent_config_carries_client_instructions(store_path):
+    client = PageIndexLocalClient(storage_path=store_path,
+                                  instructions="PERSONA")
+    assert client.openai_agent_config()["instructions"].endswith("PERSONA")
+
+
+def test_anthropic_runner_config_carries_client_instructions(store_path):
+    pytest.importorskip("anthropic")
+    client = PageIndexLocalClient(storage_path=store_path,
+                                  instructions="PERSONA")
+    assert client.anthropic_runner_config("claude-x")["system"].endswith(
+        "PERSONA")
+
+
+def test_claude_agent_config_carries_client_instructions(store_path):
+    pytest.importorskip("claude_agent_sdk")
+    client = PageIndexLocalClient(storage_path=store_path,
+                                  instructions="PERSONA")
+    assert client.claude_agent_config()["system_prompt"].endswith("PERSONA")
+
+
+def test_managed_chat_sends_one_leading_system_row(monkeypatch):
+    """One system row first: the client's, the call's, then the history's."""
+    cloud = PageIndexCloudClient(api_key="pi-k", instructions="PERSONA")
+    seen = {}
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kw: seen.update(kw) or {
+                            "choices": [{"message": {"content": "ok"}}]})
+    history = [{"role": "user", "content": "q1"},
+               {"role": "assistant", "content": "a1"},
+               {"role": "system", "content": "HISTORY"},
+               {"role": "user", "content": "q2"}]
+    assert cloud.chat(history, instructions="CALL") == "ok"
+    assert seen["messages"] == [
+        {"role": "system", "content": "PERSONA\n\nCALL\n\nHISTORY"},
+        {"role": "user", "content": "q1"},
+        {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": "q2"}]
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kw: seen.update(kw) or iter([]))
+    assert list(cloud.chat("q", stream=True, show_process=False)) == []
+    assert seen["messages"] == [{"role": "system", "content": "PERSONA"},
+                                {"role": "user", "content": "q"}]
+    cloud.chat_completions([{"role": "user", "content": "q"},
+                            {"role": "developer", "content": "DEV"}])
+    assert seen["messages"][0] == {"role": "system",
+                                   "content": "PERSONA\n\nDEV"}
+
+
+def test_managed_fold_leaves_non_system_rows_to_the_endpoint(monkeypatch):
+    """Only system rows fold; blank ones drop; the rest is not validated."""
+    cloud = PageIndexCloudClient(api_key="pi-k")
+    seen = {}
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kw: seen.update(kw) or {
+                            "choices": [{"message": {"content": "ok"}}]})
+    leading = [{"role": "system", "content": "S"},
+               {"role": "user", "content": "q"}]
+    cloud.chat(leading)
+    assert seen["messages"] == leading
+    history = [{"role": "user", "content": [{"type": "text", "text": "q"}],
+                "name": "ray"},
+               {"role": "assistant", "content": None,
+                "tool_calls": [{"id": "c"}]},
+               {"role": "tool", "tool_call_id": "c", "content": "x"},
+               {"role": "system", "content": "   "}]
+    cloud.chat(history)
+    assert seen["messages"] == history[:-1]
+
+
+def test_chat_history_takes_any_iterable(monkeypatch):
+    """Tuples and generators ride both lanes; the call's instructions land."""
+    cloud = PageIndexCloudClient(api_key="pi-k")
+    seen = {}
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kw: seen.update(kw) or {
+                            "choices": [{"message": {"content": "ok"}}]})
+    row = {"role": "user", "content": "q"}
+    cloud.chat(iter([row]), instructions="CALL")
+    assert seen["messages"] == [{"role": "system", "content": "CALL"}, row]
+    assert local_chat._split_chat_messages((row,)) == ([], [row])
+
+
+def test_system_text_refuses_non_text_parts():
+    text = {"type": "text", "text": "A"}
+    assert local_chat._system_text(
+        [text, {"type": "text", "text": "B"}]) == "A\nB"
+    with pytest.raises(PageIndexAPIError, match="text parts"):
+        local_chat._system_text(
+            [text, {"type": "image_url", "image_url": {"url": "u"}}])
+
+
+def test_managed_instructions_drop_blank_system_texts(store_path):
+    client = PageIndexLocalClient(storage_path=store_path)
+    assert (local_chat._managed_instructions(client, ["", "  ", "X"])
+            == local_chat._managed_instructions(client, ["X"]))
