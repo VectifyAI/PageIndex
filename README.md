@@ -64,7 +64,6 @@ Inspired by AlphaGo, **[PageIndex](https://vectify.ai/pageindex)** replaces the 
 | | Vector RAG | **PageIndex** |
 |---|---|---|
 | **Index** | vector index | tree index |
-| **Unit** | fixed-size chunks | natural sections |
 | **Retrieval** | semantic similarity search | LLM reasoning over the tree |
 | **Result** | opaque, “vibe retrieval” | traceable to explicit references |
 | **Context** | query embedding only | full context: conversation history, domain knowledge, etc. |
