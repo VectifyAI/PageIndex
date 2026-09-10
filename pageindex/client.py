@@ -1033,16 +1033,18 @@ class PageIndexClient:
                 a list of Messages system blocks. On the answer lane and
                 ``protocol="chat_completions"`` it precedes any ``system``
                 rows in the history.
-            citations: Cite every claim the way PageIndex chat does —
-                ``<cite doc="…" page="…"/>`` tags, ``block="…"`` added
-                where the cloud document has blocks. The guidance is the
-                PageIndex MCP server's ``cited_answer`` prompt, joining
+            citations: Own-model chat: cite every claim the way PageIndex
+                chat does — ``<cite doc="…" page="…"/>`` tags, ``block="…"``
+                added where the cloud document has blocks. The guidance is
+                the PageIndex MCP server's ``cited_answer`` prompt, joining
                 the system prompt after the managed prompt and before
                 ``instructions``; local documents get the SDK's copy
-                (pages only); another format (own-model chat only):
-                ``citation_prompt()`` passed through ``instructions=``
-                instead. Managed chat: its own citations
-                (``chat_completions``'s ``enable_citations``).
+                (pages only); another format: ``citation_prompt()`` passed
+                through ``instructions=`` instead. Managed chat:
+                ``chat_completions``'s ``enable_citations`` — the endpoint
+                cites in its own inline markup, not ``<cite>`` tags, and
+                the resolved citations it returns come back only from
+                ``chat_completions``.
             max_turns: Own-model chat only — cap on agent turns per call
                 (default 10). The OpenAI lanes raise at the cap;
                 ``protocol="messages"`` returns the truncated run
@@ -1297,8 +1299,12 @@ class PageIndexClient:
             temperature: Sampling temperature, passed through to the model.
             stream_metadata: With stream=True, yield chunk dicts instead of
                 text pieces.
-            enable_citations: Managed chat only — own-model chat raises
-                (cite there with ``chat(citations=True)``).
+            enable_citations: Managed chat only — the endpoint cites
+                inline and returns the resolved citations (``citations``
+                in the response; with ``stream_metadata=True`` a trailing
+                citations chunk). Own-model chat raises; its
+                ``chat(citations=True)`` adds ``<cite>`` markup only,
+                nothing is resolved.
             model: Own-model chat only — backend model name (defaults to
                 ``chat_model``). The managed endpoint selects its own.
             max_turns: Own-model chat only — cap on agent turns per call.
