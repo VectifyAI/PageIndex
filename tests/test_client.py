@@ -1618,6 +1618,8 @@ def test_cloud_chat_folder_id_rides_the_wire(cloud):
     assert len(calls) == 1
     client.chat_completions("q", folder_id="")
     assert "folder_id" not in calls[-1]["json"]
+    client.chat("q", protocol="chat_completions", folder_id="f-1")
+    assert calls[-1]["json"]["folder_id"] == "f-1"
 
 
 def test_folder_id_is_keyword_only_on_every_chat_surface():

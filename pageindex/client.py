@@ -1207,7 +1207,7 @@ class PageIndexClient:
         if protocol == "chat_completions":
             return self.chat_completions(
                 messages, stream=stream, stream_metadata=True, doc_id=doc_id,
-                enable_citations=enable_citations,
+                enable_citations=enable_citations, folder_id=folder_id,
                 model=model, max_turns=max_turns,
                 reasoning_effort=reasoning_effort, extra_body=extra_body,
                 extra_headers=extra_headers, backend=backend)
