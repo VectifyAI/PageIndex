@@ -1,6 +1,7 @@
 """Local chat surfaces: three protocols over fake backends — no network,
 no LLM keys. Tool execution runs for real against a seeded local store."""
 import asyncio
+import inspect
 import json
 import sys
 import types
@@ -312,9 +313,6 @@ def test_cloud_guards(monkeypatch):
     with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.chat_completions([{"role": "user", "content": "x"}],
                                reasoning_effort="low")
-    with pytest.raises(PageIndexAPIError, match="own chat model"):
-        cloud.chat_completions([{"role": "user", "content": "x"}],
-                               extra_body={"service_tier": "auto"})
     with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.chat_completions([{"role": "user", "content": "x"}], top_p=0.9)
     with pytest.raises(PageIndexAPIError, match="own chat model"):
@@ -3216,6 +3214,70 @@ def test_old_door_names_point_at_chat_protocol(client):
         client.no_such_thing
 
 
+def test_chat_protocol_chat_completions_is_the_door(client, monkeypatch):
+    seen = []
+    monkeypatch.setattr(local_chat, "run_chat_completions",
+                        lambda c, messages, **kw: seen.append((messages, kw))
+                        or "door")
+    knobs = dict(doc_id="pi-a", model="gpt-x", max_turns=3,
+                 reasoning_effort="low", backend={"api_key": "k"},
+                 extra_headers={"x": "1"}, extra_body={"seed": 1})
+    for streaming in (False, True):
+        assert client.chat("q", protocol="chat_completions", stream=streaming,
+                           **knobs) == "door"
+        # the protocol's own stream is its chunk dicts, never text pieces
+        assert client.chat_completions("q", stream=streaming,
+                                       stream_metadata=True,
+                                       **knobs) == "door"
+        assert seen[-2] == seen[-1]
+    assert seen[0][0] == [{"role": "user", "content": "q"}]
+    client.chat("q", protocol="chat_completions", instructions="be brief")
+    assert seen[-1][0] == [{"role": "system", "content": "be brief"},
+                           {"role": "user", "content": "q"}]
+    with pytest.raises(PageIndexAPIError, match="show_process"):
+        client.chat("q", protocol="chat_completions", stream=True,
+                    show_process=True)
+    assert client.chat_completions("q") == "door"
+
+
+def test_chat_protocol_chat_completions_serves_managed_cloud(monkeypatch):
+    """Unlike the own-model protocols, the managed cloud chat speaks
+    chat.completions itself, so the lane opens without a chat model;
+    the own-model knobs still refuse there."""
+    from pageindex import PageIndexClient
+    cloud = PageIndexClient(api_key="pi-k")
+    seen = []
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kw: seen.append(kw) or {"choices": []})
+    assert cloud.chat("q", protocol="chat_completions") == {"choices": []}
+    assert seen[-1] == {"messages": [{"role": "user", "content": "q"}],
+                        "stream": False, "doc_id": None, "temperature": None,
+                        "stream_metadata": True, "enable_citations": False,
+                        "extra_body": None}
+    cloud.chat("q", protocol="chat_completions",
+               extra_body={"temperature": 0.2, "enable_citations": True})
+    assert seen[-1]["extra_body"] == {"temperature": 0.2,
+                                      "enable_citations": True}
+    with pytest.raises(PageIndexAPIError, match="extra_body cannot carry"):
+        cloud.chat("q", protocol="chat_completions",
+                   extra_body={"messages": []})
+    with pytest.raises(PageIndexAPIError, match="chat_model="):
+        cloud.chat("q", protocol="chat_completions", model="m")
+    with pytest.raises(PageIndexAPIError, match="chat_model="):
+        cloud.chat("q", protocol="chat_completions", instructions="x")
+
+
+def test_chat_takes_only_messages_by_position():
+    """chat_completions() puts stream before doc_id; chat() the reverse.
+    A positional rewrite must fail loudly, never bind doc_id=True."""
+    params = list(inspect.signature(PageIndexClient.chat).parameters.values())
+    assert [p.name for p in params[:2]] == ["self", "messages"]
+    assert {p.kind for p in params[2:]} == {inspect.Parameter.KEYWORD_ONLY}
+    cloud = PageIndexClient(api_key="pi-k")
+    with pytest.raises(TypeError, match="positional"):
+        cloud.chat("q", True, "pi-1")
+
+
 def test_chat_protocol_responses_is_the_door(client, monkeypatch):
     seen = []
     monkeypatch.setattr(local_chat, "run_responses",
@@ -3295,6 +3357,46 @@ def test_extra_body_refuses_skeleton_keys():
     with pytest.raises(PageIndexAPIError, match="instructions="):
         local_chat._openai_agent(None, "responses", "gpt-test", "sys",
                                  None, None, extra_body={"input": "x"})
+
+
+def test_extra_body_refuses_non_dicts_and_argument_keys():
+    """The same gate: a non-dict would be splatted into the payload as
+    fabricated fields; stream / doc_id select the SDK's parser and scope,
+    so they ride their own arguments on every lane."""
+    for bad in (["ab"], "messages", 5, [("a", 1)]):
+        with pytest.raises(PageIndexAPIError,
+                           match="extra_body must be a dict"):
+            local_chat._refuse_skeleton(bad)
+    for key in ("stream", "doc_id"):
+        with pytest.raises(PageIndexAPIError,
+                           match=rf"extra_body cannot carry {key}: use {key}="):
+            local_chat._refuse_skeleton({key: True})
+    local_chat._refuse_skeleton(None)
+    local_chat._refuse_skeleton({})
+    local_chat._refuse_skeleton({"service_tier": "auto"})
+
+
+def test_chat_refuses_bad_extra_body_before_any_lane(client, monkeypatch):
+    """chat() and chat_completions() check extra_body before entering a
+    lane, so no lane does I/O (or, on Responses, an effort merge) on a
+    bad value."""
+    entered = []
+    for door in ("run_chat_completions", "run_responses", "run_messages"):
+        monkeypatch.setattr(local_chat, door,
+                            lambda c, *a, **kw: entered.append(1))
+    for protocol, knobs in ((None, {}), ("chat_completions", {}),
+                            ("responses", {}),
+                            ("messages", {"model": "claude-x"})):
+        with pytest.raises(PageIndexAPIError,
+                           match="extra_body must be a dict"):
+            client.chat("q", protocol=protocol, reasoning_effort="low",
+                        extra_body=["ab"], **knobs)
+        with pytest.raises(PageIndexAPIError, match="cannot carry stream"):
+            client.chat("q", protocol=protocol, extra_body={"stream": True},
+                        **knobs)
+    with pytest.raises(PageIndexAPIError, match="cannot carry stream"):
+        client.chat_completions("q", extra_body={"stream": True})
+    assert entered == []
 
 
 @needs_anthropic

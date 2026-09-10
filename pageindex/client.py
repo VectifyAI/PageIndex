@@ -519,8 +519,9 @@ class PageIndexClient:
         return model is not None
 
     def _require_own_chat(self, lane: str) -> None:
-        # The one refusal for chat(protocol=...), the doors behind it, and
-        # instructions: shared, so the doors cannot drift from chat().
+        # The one refusal for the Responses / Messages lanes, the doors
+        # behind them, and instructions: shared, so the doors cannot drift
+        # from chat().
         if self._local_chat:
             return
         if not getattr(self, "api_key", None):
@@ -531,7 +532,8 @@ class PageIndexClient:
         raise PageIndexAPIError(
             f"{lane} drives your own chat model — construct the client "
             "with chat_model=... (or a chat= model); the managed cloud chat "
-            "serves the answer lane and chat_completions() only.")
+            "serves the answer lane and chat(protocol=\"chat_completions\") "
+            "only.")
 
     if not TYPE_CHECKING:
         # The protocol doors live behind chat(protocol=...); their old
@@ -755,11 +757,11 @@ class PageIndexClient:
 
         Cloud-only: the cloud API marks this endpoint deprecated in favor of
         chat completions, so local mode does not implement it — raises
-        PageIndexAPIError. Use ``chat_completions`` instead.
+        PageIndexAPIError. Use ``chat()`` instead.
         """
         return self._require_cloud(
             "submit_query is cloud-only — the retrieval API is deprecated in "
-            "favor of chat completions; use chat_completions instead."
+            "favor of chat completions; use chat() instead."
         ).submit_query(doc_id=doc_id, query=query, thinking=thinking)
 
     def get_retrieval(self, retrieval_id: str) -> dict[str, Any]:
@@ -768,11 +770,11 @@ class PageIndexClient:
 
         Cloud-only: the cloud API marks this endpoint deprecated in favor of
         chat completions, so local mode does not implement it — raises
-        PageIndexAPIError. Use ``chat_completions`` instead.
+        PageIndexAPIError. Use ``chat()`` instead.
         """
         return self._require_cloud(
             "get_retrieval is cloud-only — the retrieval API is deprecated in "
-            "favor of chat completions; use chat_completions instead."
+            "favor of chat completions; use chat() instead."
         ).get_retrieval(retrieval_id=retrieval_id)
 
     # ---------- CHAT ----------
@@ -784,12 +786,12 @@ class PageIndexClient:
     def chat(
         self,
         messages: Union[str, list[dict[str, Any]]],
+        *,
         doc_id: Optional[Union[str, list[str]]] = None,
         stream: Literal[False] = False,
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
-        *,
         protocol: None = None,
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
         max_turns: Optional[int] = None,
@@ -802,8 +804,8 @@ class PageIndexClient:
     def chat(
         self,
         messages: Union[str, list[dict[str, Any]]],
-        doc_id: Optional[Union[str, list[str]]] = None,
         *,
+        doc_id: Optional[Union[str, list[str]]] = None,
         stream: Literal[True],
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
@@ -820,13 +822,13 @@ class PageIndexClient:
     def chat(
         self,
         messages: Union[str, list[dict[str, Any]]],
+        *,
         doc_id: Optional[Union[str, list[str]]] = None,
         stream: Literal[False] = False,
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
-        *,
-        protocol: Literal["responses", "messages"],
+        protocol: Literal["chat_completions", "responses", "messages"],
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
         max_turns: Optional[int] = None,
         backend: Optional[dict[str, Any]] = None,
@@ -838,13 +840,13 @@ class PageIndexClient:
     def chat(
         self,
         messages: Union[str, list[dict[str, Any]]],
-        doc_id: Optional[Union[str, list[str]]] = None,
         *,
+        doc_id: Optional[Union[str, list[str]]] = None,
         stream: Literal[True],
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
-        protocol: Literal["responses"],
+        protocol: Literal["chat_completions", "responses"],
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
         max_turns: Optional[int] = None,
         backend: Optional[dict[str, Any]] = None,
@@ -856,8 +858,8 @@ class PageIndexClient:
     def chat(
         self,
         messages: Union[str, list[dict[str, Any]]],
-        doc_id: Optional[Union[str, list[str]]] = None,
         *,
+        doc_id: Optional[Union[str, list[str]]] = None,
         stream: Literal[True],
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
@@ -874,12 +876,12 @@ class PageIndexClient:
     def chat(
         self,
         messages: Union[str, list[dict[str, Any]]],
+        *,
         doc_id: Optional[Union[str, list[str]]] = None,
         stream: bool = False,
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
-        *,
         protocol: None = None,
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
         max_turns: Optional[int] = None,
@@ -892,13 +894,14 @@ class PageIndexClient:
     def chat(
         self,
         messages: Union[str, list[dict[str, Any]]],
+        *,
         doc_id: Optional[Union[str, list[str]]] = None,
         stream: bool = False,
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
-        *,
-        protocol: Optional[str] = None,
+        protocol: Optional[Literal["chat_completions", "responses",
+                                   "messages"]] = None,
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
         max_turns: Optional[int] = None,
         backend: Optional[dict[str, Any]] = None,
@@ -909,13 +912,14 @@ class PageIndexClient:
     def chat(
         self,
         messages: Union[str, list[dict[str, Any]]],
+        *,
         doc_id: Optional[Union[str, list[str]]] = None,
         stream: bool = False,
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
-        *,
-        protocol: Optional[str] = None,
+        protocol: Optional[Literal["chat_completions", "responses",
+                                   "messages"]] = None,
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
         max_turns: Optional[int] = None,
         backend: Optional[dict[str, Any]] = None,
@@ -933,10 +937,14 @@ class PageIndexClient:
         join a stream into one only with ``show_process=False``) and pass
         it back.
 
-        The protocol lanes (``protocol="responses"`` / ``"messages"``):
-        own-model chat driven natively over the OpenAI Responses API or
-        Anthropic's Messages API. Input and output are that protocol's own
-        shapes — the history may carry its transcript (Responses items, or
+        The protocol lanes: ``protocol="chat_completions"`` is the answer
+        lane's own engine with its envelope kept — the Chat Completions
+        response (``choices``/``usage``), or its chunk dicts when
+        streaming; it is the one protocol the managed cloud chat serves
+        too. ``protocol="responses"`` / ``"messages"``: own-model chat
+        driven natively over the OpenAI Responses API or Anthropic's
+        Messages API. Input and output are that protocol's own shapes —
+        the history may carry its transcript (Responses items, or
         Messages content blocks with prior tool_use/tool_result
         round-trips), and the return is its response envelope, streaming
         its native events. A round-tripped transcript continues the
@@ -947,11 +955,15 @@ class PageIndexClient:
 
         Args:
             messages: A question string, or the conversation history —
-                role/content messages on every lane. ``system`` rows join
-                the managed prompt on the answer lane only, wherever they
-                sit; the protocol lanes pass rows to the wire as they are
-                (use ``instructions`` for persona there). With a protocol,
-                also that protocol's transcript items or content blocks.
+                role/content messages on every lane. With your own chat
+                model, ``system`` rows join the managed prompt on the
+                answer lane and ``protocol="chat_completions"``, wherever
+                they sit (the managed endpoint forwards them verbatim);
+                the other protocol lanes pass rows to the wire as they
+                are (use ``instructions`` for persona there). Responses
+                and Messages also accept their native transcript items
+                or content blocks; own-model Chat Completions takes text
+                history only.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls. Local
                 documents: also enforced at the tool layer, not just
@@ -997,18 +1009,22 @@ class PageIndexClient:
                 models expose none on the chat protocol). The labels are
                 not a parse format, and a process stream must not be
                 appended back as conversation history — for the
-                machine-readable process use ``.events``, or a protocol
-                lane's transcript. A protocol lane returns that
-                transcript itself, so ``show_process`` is an error there.
-            protocol: ``None`` for the answer lane, or ``"responses"`` /
-                ``"messages"`` — the wire protocol, engine, and
-                input/output shapes of this call. Own-model chat only.
+                machine-readable process use ``.events``, or the
+                Responses / Messages lane's transcript. A protocol lane
+                returns its own shape, so ``show_process`` is an error
+                there.
+            protocol: ``None`` for the answer lane, or
+                ``"chat_completions"`` / ``"responses"`` / ``"messages"``
+                — the wire protocol, engine, and input/output shapes of
+                this call. Own-model chat only, except
+                ``"chat_completions"``, which the managed chat serves too.
             instructions: Own-model chat only — persona or extra guidance
                 appended after the managed system prompt (which stays: it
                 carries the tool guidance and the document context). A
                 string on every lane; with ``protocol="messages"`` also
-                a list of Messages system blocks. On the answer lane it
-                precedes any ``system`` rows in the history.
+                a list of Messages system blocks. On the answer lane and
+                ``protocol="chat_completions"`` it precedes any ``system``
+                rows in the history.
             max_turns: Own-model chat only — cap on agent turns per call
                 (default 10). The OpenAI lanes raise at the cap;
                 ``protocol="messages"`` returns the truncated run
@@ -1017,24 +1033,29 @@ class PageIndexClient:
             backend: Own-model chat only — connection overrides for this
                 call's backend, merged over the client's ``chat_backend``
                 (per-call keys win): LiteLLM's connection params on the
-                answer lane, the openai / anthropic SDK's client params
-                on the protocol lanes. Passed through verbatim.
+                answer lane and ``protocol="chat_completions"``; the
+                openai / anthropic SDK's client params on Responses /
+                Messages. Passed through verbatim.
             extra_headers: Own-model chat only — extra HTTP headers
                 merged into each backend request; caller headers win.
                 LiteLLM's anthropic adapter owns ``anthropic-beta`` on the
-                answer lane — Anthropic beta flags ride
-                ``protocol="messages"``.
-            extra_body: Own-model chat only — the provider's own request
-                fields beyond this method's parameters, in the lane's
-                wire names (Responses ``max_output_tokens``, Messages
-                ``thinking`` / ``top_k``), merged last so they win.
-                Answer lane: LiteLLM's own params, mapped or refused per
-                provider (``response_format`` has no door on
-                LiteLLM-routed models); protocol lanes: verbatim into
-                the request body. The managed prompt, conversation and
-                tools are not fields here (``system`` / ``instructions``
-                / ``input`` / ``messages`` / ``tools`` are refused);
-                extend the prompt with ``instructions=``. Credentials
+                answer lane and ``protocol="chat_completions"`` —
+                Anthropic beta flags ride ``protocol="messages"``.
+            extra_body: The wire's own request fields beyond this
+                method's parameters, in the lane's wire names (Responses
+                ``max_output_tokens``, Messages ``thinking`` / ``top_k``;
+                the managed chat endpoint's ``temperature`` /
+                ``enable_citations``), merged last so they win.
+                The managed endpoint, Responses / Messages, and
+                OpenAI-compatible chat backends take these verbatim in
+                the request body. Other own-model chat backends take
+                LiteLLM's own params, mapped or refused per provider
+                (``response_format`` is unsupported there). The managed
+                prompt, conversation and tools are not fields here (``system`` /
+                ``instructions`` / ``input`` / ``messages`` / ``tools``
+                are refused); extend the prompt with ``instructions=`` or a
+                leading system row in ``messages``. ``stream`` / ``doc_id``
+                are refused too: each has its own argument. Credentials
                 belong in ``backend``, never here.
 
         Returns:
@@ -1047,24 +1068,27 @@ class PageIndexClient:
               ``{"type": "tool_call", "call_id", "name", "arguments"}``,
               ``{"type": "tool_result", "call_id", "name", "output"}``
             - protocol lane, stream=False: the protocol's response
-              envelope — Responses: ``output`` plus an ``items``
+              envelope — Chat Completions: ``choices`` and ``usage``;
+              Responses: ``output`` plus an ``items``
               transcript and cross-turn ``usage``; Messages: the final
               message with a ``messages`` turn sequence and aggregated
               ``usage``
             - protocol lane, stream=True: an iterator of the protocol's
               own stream events
         """
-        if protocol not in (None, "responses", "messages"):
+        if protocol not in (None, "chat_completions", "responses",
+                            "messages"):
             raise PageIndexAPIError(
-                "protocol selects the wire: \"responses\" (OpenAI Responses) "
-                "or \"messages\" (Anthropic Messages), or leave it unset for "
+                "protocol selects the wire: \"chat_completions\" (OpenAI Chat "
+                "Completions), \"responses\" (OpenAI Responses) or "
+                "\"messages\" (Anthropic Messages), or leave it unset for "
                 f"the answer lane — got {protocol!r}.")
         if (protocol is not None and show_process is not False
                 and show_process is not None):
             raise PageIndexAPIError(
                 "show_process weaves the answer lane's run; with "
-                f"protocol={protocol!r} the run comes back as the protocol's "
-                "own transcript and events — drop show_process, or drop "
+                f"protocol={protocol!r} the return is the protocol's own "
+                "envelope and events — drop show_process, or drop "
                 "protocol for the woven text stream.")
         if show_process is not False and show_process is not None:
             from .local_chat import _process_options
@@ -1079,7 +1103,9 @@ class PageIndexClient:
                 "instructions blocks are the Messages protocol's shape — "
                 "with protocol=\"messages\" they append after the managed "
                 "system blocks; the other lanes take a string.")
-        if protocol is not None:
+        from .local_chat import _refuse_skeleton
+        _refuse_skeleton(extra_body)
+        if protocol in ("responses", "messages"):
             self._require_own_chat(f"chat(protocol={protocol!r})")
             if protocol == "responses":
                 body = extra_body
@@ -1125,6 +1151,12 @@ class PageIndexClient:
                 # then the history's own system rows.
                 messages = [{"role": "system", "content": instructions},
                             *messages]
+        if protocol == "chat_completions":
+            return self.chat_completions(
+                messages, stream=stream, stream_metadata=True, doc_id=doc_id,
+                model=model, max_turns=max_turns,
+                reasoning_effort=reasoning_effort, extra_body=extra_body,
+                extra_headers=extra_headers, backend=backend)
         if stream:
             # the default means "on where available"
             resolved = True if show_process is None else show_process
@@ -1179,7 +1211,12 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
     ) -> Union[dict[str, Any], Iterator[str], Iterator[dict[str, Any]]]:
         """
-        PageIndex Chat Completions: document QA in one call.
+        Kept for existing code — new code calls ``chat()``. Everything
+        here is ``chat(protocol="chat_completions")``: the same engine
+        and envelope, with this method's sampling fields riding
+        ``extra_body`` under their wire names. The one exception is the
+        text-only stream (``stream=True`` without ``stream_metadata``):
+        that is ``chat(stream=True, show_process=False)``.
 
         With no chat model configured (a plain cloud client): the managed
         hosted chat endpoint. With one — local mode, or a cloud client
@@ -1238,14 +1275,15 @@ class PageIndexClient:
                 its own thinking control, and the values mean what the
                 backend says they mean. Unset sends nothing (the
                 backend's default applies).
-            extra_body: Own-model chat only — extra request fields beyond this
-                method's parameters, merged last so they win.
-                OpenAI-compatible backends take them verbatim in the
+            extra_body: Extra request fields beyond this method's
+                parameters, merged last so they win. The managed endpoint
+                and OpenAI-compatible backends take them verbatim in the
                 request body; LiteLLM-routed providers take them as
                 LiteLLM's own params (mapped or refused per provider).
                 The managed prompt, conversation and tools are not
                 fields here (``system`` / ``instructions`` / ``input`` /
-                ``messages`` / ``tools`` are refused). Credentials belong
+                ``messages`` / ``tools`` are refused), nor are ``stream``
+                / ``doc_id``: each has its own argument. Credentials belong
                 in ``backend``, never here.
             extra_headers: Own-model chat only — extra HTTP headers merged into
                 each backend request; caller headers win. One exception:
@@ -1270,6 +1308,8 @@ class PageIndexClient:
                     "messages must be a non-empty string or a list of "
                     "message dicts.")
             messages = [{"role": "user", "content": messages}]
+        from .local_chat import _refuse_skeleton
+        _refuse_skeleton(extra_body)
         if self._local_chat:
             from .local_chat import run_chat_completions
             return run_chat_completions(
@@ -1287,10 +1327,10 @@ class PageIndexClient:
                 "chat_model=... to run the agent with your own model.")
         if (model or max_turns is not None or top_p is not None
                 or max_tokens is not None or reasoning_effort
-                or extra_body or extra_headers or backend):
+                or extra_headers or backend):
             raise PageIndexAPIError(
                 "model, max_turns, top_p, max_tokens, reasoning_effort, "
-                "extra_body, extra_headers and backend drive your own chat "
+                "extra_headers and backend drive your own chat "
                 "model, which this client does not configure — construct "
                 "the client with chat_model=... (or a chat= model) to run the "
                 "agent in your process, or drop them to use the managed "
@@ -1300,7 +1340,7 @@ class PageIndexClient:
         return cast(CloudAPI, self._api).chat_completions(
             messages=messages, stream=stream, doc_id=doc_id,
             temperature=temperature, stream_metadata=stream_metadata,
-            enable_citations=enable_citations,
+            enable_citations=enable_citations, extra_body=extra_body,
         )
 
     def _responses(
@@ -1336,10 +1376,11 @@ class PageIndexClient:
 
         Requires a backend that supports the
         Responses API; backends that only speak chat.completions should use
-        ``chat_completions()``. Provider-prefixed models (``anthropic/…``)
-        route through LiteLLM's chat.completions adapter and are therefore
-        refused here — use ``chat_completions()`` or
-        ``chat(protocol="messages")`` for those.
+        ``chat(protocol="chat_completions")``. Provider-prefixed models
+        (``anthropic/…``) route through LiteLLM's chat.completions adapter
+        and are therefore refused here — use
+        ``chat(protocol="chat_completions")`` or ``chat(protocol="messages")``
+        for those.
 
         Args:
             input: A user message string, or a list of Responses input items
@@ -1921,7 +1962,7 @@ class PageIndexClient:
         SDK release. Raises PageIndexAPIError if the server cannot be
         reached. Local: the built-in guidance for the in-process tools.
 
-        With ``doc_id`` (str or list, same shape as ``chat_completions``),
+        With ``doc_id`` (str or list, same shape as ``chat``),
         appends the target documents' names and metadata and directs the
         agent to work within them. Raises PageIndexAPIError if a doc_id
         does not exist, or if its name is shadowed by a newer same-name

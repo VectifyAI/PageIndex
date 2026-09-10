@@ -1354,9 +1354,9 @@ def test_folders_are_cloud_only(local_client):
 # ── local: retrieval endpoints are cloud-only ──
 
 def test_retrieval_endpoints_cloud_only(local_client):
-    with pytest.raises(PageIndexAPIError, match="use chat_completions"):
+    with pytest.raises(PageIndexAPIError, match=r"use chat\(\)"):
         local_client.submit_query("any", "q")
-    with pytest.raises(PageIndexAPIError, match="use chat_completions"):
+    with pytest.raises(PageIndexAPIError, match=r"use chat\(\)"):
         local_client.get_retrieval("any")
 
 
@@ -1535,6 +1535,71 @@ def test_cloud_chat_accepts_query_string(cloud):
         {"role": "user", "content": "What status?"}]
     with pytest.raises(PageIndexAPIError, match="non-empty string"):
         client.chat_completions("   ")
+
+
+def test_cloud_chat_extra_body_merges_into_payload(cloud):
+    client, calls, fake = cloud
+    fake.payload = {"choices": [{"message": {"content": "ok"}}]}
+    client.chat("q", doc_id="pi-1",
+                extra_body={"temperature": 0.2, "enable_citations": True,
+                            "service_tier": "auto"})
+    assert calls[-1]["json"] == {
+        "messages": [{"role": "user", "content": "q"}], "stream": False,
+        "doc_id": "pi-1", "temperature": 0.2, "enable_citations": True,
+        "service_tier": "auto"}
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("extra_stream", [False, True])
+@pytest.mark.parametrize("method, options", [
+    ("chat", {}),
+    ("chat", {"protocol": "chat_completions"}),
+    ("chat_completions", {}),
+    ("chat_completions", {"stream_metadata": True}),
+])
+def test_cloud_chat_rejects_extra_body_stream_before_request(
+        cloud, stream, extra_stream, method, options):
+    client, calls, fake = cloud
+    fake.payload = {"choices": [{"message": {"content": "ok"}}]}
+    with pytest.raises(PageIndexAPIError,
+                       match=r"extra_body cannot carry stream.*stream="):
+        getattr(client, method)("q", stream=stream,
+                                extra_body={"stream": extra_stream},
+                                **options)
+    assert calls == []
+
+
+@pytest.mark.parametrize("bad", [["ab"], "messages", 5, [("a", 1)]])
+@pytest.mark.parametrize("method", ["chat", "chat_completions"])
+def test_cloud_chat_rejects_non_dict_extra_body_before_request(
+        cloud, bad, method):
+    client, calls, fake = cloud
+    fake.payload = {"choices": [{"message": {"content": "ok"}}]}
+    with pytest.raises(PageIndexAPIError, match="extra_body must be a dict"):
+        getattr(client, method)("q", extra_body=bad)
+    assert calls == []
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("extra_doc_id", [
+    None, "pi-1", "pi-other", ["pi-1", "pi-other"],
+])
+@pytest.mark.parametrize("method, options", [
+    ("chat", {}),
+    ("chat", {"protocol": "chat_completions"}),
+    ("chat_completions", {}),
+    ("chat_completions", {"stream_metadata": True}),
+])
+def test_cloud_chat_rejects_extra_body_doc_id_before_request(
+        cloud, stream, extra_doc_id, method, options):
+    client, calls, fake = cloud
+    fake.payload = {"choices": [{"message": {"content": "ok"}}]}
+    with pytest.raises(PageIndexAPIError,
+                       match=r"extra_body cannot carry doc_id.*doc_id="):
+        getattr(client, method)("q", doc_id="pi-1", stream=stream,
+                                extra_body={"doc_id": extra_doc_id},
+                                **options)
+    assert calls == []
 
 
 def test_parse_pages_overlap_counts_union():

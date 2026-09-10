@@ -62,8 +62,8 @@ def _system_text(content: Any) -> str:
 def _split_chat_messages(messages) -> "tuple[list[str], list[dict]]":
     """Validate the chat_completions surface's messages: system/developer
     content joins the managed instructions; user/assistant history passes
-    through. Tool-history round-trips belong to the protocol lanes,
-    chat(protocol=...)."""
+    through. Tool-history round-trips belong to chat(protocol="responses")
+    or chat(protocol="messages")."""
     if not isinstance(messages, list) or not messages:
         raise PageIndexAPIError("messages must be a non-empty list.")
     system_texts: list[str] = []
@@ -80,13 +80,15 @@ def _split_chat_messages(messages) -> "tuple[list[str], list[dict]]":
             if not isinstance(content, str):
                 raise PageIndexAPIError(
                     "content must be a string on this lane; for "
-                    "structured items use chat(protocol=...)."
+                    "structured items use chat(protocol=\"responses\") "
+                    "or chat(protocol=\"messages\")."
                 )
             history.append({"role": role, "content": content})
         else:
             raise PageIndexAPIError(
-                f"Unsupported role {role!r} on this lane. Tool "
-                "history round-trips belong to chat(protocol=...)."
+                f"Unsupported role {role!r} on this lane. Tool history "
+                "round-trips belong to chat(protocol=\"responses\") or "
+                "chat(protocol=\"messages\")."
             )
     if not history:
         raise PageIndexAPIError("messages must contain a user or assistant "
@@ -199,8 +201,9 @@ def _openai_model(protocol: str, model_name: str, backend=None):
                 f"protocol='responses' cannot drive '{model_name}': "
                 "provider-prefixed models route through LiteLLM, which speaks "
                 "chat.completions, not the Responses API. Use chat() without "
-                "protocol, or chat_completions() (or protocol='messages' for "
-                "Anthropic models), or point OPENAI_BASE_URL at a "
+                "protocol, or protocol='chat_completions' (or "
+                "protocol='messages' for Anthropic models), or point "
+                "OPENAI_BASE_URL at a "
                 "Responses-capable backend and use a bare or "
                 "'openai/'-prefixed model name."
             )
@@ -310,17 +313,32 @@ def _merged_backend(client, backend):
 
 _SKELETON_KEYS = frozenset({"system", "instructions", "input", "messages",
                             "tools"})
+_ARGUMENT_KEYS = frozenset({"stream", "doc_id"})
 
 
 def _refuse_skeleton(extra_body) -> None:
     """The managed prompt, conversation and tools are the SDK's on every
-    lane; extra_body merges last, so a caller's copy would replace them."""
-    hit = sorted(_SKELETON_KEYS.intersection(extra_body or ()))
+    lane; extra_body merges last, so a caller's copy would replace them.
+    Fields with their own argument select the SDK's parser and scope, so
+    they are refused here too."""
+    if extra_body is None:
+        return
+    if not isinstance(extra_body, Mapping):
+        raise PageIndexAPIError(
+            "extra_body must be a dict of request fields, got "
+            f"{type(extra_body).__name__}.")
+    hit = sorted(_SKELETON_KEYS.intersection(extra_body))
     if hit:
         raise PageIndexAPIError(
             f"extra_body cannot carry {', '.join(hit)}: the managed prompt, "
             "conversation and tools are the SDK's. Extend the prompt with "
-            "instructions=; the conversation is the first argument.")
+            "instructions= or a leading system row; pass the conversation "
+            "as messages, the first argument.")
+    hit = sorted(_ARGUMENT_KEYS.intersection(extra_body))
+    if hit:
+        raise PageIndexAPIError(
+            f"extra_body cannot carry {', '.join(hit)}: use "
+            f"{' / '.join(key + '=' for key in hit)} instead.")
 
 
 def _openai_agent(client, protocol: str, model_name: str, instructions: str,
@@ -944,7 +962,7 @@ def run_chat_completions(client, messages, stream: bool = False,
                if getattr(client, "api_key", None) else
                "local mode does not store the block-level OCR data "
                "citations need."))
-    _require_openai_agents("chat_completions")
+    _require_openai_agents("chat")
     _validate_max_turns(max_turns)
     agent, items, model_name = _chat_agent(
         client, messages, doc_id, model, temperature=temperature,
