@@ -790,6 +790,7 @@ class PageIndexClient:
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
         *,
+        folder_id: Optional[str] = None,
         protocol: None = None,
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
         max_turns: Optional[int] = None,
@@ -808,6 +809,7 @@ class PageIndexClient:
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
+        folder_id: Optional[str] = None,
         protocol: None = None,
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
         max_turns: Optional[int] = None,
@@ -826,6 +828,7 @@ class PageIndexClient:
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
         *,
+        folder_id: Optional[str] = None,
         protocol: Literal["responses", "messages"],
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
         max_turns: Optional[int] = None,
@@ -844,6 +847,7 @@ class PageIndexClient:
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
+        folder_id: Optional[str] = None,
         protocol: Literal["responses"],
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
         max_turns: Optional[int] = None,
@@ -862,6 +866,7 @@ class PageIndexClient:
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
+        folder_id: Optional[str] = None,
         protocol: Literal["messages"],
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
         max_turns: Optional[int] = None,
@@ -880,6 +885,7 @@ class PageIndexClient:
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
         *,
+        folder_id: Optional[str] = None,
         protocol: None = None,
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
         max_turns: Optional[int] = None,
@@ -898,6 +904,7 @@ class PageIndexClient:
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
         *,
+        folder_id: Optional[str] = None,
         protocol: Optional[str] = None,
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
         max_turns: Optional[int] = None,
@@ -915,6 +922,7 @@ class PageIndexClient:
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
         *,
+        folder_id: Optional[str] = None,
         protocol: Optional[str] = None,
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
         max_turns: Optional[int] = None,
@@ -957,6 +965,12 @@ class PageIndexClient:
                 documents: also enforced at the tool layer, not just
                 prompted. Cloud documents: the managed chat scopes
                 server-side; own-model chat targets at the prompt level.
+            folder_id: Folder ID to steer discovery toward that folder's
+                documents. Cloud-only. The managed chat scopes it
+                server-side; own-model chat leads the conversation with
+                the folder's targeting text (``folder_context``), ahead
+                of the document block. ``"root"`` is the whole library.
+                Keep it identical across a conversation's calls.
             stream: Answer lane: return a ``ChatStream`` — iterate it for
                 the answer as text chunks as they are produced
                 (``show_process`` is on by default, so the run's process
@@ -1092,6 +1106,7 @@ class PageIndexClient:
                         **given.get("reasoning", {})}}
                 return self._responses(
                     messages, model=model, stream=stream, doc_id=doc_id,
+                    folder_id=folder_id,
                     instructions=cast(Optional[str], instructions),
                     max_turns=max_turns, extra_body=body,
                     extra_headers=extra_headers, backend=backend)
@@ -1110,6 +1125,7 @@ class PageIndexClient:
                     **given.get("output_config", {})}}
             return self._messages(
                 messages, model=model, stream=stream, doc_id=doc_id,
+                folder_id=folder_id,
                 system=instructions, max_turns=max_turns, extra_body=body,
                 extra_headers=extra_headers, backend=backend)
         if instructions:
@@ -1131,7 +1147,7 @@ class PageIndexClient:
             if self._local_chat:
                 from .local_chat import run_chat_stream
                 return run_chat_stream(self, messages, doc_id=doc_id,
-                                       model=model,
+                                       folder_id=folder_id, model=model,
                                        reasoning_effort=reasoning_effort,
                                        show_process=resolved,
                                        max_turns=max_turns, backend=backend,
@@ -1141,6 +1157,7 @@ class PageIndexClient:
             chunks = self.chat_completions(messages, stream=True,
                                            stream_metadata=True,
                                            doc_id=doc_id, model=model,
+                                           folder_id=folder_id,
                                            reasoning_effort=reasoning_effort,
                                            max_turns=max_turns,
                                            backend=backend,
@@ -1149,6 +1166,7 @@ class PageIndexClient:
             return run_cloud_chat_stream(
                 cast(Iterator[dict[str, Any]], chunks), resolved)
         result = self.chat_completions(messages, doc_id=doc_id, model=model,
+                                       folder_id=folder_id,
                                        reasoning_effort=reasoning_effort,
                                        max_turns=max_turns, backend=backend,
                                        extra_headers=extra_headers,
@@ -1177,6 +1195,7 @@ class PageIndexClient:
         extra_body: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         backend: Optional[dict[str, Any]] = None,
+        folder_id: Optional[str] = None,
     ) -> Union[dict[str, Any], Iterator[str], Iterator[dict[str, Any]]]:
         """
         PageIndex Chat Completions: document QA in one call.
@@ -1219,6 +1238,11 @@ class PageIndexClient:
                 enforced at the tool layer, not just prompted. Cloud
                 documents: the managed chat scopes server-side;
                 own-model chat targets at the prompt level.
+            folder_id: Folder ID to steer discovery toward that folder's
+                documents (cloud-only): the managed chat scopes it
+                server-side; own-model chat leads the conversation with
+                the folder's targeting text, ahead of the document block.
+                ``"root"`` is the whole library.
             temperature: Sampling temperature, passed through to the model.
             stream_metadata: With stream=True, yield chunk dicts instead of
                 text pieces.
@@ -1274,6 +1298,7 @@ class PageIndexClient:
             from .local_chat import run_chat_completions
             return run_chat_completions(
                 self, messages, stream=stream, doc_id=doc_id,
+                folder_id=folder_id,
                 temperature=temperature, stream_metadata=stream_metadata,
                 enable_citations=enable_citations, model=model,
                 max_turns=max_turns, top_p=top_p, max_tokens=max_tokens,
@@ -1299,6 +1324,7 @@ class PageIndexClient:
         from .cloud_api import CloudAPI
         return cast(CloudAPI, self._api).chat_completions(
             messages=messages, stream=stream, doc_id=doc_id,
+            folder_id=folder_id,
             temperature=temperature, stream_metadata=stream_metadata,
             enable_citations=enable_citations,
         )
@@ -1318,6 +1344,7 @@ class PageIndexClient:
         extra_body: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         backend: Optional[dict[str, Any]] = None,
+        folder_id: Optional[str] = None,
     ) -> Union[dict[str, Any], Iterator[dict[str, Any]]]:
         """
         The engine behind ``chat(protocol="responses")``: document QA over
@@ -1359,6 +1386,10 @@ class PageIndexClient:
                 of the cached prompt prefix. Local documents: also
                 enforced at the tool layer; cloud documents:
                 prompt-level targeting only.
+            folder_id: Folder ID to steer discovery toward that folder's
+                documents (cloud-only), as the leading targeting text
+                ahead of the document block. ``"root"`` is the whole
+                library.
             instructions: Appended to the managed system prompt.
             temperature / top_p: Passed through to the model.
             max_turns: Cap on agent turns per call.
@@ -1386,6 +1417,7 @@ class PageIndexClient:
         from .local_chat import run_responses
         return run_responses(
             self, input, model=model, stream=stream, doc_id=doc_id,
+            folder_id=folder_id,
             instructions=instructions, temperature=temperature, top_p=top_p,
             max_turns=max_turns, max_output_tokens=max_output_tokens,
             reasoning=reasoning, extra_body=extra_body,
@@ -1409,6 +1441,7 @@ class PageIndexClient:
         extra_body: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         backend: Optional[dict[str, Any]] = None,
+        folder_id: Optional[str] = None,
     ) -> Union[dict[str, Any], Iterator[Any]]:
         """
         The engine behind ``chat(protocol="messages")``: document QA over
@@ -1447,6 +1480,10 @@ class PageIndexClient:
                 targeting block it adds is re-set each call. Local
                 documents: also enforced at the tool layer; cloud
                 documents: prompt-level targeting only.
+            folder_id: Folder ID to steer discovery toward that folder's
+                documents (cloud-only), as the leading targeting text
+                ahead of the document block. ``"root"`` is the whole
+                library.
             system: Appended after the managed system blocks.
             temperature / top_p / top_k / stop_sequences: Passed through.
             max_turns: Cap on agent turns per call (default 10, like the
@@ -1472,7 +1509,7 @@ class PageIndexClient:
         from .local_chat import run_messages
         return run_messages(
             self, messages, model=model, max_tokens=max_tokens,
-            stream=stream, doc_id=doc_id, system=system,
+            stream=stream, doc_id=doc_id, folder_id=folder_id, system=system,
             temperature=temperature, top_p=top_p, top_k=top_k,
             stop_sequences=stop_sequences, max_turns=max_turns,
             thinking=thinking, extra_body=extra_body,
@@ -1629,8 +1666,9 @@ class PageIndexClient:
         instructions and ``as_openai_tools`` as the tools; clients with a
         configured ``chat_model`` — local mode, or cloud with
         ``chat_model=`` — also carry it (a plain cloud client omits
-        ``model`` so the framework default applies). To target documents,
-        prepend ``document_context(doc_id)`` to your first message; to
+        ``model`` so the framework default applies). To target documents
+        or a folder, prepend ``document_context(doc_id)`` /
+        ``folder_context(folder_id)`` to your first message; to
         customize further, switch to those methods directly. You run this
         config in your own environment, so its model auth comes from
         there — ``chat_backend`` does not travel with it.
@@ -1757,8 +1795,9 @@ class PageIndexClient:
         growing prompt from cache (pop the key if you place your own
         breakpoints — the API allows four). Unlike the chat lane,
         ``system`` here is the bare instructions string, without the chat
-        header or its block-level breakpoint. To target documents,
-        prepend ``document_context(doc_id)`` to your first message; to
+        header or its block-level breakpoint. To target documents or a
+        folder, prepend ``document_context(doc_id)`` /
+        ``folder_context(folder_id)`` to your first message; to
         customize further, switch to those methods directly.
 
         Args:
@@ -1841,10 +1880,10 @@ class PageIndexClient:
         (``agent_instructions``) and the server entry (``as_claude_mcp``,
         itself the tool gate) with its ``allowed_tools`` pre-approval,
         one ``include_management`` and ``server_name`` applied
-        everywhere. To target documents, prepend
-        ``document_context(doc_id)`` to your prompt; to customize (your
-        own system prompt, extra servers), switch to those methods
-        directly.
+        everywhere. To target documents or a folder, prepend
+        ``document_context(doc_id)`` / ``folder_context(folder_id)`` to
+        your prompt; to customize (your own system prompt, extra
+        servers), switch to those methods directly.
 
         Args:
             include_management (bool): Also allow tools that modify the
@@ -1908,6 +1947,23 @@ class PageIndexClient:
             raise PageIndexAPIError("doc_id must be a string or a list of "
                                     "strings.")
         return cast(str, doc_targeting_block(self, doc_id))
+
+    def folder_context(self, folder_id: str) -> str:
+        """
+        Folder targeting text for the first user message, placed as
+        ``document_context`` is (and ahead of it, the managed chat's
+        order): the folder's name and metadata, and the directive to
+        discover its documents there, rendered as the managed chat renders
+        its own ``folder_id``. ``chat(folder_id=...)`` places it for you.
+        Cloud-only: local libraries have no folders. ``"root"`` is the
+        library itself: ``""``, nothing to place, as the managed chat
+        places nothing for it. Raises PageIndexAPIError if the folder does
+        not exist.
+        """
+        from .agent_tools import folder_targeting_block
+        if folder_id is None:
+            raise PageIndexAPIError("folder_id must be a string.")
+        return folder_targeting_block(self, folder_id) or ""
 
     # ---------- FOLDER MANAGEMENT ----------
 
