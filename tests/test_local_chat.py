@@ -3856,7 +3856,6 @@ def test_client_instructions_follow_the_managed_base_everywhere(store_path):
     marks = [managed.index(m) for m in
              (CHAT_HEADER, AGENT_INSTRUCTIONS, "PERSONA", "CALL", "HISTORY")]
     assert marks == sorted(marks)
-    # Messages lane: inside the cached managed block, before the call's
     blocks = local_chat._anthropic_system(client, "CALL", None)
     assert blocks[0]["text"].endswith("\n\nPERSONA")
     assert blocks[1]["text"] == "CALL"
@@ -3932,8 +3931,8 @@ def test_managed_chat_sends_one_leading_system_row(monkeypatch):
                                    "content": "PERSONA\n\nDEV"}
 
 
-def test_managed_chat_forwards_the_rest_of_the_history_verbatim(monkeypatch):
-    """Only system rows fold; blank ones drop; the rest goes as given."""
+def test_managed_fold_leaves_non_system_rows_to_the_endpoint(monkeypatch):
+    """Only system rows fold; blank ones drop; the rest is not validated."""
     cloud = PageIndexCloudClient(api_key="pi-k")
     seen = {}
     monkeypatch.setattr(cloud._api, "chat_completions",
@@ -3951,3 +3950,31 @@ def test_managed_chat_forwards_the_rest_of_the_history_verbatim(monkeypatch):
                {"role": "system", "content": "   "}]
     cloud.chat(history)
     assert seen["messages"] == history[:-1]
+
+
+def test_chat_history_takes_any_iterable(monkeypatch):
+    """Tuples and generators ride both lanes; the call's instructions land."""
+    cloud = PageIndexCloudClient(api_key="pi-k")
+    seen = {}
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kw: seen.update(kw) or {
+                            "choices": [{"message": {"content": "ok"}}]})
+    row = {"role": "user", "content": "q"}
+    cloud.chat(iter([row]), instructions="CALL")
+    assert seen["messages"] == [{"role": "system", "content": "CALL"}, row]
+    assert local_chat._split_chat_messages((row,)) == ([], [row])
+
+
+def test_system_text_refuses_non_text_parts():
+    text = {"type": "text", "text": "A"}
+    assert local_chat._system_text(
+        [text, {"type": "text", "text": "B"}]) == "A\nB"
+    with pytest.raises(PageIndexAPIError, match="text parts"):
+        local_chat._system_text(
+            [text, {"type": "image_url", "image_url": {"url": "u"}}])
+
+
+def test_managed_instructions_drop_blank_system_texts(store_path):
+    client = PageIndexLocalClient(storage_path=store_path)
+    assert (local_chat._managed_instructions(client, ["", "  ", "X"])
+            == local_chat._managed_instructions(client, ["X"]))

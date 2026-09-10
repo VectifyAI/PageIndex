@@ -1214,11 +1214,10 @@ class PageIndexClient:
                         "messages must be a non-empty string or a list of "
                         "message dicts.")
                 messages = [{"role": "user", "content": messages}]
-            if isinstance(messages, list):
-                # The first system text: managed prompt, then instructions,
-                # then the history's own system rows.
-                messages = [{"role": "system", "content": instructions},
-                            *messages]
+            # The first system text: managed prompt, then instructions,
+            # then the history's own system rows.
+            messages = [{"role": "system", "content": instructions},
+                        *messages]
         if protocol == "chat_completions":
             return self.chat_completions(
                 messages, stream=stream, stream_metadata=True, doc_id=doc_id,
@@ -1321,10 +1320,9 @@ class PageIndexClient:
                 System/developer messages, wherever they sit, join the
                 managed system prompt after the client's ``instructions``
                 (the managed endpoint receives them as its one leading
-                system message). Own-model chat takes text history only:
-                tool-role turns are rejected and fields beyond
-                role/content are dropped; the managed endpoint receives
-                the rest of the history verbatim.
+                system message); the history is text only: tool-role
+                turns are rejected on both engines, and message
+                fields beyond role/content are dropped.
             stream: Enable streaming responses.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
