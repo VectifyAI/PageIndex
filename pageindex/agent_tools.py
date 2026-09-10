@@ -1641,11 +1641,10 @@ AGENT_INSTRUCTIONS = "\n\n".join([
 ])
 
 
-# Frozen from the cloud MCP server's ``cited_answer`` prompt (pageindex-chat
-# server/mcp/prompts/cited-answer.ts, one text per format; "markdown" is its
-# default), minus the bullet naming the cloud-only get_document_image() tool.
-# The live parity test pins the rest verbatim. Local page content carries no
-# block_id, so the block rules stay dormant and citations resolve to pages.
+# Frozen from the cloud MCP server's ``cited_answer`` prompt, minus the
+# bullet naming the cloud-only get_document_image() tool. Local page
+# content carries no block_id, so the block rules stay dormant and
+# citations resolve to pages.
 LOCAL_CITATION_PROMPTS: dict[str, str] = {
     "markdown": """\
 GROUNDING
