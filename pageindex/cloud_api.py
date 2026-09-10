@@ -211,7 +211,7 @@ class CloudAPI:
             stream_metadata (bool, optional): If True and stream=True, return raw chunks with metadata instead of just text. Default is False.
             enable_citations (bool, optional): Enable citation instructions in responses. Default is False.
             extra_body (Optional[Dict[str, Any]], optional): Extra request fields, merged into the payload last.
-                The stream field is refused; use the stream argument instead.
+                The stream and doc_id fields are refused; use their arguments instead.
 
         Returns:
             Union[Dict[str, Any], Iterator[str], Iterator[Dict[str, Any]]]:
@@ -223,6 +223,10 @@ class CloudAPI:
             raise PageIndexAPIError(
                 "extra_body cannot carry stream: use stream= to select "
                 "both the request format and response parser.")
+        if "doc_id" in (extra_body or {}):
+            raise PageIndexAPIError(
+                "extra_body cannot carry doc_id: use doc_id= to scope "
+                "the conversation.")
 
         payload = {
             "messages": messages,

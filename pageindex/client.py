@@ -1054,8 +1054,8 @@ class PageIndexClient:
                 prompt, conversation and tools are not fields here (``system`` /
                 ``instructions`` / ``input`` / ``messages`` / ``tools``
                 are refused); extend the prompt with ``instructions=``.
-                The managed endpoint also refuses ``stream`` here; use
-                ``stream=`` instead.
+                The managed endpoint also refuses ``stream`` and
+                ``doc_id`` here; use ``stream=`` and ``doc_id=`` instead.
                 Credentials belong in ``backend``, never here.
 
         Returns:
@@ -1281,8 +1281,9 @@ class PageIndexClient:
                 The managed prompt, conversation and tools are not
                 fields here (``system`` / ``instructions`` / ``input`` /
                 ``messages`` / ``tools`` are refused). The managed
-                endpoint also refuses ``stream`` here; use ``stream=``
-                instead. Credentials belong in ``backend``, never here.
+                endpoint also refuses ``stream`` and ``doc_id`` here; use
+                ``stream=`` and ``doc_id=`` instead. Credentials belong in
+                ``backend``, never here.
             extra_headers: Own-model chat only — extra HTTP headers merged into
                 each backend request; caller headers win. One exception:
                 LiteLLM's anthropic adapter owns the ``anthropic-beta``
