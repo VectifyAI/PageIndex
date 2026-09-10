@@ -1349,6 +1349,9 @@ def test_folders_are_cloud_only(local_client):
         local_client.create_folder("team")
     with pytest.raises(PageIndexAPIError, match="cloud-only"):
         local_client.list_folders()
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        local_client.folder_context("f")
+    assert local_client.folder_context("root") == ""  # the library itself
 
 
 # ── local: retrieval endpoints are cloud-only ──
@@ -1475,6 +1478,7 @@ def test_cloud_errors_carry_status_code(cloud, monkeypatch, sample_pdf):
         lambda: client.list_documents(),
         lambda: client.create_folder("f"),
         lambda: client.list_folders(),
+        lambda: client.folder_context("f"),
     ]
     for attempt in attempts:
         with pytest.raises(PageIndexAPIError) as err:
@@ -1602,6 +1606,19 @@ def test_cloud_chat_rejects_extra_body_doc_id_before_request(
     assert calls == []
 
 
+def test_cloud_chat_folder_id_rides_the_wire(cloud):
+    """The managed chat scopes folder_id server-side: it goes out as the
+    request's own field, with no folder lookup on this side."""
+    client, calls, fake = cloud
+    fake.payload = {"choices": [{"message": {"content": "ok"}}]}
+    assert client.chat("q", folder_id="f-1") == "ok"
+    assert calls[-1]["url"].endswith("/chat/completions/")
+    assert calls[-1]["json"]["folder_id"] == "f-1"
+    assert len(calls) == 1
+    client.chat_completions("q", folder_id="")
+    assert "folder_id" not in calls[-1]["json"]
+
+
 def test_parse_pages_overlap_counts_union():
     from pageindex.client import _parse_pages
     pages = _parse_pages("1-5000,2000-9000")
@@ -1612,6 +1629,35 @@ def test_parse_pages_overlap_counts_union():
     # on — surfaced as the documented SDK error type
     with pytest.raises(PageIndexAPIError, match="positive"):
         _parse_pages("0-3")
+
+
+def test_folder_context(cloud):
+    """Folder targeting renders as the managed chat renders folder_id: the
+    name, an id/name/description metadata row (empty description dropped),
+    and the discovery directive carrying the id."""
+    client, calls, fake = cloud
+    fake.payload = {"folders": [
+        {"id": "f-1", "name": "Research", "description": "",
+         "parent_folder_id": None, "file_count": 2, "children_count": 1},
+        {"id": "f-2", "name": "Q3", "description": "quarterly",
+         "parent_folder_id": "f-1", "file_count": 1, "children_count": 0},
+    ], "total": 2}
+    text = client.folder_context("f-2")
+    assert calls[-1]["url"] == "https://api.pageindex.ai/folders/"
+    assert text.startswith("The user has specified folder: Q3\n")
+    assert ('Folder metadata: {"id": "f-2", "name": "Q3", '
+            '"description": "quarterly"}\n') in text
+    assert 'browse_documents(folder_id="f-2", recursive=true)' in text
+    assert ('Folder metadata: {"id": "f-1", "name": "Research"}\n'
+            in client.folder_context("f-1"))
+    with pytest.raises(PageIndexAPIError, match="not found"):
+        client.folder_context("f-9")
+    with pytest.raises(PageIndexAPIError, match="must be a string"):
+        client.folder_context(["f-1"])
+    calls.clear()
+    assert client.folder_context("root") == ""
+    assert client.folder_context("") == ""
+    assert calls == []
 
 
 # ── backend: the indexing lane ──

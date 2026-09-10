@@ -1744,3 +1744,45 @@ def doc_targeting_block(client, doc_id) -> Optional[str]:
         "Use these documents' names to retrieve their content with "
         "get_document_structure() and get_page_content()."
     )
+
+
+def folder_targeting_block(client, folder_id) -> Optional[str]:
+    """The folder_id targeting text, rendered as the cloud's managed chat
+    renders its own: the folder's name and metadata and the directive to
+    discover its documents there. None for no folder — None, "", and
+    "root", the library itself, which the managed chat leaves untargeted.
+    A folder proper is cloud-only: local libraries have none."""
+    if folder_id is None:
+        return None
+    if not isinstance(folder_id, str):
+        raise PageIndexAPIError("folder_id must be a string.")
+    if folder_id in ("", "root"):
+        return None
+    if not getattr(client, "api_key", None):
+        raise PageIndexAPIError(
+            "folder_id is cloud-only — folders are not supported in local "
+            "mode. Create the client with an api_key to use folders.")
+    folders = client.list_folders().get("folders") or []
+    folder = next((f for f in folders if f.get("id") == folder_id), None)
+    if folder is None:
+        raise PageIndexAPIError(
+            f"Folder not found or access denied: {folder_id}")
+    metadata = {key: folder[key] for key in ("id", "name", "description")
+                if folder.get(key)}
+    return (
+        f"The user has specified folder: {folder.get('name')}\n"
+        f"Folder metadata: {json.dumps(metadata, ensure_ascii=False)}\n"
+        "Discover its documents with "
+        f'browse_documents(folder_id="{folder_id}", recursive=true) '
+        f'or search_documents(query, folder_id="{folder_id}", '
+        "recursive=true)."
+    )
+
+
+def targeting_block(client, doc_id, folder_id=None) -> Optional[str]:
+    """The chat lanes' leading user message: the folder block, then the
+    document block, joined as the managed chat joins them; None when
+    there is nothing to place."""
+    blocks = [folder_targeting_block(client, folder_id),
+              doc_targeting_block(client, doc_id)]
+    return "\n\n".join(block for block in blocks if block) or None
