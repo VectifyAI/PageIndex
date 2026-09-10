@@ -1157,6 +1157,34 @@ def _anthropic_message(content, stop_reason):
     }
 
 
+def _anthropic_sse(message):
+    """Render text/tool turns for the real streaming tool runner."""
+    events = [{"type": "message_start", "message": {
+        **message, "content": [], "stop_reason": None}}]
+    for index, block in enumerate(message["content"]):
+        if block["type"] == "tool_use":
+            initial = {**block, "input": {}}
+            delta = {"type": "input_json_delta",
+                     "partial_json": json.dumps(block["input"])}
+        else:
+            initial = {**block, "text": ""}
+            delta = {"type": "text_delta", "text": block["text"]}
+        events.extend([
+            {"type": "content_block_start", "index": index,
+             "content_block": initial},
+            {"type": "content_block_delta", "index": index, "delta": delta},
+            {"type": "content_block_stop", "index": index},
+        ])
+    events.extend([
+        {"type": "message_delta", "delta": {
+            "stop_reason": message["stop_reason"], "stop_sequence": None},
+         "usage": {"output_tokens": message["usage"]["output_tokens"]}},
+        {"type": "message_stop"},
+    ])
+    return "".join(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n"
+                   for event in events)
+
+
 @pytest.fixture
 def fake_anthropic(monkeypatch):
     state = {"calls": []}
@@ -3122,7 +3150,7 @@ def test_messages_no_backend_leak_when_tool_build_fails(bridge_client,
                         lambda backend=None: made.append(FakeAnthropic())
                         or made[-1])
 
-    def boom(client, doc_ids=None):
+    def boom(client, doc_ids=None, **kwargs):
         raise PageIndexAPIError("Could not reach the PageIndex MCP server")
 
     monkeypatch.setattr(
@@ -3339,3 +3367,192 @@ def test_chat_answer_lane_forwards_the_promoted_knobs(client, monkeypatch):
                         lambda c, messages, **kw: streamed.update(kw) or "s")
     assert client.chat("q", stream=True, **knobs) == "s"
     assert {k: streamed[k] for k in knobs} == knobs
+
+
+# ── a tool failure that survived the bridge's retries fails the run fast ──
+
+@needs_agents
+def test_translate_run_error_unwraps_a_tool_failure():
+    """A failure the invoker re-raised leaves the run wrapped in the
+    framework's exception; the caller gets it back with its status."""
+    from agents.exceptions import AgentsException
+    wrapped = AgentsException("Error invoking MCP tool get_document")
+    wrapped.__cause__ = PageIndexAPIError("MCP request failed: HTTP 429",
+                                          status_code=429)
+    err = local_chat._translate_run_error(wrapped, None, "chat")
+    assert err.status_code == 429 and "HTTP 429" in str(err)
+    plain = local_chat._translate_run_error(AgentsException("boom"), None,
+                                            "chat")
+    assert plain.status_code is None and "agent backend failed" in str(plain)
+
+
+def test_model_backend_error_keeps_the_status_code():
+    limited = Exception("rate limited")
+    limited.status_code = 429
+    assert local_chat._model_backend_error(limited, "chat").status_code == 429
+    assert local_chat._model_backend_error(
+        Exception("x"), "chat").status_code is None
+
+
+def _rate_limited(name, arguments):
+    raise PageIndexAPIError("MCP request failed: HTTP 429", status_code=429)
+
+
+@needs_agents
+def test_bridge_chat_fails_fast_on_a_rate_limited_tool(bridge_client,
+                                                        fake_model):
+    """A 429 that survived the bridge's retries ends the run with its
+    status — no second model turn over an error envelope."""
+    client, bridge = bridge_client
+    bridge.call_tool = _rate_limited
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "r.pdf"})],
+        [_msg_item("never reached")],
+    ])
+    with pytest.raises(PageIndexAPIError, match="HTTP 429") as info:
+        client.chat_completions("What?")
+    assert info.value.status_code == 429
+    assert len(fake.instructions) == 1
+
+
+@needs_anthropic
+def test_messages_fail_fast_is_quiet(bridge_client, fake_anthropic, caplog):
+    """The runner's own tool-error logging never reports the failure the
+    lane is about to raise."""
+    client, bridge = bridge_client
+    bridge.call_tool = _rate_limited
+    fake_anthropic([_anthropic_message(
+        [{"type": "tool_use", "id": "tu_1", "name": "get_document",
+          "input": {"doc_name": "r.pdf"}}], "tool_use")])
+    with pytest.raises(PageIndexAPIError, match="HTTP 429"):
+        client.chat("q", protocol="messages", model="claude-test",
+                    extra_body={"max_tokens": 100})
+    assert not [r for r in caplog.records if r.name.startswith("anthropic")]
+
+
+@needs_anthropic
+@pytest.mark.parametrize("stop_reason", ["tool_use", "max_tokens", "refusal"])
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("max_turns", [1, 2])
+def test_messages_fail_fast_on_a_rate_limited_tool(
+        bridge_client, fake_anthropic, stop_reason, stream, max_turns):
+    """Real runners must surface executed tools' failures before another
+    model call or a max_turns exit, and preserve terminal-turn policy."""
+    client, bridge = bridge_client
+    tool_calls = []
+
+    def fail(name, arguments):
+        tool_calls.append((name, arguments))
+        return _rate_limited(name, arguments)
+
+    bridge.call_tool = fail
+    replies = [
+        _anthropic_message([{"type": "tool_use", "id": "tu_1",
+                             "name": "get_document",
+                             "input": {"doc_name": "r.pdf"}}], stop_reason),
+        _anthropic_message([{"type": "text", "text": "never reached"}],
+                           "end_turn"),
+    ]
+    calls = fake_anthropic([_anthropic_sse(reply) for reply in replies]
+                          if stream else replies)
+
+    def run():
+        result = client.chat("q", protocol="messages", model="claude-test",
+                             extra_body={"max_tokens": 100}, stream=stream,
+                             max_turns=max_turns)
+        return list(result) if stream else result
+
+    executes_tools = (stop_reason == "tool_use"
+                      or (stop_reason == "max_tokens"
+                          and _ANTHROPIC_RUNS_CUT_TOOL_TURNS))
+    if executes_tools:
+        with pytest.raises(PageIndexAPIError, match="HTTP 429") as info:
+            run()
+        assert info.value.status_code == 429
+        assert tool_calls == [("get_document", {"doc_name": "r.pdf"})]
+    else:
+        run()
+        assert tool_calls == []
+    assert len(calls) == 1, "a second model turn ran"
+
+
+@needs_anthropic
+@pytest.mark.parametrize("stream", [False, True])
+def test_messages_runs_each_tool_once(bridge_client, fake_anthropic, stream):
+    """Failure checks preserve normal tool execution across multiple turns."""
+    client, bridge = bridge_client
+    replies = [_anthropic_message([
+        {"type": "tool_use", "id": tool_id, "name": "get_document",
+         "input": {"doc_name": "r.pdf"}}], "tool_use")
+        for tool_id in ("tu_1", "tu_2")]
+    replies.append(_anthropic_message([{"type": "text", "text": "Done"}],
+                                      "end_turn"))
+    calls = fake_anthropic([_anthropic_sse(reply) for reply in replies]
+                          if stream else replies)
+    result = client.chat("q", protocol="messages", model="claude-test",
+                         extra_body={"max_tokens": 100}, stream=stream)
+    if stream:
+        list(result)
+    assert len(calls) == 3
+    assert bridge.calls == [("get_document", {"doc_name": "r.pdf"})] * 2
+
+
+@needs_anthropic
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("cached", [False, True])
+def test_messages_tool_failure_preserves_client_lifecycle(
+        bridge_client, fake_anthropic, monkeypatch, stream, cached):
+    """Failed runs close owned clients and leave cached clients reusable,
+    with no failure state leaking into the next run."""
+    client, bridge = bridge_client
+    replies = [
+        _anthropic_message([_anthropic_tool_use()], "tool_use"),
+        _anthropic_message([_anthropic_tool_use()], "tool_use"),
+        _anthropic_message([{"type": "text", "text": "Recovered"}],
+                           "end_turn"),
+    ]
+    calls = fake_anthropic([_anthropic_sse(reply) for reply in replies]
+                          if stream else replies)
+    backend = local_chat._anthropic_client()
+    monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS",
+                        {"test": backend} if cached else {})
+    original_call = bridge.call_tool
+    bridge.call_tool = _rate_limited
+
+    def run():
+        result = client.chat("q", protocol="messages", model="claude-test",
+                             extra_body={"max_tokens": 100}, stream=stream)
+        return list(result) if stream else result
+
+    try:
+        with pytest.raises(PageIndexAPIError, match="HTTP 429"):
+            run()
+        assert len(calls) == 1
+        assert backend.is_closed() is (not cached)
+        if cached:
+            bridge.call_tool = original_call
+            run()
+            assert len(calls) == 3
+            assert len(bridge.calls) == 1
+            assert not backend.is_closed()
+    finally:
+        backend.close()
+
+
+@needs_agents
+def test_bridge_chat_keeps_model_slips_model_visible(bridge_client,
+                                                     fake_model):
+    """Only the invoker's re-raised failures escape: a model-side slip (bad
+    JSON arguments) still comes back to the model as text and the run
+    goes on."""
+    from openai.types.responses import ResponseFunctionToolCall
+    client, bridge = bridge_client
+    fake = fake_model([
+        [ResponseFunctionToolCall(id="fc_1", type="function_call",
+                                  call_id="call_1", name="get_document",
+                                  arguments="{not json", status="completed")],
+        [_msg_item("Recovered")],
+    ])
+    result = client.chat_completions("What?")
+    assert result["choices"][0]["message"]["content"] == "Recovered"
+    assert len(fake.instructions) == 2 and bridge.calls == []

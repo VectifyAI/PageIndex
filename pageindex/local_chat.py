@@ -15,7 +15,7 @@ from typing import Any, Iterator, Mapping, Optional, Union
 
 from .agent_tools import _base_instructions, doc_targeting_block
 from .chat_stream import ChatStream
-from .errors import PageIndexAPIError
+from .errors import PageIndexAPIError, _pageindex_cause
 
 CHAT_HEADER = (
     "You are PageIndex by Vectify AI, a document-focused assistant. "
@@ -451,7 +451,8 @@ def _model_backend_error(exc, lane: str, client=None) -> PageIndexAPIError:
             ", or drop the chat model configuration to use the managed "
             "cloud chat." if lane == "chat" else "."
         )
-    return PageIndexAPIError(message)
+    return PageIndexAPIError(message,
+                             status_code=getattr(exc, "status_code", None))
 
 
 def _translate_run_error(exc, max_turns, lane, client=None) -> PageIndexAPIError:
@@ -460,6 +461,10 @@ def _translate_run_error(exc, max_turns, lane, client=None) -> PageIndexAPIError
     if isinstance(exc, MaxTurnsExceeded):
         return _wrap_max_turns(max_turns)
     if isinstance(exc, AgentsException):
+        cause = _pageindex_cause(exc)
+        if cause is not None:
+            # a tool failure the invoker re-raised, wrapped on its way out
+            return PageIndexAPIError(str(cause), status_code=cause.status_code)
         return PageIndexAPIError(f"The agent backend failed: {exc}")
     return _model_backend_error(exc, lane, client)
 
@@ -1378,7 +1383,8 @@ def run_messages(client, messages, model: str,
         if _cache_marks(system_blocks, prepared) < 4 else {})
     # Tools before the transport: on a bridge client building them is
     # network I/O, and a failure there must not strand the client below.
-    tools = build_anthropic_tools(client, doc_ids=scope)
+    failures: list = []
+    tools = build_anthropic_tools(client, doc_ids=scope, failures=failures)
     merged = _merged_backend(client, backend)
     backend_client = _anthropic_client(merged)
     # Close only a per-call construction: cached clients stay open for
@@ -1400,6 +1406,17 @@ def run_messages(client, messages, model: str,
         **passthrough,
         **cached,
     )
+    # Older Anthropic versions also execute tools on max_tokens turns, newer
+    # ones skip them: check right after the runner's own tool step.
+    generate_tool_response = runner.generate_tool_call_response
+
+    def checked_tool_response():
+        response = generate_tool_response()
+        if failures:
+            raise failures[0]
+        return response
+
+    runner.generate_tool_call_response = checked_tool_response
 
     if stream:
         def events() -> Iterator[Any]:
@@ -1424,7 +1441,7 @@ def run_messages(client, messages, model: str,
         return events()
 
     try:
-        turns = [turn for turn in runner]
+        turns = list(runner)
     except anthropic.AnthropicError as exc:
         raise _model_backend_error(exc, "messages", client) from exc
     except TypeError as exc:

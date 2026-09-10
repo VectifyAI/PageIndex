@@ -27,6 +27,8 @@ exclude = ["pageindex/flash/assets"]
 [tool.poetry.dependencies]
 python = ">=3.10"
 requests = ">=2.28.0"
+# MCP retries use Retry(allowed_methods=...), added in urllib3 1.26.
+urllib3 = ">=1.26"
 openai = ">=1.70.0"
 # Older releases crash on current openai before the request is sent.
 openai-agents = ">=0.18.1"

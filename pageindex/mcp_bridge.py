@@ -16,12 +16,20 @@ import threading
 from typing import Any, Optional
 
 import requests
+from requests.adapters import HTTPAdapter, Retry
 
 from ._version import sdk_version
 from .errors import PageIndexAPIError
 
 _PROTOCOL_VERSION = "2025-06-18"
 _TIMEOUT = (10, 240)  # tools may wait server-side (wait_for_completion: 3 min)
+# Below the tool layer, so the model never plays retry loop. read=0: a read
+# timeout is a full wait the server may have acted on, never replayed.
+# Retry-After is ignored: a long one is a quota, not a blip.
+_RETRY = Retry(total=3, read=0, backoff_factor=1,
+               status_forcelist=(429, *range(500, 600)),
+               allowed_methods=None, raise_on_status=False,
+               respect_retry_after_header=False)
 
 
 def _parse_sse(text: str) -> list[dict]:
@@ -45,6 +53,8 @@ class McpBridge:
         self._url = url
         self._auth_headers = dict(headers)
         self._session = requests.Session()  # agent tool calls come in bursts
+        for scheme in ("https://", "http://"):
+            self._session.mount(scheme, HTTPAdapter(max_retries=_RETRY))
         self._session_id: Optional[str] = None
         self._protocol_version: Optional[str] = None
         self._instructions: Optional[str] = None
@@ -154,10 +164,11 @@ class McpBridge:
                 },
             })
             if response.status_code >= 400:
+                hint = (" Check your API key."
+                        if response.status_code in (401, 403) else "")
                 raise PageIndexAPIError(
                     f"Could not connect to the PageIndex MCP server: HTTP "
-                    f"{response.status_code} ({response.text[:200]}). Check "
-                    "your API key.",
+                    f"{response.status_code} ({response.text[:200]}).{hint}",
                     status_code=response.status_code,
                 )
             result = self._extract_result(response, request_id) or {}

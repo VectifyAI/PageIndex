@@ -1038,24 +1038,55 @@ def test_anthropic_runner_config_thinking_lifts_max_tokens(client):
         model="claude-sonnet-4-5")
 
 
-def test_bridge_invoker_reraises_auth_failures():
-    class Revoked:
-        def call_tool(self, name, arguments):
-            raise PageIndexAPIError("HTTP 401", status_code=401)
+def test_bridge_invoker_reraises_auth_and_transport_failures():
+    """Auth failures and what survives the bridge's own retries (429/5xx)
+    escape to the caller; a status-less JSON-RPC failure (the model's own
+    bad arguments) stays a model-visible envelope, and so does a non-JSON
+    200 body: its JSONDecodeError is a RequestException too, but the server
+    was reached."""
+    import requests
 
-    invoke = agent_tools_module._bridge_invoker(Revoked(), "get_document", {})
-    with pytest.raises(PageIndexAPIError, match="401"):
-        invoke({})
-    # Transport blips stay contained in the retryable envelope.
+    def failing(exc):
+        class Bridge:
+            def call_tool(self, name, arguments):
+                raise exc
+        return agent_tools_module._bridge_invoker(Bridge(), "get_document", {})
 
-    class Down:
-        def call_tool(self, name, arguments):
-            raise PageIndexAPIError("HTTP 503", status_code=503)
-
-    blocks, is_error = agent_tools_module._bridge_invoker(
-        Down(), "get_document", {})({})
+    for status in (401, 403, 429, 503):
+        with pytest.raises(PageIndexAPIError) as info:
+            failing(PageIndexAPIError(f"HTTP {status}", status_code=status))({})
+        assert info.value.status_code == status
+    blocks, is_error = failing(
+        PageIndexAPIError("MCP error -32602: bad params"))({})
     assert is_error
     assert json.loads(blocks[0]["text"])["errorCode"] == "INTERNAL_ERROR"
+    garbled = PageIndexAPIError("non-JSON response (HTTP 200).", status_code=200)
+    garbled.__cause__ = requests.exceptions.JSONDecodeError("bad", "<html>", 0)
+    blocks, is_error = failing(garbled)({})
+    assert is_error
+    assert json.loads(blocks[0]["text"])["errorCode"] == "INTERNAL_ERROR"
+
+
+def test_bridge_invoker_reraises_account_limits():
+    """The cloud answers upstream throttling and an exhausted quota as a
+    normal tool error (HTTP 200 + errorCode): the model can act on neither,
+    so they escape like a post-retry 429; every other code stays a
+    model-visible envelope."""
+    def answering(payload):
+        class Bridge:
+            def call_tool(self, name, arguments):
+                return [{"type": "text", "text": json.dumps(payload)}], True
+        return agent_tools_module._bridge_invoker(Bridge(), "get_document", {})
+
+    for code, status in (("RATE_LIMITED", 429), ("USAGE_LIMIT_REACHED", 402)):
+        with pytest.raises(PageIndexAPIError,
+                           match=r"limit \(retry_after_seconds: 7\)") as info:
+            answering({"error": "limit", "errorCode": code,
+                       "retry_after_seconds": 7})({})
+        assert info.value.status_code == status
+    blocks, is_error = answering({"error": "gone", "errorCode": "NOT_FOUND"})({})
+    assert is_error
+    assert json.loads(blocks[0]["text"])["errorCode"] == "NOT_FOUND"
 
 
 def test_cloud_bridge_gates_the_endpoint(monkeypatch):
@@ -1507,7 +1538,7 @@ def test_mcp_bridge_protocol(monkeypatch):
     # Replace the module's own `requests` binding — patching the shared
     # requests module would leak the fake process-wide.
     monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
-        Session=lambda: types.SimpleNamespace(post=fake_post),
+        Session=lambda: types.SimpleNamespace(post=fake_post, mount=lambda *a: None),
         RequestException=requests_mod.RequestException))
     bridge = McpBridge("https://api.pageindex.ai/mcp",
                        {"Authorization": "Bearer k"})
@@ -1572,7 +1603,7 @@ def test_mcp_bridge_400_is_an_error_not_session_expiry(monkeypatch):
         return _Resp(400, text="unknown tool")
 
     monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
-        Session=lambda: types.SimpleNamespace(post=fake_post),
+        Session=lambda: types.SimpleNamespace(post=fake_post, mount=lambda *a: None),
         RequestException=requests_mod.RequestException))
     bridge = McpBridge("https://api.pageindex.ai/mcp",
                        {"Authorization": "Bearer k"})
@@ -1634,7 +1665,7 @@ def test_mcp_bridge_init_notification_bars_concurrent_requests(monkeypatch):
         return resp
 
     monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
-        Session=lambda: types.SimpleNamespace(post=fake_post),
+        Session=lambda: types.SimpleNamespace(post=fake_post, mount=lambda *a: None),
         RequestException=requests_mod.RequestException))
     bridge = McpBridge("https://api.pageindex.ai/mcp",
                        {"Authorization": "Bearer k"})
@@ -2023,7 +2054,7 @@ def test_bridge_call_tool_surfaces_iserror(monkeypatch):
             "content": [{"type": "text", "text": '{"error": "denied"}'}]}})
 
     monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
-        Session=lambda: types.SimpleNamespace(post=fake_post),
+        Session=lambda: types.SimpleNamespace(post=fake_post, mount=lambda *a: None),
         RequestException=requests_mod.RequestException))
     bridge = McpBridge("https://api.pageindex.ai/mcp", {})
     assert bridge.call_tool("t", {}) == (
@@ -2062,7 +2093,7 @@ def test_bridge_rejects_mismatched_reply_id(monkeypatch):
                                                    "text": "old"}]}})
 
     monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
-        Session=lambda: types.SimpleNamespace(post=fake_post),
+        Session=lambda: types.SimpleNamespace(post=fake_post, mount=lambda *a: None),
         RequestException=requests_mod.RequestException))
     bridge = McpBridge("https://api.pageindex.ai/mcp", {})
     with pytest.raises(PageIndexAPIError, match="no reply matching"):
@@ -2087,11 +2118,24 @@ def test_bridge_transport_error_is_pageindex_error(monkeypatch):
         raise requests_mod.ConnectionError("dns down")
 
     monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
-        Session=lambda: types.SimpleNamespace(post=dead_post),
+        Session=lambda: types.SimpleNamespace(post=dead_post, mount=lambda *a: None),
         RequestException=requests_mod.RequestException))
     bridge = McpBridge("https://api.pageindex.ai/mcp", {})
     with pytest.raises(PageIndexAPIError, match="Could not reach"):
         bridge.list_tools()
+
+
+def test_handshake_failure_blames_the_key_only_on_auth_statuses(monkeypatch):
+    """A rate-limited or failing handshake is not a key problem."""
+    import types
+    from pageindex.mcp_bridge import McpBridge
+    bridge = McpBridge("https://api.pageindex.ai/mcp", {})
+    for status, blames_key in ((401, True), (429, False), (503, False)):
+        monkeypatch.setattr(bridge, "_post", lambda payload, *a, s=status: (
+            types.SimpleNamespace(status_code=s, text="no", headers={})))
+        with pytest.raises(PageIndexAPIError, match=f"HTTP {status}") as info:
+            bridge.list_tools()
+        assert ("Check your API key" in str(info.value)) is blames_key
 
 
 def test_await_completion_preserves_metadata_over_null_refetch(monkeypatch):
@@ -2784,3 +2828,155 @@ def test_cloud_tool_list_empty_raises(monkeypatch):
     cloud = PageIndexCloudClient(api_key="pi-test-key")
     with pytest.raises(PageIndexAPIError, match="no tools"):
         cloud.as_openai_tools()
+
+
+# ── tool-path rate limits: retried below the tool layer, then fail fast ──
+
+class _McpStub:
+    """A local MCP endpoint: initialize always succeeds; tools/call answers
+    follow the scripted statuses (a 200 carries a text result), the last
+    one repeating."""
+
+    def __init__(self, statuses, delay=0.0):
+        import http.server
+        import threading
+        stub = self
+        self.calls = 0
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_POST(self):
+                body = json.loads(self.rfile.read(
+                    int(self.headers["Content-Length"])))
+                if "id" not in body:  # notifications/initialized: 202, uncounted
+                    self.send_response(202)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                if body["method"] == "initialize":
+                    return self._reply(200, body["id"], {
+                        "protocolVersion": "2025-06-18", "capabilities": {},
+                        "serverInfo": {"name": "stub", "version": "0"}})
+                stub.calls += 1
+                if delay:
+                    time.sleep(delay)
+                self._reply(statuses[min(stub.calls, len(statuses)) - 1],
+                            body["id"],
+                            {"content": [{"type": "text", "text": "ok"}],
+                             "isError": False})
+
+            def _reply(self, status, request_id, result):
+                payload = json.dumps({"jsonrpc": "2.0", "id": request_id,
+                                      "result": result}).encode()
+                self.send_response(status)
+                if status == 429:
+                    self.send_header("Retry-After", "1")  # ignored
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                try:
+                    self.wfile.write(payload)
+                except OSError:  # the client gave up (timeout tests)
+                    pass
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0),
+                                                      Handler)
+        self.server.daemon_threads = True
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.url = f"http://127.0.0.1:{self.server.server_port}/mcp"
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+@pytest.fixture
+def mcp_stub(monkeypatch):
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")  # keep the machine's proxy out
+    monkeypatch.setenv("no_proxy", "127.0.0.1")  # requests reads this spelling first
+    stubs = []
+
+    def make(statuses, delay=0.0):
+        stubs.append(_McpStub(statuses, delay))
+        return stubs[-1]
+
+    yield make
+    for stub in stubs:
+        stub.close()
+
+
+def test_bridge_retries_rate_limits_below_the_tool_layer(mcp_stub, monkeypatch):
+    """Two 429s then a 200: the call succeeds without the model ever seeing
+    an error, and the waits are the fixed backoff, not the server's
+    Retry-After."""
+    import urllib3.util.retry as retry_module
+    from pageindex.mcp_bridge import McpBridge
+    slept = []
+    monkeypatch.setattr(retry_module.time, "sleep", slept.append)
+    stub = mcp_stub([429, 429, 200])
+    assert McpBridge(stub.url, {}).call_tool("get_document", {}) == (
+        [{"type": "text", "text": "ok"}], False)
+    assert stub.calls == 3
+    assert slept == [2]
+
+
+@pytest.mark.parametrize("status", [429, 504, 529])
+def test_bridge_rate_limit_exhausted_raises_with_status(mcp_stub, monkeypatch,
+                                                        status):
+    """Three retries and still failing: the caller gets the status."""
+    import urllib3.util.retry as retry_module
+    from pageindex.mcp_bridge import McpBridge
+    monkeypatch.setattr(retry_module.time, "sleep", lambda seconds: None)
+    stub = mcp_stub([status])
+    with pytest.raises(PageIndexAPIError, match=f"HTTP {status}") as info:
+        McpBridge(stub.url, {}).call_tool("get_document", {})
+    assert info.value.status_code == status
+    assert stub.calls == 4
+
+
+def test_bridge_read_timeout_is_not_retried(mcp_stub, monkeypatch):
+    """A read timeout is a full wait the server may have acted on:
+    surfaced once, never replayed."""
+    import pageindex.mcp_bridge as mcp_bridge
+    monkeypatch.setattr(mcp_bridge, "_TIMEOUT", (10, 0.2))
+    stub = mcp_stub([200], delay=0.6)
+    with pytest.raises(PageIndexAPIError, match="Could not reach"):
+        mcp_bridge.McpBridge(stub.url, {}).call_tool("get_document", {})
+    assert stub.calls == 1
+
+
+def test_bridge_invoker_reraises_an_unreachable_server(mcp_stub, monkeypatch):
+    """A server the bridge could not reach after its own connection retries
+    escapes to the caller like a 429: the model cannot reach it either."""
+    import urllib3.util.retry as retry_module
+    from pageindex.mcp_bridge import McpBridge
+    monkeypatch.setattr(retry_module.time, "sleep", lambda seconds: None)
+    stub = mcp_stub([200])
+    stub.close()
+    bridge = McpBridge(stub.url, {})
+    invoke = agent_tools_module._bridge_invoker(bridge, "get_document", {})
+    with pytest.raises(PageIndexAPIError, match="Could not reach"):
+        invoke({})
+
+
+class _RateLimitedBridge(_ImageBridge):
+    def call_tool(self, name, arguments):
+        raise PageIndexAPIError("MCP request failed: HTTP 429",
+                                status_code=429)
+
+
+def test_as_openai_tools_transport_failure_escapes_the_run(monkeypatch):
+    """The framework's default turns every tool exception into model-visible
+    text; the SDK's server narrows that so a failure the invoker re-raised
+    escapes the run (a model-side slip staying model-visible is covered end
+    to end in test_local_chat)."""
+    pytest.importorskip("agents")
+    import pageindex.mcp_bridge as mcp_bridge
+    from pageindex.errors import _pageindex_cause
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _RateLimitedBridge)
+    tool = PageIndexCloudClient(api_key="pi-test-key").as_openai_tools()[0]
+    with pytest.raises(Exception) as info:
+        asyncio.run(tool.on_invoke_tool(None, '{"image_path": "x"}'))
+    assert _pageindex_cause(info.value).status_code == 429
