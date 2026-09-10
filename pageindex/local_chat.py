@@ -323,7 +323,8 @@ def _refuse_skeleton(extra_body) -> None:
         raise PageIndexAPIError(
             f"extra_body cannot carry {', '.join(hit)}: the managed prompt, "
             "conversation and tools are the SDK's. Extend the prompt with "
-            "instructions=; the conversation is the first argument.")
+            "instructions= (own chat model) or a system row in messages "
+            "(managed chat); the conversation is the first argument.")
 
 
 def _openai_agent(client, protocol: str, model_name: str, instructions: str,

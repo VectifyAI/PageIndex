@@ -519,8 +519,9 @@ class PageIndexClient:
         return model is not None
 
     def _require_own_chat(self, lane: str) -> None:
-        # The one refusal for chat(protocol=...), the doors behind it, and
-        # instructions: shared, so the doors cannot drift from chat().
+        # The one refusal for the Responses / Messages lanes, the doors
+        # behind them, and instructions: shared, so the doors cannot drift
+        # from chat().
         if self._local_chat:
             return
         if not getattr(self, "api_key", None):
@@ -785,12 +786,12 @@ class PageIndexClient:
     def chat(
         self,
         messages: Union[str, list[dict[str, Any]]],
+        *,
         doc_id: Optional[Union[str, list[str]]] = None,
         stream: Literal[False] = False,
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
-        *,
         protocol: None = None,
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
         max_turns: Optional[int] = None,
@@ -803,8 +804,8 @@ class PageIndexClient:
     def chat(
         self,
         messages: Union[str, list[dict[str, Any]]],
-        doc_id: Optional[Union[str, list[str]]] = None,
         *,
+        doc_id: Optional[Union[str, list[str]]] = None,
         stream: Literal[True],
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
@@ -821,12 +822,12 @@ class PageIndexClient:
     def chat(
         self,
         messages: Union[str, list[dict[str, Any]]],
+        *,
         doc_id: Optional[Union[str, list[str]]] = None,
         stream: Literal[False] = False,
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
-        *,
         protocol: Literal["chat_completions", "responses", "messages"],
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
         max_turns: Optional[int] = None,
@@ -839,8 +840,8 @@ class PageIndexClient:
     def chat(
         self,
         messages: Union[str, list[dict[str, Any]]],
-        doc_id: Optional[Union[str, list[str]]] = None,
         *,
+        doc_id: Optional[Union[str, list[str]]] = None,
         stream: Literal[True],
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
@@ -857,8 +858,8 @@ class PageIndexClient:
     def chat(
         self,
         messages: Union[str, list[dict[str, Any]]],
-        doc_id: Optional[Union[str, list[str]]] = None,
         *,
+        doc_id: Optional[Union[str, list[str]]] = None,
         stream: Literal[True],
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
@@ -875,12 +876,12 @@ class PageIndexClient:
     def chat(
         self,
         messages: Union[str, list[dict[str, Any]]],
+        *,
         doc_id: Optional[Union[str, list[str]]] = None,
         stream: bool = False,
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
-        *,
         protocol: None = None,
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
         max_turns: Optional[int] = None,
@@ -893,13 +894,14 @@ class PageIndexClient:
     def chat(
         self,
         messages: Union[str, list[dict[str, Any]]],
+        *,
         doc_id: Optional[Union[str, list[str]]] = None,
         stream: bool = False,
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
-        *,
-        protocol: Optional[str] = None,
+        protocol: Optional[Literal["chat_completions", "responses",
+                                   "messages"]] = None,
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
         max_turns: Optional[int] = None,
         backend: Optional[dict[str, Any]] = None,
@@ -910,13 +912,14 @@ class PageIndexClient:
     def chat(
         self,
         messages: Union[str, list[dict[str, Any]]],
+        *,
         doc_id: Optional[Union[str, list[str]]] = None,
         stream: bool = False,
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
-        *,
-        protocol: Optional[str] = None,
+        protocol: Optional[Literal["chat_completions", "responses",
+                                   "messages"]] = None,
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
         max_turns: Optional[int] = None,
         backend: Optional[dict[str, Any]] = None,

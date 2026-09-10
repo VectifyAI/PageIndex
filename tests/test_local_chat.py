@@ -1,6 +1,7 @@
 """Local chat surfaces: three protocols over fake backends — no network,
 no LLM keys. Tool execution runs for real against a seeded local store."""
 import asyncio
+import inspect
 import json
 import sys
 import types
@@ -3264,6 +3265,16 @@ def test_chat_protocol_chat_completions_serves_managed_cloud(monkeypatch):
         cloud.chat("q", protocol="chat_completions", model="m")
     with pytest.raises(PageIndexAPIError, match="chat_model="):
         cloud.chat("q", protocol="chat_completions", instructions="x")
+
+
+def test_chat_takes_only_messages_by_position():
+    """chat_completions() puts stream before doc_id; chat() the reverse.
+    A positional rewrite must fail loudly, never bind doc_id=True."""
+    params = list(inspect.signature(PageIndexClient.chat).parameters.values())
+    assert [p.name for p in params[:2]] == ["self", "messages"]
+    assert {p.kind for p in params[2:]} == {inspect.Parameter.KEYWORD_ONLY}
+    with pytest.raises(TypeError):
+        PageIndexClient(api_key="pi-k").chat("q", True, "pi-1")
 
 
 def test_chat_protocol_responses_is_the_door(client, monkeypatch):
