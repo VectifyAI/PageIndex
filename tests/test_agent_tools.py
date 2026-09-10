@@ -3076,7 +3076,8 @@ def _fake_requests(monkeypatch, fake_post):
     leak process-wide."""
     import requests as requests_mod
     monkeypatch.setattr("pageindex.mcp_bridge.requests", types.SimpleNamespace(
-        Session=lambda: types.SimpleNamespace(post=fake_post),
+        Session=lambda: types.SimpleNamespace(
+            post=fake_post, mount=lambda *a, **k: None),
         RequestException=requests_mod.RequestException))
 
 

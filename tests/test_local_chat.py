@@ -3525,6 +3525,8 @@ def test_chat_citations_managed(monkeypatch):
     assert seen[-1]["enable_citations"] is True
     cloud.chat("q")
     assert seen[-1]["enable_citations"] is False
+    cloud.chat("q", protocol="chat_completions", citations=True)
+    assert seen[-1]["enable_citations"] is True
     with pytest.raises(PageIndexAPIError, match="True or False"):
         cloud.chat("q", citations="cite")
 
