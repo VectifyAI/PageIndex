@@ -1105,8 +1105,7 @@ class PageIndexClient:
         enable_citations = False
         if citations:
             if self._local_chat:
-                from .agent_tools import fetch_citation_prompt
-                text = fetch_citation_prompt(self, "cite")
+                text = self.citation_prompt()
                 if isinstance(instructions, list):
                     instructions = [{"type": "text", "text": text},
                                     *instructions]
