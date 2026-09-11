@@ -105,10 +105,16 @@ class _PdfPage:
 class _PdfDoc:
     """PyPDF2-backed adapter for raw object and stream access PDFium cannot expose."""
 
-    __slots__ = ("_reader", "_virtual")
+    __slots__ = ("_reader", "_virtual", "_page_count")
 
     def __init__(self, reader):
         self._reader = reader
+        # PyPDF2 parses lazily, so a document it cannot read (AES without the
+        # crypto backend, damaged xref) raises on first object access rather
+        # than at PdfReader(). Resolving the page tree here keeps that failure
+        # inside the callers' guarded open, which is what lets them fall back
+        # to the PDFium-only channel instead of propagating.
+        self._page_count = len(reader.pages)
         # Negative pseudo-xrefs for DIRECT (inline) dicts that have no object
         # number -- text extraction reference resolution treats direct and indirect values alike,
         # so inline font dicts must be addressable by the same integer-keyed
@@ -122,7 +128,7 @@ class _PdfDoc:
 
     @property
     def page_count(self) -> int:
-        return len(self._reader.pages)
+        return self._page_count
 
     def __getitem__(self, idx):
         return _PdfPage(self._reader.pages[idx])
