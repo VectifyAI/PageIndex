@@ -1057,9 +1057,9 @@ class PageIndexClient:
                 ``"chat_completions"``, which the managed chat serves too.
             instructions: Persona or extra guidance for this call,
                 appended after the managed system prompt (which stays: it
-                carries the tool guidance and the document context) and
-                the client's own ``instructions``. A string on every
-                lane; with ``protocol="messages"`` also a list of
+                carries the tool guidance) and the client's own
+                ``instructions``. A string on every lane; with
+                ``protocol="messages"`` also a list of
                 Messages system blocks. On the answer lane and
                 ``protocol="chat_completions"`` it precedes any ``system``
                 rows in the history; the managed cloud chat receives them
@@ -1074,8 +1074,10 @@ class PageIndexClient:
                 through ``instructions=`` instead. Managed chat:
                 ``chat_completions``'s ``enable_citations`` — the endpoint
                 cites in its own inline markup, not ``<cite>`` tags, and
-                the resolved citations it returns come back only from
-                ``chat_completions``.
+                the resolved citations it returns ride the response
+                envelope, so they need ``chat_completions()`` or
+                ``protocol="chat_completions"``; the answer lane returns
+                the answer string alone.
             max_turns: Own-model chat only — cap on agent turns per call
                 (default 10). The OpenAI lanes raise at the cap;
                 ``protocol="messages"`` returns the truncated run
@@ -1977,8 +1979,7 @@ class PageIndexClient:
         guidance natively — not the client's ``instructions``, which only
         ``system_prompt`` carries; passing both duplicates the guidance
         (harmless). ``system_prompt`` stays the recommended channel: it is
-        guaranteed delivery, and the only
-        channel local mode has.
+        guaranteed delivery, and the only channel local mode has.
 
         Usage (or ``claude_agent_config()`` for all three slots in one
         call)::
