@@ -45,12 +45,10 @@ def _parse_pages(pages: str) -> list[int]:
         raise PageIndexAPIError(str(exc)) from exc
 
 
-# The two citation tag formats PageIndex chat writes and renders, parsed as
-# the cloud parses them.
+# The two citation tag formats PageIndex chat writes and renders.
 _OLD_CITATION_RE = re.compile(
     r"<doc=([^;<>]+);page=(\d+)(?:;block(?:_id)?=([^;>]+))?>")
-_CITE_TAG_RE = re.compile(
-    r"<cite\s+([^>]*?)\s*/?>|<cite\s+([^>]*?)>[^<]*</cite>")
+_CITE_TAG_RE = re.compile(r"<cite\s([^<>]*)>")
 _CITE_ATTR_RE = re.compile(r"""(\w+)=(["'])(.*?)\2""", re.S)
 
 
@@ -78,7 +76,7 @@ def _parse_citations(text: str) -> list[dict[str, Any]]:
         add(m.group(1).strip(), m.group(2), m.group(3) or None)
     for m in _CITE_TAG_RE.finditer(text):
         attrs = {name: value for name, _, value in
-                 _CITE_ATTR_RE.findall(m.group(1) or m.group(2) or "")}
+                 _CITE_ATTR_RE.findall(m.group(1))}
         add(attrs.get("doc", "").strip(), attrs.get("page", ""),
             attrs.get("block") or None)
     return found

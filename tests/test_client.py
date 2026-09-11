@@ -1530,6 +1530,17 @@ def test_parse_citations_mirrors_the_cloud_parser():
     assert _parse_citations("no tags, just [a.pdf, p. 3] prose") == []
 
 
+def test_parse_citations_is_linear_on_unterminated_tags():
+    """An unterminated '<cite ' followed by whitespace is caller-supplied
+    text; the scan must stay linear, not backtrack for minutes."""
+    import time
+    from pageindex.client import _parse_citations
+    started = time.perf_counter()
+    assert _parse_citations("<cite " + " " * 2000) == []
+    assert _parse_citations(("<cite " + " " * 40) * 200) == []
+    assert time.perf_counter() - started < 2
+
+
 def _library(docs):
     """A cloud handler serving /docs/ (100 per page) and /doc/<id>/block/
     lookups from {doc_id: (name, {block_id: block})}."""
