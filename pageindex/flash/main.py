@@ -21,7 +21,7 @@ from .classification import is_body_paragraph, detect_header_footer, HeaderFoote
 from .labels import detect_captions, build_caption_regions, CaptionContext
 from .model import Rect, numbering_kind, block_text, deaccented_text, Block
 from .outline_assembly import (
-    build_heading_from_block, is_landscape_or_empty, is_outline_valid, is_chapter_outline_valid, mark_outline_block_types, assemble_outline, compute_max_heading_gap, has_table_or_prominent, OutlineNode, outline_to_dict_tree,
+    build_heading_from_block, is_outline_valid, is_chapter_outline_valid, mark_outline_block_types, assemble_outline, compute_max_heading_gap, has_table_or_prominent, OutlineNode, outline_to_dict_tree,
 )
 from .parser_pdfium_parallel import parse_charlevel_meta_parallel
 from .phases import assign_reading_order, PageView, process_page
@@ -126,7 +126,7 @@ def extract_toc(
     workers: Optional[int] = None,
     use_embedded_toc: bool = True,
 ) -> dict:
-    """Run the full pipeline. Returns a dict shaped like:: { "doc_name": "...", "doc_title": "...", "structure": [ {"title": "...", "start_index": 1, "end_index": 3, "nodes": [...]}, ... ], "has_abstract_or_references_section": False } ``has_abstract_or_references_section`` is True when any TOP-LEVEL outline entry is an abstract-keyword heading or carries the prominent-heading flag (a references-keyword heading, plain or numbered). The near-empty bail and the valid-outline branch both report False. ``workers`` sets the process count for the per-page parallel parser: None = auto (CPU count - 1), 1 forces the sequential path; output is identical either way. ``use_embedded_toc`` consumes the PDF's embedded bookmarks when trustworthy: deep bookmarks become the frame with the detected sections they lack grafted back in, coarse ones become the chapter frame with detected nodes re-hung under them, garbage ones are ignored; adds ``toc_source`` to the result. On by default; pass False for the pure detected structure. """
+    """Run the full pipeline. Returns a dict shaped like:: { "doc_name": "...", "doc_title": "...", "structure": [ {"title": "...", "start_index": 1, "end_index": 3, "nodes": [...]}, ... ], "has_abstract_or_references_section": False } ``has_abstract_or_references_section`` is True when any TOP-LEVEL outline entry is an abstract-keyword heading or carries the prominent-heading flag (a references-keyword heading, plain or numbered). The unreadable-text bail and the valid-outline branch both report False. ``workers`` sets the process count for the per-page parallel parser: None = auto (CPU count - 1), 1 forces the sequential path; output is identical either way. ``use_embedded_toc`` consumes the PDF's embedded bookmarks when trustworthy: deep bookmarks become the frame with the detected sections they lack grafted back in, coarse ones become the chapter frame with detected nodes re-hung under them, garbage ones are ignored. On by default; pass False for the pure detected structure. ``toc_source`` is always present: ``"detected"``, ``"bookmarks"``, or ``"unreadable"`` when the text layer carries no alphabetic script and the outline is left empty. """
     # ----- 1) Parse PDF -> flat spans per page --------------------------
     # per-page (view box, /Rotate) comes from the same engine (PDFium) that
     # produced the block coordinates, so the geometry frame is consistent.
@@ -157,11 +157,11 @@ def extract_toc(
         page.blocks = cluster_lines_into_blocks(ctx)
         assign_reading_order(page, page.blocks)
 
-    # ----- Early empty-outline gate ------------------------------------
-    # Short, near-empty, unsupported-script, or mostly-landscape documents
-    # emit an empty outline rather than a fabricated structure.
-    if (doc.secondary_slot.state_slot <= 300 or doc.secondary_slot.previous_slot <= 200
-            or doc.secondary_slot.tertiary_slot in (0, 2, 10) or is_landscape_or_empty(doc)):
+    # ----- Unreadable-text gate ------------------------------------------
+    # A text layer of control characters, unclassified bytes, or astral code
+    # points is garbage for every later stage: emit an empty outline rather
+    # than headings made of it.
+    if doc.secondary_slot.tertiary_slot in (0, 2, 10):
         if isinstance(doc_handle, (str, Path)):
             doc_name = Path(str(doc_handle)).name
         else:
@@ -175,14 +175,17 @@ def extract_toc(
             "page_texts": ["\n".join(block_text(block)
                                      for block in (page.secondary_slot or []))
                            for page in pages],
+            "toc_source": "unreadable",
         }
         # Bookmarks need no extracted text, so they can still structure a
-        # document this gate wrote off as unreadable.
+        # document whose text layer is unusable.
         if use_embedded_toc:
             from .embedded_toc import apply_embedded_toc
-            result["structure"], result["toc_source"] = apply_embedded_toc(
+            structure, source = apply_embedded_toc(
                 [], doc_handle, len(pages), page_texts=result["page_texts"],
             )
+            if structure:
+                result["structure"], result["toc_source"] = structure, source
         return result
 
     # ----- 5) Classification: header / footer / watermark / TOC pages ---
@@ -321,6 +324,7 @@ def extract_toc(
         "structure": structure,
         "has_abstract_or_references_section": has_abstract_or_references,
         "page_texts": page_texts,
+        "toc_source": "detected",
     }
     if use_embedded_toc:
         from .embedded_toc import apply_embedded_toc

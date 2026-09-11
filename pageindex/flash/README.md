@@ -45,8 +45,14 @@ Writes the tree to `results/<name>_structure.json`.
             "nodes": [...],
         }
     ],
+    "toc_source": str,  # "detected" | "bookmarks" | "pages" | "unreadable"
 }
 ```
+
+`toc_source` says where the structure came from. `"pages"` means the layout
+yielded no hierarchy, so each page that carries text became one node titled by
+its first block; `"unreadable"` means the PDF carries no alphabetic text in any
+script (scanned, image-only, or a garbage encoding) and `structure` is empty.
 
 ## Benchmark
 

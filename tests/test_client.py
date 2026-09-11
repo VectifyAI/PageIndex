@@ -2186,3 +2186,45 @@ def test_instructions_must_be_a_string(tmp_path):
     with pytest.raises(PageIndexAPIError, match="instructions must be a str"):
         PageIndexClient(storage_path=str(tmp_path / "s"),
                         instructions=[{"type": "text", "text": "x"}])
+
+
+def test_submit_flash_rejects_unreadable_text_layer(local_client, sample_pdf,
+                                                    monkeypatch):
+    monkeypatch.setattr(
+        pageindex.flash, "page_index_flash",
+        lambda pdf, **kwargs: {"doc_name": "sample.pdf", "structure": [],
+                               "toc_source": "unreadable"})
+    with pytest.raises(PageIndexAPIError, match="no alphabetic text"):
+        local_client.submit_document(sample_pdf, mode="flash")
+
+
+def test_submit_flash_accepts_page_fallback(local_client, sample_pdf, monkeypatch):
+    """A small flat tree is a valid index."""
+    monkeypatch.setattr(
+        pageindex.flash, "page_index_flash",
+        lambda pdf, **kwargs: {
+            "doc_name": "sample.pdf", "toc_source": "pages",
+            "structure": [{"title": "Hello", "start_index": 1, "end_index": 1,
+                           "summary": "s", "nodes": []},
+                          {"title": "World", "start_index": 2, "end_index": 2,
+                           "summary": "s", "nodes": []}]})
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda model, prompt, **kw: "Flash description.")
+    doc_id = local_client.submit_document(sample_pdf, mode="flash")["doc_id"]
+    tree = local_client.get_tree(doc_id)["result"]
+    assert [node["title"] for node in tree] == ["Hello", "World"]
+
+
+def test_submit_flash_rejects_oversized_flat_tree(local_client, sample_pdf,
+                                                  monkeypatch):
+    from pageindex.flash.api import FLAT_TREE_MAX_NODES
+
+    nodes = [{"title": f"Page {n}", "start_index": 1, "end_index": 1, "nodes": []}
+             for n in range(FLAT_TREE_MAX_NODES + 1)]
+    monkeypatch.setattr(
+        pageindex.flash, "page_index_flash",
+        lambda pdf, **kwargs: {"doc_name": "sample.pdf", "toc_source": "pages",
+                               "structure": nodes})
+    with pytest.raises(PageIndexAPIError,
+                       match="no layout structure.*mode='standard'"):
+        local_client.submit_document(sample_pdf, mode="flash")
