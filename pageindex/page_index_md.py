@@ -8,6 +8,12 @@ except:
     from utils import *
 
 async def get_node_summary(node, summary_token_threshold=200, model=None):
+    """Generate summary for a markdown node.
+
+    For nodes whose text length is below summary_token_threshold (default: 200 tokens),
+    the raw node text is copied verbatim into summary without an LLM call to save costs.
+    Set summary_token_threshold=0 to force LLM summary generation for all nodes.
+    """
     node_text = node.get('text')
     num_tokens = count_tokens(node_text, model=model)
     if num_tokens < summary_token_threshold:

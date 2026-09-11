@@ -52,7 +52,7 @@ if __name__ == "__main__":
     parser.add_argument('--thinning-threshold', type=int, default=5000,
                       help='Minimum token threshold for thinning (markdown only)')
     parser.add_argument('--summary-token-threshold', type=int, default=200,
-                      help='Token threshold for generating summaries (markdown only)')
+                      help='Token threshold below which node text is copied verbatim into summary without an LLM call (default: 200, markdown only). Set to 0 to generate summaries for all nodes.')
     args = parser.parse_args()
     if args.flash:
         args.mode = 'flash'
