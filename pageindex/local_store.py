@@ -95,21 +95,59 @@ class DocStore:
 
     @contextmanager
     def lock(self):
-        """Cross-process mutex for check-then-write sequences (name
-        uniquing before save). fcntl is absent on Windows, where the
-        pre-existing best-effort behavior stays."""
+        """Cross-process and cross-thread mutex for check-then-write
+        sequences (name uniquing before save). Supports POSIX via fcntl
+        and Windows via msvcrt."""
         try:
             import fcntl
+            has_fcntl = True
         except ImportError:
+            has_fcntl = False
+
+        try:
+            import msvcrt
+            has_msvcrt = True
+        except ImportError:
+            has_msvcrt = False
+
+        if not has_fcntl and not has_msvcrt:
             yield
             return
+
         self._root.mkdir(parents=True, exist_ok=True)
-        with open(self._root / ".lock", "w") as handle:
-            fcntl.flock(handle, fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(handle, fcntl.LOCK_UN)
+        lock_path = self._root / ".lock"
+
+        if has_fcntl:
+            with open(lock_path, "w") as handle:
+                fcntl.flock(handle, fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(handle, fcntl.LOCK_UN)
+        elif has_msvcrt:
+            if not lock_path.is_file():
+                try:
+                    with open(lock_path, "a+b") as h:
+                        h.write(b"\0")
+                except OSError:
+                    pass
+            with open(lock_path, "r+b") as handle:
+                import time
+                while True:
+                    try:
+                        handle.seek(0)
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                        break
+                    except OSError:
+                        time.sleep(0.01)
+                try:
+                    yield
+                finally:
+                    handle.seek(0)
+                    try:
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                    except OSError:
+                        pass
 
     # ── documents ──
     def save_document(self, doc_id: str, meta: dict, tree: list, pages: list) -> None:
