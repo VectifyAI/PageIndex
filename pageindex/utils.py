@@ -6,7 +6,7 @@ import textwrap
 from datetime import datetime
 import time
 import json
-import PyPDF2
+import pypdf
 import copy
 import asyncio
 from io import BytesIO
@@ -364,7 +364,7 @@ def get_last_node(structure):
 
 
 def extract_text_from_pdf(pdf_path):
-    pdf_reader = PyPDF2.PdfReader(pdf_path)
+    pdf_reader = pypdf.PdfReader(pdf_path)
     ###return text not list 
     text=""
     for page_num in range(len(pdf_reader.pages)):
@@ -373,13 +373,13 @@ def extract_text_from_pdf(pdf_path):
     return text
 
 def get_pdf_title(pdf_path):
-    pdf_reader = PyPDF2.PdfReader(pdf_path)
+    pdf_reader = pypdf.PdfReader(pdf_path)
     meta = pdf_reader.metadata
     title = meta.title if meta and meta.title else 'Untitled'
     return title
 
 def get_text_of_pages(pdf_path, start_page, end_page, tag=True):
-    pdf_reader = PyPDF2.PdfReader(pdf_path)
+    pdf_reader = pypdf.PdfReader(pdf_path)
     text = ""
     for page_num in range(start_page-1, end_page):
         page = pdf_reader.pages[page_num]
@@ -418,7 +418,7 @@ def get_pdf_name(pdf_path):
     if isinstance(pdf_path, str):
         pdf_name = os.path.basename(pdf_path)
     elif isinstance(pdf_path, BytesIO):
-        pdf_reader = PyPDF2.PdfReader(pdf_path)
+        pdf_reader = pypdf.PdfReader(pdf_path)
         meta = pdf_reader.metadata
         pdf_name = meta.title if meta and meta.title else 'Untitled'
         pdf_name = sanitize_filename(pdf_name)
@@ -529,10 +529,10 @@ def add_preface_if_needed(data):
 
 
 
-def get_page_tokens(pdf_path, model=None, pdf_parser="PyPDF2"):
+def get_page_tokens(pdf_path, model=None, pdf_parser="pypdf"):
     import litellm
-    if pdf_parser == "PyPDF2":
-        pdf_reader = PyPDF2.PdfReader(pdf_path)
+    if pdf_parser in ("pypdf", "PyPDF2"):
+        pdf_reader = pypdf.PdfReader(pdf_path)
         page_list = []
         for page_num in range(len(pdf_reader.pages)):
             page = pdf_reader.pages[page_num]
@@ -575,7 +575,7 @@ def get_text_of_pdf_pages_with_labels(pdf_pages, start_page, end_page):
     return text
 
 def get_number_of_pages(pdf_path):
-    pdf_reader = PyPDF2.PdfReader(pdf_path)
+    pdf_reader = pypdf.PdfReader(pdf_path)
     num = len(pdf_reader.pages)
     return num
 

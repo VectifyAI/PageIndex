@@ -394,7 +394,7 @@ def _assign_show_tz(objects: list[dict], show_tzs: list[float]) -> None:
 
 
 def _page_vertical_resource_names(pdf_doc, page_idx: int) -> set[bytes]:
-    """Font resource names (``F4`` of ``/F4 14 Tf``) on this page whose encoding is a vertical CMap: a predefined ``*-V`` name (Identity-V, UniJIS-UCS2-V, ...) or an embedded CMap stream with ``/WMode 1``. This derives the vertical-font flag used by the item merger, read from the same PyPDF2 document already opened for content streams. Returns an empty set on any failure, which leaves vertical handling disabled for that page."""
+    """Font resource names (``F4`` of ``/F4 14 Tf``) on this page whose encoding is a vertical CMap: a predefined ``*-V`` name (Identity-V, UniJIS-UCS2-V, ...) or an embedded CMap stream with ``/WMode 1``. This derives the vertical-font flag used by the item merger, read from the same pypdf document already opened for content streams. Returns an empty set on any failure, which leaves vertical handling disabled for that page."""
     names: set[bytes] = set()
     try:
         for rec in pdf_doc[page_idx].get_fonts(full=True):
