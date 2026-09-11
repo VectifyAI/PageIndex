@@ -612,7 +612,8 @@ def test_get_page_content_span_bomb_rejected(local_client, indexed_doc):
 
 def test_local_citations_resolve_to_pages_only(local_client, indexed_doc):
     """Local page content has no blocks: page citations resolve to the
-    document id, block lookups name the cloud-only exit."""
+    document id, get_block names the cloud-only exit, and a block citation
+    keeps its entry without a bbox."""
     answer = 'Apples <cite doc="sample.pdf" page="1"/> and none <cite doc="other.pdf" page="2"/>.'
     assert local_client.resolve_citations(answer) == [
         {"document": "sample.pdf", "doc_id": indexed_doc, "page": 1},
@@ -620,9 +621,10 @@ def test_local_citations_resolve_to_pages_only(local_client, indexed_doc):
     ]
     with pytest.raises(PageIndexAPIError, match="get_block is cloud-only"):
         local_client.get_block(indexed_doc, "p1_text_1")
-    with pytest.raises(PageIndexAPIError, match="get_block is cloud-only"):
-        local_client.resolve_citations(
-            '<cite doc="sample.pdf" page="1" block="p1_text_1"/>')
+    assert local_client.resolve_citations(
+        '<cite doc="sample.pdf" page="1" block="p1_text_1"/>') == [
+        {"document": "sample.pdf", "doc_id": indexed_doc, "page": 1,
+         "block_id": "p1_text_1"}]
 
 
 def test_submit_does_not_create_cwd_logs(local_client, sample_pdf, tmp_path, monkeypatch):
@@ -1590,6 +1592,22 @@ def test_resolve_citations_cloud(cloud, monkeypatch):
             client.resolve_citations(not_text)
     with pytest.raises(PageIndexAPIError, match="doc_ids must be a string or a list"):
         client.resolve_citations(answer, doc_ids=5)
+    with pytest.raises(PageIndexAPIError, match="doc_ids is empty"):
+        client.resolve_citations(answer, doc_ids=[])
+
+
+def test_resolve_citations_quotes_and_tag_edges(cloud, monkeypatch):
+    """A quoted name keeps its apostrophe, and a managed-chat tag without
+    its own ';' stops at the next tag instead of swallowing it."""
+    client, calls, fake = cloud
+    _patch_requests(monkeypatch, _library({"pi-m": ("Moody's Outlook.pdf", {}),
+                                           "pi-b": ("b.pdf", {})}))
+    answer = ("""Held <cite doc="Moody's Outlook.pdf" page="3"/> and overall """
+              "<doc=b.pdf> is long, but revenue rose <doc=b.pdf;page=7>.")
+    assert client.resolve_citations(answer) == [
+        {"document": "b.pdf", "doc_id": "pi-b", "page": 7},
+        {"document": "Moody's Outlook.pdf", "doc_id": "pi-m", "page": 3},
+    ]
 
 
 def test_resolve_citations_lists_the_whole_library(cloud, monkeypatch):
@@ -1606,6 +1624,22 @@ def test_resolve_citations_lists_the_whole_library(cloud, monkeypatch):
     assert seen_offsets == [0, 100]
 
 
+def test_resolve_citations_listing_survives_a_shifting_library(cloud, monkeypatch):
+    """A listing without 'total' ends on the empty page, and a document
+    re-served after an upload shifted the window is still one document."""
+    client, calls, fake = cloud
+    def handler(method, url, kw):
+        assert url.endswith("/docs/")
+        offset = kw["params"]["offset"]
+        entries = [{"id": f"pi-{i}", "name": f"{i}.pdf"} for i in range(150)]
+        if offset:
+            entries.insert(0, {"id": "pi-new", "name": "new.pdf"})
+        return FakeResponse({"documents": entries[offset:offset + 100]})
+    _patch_requests(monkeypatch, handler)
+    assert client.resolve_citations('<cite doc="99.pdf" page="1"/>') == [
+        {"document": "99.pdf", "doc_id": "pi-99", "page": 1}]
+
+
 def test_resolve_citations_refuses_a_shared_name(cloud, monkeypatch):
     """Two documents under one cited name would silently pick a bbox from
     the wrong one: raise, name both ids, point at doc_ids=."""
@@ -1619,15 +1653,22 @@ def test_resolve_citations_refuses_a_shared_name(cloud, monkeypatch):
         {"document": "a.pdf", "doc_id": "pi-2", "page": 1}]
 
 
-def test_resolve_citations_only_swallows_404(cloud, monkeypatch):
+def test_resolve_citations_keeps_blocks_it_cannot_read(cloud, monkeypatch):
+    """A denied block (403) keeps its bbox-less entry like a missing one;
+    a transport failure still propagates with its status."""
     client, calls, fake = cloud
+    status = {"code": 403}
     def handler(method, url, kw):
         if "/block/" in url:
-            return FakeResponse(status_code=500, text="boom")
+            return FakeResponse(status_code=status["code"], text="boom")
         return _library({"pi-a": ("a.pdf", {})})(method, url, kw)
     _patch_requests(monkeypatch, handler)
+    answer = '<cite doc="a.pdf" page="1" block="p1_text_1"/>'
+    assert client.resolve_citations(answer) == [
+        {"document": "a.pdf", "doc_id": "pi-a", "page": 1, "block_id": "p1_text_1"}]
+    status["code"] = 500
     with pytest.raises(PageIndexAPIError, match="Failed to get block: boom") as err:
-        client.resolve_citations('<cite doc="a.pdf" page="1" block="p1_text_1"/>')
+        client.resolve_citations(answer)
     assert err.value.status_code == 500
 
 

@@ -46,12 +46,12 @@ def _parse_pages(pages: str) -> list[int]:
 
 
 # The two citation tag formats PageIndex chat writes and renders, parsed as
-# the cloud parses them (the same expressions).
+# the cloud parses them.
 _OLD_CITATION_RE = re.compile(
-    r"<doc=([^;]+);page=(\d+)(?:;block(?:_id)?=([^;>]+))?>")
+    r"<doc=([^;<>]+);page=(\d+)(?:;block(?:_id)?=([^;>]+))?>")
 _CITE_TAG_RE = re.compile(
     r"<cite\s+([^>]*?)\s*/?>|<cite\s+([^>]*?)>[^<]*</cite>")
-_CITE_ATTR_RE = re.compile(r"""(\w+)=["']([^"']*)["']""")
+_CITE_ATTR_RE = re.compile(r"""(\w+)=(["'])(.*?)\2""", re.S)
 
 
 def _parse_citations(text: str) -> list[dict[str, Any]]:
@@ -77,7 +77,8 @@ def _parse_citations(text: str) -> list[dict[str, Any]]:
     for m in _OLD_CITATION_RE.finditer(text):
         add(m.group(1).strip(), m.group(2), m.group(3) or None)
     for m in _CITE_TAG_RE.finditer(text):
-        attrs = dict(_CITE_ATTR_RE.findall(m.group(1) or m.group(2) or ""))
+        attrs = {name: value for name, _, value in
+                 _CITE_ATTR_RE.findall(m.group(1) or m.group(2) or "")}
         add(attrs.get("doc", "").strip(), attrs.get("page", ""),
             attrs.get("block") or None)
     return found
@@ -770,7 +771,9 @@ class PageIndexClient:
 
         Returns:
             dict: The block as the API returns it: {'doc_id', 'page',
-            'block_id', 'bbox', 'block_type', ...}. PageIndexAPIError with
+            'block_id', 'bbox', 'block_type', ...}. ``bbox`` is
+            ``[x0, y0, x1, y1]`` in thousandths of the page's width and
+            height (0-1000), origin top-left. PageIndexAPIError with
             ``status_code == 404`` when the document or the block does not
             exist.
         """
@@ -2183,18 +2186,19 @@ class PageIndexClient:
             doc_ids (str | list[str], optional): The documents the answer
                 was about — what ``chat(doc_id=...)`` took. Citations name
                 documents, and the ids come from here; without it your own
-                library is listed, so a document shared with you resolves
-                only through ``doc_ids``. Two documents sharing a cited
-                name raise PageIndexAPIError naming both ids: pass
-                ``doc_ids`` to pick.
+                library is listed. Two documents sharing a cited name
+                raise PageIndexAPIError naming both ids: pass ``doc_ids``
+                to pick.
 
         Returns:
             list: One dict per distinct citation: ``{'document', 'doc_id',
             'page'}`` for a page-level citation, plus ``'block_id'`` and
-            the block's fields (``'bbox'``, ``'block_type'``, ...) for a
-            block-level one. A document not in the library keeps
-            ``doc_id: None``; a block the document does not have (a
-            model's slip) keeps its citation without a bbox.
+            the block's fields as ``get_block()`` returns them (``'bbox'``,
+            ``'block_type'``, ...) for a block-level one. A document not in
+            the library keeps ``doc_id: None``; a block the document does
+            not have (a model's slip), or that cannot be looked up (local
+            mode, a document you cannot read), keeps its citation without
+            a bbox.
         """
         if not isinstance(answer, str):
             raise PageIndexAPIError("answer must be a str — the answer text "
@@ -2202,6 +2206,10 @@ class PageIndexClient:
         if doc_ids is not None and not isinstance(doc_ids, (str, list)):
             raise PageIndexAPIError("doc_ids must be a string or a list of "
                                     "strings.")
+        if doc_ids is not None and not doc_ids:
+            raise PageIndexAPIError("doc_ids is empty. Pass the answer's "
+                                    "document ids, or omit doc_ids to "
+                                    "resolve against your library.")
         citations = _parse_citations(answer)
         if not citations:
             return []
@@ -2213,17 +2221,12 @@ class PageIndexClient:
                 name = self.get_document(doc_id)["name"]
                 names.setdefault(name, []).append(doc_id)
         else:
-            offset = 0
-            while True:
-                page = self.list_documents(limit=100, offset=offset)
-                for doc in page["documents"]:
-                    names.setdefault(doc["name"], []).append(doc["id"])
-                offset += len(page["documents"])
-                if not page["documents"] or offset >= page["total"]:
-                    break
+            from .agent_tools import _all_documents
+            for doc in _all_documents(self):
+                names.setdefault(doc["name"], []).append(doc["id"])
         resolved: list[dict[str, Any]] = []
         for citation in citations:
-            ids = names.get(citation["document"], [])
+            ids = list(dict.fromkeys(names.get(citation["document"], [])))
             if len(ids) > 1:
                 raise PageIndexAPIError(
                     f"{citation['document']!r} names {len(ids)} documents "
@@ -2238,7 +2241,8 @@ class PageIndexClient:
                     try:
                         entry.update(self.get_block(entry["doc_id"], block_id))
                     except PageIndexAPIError as exc:
-                        if exc.status_code != 404:
+                        # Local raises carry no status; 429/5xx propagate.
+                        if exc.status_code not in (None, 403, 404):
                             raise
             resolved.append(entry)
         return resolved

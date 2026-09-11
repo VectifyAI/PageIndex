@@ -121,7 +121,9 @@ class CloudAPI:
 
         Returns:
             dict: The block as the API returns it: {'doc_id', 'page',
-                'block_id', 'bbox', 'block_type', ...}. A 404 means the
+                'block_id', 'bbox', 'block_type', ...}. bbox is
+                [x0, y0, x1, y1] in thousandths of the page's width and
+                height (0-1000), origin top-left. A 404 means the
                 document has no such block.
         """
         response = requests.get(
