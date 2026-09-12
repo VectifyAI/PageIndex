@@ -520,28 +520,33 @@ def _layout_pdf(pages, landscape=False):
     return bytes(out)
 
 
+DECK_TITLES = ["Revenue Overview", "Operating Expenses", "Customer Growth",
+               "Product Roadmap", "Regional Performance", "Engineering Metrics",
+               "Risk Factors", "Outlook and Guidance"]
+
+
+def _deck_pdf():
+    return _layout_pdf(
+        [(title, [f"Detail {n} for slide {slide} with a few more words of body text"
+                  for n in range(1, 6)]) for slide, title in enumerate(DECK_TITLES, 1)],
+        landscape=True)
+
+
 def test_landscape_deck_is_structured(tmp_path):
     """A text-light landscape deck is an ordinary document: every slide title
-    becomes a node. The landscape bail used to empty it."""
+    becomes a node."""
     from pageindex.flash.main import extract_toc
 
-    titles = ["Revenue Overview", "Operating Expenses", "Customer Growth",
-              "Product Roadmap", "Regional Performance", "Engineering Metrics",
-              "Risk Factors", "Outlook and Guidance"]
     pdf = tmp_path / "deck.pdf"
-    pdf.write_bytes(_layout_pdf(
-        [(title, [f"Detail {n} for slide {slide} with a few more words of body text"
-                  for n in range(1, 6)]) for slide, title in enumerate(titles, 1)],
-        landscape=True))
+    pdf.write_bytes(_deck_pdf())
     result = extract_toc(str(pdf))
     # slide 1 is spent on the document title, as on any title page
-    assert [node["title"] for node in result["structure"]] == titles[1:]
+    assert [node["title"] for node in result["structure"]] == DECK_TITLES[1:]
     assert result["toc_source"] == "detected"
 
 
 def test_short_document_headings_are_detected(tmp_path):
-    """Three pages of heading-plus-a-line are enough for detection; the
-    weight thresholds used to bail before it ran."""
+    """Three pages of heading-plus-a-line are enough for detection."""
     from pageindex.flash.main import extract_toc
 
     pdf = tmp_path / "memo.pdf"
@@ -579,10 +584,8 @@ def test_no_hierarchy_falls_back_to_page_nodes(tmp_path):
     result = page_index_flash(str(pdf), summary=False, optimize=False)
     assert result["toc_source"] == "pages"
     assert result["structure"] == [
-        {"title": "Mission", "node_id": "0000", "start_index": 1,
-         "end_index": 1, "nodes": []},
-        {"title": "Budget", "node_id": "0001", "start_index": 2,
-         "end_index": 2, "nodes": []},
+        {"title": "Page 1", "node_id": "0000", "start_index": 1, "end_index": 1},
+        {"title": "Page 2", "node_id": "0001", "start_index": 2, "end_index": 2},
     ]
     assert "page_texts" not in result
 
@@ -603,13 +606,13 @@ def test_flat_fallback_over_limit_skips_model_passes(tmp_path, monkeypatch):
     result = flash_api.page_index_flash(str(pdf), summary=True, summary_model="m")
     assert result["toc_source"] == "pages"
     assert [node["title"] for node in result["structure"]] == [
-        "Alpha body", "Beta body", "Gamma body"]
+        "Page 1", "Page 2", "Page 3"]
     assert "page_texts" not in result
 
 
 def test_textless_pdf_is_unreadable(tmp_path):
-    """An empty text layer has no alphabetic script, so the gate bails with
-    an empty structure labelled unreadable and no page nodes are invented."""
+    """A PDF with no text on any page has nothing to index: an empty
+    structure labelled unreadable, no page nodes."""
     from conftest import build_pdf
     from pageindex.flash import page_index_flash
 
@@ -629,7 +632,7 @@ def test_flash_rejection_reason():
     assert flash_rejection_reason(
         {"structure": [node] * 2, "toc_source": "pages"}) is None
     unreadable = flash_rejection_reason({"structure": [], "toc_source": "unreadable"})
-    assert "no alphabetic text" in unreadable and "mode='standard'" in unreadable
+    assert "no text layer" in unreadable and "standard" not in unreadable
     oversized = {"structure": [node] * (FLAT_TREE_MAX_NODES + 1),
                  "toc_source": "pages"}
     flat = flash_rejection_reason(oversized)
@@ -637,3 +640,67 @@ def test_flash_rejection_reason():
     assert "--mode standard" in flash_rejection_reason(
         oversized, standard_hint="--mode standard")
     assert "could not extract" in flash_rejection_reason({"structure": []})
+
+
+FLASH_DATA = Path(__file__).parent / "data" / "flash"   # see its make_fixtures.py
+
+
+def test_page_fallback_covers_every_page(tmp_path):
+    """Pages without text still get a node: the flat tree covers the whole
+    document, so no page is unreachable."""
+    from conftest import build_pdf
+    from pageindex.flash import page_index_flash
+
+    pdf = tmp_path / "sparse.pdf"
+    pdf.write_bytes(build_pdf(["", "Alpha body", "", "Delta body"]))
+    result = page_index_flash(str(pdf), summary=False, optimize=False)
+    assert result["toc_source"] == "pages"
+    assert [(n["title"], n["start_index"], n["end_index"])
+            for n in result["structure"]] == [
+        ("Page 1", 1, 1), ("Page 2", 2, 2), ("Page 3", 3, 3), ("Page 4", 4, 4)]
+    assert all("nodes" not in n for n in result["structure"])
+
+
+@pytest.mark.parametrize("name", ["hi_report.pdf", "ar_report.pdf"])
+def test_non_latin_document_is_indexed(name):
+    """Script never decides whether a document is indexable."""
+    from pageindex.flash import page_index_flash
+    from pageindex.flash.api import flash_rejection_reason
+
+    result = page_index_flash(str(FLASH_DATA / name), summary=False, optimize=False)
+    assert result["structure"]
+    assert flash_rejection_reason(result) is None
+
+
+def test_japanese_headings_are_kept():
+    from pageindex.flash.main import extract_toc
+
+    result = extract_toc(str(FLASH_DATA / "ja_report.pdf"), use_embedded_toc=False)
+    assert [n["title"] for n in result["structure"]] == [
+        "財務ハイライト", "リスク要因", "今後の見通し"]
+
+
+def test_cross_script_headings_are_kept():
+    from pageindex.flash.main import extract_toc
+
+    result = extract_toc(str(FLASH_DATA / "zh_body_en_headings.pdf"),
+                         use_embedded_toc=False)
+    assert [n["title"] for n in result["structure"]] == [
+        "Financial Review", "Risk Factors", "Business Outlook"]
+
+
+@pytest.mark.parametrize("name", ["hi_report.pdf", "ar_report.pdf"])
+def test_non_latin_headings_are_detected(name):
+    from pageindex.flash.main import extract_toc
+
+    result = extract_toc(str(FLASH_DATA / name), use_embedded_toc=False)
+    assert result["toc_source"] == "detected"
+    assert len(result["structure"]) == 3
+
+
+def test_landscape_deck_title_is_the_slide_heading(tmp_path):
+    from pageindex.flash.main import extract_toc
+
+    pdf = tmp_path / "deck.pdf"
+    pdf.write_bytes(_deck_pdf())
+    assert extract_toc(str(pdf))["doc_title"] == DECK_TITLES[0]

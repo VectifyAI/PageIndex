@@ -2194,7 +2194,7 @@ def test_submit_flash_rejects_unreadable_text_layer(local_client, sample_pdf,
         pageindex.flash, "page_index_flash",
         lambda pdf, **kwargs: {"doc_name": "sample.pdf", "structure": [],
                                "toc_source": "unreadable"})
-    with pytest.raises(PageIndexAPIError, match="no alphabetic text"):
+    with pytest.raises(PageIndexAPIError, match="no text layer"):
         local_client.submit_document(sample_pdf, mode="flash")
 
 

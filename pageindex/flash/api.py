@@ -99,14 +99,12 @@ def _optimize(structure, page_texts, do_expand, model):
 
 
 def _page_nodes(page_texts: list[str]) -> list[dict]:
-    """One node per page that carries text, titled by the page's first block."""
+    """One node per page, so every page is reachable."""
     from ..utils import write_node_id
-    nodes = []
-    for index, text in enumerate(page_texts, start=1):
-        first = next((line.strip() for line in text.splitlines() if line.strip()), "")
-        if first:
-            nodes.append({"title": first[:80], "node_id": "", "start_index": index,
-                          "end_index": index, "nodes": []})
+    if not any(text.strip() for text in page_texts):
+        return []
+    nodes = [{"title": f"Page {index}", "node_id": "", "start_index": index,
+              "end_index": index} for index in range(1, len(page_texts) + 1)]
     write_node_id(nodes)
     return nodes
 
@@ -119,13 +117,12 @@ def flash_rejection_reason(result: dict, standard_hint: str = "mode='standard'")
     """
     structure = result.get("structure") or []
     if result.get("toc_source") == "unreadable":
-        return ("PageIndex Flash found no alphabetic text in this PDF (scanned, "
-                "image-only, or a broken text encoding). If it does carry text, "
-                f"try {standard_hint}, which builds the structure with the model.")
+        return ("PageIndex Flash found no text layer in this PDF (scanned or "
+                "image-only); run OCR before indexing it.")
     if result.get("toc_source") == "pages" and len(structure) > FLAT_TREE_MAX_NODES:
         return (f"PageIndex Flash found no layout structure in this document "
-                f"({len(structure)} pages of text); try {standard_hint}, which "
-                "builds the structure with the model.")
+                f"({len(structure)} pages); try {standard_hint}, which builds "
+                "the structure with the model.")
     if not structure:
         return ("PageIndex Flash could not extract a structure from this PDF; "
                 f"try {standard_hint}, which builds the structure with the model.")
@@ -136,7 +133,7 @@ def page_index_flash(pdf, summary=True, summary_model=None,
                      optimize: str | bool | None = None, optimize_expand=None,
                      optimize_model=None, summary_concurrency=None,
                      use_embedded_toc=True) -> dict:
-    """Build a PageIndex tree structure from a PDF using layout statistics. The tree extraction itself uses no LLM; by default an LLM writes node summaries and expands the tree (``summary=False, optimize=False`` runs fully LLM-free). Args: pdf: path to a PDF file (``str`` or ``pathlib.Path``) or an in-memory binary stream (``io.BytesIO``). summary: if True, generate LLM summaries for each node (requires ``summary_model``). summary_model: the LLM model identifier to use for summary generation. optimize: ``"full"`` for merge + LLM expand (a model unreachable after the retry ladder — a missing credential included — fails the run loudly from expand itself; a per-prompt rejection leaves just that node collapsed), ``"merge"`` for deterministic merge only, ``False`` to disable. ``True`` is accepted as ``"full"`` for backward compatibility; defaults to ``"full"``. Expand needs readable page text, so a bookmark-only or scanned PDF runs the merge half only (``expands`` reports 0). optimize_expand: deprecated — use ``optimize``. Honored only when ``optimize`` is not passed (or is the legacy ``True``): ``False`` maps to ``"merge"``, ``True`` to ``"full"``. optimize_model: the LLM model for expand (defaults to the summary model). summary_concurrency: maximum simultaneous summary model calls; None uses the library default. use_embedded_toc: if True, consume the PDF's embedded bookmarks when trustworthy: deep bookmarks become the frame and the detected sections they lack are grafted back in after noise filtering, coarse ones become the chapter frame with detected nodes re-hung under them (deeper sparse entries are filled in when the page text confirms them, and garbled extracted titles are repaired from the bookmark strings), garbage ones are ignored. On by default; pass False for the pure detected structure. Returns: dict with keys ``doc_name``, ``doc_title``, ``structure`` (a list of nested ``{"title", "start_index", "end_index", "nodes"}`` dicts; page indexes are 1-based) and ``has_abstract_or_references_section`` (True when a top-level entry is an abstract or references heading). ``toc_source`` says where the structure came from: ``"detected"`` (layout), ``"bookmarks"`` (the embedded outline), ``"pages"`` (no hierarchy found, so one node per page that carries text, titled by its first block; left unsummarized and unoptimized when there are more than ``FLAT_TREE_MAX_NODES`` of them, a size the local client and CLI refuse) or ``"unreadable"`` (no alphabetic text in any script: scanned, image-only, or garbage encoding; ``structure`` is empty). With ``optimize`` an ``optimize`` key reports merge/expand counts and before/after search-cost metrics. """
+    """Build a PageIndex tree structure from a PDF using layout statistics. The tree extraction itself uses no LLM; by default an LLM writes node summaries and expands the tree (``summary=False, optimize=False`` runs fully LLM-free). Args: pdf: path to a PDF file (``str`` or ``pathlib.Path``) or an in-memory binary stream (``io.BytesIO``). summary: if True, generate LLM summaries for each node (requires ``summary_model``). summary_model: the LLM model identifier to use for summary generation. optimize: ``"full"`` for merge + LLM expand (a model unreachable after the retry ladder — a missing credential included — fails the run loudly from expand itself; a per-prompt rejection leaves just that node collapsed), ``"merge"`` for deterministic merge only, ``False`` to disable. ``True`` is accepted as ``"full"`` for backward compatibility; defaults to ``"full"``. Expand needs readable page text, so a bookmark-only or scanned PDF runs the merge half only (``expands`` reports 0). optimize_expand: deprecated — use ``optimize``. Honored only when ``optimize`` is not passed (or is the legacy ``True``): ``False`` maps to ``"merge"``, ``True`` to ``"full"``. optimize_model: the LLM model for expand (defaults to the summary model). summary_concurrency: maximum simultaneous summary model calls; None uses the library default. use_embedded_toc: if True, consume the PDF's embedded bookmarks when trustworthy: deep bookmarks become the frame and the detected sections they lack are grafted back in after noise filtering, coarse ones become the chapter frame with detected nodes re-hung under them (deeper sparse entries are filled in when the page text confirms them, and garbled extracted titles are repaired from the bookmark strings), garbage ones are ignored. On by default; pass False for the pure detected structure. Returns: dict with keys ``doc_name``, ``doc_title``, ``structure`` (a list of nested ``{"title", "start_index", "end_index", "nodes"}`` dicts; page indexes are 1-based) and ``has_abstract_or_references_section`` (True when a top-level entry is an abstract or references heading). ``toc_source`` says where the structure came from: ``"detected"`` (layout), ``"bookmarks"`` (the embedded outline), ``"hybrid"`` (bookmarks framing the detected sections), ``"pages"`` (no hierarchy found, so one node per page titled ``Page N``; left unsummarized and unoptimized when there are more than ``FLAT_TREE_MAX_NODES`` pages, a size the local client and CLI refuse) or ``"unreadable"`` (no page carries text; ``structure`` is empty). With ``optimize`` an ``optimize`` key reports merge/expand counts and before/after search-cost metrics; a refused flat tree carries neither it nor node summaries. """
     if optimize_expand is not None:
         import warnings
         warnings.warn(
@@ -155,7 +152,7 @@ def page_index_flash(pdf, summary=True, summary_model=None,
             f"optimize must be 'full', 'merge', or False, got {optimize!r}")
     result = extract_toc(_validate_pdf(pdf), use_embedded_toc=use_embedded_toc)
     structure = result.get("structure", [])
-    if not structure and result.get("toc_source") != "unreadable":
+    if not structure:
         # the layout yields no hierarchy; the pages themselves are the tree
         structure = _page_nodes(result.get("page_texts") or [])
         result["structure"] = structure
