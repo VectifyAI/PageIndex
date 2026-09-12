@@ -1608,8 +1608,9 @@ def test_resolve_citations_cloud(cloud, monkeypatch):
 
 
 def test_resolve_citations_quotes_and_tag_edges(cloud, monkeypatch):
-    """A quoted name keeps its apostrophe, and a managed-chat tag without
-    its own ';' stops at the next tag instead of swallowing it."""
+    """A quoted name keeps its apostrophe, and neither field of a
+    managed-chat tag runs past the tag: an unterminated name and an
+    unterminated block both stop at the next tag instead of eating it."""
     client, calls, fake = cloud
     _patch_requests(monkeypatch, _library({"pi-m": ("Moody's Outlook.pdf", {}),
                                            "pi-b": ("b.pdf", {})}))
@@ -1619,6 +1620,10 @@ def test_resolve_citations_quotes_and_tag_edges(cloud, monkeypatch):
         {"document": "b.pdf", "doc_id": "pi-b", "page": 7},
         {"document": "Moody's Outlook.pdf", "doc_id": "pi-m", "page": 3},
     ]
+    # A block= that never closes must not swallow the citation after it.
+    assert client.resolve_citations(
+        '<doc=b.pdf;page=3;block=p3_text_5 <cite doc="b.pdf" page="9"/>'
+    ) == [{"document": "b.pdf", "doc_id": "pi-b", "page": 9}]
 
 
 def test_resolve_citations_lists_the_whole_library(cloud, monkeypatch):
@@ -1636,13 +1641,16 @@ def test_resolve_citations_lists_the_whole_library(cloud, monkeypatch):
 
 
 def test_resolve_citations_listing_survives_a_shifting_library(cloud, monkeypatch):
-    """A listing without 'total' ends on the empty page, and a document
-    re-served after an upload shifted the window is still one document."""
+    """A listing without 'total' ends on the empty page, a document
+    re-served after an upload shifted the window is still one document,
+    and an entry missing 'name' or 'id' is skipped, not a KeyError."""
     client, calls, fake = cloud
     def handler(method, url, kw):
         assert url.endswith("/docs/")
         offset = kw["params"]["offset"]
         entries = [{"id": f"pi-{i}", "name": f"{i}.pdf"} for i in range(150)]
+        entries[7] = {"id": "pi-7"}
+        entries[8] = {"name": "8.pdf"}
         if offset:
             entries.insert(0, {"id": "pi-new", "name": "new.pdf"})
         return FakeResponse({"documents": entries[offset:offset + 100]})

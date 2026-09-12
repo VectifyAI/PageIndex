@@ -47,7 +47,7 @@ def _parse_pages(pages: str) -> list[int]:
 
 # The two citation tag formats PageIndex chat writes and renders.
 _OLD_CITATION_RE = re.compile(
-    r"<doc=([^;<>]+);page=(\d+)(?:;block(?:_id)?=([^;>]+))?>")
+    r"<doc=([^;<>]+);page=(\d+)(?:;block(?:_id)?=([^;<>]+))?>")
 _CITE_TAG_RE = re.compile(r"<cite\s([^<>]*)>")
 _CITE_ATTR_RE = re.compile(r"""(\w+)=(["'])(.*?)\2""", re.S)
 
@@ -2221,7 +2221,8 @@ class PageIndexClient:
         else:
             from .agent_tools import _all_documents
             for doc in _all_documents(self):
-                names.setdefault(doc["name"], []).append(doc["id"])
+                if doc.get("name") and doc.get("id"):
+                    names.setdefault(doc["name"], []).append(doc["id"])
         resolved: list[dict[str, Any]] = []
         for citation in citations:
             ids = list(dict.fromkeys(names.get(citation["document"], [])))
