@@ -60,6 +60,17 @@ def test_page_mode_walk_uses_merged_surrogate_census():
     assert unmapped["ch"] == "β"
 
 
+def test_rtl_sign_takes_a_multi_code_point_glyph():
+    """A ToUnicode value can be several code points (a Devanagari conjunct, a
+    Thai cluster, an Arabic ligature); the first one decides the direction."""
+    from pageindex.flash.parser_pdfium_charlevel.text_normalize import _rtl_sign
+
+    assert _rtl_sign("\u094d\u0924") == 1    # Devanagari conjunct
+    assert _rtl_sign("\u0e01\u0e34") == 1    # Thai cluster
+    assert _rtl_sign("\u0626\u062c") == -1   # Arabic ligature
+    assert _rtl_sign("") == 1
+
+
 def test_optimize_full_keyless_reports_file_errors_first(tmp_path, monkeypatch):
     """No credential pre-check: a bad path is a FileNotFoundError even
     keyless (validation runs first), and the LLM-free spellings still run
