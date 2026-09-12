@@ -227,6 +227,7 @@ class LocalAPI:
 
     def _index_flash(self, file_path: str) -> tuple[list, str | None]:
         from .flash import page_index_flash
+        from .flash.api import flash_rejection_reason
         from .utils import (create_clean_structure_for_description,
                             generate_doc_description, write_node_id)
         result = page_index_flash(file_path, summary=True,
@@ -234,12 +235,9 @@ class LocalAPI:
                                   optimize="full",
                                   optimize_model=self._summary_model)
         structure = result.get("structure", [])
-        if not structure:
-            raise PageIndexAPIError(
-                "Failed to submit document: PageIndex Flash could not extract "
-                "a structure from this PDF. Try mode='standard', which builds "
-                "the structure with the model."
-            )
+        reason = flash_rejection_reason(result)
+        if reason:
+            raise PageIndexAPIError(f"Failed to submit document: {reason}")
         write_node_id(structure)
         description = generate_doc_description(
             create_clean_structure_for_description(structure),

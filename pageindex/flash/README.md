@@ -45,8 +45,15 @@ Writes the tree to `results/<name>_structure.json`.
             "nodes": [...],
         }
     ],
+    "toc_source": str,  # "detected" | "bookmarks" | "hybrid" | "pages" | "unreadable"
 }
 ```
+
+`toc_source` says where the structure came from: `"detected"` from the layout,
+`"bookmarks"` from the embedded outline, `"hybrid"` when bookmarks frame the
+detected sections. `"pages"` means the layout yielded no hierarchy, so every
+page became one node titled `Page N`; `"unreadable"` means no page carries text
+and `structure` is empty.
 
 ## Benchmark
 

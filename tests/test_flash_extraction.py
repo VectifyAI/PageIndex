@@ -81,16 +81,16 @@ def test_optimize_full_keyless_reports_file_errors_first(tmp_path, monkeypatch):
     assert "structure" in result
 
 
-def test_empty_outline_gate_carries_page_texts(tmp_path):
-    """The gate's bookmark-built trees feed the same summary/expand passes
-    as detected ones, so its result must carry the per-page text too."""
+def test_no_heading_result_carries_page_texts(tmp_path):
+    """A document that yields no headings still carries its per-page text,
+    so the page-node fallback and the summary/expand passes can read it."""
     from conftest import build_pdf
     from pageindex.flash.main import extract_toc
 
     pdf = tmp_path / "doc.pdf"
     pdf.write_bytes(build_pdf(["Alpha body", "Beta body"]))
     result = extract_toc(str(pdf))
-    assert result["structure"] == []  # the short-document gate fired
+    assert result["structure"] == []  # two body-only pages: nothing to detect
     assert len(result["page_texts"]) == 2
     assert "Alpha" in result["page_texts"][0]
 
@@ -420,7 +420,7 @@ def test_optimize_expand_warning_names_the_behavior_change(tmp_path,
 SCRIPT = Path(__file__).resolve().parent.parent / "run_pageindex.py"
 
 
-def _run_flash_cli(monkeypatch, tmp_path, argv, structure):
+def _run_flash_cli(monkeypatch, tmp_path, argv, structure, toc_source=None):
     """Drive run_pageindex.py in-process with a stubbed flash indexer."""
     import runpy
     import sys
@@ -433,7 +433,10 @@ def _run_flash_cli(monkeypatch, tmp_path, argv, structure):
 
     def fake_flash(path, **kw):
         captured.update(kw)
-        return {"structure": structure}
+        result = {"structure": structure}
+        if toc_source:
+            result["toc_source"] = toc_source
+        return result
     monkeypatch.setattr(pageindex.flash, "page_index_flash", fake_flash)
     monkeypatch.setattr(sys, "argv",
                         ["run_pageindex.py", "--pdf_path", str(pdf), *argv])
@@ -467,3 +470,237 @@ def test_flash_cli_rejects_empty_structure(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="try --mode standard"):
         _run_flash_cli(monkeypatch, tmp_path, [], [])
     assert not (tmp_path / "results").exists()
+
+
+def test_flash_cli_rejects_oversized_flat_tree(monkeypatch, tmp_path):
+    """The CLI applies the same refusal policy as the local client, worded
+    for its own flag."""
+    from pageindex.flash.api import FLAT_TREE_MAX_NODES
+
+    nodes = [{"title": f"Page {n}", "start_index": n, "end_index": n, "nodes": []}
+             for n in range(1, FLAT_TREE_MAX_NODES + 2)]
+    with pytest.raises(ValueError, match="no layout structure.*--mode standard"):
+        _run_flash_cli(monkeypatch, tmp_path, [], nodes, toc_source="pages")
+    assert not (tmp_path / "results").exists()
+
+
+def _layout_pdf(pages, landscape=False):
+    """Uncompressed PDF, per page a 20pt heading line then 11pt body lines:
+    ``pages`` is a list of ``(heading, [body line, ...])``."""
+    width, height = (792, 612) if landscape else (595, 842)
+    objs = {1: "<</Type/Catalog/Pages 2 0 R>>", 3: "<</Font<</F1 5 0 R>>>>",
+            5: "<</Type/Font/Subtype/Type1/BaseFont/Helvetica"
+               "/Encoding/WinAnsiEncoding>>"}
+    kids, nxt = [], 6
+    for heading, lines in pages:
+        ops, y = [(20, height - 80, heading)], height - 120
+        for line in lines:
+            ops.append((11, y, line))
+            y -= 16
+        stream = "".join(f"BT /F1 {size} Tf 72 {top} Td ({text}) Tj ET\n"
+                         for size, top, text in ops)
+        objs[nxt] = f"<</Length {len(stream)}>>\nstream\n{stream}endstream"
+        objs[nxt + 1] = (f"<</Type/Page/MediaBox[0 0 {width} {height}]"
+                         f"/Resources 3 0 R/Parent 2 0 R/Contents {nxt} 0 R>>")
+        kids.append(nxt + 1)
+        nxt += 2
+    objs[2] = (f"<</Type/Pages/Count {len(kids)}"
+               f"/Kids[{' '.join(f'{k} 0 R' for k in kids)}]>>")
+    out, offsets = bytearray(b"%PDF-1.7\n"), {}
+    for num in sorted(objs):
+        offsets[num] = len(out)
+        out += f"{num} 0 obj\n{objs[num]}\nendobj\n".encode("latin-1")
+    xref = len(out)
+    out += f"xref\n0 {nxt}\n0000000000 65535 f \n".encode()
+    for num in range(1, nxt):
+        out += (f"{offsets[num]:010d} 00000 n \n" if num in offsets
+                else "0000000000 65535 f \n").encode()
+    out += (f"trailer\n<</Size {nxt}/Root 1 0 R>>\nstartxref\n{xref}\n"
+            "%%EOF\n").encode()
+    return bytes(out)
+
+
+DECK_TITLES = ["Revenue Overview", "Operating Expenses", "Customer Growth",
+               "Product Roadmap", "Regional Performance", "Engineering Metrics",
+               "Risk Factors", "Outlook and Guidance"]
+
+
+def _deck_pdf():
+    return _layout_pdf(
+        [(title, [f"Detail {n} for slide {slide} with a few more words of body text"
+                  for n in range(1, 6)]) for slide, title in enumerate(DECK_TITLES, 1)],
+        landscape=True)
+
+
+def test_landscape_deck_is_structured(tmp_path):
+    """A text-light landscape deck is an ordinary document: every slide title
+    becomes a node."""
+    from pageindex.flash.main import extract_toc
+
+    pdf = tmp_path / "deck.pdf"
+    pdf.write_bytes(_deck_pdf())
+    result = extract_toc(str(pdf))
+    # slide 1 is spent on the document title, as on any title page
+    assert [node["title"] for node in result["structure"]] == DECK_TITLES[1:]
+    assert result["toc_source"] == "detected"
+
+
+def test_short_document_headings_are_detected(tmp_path):
+    """Three pages of heading-plus-a-line are enough for detection."""
+    from pageindex.flash.main import extract_toc
+
+    pdf = tmp_path / "memo.pdf"
+    pdf.write_bytes(_layout_pdf([("Mission", ["The launch is named Skylark."]),
+                                 ("Budget", ["The budget is 420 euros."]),
+                                 ("Team", ["The lead is Ada."])]))
+    result = extract_toc(str(pdf))
+    assert [node["title"] for node in result["structure"]] == ["Budget", "Team"]
+    assert result["doc_title"] == "Mission"
+
+
+def test_toc_source_is_always_present(tmp_path):
+    """The pure-detected path (no bookmark pass) labels its result too, so
+    callers can rely on the key."""
+    from pageindex.flash import page_index_flash
+
+    pdf = tmp_path / "memo.pdf"
+    pdf.write_bytes(_layout_pdf([("Mission", ["The launch is named Skylark."]),
+                                 ("Budget", ["The budget is 420 euros."]),
+                                 ("Team", ["The lead is Ada."])]))
+    result = page_index_flash(str(pdf), summary=False, optimize=False,
+                              use_embedded_toc=False)
+    assert result["toc_source"] == "detected"
+    assert [node["title"] for node in result["structure"]] == ["Budget", "Team"]
+
+
+def test_no_hierarchy_falls_back_to_page_nodes(tmp_path):
+    """Two pages leave one heading after the title claims the other; with no
+    hierarchy to infer, the pages themselves are the tree, labelled as such."""
+    from pageindex.flash import page_index_flash
+
+    pdf = tmp_path / "two.pdf"
+    pdf.write_bytes(_layout_pdf([("Mission", ["The launch is named Skylark."]),
+                                 ("Budget", ["The budget is 420 euros."])]))
+    result = page_index_flash(str(pdf), summary=False, optimize=False)
+    assert result["toc_source"] == "pages"
+    assert result["structure"] == [
+        {"title": "Page 1", "node_id": "0000", "start_index": 1, "end_index": 1},
+        {"title": "Page 2", "node_id": "0001", "start_index": 2, "end_index": 2},
+    ]
+    assert "page_texts" not in result
+
+
+def test_flat_fallback_over_limit_skips_model_passes(tmp_path, monkeypatch):
+    """A flat tree larger than the managed pipelines accept is returned
+    unsummarized: neither optimize nor summary may spend model calls on it."""
+    from conftest import build_pdf
+    from pageindex.flash import api as flash_api
+
+    monkeypatch.setattr(flash_api, "FLAT_TREE_MAX_NODES", 2)
+    monkeypatch.setattr(flash_api, "_optimize", lambda *a, **k: pytest.fail(
+        "optimize ran on a refused flat tree"))
+    monkeypatch.setattr(flash_api, "_summarize", lambda *a, **k: pytest.fail(
+        "summary ran on a refused flat tree"))
+    pdf = tmp_path / "letter.pdf"
+    pdf.write_bytes(build_pdf(["Alpha body", "Beta body", "Gamma body"]))
+    result = flash_api.page_index_flash(str(pdf), summary=True, summary_model="m")
+    assert result["toc_source"] == "pages"
+    assert [node["title"] for node in result["structure"]] == [
+        "Page 1", "Page 2", "Page 3"]
+    assert "page_texts" not in result
+
+
+def test_textless_pdf_is_unreadable(tmp_path):
+    """A PDF with no text on any page has nothing to index: an empty
+    structure labelled unreadable, no page nodes."""
+    from conftest import build_pdf
+    from pageindex.flash import page_index_flash
+
+    pdf = tmp_path / "scan.pdf"
+    pdf.write_bytes(build_pdf(["", ""]))
+    result = page_index_flash(str(pdf), summary=False, optimize=False)
+    assert result["structure"] == []
+    assert result["toc_source"] == "unreadable"
+
+
+def test_flash_rejection_reason():
+    from pageindex.flash.api import FLAT_TREE_MAX_NODES, flash_rejection_reason
+
+    node = {"title": "T", "start_index": 1, "end_index": 1, "nodes": []}
+    assert flash_rejection_reason(
+        {"structure": [node], "toc_source": "detected"}) is None
+    assert flash_rejection_reason(
+        {"structure": [node] * 2, "toc_source": "pages"}) is None
+    unreadable = flash_rejection_reason({"structure": [], "toc_source": "unreadable"})
+    assert "no text layer" in unreadable and "standard" not in unreadable
+    oversized = {"structure": [node] * (FLAT_TREE_MAX_NODES + 1),
+                 "toc_source": "pages"}
+    flat = flash_rejection_reason(oversized)
+    assert "no layout structure" in flat and "mode='standard'" in flat
+    assert "--mode standard" in flash_rejection_reason(
+        oversized, standard_hint="--mode standard")
+    assert "could not extract" in flash_rejection_reason({"structure": []})
+
+
+FLASH_DATA = Path(__file__).parent / "data" / "flash"   # see its make_fixtures.py
+
+
+def test_page_fallback_covers_every_page(tmp_path):
+    """Pages without text still get a node: the flat tree covers the whole
+    document, so no page is unreachable."""
+    from conftest import build_pdf
+    from pageindex.flash import page_index_flash
+
+    pdf = tmp_path / "sparse.pdf"
+    pdf.write_bytes(build_pdf(["", "Alpha body", "", "Delta body"]))
+    result = page_index_flash(str(pdf), summary=False, optimize=False)
+    assert result["toc_source"] == "pages"
+    assert [(n["title"], n["start_index"], n["end_index"])
+            for n in result["structure"]] == [
+        ("Page 1", 1, 1), ("Page 2", 2, 2), ("Page 3", 3, 3), ("Page 4", 4, 4)]
+    assert all("nodes" not in n for n in result["structure"])
+
+
+@pytest.mark.parametrize("name", ["hi_report.pdf", "ar_report.pdf"])
+def test_non_latin_document_is_indexed(name):
+    """Script never decides whether a document is indexable."""
+    from pageindex.flash import page_index_flash
+    from pageindex.flash.api import flash_rejection_reason
+
+    result = page_index_flash(str(FLASH_DATA / name), summary=False, optimize=False)
+    assert result["structure"]
+    assert flash_rejection_reason(result) is None
+
+
+def test_japanese_headings_are_kept():
+    from pageindex.flash.main import extract_toc
+
+    result = extract_toc(str(FLASH_DATA / "ja_report.pdf"), use_embedded_toc=False)
+    assert [n["title"] for n in result["structure"]] == [
+        "財務ハイライト", "リスク要因", "今後の見通し"]
+
+
+def test_cross_script_headings_are_kept():
+    from pageindex.flash.main import extract_toc
+
+    result = extract_toc(str(FLASH_DATA / "zh_body_en_headings.pdf"),
+                         use_embedded_toc=False)
+    assert [n["title"] for n in result["structure"]] == [
+        "Financial Review", "Risk Factors", "Business Outlook"]
+
+
+@pytest.mark.parametrize("name", ["hi_report.pdf", "ar_report.pdf"])
+def test_non_latin_headings_are_detected(name):
+    from pageindex.flash.main import extract_toc
+
+    result = extract_toc(str(FLASH_DATA / name), use_embedded_toc=False)
+    assert result["toc_source"] == "detected"
+    assert len(result["structure"]) == 3
+
+
+def test_landscape_deck_title_is_the_slide_heading(tmp_path):
+    from pageindex.flash.main import extract_toc
+
+    pdf = tmp_path / "deck.pdf"
+    pdf.write_bytes(_deck_pdf())
+    assert extract_toc(str(pdf))["doc_title"] == DECK_TITLES[0]
