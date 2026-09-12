@@ -45,6 +45,43 @@ def _parse_pages(pages: str) -> list[int]:
         raise PageIndexAPIError(str(exc)) from exc
 
 
+# The two citation tag formats PageIndex chat writes and renders.
+_OLD_CITATION_RE = re.compile(
+    r"<doc=([^;<>]+);page=(\d+)(?:;block(?:_id)?=([^;<>]+))?>")
+_CITE_TAG_RE = re.compile(r"<cite\s([^<>]*)>")
+_CITE_ATTR_RE = re.compile(r"""(\w+)=(["'])(.*?)\2""", re.S)
+
+
+def _parse_citations(text: str) -> list[dict[str, Any]]:
+    """``<doc=…;page=…;block=…>`` tags (the managed chat's format), then
+    ``<cite doc= page= block=/>`` tags; deduplicated, ``block_id`` only
+    when the tag carries one."""
+    found: list[dict[str, Any]] = []
+    seen: set[tuple[str, int, Optional[str]]] = set()
+
+    def add(doc: str, page_str: str, block_id: Optional[str]) -> None:
+        try:
+            page = int(page_str.split("-")[0])
+        except ValueError:
+            return
+        key = (doc, page, block_id)
+        if doc and page > 0 and key not in seen:
+            seen.add(key)
+            entry: dict[str, Any] = {"document": doc, "page": page}
+            if block_id:
+                entry["block_id"] = block_id
+            found.append(entry)
+
+    for m in _OLD_CITATION_RE.finditer(text):
+        add(m.group(1).strip(), m.group(2), m.group(3) or None)
+    for m in _CITE_TAG_RE.finditer(text):
+        attrs = {name: value for name, _, value in
+                 _CITE_ATTR_RE.findall(m.group(1))}
+        add(attrs.get("doc", "").strip(), attrs.get("page", ""),
+            attrs.get("block") or None)
+    return found
+
+
 def _agents_sdk_model_name(model: str) -> str:
     """Preserve supported Agents SDK prefixes and route other provider paths via LiteLLM."""
     passthrough_prefixes = ("litellm/", "openai/")
@@ -717,6 +754,31 @@ class PageIndexClient:
                 f"(status: {result.get('status', 'unknown')})"
             )
         return [p for p in all_pages if p["page_index"] in wanted]
+
+    def get_block(self, doc_id: str, block_id: str) -> dict[str, Any]:
+        """
+        One layout block of a cloud document — the page, bounding box, type
+        and content behind a ``block_id`` from page content or a
+        block-level citation. Cloud-only: local page content has no
+        blocks, so local mode raises PageIndexAPIError.
+
+        Args:
+            doc_id (str): Document ID.
+            block_id (str): Block ID as page content and citations carry
+                it, e.g. ``"p3_text_5"``.
+
+        Returns:
+            dict: The block as the API returns it: {'doc_id', 'page',
+            'block_id', 'bbox', 'block_type', ...}. ``bbox`` is
+            ``[x0, y0, x1, y1]`` in thousandths of the page's width and
+            height (0-1000), origin top-left. PageIndexAPIError with
+            ``status_code == 404`` when the document or the block does not
+            exist.
+        """
+        return self._require_cloud(
+            "get_block is cloud-only — local page content has no layout "
+            "blocks. Create the client with an api_key to look up blocks."
+        ).get_block(doc_id=doc_id, block_id=block_id)
 
     # ---------- TREE GENERATION ----------
 
@@ -2100,6 +2162,89 @@ class PageIndexClient:
         """
         from .agent_tools import fetch_citation_prompt
         return fetch_citation_prompt(self, format or "cite")
+
+    def resolve_citations(
+        self,
+        answer: str,
+        doc_ids: Optional[Union[str, list[str]]] = None,
+    ) -> list[dict[str, Any]]:
+        """
+        The citations in a cited answer, each with the id of the document
+        it names and, for a block-level citation on a cloud document, the
+        block behind it from ``get_block()`` — page, bounding box, type and
+        content: the managed chat's ``citations`` entries, plus ``doc_id``
+        and the block's ``text``. Reads both tag formats PageIndex chat
+        writes: ``<cite doc= page= block=/>`` (own-model
+        ``chat(citations=True)``) and ``<doc=…;page=…;block=…>`` (the
+        managed chat). The markdown and footnote formats of
+        ``citation_prompt()`` are prose for readers and are not parsed.
+
+        Args:
+            answer (str): The answer text, tags included.
+            doc_ids (str | list[str], optional): The documents the answer
+                was about — what ``chat(doc_id=...)`` took. Citations name
+                documents, and the ids come from here; without it your own
+                library is listed. Two documents sharing a cited name
+                raise PageIndexAPIError naming both ids: pass ``doc_ids``
+                to pick.
+
+        Returns:
+            list: One dict per distinct citation: ``{'document', 'doc_id',
+            'page'}`` for a page-level citation, plus ``'block_id'`` and
+            the block's fields as ``get_block()`` returns them (``'bbox'``,
+            ``'block_type'``, ...) for a block-level one. A document not in
+            the library keeps ``doc_id: None``; a block the document does
+            not have (a model's slip), or that cannot be looked up (local
+            mode, a document you cannot read), keeps its citation without
+            a bbox.
+        """
+        if not isinstance(answer, str):
+            raise PageIndexAPIError("answer must be a str — the answer text "
+                                    "with its citation tags.")
+        if doc_ids is not None and not isinstance(doc_ids, (str, list)):
+            raise PageIndexAPIError("doc_ids must be a string or a list of "
+                                    "strings.")
+        if doc_ids is not None and not doc_ids:
+            raise PageIndexAPIError("doc_ids is empty. Pass the answer's "
+                                    "document ids, or omit doc_ids to "
+                                    "resolve against your library.")
+        citations = _parse_citations(answer)
+        if not citations:
+            return []
+        names: dict[str, list[str]] = {}
+        if doc_ids is not None:
+            if isinstance(doc_ids, str):
+                doc_ids = [doc_ids]
+            for doc_id in dict.fromkeys(doc_ids):
+                name = self.get_document(doc_id)["name"]
+                names.setdefault(name, []).append(doc_id)
+        else:
+            from .agent_tools import _all_documents
+            for doc in _all_documents(self):
+                if doc.get("name") and doc.get("id"):
+                    names.setdefault(doc["name"], []).append(doc["id"])
+        resolved: list[dict[str, Any]] = []
+        for citation in citations:
+            ids = list(dict.fromkeys(names.get(citation["document"], [])))
+            if len(ids) > 1:
+                raise PageIndexAPIError(
+                    f"{citation['document']!r} names {len(ids)} documents "
+                    f"({', '.join(ids)}) — pass doc_ids= to pick one.")
+            entry: dict[str, Any] = {"document": citation["document"],
+                                     "doc_id": ids[0] if ids else None,
+                                     "page": citation["page"]}
+            block_id = citation.get("block_id")
+            if block_id:
+                entry["block_id"] = block_id
+                if entry["doc_id"]:
+                    try:
+                        entry.update(self.get_block(entry["doc_id"], block_id))
+                    except PageIndexAPIError as exc:
+                        # Local raises carry no status; 429/5xx propagate.
+                        if exc.status_code not in (None, 403, 404):
+                            raise
+            resolved.append(entry)
+        return resolved
 
     def folder_context(self, folder_id: str) -> str:
         """

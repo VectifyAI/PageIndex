@@ -110,6 +110,33 @@ class CloudAPI:
                 status_code=response.status_code)
         return response.json()
 
+    def get_block(self, doc_id: str, block_id: str) -> Dict[str, Any]:
+        """
+        Get one layout block of a document by the block_id its page content
+        and block-level citations carry.
+
+        Args:
+            doc_id (str): Document ID.
+            block_id (str): Block ID, e.g. "p3_text_5".
+
+        Returns:
+            dict: The block as the API returns it: {'doc_id', 'page',
+                'block_id', 'bbox', 'block_type', ...}. bbox is
+                [x0, y0, x1, y1] in thousandths of the page's width and
+                height (0-1000), origin top-left. A 404 means the
+                document has no such block.
+        """
+        response = requests.get(
+            f"{self.BASE_URL}/doc/{_enc(doc_id)}/block/{_enc(block_id)}/",
+            headers=self._headers(),
+            timeout=30
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to get block: {response.text}",
+                status_code=response.status_code)
+        return response.json()
+
     # ---------- TREE GENERATION ----------
 
     def get_tree(self, doc_id: str, node_summary: bool = False,
