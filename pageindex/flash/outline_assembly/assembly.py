@@ -64,20 +64,6 @@ def has_table_or_prominent(outline_nodes: list[OutlineNode]) -> bool:
     return any(secondary_item.heading.type == 5 or secondary_item.heading.is_prominent for secondary_item in outline_nodes)
 
 
-def is_landscape_or_empty(doc) -> bool:
-    """Return True for mostly-landscape or near-empty documents with little outline text."""
-    if doc.secondary_slot.secondary_slot >= 1e3:
-        return False
-    secondary_item = 0
-    candidate_item = 0.0
-    for page in doc.primary_slot:
-        if page.bounds.bbox_width() > page.bounds.bbox_height() and page.primary_slot.secondary_slot < 1e3:
-            secondary_item += 1
-            candidate_item += page.primary_slot.secondary_slot
-    count_item = len(doc.primary_slot)
-    return secondary_item >= 0.9 * count_item or (secondary_item >= 0.7 * count_item and candidate_item >= 0.5 * doc.secondary_slot.state_slot)
-
-
 # --------------------------------------------------------------------------- #
 # Build a heading candidate from a block #
 # --------------------------------------------------------------------------- #
