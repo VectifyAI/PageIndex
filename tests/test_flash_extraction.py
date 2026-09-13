@@ -672,6 +672,18 @@ def test_page_fallback_covers_every_page(tmp_path):
     assert all("nodes" not in n for n in result["structure"])
 
 
+def test_page_nodes_are_leaves(tmp_path):
+    """``get_leaf_nodes`` takes a flat page tree, whose nodes carry no ``nodes`` key."""
+    from conftest import build_pdf
+    from pageindex import get_leaf_nodes
+    from pageindex.flash import page_index_flash
+
+    pdf = tmp_path / "flat.pdf"
+    pdf.write_bytes(build_pdf(["Alpha body", "Beta body"]))
+    structure = page_index_flash(str(pdf), summary=False, optimize=False)["structure"]
+    assert [n["title"] for n in get_leaf_nodes(structure)] == ["Page 1", "Page 2"]
+
+
 @pytest.mark.parametrize("name", ["hi_report.pdf", "ar_report.pdf"])
 def test_non_latin_document_is_indexed(name):
     """Script never decides whether a document is indexable."""

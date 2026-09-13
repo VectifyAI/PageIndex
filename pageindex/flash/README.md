@@ -40,9 +40,9 @@ Writes the tree to `results/<name>_structure.json`.
             "node_id": str,       # 4-digit, zero-padded
             "start_index": int,   # 1-based, inclusive
             "end_index": int,
-            "summary": str,
+            "summary": str,       # summary=True only
             "key_items": [str],   # optimize only: titles of subsections merged away
-            "nodes": [...],
+            "nodes": [...],       # entries with children only
         }
     ],
     "toc_source": str,  # "detected" | "bookmarks" | "hybrid" | "pages" | "unreadable"
@@ -52,8 +52,10 @@ Writes the tree to `results/<name>_structure.json`.
 `toc_source` says where the structure came from: `"detected"` from the layout,
 `"bookmarks"` from the embedded outline, `"hybrid"` when bookmarks frame the
 detected sections. `"pages"` means the layout yielded no hierarchy, so every
-page became one node titled `Page N`; `"unreadable"` means no page carries text
-and `structure` is empty.
+page became one node titled `Page N`; past `FLAT_TREE_MAX_NODES` (10) pages that
+flat tree comes back without summaries or optimization, and the local client and
+CLI refuse it. `"unreadable"` means no page carries text and `structure` is
+empty.
 
 ## Benchmark
 

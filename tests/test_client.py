@@ -2204,10 +2204,10 @@ def test_submit_flash_accepts_page_fallback(local_client, sample_pdf, monkeypatc
         pageindex.flash, "page_index_flash",
         lambda pdf, **kwargs: {
             "doc_name": "sample.pdf", "toc_source": "pages",
-            "structure": [{"title": "Hello", "start_index": 1, "end_index": 1,
-                           "summary": "s", "nodes": []},
-                          {"title": "World", "start_index": 2, "end_index": 2,
-                           "summary": "s", "nodes": []}]})
+            "structure": [{"title": "Hello", "node_id": "0000",
+                           "start_index": 1, "end_index": 1},
+                          {"title": "World", "node_id": "0001",
+                           "start_index": 2, "end_index": 2}]})
     monkeypatch.setattr(pageindex.utils, "llm_completion",
                         lambda model, prompt, **kw: "Flash description.")
     doc_id = local_client.submit_document(sample_pdf, mode="flash")["doc_id"]
