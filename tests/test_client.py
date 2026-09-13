@@ -1509,15 +1509,18 @@ def test_parse_citations_mirrors_the_cloud_parser():
     """Both tag formats PageIndex chat writes, in the cloud parser's terms:
     old tags first, then <cite> tags (self-closing or paired, either
     quote), block_id only when carried, page ranges to their first page,
-    page 0 and nameless tags dropped, duplicates collapsed."""
+    page 0 and nameless tags dropped, names and block ids trimmed,
+    duplicates collapsed."""
     from pageindex.client import _parse_citations
     text = (
         'A <cite doc="a.pdf" page="3" block="p3_text_5"/> B '
         "<cite doc='b.pdf' page='1-2'>quoted</cite> "
         '<cite doc="a.pdf" page="3" block="p3_text_5"/> '
+        '<cite doc="a.pdf" page="3" block=" p3_text_5 "/> '
         '<cite doc="" page="1"/> <cite doc="a.pdf" page="0"/> '
         '<cite doc="a.pdf" page="x"/> '
         "<doc=c.pdf;page=7> <doc=c.pdf;page=7;block_id=p7_text_1> "
+        "<doc=c.pdf;page=7;block=p7_text_1 > "
         "<doc= d.pdf ;page=2;block=p2_img_1>"
     )
     assert _parse_citations(text) == [
@@ -1530,14 +1533,16 @@ def test_parse_citations_mirrors_the_cloud_parser():
     assert _parse_citations("no tags, just [a.pdf, p. 3] prose") == []
 
 
-def test_parse_citations_is_linear_on_unterminated_tags():
-    """An unterminated '<cite ' followed by whitespace is caller-supplied
-    text; the scan must stay linear, not backtrack for minutes."""
+def test_parse_citations_scans_in_linear_time():
+    """An unterminated '<cite ' followed by whitespace, or a tag whose body
+    is one long word, is caller-supplied text; the scan must stay linear,
+    not backtrack for minutes."""
     import time
     from pageindex.client import _parse_citations
     started = time.perf_counter()
     assert _parse_citations("<cite " + " " * 2000) == []
     assert _parse_citations(("<cite " + " " * 40) * 200) == []
+    assert _parse_citations("<cite " + "x" * 65536 + ">") == []
     assert time.perf_counter() - started < 2
 
 
@@ -1587,24 +1592,24 @@ def test_resolve_citations_cloud(cloud, monkeypatch):
     ]
     assert client.resolve_citations("no citations here") == []
 
-    # doc_ids= skips the library listing: one metadata call per id.
+    # doc_id= skips the library listing: one metadata call per id.
     library = _library({"pi-a": ("a.pdf", {"p3_text_5": block})})
     def no_listing(method, url, kw):
-        assert not url.endswith("/docs/"), "doc_ids= must not list the library"
+        assert not url.endswith("/docs/"), "doc_id= must not list the library"
         return library(method, url, kw)
     _patch_requests(monkeypatch, no_listing)
     for scope in ("pi-a", ["pi-a", "pi-a"]):  # a repeated id is not a collision
         assert client.resolve_citations(
-            '<cite doc="a.pdf" page="3" block="p3_text_5"/>', doc_ids=scope,
+            '<cite doc="a.pdf" page="3" block="p3_text_5"/>', doc_id=scope,
         ) == [{"document": "a.pdf", **block}]
 
     for not_text in (None, ['<cite doc="a.pdf" page="1"/>']):
         with pytest.raises(PageIndexAPIError, match="answer must be a str"):
             client.resolve_citations(not_text)
-    with pytest.raises(PageIndexAPIError, match="doc_ids must be a string or a list"):
-        client.resolve_citations(answer, doc_ids=5)
-    with pytest.raises(PageIndexAPIError, match="doc_ids is empty"):
-        client.resolve_citations(answer, doc_ids=[])
+    with pytest.raises(PageIndexAPIError, match="doc_id must be a string or a list"):
+        client.resolve_citations(answer, doc_id=5)
+    with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
+        client.resolve_citations(answer, doc_id=[])
 
 
 def test_resolve_citations_quotes_and_tag_edges(cloud, monkeypatch):
@@ -1661,14 +1666,14 @@ def test_resolve_citations_listing_survives_a_shifting_library(cloud, monkeypatc
 
 def test_resolve_citations_refuses_a_shared_name(cloud, monkeypatch):
     """Two documents under one cited name would silently pick a bbox from
-    the wrong one: raise, name both ids, point at doc_ids=."""
+    the wrong one: raise, name both ids, point at doc_id=."""
     client, calls, fake = cloud
     _patch_requests(monkeypatch, _library({"pi-1": ("a.pdf", {}),
                                            "pi-2": ("a.pdf", {})}))
-    with pytest.raises(PageIndexAPIError, match=r"pi-1, pi-2.*doc_ids="):
+    with pytest.raises(PageIndexAPIError, match=r"pi-1, pi-2.*doc_id="):
         client.resolve_citations('<cite doc="a.pdf" page="1"/>')
     assert client.resolve_citations('<cite doc="a.pdf" page="1"/>',
-                                    doc_ids=["pi-2"]) == [
+                                    doc_id=["pi-2"]) == [
         {"document": "a.pdf", "doc_id": "pi-2", "page": 1}]
 
 

@@ -49,7 +49,7 @@ def _parse_pages(pages: str) -> list[int]:
 _OLD_CITATION_RE = re.compile(
     r"<doc=([^;<>]+);page=(\d+)(?:;block(?:_id)?=([^;<>]+))?>")
 _CITE_TAG_RE = re.compile(r"<cite\s([^<>]*)>")
-_CITE_ATTR_RE = re.compile(r"""(\w+)=(["'])(.*?)\2""", re.S)
+_CITE_ATTR_RE = re.compile(r"""\b(\w+)=(["'])(.*?)\2""", re.S)
 
 
 def _parse_citations(text: str) -> list[dict[str, Any]]:
@@ -60,6 +60,8 @@ def _parse_citations(text: str) -> list[dict[str, Any]]:
     seen: set[tuple[str, int, Optional[str]]] = set()
 
     def add(doc: str, page_str: str, block_id: Optional[str]) -> None:
+        doc = doc.strip()
+        block_id = (block_id or "").strip() or None
         try:
             page = int(page_str.split("-")[0])
         except ValueError:
@@ -73,12 +75,11 @@ def _parse_citations(text: str) -> list[dict[str, Any]]:
             found.append(entry)
 
     for m in _OLD_CITATION_RE.finditer(text):
-        add(m.group(1).strip(), m.group(2), m.group(3) or None)
+        add(m.group(1), m.group(2), m.group(3))
     for m in _CITE_TAG_RE.finditer(text):
         attrs = {name: value for name, _, value in
                  _CITE_ATTR_RE.findall(m.group(1))}
-        add(attrs.get("doc", "").strip(), attrs.get("page", ""),
-            attrs.get("block") or None)
+        add(attrs.get("doc", ""), attrs.get("page", ""), attrs.get("block"))
     return found
 
 
@@ -2166,7 +2167,7 @@ class PageIndexClient:
     def resolve_citations(
         self,
         answer: str,
-        doc_ids: Optional[Union[str, list[str]]] = None,
+        doc_id: Optional[Union[str, list[str]]] = None,
     ) -> list[dict[str, Any]]:
         """
         The citations in a cited answer, each with the id of the document
@@ -2181,11 +2182,11 @@ class PageIndexClient:
 
         Args:
             answer (str): The answer text, tags included.
-            doc_ids (str | list[str], optional): The documents the answer
+            doc_id (str | list[str], optional): The documents the answer
                 was about — what ``chat(doc_id=...)`` took. Citations name
                 documents, and the ids come from here; without it your own
                 library is listed. Two documents sharing a cited name
-                raise PageIndexAPIError naming both ids: pass ``doc_ids``
+                raise PageIndexAPIError naming both ids: pass ``doc_id``
                 to pick.
 
         Returns:
@@ -2201,23 +2202,22 @@ class PageIndexClient:
         if not isinstance(answer, str):
             raise PageIndexAPIError("answer must be a str — the answer text "
                                     "with its citation tags.")
-        if doc_ids is not None and not isinstance(doc_ids, (str, list)):
-            raise PageIndexAPIError("doc_ids must be a string or a list of "
+        if doc_id is not None and not isinstance(doc_id, (str, list)):
+            raise PageIndexAPIError("doc_id must be a string or a list of "
                                     "strings.")
-        if doc_ids is not None and not doc_ids:
-            raise PageIndexAPIError("doc_ids is empty. Pass the answer's "
-                                    "document ids, or omit doc_ids to "
+        if doc_id is not None and not doc_id:
+            raise PageIndexAPIError("doc_id is empty. Pass the answer's "
+                                    "document ids, or omit doc_id to "
                                     "resolve against your library.")
         citations = _parse_citations(answer)
         if not citations:
             return []
         names: dict[str, list[str]] = {}
-        if doc_ids is not None:
-            if isinstance(doc_ids, str):
-                doc_ids = [doc_ids]
-            for doc_id in dict.fromkeys(doc_ids):
-                name = self.get_document(doc_id)["name"]
-                names.setdefault(name, []).append(doc_id)
+        if doc_id is not None:
+            doc_ids = [doc_id] if isinstance(doc_id, str) else doc_id
+            for one_id in dict.fromkeys(doc_ids):
+                name = self.get_document(one_id)["name"]
+                names.setdefault(name, []).append(one_id)
         else:
             from .agent_tools import _all_documents
             for doc in _all_documents(self):
@@ -2229,7 +2229,7 @@ class PageIndexClient:
             if len(ids) > 1:
                 raise PageIndexAPIError(
                     f"{citation['document']!r} names {len(ids)} documents "
-                    f"({', '.join(ids)}) — pass doc_ids= to pick one.")
+                    f"({', '.join(ids)}) — pass doc_id= to pick one.")
             entry: dict[str, Any] = {"document": citation["document"],
                                      "doc_id": ids[0] if ids else None,
                                      "page": citation["page"]}
