@@ -57,6 +57,9 @@ flat tree comes back without summaries or optimization, and the local client and
 CLI refuse it. `"unreadable"` means no page carries text and `structure` is
 empty.
 
+Every page is in some node: a hierarchy that starts after page 1 is preceded by
+a `Preface` node covering the pages before it, as in standard mode.
+
 ## Benchmark
 
 Nine PDFs, each run end to end with tree optimization: PDF parse, layout

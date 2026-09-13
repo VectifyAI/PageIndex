@@ -581,7 +581,8 @@ def test_toc_source_is_always_present(tmp_path):
     result = page_index_flash(str(pdf), summary=False, optimize=False,
                               use_embedded_toc=False)
     assert result["toc_source"] == "detected"
-    assert [node["title"] for node in result["structure"]] == ["Budget", "Team"]
+    assert [node["title"] for node in result["structure"]] == [
+        "Preface", "Budget", "Team"]
 
 
 def test_no_hierarchy_falls_back_to_page_nodes(tmp_path):
@@ -682,6 +683,55 @@ def test_page_nodes_are_leaves(tmp_path):
     pdf.write_bytes(build_pdf(["Alpha body", "Beta body"]))
     structure = page_index_flash(str(pdf), summary=False, optimize=False)["structure"]
     assert [n["title"] for n in get_leaf_nodes(structure)] == ["Page 1", "Page 2"]
+
+
+def test_every_page_is_in_a_node(tmp_path):
+    """Top-level ranges cover the whole document: a hierarchy that starts after
+    page 1 is preceded by a Preface node, as in standard mode."""
+    import pypdfium2 as pdfium
+    from pageindex.flash import page_index_flash
+
+    memo = tmp_path / "memo.pdf"
+    memo.write_bytes(_layout_pdf([("Mission", ["The launch is named Skylark."]),
+                                  ("Budget", ["The budget is 420 euros."]),
+                                  ("Team", ["The lead is Ada."])]))
+    deck = tmp_path / "deck.pdf"
+    deck.write_bytes(_deck_pdf())
+    for pdf in [memo, deck, *sorted(FLASH_DATA.glob("*.pdf"))]:
+        document = pdfium.PdfDocument(str(pdf))
+        pages = len(document)
+        document.close()
+        structure = page_index_flash(str(pdf), summary=False, optimize=False)["structure"]
+        covered = {page for node in structure
+                   for page in range(node["start_index"], node["end_index"] + 1)}
+        assert covered == set(range(1, pages + 1)), pdf.name
+        assert structure[0] == {"title": "Preface", "node_id": "0000",
+                                "start_index": 1, "end_index": 1}, pdf.name
+        assert structure[1]["node_id"] == "0001", pdf.name
+
+
+def test_preface_page_is_retrievable(tmp_path, monkeypatch):
+    """The page a late-starting hierarchy skips reaches the client's tree text."""
+    import pageindex.utils
+    from pageindex import PageIndexClient
+    from pageindex.flash import api as flash_api
+
+    async def no_summary(*args, **kwargs):
+        return None
+    monkeypatch.setattr(flash_api, "_optimize", lambda *a, **k: {"merges": 0})
+    monkeypatch.setattr(flash_api, "_summarize", no_summary)
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda model, prompt, **kw: "A memo.")
+    pdf = tmp_path / "memo.pdf"
+    pdf.write_bytes(_layout_pdf([("Mission", ["The launch is named Skylark."]),
+                                 ("Budget", ["The budget is 420 euros."]),
+                                 ("Team", ["The lead is Ada."])]))
+    client = PageIndexClient(storage_path=str(tmp_path / "store"))
+    doc_id = client.submit_document(str(pdf), mode="flash")["doc_id"]
+    tree = client.get_tree(doc_id)["result"]
+    assert [(node["title"], node["page_index"]) for node in tree] == [
+        ("Preface", 1), ("Budget", 2), ("Team", 3)]
+    assert "Skylark" in tree[0]["text"]
 
 
 @pytest.mark.parametrize("name", ["hi_report.pdf", "ar_report.pdf"])
