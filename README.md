@@ -196,16 +196,16 @@ doc_id = client.submit_document("report.pdf", wait=True)["doc_id"]
 print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 ```
 
-| Capability | **Local** (this repo) | **Cloud** ([get an API key](https://developer.pageindex.ai/)) |
+| | **Local** | **Cloud** |
 |---|---|---|
-| Best for | text-heavy PDFs and local workflows | scanned, image-heavy, and large document collections |
-| Indexing | runs locally | runs in PageIndex Cloud, with production OCR and image understanding |
-| Storage | local | managed in PageIndex Cloud |
-| Chat model | your model | your model, or the managed chat included with your key |
-| Citations | page-level | line-level |
-| Image understanding | — | ✅ |
-| Multi-document scale | manual | PageIndex File System |
-| MCP server | — | ✅ |
+| Handles | Text-based PDFs | Text-based, scanned, and image-rich documents |
+| Indexing | On your machine | Managed by PageIndex |
+| Storage | Local directory | Cloud storage |
+| Citations | Page-level | Line-level |
+| OCR & image understanding | — | ✓ |
+| [Metadata](https://docs.pageindex.ai/sdk/documents#metadata-cloud) | — | ✓ |
+| [Folders](https://docs.pageindex.ai/sdk/documents#folders-cloud) | — | ✓ |
+| [MCP server](https://docs.pageindex.ai/mcp) | — | ✓ |
 
 ### More About PageIndex Cloud
 
