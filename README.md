@@ -201,7 +201,7 @@ print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 | Handles | Text-based PDFs | Text-based, scanned, and image-rich documents |
 | Indexing | On your machine | Managed by PageIndex |
 | Storage | Local directory | Cloud storage |
-| Citations | Page-level | Line-level |
+| Citations | Page-level | Block-level |
 | OCR & image understanding | — | ✓ |
 | [Metadata](https://docs.pageindex.ai/sdk/documents#metadata-cloud) | — | ✓ |
 | [Folders](https://docs.pageindex.ai/sdk/documents#folders-cloud) | — | ✓ |
