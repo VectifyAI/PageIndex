@@ -260,8 +260,8 @@ def _apply_bidi_reordering(text: str, start_level: int = -1, vertical: bool = Fa
 
 
 def _rtl_sign(char: str) -> int:
-    """+1 for LTR runs, -1 for a strong right-to-left char (bidi class R/AL, e.g. Hebrew/Arabic). PDFium reports RTL text in logical order with decreasing char origins, so the LTR ``advance = ox - prev_text_x`` model (prev_text_x = ox+glyph_w, a right edge) yields a large negative advance. For RTL chunks the x-axis is signed with ``sign*ox`` so the reading-direction advance is positive and the existing LTR merge logic applies unchanged."""
-    return -1 if unicodedata.bidirectional(char) in ("R", "AL") else 1
+    """+1 for LTR runs, -1 for a strong right-to-left char (bidi class R/AL, e.g. Hebrew/Arabic). PDFium reports RTL text in logical order with decreasing char origins, so the LTR ``advance = ox - prev_text_x`` model (prev_text_x = ox+glyph_w, a right edge) yields a large negative advance. For RTL chunks the x-axis is signed with ``sign*ox`` so the reading-direction advance is positive and the existing LTR merge logic applies unchanged. A multi-code-point value (a ligature, a Devanagari conjunct, a Thai cluster) takes the class of its first code point, like ``_reverse_if_rtl``."""
+    return -1 if char and unicodedata.bidirectional(char[0]) in ("R", "AL") else 1
 
 
 def _reverse_if_rtl(chars: str) -> str:

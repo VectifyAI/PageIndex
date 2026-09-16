@@ -61,21 +61,6 @@ def detect_title(doc) -> Optional[TitleCandidate]:
     has_seen_da = False                                  # "broke into body" flag
 
     for page in doc.primary_slot:
-        # Special branch: landscape cover document
-        if (
-            doc.secondary_slot.style_slot > len(doc.primary_slot) / 2
-            and page.page_index <= 1
-            and page.bounds.bbox_width() > page.bounds.bbox_height()
-            and page.primary_slot.secondary_slot < 500
-        ):
-            for idx, block in enumerate(page.secondary_slot):
-                if (
-                    is_title_candidate_block(block) and id(block) not in state.primary_slot
-                    and heading_score(block) > page.primary_slot.primary_slot - 0.1
-                ):
-                    score_title_candidate(state, page, idx)
-            break
-
         if (
             is_cover_like_page(doc, page)
             or (page.page_index <= 1 and len(doc.primary_slot) >= 10 and page.primary_slot.secondary_slot < 0.8 * doc.secondary_slot.secondary_slot)

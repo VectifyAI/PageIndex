@@ -90,6 +90,7 @@ if __name__ == "__main__":
             
         if args.mode == 'flash':
             from pageindex.flash import page_index_flash
+            from pageindex.flash.api import flash_rejection_reason
             summary_model = ConfigLoader().load({k: v for k, v in {
                 'summary_model': args.summary_model,
                 'index_model': args.index_model,
@@ -104,9 +105,10 @@ if __name__ == "__main__":
                 use_embedded_toc=args.embedded_toc if args.embedded_toc is not None else True,
                 summary=will_summarize,
             )
-            if not toc_with_page_number.get('structure'):
-                raise ValueError("PageIndex Flash could not extract a structure from this PDF; "
-                                 "try --mode standard, which builds the structure with the model")
+            reason = flash_rejection_reason(toc_with_page_number,
+                                            standard_hint="--mode standard")
+            if reason:
+                raise ValueError(reason)
             if 'optimize' in toc_with_page_number:
                 o = toc_with_page_number['optimize']
                 print(f"Optimize: merges={o['merges']} expands={o['expands']}, "
