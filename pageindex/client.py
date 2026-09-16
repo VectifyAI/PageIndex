@@ -1718,6 +1718,19 @@ class PageIndexClient:
         """
         return self._api.get_document(doc_id=doc_id)
 
+    def get_document_id(self, name: str) -> str:
+        """
+        Look up a document's ID by its name. Useful for resolving
+        citation doc names (from ``<cite doc="…">``) to IDs.
+
+        Raises PageIndexAPIError if no document with that name exists.
+        """
+        result = self._api.list_documents(limit=1, name=name)
+        docs = result.get("documents", [])
+        if docs:
+            return docs[0]["id"]
+        raise PageIndexAPIError(f"No document named {name!r} found.")
+
     def delete_document(self, doc_id: str) -> dict[str, Any]:
         """
         Delete a PageIndex document and all its associated data.
