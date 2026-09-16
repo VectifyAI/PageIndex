@@ -346,6 +346,7 @@ class LocalAPI:
         limit: int = 50,
         offset: int = 0,
         folder_id: str | None = None,
+        name: str | None = None,
     ) -> dict[str, Any]:
         if limit < 1 or limit > 100:
             raise ValueError("limit must be between 1 and 100")
@@ -357,6 +358,8 @@ class LocalAPI:
             )
         metas = sorted(self._store.list_metas(), key=lambda m: m.get("id") or "")
         metas.sort(key=lambda m: m.get("createdAt") or "", reverse=True)
+        if name is not None:
+            metas = [m for m in metas if m.get("name") == name]
         documents = [{
             "id": m.get("id"),
             "name": m.get("name"),

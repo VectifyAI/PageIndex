@@ -369,7 +369,7 @@ class CloudAPI:
                 status_code=response.status_code)
         return response.json() if response.content else {}
 
-    def list_documents(self, limit: int = 50, offset: int = 0, folder_id: Optional[str] = None) -> Dict[str, Any]:
+    def list_documents(self, limit: int = 50, offset: int = 0, folder_id: Optional[str] = None, name: Optional[str] = None) -> Dict[str, Any]:
         """
         List all documents for the authenticated user with pagination.
 
@@ -394,6 +394,8 @@ class CloudAPI:
         params: Dict[str, Any] = {"limit": limit, "offset": offset}
         if folder_id is not None:
             params["folder_id"] = folder_id
+        if name is not None:
+            params["name"] = name
 
         response = requests.get(
             f"{self.BASE_URL}/docs/",
