@@ -2406,19 +2406,14 @@ def test_citation_prompt_local_frozen_copy(client):
 
 @pytest.mark.skipif(not LIVE_KEY, reason="PAGEINDEX_API_KEY not set")
 def test_live_local_citation_prompts_match_cloud():
-    """The frozen local copies are the server's texts minus the bullet
-    naming get_document_image() and the 'Sources' footer (cite format
-    only — SDK users who can't render <cite> tags use the markdown or
-    footnote format instead)."""
+    """The frozen local copies are the server's texts minus the one bullet
+    naming get_document_image(); any other server edit fails here."""
     from pageindex.agent_tools import LOCAL_CITATION_PROMPTS
     cloud = PageIndexCloudClient(api_key=LIVE_KEY)
     for fmt, frozen in LOCAL_CITATION_PROMPTS.items():
         live = cloud.citation_prompt(format=fmt).split("\n")
-        dropped = [line for line in live
-                   if "get_document_image()" in line
-                   or (fmt == "cite" and "Sources" in line)]
-        expected_drops = 2 if fmt == "cite" else 1
-        assert len(dropped) == expected_drops, f"{fmt}: expected {expected_drops} dropped lines, got {len(dropped)}"
+        dropped = [line for line in live if "get_document_image()" in line]
+        assert len(dropped) == 1, fmt
         assert "\n".join(line for line in live if line not in dropped) == frozen
 
 
