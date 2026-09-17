@@ -2267,6 +2267,43 @@ def test_live_cloud_instructions_nonempty():
     assert bridge.instructions()
 
 
+# Cloud-only capabilities: every instruction line the local copy drops
+# names one of these. Whatever local mode gains, drop its marker here.
+_CLOUD_ONLY_MARKERS = (
+    "get_folder_structure", "search_documents", "get_document_image",
+    "image_path", "folder", "recursive", 'sort="relevance"',
+)
+
+# The two lines no marker catches — they exist only because the sections
+# above do: the discovery heading and the escalation ladder's closer.
+_CLOUD_ONLY_LINES = (
+    "DOCUMENT DISCOVERY (three-step funnel):",
+    "Only after ALL five steps have been tried may you conclude the "
+    "document is not in the library. Do NOT fall back to general "
+    "knowledge \u2014 if the user's question references their own "
+    "documents, exhaust every discovery path first.",
+)
+
+
+@pytest.mark.skipif(not LIVE_KEY, reason="PAGEINDEX_API_KEY not set")
+def test_live_cloud_instructions_local_parity():
+    """Drift alarm for the frozen AGENT_INSTRUCTIONS: every line the cloud
+    serves and the local copy drops must name a tool or parameter local
+    mode does not have. A cloud edit to shared guidance lands here instead
+    of leaving local agents on stale instructions."""
+    from pageindex.mcp_bridge import McpBridge
+    bridge = McpBridge("https://api.pageindex.ai/mcp",
+                       {"Authorization": f"Bearer {LIVE_KEY}"})
+    frozen = set(AGENT_INSTRUCTIONS.split("\n"))
+    unexplained = [
+        line for line in bridge.instructions().split("\n")
+        if line.strip() and line not in frozen
+        and line not in _CLOUD_ONLY_LINES
+        and not any(marker in line for marker in _CLOUD_ONLY_MARKERS)
+    ]
+    assert not unexplained, unexplained
+
+
 # ── agent_instructions ──
 
 def test_agent_instructions_default(client):
@@ -2391,16 +2428,16 @@ def test_citation_prompt_local_frozen_copy(client):
     one text per format, PageIndex chat's cite format by default, only
     local tools named."""
     from pageindex.agent_tools import LOCAL_CITATION_PROMPTS
-    assert len(set(LOCAL_CITATION_PROMPTS.values())) == 3
+    assert len(set(LOCAL_CITATION_PROMPTS.values())) == 2
     assert client.citation_prompt() == LOCAL_CITATION_PROMPTS["cite"]
     assert client.citation_prompt(format="") == LOCAL_CITATION_PROMPTS["cite"]
-    for fmt in ("markdown", "cite", "footnote"):
+    for fmt in ("markdown", "cite"):
         text = client.citation_prompt(format=fmt)
         assert text == LOCAL_CITATION_PROMPTS[fmt]
         assert "CITATIONS" in text and "get_document_image" not in text
         named = set(re.findall(r"\b(\w+)\(", text))
         assert named and named <= set(tool_names(include_management=True))
-    with pytest.raises(PageIndexAPIError, match="markdown, cite, footnote"):
+    with pytest.raises(PageIndexAPIError, match="markdown, cite"):
         client.citation_prompt(format="bogus")
 
 
@@ -2419,13 +2456,13 @@ def test_live_local_citation_prompts_match_cloud():
 
 @pytest.mark.skipif(not LIVE_KEY, reason="PAGEINDEX_API_KEY not set")
 def test_live_cloud_citation_prompt_formats():
-    """The real server serves cited_answer in all three formats, each a
+    """The real server serves cited_answer in both formats, each a
     distinct rendering of the same rules."""
     cloud = PageIndexCloudClient(api_key=LIVE_KEY)
     texts = {fmt: cloud.citation_prompt(format=fmt)
-             for fmt in ("markdown", "cite", "footnote")}
+             for fmt in ("markdown", "cite")}
     assert all("CITATIONS" in text for text in texts.values())
-    assert len(set(texts.values())) == 3
+    assert len(set(texts.values())) == 2
     assert cloud.citation_prompt() == texts["cite"]
 
 

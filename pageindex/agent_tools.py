@@ -1652,17 +1652,6 @@ CITATIONS
 - When page content includes block_id values, citations MUST be block-level: copy the exact block_id of the supporting block. Page-only cites are allowed ONLY when the tool output carries no block_id (legacy documents, structure outlines). NEVER invent or alter block_id values.
 - For a claim drawn from multiple blocks on one page, add one tag per supporting block (at most 3); beyond that, cite the single strongest block.
 - Each tag must reference a SINGLE page integer. For multi-page citations, use separate tags.""",
-    "footnote": """\
-GROUNDING
-- Answer only from the user's PageIndex documents. Call get_page_content() and state only what was actually read there.
-- Never fill a gap from general knowledge. When the documents do not answer the question, say so.
-
-CITATIONS
-- Cite only statements supported by tool outputs, as a Markdown footnote: put [^n] immediately after the claim and define it at the end of the answer as [^n]: {docName}, p. {pageNumber} or [^n]: {docName}, p. {pageNumber}, block {blockId}.
-- When page content includes block_id values, citations MUST be block-level: copy the exact block_id of the supporting block. Page-only cites are allowed ONLY when the tool output carries no block_id (legacy documents, structure outlines). NEVER invent or alter block_id values.
-- For a claim drawn from multiple blocks on one page, add one footnote per supporting block (at most 3); beyond that, cite the single strongest block.
-- Each footnote must reference a SINGLE page integer. For multi-page citations, use separate footnotes.
-- Number footnotes from 1 in order of first use; reuse a number when the same page and block support another claim. Every marker needs a definition and every definition a marker.""",
 }
 
 
