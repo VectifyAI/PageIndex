@@ -125,8 +125,8 @@ TOOL_CONTRACT: dict[str, dict[str, Any]] = {
                 "query": {
                     "type": "string",
                     "description": (
-                        "Search query for relevance ranking. Required when "
-                        'sort="relevance"; must be omitted when sort="time".'
+                        "Search query for relevance ranking. "
+                        'Only used when sort="relevance".'
                     ),
                 },
                 "offset": {
