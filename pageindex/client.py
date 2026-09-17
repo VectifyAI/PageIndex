@@ -2168,11 +2168,11 @@ class PageIndexClient:
 
         ``format`` picks how a citation is written: ``"cite"`` (the
         ``<cite doc= page= block=/>`` tags PageIndex chat writes and
-        renders — the default), ``"markdown"`` (a bracketed
-        ``[doc, p. N]`` reference, for hosts that strip tags) or
-        ``"footnote"`` (Markdown footnotes); the server rejects any
-        other value. Local documents: the SDK's frozen copy of the
-        same prompt (page-level — local page content has no blocks).
+        renders — the default) or ``"markdown"`` (a bracketed
+        ``[doc, p. N]`` reference, for hosts that strip tags); the
+        server rejects any other value. Local documents: the SDK's
+        frozen copy of the same prompt (page-level — local page
+        content has no blocks).
         """
         from .agent_tools import fetch_citation_prompt
         return fetch_citation_prompt(self, format or "cite")
@@ -2190,8 +2190,8 @@ class PageIndexClient:
         and the block's ``text``. Reads both tag formats PageIndex chat
         writes: ``<cite doc= page= block=/>`` (own-model
         ``chat(citations=True)``) and ``<doc=…;page=…;block=…>`` (the
-        managed chat). The markdown and footnote formats of
-        ``citation_prompt()`` are prose for readers and are not parsed.
+        managed chat). The markdown format of
+        ``citation_prompt()`` is prose for readers and is not parsed.
 
         Args:
             answer (str): The answer text, tags included.
