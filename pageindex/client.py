@@ -2169,8 +2169,8 @@ class PageIndexClient:
         ``format`` picks how a citation is written: ``"cite"`` (the
         ``<cite doc= page= block=/>`` tags PageIndex chat writes and
         renders — the default) or ``"markdown"`` (a bracketed
-        ``[doc, p. N]`` reference, for hosts that strip tags); the
-        server rejects any other value. Local documents: the SDK's
+        ``[doc, p. N]`` reference, for hosts that strip tags); any
+        other value raises. Local documents: the SDK's
         frozen copy of the same prompt (page-level — local page
         content has no blocks).
         """

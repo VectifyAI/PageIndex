@@ -2312,6 +2312,7 @@ _LOCAL_ONLY_LINES = (
 
 def _assert_instructions_local_parity(instructions):
     frozen = {line for line in AGENT_INSTRUCTIONS.splitlines() if line.strip()}
+    assert set(_LOCAL_ONLY_LINES) <= frozen, "stale _LOCAL_ONLY_LINES entries"
     live = {line for line in instructions.splitlines() if line.strip()}
     unexplained = [
         line for line in sorted(live - frozen)
@@ -2487,7 +2488,7 @@ def test_citation_prompt_local_frozen_copy(client):
     one text per format, PageIndex chat's cite format by default, only
     local tools named."""
     from pageindex.agent_tools import LOCAL_CITATION_PROMPTS
-    assert len(set(LOCAL_CITATION_PROMPTS.values())) == 2
+    assert set(LOCAL_CITATION_PROMPTS) == {"markdown", "cite"}
     assert client.citation_prompt() == LOCAL_CITATION_PROMPTS["cite"]
     assert client.citation_prompt(format="") == LOCAL_CITATION_PROMPTS["cite"]
     for fmt in ("markdown", "cite"):
