@@ -44,3 +44,5 @@ jobs:
       - if: matrix.pdfium == '4'
         run: pip install "pypdfium2<5"
       - run: python -m pytest -q
+        env:
+          PAGEINDEX_API_KEY: ${{ secrets.PAGEINDEX_API_KEY }}
