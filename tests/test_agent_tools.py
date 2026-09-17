@@ -2285,23 +2285,82 @@ _CLOUD_ONLY_LINES = (
 )
 
 
+# Exact local rewrites of the cloud's folder/semantic discovery workflow.
+# Do not derive these from AGENT_INSTRUCTIONS: a shared rule removed from
+# the cloud must fail the reverse comparison, not become a new exception.
+_LOCAL_ONLY_LINES = (
+    "DOCUMENT DISCOVERY:",
+    "- browse_documents() — DEFAULT discovery tool, first choice for any "
+    "document-related question. The bare call returns your documents newest "
+    "first with names and descriptions; match them against the user's intent.",
+    '- "What do I have / list / recent" → browse_documents()',
+    '- ANY question that needs a document to answer (including "find THE '
+    'paper about Y") → browse_documents(), then pick the documents whose '
+    "name/description matches the question",
+    "1. browse_documents() and compare every returned name/description "
+    "against the user's intent",
+    "2. Rephrase the query with synonyms or alternative terms and browse again",
+    "3. Page through the ENTIRE library with `limit: 50` and `offset: "
+    "next_offset` until has_more is false — MANDATORY, must be completed "
+    'before concluding "not found"',
+    "Only after ALL steps have been tried may you conclude the document is "
+    "not in the library. Do NOT fall back to general knowledge — if the "
+    "user's question references their own documents, exhaust every discovery "
+    "path first.",
+)
+
+
+def _assert_instructions_local_parity(instructions):
+    frozen = {line for line in AGENT_INSTRUCTIONS.splitlines() if line.strip()}
+    live = {line for line in instructions.splitlines() if line.strip()}
+    unexplained = [
+        line for line in sorted(live - frozen)
+        if line not in _CLOUD_ONLY_LINES
+        and not any(marker in line for marker in _CLOUD_ONLY_MARKERS)
+    ]
+    missing = sorted(frozen - live - set(_LOCAL_ONLY_LINES))
+    assert not unexplained and not missing, {
+        "unexpected_cloud_lines": unexplained,
+        "missing_cloud_lines": missing,
+    }
+
+
+def test_instructions_parity_allows_intentional_differences():
+    cloud = AGENT_INSTRUCTIONS.replace(
+        "DOCUMENT DISCOVERY:\n", "DOCUMENT DISCOVERY (three-step funnel):\n")
+    cloud += "\n- Call get_folder_structure() to inspect the library."
+    _assert_instructions_local_parity(cloud)
+
+
+@pytest.mark.parametrize("change", [
+    "addition", "deletion", "edit", "edit_with_cloud_marker", "truncation",
+])
+def test_instructions_parity_detects_shared_drift(change):
+    shared = (
+        "- Invoke a tool only when all required parameters are present or "
+        "clearly inferable. Never invent placeholder values."
+    )
+    assert shared in AGENT_INSTRUCTIONS
+    cloud = {
+        "addition": AGENT_INSTRUCTIONS + "\n- Always verify page numbers.",
+        "deletion": AGENT_INSTRUCTIONS.replace(shared, ""),
+        "edit": AGENT_INSTRUCTIONS.replace(shared, "- Never invoke a tool."),
+        "edit_with_cloud_marker": AGENT_INSTRUCTIONS.replace(
+            shared, "- Invoke tools without parameters, including folder tools."),
+        "truncation": "READING WORKFLOW:",
+    }[change]
+    with pytest.raises(AssertionError):
+        _assert_instructions_local_parity(cloud)
+
+
 @pytest.mark.skipif(not LIVE_KEY, reason="PAGEINDEX_API_KEY not set")
 def test_live_cloud_instructions_local_parity():
-    """Drift alarm for the frozen AGENT_INSTRUCTIONS: every line the cloud
-    serves and the local copy drops must name a tool or parameter local
-    mode does not have. A cloud edit to shared guidance lands here instead
-    of leaving local agents on stale instructions."""
+    """Drift alarm for shared guidance in the frozen AGENT_INSTRUCTIONS,
+    allowing the intentional differences for cloud-only capabilities."""
     from pageindex.mcp_bridge import McpBridge
     bridge = McpBridge("https://api.pageindex.ai/mcp",
                        {"Authorization": f"Bearer {LIVE_KEY}"})
-    frozen = set(AGENT_INSTRUCTIONS.split("\n"))
-    unexplained = [
-        line for line in bridge.instructions().split("\n")
-        if line.strip() and line not in frozen
-        and line not in _CLOUD_ONLY_LINES
-        and not any(marker in line for marker in _CLOUD_ONLY_MARKERS)
-    ]
-    assert not unexplained, unexplained
+    _assert_instructions_local_parity(bridge.instructions())
 
 
 # ── agent_instructions ──
