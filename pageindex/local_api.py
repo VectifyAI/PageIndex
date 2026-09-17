@@ -347,6 +347,7 @@ class LocalAPI:
         offset: int = 0,
         folder_id: str | None = None,
         name: str | None = None,
+        recursive: bool = False,  # no folders here, nothing to descend into
     ) -> dict[str, Any]:
         if limit < 1 or limit > 100:
             raise ValueError("limit must be between 1 and 100")
@@ -368,6 +369,7 @@ class LocalAPI:
             "createdAt": m.get("createdAt"),
             "pageNum": m.get("pageNum", 0),
             "folderId": None,
+            "path": None,
             "metadata": m.get("metadata"),
             "features": {},
         } for m in metas[offset:offset + limit]]
