@@ -2270,14 +2270,16 @@ def test_live_cloud_instructions_nonempty():
 # Cloud-only capabilities: every instruction line the local copy drops
 # names one of these. Whatever local mode gains, drop its marker here.
 _CLOUD_ONLY_MARKERS = (
-    "get_folder_structure", "search_documents", "get_document_image",
-    "image_path", "folder", "recursive", 'sort="relevance"',
+    "get_folder_structure(", "search_documents", "get_document_image",
+    "image_path", "folder_id", "recursive=", 'sort="relevance"',
 )
 
 # The two lines no marker catches — they exist only because the sections
 # above do: the discovery heading and the escalation ladder's closer.
 _CLOUD_ONLY_LINES = (
     "DOCUMENT DISCOVERY (three-step funnel):",
+    '- "What do I have / list / recent / browse the X folder" '
+    "\u2192 browse_documents (time)",
     "Only after ALL five steps have been tried may you conclude the "
     "document is not in the library. Do NOT fall back to general "
     "knowledge \u2014 if the user's question references their own "
@@ -2310,7 +2312,16 @@ _LOCAL_ONLY_LINES = (
 )
 
 
+def _section_headers(text):
+    """Extract lines that end with ':' as section headers, preserving order."""
+    return [line.strip() for line in text.splitlines()
+            if line.strip() and line.strip().endswith(":")]
+
+
 def _assert_instructions_local_parity(instructions):
+    if instructions is None:
+        raise AssertionError(
+            "Server returned no instructions (None); cannot check parity")
     frozen = {line for line in AGENT_INSTRUCTIONS.splitlines() if line.strip()}
     assert set(_LOCAL_ONLY_LINES) <= frozen, "stale _LOCAL_ONLY_LINES entries"
     live = {line for line in instructions.splitlines() if line.strip()}
@@ -2323,6 +2334,14 @@ def _assert_instructions_local_parity(instructions):
     assert not unexplained and not missing, {
         "unexpected_cloud_lines": unexplained,
         "missing_cloud_lines": missing,
+    }
+    # Section order is load-bearing for a system prompt; catch reorders.
+    local_sections = _section_headers(AGENT_INSTRUCTIONS)
+    cloud_sections = _section_headers(instructions)
+    shared = [s for s in local_sections if s in cloud_sections]
+    cloud_shared = [s for s in cloud_sections if s in local_sections]
+    assert shared == cloud_shared, {
+        "section_order_mismatch": {"local": shared, "cloud": cloud_shared},
     }
 
 
@@ -2524,6 +2543,25 @@ def test_live_cloud_citation_prompt_formats():
     assert all("CITATIONS" in text for text in texts.values())
     assert len(set(texts.values())) == 2
     assert cloud.citation_prompt() == texts["cite"]
+
+
+@pytest.mark.skipif(not LIVE_KEY, reason="PAGEINDEX_API_KEY not set")
+def test_live_cloud_citation_format_enumeration():
+    """The server's prompts/list declares the same format set the SDK knows."""
+    from pageindex.agent_tools import LOCAL_CITATION_PROMPTS
+    from pageindex.mcp_bridge import McpBridge
+    bridge = McpBridge("https://api.pageindex.ai/mcp",
+                       {"Authorization": f"Bearer {LIVE_KEY}"})
+    prompts = bridge.list_prompts()
+    cited = next(p for p in prompts if p["name"] == "cited_answer")
+    fmt_arg = next(a for a in cited["arguments"] if a["name"] == "format")
+    # Extract format names from the description text (e.g. "markdown ... or cite")
+    desc = fmt_arg["description"]
+    declared = {w for w in LOCAL_CITATION_PROMPTS if w in desc}
+    assert declared == set(LOCAL_CITATION_PROMPTS), {
+        "sdk": set(LOCAL_CITATION_PROMPTS), "server_declares": declared,
+        "description": desc,
+    }
 
 
 def test_cloud_bridge_cache_threadsafe_and_pickle_clean(monkeypatch):
