@@ -31,7 +31,7 @@
           },
           "query": {
             "type": "string",
-            "description": "Search query for relevance ranking. Only used when sort=\"relevance\"."
+            "description": "Search query for relevance ranking. Required when sort=\"relevance\"."
           },
           "offset": {
             "type": "integer",
