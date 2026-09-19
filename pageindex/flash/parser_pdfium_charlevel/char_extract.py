@@ -340,7 +340,7 @@ def _finalize_chars(raw_chars: list[dict]) -> list[dict]:
 
 
 def _inherited_box(pdf_doc, page_idx: int, name: str):
-    """span merger ``inherited page-box lookup`` definition: MediaBox/CropBox resolved through the page-tree ``/Parent`` chain (page-tree inheritance lookup). PDFium's FPDFPage_Get*Box does NOT inherit (pdfium bug 1786), so inherited boxes must come from the PyPDF2 channel. Returns a raw 4-tuple or None (absent / not a 4-number array, matching span merger length gate)."""
+    """span merger ``inherited page-box lookup`` definition: MediaBox/CropBox resolved through the page-tree ``/Parent`` chain (page-tree inheritance lookup). PDFium's FPDFPage_Get*Box does NOT inherit (pdfium bug 1786), so inherited boxes must come from the pypdf channel. Returns a raw 4-tuple or None (absent / not a 4-number array, matching span merger length gate)."""
     try:
         xref_cursor = pdf_doc.page_xref(page_idx)
         for _ in range(32):
