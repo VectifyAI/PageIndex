@@ -610,21 +610,48 @@ def test_get_page_content_span_bomb_rejected(local_client, indexed_doc):
     assert local_client.get_page_content(indexed_doc, "5-10004") == []
 
 
-def test_local_citations_resolve_to_pages_only(local_client, indexed_doc):
+def test_local_get_citations(local_client, indexed_doc):
     """Local page content has no blocks: page citations resolve to the
     document id, get_block names the cloud-only exit, and a block citation
     keeps its entry without a bbox."""
     answer = 'Apples <cite doc="sample.pdf" page="1"/> and none <cite doc="other.pdf" page="2"/>.'
-    assert local_client.resolve_citations(answer) == [
+    assert local_client.get_citations(answer) == [
         {"document": "sample.pdf", "doc_id": indexed_doc, "page": 1},
         {"document": "other.pdf", "doc_id": None, "page": 2},
     ]
     with pytest.raises(PageIndexAPIError, match="get_block is cloud-only"):
         local_client.get_block(indexed_doc, "p1_text_1")
-    assert local_client.resolve_citations(
+    assert local_client.get_citations(
         '<cite doc="sample.pdf" page="1" block="p1_text_1"/>') == [
         {"document": "sample.pdf", "doc_id": indexed_doc, "page": 1,
          "block_id": "p1_text_1"}]
+
+
+def test_local_resolve_citations(local_client, indexed_doc):
+    """resolve_citations rewrites tags and enriches entries on local docs."""
+    answer = 'Apples <cite doc="sample.pdf" page="1"/> and none <cite doc="other.pdf" page="2"/>.'
+    assert local_client.resolve_citations(answer) == {
+        "answer": "Apples [[1]](#pageindex-citation-01) and none "
+                  "[[2]](#pageindex-citation-02).",
+        "citations": [
+            {"anchor": "pageindex-citation-01", "index": 1,
+             "document": "sample.pdf", "doc_id": indexed_doc, "page": 1},
+            {"anchor": "pageindex-citation-02", "index": 2,
+             "document": "other.pdf", "doc_id": None, "page": 2},
+        ],
+    }
+
+
+def test_local_paths_and_images(local_client, indexed_doc):
+    """Local documents have no folders and no stored images: a document's
+    path is its name, and the folder and image lookups refuse."""
+    assert local_client.get_document_path(indexed_doc) == "sample.pdf"
+    for call in (lambda: local_client.get_folder_path("f-1"),
+                 lambda: local_client.get_folder_id("Research"),
+                 lambda: local_client.get_page_image(indexed_doc, 1),
+                 lambda: local_client.get_document_image(indexed_doc, "img-0.jpeg")):
+        with pytest.raises(PageIndexAPIError, match="is cloud-only"):
+            call()
 
 
 def test_submit_does_not_create_cwd_logs(local_client, sample_pdf, tmp_path, monkeypatch):
@@ -1493,6 +1520,8 @@ def test_cloud_errors_carry_status_code(cloud, monkeypatch, sample_pdf):
             messages=[{"role": "user", "content": "q"}]),
         lambda: client.get_document("pi-1"),
         lambda: client.get_block("pi-1", "p1_text_1"),
+        lambda: client.get_page_image("pi-1", 1),
+        lambda: client.get_document_image("pi-1", "img-0.jpeg"),
         lambda: client.delete_document("pi-1"),
         lambda: client.list_documents(),
         lambda: client.create_folder("f"),
@@ -1568,7 +1597,7 @@ def _library(docs):
     return handler
 
 
-def test_resolve_citations_cloud(cloud, monkeypatch):
+def test_get_citations_cloud(cloud, monkeypatch):
     """Names become ids from the library, block citations pick up the
     block's fields, a block the document lacks keeps a bbox-less entry,
     an unknown document keeps doc_id None."""
@@ -1583,14 +1612,14 @@ def test_resolve_citations_cloud(cloud, monkeypatch):
     answer = ('X <cite doc="a.pdf" page="3" block="p3_text_5"/> '
               'Y <cite doc="a.pdf" page="9" block="p9_text_9"/> '
               'Z <cite doc="b.pdf" page="2"/> W <cite doc="c.pdf" page="1"/>')
-    assert client.resolve_citations(answer) == [
+    assert client.get_citations(answer) == [
         {"document": "a.pdf", **block},
         {"document": "a.pdf", "doc_id": "pi-a", "page": 9,
          "block_id": "p9_text_9"},
         {"document": "b.pdf", "doc_id": "pi-b", "page": 2},
         {"document": "c.pdf", "doc_id": None, "page": 1},
     ]
-    assert client.resolve_citations("no citations here") == []
+    assert client.get_citations("no citations here") == []
 
     # doc_id= skips the library listing: one metadata call per id.
     library = _library({"pi-a": ("a.pdf", {"p3_text_5": block})})
@@ -1599,20 +1628,20 @@ def test_resolve_citations_cloud(cloud, monkeypatch):
         return library(method, url, kw)
     _patch_requests(monkeypatch, no_listing)
     for scope in ("pi-a", ["pi-a", "pi-a"]):  # a repeated id is not a collision
-        assert client.resolve_citations(
+        assert client.get_citations(
             '<cite doc="a.pdf" page="3" block="p3_text_5"/>', doc_id=scope,
         ) == [{"document": "a.pdf", **block}]
 
     for not_text in (None, ['<cite doc="a.pdf" page="1"/>']):
         with pytest.raises(PageIndexAPIError, match="answer must be a str"):
-            client.resolve_citations(not_text)
+            client.get_citations(not_text)
     with pytest.raises(PageIndexAPIError, match="doc_id must be a string or a list"):
-        client.resolve_citations(answer, doc_id=5)
+        client.get_citations(answer, doc_id=5)
     with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
-        client.resolve_citations(answer, doc_id=[])
+        client.get_citations(answer, doc_id=[])
 
 
-def test_resolve_citations_quotes_and_tag_edges(cloud, monkeypatch):
+def test_get_citations_quotes_and_tag_edges(cloud, monkeypatch):
     """A quoted name keeps its apostrophe, and neither field of a
     managed-chat tag runs past the tag: an unterminated name and an
     unterminated block both stop at the next tag instead of eating it."""
@@ -1621,17 +1650,17 @@ def test_resolve_citations_quotes_and_tag_edges(cloud, monkeypatch):
                                            "pi-b": ("b.pdf", {})}))
     answer = ("""Held <cite doc="Moody's Outlook.pdf" page="3"/> and overall """
               "<doc=b.pdf> is long, but revenue rose <doc=b.pdf;page=7>.")
-    assert client.resolve_citations(answer) == [
+    assert client.get_citations(answer) == [
         {"document": "b.pdf", "doc_id": "pi-b", "page": 7},
         {"document": "Moody's Outlook.pdf", "doc_id": "pi-m", "page": 3},
     ]
     # A block= that never closes must not swallow the citation after it.
-    assert client.resolve_citations(
+    assert client.get_citations(
         '<doc=b.pdf;page=3;block=p3_text_5 <cite doc="b.pdf" page="9"/>'
     ) == [{"document": "b.pdf", "doc_id": "pi-b", "page": 9}]
 
 
-def test_resolve_citations_lists_the_whole_library(cloud, monkeypatch):
+def test_get_citations_lists_the_whole_library(cloud, monkeypatch):
     client, calls, fake = cloud
     seen_offsets = []
     library = _library({f"pi-{i}": (f"{i}.pdf", {}) for i in range(150)})
@@ -1640,12 +1669,12 @@ def test_resolve_citations_lists_the_whole_library(cloud, monkeypatch):
             seen_offsets.append(kw["params"]["offset"])
         return library(method, url, kw)
     _patch_requests(monkeypatch, handler)
-    assert client.resolve_citations('<cite doc="149.pdf" page="1"/>') == [
+    assert client.get_citations('<cite doc="149.pdf" page="1"/>') == [
         {"document": "149.pdf", "doc_id": "pi-149", "page": 1}]
     assert seen_offsets == [0, 100]
 
 
-def test_resolve_citations_listing_survives_a_shifting_library(cloud, monkeypatch):
+def test_get_citations_listing_survives_a_shifting_library(cloud, monkeypatch):
     """A listing without 'total' ends on the empty page, a document
     re-served after an upload shifted the window is still one document,
     and an entry missing 'name' or 'id' is skipped, not a KeyError."""
@@ -1660,24 +1689,24 @@ def test_resolve_citations_listing_survives_a_shifting_library(cloud, monkeypatc
             entries.insert(0, {"id": "pi-new", "name": "new.pdf"})
         return FakeResponse({"documents": entries[offset:offset + 100]})
     _patch_requests(monkeypatch, handler)
-    assert client.resolve_citations('<cite doc="99.pdf" page="1"/>') == [
+    assert client.get_citations('<cite doc="99.pdf" page="1"/>') == [
         {"document": "99.pdf", "doc_id": "pi-99", "page": 1}]
 
 
-def test_resolve_citations_refuses_a_shared_name(cloud, monkeypatch):
+def test_get_citations_refuses_a_shared_name(cloud, monkeypatch):
     """Two documents under one cited name would silently pick a bbox from
     the wrong one: raise, name both ids, point at doc_id=."""
     client, calls, fake = cloud
     _patch_requests(monkeypatch, _library({"pi-1": ("a.pdf", {}),
                                            "pi-2": ("a.pdf", {})}))
     with pytest.raises(PageIndexAPIError, match=r"pi-1, pi-2.*doc_id="):
-        client.resolve_citations('<cite doc="a.pdf" page="1"/>')
-    assert client.resolve_citations('<cite doc="a.pdf" page="1"/>',
+        client.get_citations('<cite doc="a.pdf" page="1"/>')
+    assert client.get_citations('<cite doc="a.pdf" page="1"/>',
                                     doc_id=["pi-2"]) == [
         {"document": "a.pdf", "doc_id": "pi-2", "page": 1}]
 
 
-def test_resolve_citations_keeps_blocks_it_cannot_read(cloud, monkeypatch):
+def test_get_citations_keeps_blocks_it_cannot_read(cloud, monkeypatch):
     """A denied block (403) keeps its bbox-less entry like a missing one;
     a transport failure still propagates with its status."""
     client, calls, fake = cloud
@@ -1688,12 +1717,46 @@ def test_resolve_citations_keeps_blocks_it_cannot_read(cloud, monkeypatch):
         return _library({"pi-a": ("a.pdf", {})})(method, url, kw)
     _patch_requests(monkeypatch, handler)
     answer = '<cite doc="a.pdf" page="1" block="p1_text_1"/>'
-    assert client.resolve_citations(answer) == [
+    assert client.get_citations(answer) == [
         {"document": "a.pdf", "doc_id": "pi-a", "page": 1, "block_id": "p1_text_1"}]
     status["code"] = 500
     with pytest.raises(PageIndexAPIError, match="Failed to get block: boom") as err:
-        client.resolve_citations(answer)
+        client.get_citations(answer)
     assert err.value.status_code == 500
+
+
+def test_resolve_citations_rewrites_tags(cloud, monkeypatch):
+    """Each tag becomes the numbered link of its get_citations() entry, a
+    repeated citation reuses its number, and entries lead with anchor and
+    index. A block cited under the wrong page still gets its link: the
+    entry carries the block's real page, the number follows the tag."""
+    client, calls, fake = cloud
+    block = {"doc_id": "pi-a", "page": 3, "block_id": "p3_text_5",
+             "bbox": [163, 398, 842, 589], "block_type": "text",
+             "text": "Apples."}
+    _patch_requests(monkeypatch, _library({
+        "pi-a": ("a.pdf", {"p3_text_5": block}),
+        "pi-b": ("b.pdf", {}),
+    }))
+    answer = ('X <cite doc="a.pdf" page="3" block="p3_text_5"/> '
+              'Y <cite doc="b.pdf" page="2"/> '
+              'Z <doc=a.pdf;page=3;block=p3_text_5> '
+              'W <cite doc="a.pdf" page="4" block="p3_text_5"/>')
+    result = client.resolve_citations(answer)
+    assert result["answer"] == (
+        "X [[1]](#pageindex-citation-01) Y [[2]](#pageindex-citation-02) "
+        "Z [[1]](#pageindex-citation-01) W [[3]](#pageindex-citation-03)")
+    assert result["citations"] == [
+        {"anchor": "pageindex-citation-01", "index": 1, "document": "a.pdf",
+         **block},
+        {"anchor": "pageindex-citation-02", "index": 2, "document": "b.pdf",
+         "doc_id": "pi-b", "page": 2},
+        {"anchor": "pageindex-citation-03", "index": 3, "document": "a.pdf",
+         **block},
+    ]
+    assert all(list(c)[:2] == ["anchor", "index"] for c in result["citations"])
+    assert client.resolve_citations("no citations") == {
+        "answer": "no citations", "citations": []}
 
 
 def test_get_block_request_wiring(cloud):
@@ -1704,6 +1767,65 @@ def test_get_block_request_wiring(cloud):
     assert calls[-1]["url"] == "https://api.pageindex.ai/doc/pi%2F1/block/p3_text_5/"
     assert calls[-1]["headers"] == {"api_key": "secret"}
     assert calls[-1]["timeout"] == 30
+
+
+def test_image_url_request_wiring(cloud):
+    client, calls, fake = cloud
+    fake.payload = {"doc_id": "pi/1", "images": [
+        {"page": 3, "mime_type": "image/jpeg", "object_key": "k3",
+         "url": "https://signed/page-3.jpg", "expires_in": 3600}]}
+    assert client.get_page_image("pi/1", 3) == "https://signed/page-3.jpg"
+    assert calls[-1]["url"] == "https://api.pageindex.ai/doc/s3/pi%2F1/images"
+    assert calls[-1]["params"] == {"start": 3, "end": 3}
+    assert calls[-1]["headers"] == {"api_key": "secret"}
+    fake.payload["images"][0]["url"] = None
+    with pytest.raises(PageIndexAPIError, match="No image URL returned for page 3"):
+        client.get_page_image("pi/1", 3)
+
+    fake.payload = {"doc_id": "pi/1", "img_id": "img-7.jpeg",
+                    "url": "https://signed/img-7.jpeg", "expires_in": 3600}
+    assert client.get_document_image("pi/1", "img-7.jpeg") == "https://signed/img-7.jpeg"
+    assert calls[-1]["url"] == "https://api.pageindex.ai/doc/pi%2F1/image/img-7.jpeg/"
+    assert calls[-1]["headers"] == {"api_key": "secret"}
+    fake.payload = {}
+    with pytest.raises(PageIndexAPIError, match="No image URL returned for 'img-7.jpeg'"):
+        client.get_document_image("pi/1", "img-7.jpeg")
+
+
+def test_folder_and_document_paths(cloud, monkeypatch):
+    """Paths are folder names root first; get_folder_id reads one back, a
+    document outside the API's folders is just its name, a path two
+    folders share raises instead of picking one, and a parent cycle ends
+    the walk instead of hanging it."""
+    client, calls, fake = cloud
+    folders = [{"id": "f-r", "name": "Research", "parent_folder_id": None},
+               {"id": "f-p", "name": "Papers", "parent_folder_id": "f-r"}]
+    doc_folders = {"pi-root": None, "pi-nested": "f-p", "pi-library": "f-lib"}
+
+    def handler(method, url, kw):
+        if url.endswith("/folders/"):
+            return FakeResponse({"folders": folders, "total": len(folders)})
+        doc_id = re.fullmatch(r".*/doc/([^/]+)/metadata/", url).group(1)
+        return FakeResponse({"id": doc_id, "name": f"{doc_id}.pdf",
+                             "folderId": doc_folders[doc_id]})
+    _patch_requests(monkeypatch, handler)
+
+    assert client.get_folder_path("f-p") == "Research/Papers"
+    assert client.get_folder_id("Research/Papers") == "f-p"
+    assert client.get_folder_id("/Research/") == "f-r"
+    assert client.get_document_path("pi-nested") == "Research/Papers/pi-nested.pdf"
+    assert client.get_document_path("pi-root") == "pi-root.pdf"
+    assert client.get_document_path("pi-library") == "pi-library.pdf"
+    with pytest.raises(PageIndexAPIError, match="Folder 'f-none' not found"):
+        client.get_folder_path("f-none")
+    with pytest.raises(PageIndexAPIError, match="No folder at path 'Research/X'"):
+        client.get_folder_id("Research/X")
+    folders.append({"id": "f-x", "name": "Research/Papers", "parent_folder_id": None})
+    with pytest.raises(PageIndexAPIError, match=r"names 2 folders \(f-p, f-x\)"):
+        client.get_folder_id("Research/Papers")
+    folders[:] = [{"id": "a", "name": "A", "parent_folder_id": "b"},
+                  {"id": "b", "name": "B", "parent_folder_id": "a"}]
+    assert client.get_folder_path("a") == "B/A"
 
 
 def test_cloud_chat_stream_parsing(cloud, monkeypatch):
