@@ -490,16 +490,16 @@ def calculate_page_offset(pairs):
             differences.append(difference)
         except (KeyError, TypeError):
             continue
-    
+
     if not differences:
-        return None
-    
+        return 0
+
     difference_counts = {}
     for diff in differences:
         difference_counts[diff] = difference_counts.get(diff, 0) + 1
-    
+
     most_common = max(difference_counts.items(), key=lambda x: x[1])[0]
-    
+
     return most_common
 
 def add_page_offset_to_toc_json(data, offset):
