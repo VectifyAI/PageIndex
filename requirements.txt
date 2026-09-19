@@ -12,3 +12,4 @@ python-dotenv==1.2.2
 pyyaml==6.0.2
 regex>=2024.0.0
 sortedcontainers==2.4.0
+Pillow>=9.0
