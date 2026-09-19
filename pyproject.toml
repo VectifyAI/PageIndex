@@ -40,6 +40,7 @@ sortedcontainers = ">=2.4.0"
 regex = ">=2024.0.0"
 python-dotenv = ">=1.0.0"
 pyyaml = ">=6.0"
+Pillow = ">=9.0"
 # Older releases break string prompts with SDK MCP servers (#597, #780).
 claude-agent-sdk = { version = ">=0.1.53", optional = true }
 # Older releases execute a refusal turn's tool_use blocks.
