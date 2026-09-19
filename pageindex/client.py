@@ -52,34 +52,39 @@ _CITE_TAG_RE = re.compile(r"<cite\s([^<>]*)>")
 _CITE_ATTR_RE = re.compile(r"""\b(\w+)=(["'])(.*?)\2""", re.S)
 
 
+def _citation_key(m: re.Match) -> Optional[tuple[str, int, Optional[str]]]:
+    """(document, page, block_id) of one matched tag, or None when it names
+    no document or no positive page."""
+    if m.re is _OLD_CITATION_RE:
+        doc, page_str, block_id = m.group(1), m.group(2), m.group(3)
+    else:
+        attrs = {name: value for name, _, value in
+                 _CITE_ATTR_RE.findall(m.group(1))}
+        doc, page_str, block_id = (attrs.get("doc", ""), attrs.get("page", ""),
+                                   attrs.get("block"))
+    doc = doc.strip()
+    block_id = (block_id or "").strip() or None
+    try:
+        page = int(page_str.split("-")[0])
+    except ValueError:
+        return None
+    return (doc, page, block_id) if doc and page > 0 else None
+
+
 def _parse_citations(text: str) -> list[dict[str, Any]]:
     """``<doc=…;page=…;block=…>`` tags (the managed chat's format), then
     ``<cite doc= page= block=/>`` tags; deduplicated, ``block_id`` only
     when the tag carries one."""
     found: list[dict[str, Any]] = []
     seen: set[tuple[str, int, Optional[str]]] = set()
-
-    def add(doc: str, page_str: str, block_id: Optional[str]) -> None:
-        doc = doc.strip()
-        block_id = (block_id or "").strip() or None
-        try:
-            page = int(page_str.split("-")[0])
-        except ValueError:
-            return
-        key = (doc, page, block_id)
-        if doc and page > 0 and key not in seen:
+    for m in [*_OLD_CITATION_RE.finditer(text), *_CITE_TAG_RE.finditer(text)]:
+        key = _citation_key(m)
+        if key and key not in seen:
             seen.add(key)
-            entry: dict[str, Any] = {"document": doc, "page": page}
-            if block_id:
-                entry["block_id"] = block_id
+            entry: dict[str, Any] = {"document": key[0], "page": key[1]}
+            if key[2]:
+                entry["block_id"] = key[2]
             found.append(entry)
-
-    for m in _OLD_CITATION_RE.finditer(text):
-        add(m.group(1), m.group(2), m.group(3))
-    for m in _CITE_TAG_RE.finditer(text):
-        attrs = {name: value for name, _, value in
-                 _CITE_ATTR_RE.findall(m.group(1))}
-        add(attrs.get("doc", ""), attrs.get("page", ""), attrs.get("block"))
     return found
 
 
@@ -780,6 +785,42 @@ class PageIndexClient:
             "get_block is cloud-only — local page content has no layout "
             "blocks. Create the client with an api_key to look up blocks."
         ).get_block(doc_id=doc_id, block_id=block_id)
+
+    def get_page_image(self, doc_id: str, page: int) -> str:
+        """
+        A short-lived URL to one page, rendered as a JPEG. Cloud-only:
+        local mode renders no page images.
+
+        Args:
+            doc_id (str): Document ID.
+            page (int): 1-based page number.
+
+        Returns:
+            str: The URL. Fetch the bytes with ``requests.get(url).content``,
+            or pass it to a vision model that takes image URLs.
+        """
+        return self._require_cloud(
+            "get_page_image is cloud-only — local mode has no page-image "
+            "rendering. Create the client with an api_key to get page images."
+        ).get_page_image(doc_id=doc_id, page=page)
+
+    def get_document_image(self, doc_id: str, img_id: str) -> str:
+        """
+        A short-lived URL to an image OCR extracted from the document.
+        Cloud-only: local mode stores no images.
+
+        Args:
+            doc_id (str): Document ID.
+            img_id (str): Image ID as page content carries it,
+                e.g. ``"img-7.jpeg"``.
+
+        Returns:
+            str: The URL, as ``get_page_image`` returns one.
+        """
+        return self._require_cloud(
+            "get_document_image is cloud-only — local mode has no embedded "
+            "image storage. Create the client with an api_key."
+        ).get_document_image(doc_id=doc_id, img_id=img_id)
 
     # ---------- TREE GENERATION ----------
 
@@ -2177,7 +2218,7 @@ class PageIndexClient:
         from .agent_tools import fetch_citation_prompt
         return fetch_citation_prompt(self, format or "cite")
 
-    def resolve_citations(
+    def get_citations(
         self,
         answer: str,
         doc_id: Optional[Union[str, list[str]]] = None,
@@ -2259,6 +2300,47 @@ class PageIndexClient:
             resolved.append(entry)
         return resolved
 
+    def resolve_citations(
+        self,
+        answer: str,
+        doc_id: Optional[Union[str, list[str]]] = None,
+    ) -> dict[str, Any]:
+        """
+        Display-ready citations: the answer text with citation tags
+        replaced by numbered markdown links, and each citation's full
+        data from ``get_citations()`` plus an anchor and index.
+
+        Tags (``<cite doc= page= block=/>`` and ``<doc=…;page=…>``)
+        become ``[[1]](#pageindex-citation-01)``, one number per distinct
+        citation, so a repeated citation reuses its number. The host
+        renders the anchor targets from the ``anchor`` field.
+
+        Args:
+            answer (str): The answer text, tags included.
+            doc_id (str | list[str], optional): As in ``get_citations()``.
+
+        Returns:
+            dict: ``{'answer': str, 'citations': list}`` where each
+            citation carries ``'anchor'``, ``'index'`` and the fields
+            ``get_citations()`` returns (``'document'``, ``'doc_id'``,
+            ``'page'``, and for block-level citations ``'block_id'``,
+            ``'bbox'``, ``'block_type'``, ``'text'``).
+        """
+        entries = self.get_citations(answer, doc_id=doc_id)
+        index: dict[Any, int] = {
+            (c["document"], c["page"], c.get("block_id")): i
+            for i, c in enumerate(_parse_citations(answer), 1)}
+
+        def link(m: re.Match) -> str:
+            i = index.get(_citation_key(m))
+            return f"[[{i}]](#pageindex-citation-{i:02d})" if i else m.group(0)
+
+        return {
+            "answer": _CITE_TAG_RE.sub(link, _OLD_CITATION_RE.sub(link, answer)),
+            "citations": [{"anchor": f"pageindex-citation-{i:02d}", "index": i,
+                           **entry} for i, entry in enumerate(entries, 1)],
+        }
+
     def folder_context(self, folder_id: str) -> str:
         """
         Folder targeting text for the first user message, placed as
@@ -2305,6 +2387,62 @@ class PageIndexClient:
         ).list_folders(
             parent_folder_id=parent_folder_id,
         )
+
+    # ---------- PATH HELPERS ----------
+
+    def _folder_paths(self) -> dict[str, str]:
+        folders = {f["id"]: f for f in self.list_folders()["folders"]}
+        paths = {}
+        for folder_id in folders:
+            names, current = [], folder_id
+            while current in folders and len(names) < len(folders):
+                names.append(folders[current]["name"])
+                current = folders[current].get("parent_folder_id")
+            paths[folder_id] = "/".join(reversed(names))
+        return paths
+
+    def get_document_path(self, doc_id: str) -> str:
+        """
+        A document's path: its folder's path and its name, e.g.
+        ``"Research/Papers/attention.pdf"``. Just the name when the
+        document sits outside the API's folders, as at the library root
+        and for every local document.
+        """
+        doc = self.get_document(doc_id)
+        folder = doc.get("folderId") and self._folder_paths().get(doc["folderId"])
+        return f"{folder}/{doc['name']}" if folder else doc["name"]
+
+    def get_folder_path(self, folder_id: str) -> str:
+        """
+        A cloud folder's path: its ancestors' names and its own, root
+        first, e.g. ``"Research/Papers"``. Cloud-only. Raises
+        PageIndexAPIError if the folder does not exist.
+        """
+        self._require_cloud(
+            "get_folder_path is cloud-only — folders are not supported in "
+            "local mode. Create the client with an api_key.")
+        path = self._folder_paths().get(folder_id)
+        if path is None:
+            raise PageIndexAPIError(f"Folder {folder_id!r} not found.")
+        return path
+
+    def get_folder_id(self, path: str) -> str:
+        """
+        The ID of the cloud folder at ``path``, written as
+        ``get_folder_path`` writes it, e.g. ``"Research/Papers"``.
+        Cloud-only. Raises PageIndexAPIError if no folder, or more than
+        one, has that path.
+        """
+        self._require_cloud(
+            "get_folder_id is cloud-only — folders are not supported in "
+            "local mode. Create the client with an api_key.")
+        wanted = path.strip("/") if isinstance(path, str) else None
+        ids = [fid for fid, p in self._folder_paths().items() if p == wanted]
+        if len(ids) != 1:
+            raise PageIndexAPIError(
+                f"{path!r} names {len(ids)} folders ({', '.join(ids)})."
+                if ids else f"No folder at path {path!r}.")
+        return ids[0]
 
     def _require_cloud(self, message: str):
         from .cloud_api import CloudAPI
