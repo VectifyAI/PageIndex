@@ -1,21 +1,94 @@
+"""PageIndex SDK client: the 0.2.x cloud surface, now with a local mode."""
+from __future__ import annotations
+
 import os
-import uuid
-import json
-import asyncio
-import concurrent.futures
-from pathlib import Path
+import re
+import threading
+import time
+import warnings
+from typing import (TYPE_CHECKING, Any, Callable, Iterator, Literal, Mapping,
+                    Optional, Union, cast, overload)
 
-import PyPDF2
-
-from .page_index import page_index
-from .page_index_md import md_to_tree
-from .retrieve import get_document, get_document_structure, get_page_content
-from .utils import ConfigLoader, remove_fields
-
-META_INDEX = "_meta.json"
+from .chat_stream import ChatStream
+from .errors import PageIndexAPIError
 
 
-def _normalize_retrieve_model(model: str) -> str:
+_litellm_preload_started = False
+
+
+def _preload_litellm() -> None:
+    """Start litellm's multi-second import in the background, once per
+    process — a per-client thread would churn under per-request clients."""
+    global _litellm_preload_started
+    if _litellm_preload_started:
+        return
+    _litellm_preload_started = True
+
+    def _import() -> None:
+        try:
+            import litellm  # noqa: F401
+        except Exception:
+            pass
+
+    threading.Thread(target=_import, daemon=True).start()
+
+
+def _parse_pages(pages: str) -> list[int]:
+    from .agent_tools import _PageSpecError, _expand_pages
+    if isinstance(pages, str):
+        # 0.2.10 tolerated whitespace on this surface; the tool layer stays
+        # on the strict contract pattern.
+        pages = re.sub(r"\s*([,-])\s*", r"\1", pages.strip())
+    try:
+        return _expand_pages(pages)
+    except _PageSpecError as exc:
+        raise PageIndexAPIError(str(exc)) from exc
+
+
+# The two citation tag formats PageIndex chat writes and renders.
+_OLD_CITATION_RE = re.compile(
+    r"<doc=([^;<>]+);page=(\d+)(?:;block(?:_id)?=([^;<>]+))?>")
+_CITE_TAG_RE = re.compile(r"<cite\s([^<>]*)>")
+_CITE_ATTR_RE = re.compile(r"""\b(\w+)=(["'])(.*?)\2""", re.S)
+
+
+def _citation_key(m: re.Match) -> Optional[tuple[str, int, Optional[str]]]:
+    """(document, page, block_id) of one matched tag, or None when it names
+    no document or no positive page."""
+    if m.re is _OLD_CITATION_RE:
+        doc, page_str, block_id = m.group(1), m.group(2), m.group(3)
+    else:
+        attrs = {name: value for name, _, value in
+                 _CITE_ATTR_RE.findall(m.group(1))}
+        doc, page_str, block_id = (attrs.get("doc", ""), attrs.get("page", ""),
+                                   attrs.get("block"))
+    doc = doc.strip()
+    block_id = (block_id or "").strip() or None
+    try:
+        page = int(page_str.split("-")[0])
+    except ValueError:
+        return None
+    return (doc, page, block_id) if doc and page > 0 else None
+
+
+def _parse_citations(text: str) -> list[dict[str, Any]]:
+    """``<doc=…;page=…;block=…>`` tags (the managed chat's format), then
+    ``<cite doc= page= block=/>`` tags; deduplicated, ``block_id`` only
+    when the tag carries one."""
+    found: list[dict[str, Any]] = []
+    seen: set[tuple[str, int, Optional[str]]] = set()
+    for m in [*_OLD_CITATION_RE.finditer(text), *_CITE_TAG_RE.finditer(text)]:
+        key = _citation_key(m)
+        if key and key not in seen:
+            seen.add(key)
+            entry: dict[str, Any] = {"document": key[0], "page": key[1]}
+            if key[2]:
+                entry["block_id"] = key[2]
+            found.append(entry)
+    return found
+
+
+def _agents_sdk_model_name(model: str) -> str:
     """Preserve supported Agents SDK prefixes and route other provider paths via LiteLLM."""
     passthrough_prefixes = ("litellm/", "openai/")
     if not model or "/" not in model:
@@ -25,210 +98,2426 @@ def _normalize_retrieve_model(model: str) -> str:
     return f"litellm/{model}"
 
 
+_LOCAL_INDEX_KEYS = ("model", "summary_model", "backend", "storage_path")
+
+# Near-synonyms of "cloud" that would otherwise parse as model names —
+# a silent wrong mode. They error, pointing at the real word.
+_RESERVED_MODE_WORDS = {"hosted", "managed"}
+
+
+def _env_cloud_key(spelling: str, inline: str = "api_key=...") -> str:
+    # .env support lives in utils' import-time load_dotenv(): load it
+    # before the read, or a key in .env is visible only by import order.
+    from . import utils  # noqa: F401
+    key = os.environ.get("PAGEINDEX_API_KEY")
+    if not key:
+        raise PageIndexAPIError(
+            f"{spelling} reads the PageIndex API key from the "
+            "PAGEINDEX_API_KEY environment variable, which is not set — "
+            f"export it, or pass the key inline ({inline}).")
+    return key
+
+
+# One argument vocabulary regardless of spelling: these values are shape-
+# checked in the constructor, so a wrong type or an empty value refuses
+# there as a PageIndexAPIError — never later, never silently.
+_ARG_TYPES: "dict[str, tuple[type, ...]]" = {
+    "model": (str,), "index_model": (str,), "summary_model": (str,),
+    "chat_model": (str,), "retrieve_model": (str,),
+    "storage_path": (str, os.PathLike), "index_backend": (dict,),
+    "chat_backend": (dict,)}
+
+
+def _declared_mode(value, side: str):
+    if isinstance(value, str):
+        value = value.strip().lower()
+    if value not in (None, "cloud", "local"):
+        raise PageIndexAPIError(
+            f'{side} "mode" must be "cloud" or "local", not {value!r}.')
+    return value
+
+
+_CloudKey = Union[str, Callable[[], str], None]
+
+
+def _resolve_index_slot(index) -> "tuple[_CloudKey, dict[str, Any]]":
+    """The ``index=`` slot as (cloud api_key, local overrides). A dict
+    declares its side by its keys; an optional "mode" states it and must
+    agree. Keyless cloud spellings ("cloud" / "pageindex-cloud",
+    {"mode": "cloud"}) return the environment read as a thunk, so the
+    caller's mode cross-check runs before the environment is touched."""
+    from .types import PAGEINDEX_CLOUD
+    if isinstance(index, str):
+        # Normalized compare: a case/whitespace variant of a mode word
+        # must never fall through and silently become a model name.
+        word = index.strip().lower()
+        if word in (PAGEINDEX_CLOUD, "cloud"):
+            return lambda: _env_cloud_key(f'index="{index.strip()}"',
+                                          'index={"api_key": ...}'), {}
+        if word == "local":
+            return None, {}
+        if word in _RESERVED_MODE_WORDS:
+            raise PageIndexAPIError(
+                f'index="{index}" is not a mode word — the cloud spelling '
+                'is index="cloud" (key from PAGEINDEX_API_KEY) or '
+                'index={"api_key": ...}.')
+        if index.strip():
+            return None, {"index_model": index}
+        raise PageIndexAPIError(
+            "index is an empty string — pass a local index model name, "
+            'or "cloud".')
+    if isinstance(index, Mapping):
+        # None-valued keys mean "absent", exactly like the flat arguments.
+        conf = {name: value for name, value in index.items()
+                if value is not None}
+        declared = _declared_mode(conf.pop("mode", None), "index")
+        if not conf:
+            if declared == "cloud":
+                return lambda: _env_cloud_key('index={"mode": "cloud"}',
+                                              'index={"api_key": ...}'), {}
+            if declared == "local":
+                return None, {}
+            raise PageIndexAPIError(
+                "index is an empty dict — its keys pick the side: "
+                '{"api_key": ...} for cloud documents, or '
+                f"{', '.join(_LOCAL_INDEX_KEYS)} for the local store.")
+        unknown = set(conf) - {"api_key"} - set(_LOCAL_INDEX_KEYS)
+        if unknown:
+            raise PageIndexAPIError(
+                f"Unknown index keys ({', '.join(sorted(unknown))}) — "
+                'cloud takes "api_key"; local takes '
+                f"{', '.join(_LOCAL_INDEX_KEYS)}.")
+        if "api_key" in conf:
+            if declared == "local":
+                raise PageIndexAPIError(
+                    'index declares mode "local" but carries api_key — '
+                    "an API key means cloud documents. Drop one of them.")
+            if len(conf) > 1:
+                raise PageIndexAPIError(
+                    "index mixes cloud and local keys — cloud documents "
+                    'take {"api_key": ...} alone; the cloud pipeline does '
+                    "its own indexing.")
+            key = conf["api_key"]
+            if not key or not isinstance(key, str):
+                raise PageIndexAPIError(
+                    'index["api_key"] must be a non-empty string.')
+            return key, {}
+        if declared == "cloud":
+            raise PageIndexAPIError(
+                'index declares mode "cloud" but carries local keys '
+                f"({', '.join(sorted(conf))}) — the cloud pipeline does "
+                'its own indexing; cloud takes "api_key" only.')
+        mapped = {"index_model": conf.get("model"),
+                  "summary_model": conf.get("summary_model"),
+                  "index_backend": conf.get("backend"),
+                  "storage_path": conf.get("storage_path")}
+        return None, {name: value for name, value in mapped.items()
+                      if value is not None}
+    raise PageIndexAPIError("index must be a string or a dict.")
+
+
+def _resolve_chat_slot(chat) -> "tuple[Optional[str], dict[str, Any]]":
+    """The ``chat=`` slot as (mode, own-model overrides) — mode is
+    "managed", "own", or None (nothing declared beyond the overrides)."""
+    from .types import PAGEINDEX_CLOUD
+    if isinstance(chat, str):
+        word = chat.strip().lower()
+        if word in (PAGEINDEX_CLOUD, "cloud"):
+            return "managed", {}
+        if word == "local":
+            return "own", {}
+        if word in _RESERVED_MODE_WORDS:
+            raise PageIndexAPIError(
+                f'chat="{chat}" is not a mode word — the managed chat is '
+                'chat="cloud".')
+        if chat.strip():
+            return "own", {"chat_model": chat}
+        raise PageIndexAPIError(
+            "chat is an empty string — pass a model name, or "
+            '"cloud" for the managed chat.')
+    if isinstance(chat, Mapping):
+        # None-valued keys mean "absent", exactly like the flat arguments.
+        conf = {name: value for name, value in chat.items()
+                if value is not None}
+        declared = _declared_mode(conf.pop("mode", None), "chat")
+        unknown = set(conf) - {"model", "backend"}
+        if (not conf and declared is None) or unknown:
+            raise PageIndexAPIError(
+                ("chat is an empty dict" if not conf else
+                 f"Unknown chat keys ({', '.join(sorted(unknown))})")
+                + ' — chat takes "model" and "backend" (your own model), '
+                'or {"mode": "cloud"} / "cloud" for the managed chat.')
+        if declared == "cloud":
+            if conf:
+                raise PageIndexAPIError(
+                    'chat declares mode "cloud" but carries '
+                    f"({', '.join(sorted(conf))}) — the managed chat "
+                    "selects its own model. Drop the mode, or the keys.")
+            return "managed", {}
+        mapped = {"chat_model": conf.get("model"),
+                  "chat_backend": conf.get("backend")}
+        return "own", {name: value for name, value in mapped.items()
+                       if value is not None}
+    raise PageIndexAPIError("chat must be a string or a dict.")
+
+
 class PageIndexClient:
     """
-    A client for indexing and retrieving document content.
-    Flow: index() -> get_document() / get_document_structure() / get_page_content()
+    Python SDK client for PageIndex.
 
-    For agent-based QA, see examples/agentic_vectorless_rag_demo.py.
+    Two independent sides, each locally run or cloud-managed:
+
+    - **index** — where documents live. With an ``api_key`` they live in
+      your PageIndex cloud account, indexed by the managed pipeline,
+      exactly like the 0.2.x SDK. Without one they are indexed on your
+      machine by the open-source pipeline (your own LLM provider key,
+      e.g. ``OPENAI_API_KEY``) and stored under ``storage_path``.
+    - **chat** — who answers. With a chat model configured
+      (``chat_model=`` / ``chat=``), the document-QA agent runs in your
+      process against your own model and credentials — in both index
+      modes. On a cloud client with no chat model, the managed cloud
+      chat answers.
+
+    ``api_key`` moves your documents, never your model: ``chat_model``
+    always means your own model on your own keys. The fourth combination
+    (local documents + managed chat) cannot be expressed — the managed
+    chat cannot read your disk.
+
+    Usage:
+        client = PageIndexClient()                  # local docs + your model
+        client = PageIndexClient(api_key="...")     # cloud docs + managed chat
+        client = PageIndexClient(api_key="...",     # cloud docs + your model
+                                 chat_model="openai/gpt-5.2")
+
+    ``index=`` / ``chat=`` are the grouped spelling of the same flat
+    arguments — a string as shorthand, a dict for the full config; each
+    side picks one spelling per client. ``index="cloud"`` (or the label
+    ``"pageindex-cloud"``) is the keyless cloud spelling (the key comes
+    from the ``PAGEINDEX_API_KEY`` environment variable — which is read
+    only when the code explicitly says cloud; a bare ``PageIndexClient()``
+    stays local regardless of the environment).
+
+    Args:
+        api_key (str, optional): PageIndex cloud API key
+            (https://developer.pageindex.ai/api-keys). Omit for local mode.
+        index (str | dict, optional): The index side, grouped —
+            ``"cloud"`` / ``"pageindex-cloud"`` (cloud, key from the
+            environment), ``"local"``, a local index model name, or a
+            dict: ``{"api_key": ...}`` for cloud, ``{"model",
+            "summary_model", "backend", "storage_path"}`` for local. An
+            optional ``"mode"`` key (``"cloud"`` / ``"local"``) states
+            the side and must agree with the other keys; ``{"mode":
+            "cloud"}`` alone reads the key from the environment. Not
+            combinable with this side's flat arguments.
+        chat (str | dict, optional): The chat side, grouped — a model
+            name (your own model), ``"cloud"`` / ``"pageindex-cloud"``
+            (managed chat, cloud clients only), ``"local"`` (your own
+            model, the default one), or ``{"model", "backend"}``. An
+            optional ``"mode"`` key states the side: ``{"mode":
+            "cloud"}`` alone is the managed chat, ``"local"`` is your
+            own model and must agree with the other keys. Not
+            combinable with this side's flat arguments.
+        mode (str, optional): Client-level declaration of where the
+            documents live — ``"cloud"`` or ``"local"`` — checked
+            against the other arguments (``mode="local"`` with an
+            api_key errors). ``mode="cloud"`` alone reads the key from
+            the ``PAGEINDEX_API_KEY`` environment variable. Always
+            optional: the arguments themselves already carry the mode.
+        index_model (str, optional): Local mode only — LLM used to index
+            documents (structure and summaries). Defaults to the SDK
+            default (fast and cheap).
+        chat_model (str, optional): Your own model for the chat surfaces
+            (``chat``, ``chat_completions``), exposed as
+            ``client.chat_model`` — on a cloud client, setting it runs
+            the document-QA agent in your process over the cloud
+            documents (page content then flows through your process to
+            your model provider). Chat names route through LiteLLM and
+            mean what LiteLLM says they mean; bare names are
+            OpenAI-compatible shorthand, and ``openai/Qwen/...`` is the
+            form for an OpenAI-compatible server that itself serves
+            slashed model ids (vLLM, TGI). Defaults to the SDK default
+            (strong); reads ``None`` on a cloud client where the managed
+            chat answers.
+        model (str, optional): Local mode only — one model for both roles:
+            sets the default for ``index_model`` and ``chat_model`` at
+            once. The role-specific arguments win over it. (Also the
+            0.2.8-era name for the indexing model — old configs keep
+            working unchanged.)
+        summary_model (str, optional): Local mode only — legacy: overrides
+            the model used for node summaries and document descriptions;
+            ``index_model`` covers this.
+        retrieve_model (str, optional): Legacy name for ``chat_model`` —
+            same meaning everywhere, cloud clients included.
+        storage_path (str or os.PathLike, optional): Local mode only —
+            directory where indexed documents are stored. Defaults to
+            ``./.pageindex``.
+        index_backend (dict, optional): Local mode only — connection
+            overrides for the indexing lane's LLM calls. Keys are
+            LiteLLM's own connection params — ``api_key``, ``api_base``,
+            ``api_version``, ``aws_*``, … — passed through verbatim.
+        chat_backend (dict, optional): Default connection overrides for
+            the chat surfaces — a chat-side argument like ``chat_model``,
+            so on a cloud client it selects own-model chat. A call's own
+            ``backend`` keys win over it. The dict reaches whichever
+            door runs, in that door's vocabulary (see each method) —
+            ``api_key`` / ``base_url`` mean the same thing on all three.
+        instructions (str, optional): Standing guidance for the answering
+            agent — persona, language, format — appended after the
+            managed system prompt on every chat surface, the managed
+            cloud chat included, and in ``agent_instructions()`` and the
+            ``*_agent_config()`` bundles. Not a chat-side spelling: it
+            combines with any ``chat=`` and never selects own-model chat.
+            ``chat(instructions=...)`` adds to it per call. Indexing
+            has no prompt to extend.
+
+    PageIndexCloudClient / PageIndexLocalClient pin the index side at
+    construction instead of inferring it from api_key.
+
+    Local mode differences (all documented per method): indexing is
+    synchronous, only PDFs are supported, and folders / ``beta_headers`` /
+    the deprecated retrieval API (``submit_query``, ``get_retrieval``) are
+    cloud-only.
     """
-    def __init__(self, api_key: str = None, model: str = None, retrieve_model: str = None, workspace: str = None):
-        if api_key:
-            os.environ["OPENAI_API_KEY"] = api_key
-        elif not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
-            os.environ["OPENAI_API_KEY"] = os.getenv("CHATGPT_API_KEY")
-        self.workspace = Path(workspace).expanduser() if workspace else None
-        overrides = {}
-        if model:
-            overrides["model"] = model
-        if retrieve_model:
-            overrides["retrieve_model"] = retrieve_model
-        opt = ConfigLoader().load(overrides or None)
-        self.model = opt.model
-        self.retrieve_model = _normalize_retrieve_model(opt.retrieve_model or self.model)
-        if self.workspace:
-            self.workspace.mkdir(parents=True, exist_ok=True)
-        self.documents = {}
-        if self.workspace:
-            self._load_workspace()
 
-    def index(self, file_path: str, mode: str = "auto") -> str:
-        """Index a document. Returns a document_id."""
-        # Persist a canonical absolute path so workspace reloads do not
-        # reinterpret caller-relative paths against the workspace directory.
-        file_path = os.path.abspath(os.path.expanduser(file_path))
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"File not found: {file_path}")
+    BASE_URL = "https://api.pageindex.ai"
 
-        doc_id = str(uuid.uuid4())
-        ext = os.path.splitext(file_path)[1].lower()
+    _pin: Optional[str] = None  # the pinned subclasses' index side
 
-        is_pdf = ext == '.pdf'
-        is_md = ext in ['.md', '.markdown']
-
-        if mode == "pdf" or (mode == "auto" and is_pdf):
-            print(f"Indexing PDF: {file_path}")
-            result = page_index(
-                doc=file_path,
-                model=self.model,
-                if_add_node_summary='yes',
-                if_add_node_text='yes',
-                if_add_node_id='yes',
-                if_add_doc_description='yes'
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        *,
+        index: Optional[Union[Mapping[str, Any], str]] = None,
+        chat: Optional[Union[Mapping[str, Any], str]] = None,
+        mode: Optional[str] = None,
+        index_model: Optional[str] = None,
+        chat_model: Optional[str] = None,
+        model: Optional[str] = None,
+        summary_model: Optional[str] = None,
+        retrieve_model: Optional[str] = None,
+        storage_path: Optional[Union[str, os.PathLike[str]]] = None,
+        index_backend: Optional[dict[str, Any]] = None,
+        chat_backend: Optional[dict[str, Any]] = None,
+        instructions: Optional[str] = None,
+    ):
+        if api_key == "":
+            raise PageIndexAPIError(
+                "api_key is an empty string. Pass a real PageIndex API key for "
+                "cloud mode, or omit api_key entirely for local mode."
             )
-            # Extract per-page text so queries don't need the original PDF
-            pages = []
-            with open(file_path, 'rb') as f:
-                pdf_reader = PyPDF2.PdfReader(f)
-                for i, page in enumerate(pdf_reader.pages, 1):
-                    pages.append({'page': i, 'content': page.extract_text() or ''})
-
-            self.documents[doc_id] = {
-                'id': doc_id,
-                'type': 'pdf',
-                'path': file_path,
-                'doc_name': result.get('doc_name', ''),
-                'doc_description': result.get('doc_description', ''),
-                'page_count': len(pages),
-                'structure': result['structure'],
-                'pages': pages,
-            }
-
-        elif mode == "md" or (mode == "auto" and is_md):
-            print(f"Indexing Markdown: {file_path}")
-            coro = md_to_tree(
-                md_path=file_path,
-                if_thinning=False,
-                if_add_node_summary='yes',
-                summary_token_threshold=200,
-                model=self.model,
-                if_add_doc_description='yes',
-                if_add_node_text='yes',
-                if_add_node_id='yes'
-            )
-            try:
-                asyncio.get_running_loop()
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    result = pool.submit(asyncio.run, coro).result()
-            except RuntimeError:
-                result = asyncio.run(coro)
-            self.documents[doc_id] = {
-                'id': doc_id,
-                'type': 'md',
-                'path': file_path,
-                'doc_name': result.get('doc_name', ''),
-                'doc_description': result.get('doc_description', ''),
-                'line_count': result.get('line_count', 0),
-                'structure': result['structure'],
-            }
+        if instructions is not None and not isinstance(instructions, str):
+            raise PageIndexAPIError(
+                f"instructions must be a str, got {type(instructions).__name__}. "
+                "Pass the guidance as text; Messages system blocks belong to "
+                "chat(protocol=\"messages\", model=..., instructions=[...]) on "
+                "a client with chat_model=... set.")
+        self.instructions = (instructions or "").strip() or None
+        # Each side picks one spelling — its slot, or the flat arguments.
+        # ``model`` sets every role, so it claims both sides.
+        index_flat: dict[str, Any] = {
+            name: value for name, value in
+            (("api_key", api_key),
+             ("index_model", index_model),
+             ("summary_model", summary_model),
+             ("index_backend", index_backend),
+             ("storage_path", storage_path), ("model", model))
+            if value is not None}
+        chat_flat: dict[str, Any] = {
+            name: value for name, value in
+            (("chat_model", chat_model),
+             ("retrieve_model", retrieve_model),
+             ("chat_backend", chat_backend), ("model", model))
+            if value is not None}
+        if model is not None and (index is not None or chat is not None):
+            raise PageIndexAPIError(
+                "model= sets both roles at once, so no slot can absorb "
+                'it — name the model inside the slot ({"model": ...}) '
+                "and use index_model= / chat_model= for a side written "
+                "flat.")
+        if index is not None and index_flat:
+            raise PageIndexAPIError(
+                "index= and the flat index-side arguments "
+                f"({', '.join(sorted(index_flat))}) are two spellings of "
+                "the same thing — use one or the other.")
+        if chat is not None and chat_flat:
+            raise PageIndexAPIError(
+                "chat= and the flat chat-side arguments "
+                f"({', '.join(sorted(chat_flat))}) are two spellings of "
+                "the same thing — use one or the other.")
+        # ``mode=`` is a cross-check, not a spelling: it combines with
+        # either spelling of the index side and must agree with it. The
+        # pinned classes declare the side by class; their errors name the
+        # class, never a mode= the user did not write.
+        declared = _declared_mode(mode, "client") or self._pin
+        pinned = type(self).__name__ if self._pin else None
+        if index is not None:
+            cloud_key, index_conf = _resolve_index_slot(index)
+            if declared == "local" and cloud_key is not None:
+                raise PageIndexAPIError(
+                    f"{pinned} pins local documents — that index= selects "
+                    "cloud documents. Drop it, or use PageIndexCloudClient."
+                    if pinned else
+                    'mode="local" disagrees with index= — that index '
+                    "selects cloud documents. Drop one of them.")
+            if declared == "cloud" and cloud_key is None:
+                raise PageIndexAPIError(
+                    f"{pinned} pins cloud documents — that index= "
+                    "configures the local store. Drop it, or use "
+                    "PageIndexLocalClient."
+                    if pinned else
+                    'mode="cloud" disagrees with index= — that index '
+                    "configures the local store. Drop one of them.")
+            if callable(cloud_key):
+                cloud_key = cloud_key()
         else:
-            raise ValueError(f"Unsupported file format for: {file_path}")
+            cloud_key = api_key
+            if declared == "local" and api_key is not None:
+                raise PageIndexAPIError(
+                    'mode="local" conflicts with api_key — an API key '
+                    "means cloud documents. Drop one of them.")
+            if declared == "cloud" and cloud_key is None:
+                cloud_key = _env_cloud_key('mode="cloud"')
+            index_conf = {name: value for name, value in index_flat.items()
+                          if name != "api_key"}
+        if chat is not None:
+            chat_mode, chat_conf = _resolve_chat_slot(chat)
+        else:
+            chat_mode = "own" if chat_flat else None
+            chat_conf = chat_flat
+        # Every spelling lands here: strings are stripped, wrong types and
+        # empty values refuse loudly — an empty chat-side value must never
+        # silently select own-model chat.
+        for side, slot, conf in (("index", index, index_conf),
+                                 ("chat", chat, chat_conf)):
+            for name, value in conf.items():
+                # Slot keys are the flat names with the side prefix off.
+                shown = (f'{side}["{name.removeprefix(side + "_")}"]'
+                         if slot is not None else name)
+                if not isinstance(value, _ARG_TYPES[name]):
+                    raise PageIndexAPIError(
+                        f"{shown} must be a {_ARG_TYPES[name][0].__name__}, "
+                        f"got {type(value).__name__}.")
+                if isinstance(value, str):
+                    value = conf[name] = value.strip()
+                if not value:
+                    raise PageIndexAPIError(
+                        f"{shown} is empty — it configures nothing. Pass a "
+                        "real value, or drop the argument.")
 
-        print(f"Indexing complete. Document ID: {doc_id}")
-        if self.workspace:
-            self._save_doc(doc_id)
-        return doc_id
+        if cloud_key is not None:
+            if index_conf:
+                raise PageIndexAPIError(
+                    "Cloud documents are indexed by the PageIndex pipeline "
+                    "— the index-side arguments "
+                    f"({', '.join(sorted(index_conf))}) have nothing to "
+                    "configure there; remove them. (chat_model= / chat= "
+                    "stay yours: they run the chat agent in your process "
+                    "with your own model.)")
+            self.api_key = cloud_key
+            from .cloud_api import CloudAPI
+            self._api = CloudAPI(self)
+            if chat_mode == "own":
+                from .utils import ConfigLoader
+                overrides = {name: value for name, value in chat_conf.items()
+                             if name in ("chat_model", "retrieve_model")
+                             and value}
+                opt = ConfigLoader().load(overrides or None)
+                self.chat_model = opt.chat_model
+                self.chat_backend = chat_conf.get("chat_backend")
+                _preload_litellm()
+            else:
+                # Managed chat: the endpoint selects its own model.
+                self.chat_model = None
+                self.chat_backend = None
+        else:
+            if chat_mode == "managed":
+                if pinned:
+                    exits = (f"{pinned} pins local documents: use "
+                             "PageIndexCloudClient (or PageIndexClient("
+                             "api_key=...))")
+                else:
+                    exits = ('Go cloud (api_key=... or index="cloud")'
+                             + (' and drop mode="local"' if mode is not None
+                                else ""))
+                raise PageIndexAPIError(
+                    "The managed chat needs cloud documents — it cannot "
+                    f"read the local store. {exits}, or set your own chat "
+                    "model instead.")
+            from .utils import ConfigLoader
+            overrides = {name: value for name, value in
+                         {**index_conf, **chat_conf}.items()
+                         if name in ("model", "index_model", "summary_model",
+                                     "chat_model", "retrieve_model")
+                         and value}
+            opt = ConfigLoader().load(overrides or None)
+            self.model = opt.model
+            self.index_model = opt.index_model
+            self.summary_model = opt.summary_model
+            self.chat_model = opt.chat_model
+            self.chat_backend = chat_conf.get("chat_backend")
+            self.storage_path = index_conf.get("storage_path") or ".pageindex"
+            from .local_api import LocalAPI
+            self._api = LocalAPI(
+                storage_path=self.storage_path,
+                model=self.model,
+                summary_model=self.summary_model,
+                index_backend=index_conf.get("index_backend"),
+            )
+            # LiteLLM's multi-second import would otherwise land on the
+            # first chat call; failures resurface there with real context.
+            _preload_litellm()
 
-    @staticmethod
-    def _make_meta_entry(doc: dict) -> dict:
-        """Build a lightweight meta entry from a document dict."""
-        entry = {
-            'type': doc.get('type', ''),
-            'doc_name': doc.get('doc_name', ''),
-            'doc_description': doc.get('doc_description', ''),
-            'path': doc.get('path', ''),
-        }
-        if doc.get('type') == 'pdf':
-            entry['page_count'] = doc.get('page_count')
-        elif doc.get('type') == 'md':
-            entry['line_count'] = doc.get('line_count')
-        return entry
+    @property
+    def _local_chat(self) -> bool:
+        # Derived, never stored: own-model chat is exactly "a chat model
+        # is configured" (None on a managed-chat client). Blank configures
+        # nothing — the constructor refuses it, and assignment must agree.
+        model = getattr(self, "chat_model", None)
+        if isinstance(model, str):
+            return bool(model.strip())
+        return model is not None
 
-    @staticmethod
-    def _read_json(path) -> dict | None:
-        """Read a JSON file, returning None on any error."""
+    def _require_own_chat(self, lane: str) -> None:
+        # The one refusal for the Responses / Messages lanes and the doors
+        # behind them: shared, so the doors cannot drift from chat().
+        if self._local_chat:
+            return
+        if not getattr(self, "api_key", None):
+            raise PageIndexAPIError(
+                "chat_model is empty — it configures nothing, and a local "
+                "client has no managed chat to fall back to. Set "
+                "chat_model=... to run the agent with your own model.")
+        raise PageIndexAPIError(
+            f"{lane} drives your own chat model — construct the client "
+            "with chat_model=... (or a chat= model); the managed cloud chat "
+            "serves the answer lane and chat(protocol=\"chat_completions\") "
+            "only.")
+
+    if not TYPE_CHECKING:
+        # The protocol doors live behind chat(protocol=...); their old
+        # names are the vendor SDKs' own, so an agent-written
+        # client.messages(...) fails here with the way in. Runtime-only:
+        # a __getattr__ the type checker can see would silence every
+        # attribute typo on the client.
+        def __getattr__(self, name):
+            if name in ("responses", "messages"):
+                raise AttributeError(
+                    f"{name}() moved: call chat(protocol={name!r}, ...) "
+                    "— the same protocol, engine, and envelope. Pass the "
+                    "rest by keyword; its sampling and thinking fields "
+                    "ride extra_body under their wire names.")
+            raise AttributeError(
+                f"{type(self).__name__!r} object has no attribute {name!r}")
+
+    @property
+    def retrieve_model(self):
+        """Legacy name for ``chat_model``."""
+        return self.chat_model
+
+    @retrieve_model.setter
+    def retrieve_model(self, value):
+        # 0.2.9 allowed assignment; keep the write path working too.
+        self.chat_model = value
+
+    # ---------- DOCUMENT SUBMISSION ----------
+
+    def submit_document(
+        self,
+        file_path: str,
+        mode: Optional[str] = None,
+        beta_headers: Optional[list[str]] = None,
+        folder_id: Optional[str] = None,
+        metadata: Optional[dict] = None,
+        wait: bool = False,
+    ) -> dict[str, Any]:
+        """
+        Submit a PDF document for processing. Returns {'doc_id': ..., 'name': ...}.
+
+        Cloud: uploads the file; processing is asynchronous. Pass
+        ``wait=True`` to block until the document is ready, or poll
+        ``get_document(doc_id)['status']`` yourself.
+
+        Local: indexes the document in this call and stores it under
+        ``storage_path``. Defaults to Flash indexing: layout-based extraction,
+        refined for retrieval (a deterministic merge, then an LLM expansion
+        pass); node summaries, the expansion pass, and the document
+        description use ``summary_model``. Pass ``mode="standard"`` for a
+        full LLM-built tree (slower). ``beta_headers`` and ``folder_id`` are
+        cloud-only.
+
+        Args:
+            file_path (str): Path to the PDF file.
+            mode (str, optional): Processing mode. Local defaults to "flash";
+                pass "standard" for a full LLM-built tree. Cloud modes are
+                passed through (e.g. "mcp").
+            beta_headers (list[str], optional): Cloud-only beta feature headers.
+            folder_id (str, optional): Cloud-only folder (workspace) ID.
+            metadata (dict, optional): Your own JSON-serializable tags for the
+                document; returned in get_document/get_tree/get_ocr responses
+                and list_documents entries (both modes).
+            wait (bool): Return only once the document is ready for use.
+                Cloud: polls status until "completed" (raises on "failed" or
+                after 30 minutes). Local: indexing is synchronous already, so
+                this changes nothing. Leave False to submit many documents
+                concurrently and poll afterwards.
+
+        Returns:
+            dict: {'doc_id': ..., 'name': ...}. 'name' is the stored document
+                name: a taken name gains a numeric suffix (name_1..name_99)
+                and a UserWarning is emitted. Older cloud servers omit 'name'.
+        """
+        result = self._api.submit_document(
+            file_path=file_path, mode=mode,
+            beta_headers=beta_headers, folder_id=folder_id, metadata=metadata,
+        )
+        stored = result.get("name")
+        if stored and stored != os.path.basename(file_path):
+            warnings.warn(
+                f'Document "{os.path.basename(file_path)}" was stored as '
+                f'"{stored}".',
+                stacklevel=2,
+            )
+        if wait:
+            self._wait_until_ready(result["doc_id"])
+        return result
+
+    def _wait_until_ready(self, doc_id: str, timeout: float = 1800.0) -> None:
+        import requests
+        interval = 2.0
+        deadline = time.monotonic() + timeout
+        poll_failures = 0
+        while True:
+            try:
+                status = self.get_document(doc_id).get("status")
+                poll_failures = 0
+            except (PageIndexAPIError, requests.RequestException) as exc:
+                if getattr(exc, "status_code", None) in (401, 403, 404):
+                    raise  # a definite answer, not a poll failure
+                # Tolerate transient poll failures; a 30-minute wait should
+                # not die on one 502 or dropped connection.
+                poll_failures += 1
+                if poll_failures >= 3:
+                    raise PageIndexAPIError(
+                        f"Could not poll document status (doc_id: {doc_id}): "
+                        f"{exc}. Processing continues in the cloud — poll "
+                        "get_document(doc_id) for status."
+                    ) from exc
+                status = None
+            if status == "completed":
+                return
+            if status == "failed":
+                raise PageIndexAPIError(
+                    f"Document processing failed (doc_id: {doc_id})."
+                )
+            if time.monotonic() >= deadline:
+                raise PageIndexAPIError(
+                    f"Timed out after {int(timeout)}s waiting for document "
+                    f"processing (doc_id: {doc_id}, last status: {status}). "
+                    "Processing continues in the cloud — poll "
+                    "get_document(doc_id) for status."
+                )
+            time.sleep(interval)
+            interval = min(interval * 1.5, 15.0)
+
+    # ---------- OCR FUNCTIONALITY ----------
+
+    def get_ocr(self, doc_id: str, format: str = "page") -> dict[str, Any]:
+        """
+        Get OCR status and results.
+
+        Args:
+            doc_id (str): Document ID.
+            format (str): 'page' for page-based results, 'node' for node-based
+                results, or 'raw' for concatenated markdown.
+
+        Returns:
+            dict: {'doc_id', 'status', 'retrieval_ready', 'result', ...}.
+            With 'page', result entries are {'page_index', 'markdown', ...}.
+
+        Local: the "OCR" result is the text extracted from the PDF while
+        indexing (no OCR model runs locally, so scanned/image-only PDFs have
+        no local text).
+        """
+        return self._api.get_ocr(doc_id=doc_id, format=format)
+
+    def get_page_content(self, doc_id: str, pages: str) -> list[dict[str, Any]]:
+        """
+        Get text content of specific pages.
+
+        Args:
+            doc_id (str): Document ID.
+            pages (str): Page specifier — '5-7', '3,8', or '12'.
+
+        Returns:
+            list: Matching entries from get_ocr (format='page').
+        """
+        wanted = set(_parse_pages(pages))
+        result = self.get_ocr(doc_id, format="page")
+        all_pages = result["result"]
+        if all_pages is None:
+            raise PageIndexAPIError(
+                f"Document '{doc_id}' is not ready "
+                f"(status: {result.get('status', 'unknown')})"
+            )
+        return [p for p in all_pages if p["page_index"] in wanted]
+
+    def get_block(self, doc_id: str, block_id: str) -> dict[str, Any]:
+        """
+        One layout block of a cloud document — the page, bounding box, type
+        and content behind a ``block_id`` from page content or a
+        block-level citation. Cloud-only: local page content has no
+        blocks, so local mode raises PageIndexAPIError.
+
+        Args:
+            doc_id (str): Document ID.
+            block_id (str): Block ID as page content and citations carry
+                it, e.g. ``"p3_text_5"``.
+
+        Returns:
+            dict: The block as the API returns it: {'doc_id', 'page',
+            'block_id', 'bbox', 'block_type', ...}. ``bbox`` is
+            ``[x0, y0, x1, y1]`` in thousandths of the page's width and
+            height (0-1000), origin top-left. PageIndexAPIError with
+            ``status_code == 404`` when the document or the block does not
+            exist.
+        """
+        return self._require_cloud(
+            "get_block is cloud-only — local page content has no layout "
+            "blocks. Create the client with an api_key to look up blocks."
+        ).get_block(doc_id=doc_id, block_id=block_id)
+
+    def get_page_image(self, doc_id: str, page: int) -> str:
+        """
+        A short-lived URL to one page, rendered as a JPEG. Cloud-only:
+        local mode renders no page images.
+
+        Args:
+            doc_id (str): Document ID.
+            page (int): 1-based page number.
+
+        Returns:
+            str: The URL. Fetch the bytes with ``requests.get(url).content``,
+            or pass it to a vision model that takes image URLs.
+        """
+        return self._require_cloud(
+            "get_page_image is cloud-only — local mode has no page-image "
+            "rendering. Create the client with an api_key to get page images."
+        ).get_page_image(doc_id=doc_id, page=page)
+
+    def get_document_image(self, doc_id: str, img_id: str) -> str:
+        """
+        A short-lived URL to an image OCR extracted from the document.
+        Cloud-only: local mode stores no images.
+
+        Args:
+            doc_id (str): Document ID.
+            img_id (str): Image ID as page content carries it,
+                e.g. ``"img-7.jpeg"``.
+
+        Returns:
+            str: The URL, as ``get_page_image`` returns one.
+        """
+        return self._require_cloud(
+            "get_document_image is cloud-only — local mode has no embedded "
+            "image storage. Create the client with an api_key."
+        ).get_document_image(doc_id=doc_id, img_id=img_id)
+
+    # ---------- TREE GENERATION ----------
+
+    def get_tree(self, doc_id: str, node_summary: bool = False,
+                 include_text: bool = True) -> dict[str, Any]:
+        """
+        Get tree generation status and results.
+
+        Args:
+            doc_id (str): Document ID.
+            node_summary (bool): Include node summaries in the tree.
+            include_text (bool): Include node text (default True).
+                False is useful for structure-only views (saves tokens).
+
+        Returns:
+            dict: {'doc_id', 'status', 'retrieval_ready', 'result', ...} where
+            result nodes are {'title', 'node_id', 'page_index', ('summary' /
+            'prefix_summary',) ('text',) 'nodes'}.
+        """
+        tree = self._api.get_tree(doc_id=doc_id, node_summary=node_summary,
+                                  include_text=include_text)
+        if not include_text and tree.get("result"):
+            from .utils import remove_fields
+            tree["result"] = remove_fields(tree["result"], fields=["text"])
+        return tree
+
+    def get_document_structure(self, doc_id: str) -> list[dict[str, Any]]:
+        """
+        Get the document's tree structure without text — summaries included.
+
+        Returns:
+            list: Tree nodes with titles, page ranges, and summaries.
+        """
+        return self.get_tree(doc_id, node_summary=True, include_text=False)["result"]
+
+    def is_retrieval_ready(self, doc_id: str) -> bool:
+        """
+        Check if a document is ready for retrieval. API errors (including a
+        missing document) are reported as False; transport errors (connection
+        failures, timeouts) propagate.
+        """
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError) as e:
-            print(f"Warning: corrupt {Path(path).name}: {e}")
-            return None
+            result = self.get_tree(doc_id)
+            return result.get("retrieval_ready", False)
+        except PageIndexAPIError:
+            return False
 
-    def _save_doc(self, doc_id: str):
-        doc = self.documents[doc_id].copy()
-        # Strip text from structure nodes — redundant with pages (PDF only)
-        if doc.get('structure') and doc.get('type') == 'pdf':
-            doc['structure'] = remove_fields(doc['structure'], fields=['text'])
-        path = self.workspace / f"{doc_id}.json"
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(doc, f, ensure_ascii=False, indent=2)
-        self._save_meta(doc_id, self._make_meta_entry(doc))
-        # Drop heavy fields; will lazy-load on demand
-        self.documents[doc_id].pop('structure', None)
-        self.documents[doc_id].pop('pages', None)
+    # ---------- RETRIEVAL (cloud-only, deprecated) ----------
 
-    def _rebuild_meta(self) -> dict:
-        """Scan individual doc JSON files and return a meta dict."""
-        meta = {}
-        for path in self.workspace.glob("*.json"):
-            if path.name == META_INDEX:
-                continue
-            doc = self._read_json(path)
-            if doc and isinstance(doc, dict):
-                meta[path.stem] = self._make_meta_entry(doc)
-        return meta
+    def submit_query(self, doc_id: str, query: str, thinking: bool = False) -> dict[str, Any]:
+        """
+        Submit a retrieval query for a document. Returns {'retrieval_id': ...}.
 
-    def _read_meta(self) -> dict | None:
-        """Read and validate _meta.json, returning None on any corruption."""
-        meta = self._read_json(self.workspace / META_INDEX)
-        if meta is not None and not isinstance(meta, dict):
-            print(f"Warning: {META_INDEX} is not a JSON object, ignoring")
-            return None
-        return meta
+        Cloud-only: the cloud API marks this endpoint deprecated in favor of
+        chat completions, so local mode does not implement it — raises
+        PageIndexAPIError. Use ``chat()`` instead.
+        """
+        return self._require_cloud(
+            "submit_query is cloud-only — the retrieval API is deprecated in "
+            "favor of chat completions; use chat() instead."
+        ).submit_query(doc_id=doc_id, query=query, thinking=thinking)
 
-    def _save_meta(self, doc_id: str, entry: dict):
-        meta = self._read_meta() or self._rebuild_meta()
-        meta[doc_id] = entry
-        meta_path = self.workspace / META_INDEX
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump(meta, f, ensure_ascii=False, indent=2)
+    def get_retrieval(self, retrieval_id: str) -> dict[str, Any]:
+        """
+        Get retrieval status and results for a submitted query.
 
-    def _load_workspace(self):
-        meta = self._read_meta()
-        if meta is None:
-            meta = self._rebuild_meta()
-            if meta:
-                print(f"Loaded {len(meta)} document(s) from workspace (legacy mode).")
-        for doc_id, entry in meta.items():
-            doc = dict(entry, id=doc_id)
-            if doc.get('path') and not os.path.isabs(doc['path']):
-                doc['path'] = str((self.workspace / doc['path']).resolve())
-            self.documents[doc_id] = doc
+        Cloud-only: the cloud API marks this endpoint deprecated in favor of
+        chat completions, so local mode does not implement it — raises
+        PageIndexAPIError. Use ``chat()`` instead.
+        """
+        return self._require_cloud(
+            "get_retrieval is cloud-only — the retrieval API is deprecated in "
+            "favor of chat completions; use chat() instead."
+        ).get_retrieval(retrieval_id=retrieval_id)
 
-    def _ensure_doc_loaded(self, doc_id: str):
-        """Load full document JSON on demand (structure, pages, etc.)."""
-        doc = self.documents.get(doc_id)
-        if not doc or doc.get('structure') is not None:
-            return
-        full = self._read_json(self.workspace / f"{doc_id}.json")
-        if not full:
-            return
-        doc['structure'] = full.get('structure', [])
-        if full.get('pages'):
-            doc['pages'] = full['pages']
+    # ---------- CHAT ----------
 
-    def get_document(self, doc_id: str) -> str:
-        """Return document metadata JSON."""
-        return get_document(self.documents, doc_id)
+    # stream and protocol pick the return type: the docstring's `.events`
+    # usage and the protocol envelopes must type-check for py.typed
+    # consumers
+    @overload
+    def chat(
+        self,
+        messages: Union[str, list[dict[str, Any]]],
+        *,
+        doc_id: Optional[Union[str, list[str]]] = None,
+        stream: Literal[False] = False,
+        model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+        show_process: Union[bool, Mapping[str, Any], None] = None,
+        folder_id: Optional[str] = None,
+        protocol: None = None,
+        instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
+        citations: bool = False,
+        max_turns: Optional[int] = None,
+        backend: Optional[dict[str, Any]] = None,
+        extra_headers: Optional[dict[str, str]] = None,
+        extra_body: Optional[dict[str, Any]] = None,
+    ) -> str: ...
 
-    def get_document_structure(self, doc_id: str) -> str:
-        """Return document tree structure JSON (without text fields)."""
-        if self.workspace:
-            self._ensure_doc_loaded(doc_id)
-        return get_document_structure(self.documents, doc_id)
+    @overload
+    def chat(
+        self,
+        messages: Union[str, list[dict[str, Any]]],
+        *,
+        doc_id: Optional[Union[str, list[str]]] = None,
+        stream: Literal[True],
+        model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+        show_process: Union[bool, Mapping[str, Any], None] = None,
+        folder_id: Optional[str] = None,
+        protocol: None = None,
+        instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
+        citations: bool = False,
+        max_turns: Optional[int] = None,
+        backend: Optional[dict[str, Any]] = None,
+        extra_headers: Optional[dict[str, str]] = None,
+        extra_body: Optional[dict[str, Any]] = None,
+    ) -> ChatStream: ...
 
-    def get_page_content(self, doc_id: str, pages: str) -> str:
-        """Return page content for the given pages string (e.g. '5-7', '3,8', '12')."""
-        if self.workspace:
-            self._ensure_doc_loaded(doc_id)
-        return get_page_content(self.documents, doc_id, pages)
+    @overload
+    def chat(
+        self,
+        messages: Union[str, list[dict[str, Any]]],
+        *,
+        doc_id: Optional[Union[str, list[str]]] = None,
+        stream: Literal[False] = False,
+        model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+        show_process: Union[bool, Mapping[str, Any], None] = None,
+        folder_id: Optional[str] = None,
+        protocol: Literal["chat_completions", "responses", "messages"],
+        instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
+        citations: bool = False,
+        max_turns: Optional[int] = None,
+        backend: Optional[dict[str, Any]] = None,
+        extra_headers: Optional[dict[str, str]] = None,
+        extra_body: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]: ...
+
+    @overload
+    def chat(
+        self,
+        messages: Union[str, list[dict[str, Any]]],
+        *,
+        doc_id: Optional[Union[str, list[str]]] = None,
+        stream: Literal[True],
+        model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+        show_process: Union[bool, Mapping[str, Any], None] = None,
+        folder_id: Optional[str] = None,
+        protocol: Literal["chat_completions", "responses"],
+        instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
+        citations: bool = False,
+        max_turns: Optional[int] = None,
+        backend: Optional[dict[str, Any]] = None,
+        extra_headers: Optional[dict[str, str]] = None,
+        extra_body: Optional[dict[str, Any]] = None,
+    ) -> Iterator[dict[str, Any]]: ...
+
+    @overload
+    def chat(
+        self,
+        messages: Union[str, list[dict[str, Any]]],
+        *,
+        doc_id: Optional[Union[str, list[str]]] = None,
+        stream: Literal[True],
+        model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+        show_process: Union[bool, Mapping[str, Any], None] = None,
+        folder_id: Optional[str] = None,
+        protocol: Literal["messages"],
+        instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
+        citations: bool = False,
+        max_turns: Optional[int] = None,
+        backend: Optional[dict[str, Any]] = None,
+        extra_headers: Optional[dict[str, str]] = None,
+        extra_body: Optional[dict[str, Any]] = None,
+    ) -> Iterator[Any]: ...
+
+    @overload
+    def chat(
+        self,
+        messages: Union[str, list[dict[str, Any]]],
+        *,
+        doc_id: Optional[Union[str, list[str]]] = None,
+        stream: bool = False,
+        model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+        show_process: Union[bool, Mapping[str, Any], None] = None,
+        folder_id: Optional[str] = None,
+        protocol: None = None,
+        instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
+        citations: bool = False,
+        max_turns: Optional[int] = None,
+        backend: Optional[dict[str, Any]] = None,
+        extra_headers: Optional[dict[str, str]] = None,
+        extra_body: Optional[dict[str, Any]] = None,
+    ) -> Union[str, ChatStream]: ...
+
+    @overload
+    def chat(
+        self,
+        messages: Union[str, list[dict[str, Any]]],
+        *,
+        doc_id: Optional[Union[str, list[str]]] = None,
+        stream: bool = False,
+        model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+        show_process: Union[bool, Mapping[str, Any], None] = None,
+        folder_id: Optional[str] = None,
+        protocol: Optional[Literal["chat_completions", "responses",
+                                   "messages"]] = None,
+        instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
+        citations: bool = False,
+        max_turns: Optional[int] = None,
+        backend: Optional[dict[str, Any]] = None,
+        extra_headers: Optional[dict[str, str]] = None,
+        extra_body: Optional[dict[str, Any]] = None,
+    ) -> Union[str, ChatStream, dict[str, Any], Iterator[Any]]: ...
+
+    def chat(
+        self,
+        messages: Union[str, list[dict[str, Any]]],
+        *,
+        doc_id: Optional[Union[str, list[str]]] = None,
+        stream: bool = False,
+        model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+        show_process: Union[bool, Mapping[str, Any], None] = None,
+        folder_id: Optional[str] = None,
+        protocol: Optional[Literal["chat_completions", "responses",
+                                   "messages"]] = None,
+        instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
+        citations: bool = False,
+        max_turns: Optional[int] = None,
+        backend: Optional[dict[str, Any]] = None,
+        extra_headers: Optional[dict[str, str]] = None,
+        extra_body: Optional[dict[str, Any]] = None,
+    ) -> Union[str, ChatStream, dict[str, Any], Iterator[Any]]:
+        """
+        Ask a question about your documents.
+
+        The answer lane (no ``protocol``): thin sugar over the same engine
+        as ``chat_completions()`` in every mode — same wire, minus the
+        envelope. Returns the answer string (a ``ChatStream`` when
+        streaming). Multi-turn: keep your own role/content list of the
+        visible conversation (append each answer as an assistant message;
+        join a stream into one only with ``show_process=False``) and pass
+        it back.
+
+        The protocol lanes: ``protocol="chat_completions"`` is the answer
+        lane's own engine with its envelope kept — the Chat Completions
+        response (``choices``/``usage``), or its chunk dicts when
+        streaming; it is the one protocol the managed cloud chat serves
+        too. ``protocol="responses"`` / ``"messages"``: own-model chat
+        driven natively over the OpenAI Responses API or Anthropic's
+        Messages API. Input and output are that protocol's own shapes —
+        the history may carry its transcript (Responses items, or
+        Messages content blocks with prior tool_use/tool_result
+        round-trips), and the return is its response envelope, streaming
+        its native events. A round-tripped transcript continues the
+        agent's memory and the provider's cached prefix: follow-ups re-read
+        the run instead of redoing the tool work. The protocol is declared,
+        never inferred from the model name. Keep ``doc_id`` and
+        ``protocol`` constant across a conversation's calls.
+
+        Args:
+            messages: A question string, or the conversation history —
+                role/content messages on every lane. With your own chat
+                model, ``system`` rows join the managed prompt on the
+                answer lane and ``protocol="chat_completions"``, wherever
+                they sit (the managed endpoint forwards them verbatim);
+                the other protocol lanes pass rows to the wire as they
+                are (use ``instructions`` for persona there). Responses
+                and Messages also accept their native transcript items
+                or content blocks; own-model Chat Completions takes text
+                history only.
+            doc_id: Document ID or list of IDs to scope the conversation.
+                Keep it identical across a conversation's calls. Local
+                documents: also enforced at the tool layer, not just
+                prompted. Cloud documents: the managed chat scopes
+                server-side; own-model chat targets at the prompt level.
+            folder_id: Folder ID to steer discovery toward that folder's
+                documents. Cloud-only. The managed chat scopes it
+                server-side; own-model chat leads the conversation with
+                the folder's targeting text (``folder_context``), ahead
+                of the document block. ``"root"`` is the whole library.
+                Keep it identical across a conversation's calls.
+            stream: Answer lane: return a ``ChatStream`` — iterate it for
+                the answer as text chunks as they are produced
+                (``show_process`` is on by default, so the run's process
+                arrives woven in; ``show_process=False`` gives the bare
+                answer), or read its ``.events`` property instead for the
+                run as typed event dicts — thinking/answer deltas, each
+                tool call and its full result (own-model chat only; never
+                clipped). One run serves one view. Protocol lanes: the
+                protocol's own event stream.
+            model: Own-model chat only — backend model name (defaults
+                to ``chat_model``). ``protocol="messages"`` needs it named
+                — a Claude model; there is no cross-vendor default.
+            reasoning_effort: Own-model chat only — how hard the model
+                thinks (``"low"`` / ``"medium"`` / ``"high"``; what a
+                backend accepts is its own). Each lane sends its native
+                spelling: LiteLLM's ``reasoning_effort``, Responses
+                ``reasoning.effort``, Messages ``output_config.effort``.
+                Unset sends nothing — the model's default applies.
+            show_process: Answer lane, streamed chat — weave the run into
+                the text stream for display: thinking flows as
+                "[thinking] " sections, each tool call as a "[tool_call]
+                name arguments" line with its "[tool_result]" line, and
+                the answer unlabeled. **On by default**, weaving what the mode
+                serves: the in-process agent's full run; on a managed
+                client, the tool calls the endpoint streams (its wire
+                carries no thinking and no tool results). Pass ``False``
+                for the bare answer stream — do that before appending a
+                streamed answer to the conversation history.
+                ``True`` shows everything; a dict (typed as
+                ``pageindex.ChatProcessOptions``) selects the parts —
+                ``thinking`` / ``tool_call`` / ``tool_result``, bools
+                defaulting on — and sets ``max_chars``, the per-line
+                summary cap in characters (default 200). Omitted keys
+                keep their defaults, so ``{"thinking": False}`` hides
+                only thinking and ``{}`` equals ``True``.
+                Thinking appears when the backend streams it
+                (e.g. Claude models with ``reasoning_effort``; OpenAI
+                models expose none on the chat protocol). The labels are
+                not a parse format, and a process stream must not be
+                appended back as conversation history — for the
+                machine-readable process use ``.events``, or the
+                Responses / Messages lane's transcript. A protocol lane
+                returns its own shape, so ``show_process`` is an error
+                there.
+            protocol: ``None`` for the answer lane, or
+                ``"chat_completions"`` / ``"responses"`` / ``"messages"``
+                — the wire protocol, engine, and input/output shapes of
+                this call. Own-model chat only, except
+                ``"chat_completions"``, which the managed chat serves too.
+            instructions: Persona or extra guidance for this call,
+                appended after the managed system prompt (which stays: it
+                carries the tool guidance) and the client's own
+                ``instructions``. A string on every lane; with
+                ``protocol="messages"`` also a list of
+                Messages system blocks. On the answer lane and
+                ``protocol="chat_completions"`` it precedes any ``system``
+                rows in the history; the managed cloud chat receives them
+                all as its one leading system message.
+            citations: Own-model chat: cite every claim the way PageIndex
+                chat does — ``<cite doc="…" page="…"/>`` tags, ``block="…"``
+                added where the cloud document has blocks. The guidance is
+                the PageIndex MCP server's ``cited_answer`` prompt, joining
+                the system prompt after the managed prompt and before
+                ``instructions``; local documents get the SDK's copy
+                (pages only); another format: ``citation_prompt()`` passed
+                through ``instructions=`` instead. Managed chat:
+                ``chat_completions``'s ``enable_citations`` — the endpoint
+                cites in its own inline markup, not ``<cite>`` tags, and
+                the resolved citations it returns ride the response
+                envelope, so they need ``chat_completions()`` or
+                ``protocol="chat_completions"``; the answer lane returns
+                the answer string alone.
+            max_turns: Own-model chat only — cap on agent turns per call
+                (default 10). The OpenAI lanes raise at the cap;
+                ``protocol="messages"`` returns the truncated run
+                (``stop_reason: "tool_use"``, its ``messages`` valid for
+                continuation).
+            backend: Own-model chat only — connection overrides for this
+                call's backend, merged over the client's ``chat_backend``
+                (per-call keys win): LiteLLM's connection params on the
+                answer lane and ``protocol="chat_completions"``; the
+                openai / anthropic SDK's client params on Responses /
+                Messages. Passed through verbatim.
+            extra_headers: Own-model chat only — extra HTTP headers
+                merged into each backend request; caller headers win.
+                LiteLLM's anthropic adapter owns ``anthropic-beta`` on the
+                answer lane and ``protocol="chat_completions"`` —
+                Anthropic beta flags ride ``protocol="messages"``.
+            extra_body: The wire's own request fields beyond this
+                method's parameters, in the lane's wire names (Responses
+                ``max_output_tokens``, Messages ``thinking`` / ``top_k``;
+                the managed chat endpoint's ``temperature`` /
+                ``enable_citations``), merged last so they win.
+                The managed endpoint, Responses / Messages, and
+                OpenAI-compatible chat backends take these verbatim in
+                the request body. Other own-model chat backends take
+                LiteLLM's own params, mapped or refused per provider
+                (``response_format`` is unsupported there). The managed
+                prompt, conversation and tools are not fields here (``system`` /
+                ``instructions`` / ``input`` / ``messages`` / ``tools``
+                are refused); extend the prompt with ``instructions=`` or a
+                leading system row in ``messages``. ``stream`` / ``doc_id``
+                are refused too: each has its own argument. Credentials
+                belong in ``backend``, never here.
+
+        Returns:
+            - answer lane, stream=False: the answer string
+            - answer lane, stream=True: a ``ChatStream`` — iterating it
+              yields text chunks (with show_process, on by default, the
+              run's process woven in as labeled sections); ``.events``
+              yields typed event dicts:
+              ``{"type": "thinking"|"answer", "delta": ...}``,
+              ``{"type": "tool_call", "call_id", "name", "arguments"}``,
+              ``{"type": "tool_result", "call_id", "name", "output"}``
+            - protocol lane, stream=False: the protocol's response
+              envelope — Chat Completions: ``choices`` and ``usage``;
+              Responses: ``output`` plus an ``items``
+              transcript and cross-turn ``usage``; Messages: the final
+              message with a ``messages`` turn sequence and aggregated
+              ``usage``
+            - protocol lane, stream=True: an iterator of the protocol's
+              own stream events
+        """
+        if protocol not in (None, "chat_completions", "responses",
+                            "messages"):
+            raise PageIndexAPIError(
+                "protocol selects the wire: \"chat_completions\" (OpenAI Chat "
+                "Completions), \"responses\" (OpenAI Responses) or "
+                "\"messages\" (Anthropic Messages), or leave it unset for "
+                f"the answer lane — got {protocol!r}.")
+        if (protocol is not None and show_process is not False
+                and show_process is not None):
+            raise PageIndexAPIError(
+                "show_process weaves the answer lane's run; with "
+                f"protocol={protocol!r} the return is the protocol's own "
+                "envelope and events — drop show_process, or drop "
+                "protocol for the woven text stream.")
+        if show_process is not False and show_process is not None:
+            from .local_chat import _process_options
+            _process_options(show_process)  # a bad value chokes first
+            if not stream:
+                raise PageIndexAPIError(
+                    "show_process shows the run as it happens and requires "
+                    "stream=True; only show_process=False (or None) means "
+                    f"off — got {show_process!r}.")
+        if isinstance(instructions, list) and protocol != "messages":
+            raise PageIndexAPIError(
+                "instructions blocks are the Messages protocol's shape — "
+                "with protocol=\"messages\" they append after the managed "
+                "system blocks; the other lanes take a string.")
+        from .local_chat import _refuse_skeleton
+        _refuse_skeleton(extra_body)
+        if citations and citations is not True:
+            raise PageIndexAPIError(
+                "citations must be True or False — for another format pass "
+                "citation_prompt(format=...) as instructions= (own-model "
+                "chat).")
+        enable_citations = False
+        if citations:
+            if self._local_chat:
+                text = self.citation_prompt()
+                if isinstance(instructions, list):
+                    instructions = [{"type": "text", "text": text},
+                                    *instructions]
+                else:
+                    instructions = (f"{text}\n\n{instructions}"
+                                    if instructions else text)
+            else:
+                enable_citations = True
+        if protocol in ("responses", "messages"):
+            self._require_own_chat(f"chat(protocol={protocol!r})")
+            if protocol == "responses":
+                body = extra_body
+                if reasoning_effort:
+                    # OpenAI's own effort field, beside the caller's other
+                    # reasoning keys — theirs still win.
+                    given = extra_body or {}
+                    body = {**given, "reasoning": {
+                        "effort": reasoning_effort,
+                        **given.get("reasoning", {})}}
+                return self._responses(
+                    messages, model=model, stream=stream, doc_id=doc_id,
+                    folder_id=folder_id,
+                    instructions=cast(Optional[str], instructions),
+                    max_turns=max_turns, extra_body=body,
+                    extra_headers=extra_headers, backend=backend)
+            if not model:
+                raise PageIndexAPIError(
+                    "protocol=\"messages\" drives Anthropic's Messages API "
+                    "with the Anthropic SDK — name the Claude model with "
+                    "model=... (there is no cross-vendor default to guess).")
+            body = extra_body
+            if reasoning_effort:
+                # Anthropic's own effort field, beside the caller's other
+                # output_config keys — theirs still win.
+                given = extra_body or {}
+                body = {**given, "output_config": {
+                    "effort": reasoning_effort,
+                    **given.get("output_config", {})}}
+            return self._messages(
+                messages, model=model, stream=stream, doc_id=doc_id,
+                folder_id=folder_id,
+                system=instructions, max_turns=max_turns, extra_body=body,
+                extra_headers=extra_headers, backend=backend)
+        if instructions:
+            if isinstance(messages, str):
+                if not messages.strip():
+                    raise PageIndexAPIError(
+                        "messages must be a non-empty string or a list of "
+                        "message dicts.")
+                messages = [{"role": "user", "content": messages}]
+            # The first system text: managed prompt, then instructions,
+            # then the history's own system rows.
+            messages = [{"role": "system", "content": instructions},
+                        *messages]
+        if protocol == "chat_completions":
+            return self.chat_completions(
+                messages, stream=stream, stream_metadata=True, doc_id=doc_id,
+                enable_citations=enable_citations, folder_id=folder_id,
+                model=model, max_turns=max_turns,
+                reasoning_effort=reasoning_effort, extra_body=extra_body,
+                extra_headers=extra_headers, backend=backend)
+        if stream:
+            # the default means "on where available"
+            resolved = True if show_process is None else show_process
+            if self._local_chat:
+                from .local_chat import run_chat_stream
+                return run_chat_stream(self, messages, doc_id=doc_id,
+                                       folder_id=folder_id, model=model,
+                                       reasoning_effort=reasoning_effort,
+                                       show_process=resolved,
+                                       max_turns=max_turns, backend=backend,
+                                       extra_headers=extra_headers,
+                                       extra_body=extra_body)
+            from .local_chat import run_cloud_chat_stream
+            chunks = self.chat_completions(messages, stream=True,
+                                           stream_metadata=True,
+                                           enable_citations=enable_citations,
+                                           doc_id=doc_id, model=model,
+                                           folder_id=folder_id,
+                                           reasoning_effort=reasoning_effort,
+                                           max_turns=max_turns,
+                                           backend=backend,
+                                           extra_headers=extra_headers,
+                                           extra_body=extra_body)
+            return run_cloud_chat_stream(
+                cast(Iterator[dict[str, Any]], chunks), resolved)
+        result = self.chat_completions(messages, doc_id=doc_id, model=model,
+                                       enable_citations=enable_citations,
+                                       folder_id=folder_id,
+                                       reasoning_effort=reasoning_effort,
+                                       max_turns=max_turns, backend=backend,
+                                       extra_headers=extra_headers,
+                                       extra_body=extra_body)
+        envelope = cast(dict[str, Any], result)
+        try:
+            return envelope["choices"][0]["message"]["content"] or ""
+        except (KeyError, IndexError, TypeError) as exc:
+            raise PageIndexAPIError(
+                "The chat response carries no answer: "
+                f"{str(envelope)[:200]}") from exc
+
+    def chat_completions(
+        self,
+        messages: Union[str, list[dict[str, str]]],
+        stream: bool = False,
+        doc_id: Optional[Union[str, list[str]]] = None,
+        temperature: Optional[float] = None,
+        stream_metadata: bool = False,
+        enable_citations: bool = False,
+        model: Optional[str] = None,
+        max_turns: Optional[int] = None,
+        top_p: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        reasoning_effort: Optional[str] = None,
+        extra_body: Optional[dict[str, Any]] = None,
+        extra_headers: Optional[dict[str, str]] = None,
+        backend: Optional[dict[str, Any]] = None,
+        *,
+        folder_id: Optional[str] = None,
+    ) -> Union[dict[str, Any], Iterator[str], Iterator[dict[str, Any]]]:
+        """
+        Kept for existing code — new code calls ``chat()``. Everything
+        here is ``chat(protocol="chat_completions")``: the same engine
+        and envelope, with this method's sampling fields riding
+        ``extra_body`` under their wire names. The one exception is the
+        text-only stream (``stream=True`` without ``stream_metadata``):
+        that is ``chat(stream=True, show_process=False)``.
+
+        With no chat model configured (a plain cloud client): the managed
+        hosted chat endpoint. With one — local mode, or a cloud client
+        constructed with ``chat_model=``/``chat=`` (own-model chat) — a
+        managed document-QA agent runs in your process over the mode's
+        tools (local store, or the live cloud tool set) against your own
+        LLM backend, routed through LiteLLM — model names mean what
+        LiteLLM says they mean.
+        Bare names are OpenAI-compatible shorthand (the OpenAI SDK's usual
+        env config — OPENAI_API_KEY, OPENAI_BASE_URL — selects the
+        backend, so any OpenAI-compatible server works; write
+        ``openai/Qwen/...`` when the server itself serves slashed ids),
+        provider-prefixed names — ``anthropic/…``, ``bedrock/…`` — reach
+        that provider, and LiteLLM-routed Claude models get the managed
+        prompt prefix cache-marked automatically. The non-stream
+        response carries the final answer only; streaming yields the
+        agent's visible text as it is produced, including narration before
+        tool calls. ``finish_reason`` carries the final turn's native
+        finish reason — "stop", or the backend's "length" /
+        "content_filter" when the last turn was cut short. For
+        the tool-use process and prompt-cache round-trip use
+        ``chat(protocol="responses")`` or ``chat(protocol="messages")``.
+
+        Args:
+            messages: Conversation messages with 'role' and 'content' keys,
+                or a bare query string (it becomes a single user message).
+                System/developer messages, wherever they sit, join the
+                managed system prompt after the client's ``instructions``
+                (the managed endpoint receives them as its one leading
+                system message); the history is text only: tool-role
+                turns are rejected on both engines, and message
+                fields beyond role/content are dropped.
+            stream: Enable streaming responses.
+            doc_id: Document ID or list of IDs to scope the conversation.
+                Keep it identical across a conversation's calls — the
+                targeting block it adds is re-set each call and is part
+                of the cached prompt prefix. Local documents: also
+                enforced at the tool layer, not just prompted. Cloud
+                documents: the managed chat scopes server-side;
+                own-model chat targets at the prompt level.
+            folder_id: Folder ID to steer discovery toward that folder's
+                documents (cloud-only): the managed chat scopes it
+                server-side; own-model chat leads the conversation with
+                the folder's targeting text, ahead of the document block.
+                ``"root"`` is the whole library.
+            temperature: Sampling temperature, passed through to the model.
+            stream_metadata: With stream=True, yield chunk dicts instead of
+                text pieces.
+            enable_citations: Managed chat only — the endpoint cites
+                inline and returns the resolved citations (``citations``
+                in the response; with ``stream_metadata=True`` a trailing
+                citations chunk). Own-model chat raises; its
+                ``chat(citations=True)`` adds ``<cite>`` markup only,
+                nothing is resolved.
+            model: Own-model chat only — backend model name (defaults to
+                ``chat_model``). The managed endpoint selects its own.
+            max_turns: Own-model chat only — cap on agent turns per call.
+            top_p: Own-model chat only — nucleus sampling, passed
+                through to the model.
+            max_tokens: Own-model chat only — per-call output cap,
+                passed through; it bounds each backend call in the agent
+                loop (the way max_turns bounds the loop), not the whole
+                run.
+            reasoning_effort: Own-model chat only — passed through verbatim as
+                LiteLLM's ``reasoning_effort``; each provider maps it to
+                its own thinking control, and the values mean what the
+                backend says they mean. Unset sends nothing (the
+                backend's default applies).
+            extra_body: Extra request fields beyond this method's
+                parameters, merged last so they win. The managed endpoint
+                and OpenAI-compatible backends take them verbatim in the
+                request body; LiteLLM-routed providers take them as
+                LiteLLM's own params (mapped or refused per provider).
+                The managed prompt, conversation and tools are not
+                fields here (``system`` / ``instructions`` / ``input`` /
+                ``messages`` / ``tools`` are refused), nor are ``stream``
+                / ``doc_id``: each has its own argument. Credentials belong
+                in ``backend``, never here.
+            extra_headers: Own-model chat only — extra HTTP headers merged into
+                each backend request; caller headers win. One exception:
+                LiteLLM's anthropic adapter owns the ``anthropic-beta``
+                header (your value is dropped there) — Anthropic beta
+                flags ride ``chat(protocol="messages")``.
+            backend: Own-model chat only — connection overrides for this call's
+                backend, merged over the client's ``chat_backend``
+                (per-call keys win). Keys are LiteLLM's own connection
+                params — ``api_key``, ``base_url``, ``api_version``,
+                ``aws_*``, … — passed through verbatim.
+
+        Returns:
+            - stream=False: complete response dict ({'id', 'object', 'created',
+              'choices', 'usage'})
+            - stream=True, stream_metadata=False: iterator of text chunks
+            - stream=True, stream_metadata=True: iterator of chunk dicts
+        """
+        if isinstance(messages, str):
+            if not messages.strip():
+                raise PageIndexAPIError(
+                    "messages must be a non-empty string or a list of "
+                    "message dicts.")
+            messages = [{"role": "user", "content": messages}]
+        from .local_chat import _refuse_skeleton
+        _refuse_skeleton(extra_body)
+        if self._local_chat:
+            from .local_chat import run_chat_completions
+            return run_chat_completions(
+                self, messages, stream=stream, doc_id=doc_id,
+                folder_id=folder_id,
+                temperature=temperature, stream_metadata=stream_metadata,
+                enable_citations=enable_citations, model=model,
+                max_turns=max_turns, top_p=top_p, max_tokens=max_tokens,
+                reasoning_effort=reasoning_effort, extra_body=extra_body,
+                extra_headers=extra_headers, backend=backend,
+            )
+        if not getattr(self, "api_key", None):
+            raise PageIndexAPIError(
+                "chat_model is empty — it configures nothing, and a local "
+                "client has no managed chat to fall back to. Set "
+                "chat_model=... to run the agent with your own model.")
+        if (model or max_turns is not None or top_p is not None
+                or max_tokens is not None or reasoning_effort
+                or extra_headers or backend):
+            raise PageIndexAPIError(
+                "model, max_turns, top_p, max_tokens, reasoning_effort, "
+                "extra_headers and backend drive your own chat "
+                "model, which this client does not configure — construct "
+                "the client with chat_model=... (or a chat= model) to run the "
+                "agent in your process, or drop them to use the managed "
+                "chat endpoint, which selects its own model."
+            )
+        # The endpoint takes one system message, first: the client's
+        # instructions and the history's system rows fold into it.
+        from .local_chat import _system_text
+        texts = [self.instructions] if self.instructions else []
+        history = []
+        for message in messages:
+            role = message.get("role") if isinstance(message, dict) else None
+            if role in ("system", "developer"):
+                texts.append(_system_text(message.get("content")))
+            else:
+                history.append(message)
+        texts = [t for t in texts if t.strip()]
+        messages = ([{"role": "system", "content": "\n\n".join(texts)}]
+                    if texts else []) + history
+        from .cloud_api import CloudAPI
+        return cast(CloudAPI, self._api).chat_completions(
+            messages=messages, stream=stream, doc_id=doc_id,
+            folder_id=folder_id,
+            temperature=temperature, stream_metadata=stream_metadata,
+            enable_citations=enable_citations, extra_body=extra_body,
+        )
+
+    def _responses(
+        self,
+        input: Union[str, list[dict[str, Any]]],
+        model: Optional[str] = None,
+        stream: bool = False,
+        doc_id: Optional[Union[str, list[str]]] = None,
+        instructions: Optional[str] = None,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        max_turns: Optional[int] = None,
+        max_output_tokens: Optional[int] = None,
+        reasoning: Optional[dict[str, Any]] = None,
+        extra_body: Optional[dict[str, Any]] = None,
+        extra_headers: Optional[dict[str, str]] = None,
+        backend: Optional[dict[str, Any]] = None,
+        *,
+        folder_id: Optional[str] = None,
+    ) -> Union[dict[str, Any], Iterator[dict[str, Any]]]:
+        """
+        The engine behind ``chat(protocol="responses")``: document QA over
+        the OpenAI Responses protocol.
+
+        Own-model chat only — local mode, or a cloud client constructed
+        with ``chat_model=``/``chat=``. Drives your backend's /responses
+        end to end (no translation layer). The envelope is official
+        Responses shape — ``output`` carries the model-produced items
+        and parses with the openai SDK types — and the whole process
+        transcript (including the tool outputs the SDK executed) rides
+        in the extra ``items`` field.
+        Append the returned ``items`` to your next call's ``input`` verbatim
+        to keep provider prompt-cache prefix continuity and the agent's
+        memory of what it already read.
+
+        Requires a backend that supports the
+        Responses API; backends that only speak chat.completions should use
+        ``chat(protocol="chat_completions")``. Provider-prefixed models
+        (``anthropic/…``) route through LiteLLM's chat.completions adapter
+        and are therefore refused here — use
+        ``chat(protocol="chat_completions")`` or ``chat(protocol="messages")``
+        for those.
+
+        Args:
+            input: A user message string, or a list of Responses input items
+                (round-trip prior ``items`` here).
+            model: Backend model name (defaults to ``chat_model``).
+            stream: Yield Responses stream events as dicts — one logical
+                response per call: per-turn backend lifecycle events are
+                collapsed to one opening ``response.created`` and one
+                final terminal event, sequence numbers are reassigned
+                monotonically, and ``output_index`` is re-based onto the
+                single logical ``output``. The final event is the
+                terminal ``response.*`` for the run's status; its
+                ``response`` carries the tool outputs in ``items``.
+            doc_id: Document ID or list of IDs to scope the conversation.
+                Keep it identical across a conversation's calls — the
+                targeting block it adds is re-set each call and is part
+                of the cached prompt prefix. Local documents: also
+                enforced at the tool layer; cloud documents:
+                prompt-level targeting only.
+            folder_id: Folder ID to steer discovery toward that folder's
+                documents (cloud-only), as the leading targeting text
+                ahead of the document block. ``"root"`` is the whole
+                library.
+            instructions: Appended to the managed system prompt.
+            temperature / top_p: Passed through to the model.
+            max_turns: Cap on agent turns per call.
+            max_output_tokens: Per-call output cap, passed through; it
+                bounds each backend call in the agent loop (the way
+                max_turns bounds the loop), not the whole run. Echoed in
+                the envelope.
+            reasoning: Responses reasoning options, forwarded verbatim
+                (e.g. ``{"effort": "low", "summary": "auto"}``) — the
+                values mean what the backend says they mean. Unset sends
+                nothing (the backend's default applies).
+            extra_body: Extra request fields beyond this method's
+                parameters, merged verbatim into the request body (last,
+                so they win). Credentials belong in ``backend``, never
+                here.
+            extra_headers: Extra HTTP headers merged into each request;
+                caller headers win over defaults.
+            backend: Connection overrides for this call's backend client,
+                merged over the client's ``chat_backend`` (per-call keys
+                win). Keys are the openai SDK's client params —
+                ``api_key``, ``base_url``, ``organization``, … — passed
+                verbatim; unknown keys raise.
+        """
+        self._require_own_chat("chat(protocol='responses')")
+        from .local_chat import run_responses
+        return run_responses(
+            self, input, model=model, stream=stream, doc_id=doc_id,
+            folder_id=folder_id,
+            instructions=instructions, temperature=temperature, top_p=top_p,
+            max_turns=max_turns, max_output_tokens=max_output_tokens,
+            reasoning=reasoning, extra_body=extra_body,
+            extra_headers=extra_headers, backend=backend,
+        )
+
+    def _messages(
+        self,
+        messages: Union[str, list[dict[str, Any]]],
+        model: str,
+        max_tokens: Optional[int] = None,
+        stream: bool = False,
+        doc_id: Optional[Union[str, list[str]]] = None,
+        system: Optional[Union[str, list[dict[str, Any]]]] = None,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        top_k: Optional[int] = None,
+        stop_sequences: Optional[list[str]] = None,
+        max_turns: Optional[int] = None,
+        thinking: Optional[dict[str, Any]] = None,
+        extra_body: Optional[dict[str, Any]] = None,
+        extra_headers: Optional[dict[str, str]] = None,
+        backend: Optional[dict[str, Any]] = None,
+        *,
+        folder_id: Optional[str] = None,
+    ) -> Union[dict[str, Any], Iterator[Any]]:
+        """
+        The engine behind ``chat(protocol="messages")``: document QA over
+        the Anthropic Messages protocol, Claude-native.
+
+        Own-model chat only — local mode, or a cloud client constructed
+        with ``chat_model=``/``chat=``. Drives Anthropic's /v1/messages
+        via the Anthropic SDK's own tool runner (requires
+        ``pageindex[anthropic]``; ANTHROPIC_API_KEY selects the
+        backend). ``tool_use``/``tool_result`` round-trip is the
+        format's native behavior: the response is the
+        final message envelope with cross-turn aggregated ``usage`` plus a
+        ``messages`` field — the full new turn sequence, valid for verbatim
+        append to your history. The managed system prompt carries a
+        ``cache_control`` breakpoint, and the request sets the top-level
+        ``cache_control`` so each turn re-reads the growing conversation
+        from cache — skipped when your own blocks already use the three
+        remaining breakpoints (the managed prompt holds the fourth).
+
+        Args:
+            messages: Native Messages-format history (including prior
+                tool_use/tool_result blocks on round-trip), or a bare query
+                string (it becomes a single user message).
+            model: Required — there is no cross-vendor default to guess.
+            max_tokens: Per-turn output budget the Messages API requires on
+                the wire; the default is resolved per model (8192, or 4096
+                for the claude-3 generation whose ceiling is lower) so the
+                simple call needs only a question, and rises to
+                budget_tokens + 8192 when ``thinking`` is enabled (the wire
+                requires max_tokens above the budget). Passed through.
+            stream: Yield the Anthropic SDK's event stream across turns
+                (its native event objects, including SDK-synthesized
+                convenience events), one message sequence per turn.
+            doc_id: Document ID or list of IDs to scope the conversation.
+                Keep it identical across a conversation's calls — the
+                targeting block it adds is re-set each call. Local
+                documents: also enforced at the tool layer; cloud
+                documents: prompt-level targeting only.
+            folder_id: Folder ID to steer discovery toward that folder's
+                documents (cloud-only), as the leading targeting text
+                ahead of the document block. ``"root"`` is the whole
+                library.
+            system: Appended after the managed system blocks.
+            temperature / top_p / top_k / stop_sequences: Passed through.
+            max_turns: Cap on agent turns per call (default 10, like the
+                OpenAI surfaces). A truncated run reports
+                ``stop_reason: "tool_use"`` and its ``messages`` remain
+                valid for continuation.
+            thinking: Anthropic thinking configuration, forwarded verbatim
+                (e.g. ``{"type": "adaptive"}``) — the values and their
+                constraints are the backend's. Unset sends nothing.
+            extra_body: Extra request fields beyond this method's
+                parameters, merged verbatim into each request body.
+                Credentials belong in ``backend``, never here.
+            extra_headers: Extra HTTP headers merged into each request
+                (e.g. ``anthropic-beta`` feature flags); caller headers
+                win over defaults.
+            backend: Connection overrides for this call's backend client,
+                merged over the client's ``chat_backend`` (per-call keys
+                win). Keys are the anthropic SDK's client params —
+                ``api_key``, ``base_url``, ``auth_token``, … — passed
+                verbatim; unknown keys raise.
+        """
+        self._require_own_chat("chat(protocol='messages')")
+        from .local_chat import run_messages
+        return run_messages(
+            self, messages, model=model, max_tokens=max_tokens,
+            stream=stream, doc_id=doc_id, folder_id=folder_id, system=system,
+            temperature=temperature, top_p=top_p, top_k=top_k,
+            stop_sequences=stop_sequences, max_turns=max_turns,
+            thinking=thinking, extra_body=extra_body,
+            extra_headers=extra_headers, backend=backend,
+        )
+
+    # ---------- DOCUMENT MANAGEMENT ----------
+
+    def get_document(self, doc_id: str) -> dict[str, Any]:
+        """
+        Get document metadata: {'id', 'name', 'description', 'status',
+        'createdAt', 'pageNum', 'folderId', 'metadata'}. Status is one of
+        "queued", "processing", "completed", "failed" (local documents are
+        always "completed"; local 'folderId' is always None). 'metadata'
+        is your own tags from ``submit_document``, or None.
+
+        'createdAt' is UTC with no timezone marker, in both modes. To show
+        it in the user's timezone::
+
+            from datetime import datetime, timezone
+            datetime.fromisoformat(doc["createdAt"]).replace(
+                tzinfo=timezone.utc).astimezone()
+        """
+        return self._api.get_document(doc_id=doc_id)
+
+    def get_document_id(self, name: str) -> str:
+        """
+        Look up a document's ID by its name. Useful for resolving
+        citation doc names (from ``<cite doc="…">``) to IDs.
+
+        Raises PageIndexAPIError if no document with that name exists.
+        """
+        result = self._api.list_documents(limit=1, name=name)
+        docs = result.get("documents", [])
+        if docs:
+            return docs[0]["id"]
+        raise PageIndexAPIError(f"No document named {name!r} found.")
+
+    def delete_document(self, doc_id: str) -> dict[str, Any]:
+        """
+        Delete a PageIndex document and all its associated data.
+
+        Returns:
+            dict: {'message': 'Document deleted successfully.'}, or an empty
+            dict if the cloud API responds with no body.
+        """
+        return self._api.delete_document(doc_id=doc_id)
+
+    def list_documents(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        folder_id: Optional[str] = None,
+        recursive: bool = False,
+    ) -> dict[str, Any]:
+        """
+        List documents with pagination, newest first.
+
+        Args:
+            limit (int): Maximum documents to return (1-100).
+            offset (int): Number of documents to skip.
+            folder_id (str, optional): Cloud-only folder filter.
+            recursive (bool): Include documents in ``folder_id``'s
+                descendant folders, flattened into one list. Cloud-only;
+                local libraries have no folders.
+
+        Returns:
+            dict: {'documents': [...], 'total', 'limit', 'offset'}.
+
+        Each document carries ``path``, its folder chain rendered
+        ``"Parent/Child"`` — what a flat listing otherwise loses. None
+        at the library root, for a folder reached only through a share
+        of something below it, and for every local document.
+        """
+        return self._api.list_documents(limit=limit, offset=offset,
+                                        folder_id=folder_id, recursive=recursive)
+
+    # ---------- AGENT INTEGRATION ----------
+
+    def agent_tools(
+        self, include_management: bool = False,
+    ) -> list[Callable[..., str]]:
+        """
+        Plain functions for any agent framework (LangChain, PydanticAI, ...).
+        For the OpenAI / Claude Agent SDKs, prefer ``as_openai_tools()`` /
+        ``as_claude_mcp()``.
+
+        Cloud: the full live read tool set, discovered from the PageIndex
+        MCP server when this method is called — one function per tool,
+        signature and docstring synthesized from the server's schemas, calls
+        executed from your process over MCP. Raises PageIndexAPIError if the
+        server cannot be reached. Local: the built-in tools over the local
+        store (``browse_documents``, ``get_document``,
+        ``get_document_structure``, ``get_page_content``).
+
+        Each function takes JSON-serializable arguments, returns a JSON
+        string (binary results such as ``get_document_image`` as a size
+        stub — a string cannot carry an image; the framework adapters
+        can), and reports failures inside that JSON instead of raising —
+        except a cloud 401/403, a 429/5xx that outlived the bridge's
+        retries, an unreachable server or a RATE_LIMITED /
+        USAGE_LIMIT_REACHED tool error, which raise PageIndexAPIError.
+
+        Args:
+            include_management (bool): Also expose tools that modify the
+                library. Local: adds ``remove_document``. Cloud: the URL
+                is the gate — the default serves what the read-only
+                endpoint (``?tools=read``) registers; True connects to
+                the full ``/mcp`` list (upload, delete, ...).
+        """
+        from .agent_tools import build_agent_tools
+        return build_agent_tools(self, include_management)
+
+    def as_openai_tools(self, include_management: bool = False,
+                        hosted: bool = False) -> list:
+        """
+        Tools for the OpenAI Agents SDK — pass to ``Agent(tools=...)``
+        (or ``openai_agent_config()`` for all the Agent slots in one
+        call). In-process cloud tools abort the run on a 401/403, a
+        429/5xx that outlived the bridge's retries, an unreachable server
+        or a RATE_LIMITED / USAGE_LIMIT_REACHED tool error: the
+        framework's AgentsException, the PageIndexAPIError as its
+        ``__cause__``.
+
+        Cloud (default): the full live read tool set (search, folders,
+        images — as enabled for your key) as function tools, discovered
+        from the PageIndex MCP server and executed from your process —
+        works with any model backend. The tools are the framework's own
+        MCP conversion, so results reach the model in its shapes: text
+        as text, images (e.g. ``get_document_image``) as images. Pass
+        ``hosted=True`` to
+        hand the connection to OpenAI instead: one hosted MCP tool, tool
+        calls executed server-side (lowest latency; requires an
+        OpenAI-hosted model on the Responses API). The framework's own
+        ``MCPServerStreamableHttp`` — ``params={"url":
+        f"{BASE_URL}/mcp?tools=read", "headers": {"Authorization":
+        "Bearer <your PageIndex API key>"}}`` (drop ``?tools=read`` for
+        the full tool set) — is the async-native alternative for its
+        ``mcp_servers=`` slot.
+
+        Local: the in-process tools, any model backend; ``hosted`` does
+        not apply.
+
+        ``openai-agents`` is imported only when this method is called.
+
+        Args:
+            include_management (bool): Also expose tools that modify the
+                library (delete, upload). Default off: on cloud the URL
+                is the gate — in-process and ``hosted=True`` alike
+                connect to the read-only endpoint (``/mcp?tools=read``);
+                True switches to the full ``/mcp`` list.
+            hosted (bool): Cloud only — hand the MCP connection to OpenAI
+                for server-side tool execution (OpenAI models only).
+        """
+        from .integrations.openai_agents import build_openai_tools
+        return build_openai_tools(self, include_management, hosted)
+
+    def _local_doc_scope(self, doc_id):
+        """doc_id for the tool layer: passed through locally (structural
+        allowlist), dropped on cloud — its tools take no allowlist, so
+        own-model chat targets at the prompt level only."""
+        from .agent_tools import _require_doc_selection
+        _require_doc_selection(doc_id)
+        if not getattr(self, "api_key", None):
+            return doc_id
+        return None
+
+    def openai_agent_config(
+        self,
+        *,
+        include_management: bool = False,
+        model: Optional[str] = None,
+        model_settings: Optional[Any] = None,
+        name: str = "PageIndex",
+    ) -> dict[str, Any]:
+        """
+        Document QA ``Agent`` kwargs for the OpenAI Agents SDK in one
+        call::
+
+            agent = Agent(**client.openai_agent_config())
+
+        Sugar over the explicit form — ``agent_instructions`` as the
+        instructions and ``as_openai_tools`` as the tools; clients with a
+        configured ``chat_model`` — local mode, or cloud with
+        ``chat_model=`` — also carry it (a plain cloud client omits
+        ``model`` so the framework default applies). To target a folder
+        or documents, prepend ``folder_context(folder_id)`` /
+        ``document_context(doc_id)`` to your first message; to
+        customize further, switch to those methods directly. You run this
+        config in your own environment, so its model auth comes from
+        there — ``chat_backend`` does not travel with it.
+
+        Prompt caching: OpenAI models cache server-side on their own;
+        LiteLLM-routed Claude (Anthropic, Bedrock, Vertex) gets its
+        cache marks from the bundled ``model_settings``. Pass
+        ``model_settings`` here to layer your own on top — your fields
+        win and ``extra_args`` merge. Replacing the returned key
+        wholesale drops the marks instead.
+
+        Args:
+            include_management (bool): Also expose tools that modify the
+                library.
+            model: Backend model name; overrides the local default. Same
+                grammar as ``chat_model`` (LiteLLM names; bare names are
+                OpenAI-compatible shorthand).
+            model_settings: Your own ``ModelSettings``, merged on top of
+                the bundled cache marks; included verbatim when no marks
+                apply.
+            name (str): Agent display name; in composition it also seeds
+                the SDK-derived handoff and ``as_tool`` names.
+        """
+        from .agent_tools import _base_instructions
+        config: dict[str, Any] = {
+            "name": name,
+            "instructions": _base_instructions(self, include_management),
+            "tools": self.as_openai_tools(include_management),
+        }
+        model = model or (self.chat_model if self._local_chat else None)
+        if model:
+            config["model"] = _agents_sdk_model_name(model)
+            if config["model"].startswith("litellm/"):
+                # The runner resolves this model through LiteLLM in the
+                # caller's process, outside our completion helpers.
+                from .utils import (_mute_litellm_bridge_usage_warning,
+                                    _repair_litellm_types)
+                _repair_litellm_types()
+                _mute_litellm_bridge_usage_warning()
+                # Marks follow this lane's routing: the SDK strips litellm/
+                # and LiteLLM resolves the rest (bare claude-* → Anthropic);
+                # names without the prefix ride the SDK's OpenAI provider.
+                from .local_chat import _litellm_claude_marks
+                extra_args = _litellm_claude_marks(
+                    config["model"].removeprefix("litellm/"))
+                if extra_args:
+                    from agents import ModelSettings
+                    config["model_settings"] = ModelSettings(
+                        extra_args=extra_args)
+        if model_settings is not None:
+            marks = config.get("model_settings")
+            config["model_settings"] = (marks.resolve(model_settings)
+                                        if marks else model_settings)
+        return config
+
+    def as_anthropic_tools(self, include_management: bool = False,
+                           asynchronous: bool = False) -> list:
+        """
+        Runnable tools for the Anthropic SDK's tool runner — pass to
+        ``client.beta.messages.tool_runner(tools=...)`` (or
+        ``anthropic_runner_config()`` for the whole setup in one call).
+        The default flavor is for the sync ``Anthropic`` client; pass
+        ``asynchronous=True`` for ``AsyncAnthropic``. For a manual
+        ``messages.create`` loop, serialize with
+        ``[tool.to_dict() for tool in ...]``. A cloud 401/403, a 429/5xx
+        that outlived the bridge's retries, an unreachable server or a
+        RATE_LIMITED / USAGE_LIMIT_REACHED tool error raises
+        PageIndexAPIError, which the tool runner flattens into an
+        is_error result.
+
+        Cloud: the full live read tool set (search, folders, images — as
+        enabled for your key), discovered from the PageIndex MCP server
+        and executed from your process; the server's input schemas pass
+        through verbatim (MCP and the Messages API share the schema
+        shape), and results are the Anthropic SDK's own MCP conversion:
+        content block lists, text as text and images (e.g.
+        ``get_document_image``) as image blocks. The
+        server-side alternative is the Messages API's beta
+        MCP connector — ``mcp_servers=[{"type": "url", "name":
+        "pageindex", "url": f"{BASE_URL}/mcp?tools=read",
+        "authorization_token": <your PageIndex API key>}]`` (drop
+        ``?tools=read`` for the full tool set) — with no client-side
+        tools involved. Local: the in-process tools — the same set
+        ``chat(protocol="messages")`` runs internally.
+
+        Requires ``anthropic>=0.108.0``
+        (``pip install 'pageindex[anthropic]'``), imported only when this
+        method is called.
+
+        Args:
+            include_management (bool): Also expose tools that modify the
+                library. Local: adds ``remove_document``. Cloud: the URL
+                is the gate — the default serves what the read-only
+                endpoint (``?tools=read``) registers; True connects to
+                the full ``/mcp`` list (upload, delete, ...).
+            asynchronous (bool): Build ``beta_async_tool`` runnables for
+                ``AsyncAnthropic`` (each tool call runs in a worker
+                thread, keeping blocking I/O off your event loop). The
+                sync and async runners each accept only their own flavor.
+        """
+        from .integrations.anthropic_sdk import build_anthropic_tools
+        return build_anthropic_tools(self, include_management, asynchronous)
+
+    def anthropic_runner_config(
+        self,
+        model: str,
+        *,
+        include_management: bool = False,
+        asynchronous: bool = False,
+        max_tokens: Optional[int] = None,
+        max_turns: Optional[int] = None,
+        thinking: Optional[dict] = None,
+    ) -> dict[str, Any]:
+        """
+        Document QA ``tool_runner`` kwargs for the Anthropic SDK in one
+        call — only your ``messages`` remain::
+
+            runner = anthropic_client.beta.messages.tool_runner(
+                **client.anthropic_runner_config(model="claude-sonnet-4-5"),
+                messages=[{"role": "user", "content": "..."}],
+            )
+
+        Sugar over the explicit form — ``agent_instructions`` as the
+        system prompt and ``as_anthropic_tools`` as the tools — plus the
+        ``max_tokens`` default and 10-turn ``max_iterations`` bound
+        ``chat(protocol="messages")`` uses,
+        and a top-level ``cache_control`` so each loop turn re-reads the
+        growing prompt from cache (pop the key if you place your own
+        breakpoints — the API allows four). Unlike the chat lane,
+        ``system`` here is the bare instructions string, without the chat
+        header or its block-level breakpoint. To target a folder or
+        documents, prepend ``folder_context(folder_id)`` /
+        ``document_context(doc_id)`` to your first message; to
+        customize further, switch to those methods directly.
+
+        Args:
+            model: Backend model name (also resolves the ``max_tokens``
+                default).
+            include_management (bool): Also expose tools that modify the
+                library.
+            asynchronous (bool): Build async runnables for
+                ``AsyncAnthropic``.
+            max_tokens: Per-turn output budget; default resolved per
+                model.
+            max_turns: Agent-loop bound; default 10.
+            thinking: Anthropic ``thinking`` config, included in the
+                kwargs; an enabled budget also lifts the ``max_tokens``
+                default above it. Pass it here, not alongside the
+                unpacked config, so the default stays valid.
+        """
+        from .agent_tools import _base_instructions
+        from .local_chat import _default_max_tokens, _validate_max_turns
+        _validate_max_turns(max_turns)
+        return {
+            "model": model,
+            "max_tokens": (max_tokens if max_tokens is not None
+                           else _default_max_tokens(model, thinking)),
+            "system": _base_instructions(self, include_management),
+            "tools": self.as_anthropic_tools(include_management, asynchronous),
+            "max_iterations": max_turns if max_turns is not None else 10,
+            **({"thinking": thinking} if thinking is not None else {}),
+            "cache_control": {"type": "ephemeral"},
+        }
+
+    def as_claude_mcp(self, include_management: bool = False, *,
+                      server_name: str = "pageindex"):
+        """
+        ``mcp_servers`` entry for the Claude Agent SDK.
+
+        Cloud: returns the remote PageIndex MCP config.
+        ``include_management`` picks the endpoint, so the URL itself is
+        the gate — the default connects to the read-only endpoint
+        (``/mcp?tools=read``: the server registers only read-only tools),
+        ``True`` connects to the full tool set. Local: returns an
+        in-process SDK MCP server exposing the agent tools, gated the
+        same way at registration (requires ``claude-agent-sdk``;
+        ``pip install 'pageindex[claude]'``). ``server_name`` names the
+        in-process server — match it to the key you register the entry
+        under (cloud entries carry no name).
+
+        Cloud hosts that surface MCP server instructions receive the tool
+        guidance natively — not the client's ``instructions``, which only
+        ``system_prompt`` carries; passing both duplicates the guidance
+        (harmless). ``system_prompt`` stays the recommended channel: it is
+        guaranteed delivery, and the only channel local mode has.
+
+        Usage (or ``claude_agent_config()`` for all three slots in one
+        call)::
+
+            options = ClaudeAgentOptions(
+                system_prompt=client.agent_instructions(),
+                mcp_servers={"pageindex": client.as_claude_mcp()},
+                # Pre-approval only — the server itself is already gated.
+                allowed_tools=["mcp__pageindex"],
+            )
+        """
+        from .integrations.claude_agent_sdk import build_claude_mcp
+        return build_claude_mcp(self, include_management,
+                                server_name=server_name)
+
+    def claude_agent_config(
+        self,
+        *,
+        include_management: bool = False,
+        server_name: str = "pageindex",
+    ) -> dict[str, Any]:
+        """
+        Document QA ``ClaudeAgentOptions`` kwargs in one call::
+
+            options = ClaudeAgentOptions(**client.claude_agent_config())
+
+        Sugar over the explicit form — the managed system prompt
+        (``agent_instructions``) and the server entry (``as_claude_mcp``,
+        itself the tool gate) with its ``allowed_tools`` pre-approval,
+        one ``include_management`` and ``server_name`` applied
+        everywhere. To target a folder or documents, prepend
+        ``folder_context(folder_id)`` / ``document_context(doc_id)`` to
+        your prompt; to customize (your own system prompt, extra
+        servers), switch to those methods directly.
+
+        Args:
+            include_management (bool): Also allow tools that modify the
+                library.
+            server_name (str): Key the server is registered under;
+                locally also the name the SDK server declares.
+        """
+        from .agent_tools import _base_instructions
+        return {
+            "system_prompt": _base_instructions(self, include_management),
+            "mcp_servers": {server_name: self.as_claude_mcp(
+                include_management, server_name=server_name)},
+            # Pre-approval only — the server itself is already gated (the
+            # read-only endpoint on cloud, the registered set locally).
+            "allowed_tools": [f"mcp__{server_name}"],
+        }
+
+    def agent_instructions(self, *, include_management: bool = False) -> str:
+        """
+        Orchestration guidance for document QA agents — pass as the agent's
+        system prompt (or append to your own).
+
+        Cloud: the live instructions the PageIndex MCP server serves for
+        your key's tool set, fetched over the same session as
+        ``agent_tools()`` — server-side guidance updates arrive without an
+        SDK release. Raises PageIndexAPIError if the server cannot be
+        reached. Local: the built-in guidance for the in-process tools.
+        The client's ``instructions``, if set, follow the guidance.
+
+        Static by design: document targeting is conversation content, not
+        guidance — see ``document_context()``.
+
+        ``include_management``: fetch the guidance for the full tool set,
+        matching tools built with ``include_management=True`` (cloud;
+        local guidance is a single set).
+        """
+        from .agent_tools import _base_instructions
+        return _base_instructions(self, include_management)
+
+    def document_context(self, doc_id: Union[str, list[str]]) -> str:
+        """
+        Document targeting text for the first user message: the target
+        documents' names and metadata, and the directive to work within
+        them. ``chat(doc_id=...)`` places it for you; on the framework
+        routes you own the conversation, so lead with it yourself::
+
+            Runner.run_sync(agent, [
+                {"role": "user", "content": client.document_context(doc_id)},
+                {"role": "user", "content": question},
+            ])
+
+        (or prepend it to the prompt text where the framework takes a
+        string). Conversation content, not system prompt: it varies per
+        request, so keeping it out of the system prompt leaves the cached
+        prefix stable.
+
+        ``doc_id``: a document ID or list of IDs, as in ``chat``. Raises
+        PageIndexAPIError if a document does not exist.
+        """
+        from .agent_tools import doc_targeting_block
+        if doc_id is None:
+            raise PageIndexAPIError("doc_id must be a string or a list of "
+                                    "strings.")
+        return cast(str, doc_targeting_block(self, doc_id))
+
+    def citation_prompt(self, format: str = "cite") -> str:
+        """
+        The citation discipline for cited answers — grounding rules plus
+        how each citation is written — as served by the PageIndex MCP
+        server's ``cited_answer`` prompt — what own-model
+        ``chat(citations=True)`` adds. Fetch it here to append to
+        ``agent_instructions()`` for an agent you build with a framework,
+        or to pass another format through own-model ``chat``'s
+        ``instructions=`` in place of ``citations=True`` — it is
+        guidance, so it belongs in the system prompt.
+
+        ``format`` picks how a citation is written: ``"cite"`` (the
+        ``<cite doc= page= block=/>`` tags PageIndex chat writes and
+        renders — the default) or ``"markdown"`` (a bracketed
+        ``[doc, p. N]`` reference, for hosts that strip tags); any
+        other value raises. Local documents: the SDK's
+        frozen copy of the same prompt (page-level — local page
+        content has no blocks).
+        """
+        from .agent_tools import fetch_citation_prompt
+        return fetch_citation_prompt(self, format or "cite")
+
+    def get_citations(
+        self,
+        answer: str,
+        doc_id: Optional[Union[str, list[str]]] = None,
+    ) -> list[dict[str, Any]]:
+        """
+        The citations in a cited answer, each with the id of the document
+        it names and, for a block-level citation on a cloud document, the
+        block behind it from ``get_block()`` — page, bounding box, type and
+        content: the managed chat's ``citations`` entries, plus ``doc_id``
+        and the block's ``text``. Reads both tag formats PageIndex chat
+        writes: ``<cite doc= page= block=/>`` (own-model
+        ``chat(citations=True)``) and ``<doc=…;page=…;block=…>`` (the
+        managed chat). The markdown format of
+        ``citation_prompt()`` is prose for readers and is not parsed.
+
+        Args:
+            answer (str): The answer text, tags included.
+            doc_id (str | list[str], optional): The documents the answer
+                was about — what ``chat(doc_id=...)`` took. Citations name
+                documents, and the ids come from here; without it your own
+                library is listed. Two documents sharing a cited name
+                raise PageIndexAPIError naming both ids: pass ``doc_id``
+                to pick.
+
+        Returns:
+            list: One dict per distinct citation: ``{'document', 'doc_id',
+            'page'}`` for a page-level citation, plus ``'block_id'`` and
+            the block's fields as ``get_block()`` returns them (``'bbox'``,
+            ``'block_type'``, ...) for a block-level one. A document not in
+            the library keeps ``doc_id: None``; a block the document does
+            not have (a model's slip), or that cannot be looked up (local
+            mode, a document you cannot read), keeps its citation without
+            a bbox.
+        """
+        if not isinstance(answer, str):
+            raise PageIndexAPIError("answer must be a str — the answer text "
+                                    "with its citation tags.")
+        if doc_id is not None and not isinstance(doc_id, (str, list)):
+            raise PageIndexAPIError("doc_id must be a string or a list of "
+                                    "strings.")
+        if doc_id is not None and not doc_id:
+            raise PageIndexAPIError("doc_id is empty. Pass the answer's "
+                                    "document ids, or omit doc_id to "
+                                    "resolve against your library.")
+        citations = _parse_citations(answer)
+        if not citations:
+            return []
+        names: dict[str, list[str]] = {}
+        if doc_id is not None:
+            doc_ids = [doc_id] if isinstance(doc_id, str) else doc_id
+            for one_id in dict.fromkeys(doc_ids):
+                name = self.get_document(one_id)["name"]
+                names.setdefault(name, []).append(one_id)
+        else:
+            from .agent_tools import _all_documents
+            for doc in _all_documents(self):
+                if doc.get("name") and doc.get("id"):
+                    names.setdefault(doc["name"], []).append(doc["id"])
+        resolved: list[dict[str, Any]] = []
+        for citation in citations:
+            ids = list(dict.fromkeys(names.get(citation["document"], [])))
+            if len(ids) > 1:
+                raise PageIndexAPIError(
+                    f"{citation['document']!r} names {len(ids)} documents "
+                    f"({', '.join(ids)}) — pass doc_id= to pick one.")
+            entry: dict[str, Any] = {"document": citation["document"],
+                                     "doc_id": ids[0] if ids else None,
+                                     "page": citation["page"]}
+            block_id = citation.get("block_id")
+            if block_id:
+                entry["block_id"] = block_id
+                if entry["doc_id"]:
+                    try:
+                        entry.update(self.get_block(entry["doc_id"], block_id))
+                    except PageIndexAPIError as exc:
+                        # Local raises carry no status; 429/5xx propagate.
+                        if exc.status_code not in (None, 403, 404):
+                            raise
+            resolved.append(entry)
+        return resolved
+
+    def resolve_citations(
+        self,
+        answer: str,
+        doc_id: Optional[Union[str, list[str]]] = None,
+    ) -> dict[str, Any]:
+        """
+        Display-ready citations: the answer text with citation tags
+        replaced by numbered markdown links, and each citation's full
+        data from ``get_citations()`` plus an anchor and index.
+
+        Tags (``<cite doc= page= block=/>`` and ``<doc=…;page=…>``)
+        become ``[[1]](#pageindex-citation-01)``, one number per distinct
+        citation, so a repeated citation reuses its number. The host
+        renders the anchor targets from the ``anchor`` field.
+
+        Args:
+            answer (str): The answer text, tags included.
+            doc_id (str | list[str], optional): As in ``get_citations()``.
+
+        Returns:
+            dict: ``{'answer': str, 'citations': list}`` where each
+            citation carries ``'anchor'``, ``'index'`` and the fields
+            ``get_citations()`` returns (``'document'``, ``'doc_id'``,
+            ``'page'``, and for block-level citations ``'block_id'``,
+            ``'bbox'``, ``'block_type'``, ``'text'``).
+        """
+        entries = self.get_citations(answer, doc_id=doc_id)
+        index: dict[Any, int] = {
+            (c["document"], c["page"], c.get("block_id")): i
+            for i, c in enumerate(_parse_citations(answer), 1)}
+
+        def link(m: re.Match) -> str:
+            i = index.get(_citation_key(m))
+            return f"[[{i}]](#pageindex-citation-{i:02d})" if i else m.group(0)
+
+        return {
+            "answer": _CITE_TAG_RE.sub(link, _OLD_CITATION_RE.sub(link, answer)),
+            "citations": [{"anchor": f"pageindex-citation-{i:02d}", "index": i,
+                           **entry} for i, entry in enumerate(entries, 1)],
+        }
+
+    def folder_context(self, folder_id: str) -> str:
+        """
+        Folder targeting text for the first user message, placed as
+        ``document_context`` is (and ahead of it, the managed chat's
+        order): the folder's name and metadata, and the directive to
+        discover its documents there, rendered as the managed chat renders
+        its own ``folder_id``. ``chat(folder_id=...)`` places it for you.
+        Cloud-only: local libraries have no folders. ``"root"`` is the
+        library itself: ``""``, nothing to place, as the managed chat
+        places nothing for it. Raises PageIndexAPIError if the folder does
+        not exist.
+        """
+        from .agent_tools import folder_targeting_block
+        if folder_id is None:
+            raise PageIndexAPIError("folder_id must be a string.")
+        return folder_targeting_block(self, folder_id) or ""
+
+    # ---------- FOLDER MANAGEMENT ----------
+
+    def create_folder(
+        self,
+        name: str,
+        description: Optional[str] = None,
+        parent_folder_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """
+        Create a folder (workspace). Cloud-only: local mode raises
+        PageIndexAPIError.
+        """
+        return self._require_cloud(
+            "create_folder is cloud-only — folders are not supported in local "
+            "mode. Create the client with an api_key to use folders."
+        ).create_folder(
+            name=name, description=description, parent_folder_id=parent_folder_id,
+        )
+
+    def list_folders(self, parent_folder_id: Optional[str] = None) -> dict[str, Any]:
+        """
+        List folders. Cloud-only: local mode raises PageIndexAPIError.
+        """
+        return self._require_cloud(
+            "list_folders is cloud-only — folders are not supported in local "
+            "mode. Create the client with an api_key to use folders."
+        ).list_folders(
+            parent_folder_id=parent_folder_id,
+        )
+
+    # ---------- PATH HELPERS ----------
+
+    def _folder_paths(self) -> dict[str, str]:
+        folders = {f["id"]: f for f in self.list_folders()["folders"]}
+        paths = {}
+        for folder_id in folders:
+            names, current = [], folder_id
+            while current in folders and len(names) < len(folders):
+                names.append(folders[current]["name"])
+                current = folders[current].get("parent_folder_id")
+            paths[folder_id] = "/".join(reversed(names))
+        return paths
+
+    def get_document_path(self, doc_id: str) -> str:
+        """
+        A document's path: its folder's path and its name, e.g.
+        ``"Research/Papers/attention.pdf"``. Just the name when the
+        document sits outside the API's folders, as at the library root
+        and for every local document.
+        """
+        doc = self.get_document(doc_id)
+        folder = doc.get("folderId") and self._folder_paths().get(doc["folderId"])
+        return f"{folder}/{doc['name']}" if folder else doc["name"]
+
+    def get_folder_path(self, folder_id: str) -> str:
+        """
+        A cloud folder's path: its ancestors' names and its own, root
+        first, e.g. ``"Research/Papers"``. Cloud-only. Raises
+        PageIndexAPIError if the folder does not exist.
+        """
+        self._require_cloud(
+            "get_folder_path is cloud-only — folders are not supported in "
+            "local mode. Create the client with an api_key.")
+        path = self._folder_paths().get(folder_id)
+        if path is None:
+            raise PageIndexAPIError(f"Folder {folder_id!r} not found.")
+        return path
+
+    def get_folder_id(self, path: str) -> str:
+        """
+        The ID of the cloud folder at ``path``, written as
+        ``get_folder_path`` writes it, e.g. ``"Research/Papers"``.
+        Cloud-only. Raises PageIndexAPIError if no folder, or more than
+        one, has that path.
+        """
+        self._require_cloud(
+            "get_folder_id is cloud-only — folders are not supported in "
+            "local mode. Create the client with an api_key.")
+        wanted = path.strip("/") if isinstance(path, str) else None
+        ids = [fid for fid, p in self._folder_paths().items() if p == wanted]
+        if len(ids) != 1:
+            raise PageIndexAPIError(
+                f"{path!r} names {len(ids)} folders ({', '.join(ids)})."
+                if ids else f"No folder at path {path!r}.")
+        return ids[0]
+
+    def _require_cloud(self, message: str):
+        from .cloud_api import CloudAPI
+        if not isinstance(self._api, CloudAPI):
+            raise PageIndexAPIError(message)
+        return self._api
+
+
+class PageIndexCloudClient(PageIndexClient):
+    """Cloud mode — the class name says cloud, so the key may come from
+    the environment: ``PageIndexCloudClient()`` reads PAGEINDEX_API_KEY.
+    The shortest env-key cloud spelling."""
+
+    _pin = "cloud"
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        *,
+        index: Optional[Union[Mapping[str, Any], str]] = None,
+        chat: Optional[Union[Mapping[str, Any], str]] = None,
+        chat_model: Optional[str] = None,
+        retrieve_model: Optional[str] = None,
+        chat_backend: Optional[dict[str, Any]] = None,
+        instructions: Optional[str] = None,
+    ):
+        if index is None:
+            if api_key is None:
+                # .env keys arrive via utils' import-time load_dotenv().
+                from . import utils  # noqa: F401
+                api_key = os.environ.get("PAGEINDEX_API_KEY")
+            if not api_key:
+                raise PageIndexAPIError(
+                    "PageIndexCloudClient requires a PageIndex API key — "
+                    "pass api_key=..., or export PAGEINDEX_API_KEY. Get one "
+                    "at https://developer.pageindex.ai/api-keys."
+                )
+        super().__init__(api_key, index=index, chat=chat,
+                         chat_model=chat_model, retrieve_model=retrieve_model,
+                         chat_backend=chat_backend, instructions=instructions)
+
+
+class PageIndexLocalClient(PageIndexClient):
+    """Local mode — no api_key parameter, no cloud access."""
+
+    _pin = "local"
+
+    def __init__(
+        self,
+        *,
+        index: Optional[Union[Mapping[str, Any], str]] = None,
+        chat: Optional[Union[Mapping[str, Any], str]] = None,
+        index_model: Optional[str] = None,
+        chat_model: Optional[str] = None,
+        model: Optional[str] = None,
+        summary_model: Optional[str] = None,
+        retrieve_model: Optional[str] = None,
+        storage_path: Optional[Union[str, os.PathLike[str]]] = None,
+        index_backend: Optional[dict[str, Any]] = None,
+        chat_backend: Optional[dict[str, Any]] = None,
+        instructions: Optional[str] = None,
+    ):
+        super().__init__(None, index=index, chat=chat,
+                         index_model=index_model, chat_model=chat_model,
+                         model=model, summary_model=summary_model,
+                         retrieve_model=retrieve_model, storage_path=storage_path,
+                         index_backend=index_backend, chat_backend=chat_backend,
+                         instructions=instructions)

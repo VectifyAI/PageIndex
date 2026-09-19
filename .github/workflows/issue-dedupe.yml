@@ -31,7 +31,7 @@ jobs:
        !endsWith(github.actor, '[bot]') &&
        github.actor != 'github-actions')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Determine issue number
         id: issue
