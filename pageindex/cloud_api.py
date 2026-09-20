@@ -5,6 +5,7 @@ import json
 import urllib.parse
 
 from .errors import PageIndexAPIError
+from .naming import validate_folder_name
 
 
 def _enc(value: str) -> str:
@@ -511,6 +512,10 @@ class CloudAPI:
                 - folder (dict): Folder info with id, name, description, parent_folder_id,
                     created_at, file_count, children_count
         """
+        try:
+            validate_folder_name(name)
+        except ValueError as exc:
+            raise PageIndexAPIError(str(exc)) from exc
         payload = {"name": name}
         if description is not None:
             payload["description"] = description

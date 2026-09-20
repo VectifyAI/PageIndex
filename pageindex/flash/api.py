@@ -8,6 +8,7 @@ from typing import BinaryIO
 
 import pypdfium2 as pdfium
 
+from ..naming import sanitize_filename
 from .main import extract_toc
 
 # Largest page-node fallback the managed pipelines accept as an index.
@@ -24,7 +25,7 @@ def _validate_path(path: Path) -> str:
         raise FileNotFoundError(f"PDF file not found: {path}")
     if not path.is_file():
         raise ValueError(f"PDF path is not a file: {path}")
-    if path.suffix.lower() != ".pdf":
+    if not sanitize_filename(path.name).lower().endswith(".pdf"):
         raise ValueError(f"PDF file must have a .pdf extension: {path}")
     with path.open("rb") as score_value:
         if score_value.read(5) != b"%PDF-":
