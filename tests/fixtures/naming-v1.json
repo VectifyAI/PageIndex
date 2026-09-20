@@ -1,0 +1,221 @@
+{
+  "version": 1,
+  "max_bytes": 180,
+  "files": [
+    {
+      "name": "\u62a5\u544a\ud83d\ude00.pdf",
+      "expected": "\u62a5\u544a\ud83d\ude00.pdf"
+    },
+    {
+      "name": "  \uff32\uff45\uff53\uff45\uff41\uff52\uff43\uff48\u3000 \uff12\uff10\uff12\uff16.pdf  ",
+      "expected": "Research 2026.pdf"
+    },
+    {
+      "name": "Caf\u00e9.pdf",
+      "expected": "Caf\u00e9.pdf"
+    },
+    {
+      "name": "Cafe\u0301.pdf",
+      "expected": "Caf\u00e9.pdf"
+    },
+    {
+      "name": "Q3:2026?.pdf",
+      "expected": "Q3_2026_.pdf"
+    },
+    {
+      "name": "a/b\\c|d*e<f>g\".pdf",
+      "expected": "a_b_c_d_e_f_g_.pdf"
+    },
+    {
+      "name": "a\n\t\u0000\u007fb.pdf",
+      "expected": "a____b.pdf"
+    },
+    {
+      "name": "a\u2028b.pdf",
+      "expected": "a_b.pdf"
+    },
+    {
+      "name": "CON.pdf",
+      "expected": "_CON.pdf"
+    },
+    {
+      "name": "com\u00b9.txt",
+      "expected": "_com1.txt"
+    },
+    {
+      "name": "Lpt0.pdf",
+      "expected": "_Lpt0.pdf"
+    },
+    {
+      "name": "NUL",
+      "expected": "_NUL"
+    },
+    {
+      "name": "report.pdf.",
+      "expected": "report.pdf"
+    },
+    {
+      "name": ".hidden",
+      "expected": ".hidden"
+    },
+    {
+      "name": "..",
+      "expected": "untitled"
+    },
+    {
+      "name": "  ",
+      "expected": "untitled"
+    },
+    {
+      "name": "\ud83d\udc69\u200d\ud83d\udcbb.pdf",
+      "expected": "\ud83d\udc69\u200d\ud83d\udcbb.pdf"
+    },
+    {
+      "name": "Anthropic\u2019s.pdf",
+      "expected": "Anthropic's.pdf"
+    },
+    {
+      "name": "\u201cReport\u201d.pdf",
+      "expected": "_Report_.pdf"
+    },
+    {
+      "name": "a\ud800.pdf",
+      "expected": "a\ufffd.pdf"
+    },
+    {
+      "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pdf",
+      "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_49962583.pdf"
+    },
+    {
+      "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pdf",
+      "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pdf"
+    },
+    {
+      "name": "\u0149.pdf",
+      "expected": "'n.pdf"
+    }
+  ],
+  "folders": [
+    {
+      "name": "Research",
+      "expected": "Research"
+    },
+    {
+      "name": "research",
+      "expected": "research"
+    },
+    {
+      "name": "  \uff32\uff45\uff53\uff45\uff41\uff52\uff43\uff48\u3000 \uff12\uff10\uff12\uff16  ",
+      "expected": "Research 2026"
+    },
+    {
+      "name": ".archive",
+      "expected": ".archive"
+    },
+    {
+      "name": "\u7814\u7a76 \ud83d\udc69\u200d\ud83d\udcbb",
+      "expected": "\u7814\u7a76 \ud83d\udc69\u200d\ud83d\udcbb"
+    },
+    {
+      "name": "\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d",
+      "expected": "\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d"
+    },
+    {
+      "name": "",
+      "error": "empty"
+    },
+    {
+      "name": "   ",
+      "error": "empty"
+    },
+    {
+      "name": "/Research/",
+      "error": "cannot contain"
+    },
+    {
+      "name": "a\\b",
+      "error": "cannot contain"
+    },
+    {
+      "name": "a?b",
+      "error": "cannot contain"
+    },
+    {
+      "name": "\uff32\uff0f\uff22",
+      "error": "cannot contain"
+    },
+    {
+      "name": "a\tb",
+      "error": "control"
+    },
+    {
+      "name": "a\nb",
+      "error": "control"
+    },
+    {
+      "name": "a\u0000b",
+      "error": "control"
+    },
+    {
+      "name": "a\u2028b",
+      "error": "control"
+    },
+    {
+      "name": "a\ud800b",
+      "error": "Unicode"
+    },
+    {
+      "name": ".",
+      "error": "reserved"
+    },
+    {
+      "name": "..",
+      "error": "reserved"
+    },
+    {
+      "name": "CON",
+      "error": "reserved"
+    },
+    {
+      "name": "NUL.txt",
+      "error": "reserved"
+    },
+    {
+      "name": "COM\u00b9",
+      "error": "reserved"
+    },
+    {
+      "name": "report.",
+      "error": "period"
+    },
+    {
+      "name": "\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d\u4e2d",
+      "error": "180 UTF-8 bytes"
+    },
+    {
+      "name": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00",
+      "error": "180 UTF-8 bytes"
+    },
+    {
+      "name": "\u0149otes",
+      "expected": "'notes"
+    }
+  ],
+  "suffixes": [
+    {
+      "name": "report.pdf",
+      "suffix": "_1",
+      "expected": "report_1.pdf"
+    },
+    {
+      "name": ".hidden",
+      "suffix": "_2",
+      "expected": ".hidden_2"
+    },
+    {
+      "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pdf",
+      "suffix": "_1",
+      "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_1d59b829_1.pdf"
+    }
+  ]
+}

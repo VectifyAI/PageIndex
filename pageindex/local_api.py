@@ -12,6 +12,7 @@ from typing import Any
 
 from .errors import PageIndexAPIError
 from .local_store import DocStore
+from .naming import sanitize_filename, truncate_filename
 from .utils import run_off_loop
 
 logger = logging.getLogger(__name__)
@@ -100,7 +101,8 @@ class LocalAPI:
         file_path = os.path.abspath(os.path.expanduser(str(file_path)))
         if not os.path.isfile(file_path):
             raise FileNotFoundError(f"No such file: {file_path}")
-        if not file_path.lower().endswith(".pdf"):
+        doc_name = sanitize_filename(os.path.basename(file_path))
+        if not doc_name.lower().endswith(".pdf"):
             raise PageIndexAPIError(
                 "Failed to submit document: only PDF files are supported in local mode."
             )
@@ -117,10 +119,6 @@ class LocalAPI:
             raise PageIndexAPIError(
                 "Failed to submit document: PDF has no content. All pages are blank."
             )
-        # Surrogates from a surrogateescape'd filesystem name would be
-        # mangled by the store's errors="replace" write; scrub now so the
-        # returned name is byte-for-byte the stored name.
-        doc_name = _scrub_surrogates(os.path.basename(file_path))
         self._unique_doc_name(doc_name)
 
         try:
@@ -167,9 +165,8 @@ class LocalAPI:
         taken = {meta.get("name") for meta in self._store.list_metas()}
         if name not in taken:
             return name
-        base, ext = os.path.splitext(name)
         for num in range(1, 100):
-            candidate = f"{base}_{num}{ext}"
+            candidate = truncate_filename(name, suffix=f"_{num}")
             if candidate not in taken:
                 return candidate
         raise PageIndexAPIError(

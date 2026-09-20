@@ -2446,8 +2446,10 @@ class PageIndexClient:
         self._require_cloud(
             "get_folder_id is cloud-only — folders are not supported in "
             "local mode. Create the client with an api_key.")
-        wanted = path.strip("/") if isinstance(path, str) else None
-        ids = [fid for fid, p in self._folder_paths().items() if p == wanted]
+        paths = self._folder_paths()
+        ids = [fid for fid, p in paths.items() if p == path]
+        if not ids and isinstance(path, str):
+            ids = [fid for fid, p in paths.items() if p == path.strip("/")]
         if len(ids) != 1:
             raise PageIndexAPIError(
                 f"{path!r} names {len(ids)} folders ({', '.join(ids)})."

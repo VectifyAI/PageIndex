@@ -1825,6 +1825,9 @@ def test_folder_and_document_paths(cloud, monkeypatch):
     assert client.get_folder_path("f-p") == "Research/Papers"
     assert client.get_folder_id("Research/Papers") == "f-p"
     assert client.get_folder_id("/Research/") == "f-r"
+    folders.append({"id": "legacy", "name": "/Research/", "parent_folder_id": None})
+    assert client.get_folder_id(client.get_folder_path("legacy")) == "legacy"
+    assert client.get_folder_id("Research") == "f-r"
     assert client.get_document_path("pi-nested") == "Research/Papers/pi-nested.pdf"
     assert client.get_document_path("pi-root") == "pi-root.pdf"
     assert client.get_document_path("pi-library") == "pi-library.pdf"
@@ -2581,3 +2584,115 @@ def test_submit_flash_rejects_oversized_flat_tree(local_client, sample_pdf,
     with pytest.raises(PageIndexAPIError,
                        match="no layout structure.*mode='standard'"):
         local_client.submit_document(sample_pdf, mode="flash")
+
+
+@pytest.mark.parametrize("name", ["/Research/", "CON", "bad?name", "a\nb", "中" * 61])
+def test_cloud_folder_name_rejected_before_request(cloud, name):
+    client, calls, fake = cloud
+    before = len(calls)
+    with pytest.raises(PageIndexAPIError):
+        client.create_folder(name)
+    assert len(calls) == before
+
+
+def test_cloud_folder_uses_server_result(cloud):
+    client, calls, fake = cloud
+    fake.payload = {"folder": {"id": "f-1", "name": "Research 2026"}}
+    result = client.create_folder("  Ｒｅｓｅａｒｃｈ   ２０２６ ")
+    assert calls[-1]["json"]["name"] == "  Ｒｅｓｅａｒｃｈ   ２０２６ "
+    assert result["folder"]["name"] == "Research 2026"
+
+
+@pytest.mark.parametrize(("name", "expected"), [
+    ('Q"3.pdf', "Q_3.pdf"),
+    ("Q\r\n3.pdf", "Q__3.pdf"),
+    ("Q%223.pdf", "Q%223.pdf"),
+    ("Ｑ３？．ｐｄｆ", "Q3_.pdf"),
+    ("报告😀.pdf", "报告😀.pdf"),
+])
+def test_cloud_upload_normalizes_before_multipart_encoding(
+    tmp_path, monkeypatch, name, expected
+):
+    from email import policy
+    from email.parser import BytesParser
+
+    import requests
+
+    pdf = tmp_path / name
+    content = b"%PDF-test upload body"
+    pdf.write_bytes(content)
+    sent = []
+    server_result = {"doc_id": "pi-1", "name": "assigned_7.pdf"}
+
+    def send(_session, request, **kwargs):
+        sent.append(request)
+        message = BytesParser(policy=policy.default).parsebytes(
+            ("Content-Type: " + request.headers["Content-Type"]
+             + "\r\nMIME-Version: 1.0\r\n\r\n").encode() + request.body
+        )
+        file_part = next(part for part in message.iter_parts()
+                         if part.get_filename() is not None)
+        assert file_part.get_filename() == expected
+        assert file_part.get_payload(decode=True) == content
+        response = requests.Response()
+        response.status_code = 200
+        response._content = json.dumps(server_result).encode()
+        return response
+
+    monkeypatch.setattr(requests.Session, "send", send)
+    with pytest.warns(UserWarning, match="assigned_7.pdf"):
+        result = PageIndexClient(api_key="test").submit_document(str(pdf))
+    assert result == server_result
+    assert len(sent) == 1
+
+
+@pytest.mark.parametrize("name", ["Ｑ３？.pdf", "Ｑ３？．ｐｄｆ", "Ｑ３？.pdf. "])
+def test_local_upload_uses_shared_name_rules(
+    local_client, sample_pdf, tmp_path, monkeypatch, name
+):
+    pdf = tmp_path / name
+    pdf.write_bytes(Path(sample_pdf).read_bytes())
+    monkeypatch.setattr(page_index_module, "page_index_main", lambda *args, **kwargs: {
+        "doc_name": "ignored", "doc_description": None,
+        "structure": json.loads(json.dumps(STRUCTURE)),
+    })
+    with pytest.warns(UserWarning, match="stored as"):
+        result = local_client.submit_document(str(pdf), mode="standard")
+    assert result["name"] == "Q3_.pdf"
+    assert local_client.get_document(result["doc_id"])["name"] == result["name"]
+
+
+def test_local_collision_stays_within_byte_budget(local_client, monkeypatch):
+    contract = Path(__file__).parent / "fixtures/naming-v1.json"
+    case = json.loads(contract.read_text())["suffixes"][-1]
+    monkeypatch.setattr(
+        local_client._api._store, "list_metas", lambda: [{"name": case["name"]}]
+    )
+    assert local_client._api._unique_doc_name(case["name"]) == case["expected"]
+
+
+@pytest.mark.parametrize("name", ["报告．ｐｄｆ", "report.pdf. "])
+@pytest.mark.parametrize("mode", ["standard", "flash"])
+def test_indexers_accept_normalizable_extensions(
+    sample_pdf, tmp_path, monkeypatch, name, mode
+):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, Mock
+
+    pdf = tmp_path / name
+    pdf.write_bytes(Path(sample_pdf).read_bytes())
+    if mode == "flash":
+        result = pageindex.flash.page_index_flash(
+            str(pdf), summary=False, optimize=False
+        )
+    else:
+        monkeypatch.setattr(page_index_module, "tree_parser", AsyncMock(return_value=[
+            {"title": "Hello", "start_index": 1, "end_index": 2},
+        ]))
+        options = SimpleNamespace(
+            if_add_node_id="no", if_add_node_text="no", if_add_node_summary="no"
+        )
+        result = page_index_module.page_index_main(
+            str(pdf), options, logger=Mock(), page_list=[("one", 1), ("two", 1)],
+        )
+    assert result["structure"]
