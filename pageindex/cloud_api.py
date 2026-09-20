@@ -1,11 +1,12 @@
 """Cloud mode of the PageIndex SDK, based on the 0.2.8 client."""
 import requests
+from pathlib import Path
 from typing import Optional, Dict, Any, List, Union, Iterator
 import json
 import urllib.parse
 
 from .errors import PageIndexAPIError
-from .naming import validate_folder_name
+from .naming import sanitize_filename, validate_folder_name
 
 
 def _enc(value: str) -> str:
@@ -74,7 +75,7 @@ class CloudAPI:
             response = requests.post(
                 f"{self.BASE_URL}/doc/",
                 headers=self._headers(),
-                files={'file': f},
+                files={'file': (sanitize_filename(Path(file_path).name), f)},
                 data=data
             )
 

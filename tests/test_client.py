@@ -2603,6 +2603,49 @@ def test_cloud_folder_uses_server_result(cloud):
     assert result["folder"]["name"] == "Research 2026"
 
 
+@pytest.mark.parametrize(("name", "expected"), [
+    ('Q"3.pdf', "Q_3.pdf"),
+    ("Q\r\n3.pdf", "Q__3.pdf"),
+    ("Q%223.pdf", "Q%223.pdf"),
+    ("Ｑ３？．ｐｄｆ", "Q3_.pdf"),
+    ("报告😀.pdf", "报告😀.pdf"),
+])
+def test_cloud_upload_normalizes_before_multipart_encoding(
+    tmp_path, monkeypatch, name, expected
+):
+    from email import policy
+    from email.parser import BytesParser
+
+    import requests
+
+    pdf = tmp_path / name
+    content = b"%PDF-test upload body"
+    pdf.write_bytes(content)
+    sent = []
+    server_result = {"doc_id": "pi-1", "name": "assigned_7.pdf"}
+
+    def send(_session, request, **kwargs):
+        sent.append(request)
+        message = BytesParser(policy=policy.default).parsebytes(
+            ("Content-Type: " + request.headers["Content-Type"]
+             + "\r\nMIME-Version: 1.0\r\n\r\n").encode() + request.body
+        )
+        file_part = next(part for part in message.iter_parts()
+                         if part.get_filename() is not None)
+        assert file_part.get_filename() == expected
+        assert file_part.get_payload(decode=True) == content
+        response = requests.Response()
+        response.status_code = 200
+        response._content = json.dumps(server_result).encode()
+        return response
+
+    monkeypatch.setattr(requests.Session, "send", send)
+    with pytest.warns(UserWarning, match="assigned_7.pdf"):
+        result = PageIndexClient(api_key="test").submit_document(str(pdf))
+    assert result == server_result
+    assert len(sent) == 1
+
+
 @pytest.mark.parametrize("name", ["Ｑ３？.pdf", "Ｑ３？．ｐｄｆ", "Ｑ３？.pdf. "])
 def test_local_upload_uses_shared_name_rules(
     local_client, sample_pdf, tmp_path, monkeypatch, name

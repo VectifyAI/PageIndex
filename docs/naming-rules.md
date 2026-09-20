@@ -16,8 +16,10 @@ scopes and database comparison behavior are unchanged.
   line/paragraph separators. Check controls before whitespace normalization.
 - Disallow dot-only names, trailing periods, and case-insensitive Windows
   device names CON, PRN, AUX, NUL, COM0–9 and LPT0–9, also with extensions.
-- The final name, including extension, hash and collision suffix, must fit
-  **180 UTF-8 bytes**. Do not split a Unicode code point when truncating.
+- Before resolving duplicates, names including extensions and truncation
+  hashes must fit **180 UTF-8 bytes**. Automatically added short numeric
+  collision suffixes may exceed this budget by the suffix length. Do not
+  split a Unicode code point when truncating.
 
 ## Upload allocation
 
@@ -29,11 +31,15 @@ Shorten overlong names with `_` plus the first eight hexadecimal characters
 of the MD5 of the cleaned name. Preserve the extension where possible; if the
 extension itself exceeds the budget, shorten it too. MD5 is only a stable
 label here, not a security mechanism. A duplicate adds `_1`, `_2`, etc.
-before the extension, reapplying the byte budget to the entire result.
+before the extension. Allocators may shorten again to stay within the
+180-byte budget; a short numeric suffix exceeding that budget is also allowed.
 Each backend keeps its existing collision-attempt limit.
 The allocating backend returns the actual final name alongside its upload
 URL or document ID. Chat and cloud SDK callers use that response unchanged.
 The local SDK is its own backend and performs the same allocation locally.
+The cloud SDK applies the same idempotent sanitization before multipart
+encoding so header escaping cannot alter the name. The backend still
+validates the name and allocates the final collision suffix.
 
 ## Folder creation and rename
 
