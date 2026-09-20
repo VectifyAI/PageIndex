@@ -1761,11 +1761,14 @@ class PageIndexClient:
 
     def get_document_id(self, name: str) -> str:
         """
-        Look up a document's ID by its name. Useful for resolving
-        citation doc names (from ``<cite doc="…">``) to IDs.
+        Look up a document's ID by its name or path. A path like
+        ``"Research/Papers/attention.pdf"`` is accepted: the folder
+        part is stripped because document names are unique across
+        the library.
 
         Raises PageIndexAPIError if no document with that name exists.
         """
+        name = name.rsplit("/", 1)[-1] if "/" in name else name
         result = self._api.list_documents(limit=1, name=name)
         docs = result.get("documents", [])
         if docs:

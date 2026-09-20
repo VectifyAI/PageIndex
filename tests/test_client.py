@@ -1823,9 +1823,17 @@ def test_folder_and_document_paths(cloud, monkeypatch):
     def handler(method, url, kw):
         if url.endswith("/folders/"):
             return FakeResponse({"folders": folders, "total": len(folders)})
-        doc_id = re.fullmatch(r".*/doc/([^/]+)/metadata/", url).group(1)
-        return FakeResponse({"id": doc_id, "name": f"{doc_id}.pdf",
-                             "folderId": doc_folders[doc_id]})
+        m = re.fullmatch(r".*/doc/([^/]+)/metadata/", url)
+        if m:
+            doc_id = m.group(1)
+            return FakeResponse({"id": doc_id, "name": f"{doc_id}.pdf",
+                                 "folderId": doc_folders[doc_id]})
+        if url.endswith("/docs/"):
+            name = kw.get("params", {}).get("name", "")
+            docs = [{"id": did, "name": f"{did}.pdf"}
+                    for did in doc_folders if f"{did}.pdf" == name]
+            return FakeResponse({"documents": docs})
+        return FakeResponse({})
     _patch_requests(monkeypatch, handler)
 
     assert client.get_folder_path("f-p") == "Research/Papers"
@@ -1837,6 +1845,8 @@ def test_folder_and_document_paths(cloud, monkeypatch):
     assert client.get_document_path("pi-nested") == "Research/Papers/pi-nested.pdf"
     assert client.get_document_path("pi-root") == "pi-root.pdf"
     assert client.get_document_path("pi-library") == "pi-library.pdf"
+    assert client.get_document_id("Research/Papers/pi-nested.pdf") == "pi-nested"
+    assert client.get_document_id("pi-root.pdf") == "pi-root"
     with pytest.raises(PageIndexAPIError, match="Folder 'f-none' not found"):
         client.get_folder_path("f-none")
     with pytest.raises(PageIndexAPIError, match="No folder at path 'Research/X'"):
