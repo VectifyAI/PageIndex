@@ -137,6 +137,56 @@ class CloudAPI:
                 status_code=response.status_code)
         return response.json()
 
+    def get_page_image(self, doc_id: str, page: int) -> str:
+        """Presigned URL for a rendered page image.
+
+        Args:
+            doc_id (str): Document ID.
+            page (int): 1-based page number.
+
+        Returns:
+            str: A presigned URL to the page image (JPEG).
+        """
+        response = requests.get(
+            f"{self.BASE_URL}/doc/s3/{_enc(doc_id)}/images",
+            headers=self._headers(),
+            params={"start": page, "end": page},
+            timeout=30
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to get page image: {response.text}",
+                status_code=response.status_code)
+        for img in response.json().get("images") or []:
+            if img.get("page") == page and img.get("url"):
+                return img["url"]
+        raise PageIndexAPIError(f"No image URL returned for page {page}.")
+
+    def get_document_image(self, doc_id: str, img_id: str) -> str:
+        """Presigned URL for an embedded image extracted during OCR.
+
+        Args:
+            doc_id (str): Document ID.
+            img_id (str): Image ID as page content carries it,
+                e.g. ``"img-7.jpeg"``.
+
+        Returns:
+            str: A presigned URL to the image.
+        """
+        response = requests.get(
+            f"{self.BASE_URL}/doc/{_enc(doc_id)}/image/{_enc(img_id)}/",
+            headers=self._headers(),
+            timeout=30
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to get document image: {response.text}",
+                status_code=response.status_code)
+        url = response.json().get("url")
+        if not url:
+            raise PageIndexAPIError(f"No image URL returned for {img_id!r}.")
+        return url
+
     # ---------- TREE GENERATION ----------
 
     def get_tree(self, doc_id: str, node_summary: bool = False,
