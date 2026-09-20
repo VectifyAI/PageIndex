@@ -48,7 +48,7 @@ def _parse_pages(pages: str) -> list[int]:
 # The two citation tag formats PageIndex chat writes and renders.
 _OLD_CITATION_RE = re.compile(
     r"<doc=([^;<>]+);page=(\d+)(?:;block(?:_id)?=([^;<>]+))?>")
-_CITE_TAG_RE = re.compile(r"<cite\s([^<>]*)>")
+_CITE_TAG_RE = re.compile(r"<cite\s([^<>]*)>(?:(?P<inner>[^<>]*)</cite>)?")
 _CITE_ATTR_RE = re.compile(r"""\b(\w+)=(["'])(.*?)\2""", re.S)
 
 
@@ -2323,8 +2323,9 @@ class PageIndexClient:
             dict: ``{'answer': str, 'citations': list}`` where each
             citation carries ``'anchor'``, ``'index'`` and the fields
             ``get_citations()`` returns (``'document'``, ``'doc_id'``,
-            ``'page'``, and for block-level citations ``'block_id'``,
-            ``'bbox'``, ``'block_type'``, ``'text'``).
+            ``'page'``, and for block-level citations ``'block_id'`` plus,
+            when the block could be read, ``'bbox'``, ``'block_type'``,
+            ``'text'``).
         """
         entries = self.get_citations(answer, doc_id=doc_id)
         index: dict[Any, int] = {
@@ -2333,7 +2334,10 @@ class PageIndexClient:
 
         def link(m: re.Match) -> str:
             i = index.get(_citation_key(m))
-            return f"[[{i}]](#pageindex-citation-{i:02d})" if i else m.group(0)
+            if not i:
+                return m.group(0)
+            return (f"[[{i}]](#pageindex-citation-{i:02d})"
+                    f"{m.groupdict().get('inner') or ''}")
 
         return {
             "answer": _CITE_TAG_RE.sub(link, _OLD_CITATION_RE.sub(link, answer)),

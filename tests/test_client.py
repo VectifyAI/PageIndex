@@ -1755,6 +1755,12 @@ def test_resolve_citations_rewrites_tags(cloud, monkeypatch):
          **block},
     ]
     assert all(list(c)[:2] == ["anchor", "index"] for c in result["citations"])
+    paired = client.resolve_citations(
+        "P <cite doc='b.pdf' page='2'>quoted</cite> "
+        'Q <cite doc="b.pdf" page="2"></cite>.')
+    assert paired["answer"] == (
+        "P [[1]](#pageindex-citation-01)quoted "
+        "Q [[1]](#pageindex-citation-01).")
     assert client.resolve_citations("no citations") == {
         "answer": "no citations", "citations": []}
 
