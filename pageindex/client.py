@@ -1752,7 +1752,7 @@ class PageIndexClient:
         List documents with pagination, newest first.
 
         Args:
-            limit (int): Maximum documents to return (1-100).
+            limit (int): Maximum documents to return (1-10000).
             offset (int): Number of documents to skip.
             folder_id (str, optional): Cloud-only folder filter.
             recursive (bool): Include documents in ``folder_id``'s
