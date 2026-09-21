@@ -931,6 +931,7 @@ def test_document_management(local_client, indexed_doc):
     assert listing["total"] == 1
     assert listing["limit"] == 50 and listing["offset"] == 0
     assert listing["documents"][0]["id"] == indexed_doc
+    assert listing["documents"][0]["path"] is None
 
     assert local_client.is_retrieval_ready(indexed_doc) is True
 
@@ -1343,6 +1344,17 @@ def test_list_documents_validation(local_client):
         local_client.list_documents(offset=-1)
     with pytest.raises(PageIndexAPIError, match="folders"):
         local_client.list_documents(folder_id="f1")
+    assert local_client.list_documents(recursive=True)["total"] == 0
+    assert local_client.list_documents(folder_id="root")["total"] == 0
+
+
+def test_list_documents_recursive_wire(cloud):
+    """recursive reaches the query string only when asked for."""
+    client, calls, _ = cloud
+    client.list_documents(folder_id="f1")
+    assert "recursive" not in calls[-1]["params"]
+    client.list_documents(folder_id="f1", recursive=True)
+    assert "recursive" in calls[-1]["params"]
 
 
 def test_missing_document_errors(local_client):

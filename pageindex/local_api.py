@@ -347,12 +347,13 @@ class LocalAPI:
         offset: int = 0,
         folder_id: str | None = None,
         name: str | None = None,
+        recursive: bool = False,
     ) -> dict[str, Any]:
-        if limit < 1 or limit > 100:
-            raise ValueError("limit must be between 1 and 100")
+        if limit < 1 or limit > 10000:
+            raise ValueError("limit must be between 1 and 10000")
         if offset < 0:
             raise ValueError("offset must be non-negative")
-        if folder_id is not None:
+        if folder_id is not None and folder_id not in ("", "root"):
             raise PageIndexAPIError(
                 "Failed to list documents: folders are not supported in local mode."
             )
@@ -368,6 +369,7 @@ class LocalAPI:
             "createdAt": m.get("createdAt"),
             "pageNum": m.get("pageNum", 0),
             "folderId": None,
+            "path": None,
             "metadata": m.get("metadata"),
             "features": {},
         } for m in metas[offset:offset + limit]]

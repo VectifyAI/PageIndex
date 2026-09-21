@@ -1746,19 +1746,29 @@ class PageIndexClient:
         limit: int = 50,
         offset: int = 0,
         folder_id: Optional[str] = None,
+        recursive: bool = False,
     ) -> dict[str, Any]:
         """
         List documents with pagination, newest first.
 
         Args:
-            limit (int): Maximum documents to return (1-100).
+            limit (int): Maximum documents to return (1-10000).
             offset (int): Number of documents to skip.
             folder_id (str, optional): Cloud-only folder filter.
+            recursive (bool): Include documents in ``folder_id``'s
+                descendant folders, flattened into one list. Cloud-only;
+                local libraries have no folders.
 
         Returns:
             dict: {'documents': [...], 'total', 'limit', 'offset'}.
+
+        Each document carries ``path``, its folder chain rendered
+        ``"Parent/Child"`` — what a flat listing otherwise loses. None
+        at the library root, for a folder reached only through a share
+        of something below it, and for every local document.
         """
-        return self._api.list_documents(limit=limit, offset=offset, folder_id=folder_id)
+        return self._api.list_documents(limit=limit, offset=offset,
+                                        folder_id=folder_id, recursive=recursive)
 
     # ---------- AGENT INTEGRATION ----------
 

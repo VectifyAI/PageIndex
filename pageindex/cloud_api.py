@@ -396,15 +396,17 @@ class CloudAPI:
                 status_code=response.status_code)
         return response.json() if response.content else {}
 
-    def list_documents(self, limit: int = 50, offset: int = 0, folder_id: Optional[str] = None, name: Optional[str] = None) -> Dict[str, Any]:
+    def list_documents(self, limit: int = 50, offset: int = 0, folder_id: Optional[str] = None, name: Optional[str] = None, recursive: bool = False) -> Dict[str, Any]:
         """
         List all documents for the authenticated user with pagination.
 
         Args:
-            limit (int, optional): Maximum number of documents to return (1-100). Defaults to 50.
+            limit (int, optional): Maximum number of documents to return (1-10000). Defaults to 50.
             offset (int, optional): Number of documents to skip. Defaults to 0.
             folder_id (str, optional): Filter by folder (workspace) ID. If provided, only documents
                 in the specified folder are returned. Defaults to None (all documents).
+            recursive (bool, optional): Also return documents in descendant folders of folder_id.
+                Defaults to False (direct contents only).
 
         Returns:
             dict: API response containing:
@@ -413,8 +415,8 @@ class CloudAPI:
                 - limit (int): Applied limit
                 - offset (int): Applied offset
         """
-        if limit < 1 or limit > 100:
-            raise ValueError("limit must be between 1 and 100")
+        if limit < 1 or limit > 10000:
+            raise ValueError("limit must be between 1 and 10000")
         if offset < 0:
             raise ValueError("offset must be non-negative")
 
@@ -423,6 +425,8 @@ class CloudAPI:
             params["folder_id"] = folder_id
         if name is not None:
             params["name"] = name
+        if recursive:
+            params["recursive"] = recursive
 
         response = requests.get(
             f"{self.BASE_URL}/docs/",
