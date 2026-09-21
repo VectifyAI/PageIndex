@@ -1375,6 +1375,44 @@ def test_list_documents_validation(local_client):
     assert local_client.list_documents(folder_id="root")["total"] == 0
 
 
+@pytest.mark.parametrize("limit", [101, 10000])
+def test_list_documents_large_page_local(local_client, monkeypatch, limit):
+    metas = [{"id": f"doc-{i:05d}", "name": f"{i}.pdf"}
+             for i in range(limit + 2)]
+    monkeypatch.setattr(local_client._api._store, "list_metas", lambda: metas)
+
+    listing = local_client.list_documents(limit=limit, offset=1)
+
+    assert len(listing["documents"]) == limit
+    assert listing["documents"][0]["id"] == "doc-00001"
+    assert listing["documents"][-1]["id"] == f"doc-{limit:05d}"
+    assert listing["total"] == limit + 2
+    assert listing["limit"] == limit and listing["offset"] == 1
+
+
+@pytest.mark.parametrize("limit", [101, 10000])
+def test_list_documents_large_page_cloud(cloud, limit):
+    client, calls, _ = cloud
+
+    client.list_documents(limit=limit, offset=1)
+
+    assert calls[-1]["params"] == {"limit": limit, "offset": 1}
+
+
+@pytest.mark.parametrize("limit", [0, 10001])
+def test_list_documents_limit_out_of_range_local(local_client, limit):
+    with pytest.raises(ValueError, match="limit must be between 1 and 10000"):
+        local_client.list_documents(limit=limit)
+
+
+@pytest.mark.parametrize("limit", [0, 10001])
+def test_list_documents_limit_out_of_range_cloud(cloud, limit):
+    client, calls, _ = cloud
+    with pytest.raises(ValueError, match="limit must be between 1 and 10000"):
+        client.list_documents(limit=limit)
+    assert calls == []
+
+
 def test_list_documents_recursive_wire(cloud):
     """recursive reaches the query string only when asked for."""
     client, calls, _ = cloud
@@ -1382,6 +1420,15 @@ def test_list_documents_recursive_wire(cloud):
     assert "recursive" not in calls[-1]["params"]
     client.list_documents(folder_id="f1", recursive=True)
     assert "recursive" in calls[-1]["params"]
+
+
+def test_list_documents_recursive_false_string_wire(cloud):
+    client, calls, _ = cloud
+
+    client.list_documents(folder_id="f1", recursive="false")
+
+    assert calls[-1]["params"] == {"limit": 50, "offset": 0,
+                                  "folder_id": "f1", "recursive": "false"}
 
 
 def test_missing_document_errors(local_client):
