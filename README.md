@@ -1,7 +1,7 @@
 <div align="center">
   
 <a href="https://vectify.ai/pageindex" target="_blank">
-<img width="1471" height="491" alt="pi_github_banner_low" src="https://github.com/user-attachments/assets/bae02956-6c4e-4a0b-adea-257b0be4aaa1" />
+<img width="1471" alt="pi_github_banner_low" src="https://github.com/user-attachments/assets/bae02956-6c4e-4a0b-adea-257b0be4aaa1" />
 </a>
 
 <br/>
