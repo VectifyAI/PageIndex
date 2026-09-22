@@ -2296,6 +2296,15 @@ _LOCAL_ONLY_LINES = (
     "document-related question. The bare call returns your documents newest "
     "first with names and descriptions; match them against the user's intent.",
     '- "What do I have / list / recent" → browse_documents()',
+    # STRUCTURED RETRIEVAL: the find_pages section is local-only by design
+    # (the cloud tool set has no find_pages), listed here so the cloud
+    # parity check treats its absence from the server text as intended.
+    "- When a question needs a document you have already identified, call "
+    "find_pages(doc_name, query) before browsing the structure: it "
+    "navigates the document's section tree and returns the page ranges "
+    "that answer the query, ready for get_page_content().",
+    "- Read the returned ranges; if they miss the answer, fall back to "
+    "get_document_structure() and get_page_content().",
     '- ANY question that needs a document to answer (including "find THE '
     'paper about Y") → browse_documents(), then pick the documents whose '
     "name/description matches the question",

@@ -868,6 +868,65 @@ class PageIndexClient:
         except PageIndexAPIError:
             return False
 
+    # ---------- SEARCH (Jev-gated navigation, local-only) ----------
+
+    def search(self, doc_id: str, query: str) -> dict[str, Any]:
+        """
+        Locate the pages of one indexed document that answer ``query`` by
+        navigating its section tree with the Jev-gated routing kernel —
+        TypeSafe System One decides at every fan-out (sub-second, vs. the
+        LLM walk's seconds per level), the SDK's own model handles the
+        ambiguous and oversized fan-outs.
+
+        Jev is a hard dependency: a missing ``TYPESAFE_API_KEY`` or a Jev
+        call that failed past its retries raises PageIndexAPIError — the
+        walk never silently degrades to a full expansion.
+
+        Local-only: it navigates the local store's section tree, which a
+        cloud client has none of.
+
+        Args:
+            doc_id (str): Document ID.
+            query (str): The question to locate inside the document.
+
+        Returns:
+            dict: {'doc_id', 'query', 'pages', 'page_ranges', 'navigated'}
+            where ``pages`` is a get_page_content-style page specification
+            ('' when nothing matched), ``page_ranges`` rows are
+            {'start', 'end', 'title', 'node_id'}, and ``navigated`` counts
+            the routing decisions {jev_calls, llm_calls, pruned,
+            fallbacks}.
+        """
+        api = self._require_local_api(
+            "search is local-only — it navigates the local store's section "
+            "tree, which a cloud client has none of. Use chat() for cloud "
+            "documents.")
+        if not isinstance(query, str) or not query.strip():
+            raise PageIndexAPIError("query must be a non-empty string.")
+        try:
+            meta = api.get_document(doc_id)
+        except PageIndexAPIError as exc:
+            raise PageIndexAPIError(
+                f"Failed to search document: {exc}") from exc
+        if meta.get("status") != "completed":
+            raise PageIndexAPIError(
+                f"Document '{doc_id}' is not ready "
+                f"(status: {meta.get('status')}).")
+        tree = api.raw_tree(doc_id)
+        if tree is None:
+            raise PageIndexAPIError(
+                "Failed to search document: stored document data is "
+                "unreadable.")
+        from .jev_router import build_router, page_ranges, page_spec
+        # JevUnavailable is a PageIndexAPIError subclass and carries the
+        # fix in its message: it propagates raw, by design.
+        result = build_router(self.chat_model).route(
+            query, tree, doc_name=meta.get("name"))
+        return {"doc_id": doc_id, "query": query,
+                "pages": page_spec(result["hits"]),
+                "page_ranges": page_ranges(result["hits"]),
+                "navigated": result["stats"]}
+
     # ---------- RETRIEVAL (cloud-only, deprecated) ----------
 
     def submit_query(self, doc_id: str, query: str, thinking: bool = False) -> dict[str, Any]:
@@ -2466,6 +2525,12 @@ class PageIndexClient:
     def _require_cloud(self, message: str):
         from .cloud_api import CloudAPI
         if not isinstance(self._api, CloudAPI):
+            raise PageIndexAPIError(message)
+        return self._api
+
+    def _require_local_api(self, message: str):
+        from .local_api import LocalAPI
+        if not isinstance(self._api, LocalAPI):
             raise PageIndexAPIError(message)
         return self._api
 

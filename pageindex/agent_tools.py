@@ -33,7 +33,9 @@ from typing import Any, Callable, Optional
 
 import requests
 
+from . import jev_router
 from .errors import PageIndexAPIError
+from .jev_router import JevUnavailable, build_router
 from .mcp_bridge import render_prompt_text, render_text
 
 TOOL_RESPONSE_CHAR_LIMIT = 100_000
@@ -1125,6 +1127,104 @@ def _get_page_content(client, doc_name: str, pages: str,
     )
 
 
+def _find_pages(client, doc_name: str, query: str, max_pages: int = 10,
+                _allowed_ids: Optional[frozenset] = None) -> tuple[dict, bool]:
+    """The find_pages tool: Jev-gated tree navigation inside one document,
+    returning the page ranges that answer ``query``. Jev is a hard
+    dependency — JevUnavailable becomes the error envelope that names the
+    fix; it is never absorbed into a silent full expansion (only the SDK's
+    own LLM may fall back, inside the kernel)."""
+    if not isinstance(query, str) or not query.strip():
+        return _failure(
+            "query must be a non-empty string", None,
+            {"summary": "The query parameter is required",
+             "options": ["Pass the question to locate inside the document"]},
+            "INVALID_INPUT")
+    try:
+        max_pages = min(max(int(max_pages), 1), 50)
+    except (TypeError, ValueError):
+        return _failure(
+            "max_pages must be a number", None,
+            {"summary": "Invalid max_pages parameter",
+             "options": ["Pass max_pages as an integer between 1 and 50"]},
+            "INVALID_INPUT")
+    entry, error = _resolve_document(client, doc_name, allowed_ids=_allowed_ids)
+    if error is not None:
+        return error
+    assert entry is not None
+    if entry.get("status") != "completed":
+        # Local documents are stored already terminal; this is the guard
+        # for a store written by a future/foreign writer.
+        return _not_ready_error(doc_name, entry.get("status"),
+                                "page location", False)
+    try:
+        raw_tree = getattr(getattr(client, "_api", None), "raw_tree", None)
+        tree = raw_tree(entry["id"]) if raw_tree is not None else None
+    except PageIndexAPIError as exc:
+        return _failure(
+            f"Failed to retrieve document structure: {exc}",
+            {"doc_name": doc_name},
+            {"summary": "Failed to retrieve the document's section tree",
+             "options": ["Check if the document name is correct",
+                         "Try again in a few moments"]},
+            "INTERNAL_ERROR")
+    if tree is None:
+        return _failure(
+            "Structure not available for this document",
+            {"doc_name": doc_name},
+            {"summary": "Structure not available for this document",
+             "options": ["The document may not have been processed "
+                         "correctly — re-index it if possible"]},
+            "INTERNAL_ERROR")
+    try:
+        router = build_router(getattr(client, "chat_model", None))
+        result = router.route(query, tree, doc_name=doc_name)
+    except JevUnavailable as exc:
+        return _failure(
+            f"find_pages requires Jev (TypeSafe System One), which is "
+            f"unavailable: {exc}",
+            {"doc_name": doc_name},
+            {"summary": "Jev navigation is required for find_pages",
+             "options": [
+                 f"Export {jev_router.JEV_API_KEY_ENV} (the TypeSafe API "
+                 "key) and retry",
+                 "Check network access to api.typesafe.ai",
+                 "For this call, fall back to get_document_structure() "
+                 "and get_page_content()",
+             ]},
+            "JEV_UNAVAILABLE")
+    rows = jev_router.page_ranges(result["hits"])
+    pages = jev_router.page_numbers(result["hits"])
+    options = []
+    if len(pages) > max_pages:
+        kept = set(pages[:max_pages])
+        rows = [row for row in rows if row["start"] in kept]
+        pages = pages[:max_pages]
+        options.append(
+            f"find_pages returned the first {max_pages} pages of "
+            f"{len(jev_router.page_numbers(result['hits']))} — raise "
+            "max_pages or narrow the query for more")
+    spec = jev_router.format_ranges(pages)
+    if not spec:
+        return _success(
+            {"doc_name": doc_name, "pages": "", "page_ranges": [],
+             "navigated": result["stats"]},
+            {"summary": "No section of the document matched the query.",
+             "options": [
+                 "Use get_document_structure() to browse the outline and "
+                 "pick ranges for get_page_content() yourself",
+             ]},
+        )
+    options.insert(0, f'Feed these ranges into get_page_content(doc_name: '
+                      f'"{doc_name}", pages: "{spec}")')
+    return _success(
+        {"doc_name": doc_name, "pages": spec, "page_ranges": rows,
+         "navigated": result["stats"]},
+        {"summary": f"Located {len(rows)} section(s) answering the query.",
+         "options": options},
+    )
+
+
 def _remove_document(client, doc_names: list[str],
                      folder_id: Optional[str] = None,
                      _allowed_ids: Optional[frozenset] = None) -> tuple[dict, bool]:
@@ -1185,9 +1285,70 @@ _IMPLEMENTATIONS: dict[str, Callable[..., tuple[dict, bool]]] = {
     "remove_document": _remove_document,
 }
 
+_LOCAL_DOC_NAME_DESCRIPTION = (
+    'Copy the `name` field verbatim from a browse_documents() response '
+    '(case-sensitive, include extension). Example: "Q3 Report.pdf". '
+    "Document names are unique in a local library."
+)
+
+# Local-only tools: they exist in no cloud MCP contract (the committed
+# snapshot pins TOOL_CONTRACT to the live server's tool set), so they live
+# in their own registry and merge into the four local surfaces below.
+_LOCAL_ONLY_TOOLS: dict[str, dict[str, Any]] = {
+    "find_pages": {
+        "annotations": {"readOnlyHint": True, "openWorldHint": False},
+        "description": (
+            "Targeted retrieval inside a known document. For questions "
+            "that need a document you have already identified, call this "
+            "before browsing the structure: it navigates the document's "
+            "section tree and returns the page ranges that answer the "
+            "query. Feed the returned `pages` value straight into "
+            "get_page_content(). If the returned ranges do not contain "
+            "the answer, fall back to get_document_structure() and "
+            "get_page_content()."
+        ),
+        "schema": {
+            "type": "object",
+            "properties": {
+                "doc_name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": _LOCAL_DOC_NAME_DESCRIPTION,
+                },
+                "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": (
+                        "The question to locate inside the document, in "
+                        "the user's own words."
+                    ),
+                },
+                "max_pages": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50,
+                    "default": 10,
+                    "description": (
+                        "Number of pages to return (1-50, default 10). "
+                        "When the located sections span more, the first "
+                        "max_pages pages are returned and next_steps says "
+                        "so."
+                    ),
+                },
+            },
+            "required": ["doc_name", "query"],
+        },
+    },
+}
+
+_LOCAL_ONLY_IMPLEMENTATIONS: dict[str, Callable[..., tuple[dict, bool]]] = {
+    "find_pages": _find_pages,
+}
+
 
 def tool_names(include_management: bool = False) -> tuple[str, ...]:
-    return _READ_TOOLS + (_MANAGEMENT_TOOLS if include_management else ())
+    return (_READ_TOOLS + tuple(_LOCAL_ONLY_TOOLS)
+            + (_MANAGEMENT_TOOLS if include_management else ()))
 
 
 def _coerce_bool_args(schema: dict, kwargs: dict[str, Any]) -> None:
@@ -1207,13 +1368,15 @@ def call_tool(client, name: str, arguments: dict[str, Any],
     for tool-level failures — unexpected exceptions become error envelopes.
     ``doc_ids`` restricts every document lookup to that allowlist (the local
     chat surfaces' doc_id scope)."""
-    implementation = _IMPLEMENTATIONS.get(name)
+    implementation = (_IMPLEMENTATIONS.get(name)
+                      or _LOCAL_ONLY_IMPLEMENTATIONS.get(name))
     if implementation is None:
+        available = list(_IMPLEMENTATIONS) + list(_LOCAL_ONLY_IMPLEMENTATIONS)
         payload, _ = _failure(
             f"Unknown tool: {name}",
-            {"tool_name": name, "available_tools": list(_IMPLEMENTATIONS)},
+            {"tool_name": name, "available_tools": available},
             {"summary": "Tool not found",
-             "options": [f"Available tools: {', '.join(_IMPLEMENTATIONS)}"]},
+             "options": [f"Available tools: {', '.join(available)}"]},
             "INVALID_INPUT",
         )
         return _dumps(payload), True
@@ -1232,7 +1395,7 @@ def call_tool(client, name: str, arguments: dict[str, Any],
     # "omit if ..." semantics, same as the cloud bridge invoker).
     kwargs = {key: value for key, value in (arguments or {}).items()
               if not key.startswith("_") and value is not None}
-    _coerce_bool_args(TOOL_CONTRACT.get(name, {}).get("schema", {}), kwargs)
+    _coerce_bool_args(_contract(name).get("schema", {}), kwargs)
     try:
         if doc_ids is not None:
             ids = [doc_ids] if isinstance(doc_ids, str) else doc_ids
@@ -1277,12 +1440,6 @@ _LOCAL_HIDDEN_PARAMS: dict[str, tuple[str, ...]] = {
     "remove_document": ("folder_id",),
 }
 
-_LOCAL_DOC_NAME_DESCRIPTION = (
-    'Copy the `name` field verbatim from a browse_documents() response '
-    '(case-sensitive, include extension). Example: "Q3 Report.pdf". '
-    "Document names are unique in a local library."
-)
-
 _LOCAL_DESCRIPTIONS: dict[str, str] = {
     "browse_documents": (
         "Primary document retrieval tool — first choice for any "
@@ -1313,12 +1470,19 @@ _LOCAL_PARAM_DESCRIPTIONS: dict[tuple[str, str], str] = {
 }
 
 
+def _contract(name: str) -> dict[str, Any]:
+    """The tool's contract entry — the cloud contract first, then the
+    local-only registry."""
+    return TOOL_CONTRACT.get(name) or _LOCAL_ONLY_TOOLS.get(name) or {}
+
+
 def _local_description(name: str) -> str:
-    return _LOCAL_DESCRIPTIONS.get(name) or TOOL_CONTRACT[name]["description"]
+    return (_LOCAL_DESCRIPTIONS.get(name)
+            or _contract(name).get("description", ""))
 
 
 def _local_schema(name: str) -> dict[str, Any]:
-    schema = copy.deepcopy(TOOL_CONTRACT[name]["schema"])
+    schema = copy.deepcopy(_contract(name)["schema"])
     for param in _LOCAL_HIDDEN_PARAMS.get(name, ()):
         schema["properties"].pop(param, None)
     for (tool_name, param), text in _LOCAL_PARAM_DESCRIPTIONS.items():
@@ -1594,6 +1758,11 @@ TOOL USAGE RULES:
 - Invoke a tool only when all required parameters are present or clearly inferable. Never invent placeholder values.
 - If a tool returns an error, present the provided next_steps/options to the user instead of retrying blindly."""
 
+_STRUCTURED_RETRIEVAL = """\
+STRUCTURED RETRIEVAL:
+- When a question needs a document you have already identified, call find_pages(doc_name, query) before browsing the structure: it navigates the document's section tree and returns the page ranges that answer the query, ready for get_page_content().
+- Read the returned ranges; if they miss the answer, fall back to get_document_structure() and get_page_content()."""
+
 _DISCOVERY = """\
 DOCUMENT DISCOVERY:
 - browse_documents() — DEFAULT discovery tool, first choice for any document-related question. The bare call returns your documents newest first with names and descriptions; match them against the user's intent."""
@@ -1619,6 +1788,7 @@ Only after ALL steps have been tried may you conclude the document is not in the
 AGENT_INSTRUCTIONS = "\n\n".join([
     _INSTRUCTIONS_HEADER,
     _READING_WORKFLOW,
+    _STRUCTURED_RETRIEVAL,
     _TOOL_USAGE_RULES,
     _DISCOVERY,
     _DECISION,
