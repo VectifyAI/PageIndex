@@ -962,7 +962,6 @@ def test_anthropic_runner_config_accepts_the_litellm_spelling(client):
     config = client.anthropic_runner_config(
         model="anthropic/claude-3-opus-20240229")
     assert config["model"] == "claude-3-opus-20240229"
-    assert config["max_tokens"] == 4096   # resolved on the stripped id
 
 
 def test_anthropic_runner_config_carries_a_claude_chat_model(client, store_path):
@@ -971,7 +970,6 @@ def test_anthropic_runner_config_carries_a_claude_chat_model(client, store_path)
                                  chat_model="anthropic/claude-3-opus-20240229")
     config = local.anthropic_runner_config()
     assert config["model"] == "claude-3-opus-20240229"
-    assert config["max_tokens"] == 4096
     # The stock default was never chosen: nothing to send.
     with pytest.raises(PageIndexAPIError, match="needs a model"):
         client.anthropic_runner_config()
@@ -995,7 +993,7 @@ def test_anthropic_runner_config_shapes(client):
     import anthropic
     from anthropic.lib.tools import BetaAsyncFunctionTool
     config = client.anthropic_runner_config(model="claude-3-opus-20240229")
-    assert config["max_tokens"] == 4096
+    assert config["max_tokens"] == 8192
     assert config["max_iterations"] == 10
     assert config["cache_control"] == {"type": "ephemeral"}
     assert config["system"] == AGENT_INSTRUCTIONS
@@ -3121,6 +3119,8 @@ def test_anthropic_runner_config_strips_the_route_prefix(store_path):
     config = local.anthropic_runner_config()
     assert config["model"] == "anthropic.claude-3-5-sonnet-20241022-v2:0"
     assert config["max_tokens"] == 8192
+    # Bedrock's InvokeModel integration rejects the top-level field.
+    assert "cache_control" not in config
 
 
 # ── tool-path rate limits: retried below the tool layer, then fail fast ──

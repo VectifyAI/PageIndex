@@ -1244,7 +1244,7 @@ _ROUTE_CLIENTS = {"anthropic": "Anthropic", "bedrock": "AnthropicBedrock",
                   "azure_ai": "AnthropicFoundry"}
 
 
-def _anthropic_client(backend=None, route="anthropic"):
+def _anthropic_client(backend, route):
     """The backend client — the seam tests replace with a fake transport.
     ``route`` (declared by the model's prefix) picks the SDK client
     class. One client per (route, backend): each construction pays
@@ -1346,15 +1346,10 @@ def _anthropic_usage(turns, final_usage: dict) -> dict:
     return totals
 
 
-_CLAUDE_4096_MODELS = ("claude-3-opus", "claude-3-sonnet", "claude-3-haiku",
-                       "claude-3-5-sonnet-20240620")
-
-
-def _default_max_tokens(model: str, thinking=None) -> int:
-    """The wire-required per-turn budget when the caller sets none: 8192,
-    except the claude-3 generation whose output ceiling is 4096. The wire
-    also requires max_tokens > thinking.budget_tokens, so an enabled
-    budget lifts the default above itself. Pure arithmetic on the
+def _default_max_tokens(thinking=None) -> int:
+    """The wire-required per-turn budget when the caller sets none: 8192.
+    The wire also requires max_tokens > thinking.budget_tokens, so an
+    enabled budget lifts the default above itself. Pure arithmetic on the
     caller's own inputs — whether the sum fits the model's output ceiling
     is the API's own ruling (its 400 names both numbers), never a lookup
     here."""
@@ -1362,10 +1357,10 @@ def _default_max_tokens(model: str, thinking=None) -> int:
               if isinstance(thinking, dict) else None)
     if isinstance(budget, int) and not isinstance(budget, bool):
         return budget + 8192
-    return 4096 if model.startswith(_CLAUDE_4096_MODELS) else 8192
+    return 8192
 
 
-def run_messages(client, messages, model: str, route: str = "anthropic",
+def run_messages(client, messages, model: str, route: str,
                  max_tokens: Optional[int] = None,
                  stream: bool = False, doc_id=None, system=None,
                  temperature: Optional[float] = None,
@@ -1405,9 +1400,12 @@ def run_messages(client, messages, model: str, route: str = "anthropic",
     # Top-level cache_control: the server re-marks the newest block each
     # turn, so the loop re-reads the growing conversation from cache.
     # Counts toward the 4-breakpoint limit (live-verified 400 past it).
+    # Bedrock's InvokeModel integration rejects the field for Opus 4.6 and
+    # earlier: there each turn's tool results carry the breakpoint instead.
+    marks_fit = _cache_marks(system_blocks, prepared) < 4
     cached: dict[str, Any] = (
         {"cache_control": {"type": "ephemeral"}}
-        if _cache_marks(system_blocks, prepared) < 4 else {})
+        if marks_fit and route != "bedrock" else {})
     # Tools before the transport: on a bridge client building them is
     # network I/O, and a failure there must not strand the client below.
     failures: list = []
@@ -1431,7 +1429,7 @@ def run_messages(client, messages, model: str, route: str = "anthropic",
                 "pip install -U anthropic.")
         if max_tokens is None:
             max_tokens = _default_max_tokens(
-                model, (extra_body or {}).get("thinking", thinking))
+                (extra_body or {}).get("thinking", thinking))
         runner = backend_client.beta.messages.tool_runner(
             max_tokens=max_tokens,
             messages=prepared,
@@ -1453,11 +1451,17 @@ def run_messages(client, messages, model: str, route: str = "anthropic",
     # Older Anthropic versions also execute tools on max_tokens turns, newer
     # ones skip them: check right after the runner's own tool step.
     generate_tool_response = runner.generate_tool_call_response
+    moved: list = []  # the block holding the bedrock breakpoint
 
     def checked_tool_response():
         response = generate_tool_response()
         if failures:
             raise failures[0]
+        if response and marks_fit and route == "bedrock":
+            for block in moved:
+                block.pop("cache_control", None)
+            moved[:] = [response["content"][-1]]
+            moved[0]["cache_control"] = {"type": "ephemeral"}
         return response
 
     runner.generate_tool_call_response = checked_tool_response
@@ -1486,6 +1490,8 @@ def run_messages(client, messages, model: str, route: str = "anthropic",
             backend_client.close()
     if not turns:
         raise PageIndexAPIError("The model returned no response.")
+    for block in moved:
+        block.pop("cache_control", None)  # a request's breakpoint, not history
     captured: dict = {}
 
     def capture(params):

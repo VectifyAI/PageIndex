@@ -391,9 +391,7 @@ class PageIndexClient:
             server that itself serves slashed model ids (vLLM, TGI). The
             Anthropic-native surfaces read the name by its routing
             prefix instead — bare names are Anthropic's own — and treat
-            the untouched stock default as no choice. For a Claude model
-            used across both kinds of surface, the ``anthropic/``
-            spelling means the same thing everywhere. Defaults to the
+            the untouched stock default as no choice. Defaults to the
             SDK default (strong); reads ``None`` on a cloud client where
             the managed chat answers.
         model (str, optional): Local mode only — one model for both roles:
@@ -1761,7 +1759,10 @@ class PageIndexClient:
         ``cache_control`` breakpoint, and the request sets the top-level
         ``cache_control`` so each turn re-reads the growing conversation
         from cache — skipped when your own blocks already use the three
-        remaining breakpoints (the managed prompt holds the fourth).
+        remaining breakpoints (the managed prompt holds the fourth). On
+        ``bedrock/``, whose InvokeModel integration rejects the top-level
+        field for Opus 4.6 and earlier, an explicit breakpoint moves onto
+        each turn's tool results instead.
 
         Args:
             messages: Native Messages-format history (including prior
@@ -1775,9 +1776,8 @@ class PageIndexClient:
                 carries over; the stock default raises rather than being
                 sent.
             max_tokens: Per-turn output budget the Messages API requires on
-                the wire; the default is resolved per model (8192, or 4096
-                for the claude-3 generation whose ceiling is lower) so the
-                simple call needs only a question, and rises to
+                the wire; the default is 8192 so the simple call needs
+                only a question, and rises to
                 budget_tokens + 8192 when ``thinking`` is enabled (the wire
                 requires max_tokens above the budget). Passed through.
             stream: Yield the Anthropic SDK's event stream across turns
@@ -2143,7 +2143,9 @@ class PageIndexClient:
         ``chat(protocol="messages")`` uses,
         and a top-level ``cache_control`` so each loop turn re-reads the
         growing prompt from cache (pop the key if you place your own
-        breakpoints — the API allows four). Unlike the chat lane,
+        breakpoints — the API allows four; a ``bedrock/`` model omits it,
+        as Bedrock's InvokeModel integration rejects it for Opus 4.6 and
+        earlier). Unlike the chat lane,
         ``system`` here is the bare instructions string, without the chat
         header or its block-level breakpoint. To target a folder or
         documents, prepend ``folder_context(folder_id)`` /
@@ -2156,16 +2158,14 @@ class PageIndexClient:
                 ``azure_ai/``) stripped — your client is the transport
                 and judges the id, so pair a routed prefix with that
                 channel's own client class (``AnthropicBedrock``,
-                ``AnthropicVertex``, ``AnthropicFoundry``); also
-                resolves the ``max_tokens`` default. Unset: a
+                ``AnthropicVertex``, ``AnthropicFoundry``). Unset: a
                 ``chat_model`` you set carries over; the stock default
                 raises rather than being sent.
             include_management (bool): Also expose tools that modify the
                 library.
             asynchronous (bool): Build async runnables for
                 ``AsyncAnthropic``.
-            max_tokens: Per-turn output budget; default resolved per
-                model.
+            max_tokens: Per-turn output budget; default 8192.
             max_turns: Agent-loop bound; default 10.
             thinking: Anthropic ``thinking`` config, included in the
                 kwargs; an enabled budget also lifts the ``max_tokens``
@@ -2182,16 +2182,17 @@ class PageIndexClient:
             # A cleared chat_model ('' or None) configures nothing —
             # same refusal as the stock default, never a {'model': ''}.
             raise _needs_model("anthropic_runner_config()")
-        model, _ = _claude_wire(model, "anthropic_runner_config()")
+        model, route = _claude_wire(model, "anthropic_runner_config()")
         return {
             "model": model,
             "max_tokens": (max_tokens if max_tokens is not None
-                           else _default_max_tokens(model, thinking)),
+                           else _default_max_tokens(thinking)),
             "system": _base_instructions(self, include_management),
             "tools": self.as_anthropic_tools(include_management, asynchronous),
             "max_iterations": max_turns if max_turns is not None else 10,
             **({"thinking": thinking} if thinking is not None else {}),
-            "cache_control": {"type": "ephemeral"},
+            **({} if route == "bedrock"
+               else {"cache_control": {"type": "ephemeral"}}),
         }
 
     def as_claude_mcp(self, include_management: bool = False, *,

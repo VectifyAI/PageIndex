@@ -2203,13 +2203,13 @@ def test_chat_stream_abandonment_cancels_pending_turn(client, store_path,
 
 
 @needs_anthropic
-def test_messages_max_tokens_default_resolves_per_model(client, fake_anthropic):
-    """The wire-required budget must not exceed the model's ceiling: the
-    claude-3 generation caps output at 4096."""
+def test_messages_max_tokens_default(client, fake_anthropic):
+    """The wire-required budget defaults to 8192 whatever the model names;
+    an explicit value passes through."""
     calls = fake_anthropic([
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
     client._messages("q", model="claude-3-opus-20240229")
-    assert calls[0]["max_tokens"] == 4096
+    assert calls[0]["max_tokens"] == 8192
     calls = fake_anthropic([
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
     client._messages("q", model="claude-sonnet-4-5")
@@ -2226,7 +2226,6 @@ def test_messages_accepts_the_litellm_spelling(client, fake_anthropic):
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
     client._messages("q", model="anthropic/claude-3-opus-20240229")
     assert calls[0]["model"] == "claude-3-opus-20240229"
-    assert calls[0]["max_tokens"] == 4096
 
 
 @needs_anthropic
@@ -2237,7 +2236,6 @@ def test_messages_carries_a_claude_chat_model(store_path, fake_anthropic):
                                  chat_model="anthropic/claude-3-opus-20240229")
     local._messages("q")
     assert calls[0]["model"] == "claude-3-opus-20240229"
-    assert calls[0]["max_tokens"] == 4096
     # The stock default was never chosen: nothing to send.
     with pytest.raises(PageIndexAPIError, match="needs a model"):
         PageIndexLocalClient(storage_path=store_path)._messages("q")
@@ -2505,6 +2503,37 @@ def test_messages_top_level_cache_control(client, store_path, fake_anthropic):
     assert "cache_control" not in calls[0]
 
 
+@needs_anthropic
+@pytest.mark.parametrize("stream", [False, True])
+def test_messages_bedrock_moves_an_explicit_breakpoint(client, store_path,
+                                                       fake_anthropic, stream):
+    """Bedrock's InvokeModel integration rejects the top-level field (Opus
+    4.6 and earlier): each turn's newest tool result carries the one moving
+    breakpoint instead, and none leaks into the returned history."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    replies = [_anthropic_message([_anthropic_tool_use(tool_id)], "tool_use")
+               for tool_id in ("tu_1", "tu_2")]
+    replies.append(_anthropic_message([{"type": "text", "text": "Done"}],
+                                      "end_turn"))
+    calls = fake_anthropic([_anthropic_sse(reply) for reply in replies]
+                          if stream else replies)
+    result = client._messages("q", model="bedrock/anthropic.claude-sonnet-4-6",
+                              max_tokens=50, stream=stream)
+    if stream:
+        list(result)
+
+    def marked(call):
+        return [block.get("tool_use_id")
+                for message in call["messages"]
+                if isinstance(message["content"], list)
+                for block in message["content"] if block.get("cache_control")]
+
+    assert all("cache_control" not in call for call in calls)
+    assert [marked(call) for call in calls] == [[], ["tu_1"], ["tu_2"]]
+    if not stream:
+        assert "cache_control" not in json.dumps(result["messages"])
+
+
 def test_merged_backend_precedence():
     from types import SimpleNamespace
     stub = SimpleNamespace(chat_backend={"api_key": "a", "api_version": "v1"})
@@ -2517,11 +2546,11 @@ def test_merged_backend_precedence():
 def test_messages_backend_merges_and_reaches_the_client(client, fake_anthropic,
                                                         monkeypatch):
     real = local_chat._anthropic_client({"api_key": "kk",
-                                         "base_url": "http://x"})
+                                         "base_url": "http://x"}, "anthropic")
     assert real.api_key == "kk"
     assert str(real.base_url).rstrip("/") == "http://x"
     real = local_chat._anthropic_client({"api_key": "kk",
-                                         "api_base": "http://y"})
+                                         "api_base": "http://y"}, "anthropic")
     assert str(real.base_url).rstrip("/") == "http://y"
 
     calls = fake_anthropic([
@@ -2541,7 +2570,7 @@ def test_messages_backend_merges_and_reaches_the_client(client, fake_anthropic,
 def test_messages_bad_backend_wraps_like_the_other_doors():
     with pytest.raises(PageIndexAPIError,
                        match="Anthropic backend is not configured"):
-        local_chat._anthropic_client({"no_such_param": 1})
+        local_chat._anthropic_client({"no_such_param": 1}, "anthropic")
 
 
 @needs_agents
@@ -2629,9 +2658,21 @@ def test_anthropic_client_cached_per_backend(monkeypatch):
     """One real client per backend: construction pays ~45ms of SSL-context
     build and a cold connection pool each call otherwise."""
     monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
-    a = local_chat._anthropic_client({"api_key": "k"})
-    assert local_chat._anthropic_client({"api_key": "k"}) is a
-    assert local_chat._anthropic_client({"api_key": "k2"}) is not a
+    a = local_chat._anthropic_client({"api_key": "k"}, "anthropic")
+    assert local_chat._anthropic_client({"api_key": "k"}, "anthropic") is a
+    assert local_chat._anthropic_client({"api_key": "k2"}, "anthropic") is not a
+
+
+@needs_anthropic
+def test_anthropic_client_cache_keys_on_the_route(monkeypatch):
+    """Same backend, another route: a cached direct client must never
+    carry a Bedrock id to api.anthropic.com."""
+    monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    direct = local_chat._anthropic_client({"api_key": "k"}, "anthropic")
+    bedrock = local_chat._anthropic_client({"api_key": "k"}, "bedrock")
+    assert isinstance(bedrock, anthropic.AnthropicBedrock)
+    assert not isinstance(direct, anthropic.AnthropicBedrock)
 
 
 @needs_anthropic
@@ -2647,7 +2688,7 @@ def test_anthropic_client_construction_race_keeps_first(monkeypatch):
             ("anthropic", (("api_key", "k"),))] = winner
         return real(**kwargs)
     monkeypatch.setattr(anthropic, "Anthropic", racing)
-    assert local_chat._anthropic_client({"api_key": "k"}) is winner
+    assert local_chat._anthropic_client({"api_key": "k"}, "anthropic") is winner
 
 
 @needs_anthropic
@@ -2999,16 +3040,10 @@ def test_default_max_tokens_is_pure_arithmetic(capsys):
     third-party lookup runs — no I/O, no hang, nothing printed, for any
     spelling. bool is not a budget."""
     lift = local_chat._default_max_tokens
-    enabled10 = {"type": "enabled", "budget_tokens": 10000}
-    assert lift("claude-opus-4-1",
-                {"type": "enabled", "budget_tokens": 30000}) == 38192
-    assert lift("claude-opus-4-1", enabled10) == 18192
-    assert lift("claude-test", enabled10) == 18192
-    assert lift("sonnet", enabled10) == 18192
-    assert lift("us.anthropic.claude-3-7-sonnet-20250219-v1:0",
-                enabled10) == 18192
-    assert lift("claude-sonnet-4-5",
-                {"type": "enabled", "budget_tokens": True}) == 8192
+    assert lift({"type": "enabled", "budget_tokens": 30000}) == 38192
+    assert lift({"type": "enabled", "budget_tokens": 10000}) == 18192
+    assert lift({"type": "enabled", "budget_tokens": True}) == 8192
+    assert lift() == 8192
     assert capsys.readouterr().out == ""
 
 
@@ -3412,7 +3447,7 @@ def test_anthropic_client_route_picks_the_transport_class(monkeypatch):
         {"aws_region": "us-east-1", "aws_access_key": "a",
          "aws_secret_key": "s"}, "bedrock")
     assert isinstance(bedrock, anthropic.AnthropicBedrock)
-    direct = local_chat._anthropic_client({"api_key": "k"})
+    direct = local_chat._anthropic_client({"api_key": "k"}, "anthropic")
     assert isinstance(direct, anthropic.Anthropic)
     assert not isinstance(direct, anthropic.AnthropicBedrock)
 
@@ -3431,6 +3466,8 @@ def test_anthropic_client_foundry_route(monkeypatch):
     if not hasattr(anthropic, "AnthropicFoundry"):
         pytest.skip("this anthropic build has no Foundry client")
     monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
+    # AnthropicFoundry fills base_url from this and refuses it beside resource=.
+    monkeypatch.delenv("ANTHROPIC_FOUNDRY_BASE_URL", raising=False)
     foundry = local_chat._anthropic_client(
         {"resource": "r", "api_key": "k"}, "azure_ai")
     assert isinstance(foundry, anthropic.AnthropicFoundry)
@@ -3547,7 +3584,8 @@ def test_route_tables_and_marks_agree():
                  *(f"{route}/claude-opus-4-6" for route in _CLAUDE_ROUTES)):
         assert local_chat._litellm_claude_marks(wire), wire
     # Claude-gated on the cloud routes: other models get no marks.
-    assert local_chat._litellm_claude_marks("azure_ai/gpt-4o") is None
+    assert local_chat._litellm_claude_marks(
+        "azure_ai/Meta-Llama-3-70B-Instruct") is None
 
 
 # ── chat(protocol=): the protocol doors behind the front door ──
@@ -3752,7 +3790,7 @@ def test_messages_extra_body_refuses_skeleton_before_transport(client,
                         lambda backend=None: made.append(1))
     with pytest.raises(PageIndexAPIError, match="instructions="):
         local_chat.run_messages(client, "q", model="claude-x",
-                                extra_body={"system": "x"})
+                                route="anthropic", extra_body={"system": "x"})
     assert made == []
 
 
