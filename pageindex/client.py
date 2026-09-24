@@ -98,6 +98,58 @@ def _agents_sdk_model_name(model: str) -> str:
     return f"litellm/{model}"
 
 
+# The Anthropic-stack routes this SDK wires a transport for, each with
+# its Claude Code env switch; a row is an inventory fact, not a model
+# judgment. Growth rule: a row per route LiteLLM names and the anthropic
+# SDK ships a client for (Mantle clears both bars, no one has asked;
+# Claude-on-AWS/GoogleCloud wait on LiteLLM prefix names).
+_ROUTE_ENV = {"bedrock": "CLAUDE_CODE_USE_BEDROCK",
+              "vertex_ai": "CLAUDE_CODE_USE_VERTEX",
+              "azure_ai": "CLAUDE_CODE_USE_FOUNDRY"}
+_CLAUDE_ROUTES = tuple(_ROUTE_ENV)
+
+
+def _claude_wire(model, surface: str) -> "tuple[str, str]":
+    """(wire id, route) for an Anthropic-native surface. The name is sent
+    as written — the destination judges the id; only the routing prefix
+    is read: ``litellm/`` drops, ``bedrock/`` / ``vertex_ai/`` /
+    ``azure_ai/`` select that transport, and ``anthropic/`` is the
+    direct route's own prefix.
+    Anything else — bare ids, aliases, gateway names — ships verbatim on
+    the direct route. A prefix with nothing after it names a route and
+    no model: refused, so no surface ships model='' or switches a
+    transport with no model chosen."""
+    if not isinstance(model, str):
+        raise PageIndexAPIError(
+            f"{surface} model must be a str, got {type(model).__name__}.")
+    wire = model.removeprefix("litellm/")
+    for route in _CLAUDE_ROUTES:
+        if wire.startswith(route + "/"):
+            wire = wire[len(route) + 1:]
+            break
+    else:
+        wire, route = wire.removeprefix("anthropic/"), "anthropic"
+    if not wire:
+        raise PageIndexAPIError(
+            f"{surface} model {model!r} names a route but no model id.")
+    return wire, route
+
+
+def _yaml_names_chat(loader) -> bool:
+    # config.yaml is a third way to name a chat model. Blank values mean
+    # "absent", exactly like the flat arguments (_resolve_models agrees).
+    return any(loader._default_dict.get(key)
+               for key in ("chat_model", "retrieve_model", "model"))
+
+
+def _needs_model(surface: str) -> PageIndexAPIError:
+    # The stock chat_model default is not the user's choice: never send
+    # it on an Anthropic-native surface as if it were one.
+    return PageIndexAPIError(
+        f"{surface} needs a model — pass a Claude model=..., or "
+        "configure chat_model on the client.")
+
+
 _LOCAL_INDEX_KEYS = ("model", "summary_model", "backend", "storage_path",
                      "summary_max_words", "summary_concurrency",
                      "use_embedded_toc", "optimize")
@@ -328,17 +380,21 @@ class PageIndexClient:
             documents (structure and summaries). Defaults to the SDK
             default (fast and cheap).
         chat_model (str, optional): Your own model for the chat surfaces
-            (``chat``, ``chat_completions``), exposed as
-            ``client.chat_model`` — on a cloud client, setting it runs
-            the document-QA agent in your process over the cloud
-            documents (page content then flows through your process to
-            your model provider). Chat names route through LiteLLM and
-            mean what LiteLLM says they mean; bare names are
-            OpenAI-compatible shorthand, and ``openai/Qwen/...`` is the
-            form for an OpenAI-compatible server that itself serves
-            slashed model ids (vLLM, TGI). Defaults to the SDK default
-            (strong); reads ``None`` on a cloud client where the managed
-            chat answers.
+            (``chat``, ``chat_completions``; a value you set also
+            carries onto ``chat(protocol="messages")`` and the two
+            Anthropic agent configs), exposed as ``client.chat_model`` —
+            on a cloud client, setting it runs the document-QA agent in
+            your process over the cloud documents (page content then
+            flows through your process to your model provider). Chat
+            names route through LiteLLM and mean what LiteLLM says they
+            mean; bare names are OpenAI-compatible shorthand, and
+            ``openai/Qwen/...`` is the form for an OpenAI-compatible
+            server that itself serves slashed model ids (vLLM, TGI). The
+            Anthropic-native surfaces read the name by its routing
+            prefix instead — bare names are Anthropic's own — and treat
+            the untouched stock default as no choice. Defaults to the
+            SDK default (strong); reads ``None`` on a cloud client where
+            the managed chat answers.
         model (str, optional): Local mode only — one model for both roles:
             sets the default for ``index_model`` and ``chat_model`` at
             once. The role-specific arguments win over it. (Also the
@@ -551,13 +607,18 @@ class PageIndexClient:
                 overrides = {name: value for name, value in chat_conf.items()
                              if name in ("chat_model", "retrieve_model")
                              and value}
-                opt = ConfigLoader().load(overrides or None)
-                self.chat_model = opt.chat_model
+                loader = ConfigLoader()
+                opt = loader.load(overrides or None)
+                self._chat_model = opt.chat_model
+                # chat="local" alone names no model: the stock default.
+                self._chat_model_stock = (not overrides
+                                          and not _yaml_names_chat(loader))
                 self.chat_backend = chat_conf.get("chat_backend")
                 _preload_litellm()
             else:
                 # Managed chat: the endpoint selects its own model.
-                self.chat_model = None
+                self._chat_model = None
+                self._chat_model_stock = True
                 self.chat_backend = None
         else:
             if chat_mode == "managed":
@@ -579,11 +640,16 @@ class PageIndexClient:
                          if name in ("model", "index_model", "summary_model",
                                      "chat_model", "retrieve_model")
                          and value}
-            opt = ConfigLoader().load(overrides or None)
+            loader = ConfigLoader()
+            opt = loader.load(overrides or None)
             self.model = opt.model
             self.index_model = opt.index_model
             self.summary_model = opt.summary_model
-            self.chat_model = opt.chat_model
+            self._chat_model = opt.chat_model
+            self._chat_model_stock = (not (overrides.get("chat_model")
+                                           or overrides.get("retrieve_model")
+                                           or overrides.get("model"))
+                                      and not _yaml_names_chat(loader))
             self.chat_backend = chat_conf.get("chat_backend")
             self.storage_path = index_conf.get("storage_path") or ".pageindex"
             from .local_api import LocalAPI
@@ -642,6 +708,18 @@ class PageIndexClient:
                     "ride extra_body under their wire names.")
             raise AttributeError(
                 f"{type(self).__name__!r} object has no attribute {name!r}")
+
+    @property
+    def chat_model(self):
+        """Your own chat model; None on a managed-chat client."""
+        return self._chat_model
+
+    @chat_model.setter
+    def chat_model(self, value):
+        # Any assignment is a choice; only the untouched stock default
+        # is not one.
+        self._chat_model = value
+        self._chat_model_stock = False
 
     @property
     def retrieve_model(self):
@@ -1154,8 +1232,9 @@ class PageIndexClient:
                 clipped). One run serves one view. Protocol lanes: the
                 protocol's own event stream.
             model: Own-model chat only — backend model name (defaults
-                to ``chat_model``). ``protocol="messages"`` needs it named
-                — a Claude model; there is no cross-vendor default.
+                to ``chat_model``). ``protocol="messages"`` takes a Claude
+                model — a ``chat_model`` you set carries over; the stock
+                default is never sent.
             reasoning_effort: Own-model chat only — how hard the model
                 thinks (``"low"`` / ``"medium"`` / ``"high"``; what a
                 backend accepts is its own). Each lane sends its native
@@ -1330,11 +1409,6 @@ class PageIndexClient:
                     instructions=cast(Optional[str], instructions),
                     max_turns=max_turns, extra_body=body,
                     extra_headers=extra_headers, backend=backend)
-            if not model:
-                raise PageIndexAPIError(
-                    "protocol=\"messages\" drives Anthropic's Messages API "
-                    "with the Anthropic SDK — name the Claude model with "
-                    "model=... (there is no cross-vendor default to guess).")
             body = extra_body
             if reasoning_effort:
                 # Anthropic's own effort field, beside the caller's other
@@ -1684,7 +1758,7 @@ class PageIndexClient:
     def _messages(
         self,
         messages: Union[str, list[dict[str, Any]]],
-        model: str,
+        model: Optional[str] = None,
         max_tokens: Optional[int] = None,
         stream: bool = False,
         doc_id: Optional[Union[str, list[str]]] = None,
@@ -1706,10 +1780,12 @@ class PageIndexClient:
         the Anthropic Messages protocol, Claude-native.
 
         Own-model chat only — local mode, or a cloud client constructed
-        with ``chat_model=``/``chat=``. Drives Anthropic's /v1/messages
-        via the Anthropic SDK's own tool runner (requires
-        ``pageindex[anthropic]``; ANTHROPIC_API_KEY selects the
-        backend). ``tool_use``/``tool_result`` round-trip is the
+        with ``chat_model=``/``chat=``. Drives the Messages API via the
+        Anthropic SDK's own tool runner (requires
+        ``pageindex[anthropic]``); the model's routing prefix picks the
+        transport — Anthropic directly by default (ANTHROPIC_API_KEY
+        selects the backend), or that channel's own SDK client.
+        ``tool_use``/``tool_result`` round-trip is the
         format's native behavior: the response is the
         final message envelope with cross-turn aggregated ``usage`` plus a
         ``messages`` field — the full new turn sequence, valid for verbatim
@@ -1717,17 +1793,25 @@ class PageIndexClient:
         ``cache_control`` breakpoint, and the request sets the top-level
         ``cache_control`` so each turn re-reads the growing conversation
         from cache — skipped when your own blocks already use the three
-        remaining breakpoints (the managed prompt holds the fourth).
+        remaining breakpoints (the managed prompt holds the fourth). On
+        ``bedrock/``, whose InvokeModel integration rejects the top-level
+        field for Opus 4.6 and earlier, an explicit breakpoint moves onto
+        each turn's tool results instead.
 
         Args:
             messages: Native Messages-format history (including prior
                 tool_use/tool_result blocks on round-trip), or a bare query
                 string (it becomes a single user message).
-            model: Required — there is no cross-vendor default to guess.
+            model: Model for the Messages wire, sent as written — a
+                ``bedrock/``, ``vertex_ai/``, or ``azure_ai/`` prefix
+                selects that channel's SDK client, anything else goes to
+                Anthropic directly (``litellm/`` and ``anthropic/``
+                prefixes are stripped). Unset: a ``chat_model`` you set
+                carries over; the stock default raises rather than being
+                sent.
             max_tokens: Per-turn output budget the Messages API requires on
-                the wire; the default is resolved per model (8192, or 4096
-                for the claude-3 generation whose ceiling is lower) so the
-                simple call needs only a question, and rises to
+                the wire; the default is 8192 so the simple call needs
+                only a question, and rises to
                 budget_tokens + 8192 when ``thinking`` is enabled (the wire
                 requires max_tokens above the budget). Passed through.
             stream: Yield the Anthropic SDK's event stream across turns
@@ -1759,14 +1843,20 @@ class PageIndexClient:
                 win over defaults.
             backend: Connection overrides for this call's backend client,
                 merged over the client's ``chat_backend`` (per-call keys
-                win). Keys are the anthropic SDK's client params —
-                ``api_key``, ``base_url``, ``auth_token``, … — passed
-                verbatim; unknown keys raise.
+                win). Keys are the selected route's anthropic SDK client
+                params, passed verbatim — direct: ``api_key``,
+                ``base_url``, ``auth_token``, …; the cloud routes take
+                their own client's (``aws_region``, ``project_id``, …) —
+                and unknown keys raise.
         """
         self._require_own_chat("chat(protocol='messages')")
+        if not model and self._chat_model_stock:
+            raise _needs_model("chat(protocol='messages')")
         from .local_chat import run_messages
+        wire, route = _claude_wire(model or self.chat_model,
+                                   "chat(protocol='messages')")
         return run_messages(
-            self, messages, model=model, max_tokens=max_tokens,
+            self, messages, model=wire, route=route, max_tokens=max_tokens,
             stream=stream, doc_id=doc_id, folder_id=folder_id, system=system,
             temperature=temperature, top_p=top_p, top_k=top_k,
             stop_sequences=stop_sequences, max_turns=max_turns,
@@ -1964,8 +2054,8 @@ class PageIndexClient:
         there — ``chat_backend`` does not travel with it.
 
         Prompt caching: OpenAI models cache server-side on their own;
-        LiteLLM-routed Claude (Anthropic, Bedrock, Vertex) gets its
-        cache marks from the bundled ``model_settings``. Pass
+        LiteLLM-routed Claude (Anthropic, Bedrock, Vertex, Foundry) gets
+        its cache marks from the bundled ``model_settings``. Pass
         ``model_settings`` here to layer your own on top — your fields
         win and ``extra_args`` merge. Replacing the returned key
         wholesale drops the marks instead.
@@ -2044,7 +2134,7 @@ class PageIndexClient:
         tools involved. Local: the in-process tools — the same set
         ``chat(protocol="messages")`` runs internally.
 
-        Requires ``anthropic>=0.108.0``
+        Requires the ``anthropic`` extra
         (``pip install 'pageindex[anthropic]'``), imported only when this
         method is called.
 
@@ -2064,7 +2154,7 @@ class PageIndexClient:
 
     def anthropic_runner_config(
         self,
-        model: str,
+        model: Optional[str] = None,
         *,
         include_management: bool = False,
         asynchronous: bool = False,
@@ -2087,7 +2177,9 @@ class PageIndexClient:
         ``chat(protocol="messages")`` uses,
         and a top-level ``cache_control`` so each loop turn re-reads the
         growing prompt from cache (pop the key if you place your own
-        breakpoints — the API allows four). Unlike the chat lane,
+        breakpoints — the API allows four; a ``bedrock/`` model omits it,
+        as Bedrock's InvokeModel integration rejects it for Opus 4.6 and
+        earlier). Unlike the chat lane,
         ``system`` here is the bare instructions string, without the chat
         header or its block-level breakpoint. To target a folder or
         documents, prepend ``folder_context(folder_id)`` /
@@ -2095,14 +2187,19 @@ class PageIndexClient:
         customize further, switch to those methods directly.
 
         Args:
-            model: Backend model name (also resolves the ``max_tokens``
-                default).
+            model: Model name, routing prefixes (``litellm/``,
+                ``anthropic/``, ``bedrock/``, ``vertex_ai/``,
+                ``azure_ai/``) stripped — your client is the transport
+                and judges the id, so pair a routed prefix with that
+                channel's own client class (``AnthropicBedrock``,
+                ``AnthropicVertex``, ``AnthropicFoundry``). Unset: a
+                ``chat_model`` you set carries over; the stock default
+                raises rather than being sent.
             include_management (bool): Also expose tools that modify the
                 library.
             asynchronous (bool): Build async runnables for
                 ``AsyncAnthropic``.
-            max_tokens: Per-turn output budget; default resolved per
-                model.
+            max_tokens: Per-turn output budget; default 8192.
             max_turns: Agent-loop bound; default 10.
             thinking: Anthropic ``thinking`` config, included in the
                 kwargs; an enabled budget also lifts the ``max_tokens``
@@ -2112,15 +2209,24 @@ class PageIndexClient:
         from .agent_tools import _base_instructions
         from .local_chat import _default_max_tokens, _validate_max_turns
         _validate_max_turns(max_turns)
+        if not model and self._chat_model_stock:
+            raise _needs_model("anthropic_runner_config()")
+        model = model or self.chat_model
+        if not model:
+            # A cleared chat_model ('' or None) configures nothing —
+            # same refusal as the stock default, never a {'model': ''}.
+            raise _needs_model("anthropic_runner_config()")
+        model, route = _claude_wire(model, "anthropic_runner_config()")
         return {
             "model": model,
             "max_tokens": (max_tokens if max_tokens is not None
-                           else _default_max_tokens(model, thinking)),
+                           else _default_max_tokens(thinking)),
             "system": _base_instructions(self, include_management),
             "tools": self.as_anthropic_tools(include_management, asynchronous),
             "max_iterations": max_turns if max_turns is not None else 10,
             **({"thinking": thinking} if thinking is not None else {}),
-            "cache_control": {"type": "ephemeral"},
+            **({} if route == "bedrock"
+               else {"cache_control": {"type": "ephemeral"}}),
         }
 
     def as_claude_mcp(self, include_management: bool = False, *,
@@ -2145,7 +2251,7 @@ class PageIndexClient:
         (harmless). ``system_prompt`` stays the recommended channel: it is
         guaranteed delivery, and the only channel local mode has.
 
-        Usage (or ``claude_agent_config()`` for all three slots in one
+        Usage (or ``claude_agent_config()`` for the whole bundle in one
         call)::
 
             options = ClaudeAgentOptions(
@@ -2164,6 +2270,7 @@ class PageIndexClient:
         *,
         include_management: bool = False,
         server_name: str = "pageindex",
+        model: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         Document QA ``ClaudeAgentOptions`` kwargs in one call::
@@ -2174,7 +2281,10 @@ class PageIndexClient:
         (``agent_instructions``) and the server entry (``as_claude_mcp``,
         itself the tool gate) with its ``allowed_tools`` pre-approval,
         one ``include_management`` and ``server_name`` applied
-        everywhere. To target a folder or documents, prepend
+        everywhere; a chosen model adds ``model`` (and its route's
+        ``env`` switch) — those keys are then taken, so pop them from
+        the result before passing your own ``model=`` or ``env=``
+        alongside the unpack. To target a folder or documents, prepend
         ``folder_context(folder_id)`` / ``document_context(doc_id)`` to
         your prompt; to customize (your own system prompt, extra
         servers), switch to those methods directly.
@@ -2184,8 +2294,26 @@ class PageIndexClient:
                 library.
             server_name (str): Key the server is registered under;
                 locally also the name the SDK server declares.
+            model (str, optional): Claude model, in the client's spelling
+                or the SDK's own (aliases included) — routing prefixes
+                are stripped and the SDK judges the id. A ``bedrock/``,
+                ``vertex_ai/``, or ``azure_ai/`` prefix also rides along
+                as that channel's ``CLAUDE_CODE_USE_*`` env switch, set
+                to ``"1"`` — only that one: other switches in your
+                environment stay yours, weighed by the CLI's own rules.
+                ``anthropic/`` and bare spellings name a model, not a
+                channel, and leave ``env`` out. Unset: a ``chat_model``
+                you set is forwarded as written; the stock default, like
+                a managed-chat client, leaves the SDK's own default in
+                place.
         """
         from .agent_tools import _base_instructions
+        # The stock default is not a choice: leave the SDK's own model.
+        if not model and not self._chat_model_stock:
+            model = self.chat_model
+        route = None
+        if model:
+            model, route = _claude_wire(model, "claude_agent_config()")
         return {
             "system_prompt": _base_instructions(self, include_management),
             "mcp_servers": {server_name: self.as_claude_mcp(
@@ -2193,6 +2321,14 @@ class PageIndexClient:
             # Pre-approval only — the server itself is already gated (the
             # read-only endpoint on cloud, the registered set locally).
             "allowed_tools": [f"mcp__{server_name}"],
+            **({"model": model} if model else {}),
+            # Claude Code picks its transport from env switches; a route
+            # prefix rides along as that one switch (the SDK merges env
+            # over the inherited environment). Only the chosen switch:
+            # the rest of the caller's environment is the caller's, and
+            # how the CLI weighs its own switches is the CLI's business.
+            **({"env": {_ROUTE_ENV[route]: "1"}}
+               if route in _ROUTE_ENV else {}),
         }
 
     def agent_instructions(self, *, include_management: bool = False) -> str:
