@@ -613,6 +613,8 @@ def test_flat_fallback_over_limit_skips_model_passes(tmp_path, monkeypatch):
         "optimize ran on a refused flat tree"))
     monkeypatch.setattr(flash_api, "_summarize", lambda *a, **k: pytest.fail(
         "summary ran on a refused flat tree"))
+    monkeypatch.setattr(flash_api, "_optimize_and_summarize", lambda *a, **k: pytest.fail(
+        "optimize and summary ran on a refused flat tree"))
     pdf = tmp_path / "letter.pdf"
     pdf.write_bytes(build_pdf(["Alpha body", "Beta body", "Gamma body"]))
     result = flash_api.page_index_flash(str(pdf), summary=True, summary_model="m")
@@ -720,6 +722,7 @@ def test_preface_page_is_retrievable(tmp_path, monkeypatch):
         return None
     monkeypatch.setattr(flash_api, "_optimize", lambda *a, **k: {"merges": 0})
     monkeypatch.setattr(flash_api, "_summarize", no_summary)
+    monkeypatch.setattr(flash_api, "_optimize_and_summarize", no_summary)
     monkeypatch.setattr(pageindex.utils, "llm_completion",
                         lambda model, prompt, **kw: "A memo.")
     pdf = tmp_path / "memo.pdf"
