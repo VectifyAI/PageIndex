@@ -1,6 +1,28 @@
+import subprocess
+import sys
 import unittest
+from pathlib import Path
 
 from pageindex.page_index_md import extract_nodes_from_markdown
+
+
+class UtilsImportFallbackTest(unittest.TestCase):
+    def test_script_mode_import_resolves_sibling_utils(self):
+        # Without a parent package the module must fall back to `from utils import *`.
+        module_dir = Path(__file__).resolve().parents[1] / "pageindex"
+        result = subprocess.run(
+            [sys.executable, "-c", "import page_index_md; print(page_index_md.count_tokens.__name__)"],
+            cwd=module_dir,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "count_tokens")
+
+    def test_package_import_does_not_swallow_errors(self):
+        source = (Path(__file__).resolve().parents[1] / "pageindex" / "page_index_md.py").read_text()
+        self.assertNotIn("except:", source)
 
 
 class ExtractNodesFromMarkdownTest(unittest.TestCase):
