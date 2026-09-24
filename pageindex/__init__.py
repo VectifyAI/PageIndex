@@ -30,9 +30,10 @@ _LAZY = {
     "md_to_tree": ".page_index_md",
 }
 _SUBMODULES = {"agent_tools", "chat_stream", "client", "cloud_api", "errors",
-               "flash", "imaging", "integrations", "local_api", "local_chat",
-               "local_store", "mcp_bridge", "page_index_classic",
-               "page_index_md", "tree_optimize", "types", "utils"}
+               "flash", "imaging", "integrations", "jev_router", "local_api",
+               "local_chat", "local_store", "mcp_bridge",
+               "page_index_classic", "page_index_md", "tree_optimize",
+               "types", "utils"}
 
 
 def __getattr__(name):
