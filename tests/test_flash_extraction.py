@@ -248,7 +248,7 @@ def test_optimize_wins_over_deprecated_optimize_expand(tmp_path, monkeypatch):
     from pageindex.flash import api as flash_api
     seen = {}
 
-    def fake_optimize(structure, pages, do_expand, model):
+    def fake_optimize(structure, pages, do_expand, model, concurrency=None):
         seen["do_expand"] = do_expand
         return {"merges": 0}
 
@@ -367,7 +367,7 @@ def test_optimize_full_skips_expand_without_page_texts(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     calls = {}
 
-    def fake_optimize(structure, pages, do_expand, model):
+    def fake_optimize(structure, pages, do_expand, model, concurrency=None):
         calls["pages"] = pages
         calls["do_expand"] = do_expand
         return {"merges": 0}
@@ -393,7 +393,7 @@ def test_optimize_full_skips_expand_on_textless_pages(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     calls = {}
 
-    def fake_optimize(structure, pages, do_expand, model):
+    def fake_optimize(structure, pages, do_expand, model, concurrency=None):
         calls["do_expand"] = do_expand
         return {"merges": 0}
 
@@ -613,6 +613,8 @@ def test_flat_fallback_over_limit_skips_model_passes(tmp_path, monkeypatch):
         "optimize ran on a refused flat tree"))
     monkeypatch.setattr(flash_api, "_summarize", lambda *a, **k: pytest.fail(
         "summary ran on a refused flat tree"))
+    monkeypatch.setattr(flash_api, "_optimize_and_summarize", lambda *a, **k: pytest.fail(
+        "optimize and summary ran on a refused flat tree"))
     pdf = tmp_path / "letter.pdf"
     pdf.write_bytes(build_pdf(["Alpha body", "Beta body", "Gamma body"]))
     result = flash_api.page_index_flash(str(pdf), summary=True, summary_model="m")
@@ -720,6 +722,7 @@ def test_preface_page_is_retrievable(tmp_path, monkeypatch):
         return None
     monkeypatch.setattr(flash_api, "_optimize", lambda *a, **k: {"merges": 0})
     monkeypatch.setattr(flash_api, "_summarize", no_summary)
+    monkeypatch.setattr(flash_api, "_optimize_and_summarize", no_summary)
     monkeypatch.setattr(pageindex.utils, "llm_completion",
                         lambda model, prompt, **kw: "A memo.")
     pdf = tmp_path / "memo.pdf"
@@ -777,3 +780,21 @@ def test_landscape_deck_title_is_the_slide_heading(tmp_path):
     pdf = tmp_path / "deck.pdf"
     pdf.write_bytes(_deck_pdf())
     assert extract_toc(str(pdf))["doc_title"] == DECK_TITLES[0]
+
+
+def test_flash_cli_summary_concurrency_reaches_the_indexer(monkeypatch, tmp_path):
+    captured = _run_flash_cli(monkeypatch, tmp_path, ["--summary-concurrency", "8"],
+                              [{"title": "A", "start_index": 1, "end_index": 1}])
+    assert captured["summary_concurrency"] == 8
+
+
+def test_flash_cli_summary_max_words_reaches_the_indexer(monkeypatch, tmp_path):
+    captured = _run_flash_cli(monkeypatch, tmp_path, ["--summary-max-words", "80"],
+                              [{"title": "A", "start_index": 1, "end_index": 1}])
+    assert captured["summary_max_words"] == 80
+
+
+def test_flash_cli_summary_flags_refuse_standard_mode(monkeypatch, tmp_path):
+    for flag in ("--summary-concurrency", "--summary-max-words"):
+        with pytest.raises(ValueError, match=f"{flag} requires Flash mode"):
+            _run_flash_cli(monkeypatch, tmp_path, ["--mode", "standard", flag, "8"], [])

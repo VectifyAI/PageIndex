@@ -13,7 +13,7 @@ from typing import Any
 from .errors import PageIndexAPIError
 from .local_store import DocStore
 from .naming import sanitize_filename, truncate_filename
-from .utils import run_off_loop
+from .utils import count_tokens, run_off_loop
 
 logger = logging.getLogger(__name__)
 
@@ -38,11 +38,19 @@ class LocalAPI:
     """Backs PageIndexClient's local mode. One instance per client."""
 
     def __init__(self, storage_path: str, model: str, summary_model: str,
-                 index_backend: dict | None = None):
+                 index_backend: dict | None = None,
+                 summary_max_words: int | None = None,
+                 summary_concurrency: int | None = None,
+                 use_embedded_toc: bool = True,
+                 optimize: str = "full"):
         self._store = DocStore(storage_path)
         self._model = model
         self._summary_model = summary_model
         self._index_backend = index_backend
+        self._summary_max_words = summary_max_words
+        self._summary_concurrency = summary_concurrency
+        self._use_embedded_toc = use_embedded_toc
+        self._optimize = optimize
         from .utils import ConfigLoader
         self._config_loader = ConfigLoader()
 
@@ -98,6 +106,12 @@ class LocalAPI:
             )
         if mode is None:
             mode = "flash"
+        if mode == "standard" and (self._summary_max_words is not None
+                                   or self._summary_concurrency is not None):
+            raise PageIndexAPIError(
+                "Failed to submit document: summary_max_words and "
+                "summary_concurrency are flash-only; mode='standard' does not "
+                "support them.")
         file_path = os.path.abspath(os.path.expanduser(str(file_path)))
         if not os.path.isfile(file_path):
             raise FileNotFoundError(f"No such file: {file_path}")
@@ -203,9 +217,7 @@ class LocalAPI:
 
     def _index_standard(self, file_path: str, page_texts: list[str]) -> tuple[list, str | None]:
         from .page_index_classic import page_index_main
-        import litellm
-        page_list = [(text, litellm.token_counter(model=self._model, text=text))
-                     for text in page_texts]
+        page_list = [(text, count_tokens(text, model=self._model)) for text in page_texts]
         opt = self._config_loader.load({
             "model": self._model,
             "summary_model": self._summary_model,
@@ -229,8 +241,11 @@ class LocalAPI:
                             generate_doc_description, write_node_id)
         result = page_index_flash(file_path, summary=True,
                                   summary_model=self._summary_model,
-                                  optimize="full",
-                                  optimize_model=self._summary_model)
+                                  optimize=False if self._optimize == "off" else self._optimize,
+                                  optimize_model=self._summary_model,
+                                  summary_concurrency=self._summary_concurrency,
+                                  summary_max_words=self._summary_max_words,
+                                  use_embedded_toc=self._use_embedded_toc)
         structure = result.get("structure", [])
         reason = flash_rejection_reason(result)
         if reason:

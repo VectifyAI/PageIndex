@@ -36,7 +36,8 @@ When a subtree is merged away, the removed titles are kept on the parent as
 `key_items`: the pages stay reachable by scanning the parent, but the titles
 are routing information that would otherwise be lost.
 
-merge_same_page() runs first, as a special case of the same idea. Retrieval is
+merge_same_page() runs at every seam of optimize() where same-page duplicates can
+appear, as a special case of the same idea. Retrieval is
 page-granular, so frontier siblings covering identical pages cannot be told apart:
 an agent routed to any of them reads the same text, and because the leaf summary
 prompt sees only that text, their summaries come back near-identical. They collapse
@@ -491,9 +492,10 @@ def union_title(titles, node):
 def merge_same_page(structure, log):
     """Collapse frontier siblings that cover exactly the same pages.
 
-    Deterministic and free. Runs before merge() because a narrower tree changes
-    its ancestors' tree_cost, and before expand() because children an expand pass
-    lands on one page are the same redundancy arriving later.
+    Deterministic and free. Runs at every optimize() seam where the redundancy can appear:
+    before merge() because a narrower tree changes its ancestors' tree_cost,
+    again after it because a collapsed subtree can land on a sibling's exact
+    pages, and on a node's children right after expand attaches them.
     """
     changed = False
 
@@ -659,7 +661,7 @@ async def expand(structure, pages, lines, args, log, frozen):
     priced with expand_cost and the cheapest is kept.
     """
     changed = False
-    semaphore = asyncio.Semaphore(EXPAND_CONCURRENCY)
+    semaphore = asyncio.Semaphore(args.concurrency)
 
     async def proposals_for(node):
         """The model half of one node's lookahead: the empty-retry ladder and
@@ -705,6 +707,7 @@ async def expand(structure, pages, lines, args, log, frozen):
             log.append({"op": "expand", "node_id": node.get("node_id"),
                         "decision": "no_children", "S": span, "attempts": attempts})
             frozen.add(node.get("node_id"))
+            args.settled([node])
             return
 
         scored = []
@@ -719,6 +722,8 @@ async def expand(structure, pages, lines, args, log, frozen):
         cost = best["expand_cost"]
         gain = span - cost
         ratio = gain / span if span else 0.0
+        # strict: at cost == span the next round's merge (span <= cost) would
+        # fold the node right back, touching children already marked final
         keep = cost < span and ratio >= args.min_gain_ratio
 
         note(args.progress,
@@ -739,15 +744,21 @@ async def expand(structure, pages, lines, args, log, frozen):
                                  for c in best["children"]]})
 
         frozen.add(node.get("node_id"))
-        if keep:
-            changed = True
-            attach_children(node, best["children"], lines)
-            results = await asyncio.gather(*(process(child)
-                                             for child in node["nodes"]),
-                                           return_exceptions=True)
-            for result in results:
-                if isinstance(result, BaseException):
-                    raise result
+        if not keep:
+            args.settled([node])
+            return
+        changed = True
+        attach_children(node, best["children"], lines)
+        if args.do_merge:
+            merge_same_page([node], log)
+        # settle after the fusion: mark_final snapshots the children, finish() rejects a later change
+        args.settled([node])
+        results = await asyncio.gather(*(process(child)
+                                         for child in node["nodes"]),
+                                       return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
 
     results = await asyncio.gather(*(process(node)
                                      for node, _ in flatten(structure)),
@@ -768,11 +779,20 @@ def default_model():
     return getattr(opt, "summary_model", None) or opt.model
 
 
+def final_nodes(nodes, trigger, frozen):
+    """Nodes whose children will not change any more: everything but a
+    collapsed node over the trigger that expand has not judged yet."""
+    return [node for node, _ in flatten(nodes)
+            if not is_frontier(node) or S(node) <= trigger
+            or node.get("node_id") in frozen]
+
+
 async def optimize(structure, pages, lines, model=None, routing=ROUTING_COST,
                    trigger_pages=TRIGGER_PAGES, min_gain_ratio=0.0,
                    do_merge=True, do_expand=True, max_rounds=3, page_count=None,
                    cache=None, kinds=("section", "table"), empty_retries=1,
-                   do_relabel=True, progress=False):
+                   do_relabel=True, progress=False, on_final=None,
+                   concurrency=None):
     """Run merge and expand over a tree until neither changes anything.
 
     Mutates `structure` in place and returns a summary.
@@ -782,30 +802,52 @@ async def optimize(structure, pages, lines, model=None, routing=ROUTING_COST,
     ancestors' tree_cost. Nodes decided by either operator are frozen for the rest
     of the run, so a node cannot be collapsed and re-expanded in alternating
     rounds.
+
+    `on_final(nodes)` hears, as the run goes, which nodes will not change any
+    more (see final_nodes): after each round's merges, as expand decides each
+    candidate, and for the whole tree at the end.
     """
     if do_expand and pages is None:
         raise ValueError("expand needs the PDF pages; pass pages/lines or do_expand=False")
+    log, frozen = [], set()
+
+    def settled(nodes):
+        if on_final is not None:
+            on_final(final_nodes(nodes, trigger_pages, frozen))
     opts = SimpleNamespace(model=model or default_model(), routing=routing,
                            trigger_pages=trigger_pages,
                            min_gain_ratio=min_gain_ratio, cache=cache,
                            kinds=set(kinds) if kinds else None,
-                           empty_retries=empty_retries, progress=progress)
+                           empty_retries=empty_retries, progress=progress,
+                           settled=settled, do_merge=do_merge,
+                           concurrency=min(EXPAND_CONCURRENCY,
+                                           concurrency or EXPAND_CONCURRENCY))
     baseline = set(validate(structure, page_count)) if page_count else set()
     before = complexity(structure, page_count, routing=routing) if page_count else {}
 
-    log, frozen = [], set()
     rounds = 0
     for round_no in range(1, max_rounds + 1):
         rounds = round_no
         note(progress, f"  round {round_no}")
-        same_page = merge_same_page(structure, log) if do_merge else False
+        round_start = len(log)
+        if do_merge:
+            merge_same_page(structure, log)
         merged = merge(structure, routing, log, frozen, progress) if do_merge else False
+        if merged:
+            # a collapsed subtree can land on a sibling's exact pages
+            merge_same_page(structure, log)
+        settled(structure)
         expanded = await expand(structure, pages, lines, opts, log, frozen) \
             if do_expand else False
+        # derived from this round's log slice, so the flag counts the fusions
+        # inside expand too and cannot disagree with the run counters
+        same_page = any(e["op"] == "merge_same_page" for e in log[round_start:])
         log.append({"op": "round", "round": round_no, "same_page": same_page,
                     "merged": merged, "expanded": expanded})
         if not (same_page or merged or expanded):
             break
+    if on_final is not None:
+        on_final([node for node, _ in flatten(structure)])
 
     id_map = relabel(structure) if do_relabel else {}
     after = complexity(structure, page_count, routing=routing) if page_count else {}
