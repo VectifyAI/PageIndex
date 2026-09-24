@@ -2234,11 +2234,13 @@ def test_messages_carries_a_claude_chat_model(store_path, fake_anthropic):
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
     local = PageIndexLocalClient(storage_path=store_path,
                                  chat_model="anthropic/claude-3-opus-20240229")
-    local._messages("q")
+    # Through the public door: chat() must not demand model= itself.
+    local.chat("q", protocol="messages")
     assert calls[0]["model"] == "claude-3-opus-20240229"
     # The stock default was never chosen: nothing to send.
     with pytest.raises(PageIndexAPIError, match="needs a model"):
-        PageIndexLocalClient(storage_path=store_path)._messages("q")
+        PageIndexLocalClient(storage_path=store_path).chat(
+            "q", protocol="messages")
 
 
 @needs_anthropic
