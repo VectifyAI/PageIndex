@@ -2253,7 +2253,7 @@ def test_messages_cleared_chat_model_gets_the_own_model_refusal(
                                  chat_model="claude-sonnet-4-5")
     for cleared in ("", None):
         local.chat_model = cleared
-        with pytest.raises(PageIndexAPIError, match="chat_model"):
+        with pytest.raises(PageIndexAPIError, match="chat_model="):
             local._messages("q")
     assert calls == []
 
