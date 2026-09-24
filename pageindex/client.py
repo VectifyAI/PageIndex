@@ -347,12 +347,14 @@ class PageIndexClient:
         summary_model (str, optional): Local mode only — legacy: overrides
             the model used for node summaries and document descriptions;
             ``index_model`` covers this.
-        summary_max_words (int, optional): Local mode only — the word cap
-            each node summary is asked to stay within. Defaults to 150.
-        summary_concurrency (int, optional): Local mode only — cap on
+        summary_max_words (int, optional): Local flash mode only — the word
+            cap each model-written node summary is asked to stay within;
+            short leaf nodes keep their own text. Defaults to 150.
+        summary_concurrency (int, optional): Local flash mode only — cap on
             simultaneous indexing model calls per lane: the summaries, and
             expand up to its own ceiling of 32. The lanes overlap, so up to
-            cap + min(32, cap) calls run at once. Defaults to 64.
+            cap + min(32, cap) calls run at once. Defaults to 64. A
+            ``mode="standard"`` submit refuses either summary knob.
         use_embedded_toc (bool, optional): Local mode only — whether flash
             indexing consumes the PDF's embedded bookmarks when they look
             trustworthy. Defaults to True.
@@ -527,6 +529,10 @@ class PageIndexClient:
                 if name == "optimize" and value not in ("full", "merge", "off"):
                     raise PageIndexAPIError(
                         f'{shown} must be "full", "merge" or "off", got {value!r}.')
+                if (name in ("summary_max_words", "summary_concurrency")
+                        and isinstance(value, int) and value < 1):
+                    raise PageIndexAPIError(
+                        f"{shown} must be a positive int, got {value!r}.")
 
         if cloud_key is not None:
             if index_conf:

@@ -3,7 +3,8 @@ import os
 import json
 from pageindex import *
 from pageindex.page_index_md import md_to_tree
-from pageindex.utils import ConfigLoader
+from pageindex.utils import ConfigLoader, SUMMARY_CONCURRENCY, SUMMARY_MAX_WORDS
+from pageindex.tree_optimize import EXPAND_CONCURRENCY
 
 if __name__ == "__main__":
     # Set up argument parser
@@ -30,9 +31,9 @@ if __name__ == "__main__":
     parser.add_argument('--summary-model', type=str, default=None,
                       help='Model for node summaries (falls back to config.yaml summary_model, then --index-model, then --model)')
     parser.add_argument('--summary-max-words', type=int, default=None,
-                      help='Word cap for each node summary (flash mode; default 150)')
+                      help=f'Word cap for each model-written node summary; short leaf nodes keep their own text (flash mode; default {SUMMARY_MAX_WORDS})')
     parser.add_argument('--summary-concurrency', type=int, default=None,
-                      help='Cap on simultaneous indexing model calls per lane (flash mode; default 64, expand tops out at 32)')
+                      help=f'Cap on simultaneous indexing model calls per lane (flash mode; default {SUMMARY_CONCURRENCY}, expand tops out at {EXPAND_CONCURRENCY})')
 
     parser.add_argument('--toc-check-pages', type=int, default=None,
                       help='Number of pages to check for table of contents (PDF only)')

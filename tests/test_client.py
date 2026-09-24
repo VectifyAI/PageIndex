@@ -3188,9 +3188,10 @@ def test_summary_max_words_reaches_the_local_indexer():
 
 
 def test_flash_knobs_reach_the_local_indexer(tmp_path, sample_pdf, monkeypatch):
-    """summary_concurrency, use_embedded_toc and optimize are settable on the
-    client, flat or in the index slot, and land on page_index_flash the way
-    the CLI's flags do ("off" is no optimize pass at all)."""
+    """summary_concurrency, summary_max_words, use_embedded_toc and optimize
+    are settable on the client, flat or in the index slot, and land on
+    page_index_flash the way the CLI's flags do ("off" is no optimize pass
+    at all)."""
     from pageindex import PageIndexLocalClient
     captured = {}
     monkeypatch.setattr(pageindex.flash, "page_index_flash",
@@ -3204,25 +3205,56 @@ def test_flash_knobs_reach_the_local_indexer(tmp_path, sample_pdf, monkeypatch):
     def run(**kwargs):
         captured.clear()
         PageIndexLocalClient(**kwargs).submit_document(sample_pdf)
-        return (captured.get("summary_concurrency"), captured["use_embedded_toc"],
-                captured["optimize"])
+        return (captured.get("summary_concurrency"), captured.get("summary_max_words"),
+                captured["use_embedded_toc"], captured["optimize"])
 
-    assert run(summary_concurrency=8, use_embedded_toc=False, optimize="merge") == (8, False, "merge")
-    assert run(index={"summary_concurrency": 8, "use_embedded_toc": False,
-                      "optimize": "off"}) == (8, False, False)
-    assert run() == (None, True, "full")
+    assert run(summary_concurrency=8, summary_max_words=80, use_embedded_toc=False,
+               optimize="merge") == (8, 80, False, "merge")
+    assert run(index={"summary_concurrency": 8, "summary_max_words": 80,
+                      "use_embedded_toc": False, "optimize": "off"}) == (8, 80, False, False)
+    assert run() == (None, None, True, "full")
     for kwargs, msg in (({"index": {"use_embedded_toc": "no"}},
                          r'index\["use_embedded_toc"\] must be a bool'),
                         ({"optimize": "sometimes"},
                          r'optimize must be "full", "merge" or "off"'),
-                        ({"summary_concurrency": "8"}, "summary_concurrency must be a")):
+                        ({"summary_concurrency": "8"}, "summary_concurrency must be a"),
+                        ({"summary_concurrency": -1},
+                         "summary_concurrency must be a positive int"),
+                        ({"index": {"summary_max_words": -5}},
+                         r'index\["summary_max_words"\] must be a positive int')):
         with pytest.raises(PageIndexAPIError, match=msg):
             PageIndexLocalClient(**kwargs)
 
 
-def test_summary_concurrency_caps_expand_too(tmp_path, monkeypatch):
+def test_standard_mode_refuses_the_flash_summary_knobs(tmp_path, sample_pdf, monkeypatch):
+    """Standard indexing reads neither summary knob: a submit that would
+    silently drop the user's cap refuses instead."""
+    from pageindex import PageIndexLocalClient
+    import pageindex.page_index_classic as classic
+    monkeypatch.setattr(classic, "page_index_main", lambda *a, **kw: {
+        "structure": [{"title": "T", "start_index": 1, "end_index": 1, "nodes": []}]})
+    monkeypatch.chdir(tmp_path)
+    for name, value in (("summary_concurrency", 2), ("summary_max_words", 7)):
+        with pytest.raises(PageIndexAPIError, match="summary_concurrency are flash-only"):
+            PageIndexLocalClient(**{name: value}).submit_document(sample_pdf, mode="standard")
+    PageIndexLocalClient().submit_document(sample_pdf, mode="standard")
+
+
+def test_page_index_flash_refuses_bad_summary_knobs():
+    """Only a positive int is a cap: NaN deadlocks the summary lane, a
+    fraction lifts expand's cap, a negative fails deep inside the run."""
+    import pageindex.flash.api as flash_api
+    for name, value in (("summary_concurrency", -1), ("summary_concurrency", 0),
+                        ("summary_concurrency", float("nan")),
+                        ("summary_concurrency", 2.5), ("summary_max_words", -5)):
+        with pytest.raises(ValueError, match=f"{name} must be a positive int"):
+            flash_api.page_index_flash("never-read.pdf", **{name: value})
+
+
+def test_summary_concurrency_caps_both_lanes_on_every_path(tmp_path, monkeypatch):
     """A user who lowers summary_concurrency for a tight quota gets the whole
-    indexing lane lowered: expand's own gate takes the same cap."""
+    indexing lane lowered: the summaries and expand's own gate, whether they
+    overlap or run one after the other."""
     from conftest import build_pdf
     import pageindex.flash.api as flash_api
     import pageindex.tree_optimize as tree_optimize
@@ -3237,26 +3269,36 @@ def test_summary_concurrency_caps_expand_too(tmp_path, monkeypatch):
     pdf.write_bytes(build_pdf(["x"]))
     monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: {
         "structure": roots(), "page_texts": list(pages)})
-    in_flight, peak = 0, 0
+    in_flight = {"expand": 0, "summary": 0}
+    peak = {"expand": 0, "summary": 0}
+
+    async def track(lane):
+        in_flight[lane] += 1
+        peak[lane] = max(peak[lane], in_flight[lane])
+        await asyncio.sleep(0.02)
+        in_flight[lane] -= 1
 
     async def propose(model, prompt):
-        nonlocal in_flight, peak
-        in_flight += 1
-        peak = max(peak, in_flight)
-        await asyncio.sleep(0.02)
-        in_flight -= 1
+        await track("expand")
         return {"subsections": []}
     monkeypatch.setattr(tree_optimize, "ask_model", propose)
 
     async def summarize(model, prompt):
+        await track("summary")
         return '{"summary": "ok"}'
     monkeypatch.setattr(pageindex.utils, "llm_acompletion", summarize)
 
-    flash_api.page_index_flash(str(pdf), summary_model="m", summary_concurrency=1)
-    assert peak == 1
-    peak = 0
-    flash_api.page_index_flash(str(pdf), summary_model="m")  # control: the three overlap
-    assert peak == 3
+    def run(**kwargs):
+        peak.update(expand=0, summary=0)
+        flash_api.page_index_flash(str(pdf), summary_model="m", **kwargs)
+        return peak["expand"], peak["summary"]
+
+    assert run(summary_concurrency=1) == (1, 1)
+    assert run() == (3, 3)  # control: the three overlap
+    assert run(summary=False, summary_concurrency=1) == (1, 0)
+    assert run(summary=False) == (3, 0)
+    assert run(optimize="merge", summary_concurrency=1) == (0, 1)
+    assert run(optimize="merge") == (0, 3)
 
 
 def test_count_tokens_falls_back_to_the_default_tokenizer(monkeypatch):

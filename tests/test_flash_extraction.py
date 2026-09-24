@@ -789,3 +789,9 @@ def test_flash_cli_summary_max_words_reaches_the_indexer(monkeypatch, tmp_path):
     captured = _run_flash_cli(monkeypatch, tmp_path, ["--summary-max-words", "80"],
                               [{"title": "A", "start_index": 1, "end_index": 1}])
     assert captured["summary_max_words"] == 80
+
+
+def test_flash_cli_summary_flags_refuse_standard_mode(monkeypatch, tmp_path):
+    for flag in ("--summary-concurrency", "--summary-max-words"):
+        with pytest.raises(ValueError, match=f"{flag} requires Flash mode"):
+            _run_flash_cli(monkeypatch, tmp_path, ["--mode", "standard", flag, "8"], [])
