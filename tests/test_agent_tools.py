@@ -651,22 +651,9 @@ def test_as_openai_tools_invocation_runs_call_tool(client, store_path):
     tool = {t.name: t for t in client.as_openai_tools()}["get_document"]
     out = asyncio.run(tool.on_invoke_tool(
         None, json.dumps({"doc_name": "report.pdf", "folder_id": None})))
-    payload = json.loads(out)
+    # The framework's own MCP conversion: a text result is its text item.
+    payload = json.loads(out["text"])
     assert payload["success"] is True and payload["name"] == "report.pdf"
-
-
-def test_as_openai_tools_malformed_args_answer_the_model(client, store_path):
-    """strict_json_schema is off, so a truncated or non-object argument
-    string is reachable; raising here aborted the caller's whole run —
-    the model must get the guided envelope back and retry instead."""
-    pytest.importorskip("agents")
-    seed_doc(store_path, "pi-a", "report.pdf")
-    tool = {t.name: t for t in client.as_openai_tools()}["get_document"]
-    for bad in ('{not json', '[1, 2]', '"x"', 'null'):
-        out = asyncio.run(tool.on_invoke_tool(None, bad))
-        payload = json.loads(out)
-        assert payload["errorCode"] == "INVALID_INPUT"
-        assert "JSON object" in payload["error"]
 
 
 def test_as_openai_tools_cloud_object_params_survive(monkeypatch):
@@ -696,7 +683,7 @@ def test_as_openai_tools_cloud_object_params_survive(monkeypatch):
                      "inputSchema": schema}]
 
         def call_tool(self, name, arguments):
-            return json.dumps({"success": True}), False
+            return _text_block(json.dumps({"success": True})), False
 
     monkeypatch.setattr(mcp_bridge, "McpBridge", _ObjBridge)
     cloud = PageIndexCloudClient(api_key="pi-test-key")
@@ -751,11 +738,10 @@ def test_claude_agent_config_is_sugar_over_the_explicit_form(
     assert renamed["allowed_tools"] == ["mcp__docs"]
 
 
-def test_claude_agent_config_local(client, store_path):
+def test_claude_agent_config_local(client):
     pytest.importorskip("claude_agent_sdk")
-    seed_doc(store_path, "pi-a", "report.pdf")
-    config = client.claude_agent_config(doc_id="pi-a")
-    assert "report.pdf" in config["system_prompt"]
+    config = client.claude_agent_config()
+    assert config["system_prompt"] == AGENT_INSTRUCTIONS
     assert config["allowed_tools"] == ["mcp__pageindex"]
     assert config["mcp_servers"]["pageindex"]["name"] == "pageindex"
     # The SDK server's declared identity follows the registration key.
@@ -764,13 +750,80 @@ def test_claude_agent_config_local(client, store_path):
     assert renamed["allowed_tools"] == ["mcp__docs"]
 
 
-def test_openai_agent_config_local(client, store_path):
+def test_claude_agent_config_forwards_a_claude_chat_model(cloud_with_fake_bridge):
+    # chat_model says who answers; the Claude Agent SDK takes Anthropic's
+    # own name, so LiteLLM's routing prefix is stripped.
+    for name in ("anthropic/claude-sonnet-4-6", "claude-sonnet-4-6",
+                 "litellm/anthropic/claude-sonnet-4-6"):
+        cloud = PageIndexCloudClient(api_key="pi-test-key", chat_model=name)
+        assert cloud.claude_agent_config()["model"] == "claude-sonnet-4-6"
+    # Names are sent as written — no model map gates them.
+    for name in ("anthropic/claude-3-5-sonnet-latest",
+                 "claude-3-5-sonnet-latest"):
+        cloud = PageIndexCloudClient(api_key="pi-test-key", chat_model=name)
+        assert cloud.claude_agent_config()["model"] == "claude-3-5-sonnet-latest"
+
+
+def test_claude_agent_config_carries_any_chosen_chat_model(
+        cloud_with_fake_bridge):
+    # A model you set is sent as written — the destination judges the id.
+    for name in ("gpt-4.1", "openrouter/anthropic/claude-sonnet-4-6"):
+        cloud = PageIndexCloudClient(api_key="pi-test-key", chat_model=name)
+        assert cloud.claude_agent_config()["model"] == name
+        # An explicit model may be the SDK's own name (an alias included)...
+        assert cloud.claude_agent_config(model="sonnet")["model"] == "sonnet"
+        # ... or the client's spelling, read exactly like chat_model.
+        for spelling in ("anthropic/claude-sonnet-4-6",
+                         "litellm/anthropic/claude-sonnet-4-6"):
+            assert (cloud.claude_agent_config(model=spelling)["model"]
+                    == "claude-sonnet-4-6")
+    # Explicitly writing the stock value is a choice too: it carries.
+    cloud = PageIndexCloudClient(api_key="pi-test-key", chat_model="gpt-5.6-sol")
+    assert cloud.claude_agent_config()["model"] == "gpt-5.6-sol"
+
+
+def test_claude_agent_config_managed_chat_sets_no_model(cloud_with_fake_bridge):
+    cloud, _ = cloud_with_fake_bridge
+    assert "model" not in cloud.claude_agent_config()
+
+
+def test_claude_agent_config_local_chat_model(store_path):
+    pytest.importorskip("claude_agent_sdk")
+    local = PageIndexLocalClient(storage_path=store_path,
+                                 chat_model="anthropic/claude-sonnet-4-6")
+    assert local.claude_agent_config()["model"] == "claude-sonnet-4-6"
+    assert "model" not in PageIndexLocalClient(
+        storage_path=store_path).claude_agent_config()
+
+
+def test_claude_agent_config_route_prefix_sets_the_channel_switch(
+        cloud_with_fake_bridge):
+    # Claude Code picks its transport from env switches, not a client
+    # class — a routing prefix rides along as that one switch, set to
+    # "1", and nothing else: the rest of the caller's environment is the
+    # caller's, and how the CLI weighs its own switches is the CLI's
+    # business, not this SDK's.
+    cloud, _ = cloud_with_fake_bridge
+    for prefix, switch in (("bedrock", "CLAUDE_CODE_USE_BEDROCK"),
+                           ("vertex_ai", "CLAUDE_CODE_USE_VERTEX"),
+                           ("azure_ai", "CLAUDE_CODE_USE_FOUNDRY")):
+        cloud.chat_model = f"{prefix}/claude-opus-4-6"
+        config = cloud.claude_agent_config()
+        assert config["model"] == "claude-opus-4-6"
+        assert config["env"] == {switch: "1"}
+    # anthropic/ and bare spellings name a model, not a channel: env
+    # stays out, so the same name means the same thing on every surface.
+    for spelling in ("anthropic/claude-opus-4-6", "claude-opus-4-6"):
+        cloud.chat_model = spelling
+        assert "env" not in cloud.claude_agent_config()
+
+
+def test_openai_agent_config_local(client):
     pytest.importorskip("agents")
     from agents import Agent
-    seed_doc(store_path, "pi-a", "report.pdf")
-    config = client.openai_agent_config(doc_id="pi-a")
+    config = client.openai_agent_config()
     assert config["name"] == "PageIndex"
-    assert "report.pdf" in config["instructions"]
+    assert config["instructions"] == AGENT_INSTRUCTIONS
     assert [tool.name for tool in config["tools"]] == list(tool_names())
     assert config["model"] == client.retrieve_model
     assert client.openai_agent_config(model="gpt-x")["model"] == "gpt-x"
@@ -904,17 +957,46 @@ def test_openai_agent_config_cloud_omits_model(cloud_with_fake_bridge):
                                                        "get_document"]
 
 
-def test_anthropic_runner_config_shapes(client, store_path):
+def test_anthropic_runner_config_accepts_the_litellm_spelling(client):
+    pytest.importorskip("anthropic")
+    config = client.anthropic_runner_config(
+        model="anthropic/claude-3-opus-20240229")
+    assert config["model"] == "claude-3-opus-20240229"
+
+
+def test_anthropic_runner_config_carries_a_claude_chat_model(client, store_path):
+    pytest.importorskip("anthropic")
+    local = PageIndexLocalClient(storage_path=store_path,
+                                 chat_model="anthropic/claude-3-opus-20240229")
+    config = local.anthropic_runner_config()
+    assert config["model"] == "claude-3-opus-20240229"
+    # The stock default was never chosen: nothing to send.
+    with pytest.raises(PageIndexAPIError, match="needs a model"):
+        client.anthropic_runner_config()
+
+
+def test_anthropic_runner_config_cleared_chat_model_needs_a_model(store_path):
+    """'' and None both mean "configures nothing": a cleared chat_model
+    must get the crafted refusal, never a {'model': ''} config or a
+    NoneType crash."""
+    pytest.importorskip("anthropic")
+    local = PageIndexLocalClient(storage_path=store_path,
+                                 chat_model="claude-sonnet-4-5")
+    for cleared in ("", None):
+        local.chat_model = cleared
+        with pytest.raises(PageIndexAPIError, match="needs a model"):
+            local.anthropic_runner_config()
+
+
+def test_anthropic_runner_config_shapes(client):
     pytest.importorskip("anthropic")
     import anthropic
     from anthropic.lib.tools import BetaAsyncFunctionTool
-    seed_doc(store_path, "pi-a", "report.pdf")
-    config = client.anthropic_runner_config(model="claude-3-opus-20240229",
-                                            doc_id="pi-a")
-    assert config["max_tokens"] == 4096
+    config = client.anthropic_runner_config(model="claude-3-opus-20240229")
+    assert config["max_tokens"] == 8192
     assert config["max_iterations"] == 10
     assert config["cache_control"] == {"type": "ephemeral"}
-    assert "report.pdf" in config["system"]
+    assert config["system"] == AGENT_INSTRUCTIONS
     assert [tool.name for tool in config["tools"]] == list(tool_names())
     assert (client.anthropic_runner_config(model="claude-sonnet-4-5")
             ["max_tokens"] == 8192)
@@ -942,104 +1024,6 @@ def test_anthropic_runner_config_cloud(cloud_with_fake_bridge):
                                                        "get_document"]
 
 
-# ── config helpers: doc_id is structural in the tools, not just prompted ──
-
-def test_openai_agent_config_doc_scope_enforced_in_tools(client, store_path):
-    pytest.importorskip("agents")
-    seed_doc(store_path, "pi-a", "report.pdf")
-    seed_doc(store_path, "pi-b", "payroll.pdf",
-             created_at="2026-08-02T10:00:00.123000")
-    tools = {tool.name: tool
-             for tool in client.openai_agent_config(doc_id="pi-a")["tools"]}
-    out = asyncio.run(tools["get_page_content"].on_invoke_tool(
-        None, json.dumps({"doc_name": "payroll.pdf", "pages": "1"})))
-    assert json.loads(out)["errorCode"] == "NOT_FOUND"
-    out = asyncio.run(tools["browse_documents"].on_invoke_tool(None, "{}"))
-    assert [doc["name"]
-            for doc in json.loads(out)["documents"]] == ["report.pdf"]
-
-
-def test_anthropic_runner_config_doc_scope_enforced_in_tools(client,
-                                                             store_path):
-    pytest.importorskip("anthropic")
-    from anthropic.lib.tools import ToolError
-    seed_doc(store_path, "pi-a", "report.pdf")
-    seed_doc(store_path, "pi-b", "payroll.pdf",
-             created_at="2026-08-02T10:00:00.123000")
-    config = client.anthropic_runner_config(model="claude-sonnet-4-5",
-                                            doc_id="pi-a")
-    tools = {tool.name: tool for tool in config["tools"]}
-    with pytest.raises(ToolError, match="NOT_FOUND"):
-        tools["get_page_content"].call({"doc_name": "payroll.pdf",
-                                        "pages": "1"})
-    browse = json.loads(tools["browse_documents"].call({}))
-    assert [doc["name"] for doc in browse["documents"]] == ["report.pdf"]
-
-
-def test_claude_agent_config_doc_scope_enforced_in_tools(client, store_path,
-                                                         monkeypatch):
-    """claude_agent_config(doc_id=...) must wire scope all the way into the
-    handlers it registers — an out-of-scope document returns NOT_FOUND. The
-    assertion has to drive those handlers, or build_claude_mcp's doc_ids
-    pass-through goes unguarded."""
-    claude_agent_sdk = pytest.importorskip("claude_agent_sdk")
-    seed_doc(store_path, "pi-a", "report.pdf")
-    seed_doc(store_path, "pi-b", "payroll.pdf",
-             created_at="2026-08-02T10:00:00.123000")
-
-    registered = {}
-    create_server = claude_agent_sdk.create_sdk_mcp_server
-
-    def capture(**kwargs):
-        registered.update(kwargs)
-        return create_server(**kwargs)
-
-    monkeypatch.setattr(claude_agent_sdk, "create_sdk_mcp_server", capture)
-    config = client.claude_agent_config(doc_id="pi-a")
-    assert "report.pdf" in config["system_prompt"]
-    handlers = {spec.name: spec.handler for spec in registered["tools"]}
-    result = asyncio.run(handlers["get_page_content"](
-        {"doc_name": "payroll.pdf", "pages": "1"}))
-    assert result.get("is_error")
-    assert json.loads(result["content"][0]["text"])["errorCode"] == "NOT_FOUND"
-    browse = asyncio.run(handlers["browse_documents"]({}))
-    listed = json.loads(browse["content"][0]["text"])["documents"]
-    assert [doc["name"] for doc in listed] == ["report.pdf"]
-
-
-def test_openai_agent_config_scoped_shadow_check(client, store_path):
-    """The bundles' tools resolve names inside the allowlist, so a same-name
-    document outside the target set must not block — only an in-set
-    duplicate shadows."""
-    pytest.importorskip("agents")
-    seed_doc(store_path, "pi-old", "report.pdf")
-    seed_doc(store_path, "pi-new", "report.pdf",
-             created_at="2026-08-02T10:00:00.123000")
-    config = client.openai_agent_config(doc_id="pi-old")
-    assert "report.pdf" in config["instructions"]
-    with pytest.raises(PageIndexAPIError, match="shadowed"):
-        client.openai_agent_config(doc_id=["pi-old", "pi-new"])
-
-
-def test_anthropic_runner_config_scoped_shadow_check(client, store_path):
-    pytest.importorskip("anthropic")
-    seed_doc(store_path, "pi-old", "report.pdf")
-    seed_doc(store_path, "pi-new", "report.pdf",
-             created_at="2026-08-02T10:00:00.123000")
-    config = client.anthropic_runner_config(model="claude-sonnet-4-5",
-                                            doc_id="pi-old")
-    assert "report.pdf" in config["system"]
-
-
-def test_claude_agent_config_scoped_shadow_check(client, store_path):
-    pytest.importorskip("claude_agent_sdk")
-    seed_doc(store_path, "pi-old", "report.pdf")
-    seed_doc(store_path, "pi-new", "report.pdf",
-             created_at="2026-08-02T10:00:00.123000")
-    config = client.claude_agent_config(doc_id="pi-old")
-    assert "report.pdf" in config["system_prompt"]
-
-
 def test_anthropic_runner_config_thinking_lifts_max_tokens(client):
     pytest.importorskip("anthropic")
     config = client.anthropic_runner_config(
@@ -1051,24 +1035,55 @@ def test_anthropic_runner_config_thinking_lifts_max_tokens(client):
         model="claude-sonnet-4-5")
 
 
-def test_bridge_invoker_reraises_auth_failures():
-    class Revoked:
-        def call_tool(self, name, arguments):
-            raise PageIndexAPIError("HTTP 401", status_code=401)
+def test_bridge_invoker_reraises_auth_and_transport_failures():
+    """Auth failures and what survives the bridge's own retries (429/5xx)
+    escape to the caller; a status-less JSON-RPC failure (the model's own
+    bad arguments) stays a model-visible envelope, and so does a non-JSON
+    200 body: its JSONDecodeError is a RequestException too, but the server
+    was reached."""
+    import requests
 
-    invoke = agent_tools_module._bridge_invoker(Revoked(), "get_document", {})
-    with pytest.raises(PageIndexAPIError, match="401"):
-        invoke({})
-    # Transport blips stay contained in the retryable envelope.
+    def failing(exc):
+        class Bridge:
+            def call_tool(self, name, arguments):
+                raise exc
+        return agent_tools_module._bridge_invoker(Bridge(), "get_document", {})
 
-    class Down:
-        def call_tool(self, name, arguments):
-            raise PageIndexAPIError("HTTP 503", status_code=503)
-
-    text, is_error = agent_tools_module._bridge_invoker(
-        Down(), "get_document", {})({})
+    for status in (401, 403, 429, 503):
+        with pytest.raises(PageIndexAPIError) as info:
+            failing(PageIndexAPIError(f"HTTP {status}", status_code=status))({})
+        assert info.value.status_code == status
+    blocks, is_error = failing(
+        PageIndexAPIError("MCP error -32602: bad params"))({})
     assert is_error
-    assert json.loads(text)["errorCode"] == "INTERNAL_ERROR"
+    assert json.loads(blocks[0]["text"])["errorCode"] == "INTERNAL_ERROR"
+    garbled = PageIndexAPIError("non-JSON response (HTTP 200).", status_code=200)
+    garbled.__cause__ = requests.exceptions.JSONDecodeError("bad", "<html>", 0)
+    blocks, is_error = failing(garbled)({})
+    assert is_error
+    assert json.loads(blocks[0]["text"])["errorCode"] == "INTERNAL_ERROR"
+
+
+def test_bridge_invoker_reraises_account_limits():
+    """The cloud answers upstream throttling and an exhausted quota as a
+    normal tool error (HTTP 200 + errorCode): the model can act on neither,
+    so they escape like a post-retry 429; every other code stays a
+    model-visible envelope."""
+    def answering(payload):
+        class Bridge:
+            def call_tool(self, name, arguments):
+                return [{"type": "text", "text": json.dumps(payload)}], True
+        return agent_tools_module._bridge_invoker(Bridge(), "get_document", {})
+
+    for code, status in (("RATE_LIMITED", 429), ("USAGE_LIMIT_REACHED", 402)):
+        with pytest.raises(PageIndexAPIError,
+                           match=r"limit \(retry_after_seconds: 7\)") as info:
+            answering({"error": "limit", "errorCode": code,
+                       "retry_after_seconds": 7})({})
+        assert info.value.status_code == status
+    blocks, is_error = answering({"error": "gone", "errorCode": "NOT_FOUND"})({})
+    assert is_error
+    assert json.loads(blocks[0]["text"])["errorCode"] == "NOT_FOUND"
 
 
 def test_cloud_bridge_gates_the_endpoint(monkeypatch):
@@ -1094,30 +1109,6 @@ def test_cloud_bridge_gates_the_endpoint(monkeypatch):
     assert len(created) == 2  # cached per gate
 
 
-def test_doc_scope_rejected_on_cloud_openai():
-    pytest.importorskip("agents")
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
-    with pytest.raises(PageIndexAPIError, match="server-side"):
-        cloud.as_openai_tools(doc_id="pi-a")
-    # The hosted branch returns before _tool_specs — it must reject too,
-    # not silently drop the allowlist.
-    with pytest.raises(PageIndexAPIError, match="server-side"):
-        cloud.as_openai_tools(hosted=True, doc_id="pi-a")
-
-
-def test_doc_scope_rejected_on_cloud_anthropic():
-    pytest.importorskip("anthropic")
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
-    with pytest.raises(PageIndexAPIError, match="server-side"):
-        cloud.as_anthropic_tools(doc_id="pi-a")
-
-
-def test_doc_scope_rejected_on_cloud_claude():
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
-    with pytest.raises(PageIndexAPIError, match="server-side"):
-        cloud.as_claude_mcp(doc_id="pi-a")
-
-
 def test_as_anthropic_tools_missing_dependency(client, monkeypatch):
     monkeypatch.setitem(sys.modules, "anthropic", None)
     with pytest.raises(PageIndexAPIError, match="anthropic"):
@@ -1137,7 +1128,8 @@ def test_as_anthropic_tools_local_in_process(client, store_path):
     assert browse.input_schema == _local_schema("browse_documents")
     assert browse.description == _local_description("browse_documents")
     seed_doc(store_path, "pi-a", "report.pdf")
-    assert "report.pdf" in browse.call({})
+    # Results are the Anthropic SDK's own MCP conversion: content blocks.
+    assert "report.pdf" in browse.call({})[0]["text"]
 
 
 def test_as_anthropic_tools_async_flavor(client, store_path):
@@ -1148,7 +1140,7 @@ def test_as_anthropic_tools_async_flavor(client, store_path):
     assert [tool.name for tool in tools] == list(tool_names())
     seed_doc(store_path, "pi-a", "report.pdf")
     browse = {tool.name: tool for tool in tools}["browse_documents"]
-    assert "report.pdf" in asyncio.run(browse.call({}))
+    assert "report.pdf" in asyncio.run(browse.call({}))[0]["text"]
 
 
 def test_as_anthropic_tools_local_management_opt_in(client):
@@ -1168,8 +1160,8 @@ def test_as_anthropic_tools_local_failures_raise_toolerror(client, store_path):
     tools = {tool.name: tool for tool in client.as_anthropic_tools()}
     with pytest.raises(ToolError) as excinfo:
         tools["get_document"].call({"doc_name": "ghost.pdf"})
-    assert json.loads(excinfo.value.content)["errorCode"] == "NOT_FOUND"
-    assert "report.pdf" in tools["browse_documents"].call({})
+    assert json.loads(excinfo.value.content[0]["text"])["errorCode"] == "NOT_FOUND"
+    assert "report.pdf" in tools["browse_documents"].call({})[0]["text"]
 
 
 def test_as_anthropic_tools_cloud_iserror_raises_toolerror(
@@ -1181,10 +1173,10 @@ def test_as_anthropic_tools_cloud_iserror_raises_toolerror(
     cloud, created = cloud_with_fake_bridge
     tools = cloud.as_anthropic_tools()
     created["bridge"].call_tool = lambda name, arguments: (
-        '{"error": "denied"}', True)
+        _text_block('{"error": "denied"}'), True)
     with pytest.raises(ToolError) as excinfo:
         tools[0].call({"query": "q"})
-    assert json.loads(excinfo.value.content)["error"] == "denied"
+    assert json.loads(excinfo.value.content[0]["text"])["error"] == "denied"
 
 
 def test_as_anthropic_tools_cloud_schemas_pass_through(cloud_with_fake_bridge):
@@ -1201,7 +1193,7 @@ def test_as_anthropic_tools_cloud_schemas_pass_through(cloud_with_fake_bridge):
     # Calls route over the bridge; None-valued arguments mean "omitted".
     out = tools[1].call({"doc_name": "x.pdf", "folder_id": None})
     assert bridge.calls == [("get_document", {"doc_name": "x.pdf"})]
-    assert json.loads(out)["success"] is True
+    assert json.loads(out[0]["text"])["success"] is True
 
 
 def test_as_anthropic_tools_cloud_async_flavor(cloud_with_fake_bridge):
@@ -1212,7 +1204,7 @@ def test_as_anthropic_tools_cloud_async_flavor(cloud_with_fake_bridge):
     assert all(isinstance(tool, BetaAsyncFunctionTool) for tool in tools)
     out = asyncio.run(tools[1].call({"doc_name": "x.pdf"}))
     assert created["bridge"].calls == [("get_document", {"doc_name": "x.pdf"})]
-    assert json.loads(out)["success"] is True
+    assert json.loads(out[0]["text"])["success"] is True
 
 
 def test_as_anthropic_tools_cloud_management_opt_in(cloud_with_fake_bridge):
@@ -1239,7 +1231,7 @@ def test_as_anthropic_tools_cloud_contains_bridge_errors(cloud_with_fake_bridge)
     created["bridge"].call_tool = boom
     with pytest.raises(ToolError) as excinfo:
         tools[0].call({"query": "q"})
-    payload = json.loads(excinfo.value.content)
+    payload = json.loads(excinfo.value.content[0]["text"])
     assert payload["errorCode"] == "INTERNAL_ERROR"
     assert "bridge down" in payload["error"]
 
@@ -1254,6 +1246,11 @@ def test_agent_tools_work_without_frameworks(client, store_path, monkeypatch):
 
 
 # ── cloud agent_tools: MCP bridge ──
+
+def _text_block(text):
+    """A tool result as the bridge returns it: MCP content blocks."""
+    return [{"type": "text", "text": text}]
+
 
 class _FakeBridge:
     def __init__(self, url, headers):
@@ -1319,8 +1316,8 @@ class _FakeBridge:
 
     def call_tool(self, name, arguments):
         self.calls.append((name, arguments))
-        return json.dumps({"success": True, "tool": name,
-                           "args": arguments}), False
+        return _text_block(json.dumps({"success": True, "tool": name,
+                                       "args": arguments})), False
 
 
 @pytest.fixture
@@ -1389,7 +1386,7 @@ def test_cloud_agent_tools_null_description_survives():
 
     class _Bridge:
         def call_tool(self, name, arguments):
-            return json.dumps({"success": True}), False
+            return _text_block(json.dumps({"success": True})), False
 
     tool = _synth(_Bridge(), {
         "name": "search_documents",
@@ -1514,7 +1511,7 @@ def test_mcp_bridge_protocol(monkeypatch):
     # Replace the module's own `requests` binding — patching the shared
     # requests module would leak the fake process-wide.
     monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
-        Session=lambda: types.SimpleNamespace(post=fake_post),
+        Session=lambda: types.SimpleNamespace(post=fake_post, mount=lambda *a: None),
         RequestException=requests_mod.RequestException))
     bridge = McpBridge("https://api.pageindex.ai/mcp",
                        {"Authorization": "Bearer k"})
@@ -1531,8 +1528,9 @@ def test_mcp_bridge_protocol(monkeypatch):
     assert list_headers["Authorization"] == "Bearer k"
 
     # First tools/call 404s (expired session) → re-initialize → retry succeeds.
-    text, is_error = bridge.call_tool("t1", {"a": 1})
-    assert (text, is_error) == ("hello\nworld", False)
+    blocks, is_error = bridge.call_tool("t1", {"a": 1})
+    assert (blocks, is_error) == ([{"type": "text", "text": "hello"},
+                                   {"type": "text", "text": "world"}], False)
     methods = [p["payload"]["method"] for p in posts]
     assert methods.count("initialize") == 2
     # The expired session's negotiated state must not leak into the new
@@ -1578,7 +1576,7 @@ def test_mcp_bridge_400_is_an_error_not_session_expiry(monkeypatch):
         return _Resp(400, text="unknown tool")
 
     monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
-        Session=lambda: types.SimpleNamespace(post=fake_post),
+        Session=lambda: types.SimpleNamespace(post=fake_post, mount=lambda *a: None),
         RequestException=requests_mod.RequestException))
     bridge = McpBridge("https://api.pageindex.ai/mcp",
                        {"Authorization": "Bearer k"})
@@ -1640,7 +1638,7 @@ def test_mcp_bridge_init_notification_bars_concurrent_requests(monkeypatch):
         return resp
 
     monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
-        Session=lambda: types.SimpleNamespace(post=fake_post),
+        Session=lambda: types.SimpleNamespace(post=fake_post, mount=lambda *a: None),
         RequestException=requests_mod.RequestException))
     bridge = McpBridge("https://api.pageindex.ai/mcp",
                        {"Authorization": "Bearer k"})
@@ -1670,25 +1668,141 @@ def test_mcp_bridge_init_notification_bars_concurrent_requests(monkeypatch):
     assert events.count(("start", "initialize")) == 1
 
 
-def test_mcp_bridge_blob_blocks_become_stubs():
-    """Non-text content used to be json.dumps'd wholesale, handing the
-    model the raw base64 payload of an image tool's response."""
-    from pageindex.mcp_bridge import McpBridge
+_BLOB = "A" * 8192  # ~6 KB decoded
+
+
+def test_mcp_bridge_hands_content_blocks_through():
+    """The bridge used to flatten every result to text, dropping images
+    before any adapter could carry them; render_text is now the text-only
+    rendering, and it still never hands the model a raw base64 payload."""
+    from pageindex.mcp_bridge import McpBridge, render_text
 
     bridge = McpBridge("https://api.pageindex.ai/mcp", {})
-    blob = "A" * 8192  # ~6 KB decoded
-    bridge._request = lambda method, params: {"content": [
+    content = [
         {"type": "text", "text": "Page 3 of report.pdf"},
-        {"type": "image", "mimeType": "image/png", "data": blob},
+        {"type": "image", "mimeType": "image/png", "data": _BLOB},
         {"type": "resource",
-         "resource": {"mimeType": "image/jpeg", "blob": blob}},
-    ]}
-    text, is_error = bridge.call_tool("get_document_image", {})
-    assert not is_error
+         "resource": {"mimeType": "image/jpeg", "blob": _BLOB}},
+    ]
+    bridge._request = lambda method, params: {"content": content}
+    assert bridge.call_tool("get_document_image", {}) == (content, False)
+    text = render_text(content)
     assert "Page 3 of report.pdf" in text
     assert "AAAA" not in text
     assert "[image/png content omitted: ~6 KB]" in text
     assert "[image/jpeg content omitted: ~6 KB]" in text
+
+
+class _ImageBridge:
+    """A cloud tool whose result is multimodal: text and a PNG."""
+    is_error = False
+
+    def __init__(self, url, headers):
+        pass
+
+    def list_tools(self):
+        return [{"name": "get_document_image", "description": "d",
+                 "annotations": {"readOnlyHint": True},
+                 "inputSchema": {"type": "object",
+                                 "properties": {"image_path": {"type": "string"}},
+                                 "required": ["image_path"]}}]
+
+    def call_tool(self, name, arguments):
+        return [{"type": "text", "text": "page 1"},
+                {"type": "image", "mimeType": "image/png", "data": "QUJD"},
+                ], self.is_error
+
+
+def test_agent_tools_functions_render_images_as_stubs(monkeypatch):
+    """The str-returning surface keeps the size stub, never the blob."""
+    import pageindex.mcp_bridge as mcp_bridge
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _ImageBridge)
+    fn = PageIndexCloudClient(api_key="pi-test-key").agent_tools()[0]
+    assert fn(image_path="x") == "page 1\n[image/png content omitted: ~1 KB]"
+
+
+def test_openai_mcp_server_carries_mcp_types(client, store_path, monkeypatch):
+    """The in-process server hands the framework MCP types on both sides,
+    local and cloud alike: tools from the specs, results validated as
+    CallToolResult with the content untouched."""
+    pytest.importorskip("agents")
+    from mcp.types import ImageContent, TextContent
+    from pageindex.integrations.openai_agents import build_mcp_server
+    seed_doc(store_path, "pi-a", "report.pdf")
+    local = build_mcp_server(client)
+    assert [tool.name for tool in asyncio.run(local.list_tools())] == list(tool_names())
+    result = asyncio.run(local.call_tool("get_document", {"doc_name": "ghost.pdf"}))
+    # Attribute names differ between mcp 1.x and 2.x; the wire aliases don't.
+    wire = result.model_dump(by_alias=True, exclude_none=True)
+    assert wire["isError"] and isinstance(result.content[0], TextContent)
+    assert json.loads(wire["content"][0]["text"])["errorCode"] == "NOT_FOUND"
+
+    import pageindex.mcp_bridge as mcp_bridge
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _ImageBridge)
+    cloud = build_mcp_server(PageIndexCloudClient(api_key="pi-test-key"))
+    result = asyncio.run(cloud.call_tool("get_document_image", {"image_path": "x"}))
+    wire = result.model_dump(by_alias=True, exclude_none=True)
+    assert not wire["isError"] and isinstance(result.content[1], ImageContent)
+    assert wire["content"][1] == {"type": "image", "data": "QUJD",
+                                  "mimeType": "image/png"}
+
+
+def test_as_openai_tools_images_reach_the_model(monkeypatch):
+    """Images ride as the framework's own image output (a data URL) — the
+    framework's MCP conversion, not the SDK's."""
+    pytest.importorskip("agents")
+    import pageindex.mcp_bridge as mcp_bridge
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _ImageBridge)
+    tool = PageIndexCloudClient(api_key="pi-test-key").as_openai_tools()[0]
+    out = asyncio.run(tool.on_invoke_tool(None, '{"image_path": "x"}'))
+    assert out == [{"type": "text", "text": "page 1"},
+                   {"type": "image", "image_url": "data:image/png;base64,QUJD"}]
+
+
+def test_as_anthropic_tools_images_reach_the_model(monkeypatch):
+    """Images ride as base64 image blocks, on the error channel too — the
+    Anthropic SDK's MCP conversion, not the SDK's."""
+    pytest.importorskip("anthropic")
+    from anthropic.lib.tools import ToolError
+    import pageindex.mcp_bridge as mcp_bridge
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _ImageBridge)
+    tool = PageIndexCloudClient(api_key="pi-test-key").as_anthropic_tools()[0]
+    content = [{"type": "text", "text": "page 1"},
+               {"type": "image", "source": {"type": "base64",
+                                            "media_type": "image/png",
+                                            "data": "QUJD"}}]
+    assert tool.call({"image_path": "x"}) == content
+    monkeypatch.setattr(_ImageBridge, "is_error", True)
+    with pytest.raises(ToolError) as excinfo:
+        tool.call({"image_path": "x"})
+    assert excinfo.value.content == content
+
+
+def test_integrations_carry_mcp_and_render_nothing():
+    """The rule behind the adapters: tool results reach a framework as MCP
+    content and the framework renders them. The SDK's only text rendering
+    (render_text) serves the str-returning plain functions."""
+    integrations = Path(__file__).resolve().parents[1] / "pageindex" / "integrations"
+    for path in integrations.glob("*.py"):
+        assert "render_text" not in path.read_text(encoding="utf-8"), path.name
+
+
+def test_as_claude_mcp_local_handler_passes_blocks_through(client, monkeypatch):
+    """The in-process SDK MCP server speaks MCP: content blocks go out as
+    they came in, images included, with the error marking."""
+    claude_agent_sdk = pytest.importorskip("claude_agent_sdk")
+    import pageindex.agent_tools as agent_tools
+    blocks = [{"type": "text", "text": "page 1"},
+              {"type": "image", "mimeType": "image/png", "data": "QUJD"}]
+    monkeypatch.setattr(agent_tools, "_tool_specs", lambda *args, **kwargs: [
+        ("get_page_content", "d", {"type": "object", "properties": {}},
+         lambda arguments: (blocks, True))])
+    captured = {}
+    monkeypatch.setattr(claude_agent_sdk, "create_sdk_mcp_server",
+                        lambda **kwargs: captured.update(kwargs))
+    client.as_claude_mcp()
+    result = asyncio.run(captured["tools"][0].handler({}))
+    assert result == {"content": blocks, "is_error": True}
 
 
 # ── review-round regressions ──
@@ -1712,7 +1826,7 @@ def test_synth_binding_error_names_the_tool():
 
     class _Bridge:
         def call_tool(self, name, args):
-            return json.dumps(args), False
+            return _text_block(json.dumps(args)), False
 
     meta = {"name": "browse_documents", "description": "d",
             "inputSchema": TOOL_CONTRACT["browse_documents"]["schema"]}
@@ -1733,7 +1847,7 @@ def test_bridge_invoker_coerces_string_booleans():
     class _Bridge:
         def call_tool(self, name, args):
             seen.update(args)
-            return "{}", False
+            return _text_block("{}"), False
 
     invoke = _bridge_invoker(_Bridge(), "get_document",
                              TOOL_CONTRACT["get_document"]["schema"])
@@ -1749,7 +1863,7 @@ def test_synth_optional_no_default_param_is_nullable():
 
     class _Bridge:
         def call_tool(self, name, args):
-            return json.dumps(args), False
+            return _text_block(json.dumps(args)), False
 
     meta = {"name": "browse_documents",
             "description": "d",
@@ -1766,7 +1880,7 @@ def test_synth_array_params_keep_their_item_type():
 
     class _Bridge:
         def call_tool(self, name, args):
-            return json.dumps(args), False
+            return _text_block(json.dumps(args)), False
 
     meta = {"name": "remove_documents", "description": "d",
             "inputSchema": {
@@ -1796,7 +1910,7 @@ def test_synth_escape_hatches():
     class _Bridge:
         def call_tool(self, name, args):
             calls.append((name, args))
-            return "ok", False
+            return _text_block("ok"), False
 
     # Tool named "_invoke" must not recurse into itself.
     invoke_named = _synth(_Bridge(), {
@@ -1913,10 +2027,11 @@ def test_bridge_call_tool_surfaces_iserror(monkeypatch):
             "content": [{"type": "text", "text": '{"error": "denied"}'}]}})
 
     monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
-        Session=lambda: types.SimpleNamespace(post=fake_post),
+        Session=lambda: types.SimpleNamespace(post=fake_post, mount=lambda *a: None),
         RequestException=requests_mod.RequestException))
     bridge = McpBridge("https://api.pageindex.ai/mcp", {})
-    assert bridge.call_tool("t", {}) == ('{"error": "denied"}', True)
+    assert bridge.call_tool("t", {}) == (
+        [{"type": "text", "text": '{"error": "denied"}'}], True)
 
 
 def test_bridge_rejects_mismatched_reply_id(monkeypatch):
@@ -1951,7 +2066,7 @@ def test_bridge_rejects_mismatched_reply_id(monkeypatch):
                                                    "text": "old"}]}})
 
     monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
-        Session=lambda: types.SimpleNamespace(post=fake_post),
+        Session=lambda: types.SimpleNamespace(post=fake_post, mount=lambda *a: None),
         RequestException=requests_mod.RequestException))
     bridge = McpBridge("https://api.pageindex.ai/mcp", {})
     with pytest.raises(PageIndexAPIError, match="no reply matching"):
@@ -1976,11 +2091,24 @@ def test_bridge_transport_error_is_pageindex_error(monkeypatch):
         raise requests_mod.ConnectionError("dns down")
 
     monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
-        Session=lambda: types.SimpleNamespace(post=dead_post),
+        Session=lambda: types.SimpleNamespace(post=dead_post, mount=lambda *a: None),
         RequestException=requests_mod.RequestException))
     bridge = McpBridge("https://api.pageindex.ai/mcp", {})
     with pytest.raises(PageIndexAPIError, match="Could not reach"):
         bridge.list_tools()
+
+
+def test_handshake_failure_blames_the_key_only_on_auth_statuses(monkeypatch):
+    """A rate-limited or failing handshake is not a key problem."""
+    import types
+    from pageindex.mcp_bridge import McpBridge
+    bridge = McpBridge("https://api.pageindex.ai/mcp", {})
+    for status, blames_key in ((401, True), (429, False), (503, False)):
+        monkeypatch.setattr(bridge, "_post", lambda payload, *a, s=status: (
+            types.SimpleNamespace(status_code=s, text="no", headers={})))
+        with pytest.raises(PageIndexAPIError, match=f"HTTP {status}") as info:
+            bridge.list_tools()
+        assert ("Check your API key" in str(info.value)) is blames_key
 
 
 def test_await_completion_preserves_metadata_over_null_refetch(monkeypatch):
@@ -2174,21 +2302,23 @@ def test_live_cloud_envelope_field_parity(tmp_path):
     exist in the live cloud tool's response for the analogous call — a cloud
     rename of a shared field (has_more, next_offset, content, ...) fails
     here. Guidance wording is deliberately localized and not compared."""
-    from pageindex.mcp_bridge import McpBridge
+    from pageindex.mcp_bridge import McpBridge, render_text
     bridge = McpBridge("https://api.pageindex.ai/mcp",
                        {"Authorization": f"Bearer {LIVE_KEY}"})
-    cloud_browse = json.loads(
-        bridge.call_tool("browse_documents", {"limit": 2})[0])
+
+    def call(name, arguments):
+        return json.loads(render_text(bridge.call_tool(name, arguments)[0]))
+
+    cloud_browse = call("browse_documents", {"limit": 2})
     assert cloud_browse.get("success") is True and cloud_browse["documents"]
     doc_name = cloud_browse["documents"][0]["name"]
     cloud = {
         "browse_documents": cloud_browse,
-        "get_document": json.loads(bridge.call_tool(
-            "get_document", {"doc_name": doc_name})[0]),
-        "get_document_structure": json.loads(bridge.call_tool(
-            "get_document_structure", {"doc_name": doc_name})[0]),
-        "get_page_content": json.loads(bridge.call_tool(
-            "get_page_content", {"doc_name": doc_name, "pages": "1"})[0]),
+        "get_document": call("get_document", {"doc_name": doc_name}),
+        "get_document_structure": call("get_document_structure",
+                                       {"doc_name": doc_name}),
+        "get_page_content": call("get_page_content",
+                                 {"doc_name": doc_name, "pages": "1"}),
     }
 
     store = str(tmp_path / "store")
@@ -2236,6 +2366,122 @@ def test_live_cloud_instructions_nonempty():
     assert bridge.instructions()
 
 
+# Cloud-only capabilities: every instruction line the local copy drops
+# names one of these. Whatever local mode gains, drop its marker here.
+_CLOUD_ONLY_MARKERS = (
+    "get_folder_structure(", "search_documents", "get_document_image",
+    "image_path", "folder_id", "recursive=", 'sort="relevance"',
+)
+
+# The two lines no marker catches — they exist only because the sections
+# above do: the discovery heading and the escalation ladder's closer.
+_CLOUD_ONLY_LINES = (
+    "DOCUMENT DISCOVERY (three-step funnel):",
+    '- "What do I have / list / recent / browse the X folder" '
+    "\u2192 browse_documents (time)",
+    "Only after ALL five steps have been tried may you conclude the "
+    "document is not in the library. Do NOT fall back to general "
+    "knowledge \u2014 if the user's question references their own "
+    "documents, exhaust every discovery path first.",
+)
+
+
+# Exact local rewrites of the cloud's folder/semantic discovery workflow.
+# Do not derive these from AGENT_INSTRUCTIONS: a shared rule removed from
+# the cloud must fail the reverse comparison, not become a new exception.
+_LOCAL_ONLY_LINES = (
+    "DOCUMENT DISCOVERY:",
+    "- browse_documents() — DEFAULT discovery tool, first choice for any "
+    "document-related question. The bare call returns your documents newest "
+    "first with names and descriptions; match them against the user's intent.",
+    '- "What do I have / list / recent" → browse_documents()',
+    '- ANY question that needs a document to answer (including "find THE '
+    'paper about Y") → browse_documents(), then pick the documents whose '
+    "name/description matches the question",
+    "1. browse_documents() and compare every returned name/description "
+    "against the user's intent",
+    "2. Rephrase the query with synonyms or alternative terms and browse again",
+    "3. Page through the ENTIRE library with `limit: 50` and `offset: "
+    "next_offset` until has_more is false — MANDATORY, must be completed "
+    'before concluding "not found"',
+    "Only after ALL steps have been tried may you conclude the document is "
+    "not in the library. Do NOT fall back to general knowledge — if the "
+    "user's question references their own documents, exhaust every discovery "
+    "path first.",
+)
+
+
+def _section_headers(text):
+    """Extract lines that end with ':' as section headers, preserving order."""
+    return [line.strip() for line in text.splitlines()
+            if line.strip() and line.strip().endswith(":")]
+
+
+def _assert_instructions_local_parity(instructions):
+    if instructions is None:
+        raise AssertionError(
+            "Server returned no instructions (None); cannot check parity")
+    frozen = {line for line in AGENT_INSTRUCTIONS.splitlines() if line.strip()}
+    assert set(_LOCAL_ONLY_LINES) <= frozen, "stale _LOCAL_ONLY_LINES entries"
+    live = {line for line in instructions.splitlines() if line.strip()}
+    unexplained = [
+        line for line in sorted(live - frozen)
+        if line not in _CLOUD_ONLY_LINES
+        and not any(marker in line for marker in _CLOUD_ONLY_MARKERS)
+    ]
+    missing = sorted(frozen - live - set(_LOCAL_ONLY_LINES))
+    assert not unexplained and not missing, {
+        "unexpected_cloud_lines": unexplained,
+        "missing_cloud_lines": missing,
+    }
+    # Section order is load-bearing for a system prompt; catch reorders.
+    local_sections = _section_headers(AGENT_INSTRUCTIONS)
+    cloud_sections = _section_headers(instructions)
+    shared = [s for s in local_sections if s in cloud_sections]
+    cloud_shared = [s for s in cloud_sections if s in local_sections]
+    assert shared == cloud_shared, {
+        "section_order_mismatch": {"local": shared, "cloud": cloud_shared},
+    }
+
+
+def test_instructions_parity_allows_intentional_differences():
+    cloud = AGENT_INSTRUCTIONS.replace(
+        "DOCUMENT DISCOVERY:\n", "DOCUMENT DISCOVERY (three-step funnel):\n")
+    cloud += "\n- Call get_folder_structure() to inspect the library."
+    _assert_instructions_local_parity(cloud)
+
+
+@pytest.mark.parametrize("change", [
+    "addition", "deletion", "edit", "edit_with_cloud_marker", "truncation",
+])
+def test_instructions_parity_detects_shared_drift(change):
+    shared = (
+        "- Invoke a tool only when all required parameters are present or "
+        "clearly inferable. Never invent placeholder values."
+    )
+    assert shared in AGENT_INSTRUCTIONS
+    cloud = {
+        "addition": AGENT_INSTRUCTIONS + "\n- Always verify page numbers.",
+        "deletion": AGENT_INSTRUCTIONS.replace(shared, ""),
+        "edit": AGENT_INSTRUCTIONS.replace(shared, "- Never invoke a tool."),
+        "edit_with_cloud_marker": AGENT_INSTRUCTIONS.replace(
+            shared, "- Invoke tools without parameters, including folder tools."),
+        "truncation": "READING WORKFLOW:",
+    }[change]
+    with pytest.raises(AssertionError):
+        _assert_instructions_local_parity(cloud)
+
+
+@pytest.mark.skipif(not LIVE_KEY, reason="PAGEINDEX_API_KEY not set")
+def test_live_cloud_instructions_local_parity():
+    """Drift alarm for shared guidance in the frozen AGENT_INSTRUCTIONS,
+    allowing the intentional differences for cloud-only capabilities."""
+    from pageindex.mcp_bridge import McpBridge
+    bridge = McpBridge("https://api.pageindex.ai/mcp",
+                       {"Authorization": f"Bearer {LIVE_KEY}"})
+    _assert_instructions_local_parity(bridge.instructions())
+
+
 # ── agent_instructions ──
 
 def test_agent_instructions_default(client):
@@ -2248,18 +2494,37 @@ def test_agent_instructions_default(client):
     assert 'sort="relevance"' not in text  # cloud-side capability
 
 
-def test_agent_instructions_with_doc_id(client, store_path):
+def test_document_context(client, store_path):
+    """Targeting is conversation content; the instructions stay static."""
     seed_doc(store_path, "pi-a", "report.pdf")
-    text = client.agent_instructions(doc_id="pi-a")
-    assert text.startswith(AGENT_INSTRUCTIONS)
+    text = client.document_context("pi-a")
     assert "The user has specified document: report.pdf" in text
+    with pytest.raises(TypeError):
+        client.agent_instructions(doc_id="pi-a")
 
     seed_doc(store_path, "pi-b", "other.pdf")
-    multi = client.agent_instructions(doc_id=["pi-a", "pi-b"])
+    multi = client.document_context(["pi-a", "pi-b"])
     assert "The user has specified documents: report.pdf, other.pdf" in multi
 
     with pytest.raises(PageIndexAPIError):
-        client.agent_instructions(doc_id="pi-missing")
+        client.document_context("pi-missing")
+    for bad in (None, 123):
+        with pytest.raises(PageIndexAPIError, match="string or a list"):
+            client.document_context(bad)
+
+
+def test_removed_doc_id_positional_slot_raises(client):
+    """A stale positional doc_id raises instead of landing on the next slot."""
+    from pageindex.integrations.claude_agent_sdk import build_claude_mcp
+    for stale in (lambda: client.agent_instructions("pi-a"),
+                  lambda: client.openai_agent_config("pi-a"),
+                  lambda: client.anthropic_runner_config(
+                      "claude-sonnet-4-5", "pi-a"),
+                  lambda: client.claude_agent_config("pi-a"),
+                  lambda: client.as_claude_mcp(False, "pi-a"),
+                  lambda: build_claude_mcp(client, False, "pi-a")):
+        with pytest.raises(TypeError):
+            stale()
 
 
 def test_local_instructions_name_only_local_tools():
@@ -2289,6 +2554,113 @@ def test_cloud_agent_instructions_served_live(monkeypatch):
     cloud.agent_tools()
     assert cloud.agent_instructions() == "LIVE CLOUD GUIDANCE"
     assert len(created) == 1
+
+
+def test_citation_prompt_cloud(monkeypatch):
+    """The citation prompt is the server's cited_answer prompt, fetched
+    over the same bridge session as agent_tools(); format rides as the
+    prompt's argument; PageIndex chat's cite format by default ("" is
+    unset, so the default too)."""
+    import pageindex.mcp_bridge as mcp_bridge
+    created = []
+
+    class _Bridge(_FakeBridge):
+        def __init__(self, url, headers):
+            super().__init__(url, headers)
+            created.append(self)
+            self.prompts = []
+
+        def get_prompt(self, name, arguments=None):
+            self.prompts.append((name, arguments))
+            fmt = (arguments or {}).get("format", "markdown")
+            return "Cited answers", [{"role": "user", "content": {
+                "type": "text", "text": f"CITATIONS — {fmt}"}}]
+
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _Bridge)
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud.agent_tools()
+    assert cloud.citation_prompt() == "CITATIONS — cite"
+    assert cloud.citation_prompt(format="markdown") == "CITATIONS — markdown"
+    assert cloud.citation_prompt(format="") == "CITATIONS — cite"
+    assert len(created) == 1
+    assert created[0].prompts == [("cited_answer", {"format": "cite"}),
+                                  ("cited_answer", {"format": "markdown"}),
+                                  ("cited_answer", {"format": "cite"})]
+
+
+def test_citation_prompt_empty_raises(monkeypatch):
+    """No silent empty guidance: a prompt with no text raises."""
+    import pageindex.mcp_bridge as mcp_bridge
+
+    class _Bridge(_FakeBridge):
+        def get_prompt(self, name, arguments=None):
+            return None, []
+
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _Bridge)
+    with pytest.raises(PageIndexAPIError, match="empty cited_answer prompt"):
+        PageIndexCloudClient(api_key="pi-test-key").citation_prompt()
+
+
+def test_citation_prompt_local_frozen_copy(client):
+    """Local documents get the SDK's frozen copy of the server's prompt:
+    one text per format, PageIndex chat's cite format by default, only
+    local tools named."""
+    from pageindex.agent_tools import LOCAL_CITATION_PROMPTS
+    assert set(LOCAL_CITATION_PROMPTS) == {"markdown", "cite"}
+    assert client.citation_prompt() == LOCAL_CITATION_PROMPTS["cite"]
+    assert client.citation_prompt(format="") == LOCAL_CITATION_PROMPTS["cite"]
+    for fmt in ("markdown", "cite"):
+        text = client.citation_prompt(format=fmt)
+        assert text == LOCAL_CITATION_PROMPTS[fmt]
+        assert "CITATIONS" in text and "get_document_image" not in text
+        named = set(re.findall(r"\b(\w+)\(", text))
+        assert named and named <= set(tool_names(include_management=True))
+    with pytest.raises(PageIndexAPIError, match="markdown, cite"):
+        client.citation_prompt(format="bogus")
+
+
+@pytest.mark.skipif(not LIVE_KEY, reason="PAGEINDEX_API_KEY not set")
+def test_live_local_citation_prompts_match_cloud():
+    """The frozen local copies are the server's texts minus the one bullet
+    naming get_document_image(); any other server edit fails here."""
+    from pageindex.agent_tools import LOCAL_CITATION_PROMPTS
+    cloud = PageIndexCloudClient(api_key=LIVE_KEY)
+    for fmt, frozen in LOCAL_CITATION_PROMPTS.items():
+        live = cloud.citation_prompt(format=fmt).split("\n")
+        dropped = [line for line in live if "get_document_image()" in line]
+        assert len(dropped) == 1, fmt
+        assert "\n".join(line for line in live if line not in dropped) == frozen
+
+
+@pytest.mark.skipif(not LIVE_KEY, reason="PAGEINDEX_API_KEY not set")
+def test_live_cloud_citation_prompt_formats():
+    """The real server serves cited_answer in both formats, each a
+    distinct rendering of the same rules."""
+    cloud = PageIndexCloudClient(api_key=LIVE_KEY)
+    texts = {fmt: cloud.citation_prompt(format=fmt)
+             for fmt in ("markdown", "cite")}
+    assert all("CITATIONS" in text for text in texts.values())
+    assert len(set(texts.values())) == 2
+    assert cloud.citation_prompt() == texts["cite"]
+
+
+@pytest.mark.skipif(not LIVE_KEY, reason="PAGEINDEX_API_KEY not set")
+def test_live_cloud_citation_format_enumeration():
+    """The server's prompts/list declares the same format set the SDK knows."""
+    from pageindex.agent_tools import LOCAL_CITATION_PROMPTS
+    from pageindex.mcp_bridge import McpBridge
+    bridge = McpBridge("https://api.pageindex.ai/mcp",
+                       {"Authorization": f"Bearer {LIVE_KEY}"})
+    prompts = bridge.list_prompts()
+    cited = next(p for p in prompts if p["name"] == "cited_answer")
+    fmt_arg = next(a for a in cited["arguments"] if a["name"] == "format")
+    # Extract format names from the description text (e.g. "markdown ... or cite")
+    desc = fmt_arg["description"]
+    declared = {w for w in LOCAL_CITATION_PROMPTS if w in desc}
+    assert declared == set(LOCAL_CITATION_PROMPTS), {
+        "sdk": set(LOCAL_CITATION_PROMPTS), "server_declares": declared,
+        "description": desc,
+    }
 
 
 def test_cloud_bridge_cache_threadsafe_and_pickle_clean(monkeypatch):
@@ -2486,16 +2858,12 @@ def test_submit_wait_reraises_definite_poll_answers(fake_cloud_client,
     assert "Processing continues" not in str(err.value)
 
 
-def test_config_helpers_reject_empty_doc_id_on_cloud():
-    """An explicitly empty scope must not silently widen to the whole
-    library — cloud has no tool-layer allowlist to enforce it."""
+def test_document_context_rejects_empty_doc_id():
+    """An explicitly empty selection must not silently widen to the whole
+    library."""
     cloud = PageIndexCloudClient(api_key="pi-test-key")
     with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
-        cloud.openai_agent_config(doc_id=[])
-    with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
-        cloud.anthropic_runner_config(model="claude-sonnet-4-5", doc_id=[])
-    with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
-        cloud.claude_agent_config(doc_id=[])
+        cloud.document_context([])
 
 
 def test_doc_targeting_keeps_transport_errors_out_of_not_found():
@@ -2518,6 +2886,27 @@ def test_doc_targeting_keeps_transport_errors_out_of_not_found():
         with pytest.raises(PageIndexAPIError,
                            match="Documents not found or access denied: pi-a"):
             agent_tools_module.doc_targeting_block(Stub(status), "pi-a")
+
+
+def test_doc_targeting_is_one_lookup_per_document():
+    """One get_document per id, rendered like the cloud's managed chat."""
+    calls = []
+
+    class Client:
+        def get_document(self, doc_id):
+            calls.append(doc_id)
+            return {"id": doc_id, "name": f"{doc_id}.pdf",
+                    "status": "completed",
+                    "metadata": {"quarter": "Q3", "nested": {"x": 1}}}
+
+    single = agent_tools_module.doc_targeting_block(Client(), "pi-a")
+    assert calls == ["pi-a"]
+    assert "Document metadata: {" in single
+    assert '"quarter": "Q3"' in single and '"nested": {"x": 1}' in single
+    block = agent_tools_module.doc_targeting_block(Client(), ["pi-a", "pi-b"])
+    assert calls == ["pi-a", "pi-a", "pi-b"]
+    assert "The user has specified documents: pi-a.pdf, pi-b.pdf" in block
+    assert "Documents metadata: [" in block
 
 
 def test_call_tool_coerces_string_booleans(client, store_path, monkeypatch):
@@ -2593,16 +2982,15 @@ def test_browse_documents_pages_by_rows_returned():
     assert payload["has_more"] is False and payload["next_offset"] is None
 
 
-def test_agent_instructions_carry_user_metadata(client, store_path):
-    """The targeting block promises names and metadata; local get_document
-    keeps the 7-key detail wire shape, so the tags come from the listing."""
+def test_document_context_carries_user_metadata(client, store_path):
+    """The targeting block carries the user's tags from get_document."""
     seed_doc(store_path, "pi-1", "report.pdf",
              metadata={"quarter": "Q3", "year": 2025})
-    text = client.agent_instructions(doc_id="pi-1")
+    text = client.document_context("pi-1")
     assert '"quarter": "Q3"' in text and '"year": 2025' in text
 
 
-# ── wait-poll resilience, instruction scoping, agent_tools doc_id ──
+# ── wait-poll resilience, document targeting ──
 
 def test_await_completion_polls_through_transient_refetch_failure(monkeypatch):
     """A refetch that fails once must not end the wait early — the caller
@@ -2623,36 +3011,6 @@ def test_await_completion_polls_through_transient_refetch_failure(monkeypatch):
     assert calls["n"] == 2
 
 
-def test_agent_instructions_doc_id_shadow_check(client, store_path):
-    seed_doc(store_path, "pi-old", "report.pdf",
-             created_at="2026-08-01T10:00:00.123000")
-    seed_doc(store_path, "pi-new", "report.pdf",
-             created_at="2026-08-05T10:00:00.123000")
-    # standalone instructions get the strict check; only the *_agent_config
-    # bundles (which build the tools too) relax it
-    with pytest.raises(PageIndexAPIError, match="shadowed"):
-        client.agent_instructions(doc_id="pi-old")
-
-
-def test_agent_tools_doc_id_scopes_the_functions(client, store_path):
-    seed_doc(store_path, "pi-a", "alpha.pdf")
-    seed_doc(store_path, "pi-b", "secret.pdf")
-    funcs = {fn.__name__: fn for fn in client.agent_tools(doc_id="pi-a")}
-    blocked = json.loads(funcs["get_page_content"](doc_name="secret.pdf",
-                                                   pages="1"))
-    assert "success" not in blocked
-    assert blocked["errorCode"] == "NOT_FOUND"
-    allowed = json.loads(funcs["get_page_content"](doc_name="alpha.pdf",
-                                                   pages="1"))
-    assert allowed["success"] is True
-
-
-def test_agent_tools_doc_id_refused_on_cloud():
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
-    with pytest.raises(PageIndexAPIError, match="local tools only"):
-        cloud.agent_tools(doc_id="pi-a")
-
-
 def test_cloud_tool_list_empty_raises(monkeypatch):
     """An empty tools/list must raise like empty instructions does: a
     zero-tool agent answers from the model's own knowledge instead of
@@ -2671,3 +3029,370 @@ def test_cloud_tool_list_empty_raises(monkeypatch):
     cloud = PageIndexCloudClient(api_key="pi-test-key")
     with pytest.raises(PageIndexAPIError, match="no tools"):
         cloud.as_openai_tools()
+
+
+def test_claude_wire_reads_only_the_routing_prefix():
+    from pageindex.client import _claude_wire
+    assert _claude_wire("claude-sonnet-4-6", "t()") == (
+        "claude-sonnet-4-6", "anthropic")
+    assert _claude_wire("anthropic/claude-sonnet-4-6", "t()") == (
+        "claude-sonnet-4-6", "anthropic")
+    assert _claude_wire(
+        "bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0", "t()") == (
+        "anthropic.claude-3-5-sonnet-20241022-v2:0", "bedrock")
+    assert _claude_wire(
+        "litellm/bedrock/us.anthropic.claude-sonnet-4-6-v1:0", "t()") == (
+        "us.anthropic.claude-sonnet-4-6-v1:0", "bedrock")
+    assert _claude_wire("vertex_ai/claude-sonnet-4@20250514", "t()") == (
+        "claude-sonnet-4@20250514", "vertex_ai")
+    assert _claude_wire("azure_ai/claude-opus-4-6", "t()") == (
+        "claude-opus-4-6", "azure_ai")
+    # Unknown prefixes and bare names ship verbatim on the direct route.
+    assert _claude_wire("team/claude-prod", "t()") == (
+        "team/claude-prod", "anthropic")
+    assert _claude_wire("sonnet", "t()") == ("sonnet", "anthropic")
+    with pytest.raises(PageIndexAPIError, match="must be a str"):
+        _claude_wire(123, "t()")
+
+
+def test_stock_chat_model_never_impersonates_a_choice(store_path):
+    pytest.importorskip("anthropic")
+    from pageindex import PageIndexClient
+    # Flagged at construction; any spelling that names a model clears it.
+    stock = PageIndexLocalClient(storage_path=store_path)
+    assert stock._chat_model_stock
+    with pytest.raises(PageIndexAPIError, match="needs a model"):
+        stock.anthropic_runner_config()
+    for kwargs in ({"chat_model": "gpt-5.6-sol"}, {"retrieve_model": "gpt-4o"},
+                   {"model": "gpt-4.1-mini"}):
+        assert not PageIndexLocalClient(
+            storage_path=store_path, **kwargs)._chat_model_stock
+    # chat="local" alone names no model; managed chat has none at all.
+    assert PageIndexClient(api_key="pi-test-key",
+                           chat="local")._chat_model_stock
+    assert PageIndexCloudClient(api_key="pi-test-key")._chat_model_stock
+    # Assignment is a choice: the flag follows the write paths.
+    stock.chat_model = "anthropic/claude-opus-4-1"
+    assert not stock._chat_model_stock
+    assert stock.anthropic_runner_config()["model"] == "claude-opus-4-1"
+
+
+def test_config_yaml_chat_model_is_a_choice(store_path, monkeypatch,
+                                            cloud_with_fake_bridge):
+    # config.yaml is the third way to name a chat model; a key set there
+    # must read as chosen, exactly like the constructor spellings.
+    pytest.importorskip("anthropic")
+    import pageindex.utils
+    real = pageindex.utils.ConfigLoader._load_yaml
+
+    def with_chat_model(path):
+        loaded = dict(real(path))
+        loaded["chat_model"] = "anthropic/claude-sonnet-4-6"
+        return loaded
+
+    monkeypatch.setattr(pageindex.utils.ConfigLoader, "_load_yaml",
+                        staticmethod(with_chat_model))
+    local = PageIndexLocalClient(storage_path=store_path)
+    assert not local._chat_model_stock
+    assert local.anthropic_runner_config()["model"] == "claude-sonnet-4-6"
+    cloud = PageIndexCloudClient(api_key="pi-test-key", chat="local")
+    assert not cloud._chat_model_stock
+    assert cloud.claude_agent_config()["model"] == "claude-sonnet-4-6"
+
+    def with_blank_keys(path):
+        loaded = dict(real(path))
+        loaded["chat_model"] = None   # a bare "chat_model:" line
+        loaded["model"] = ""
+        return loaded
+
+    # Blank values mean "absent", exactly like the flat arguments.
+    monkeypatch.setattr(pageindex.utils.ConfigLoader, "_load_yaml",
+                        staticmethod(with_blank_keys))
+    assert PageIndexLocalClient(storage_path=store_path)._chat_model_stock
+
+
+def test_anthropic_runner_config_strips_the_route_prefix(store_path):
+    pytest.importorskip("anthropic")
+    local = PageIndexLocalClient(
+        storage_path=store_path,
+        chat_model="bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0")
+    config = local.anthropic_runner_config()
+    assert config["model"] == "anthropic.claude-3-5-sonnet-20241022-v2:0"
+    assert config["max_tokens"] == 8192
+    # Bedrock's InvokeModel integration rejects the top-level field.
+    assert "cache_control" not in config
+
+
+# ── tool-path rate limits: retried below the tool layer, then fail fast ──
+
+class _McpStub:
+    """A local MCP endpoint: initialize always succeeds; tools/call answers
+    follow the scripted statuses (a 200 carries a text result), the last
+    one repeating."""
+
+    def __init__(self, statuses, delay=0.0):
+        import http.server
+        import threading
+        stub = self
+        self.calls = 0
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_POST(self):
+                body = json.loads(self.rfile.read(
+                    int(self.headers["Content-Length"])))
+                if "id" not in body:  # notifications/initialized: 202, uncounted
+                    self.send_response(202)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                if body["method"] == "initialize":
+                    return self._reply(200, body["id"], {
+                        "protocolVersion": "2025-06-18", "capabilities": {},
+                        "serverInfo": {"name": "stub", "version": "0"}})
+                stub.calls += 1
+                if delay:
+                    time.sleep(delay)
+                self._reply(statuses[min(stub.calls, len(statuses)) - 1],
+                            body["id"],
+                            {"content": [{"type": "text", "text": "ok"}],
+                             "isError": False})
+
+            def _reply(self, status, request_id, result):
+                payload = json.dumps({"jsonrpc": "2.0", "id": request_id,
+                                      "result": result}).encode()
+                self.send_response(status)
+                if status == 429:
+                    self.send_header("Retry-After", "1")  # ignored
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                try:
+                    self.wfile.write(payload)
+                except OSError:  # the client gave up (timeout tests)
+                    pass
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0),
+                                                      Handler)
+        self.server.daemon_threads = True
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.url = f"http://127.0.0.1:{self.server.server_port}/mcp"
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+@pytest.fixture
+def mcp_stub(monkeypatch):
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")  # keep the machine's proxy out
+    monkeypatch.setenv("no_proxy", "127.0.0.1")  # requests reads this spelling first
+    stubs = []
+
+    def make(statuses, delay=0.0):
+        stubs.append(_McpStub(statuses, delay))
+        return stubs[-1]
+
+    yield make
+    for stub in stubs:
+        stub.close()
+
+
+def test_bridge_retries_rate_limits_below_the_tool_layer(mcp_stub, monkeypatch):
+    """Two 429s then a 200: the call succeeds without the model ever seeing
+    an error, and the waits are the fixed backoff, not the server's
+    Retry-After."""
+    import urllib3.util.retry as retry_module
+    from pageindex.mcp_bridge import McpBridge
+    slept = []
+    monkeypatch.setattr(retry_module.time, "sleep", slept.append)
+    stub = mcp_stub([429, 429, 200])
+    assert McpBridge(stub.url, {}).call_tool("get_document", {}) == (
+        [{"type": "text", "text": "ok"}], False)
+    assert stub.calls == 3
+    assert slept == [2]
+
+
+@pytest.mark.parametrize("status", [429, 504, 529])
+def test_bridge_rate_limit_exhausted_raises_with_status(mcp_stub, monkeypatch,
+                                                        status):
+    """Three retries and still failing: the caller gets the status."""
+    import urllib3.util.retry as retry_module
+    from pageindex.mcp_bridge import McpBridge
+    monkeypatch.setattr(retry_module.time, "sleep", lambda seconds: None)
+    stub = mcp_stub([status])
+    with pytest.raises(PageIndexAPIError, match=f"HTTP {status}") as info:
+        McpBridge(stub.url, {}).call_tool("get_document", {})
+    assert info.value.status_code == status
+    assert stub.calls == 4
+
+
+def test_bridge_read_timeout_is_not_retried(mcp_stub, monkeypatch):
+    """A read timeout is a full wait the server may have acted on:
+    surfaced once, never replayed."""
+    import pageindex.mcp_bridge as mcp_bridge
+    monkeypatch.setattr(mcp_bridge, "_TIMEOUT", (10, 0.2))
+    stub = mcp_stub([200], delay=0.6)
+    with pytest.raises(PageIndexAPIError, match="Could not reach"):
+        mcp_bridge.McpBridge(stub.url, {}).call_tool("get_document", {})
+    assert stub.calls == 1
+
+
+def test_bridge_invoker_reraises_an_unreachable_server(mcp_stub, monkeypatch):
+    """A server the bridge could not reach after its own connection retries
+    escapes to the caller like a 429: the model cannot reach it either."""
+    import urllib3.util.retry as retry_module
+    from pageindex.mcp_bridge import McpBridge
+    monkeypatch.setattr(retry_module.time, "sleep", lambda seconds: None)
+    stub = mcp_stub([200])
+    stub.close()
+    bridge = McpBridge(stub.url, {})
+    invoke = agent_tools_module._bridge_invoker(bridge, "get_document", {})
+    with pytest.raises(PageIndexAPIError, match="Could not reach"):
+        invoke({})
+
+
+class _RateLimitedBridge(_ImageBridge):
+    def call_tool(self, name, arguments):
+        raise PageIndexAPIError("MCP request failed: HTTP 429",
+                                status_code=429)
+
+
+def test_as_openai_tools_transport_failure_escapes_the_run(monkeypatch):
+    """The framework's default turns every tool exception into model-visible
+    text; the SDK's server narrows that so a failure the invoker re-raised
+    escapes the run (a model-side slip staying model-visible is covered end
+    to end in test_local_chat)."""
+    pytest.importorskip("agents")
+    import pageindex.mcp_bridge as mcp_bridge
+    from pageindex.errors import _pageindex_cause
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _RateLimitedBridge)
+    tool = PageIndexCloudClient(api_key="pi-test-key").as_openai_tools()[0]
+    with pytest.raises(Exception) as info:
+        asyncio.run(tool.on_invoke_tool(None, '{"image_path": "x"}'))
+    assert _pageindex_cause(info.value).status_code == 429
+
+
+def _fake_requests(monkeypatch, fake_post):
+    """Swap the bridge module's own ``requests`` binding for a fake whose
+    Session posts through ``fake_post`` — patching the shared module would
+    leak process-wide."""
+    import requests as requests_mod
+    monkeypatch.setattr("pageindex.mcp_bridge.requests", types.SimpleNamespace(
+        Session=lambda: types.SimpleNamespace(
+            post=fake_post, mount=lambda *a, **k: None),
+        RequestException=requests_mod.RequestException))
+
+
+class _JsonResp:
+    def __init__(self, status, body=None, headers=None):
+        self.status_code = status
+        self._body = body
+        self.headers = headers or {"Content-Type": "application/json"}
+        self.text = json.dumps(body) if body else ""
+        self.content = self.text.encode("utf-8")
+
+    def json(self):
+        if self._body is None:
+            raise ValueError("no body")
+        return self._body
+
+
+def test_mcp_bridge_prompts(monkeypatch):
+    """prompts/list paginates like tools/list; prompts/get sends arguments
+    only when given (stringified — the prompt contract carries strings)
+    and hands the messages back untouched."""
+    from pageindex.mcp_bridge import McpBridge, render_prompt_text
+
+    posts = []
+    catalog = {None: {"prompts": [{"name": "cited_answer",
+                                   "arguments": [{"name": "format",
+                                                  "required": False}]}],
+                      "nextCursor": "p2"},
+               "p2": {"prompts": [{"name": "other"}]}}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        posts.append(json)
+        method, rid = json.get("method"), json.get("id")
+        if method == "initialize":
+            return _JsonResp(200, {"jsonrpc": "2.0", "id": rid, "result": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {"tools": {}, "prompts": {"listChanged": False}},
+                "instructions": "SERVER GUIDANCE"}})
+        if method == "notifications/initialized":
+            return _JsonResp(202)
+        if method == "prompts/list":
+            page = catalog[(json.get("params") or {}).get("cursor")]
+            return _JsonResp(200, {"jsonrpc": "2.0", "id": rid, "result": page})
+        if method == "prompts/get":
+            params = json["params"]
+            if params["name"] != "cited_answer":
+                return _JsonResp(200, {"jsonrpc": "2.0", "id": rid, "error": {
+                    "code": -32602,
+                    "message": f"Prompt {params['name']} not found"}})
+            fmt = (params.get("arguments") or {}).get("format", "markdown")
+            return _JsonResp(200, {"jsonrpc": "2.0", "id": rid, "result": {
+                "description": "Cited answers",
+                "messages": [{"role": "user", "content": {
+                    "type": "text", "text": f"CITATIONS — {fmt}"}}]}})
+        raise AssertionError(f"unexpected method {method}")
+
+    _fake_requests(monkeypatch, fake_post)
+    bridge = McpBridge("https://api.pageindex.ai/mcp", {"Authorization": "Bearer k"})
+
+    assert [p["name"] for p in bridge.list_prompts()] == ["cited_answer", "other"]
+
+    description, messages = bridge.get_prompt("cited_answer")
+    assert description == "Cited answers"
+    assert messages == [{"role": "user", "content": {"type": "text",
+                                                     "text": "CITATIONS — markdown"}}]
+    # None ≡ no arguments on the wire, not an empty object.
+    assert "arguments" not in posts[-1]["params"]
+    assert render_prompt_text(messages) == "CITATIONS — markdown"
+
+    _, messages = bridge.get_prompt("cited_answer", {"format": "cite"})
+    assert posts[-1]["params"]["arguments"] == {"format": "cite"}
+    assert render_prompt_text(messages) == "CITATIONS — cite"
+
+    with pytest.raises(PageIndexAPIError, match="-32602: Prompt nope not found"):
+        bridge.get_prompt("nope")
+
+
+def test_mcp_bridge_prompts_require_server_capability(monkeypatch):
+    """A server without the prompts capability would answer -32601 to
+    prompts/*; the bridge names the real cause instead, and never sends
+    the request."""
+    from pageindex.mcp_bridge import McpBridge
+
+    methods = []
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        methods.append(json.get("method"))
+        if json.get("method") == "initialize":
+            return _JsonResp(200, {"jsonrpc": "2.0", "id": json["id"], "result": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {"tools": {}, "resources": {}}}})
+        return _JsonResp(202)
+
+    _fake_requests(monkeypatch, fake_post)
+    bridge = McpBridge("https://api.pageindex.ai/mcp", {})
+    with pytest.raises(PageIndexAPIError, match="does not serve prompts"):
+        bridge.list_prompts()
+    with pytest.raises(PageIndexAPIError, match="does not serve prompts"):
+        bridge.get_prompt("cited_answer")
+    assert "prompts/list" not in methods and "prompts/get" not in methods
+
+
+def test_render_prompt_text_flattens_messages():
+    from pageindex.mcp_bridge import render_prompt_text
+
+    assert render_prompt_text([
+        {"role": "user", "content": {"type": "text", "text": "a"}},
+        {"role": "assistant", "content": {"type": "text", "text": "b"}},
+        {"role": "user", "content": {"type": "image", "data": "QUJD",
+                                     "mimeType": "image/png"}},
+        {"role": "user"},
+    ]) == "a\nb\n[image/png content omitted: ~1 KB]"
+    assert render_prompt_text([]) == ""

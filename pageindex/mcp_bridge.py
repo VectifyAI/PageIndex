@@ -2,8 +2,10 @@
 
 Backs the cloud branches of ``client.agent_tools()`` and
 ``client.agent_instructions()``: ``tools/list`` discovers the live tool set,
-``tools/call`` executes a tool, and the ``initialize`` handshake carries the
-server's agent instructions. Synchronous, requests-only.
+``tools/call`` executes a tool, ``prompts/list`` / ``prompts/get`` fetch the
+server's prompts (e.g. ``cited_answer``), and the ``initialize`` handshake
+carries the server's agent instructions and capabilities. Synchronous,
+requests-only.
 Works against both stateful and stateless servers: a session id returned by
 ``initialize`` is echoed back, and a session-carrying request rejected with
 HTTP 404 (the spec's expired-session status) re-initializes once and
@@ -16,12 +18,20 @@ import threading
 from typing import Any, Optional
 
 import requests
+from requests.adapters import HTTPAdapter, Retry
 
 from ._version import sdk_version
 from .errors import PageIndexAPIError
 
 _PROTOCOL_VERSION = "2025-06-18"
 _TIMEOUT = (10, 240)  # tools may wait server-side (wait_for_completion: 3 min)
+# Below the tool layer, so the model never plays retry loop. read=0: a read
+# timeout is a full wait the server may have acted on, never replayed.
+# Retry-After is ignored: a long one is a quota, not a blip.
+_RETRY = Retry(total=3, read=0, backoff_factor=1,
+               status_forcelist=(429, *range(500, 600)),
+               allowed_methods=None, raise_on_status=False,
+               respect_retry_after_header=False)
 
 
 def _parse_sse(text: str) -> list[dict]:
@@ -45,9 +55,12 @@ class McpBridge:
         self._url = url
         self._auth_headers = dict(headers)
         self._session = requests.Session()  # agent tool calls come in bursts
+        for scheme in ("https://", "http://"):
+            self._session.mount(scheme, HTTPAdapter(max_retries=_RETRY))
         self._session_id: Optional[str] = None
         self._protocol_version: Optional[str] = None
         self._instructions: Optional[str] = None
+        self._capabilities: dict[str, Any] = {}
         self._initialized = False
         self._lock = threading.RLock()
         self._next_id = 0
@@ -154,10 +167,11 @@ class McpBridge:
                 },
             })
             if response.status_code >= 400:
+                hint = (" Check your API key."
+                        if response.status_code in (401, 403) else "")
                 raise PageIndexAPIError(
                     f"Could not connect to the PageIndex MCP server: HTTP "
-                    f"{response.status_code} ({response.text[:200]}). Check "
-                    "your API key.",
+                    f"{response.status_code} ({response.text[:200]}).{hint}",
                     status_code=response.status_code,
                 )
             result = self._extract_result(response, request_id) or {}
@@ -165,6 +179,9 @@ class McpBridge:
             self._protocol_version = result.get("protocolVersion",
                                                 _PROTOCOL_VERSION)
             self._instructions = result.get("instructions")
+            capabilities = result.get("capabilities")
+            self._capabilities = (capabilities
+                                  if isinstance(capabilities, dict) else {})
             self._initialized = True
             # Sent inside the lock so no concurrent thread can slip a
             # request between the handshake and this notification.
@@ -182,48 +199,99 @@ class McpBridge:
         self._ensure_initialized()
         return self._instructions
 
-    def list_tools(self) -> list[dict]:
-        tools: list[dict] = []
+    def _list_paginated(self, method: str, key: str) -> list[dict]:
+        items: list[dict] = []
         cursor: Optional[str] = None
         # A server echoing its cursor (or cycling) must not hang the client:
         # no-progress terminates, the page cap turns a cycle into an error.
         for _ in range(50):
             params = {"cursor": cursor} if cursor else {}
-            result = self._request("tools/list", params) or {}
-            tools.extend(result.get("tools") or [])
+            result = self._request(method, params) or {}
+            items.extend(result.get(key) or [])
             next_cursor = result.get("nextCursor")
             if not next_cursor or next_cursor == cursor:
-                return tools
+                return items
             cursor = next_cursor
         raise PageIndexAPIError(
-            "MCP tools/list pagination did not terminate within 50 pages.")
+            f"MCP {method} pagination did not terminate within 50 pages.")
 
-    def call_tool(self, name: str, arguments: dict[str, Any]) -> "tuple[str, bool]":
-        """Returns (text, is_error) — is_error is the server's MCP isError
-        marking, which callers must carry to their framework's own error
-        channel."""
+    def list_tools(self) -> list[dict]:
+        return self._list_paginated("tools/list", "tools")
+
+    def _require_prompts(self) -> None:
+        """Prompts are an optional server capability; a server without it
+        answers -32601 to prompts/*, which reads as a protocol fault rather
+        than the real cause."""
+        self._ensure_initialized()
+        if "prompts" not in self._capabilities:
+            raise PageIndexAPIError(
+                f"The MCP server at {self._url} does not serve prompts.")
+
+    def list_prompts(self) -> list[dict]:
+        """The server's prompt catalog (``prompts/list``): name, title,
+        description and declared arguments per entry."""
+        self._require_prompts()
+        return self._list_paginated("prompts/list", "prompts")
+
+    def get_prompt(self, name: str,
+                   arguments: Optional[dict[str, Any]] = None,
+                   ) -> "tuple[Optional[str], list[dict]]":
+        """Returns (description, messages): the prompt's ``PromptMessage``
+        list untouched — each ``{"role", "content"}`` — for callers to place
+        as their framework carries it (render_prompt_text is the text-only
+        rendering). Argument values travel as strings, per the MCP prompt
+        contract; None means "no arguments", not an empty object."""
+        self._require_prompts()
+        params: dict[str, Any] = {"name": name}
+        if arguments is not None:
+            params["arguments"] = {key: str(value)
+                                   for key, value in arguments.items()}
+        result = self._request("prompts/get", params) or {}
+        return result.get("description"), list(result.get("messages") or [])
+
+    def call_tool(self, name: str, arguments: dict[str, Any],
+                  ) -> "tuple[list[dict], bool]":
+        """Returns (content, is_error): the MCP content blocks untouched,
+        for each adapter to render what its framework carries (render_text
+        is the text-only rendering), and the server's isError marking,
+        which callers must carry to their framework's own error channel."""
         result = self._request("tools/call",
                                {"name": name, "arguments": arguments}) or {}
-        is_error = bool(result.get("isError"))
-        texts = []
-        for block in result.get("content") or []:
-            if isinstance(block, dict) and block.get("type") == "text":
-                texts.append(block.get("text", ""))
-            elif isinstance(block, dict) and isinstance(block.get("data"), str):
-                # Base64 payloads (image/audio) become a metadata stub —
-                # dumped verbatim they hand the model the raw blob. Revisit
-                # if tool results ever pass through as real multimodal input.
-                kind = block.get("mimeType") or block.get("type") or "binary"
-                size_kb = max(1, len(block["data"]) * 3 // 4096)
-                texts.append(f"[{kind} content omitted: ~{size_kb} KB]")
-            elif (isinstance(block, dict)
-                  and isinstance(block.get("resource"), dict)
-                  and isinstance(block["resource"].get("blob"), str)):
-                # EmbeddedResource nests its base64 one level down.
-                resource = block["resource"]
-                kind = resource.get("mimeType") or "binary"
-                size_kb = max(1, len(resource["blob"]) * 3 // 4096)
-                texts.append(f"[{kind} content omitted: ~{size_kb} KB]")
-            else:
-                texts.append(json.dumps(block, ensure_ascii=False))
-        return "\n".join(texts), is_error
+        return list(result.get("content") or []), bool(result.get("isError"))
+
+
+def render_text(blocks: list) -> str:
+    """The text-only rendering of MCP content: text verbatim, base64
+    payloads as a size stub (dumped whole they hand the model the raw
+    blob)."""
+    texts = []
+    for block in blocks:
+        if isinstance(block, dict) and block.get("type") == "text":
+            texts.append(block.get("text", ""))
+        elif isinstance(block, dict) and isinstance(block.get("data"), str):
+            kind = block.get("mimeType") or block.get("type") or "binary"
+            size_kb = max(1, len(block["data"]) * 3 // 4096)
+            texts.append(f"[{kind} content omitted: ~{size_kb} KB]")
+        elif (isinstance(block, dict)
+              and isinstance(block.get("resource"), dict)
+              and isinstance(block["resource"].get("blob"), str)):
+            # EmbeddedResource nests its base64 one level down.
+            resource = block["resource"]
+            kind = resource.get("mimeType") or "binary"
+            size_kb = max(1, len(resource["blob"]) * 3 // 4096)
+            texts.append(f"[{kind} content omitted: ~{size_kb} KB]")
+        else:
+            texts.append(json.dumps(block, ensure_ascii=False))
+    return "\n".join(texts)
+
+
+def render_prompt_text(messages: list) -> str:
+    """The text-only rendering of prompt messages, roles dropped: the
+    server's prompts are standing guidance (grounding and citation rules),
+    which a system prompt carries as plain text."""
+    blocks: list = []
+    for message in messages:
+        content = message.get("content") if isinstance(message, dict) else None
+        if content is not None:
+            blocks.append(content)
+    return render_text(blocks)
