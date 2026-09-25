@@ -13,9 +13,9 @@ import time
 import uuid
 from typing import Any, Iterator, Mapping, Optional, Union
 
-from .agent_tools import _base_instructions, doc_targeting_block
+from .agent_tools import _base_instructions, targeting_block
 from .chat_stream import ChatStream
-from .errors import PageIndexAPIError
+from .errors import PageIndexAPIError, _pageindex_cause
 
 CHAT_HEADER = (
     "You are PageIndex by Vectify AI, a document-focused assistant. "
@@ -29,20 +29,8 @@ def _managed_instructions(client, extra_system: list[str]) -> str:
     # Local: the built-in subset guidance. Own-model chat over cloud
     # documents: the live instructions the MCP server serves.
     base: str = _base_instructions(client)
-    return "\n\n".join([CHAT_HEADER, base, *extra_system])
-
-
-def _doc_block(client, doc_id, scoped: bool) -> Optional[str]:
-    if doc_id is None:
-        return None
-    if not isinstance(doc_id, (str, list)):
-        raise PageIndexAPIError("doc_id must be a string or a list of "
-                                "strings.")
-    # scoped: local surfaces also pass doc_id into the tool layer, so name
-    # resolution happens inside the allowlist — only a duplicate name
-    # within the targeted set shadows. Cloud tools take no allowlist
-    # (targeting is prompt-level), so the whole library shadows.
-    return doc_targeting_block(client, doc_id, scoped=scoped)
+    return "\n\n".join([CHAT_HEADER, base,
+                        *[t for t in extra_system if t.strip()]])
 
 
 def _system_text(content: Any) -> str:
@@ -50,9 +38,9 @@ def _system_text(content: Any) -> str:
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        texts = [part.get("text") for part in content
+        texts = [part["text"] for part in content
                  if isinstance(part, dict) and isinstance(part.get("text"), str)]
-        if texts:
+        if texts and len(texts) == len(content):
             return "\n".join(texts)
     raise PageIndexAPIError(
         "system message content must be a string or a list of text parts."
@@ -62,9 +50,10 @@ def _system_text(content: Any) -> str:
 def _split_chat_messages(messages) -> "tuple[list[str], list[dict]]":
     """Validate the chat_completions surface's messages: system/developer
     content joins the managed instructions; user/assistant history passes
-    through. Tool-history round-trips belong to the protocol lanes,
-    chat(protocol=...)."""
-    if not isinstance(messages, list) or not messages:
+    through. Tool-history round-trips belong to chat(protocol="responses")
+    or chat(protocol="messages")."""
+    messages = list(messages)
+    if not messages:
         raise PageIndexAPIError("messages must be a non-empty list.")
     system_texts: list[str] = []
     history: list[dict] = []
@@ -80,13 +69,15 @@ def _split_chat_messages(messages) -> "tuple[list[str], list[dict]]":
             if not isinstance(content, str):
                 raise PageIndexAPIError(
                     "content must be a string on this lane; for "
-                    "structured items use chat(protocol=...)."
+                    "structured items use chat(protocol=\"responses\") "
+                    "or chat(protocol=\"messages\")."
                 )
             history.append({"role": role, "content": content})
         else:
             raise PageIndexAPIError(
-                f"Unsupported role {role!r} on this lane. Tool "
-                "history round-trips belong to chat(protocol=...)."
+                f"Unsupported role {role!r} on this lane. Tool history "
+                "round-trips belong to chat(protocol=\"responses\") or "
+                "chat(protocol=\"messages\")."
             )
     if not history:
         raise PageIndexAPIError("messages must contain a user or assistant "
@@ -199,8 +190,9 @@ def _openai_model(protocol: str, model_name: str, backend=None):
                 f"protocol='responses' cannot drive '{model_name}': "
                 "provider-prefixed models route through LiteLLM, which speaks "
                 "chat.completions, not the Responses API. Use chat() without "
-                "protocol, or chat_completions() (or protocol='messages' for "
-                "Anthropic models), or point OPENAI_BASE_URL at a "
+                "protocol, or protocol='chat_completions' (or "
+                "protocol='messages' for Anthropic models), or point "
+                "OPENAI_BASE_URL at a "
                 "Responses-capable backend and use a bare or "
                 "'openai/'-prefixed model name."
             )
@@ -244,9 +236,10 @@ def _reported_model(model_name: str) -> str:
 def _litellm_claude_marks(wire: str) -> Optional[dict]:
     """Claude's prompt caching is opt-in per request: on Claude models
     routed through LiteLLM (Anthropic direct, Bedrock, Vertex — each
-    channel live-verified), mark the managed system prefix and the newest
-    message via LiteLLM's injection param so the loop's later turns and a
-    conversation's next calls read them instead of repaying full price.
+    live-verified — and Foundry, same injection), mark the managed system
+    prefix and the newest message via LiteLLM's injection param so the
+    loop's later turns and a conversation's next calls read them instead
+    of repaying full price.
     ``wire`` is the name LiteLLM itself resolves — each lane strips its
     own routing prefixes first, because the lanes normalize differently
     (the chat wire treats bare names as OpenAI shorthand; the Agents SDK
@@ -258,8 +251,9 @@ def _litellm_claude_marks(wire: str) -> Optional[dict]:
         model, provider, _, _ = get_llm_provider(model=wire)
     except Exception:
         return None
-    if provider == "anthropic" or (provider in ("bedrock", "vertex_ai")
-                                   and "claude" in model.lower()):
+    if provider == "anthropic" or (
+            provider in ("bedrock", "vertex_ai", "azure_ai")
+            and "claude" in model.lower()):
         # The stable prefix plus the newest message, so each turn re-reads
         # the turns before it. LiteLLM seeds nothing unprompted, so this
         # pair is the marks' sole source.
@@ -310,17 +304,32 @@ def _merged_backend(client, backend):
 
 _SKELETON_KEYS = frozenset({"system", "instructions", "input", "messages",
                             "tools"})
+_ARGUMENT_KEYS = frozenset({"stream", "doc_id"})
 
 
 def _refuse_skeleton(extra_body) -> None:
     """The managed prompt, conversation and tools are the SDK's on every
-    lane; extra_body merges last, so a caller's copy would replace them."""
-    hit = sorted(_SKELETON_KEYS.intersection(extra_body or ()))
+    lane; extra_body merges last, so a caller's copy would replace them.
+    Fields with their own argument select the SDK's parser and scope, so
+    they are refused here too."""
+    if extra_body is None:
+        return
+    if not isinstance(extra_body, Mapping):
+        raise PageIndexAPIError(
+            "extra_body must be a dict of request fields, got "
+            f"{type(extra_body).__name__}.")
+    hit = sorted(_SKELETON_KEYS.intersection(extra_body))
     if hit:
         raise PageIndexAPIError(
             f"extra_body cannot carry {', '.join(hit)}: the managed prompt, "
             "conversation and tools are the SDK's. Extend the prompt with "
-            "instructions=; the conversation is the first argument.")
+            "instructions= or a leading system row; pass the conversation "
+            "as messages, the first argument.")
+    hit = sorted(_ARGUMENT_KEYS.intersection(extra_body))
+    if hit:
+        raise PageIndexAPIError(
+            f"extra_body cannot carry {', '.join(hit)}: use "
+            f"{' / '.join(key + '=' for key in hit)} instead.")
 
 
 def _openai_agent(client, protocol: str, model_name: str, instructions: str,
@@ -399,7 +408,7 @@ def _validate_max_turns(max_turns) -> None:
 
 
 def _conversation_cache_key(model_name: str, instructions: str, doc_id,
-                            items) -> str:
+                            items, folder_id=None) -> str:
     """Stable per-conversation cache-routing key, sent as the OpenAI
     ``prompt_cache_key`` through ModelSettings.extra_body (openai-agents
     0.20 no longer derives it from RunConfig.group_id — verified against a
@@ -409,10 +418,12 @@ def _conversation_cache_key(model_name: str, instructions: str, doc_id,
     Callers pass the conversation's own items, never the SDK-prepended
     doc-targeting block: that block is byte-identical for every
     conversation about a document and would pool them all under one key.
-    doc_id carries the targeting identity instead — the same opening
-    question against different documents is different conversations."""
+    doc_id and folder_id carry the targeting identity instead — the same
+    opening question against different documents is different
+    conversations."""
     scope = [doc_id] if isinstance(doc_id, str) else doc_id
     seed = json.dumps([model_name, instructions, scope,
+                       *([folder_id] if folder_id else []),
                        items[0] if items else None],
                       sort_keys=True, default=str)
     return "pageindex-" + hashlib.sha256(seed.encode()).hexdigest()[:16]
@@ -451,7 +462,8 @@ def _model_backend_error(exc, lane: str, client=None) -> PageIndexAPIError:
             ", or drop the chat model configuration to use the managed "
             "cloud chat." if lane == "chat" else "."
         )
-    return PageIndexAPIError(message)
+    return PageIndexAPIError(message,
+                             status_code=getattr(exc, "status_code", None))
 
 
 def _translate_run_error(exc, max_turns, lane, client=None) -> PageIndexAPIError:
@@ -460,6 +472,10 @@ def _translate_run_error(exc, max_turns, lane, client=None) -> PageIndexAPIError
     if isinstance(exc, MaxTurnsExceeded):
         return _wrap_max_turns(max_turns)
     if isinstance(exc, AgentsException):
+        cause = _pageindex_cause(exc)
+        if cause is not None:
+            # a tool failure the invoker re-raised, wrapped on its way out
+            return PageIndexAPIError(str(cause), status_code=cause.status_code)
         return PageIndexAPIError(f"The agent backend failed: {exc}")
     return _model_backend_error(exc, lane, client)
 
@@ -621,24 +637,46 @@ def _responses_usage(raw_responses) -> dict:
 def _chat_agent(client, messages, doc_id, model, temperature=None,
                 top_p=None, reasoning_effort=None, extra_body=None,
                 max_tokens=None, backend=None, extra_headers=None,
+                folder_id=None,
                 ) -> "tuple[Any, list, str]":
     """The chat lane's shared prologue: validated history, doc targeting,
     and the configured agent. Returns (agent, input items, model name)."""
     system_texts, history = _split_chat_messages(messages)
     scope = client._local_doc_scope(doc_id)
-    block = _doc_block(client, doc_id, scoped=scope is not None)
+    block = targeting_block(client, doc_id, folder_id)
     items = ([{"role": "user", "content": block}] if block else []) + history
     model_name = model or client.chat_model
     managed = _managed_instructions(client, system_texts)
     agent = _openai_agent(client, "chat", model_name, managed,
                           temperature, top_p, doc_ids=scope,
                           cache_key=_conversation_cache_key(
-                              model_name, managed, doc_id, history),
+                              model_name, managed, doc_id, history,
+                              folder_id),
                           reasoning_effort=reasoning_effort,
                           extra_body=extra_body, max_tokens=max_tokens,
                           backend=_merged_backend(client, backend),
                           extra_headers=extra_headers)
     return agent, items, model_name
+
+
+def _output_text(output) -> str:
+    """A tool result for the display: a string as it is, the framework's
+    structured items by their text, anything else as JSON with a data
+    URL's base64 payload elided."""
+    if isinstance(output, str):
+        return output
+    lines = []
+    for item in output if isinstance(output, list) else [output]:
+        kind = item.get("type") if isinstance(item, dict) else None
+        if kind == "text":
+            lines.append(item["text"])
+        elif kind == "image" and str(item.get("image_url", "")).startswith("data:"):
+            head, _, _ = item["image_url"].partition(",")
+            lines.append(json.dumps({**item, "image_url": head + ",..."},
+                                    ensure_ascii=False))
+        else:
+            lines.append(json.dumps(item, ensure_ascii=False))
+    return "\n".join(lines)
 
 
 def _clip(text, cap: int = 200) -> str:
@@ -785,7 +823,7 @@ def _weave(events, options) -> Iterator[str]:
             elif kind == "tool_result":
                 if not options["tool_result"]:
                     continue
-                out = _clip(ev["output"], cap)
+                out = _clip(_output_text(ev["output"]), cap)
                 if section == "tool" and ev["call_id"] == last_call:
                     # directly under its own call line
                     yield f"\n[tool_result] {ev['name']}: {out}"
@@ -871,7 +909,7 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
                     reasoning_effort=None,
                     show_process: Union[bool, Mapping[str, Any]] = False,
                     max_turns=None, backend=None, extra_headers=None,
-                    extra_body=None,
+                    extra_body=None, folder_id=None,
                     ) -> ChatStream:
     """chat(stream=True): validation and the agent build run here, eagerly;
     the run itself starts when the returned stream's chosen view is first
@@ -889,7 +927,8 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
     agent, items, _ = _chat_agent(client, messages, doc_id, model,
                                   reasoning_effort=reasoning_effort,
                                   extra_body=extra_body, backend=backend,
-                                  extra_headers=extra_headers)
+                                  extra_headers=extra_headers,
+                                  folder_id=folder_id)
     run_kwargs = _run_kwargs(max_turns)
 
     def events():
@@ -911,21 +950,21 @@ def run_chat_completions(client, messages, stream: bool = False,
                          extra_body: Optional[dict] = None,
                          extra_headers: Optional[dict] = None,
                          backend: Optional[dict] = None,
+                         folder_id: Optional[str] = None,
                          ) -> Union[dict, Iterator[str], Iterator[dict]]:
     if enable_citations:
         raise PageIndexAPIError(
             "enable_citations needs the managed chat endpoint — "
-            + ("drop the chat model configuration to use it."
-               if getattr(client, "api_key", None) else
-               "local mode does not store the block-level OCR data "
-               "citations need."))
-    _require_openai_agents("chat_completions")
+            + ("drop the chat model configuration to use it, or "
+               if getattr(client, "api_key", None) else "")
+            + "cite with your own model via chat(citations=True).")
+    _require_openai_agents("chat")
     _validate_max_turns(max_turns)
     agent, items, model_name = _chat_agent(
         client, messages, doc_id, model, temperature=temperature,
         top_p=top_p, reasoning_effort=reasoning_effort,
         extra_body=extra_body, max_tokens=max_tokens, backend=backend,
-        extra_headers=extra_headers)
+        extra_headers=extra_headers, folder_id=folder_id)
     reported_model = _reported_model(model_name)
     recorded: dict = {}
     _record_chat_finish(agent, recorded)
@@ -1012,6 +1051,7 @@ def run_responses(client, input, model: Optional[str] = None,
                   extra_body: Optional[dict] = None,
                   extra_headers: Optional[dict] = None,
                   backend: Optional[dict] = None,
+                  folder_id: Optional[str] = None,
                   ) -> Union[dict, Iterator[dict]]:
     _require_openai_agents("chat(protocol='responses')")
     _validate_max_turns(max_turns)
@@ -1024,7 +1064,7 @@ def run_responses(client, input, model: Optional[str] = None,
         raise PageIndexAPIError("messages must be a non-empty string or list "
                                 "of item dicts.")
     scope = client._local_doc_scope(doc_id)
-    block = _doc_block(client, doc_id, scoped=scope is not None)
+    block = targeting_block(client, doc_id, folder_id)
     conversation = items
     if block:
         items = [{"role": "user", "content": block}] + items
@@ -1034,7 +1074,8 @@ def run_responses(client, input, model: Optional[str] = None,
     agent = _openai_agent(client, "responses", model_name, managed,
                           temperature, top_p, doc_ids=scope,
                           cache_key=_conversation_cache_key(
-                              model_name, managed, doc_id, conversation),
+                              model_name, managed, doc_id, conversation,
+                              folder_id),
                           reasoning=reasoning, extra_body=extra_body,
                           max_tokens=max_output_tokens,
                           backend=_merged_backend(client, backend),
@@ -1189,33 +1230,50 @@ def _require_anthropic() -> None:
         from anthropic.lib.tools import ToolError  # noqa: F401
     except ImportError as exc:
         raise PageIndexAPIError(
-            "chat(protocol='messages') requires anthropic >= 0.108.0 (the "
-            "tool runner with ToolError) — pip install -U anthropic."
+            "chat(protocol='messages') requires the anthropic SDK tool "
+            "runner (with ToolError) — pip install -U anthropic."
         ) from exc
 
 
-_ANTHROPIC_CLIENTS: dict = {}  # backend key -> client, kept open for reuse
+_ANTHROPIC_CLIENTS: dict = {}  # (route, backend) key -> client, kept open
+
+# The transport class per routing prefix — the anthropic SDK ships one
+# client per channel, so a row here is what makes a route reachable.
+_ROUTE_CLIENTS = {"anthropic": "Anthropic", "bedrock": "AnthropicBedrock",
+                  "vertex_ai": "AnthropicVertex",
+                  "azure_ai": "AnthropicFoundry"}
 
 
-def _anthropic_client(backend=None):
+def _anthropic_client(backend, route):
     """The backend client — the seam tests replace with a fake transport.
-    One client per backend: each construction pays ~45 ms of SSL-context
-    build and a cold connection pool. A backend whose values defeat
-    hashing constructs per call, as before."""
+    ``route`` (declared by the model's prefix) picks the SDK client
+    class. One client per (route, backend): each construction pays
+    ~45 ms of SSL-context build and a cold connection pool. A backend
+    whose values defeat hashing constructs per call, as before."""
     import anthropic
     kwargs = _sdk_backend(backend)
     try:
-        key = tuple(sorted(
+        key = (route, tuple(sorted(
             (k, tuple(sorted(v.items())) if isinstance(v, dict) else v)
-            for k, v in kwargs.items()))
+            for k, v in kwargs.items())))
         hash(key)
     except TypeError:
         key = None
     if key in _ANTHROPIC_CLIENTS:
         return _ANTHROPIC_CLIENTS[key]
+    cls = getattr(anthropic, _ROUTE_CLIENTS[route], None)
+    if cls is None:
+        # A build predating this route's client class: same contract as
+        # the tool-runner probe, one step earlier.
+        raise PageIndexAPIError(
+            f"messages on this route needs the anthropic SDK's "
+            f"{_ROUTE_CLIENTS[route]} client, which this anthropic build "
+            "lacks — pip install -U anthropic.")
     try:
-        client = anthropic.Anthropic(**kwargs)
-    except TypeError as exc:
+        client = cls(**kwargs)
+    except (anthropic.AnthropicError, ValueError, TypeError) as exc:
+        # Vertex/Foundry refuse a missing region or credential right at
+        # construction, each with its own type; same contract for all.
         raise PageIndexAPIError(
             f"The Anthropic backend is not configured: {exc}") from exc
     if key is not None and len(_ANTHROPIC_CLIENTS) < 8:
@@ -1225,16 +1283,13 @@ def _anthropic_client(backend=None):
     return client
 
 
-def _anthropic_system(client, extra_system, block: Optional[str]) -> list[dict]:
+def _anthropic_system(client, extra_system) -> list[dict]:
     """System blocks: cache_control marks the stable managed prefix only
-    (the API allows 4 breakpoints total — the varying doc block and caller
-    blocks must not consume the budget); the doc block and caller system
-    content follow as their own blocks."""
+    (the API allows 4 breakpoints total — caller blocks must not consume
+    the budget); caller system content follows as its own blocks."""
     blocks = [{"type": "text",
                "text": CHAT_HEADER + "\n\n" + _base_instructions(client),
                "cache_control": {"type": "ephemeral"}}]
-    if block:
-        blocks.append({"type": "text", "text": block})
     if extra_system is None:
         return blocks
     if isinstance(extra_system, str):
@@ -1291,32 +1346,21 @@ def _anthropic_usage(turns, final_usage: dict) -> dict:
     return totals
 
 
-_CLAUDE_4096_MODELS = ("claude-3-opus", "claude-3-sonnet", "claude-3-haiku",
-                       "claude-3-5-sonnet-20240620")
-
-
-def _default_max_tokens(model: str, thinking=None) -> int:
-    """The wire-required per-turn budget when the caller sets none: 8192,
-    except the claude-3 generation whose output ceiling is 4096. The wire
-    also requires max_tokens > thinking.budget_tokens, so an enabled
-    budget lifts the default above itself — clamped to the model's output
-    ceiling where LiteLLM's capability map knows it."""
+def _default_max_tokens(thinking=None) -> int:
+    """The wire-required per-turn budget when the caller sets none: 8192.
+    The wire also requires max_tokens > thinking.budget_tokens, so an
+    enabled budget lifts the default above itself. Pure arithmetic on the
+    caller's own inputs — whether the sum fits the model's output ceiling
+    is the API's own ruling (its 400 names both numbers), never a lookup
+    here."""
     budget = (thinking.get("budget_tokens")
               if isinstance(thinking, dict) else None)
     if isinstance(budget, int) and not isinstance(budget, bool):
-        want = budget + 8192
-        try:
-            from . import utils  # noqa: F401  — must precede litellm's import
-            import litellm
-            ceiling = (litellm.model_cost.get(model)
-                       or {}).get("max_output_tokens")
-        except Exception:
-            ceiling = None
-        return min(want, ceiling) if ceiling else want
-    return 4096 if model.startswith(_CLAUDE_4096_MODELS) else 8192
+        return budget + 8192
+    return 8192
 
 
-def run_messages(client, messages, model: str,
+def run_messages(client, messages, model: str, route: str,
                  max_tokens: Optional[int] = None,
                  stream: bool = False, doc_id=None, system=None,
                  temperature: Optional[float] = None,
@@ -1328,6 +1372,7 @@ def run_messages(client, messages, model: str,
                  extra_body: Optional[dict] = None,
                  extra_headers: Optional[dict] = None,
                  backend: Optional[dict] = None,
+                 folder_id: Optional[str] = None,
                  ) -> Union[dict, Iterator[Any]]:
     from .integrations.anthropic_sdk import build_anthropic_tools
 
@@ -1342,44 +1387,84 @@ def run_messages(client, messages, model: str,
         raise PageIndexAPIError("messages must be a non-empty string or a "
                                 "list of message dicts.")
     scope = client._local_doc_scope(doc_id)
-    block = _doc_block(client, doc_id, scoped=scope is not None)
+    block = targeting_block(client, doc_id, folder_id)
     prepared = [dict(message) for message in messages]
+    if block:
+        prepared = [{"role": "user", "content": block}] + prepared
     passthrough = {key: value for key, value in {
         "temperature": temperature, "top_p": top_p, "top_k": top_k,
         "stop_sequences": stop_sequences, "thinking": thinking,
         "extra_body": extra_body, "extra_headers": extra_headers,
     }.items() if value is not None}
-    system_blocks = _anthropic_system(client, system, block)
+    system_blocks = _anthropic_system(client, system)
     # Top-level cache_control: the server re-marks the newest block each
     # turn, so the loop re-reads the growing conversation from cache.
     # Counts toward the 4-breakpoint limit (live-verified 400 past it).
+    # Bedrock's InvokeModel integration rejects the field for Opus 4.6 and
+    # earlier: there each turn's tool results carry the breakpoint instead.
+    marks_fit = _cache_marks(system_blocks, prepared) < 4
     cached: dict[str, Any] = (
         {"cache_control": {"type": "ephemeral"}}
-        if _cache_marks(system_blocks, prepared) < 4 else {})
+        if marks_fit and route != "bedrock" else {})
     # Tools before the transport: on a bridge client building them is
     # network I/O, and a failure there must not strand the client below.
-    tools = build_anthropic_tools(client, doc_ids=scope)
+    failures: list = []
+    tools = build_anthropic_tools(client, doc_ids=scope, failures=failures)
     merged = _merged_backend(client, backend)
-    backend_client = _anthropic_client(merged)
+    backend_client = _anthropic_client(merged, route)
     # Close only a per-call construction: cached clients stay open for
     # reuse; a caller-owned http_client survives regardless.
+    # list(): an atomic snapshot — a bare .values() scan breaks under a
+    # concurrent setdefault.
     owns_transport = ("http_client" not in (merged or {})
-                      and backend_client not in _ANTHROPIC_CLIENTS.values())
-    if max_tokens is None:
-        max_tokens = _default_max_tokens(
-            model, (extra_body or {}).get("thinking", thinking))
-    runner = backend_client.beta.messages.tool_runner(
-        max_tokens=max_tokens,
-        messages=prepared,
-        model=model,
-        tools=tools,
-        system=system_blocks,
-        stream=stream,
-        # Bounded like the OpenAI surfaces (their framework default is 10).
-        max_iterations=max_turns if max_turns is not None else 10,
-        **passthrough,
-        **cached,
-    )
+                      and backend_client
+                      not in list(_ANTHROPIC_CLIENTS.values()))
+    try:
+        if not hasattr(backend_client.beta.messages, "tool_runner"):
+            # An anthropic build predating this route's tool runner passes
+            # _require_anthropic (its probes are older): name the gap here.
+            raise PageIndexAPIError(
+                "messages on this route needs the anthropic SDK's tool "
+                "runner, which this anthropic build lacks — "
+                "pip install -U anthropic.")
+        if max_tokens is None:
+            max_tokens = _default_max_tokens(
+                (extra_body or {}).get("thinking", thinking))
+        runner = backend_client.beta.messages.tool_runner(
+            max_tokens=max_tokens,
+            messages=prepared,
+            model=model,
+            tools=tools,
+            system=system_blocks,
+            stream=stream,
+            # Bounded like the OpenAI surfaces (their framework default is 10).
+            max_iterations=max_turns if max_turns is not None else 10,
+            **passthrough,
+            **cached,
+        )
+    except BaseException:
+        # A failure before the runner handoff must not strand the transport
+        # the branches below would have closed.
+        if owns_transport:
+            backend_client.close()
+        raise
+    # Older Anthropic versions also execute tools on max_tokens turns, newer
+    # ones skip them: check right after the runner's own tool step.
+    generate_tool_response = runner.generate_tool_call_response
+    moved: list = []  # the block holding the bedrock breakpoint
+
+    def checked_tool_response():
+        response = generate_tool_response()
+        if failures:
+            raise failures[0]
+        if response and marks_fit and route == "bedrock":
+            for block in moved:
+                block.pop("cache_control", None)
+            moved[:] = [response["content"][-1]]
+            moved[0]["cache_control"] = {"type": "ephemeral"}
+        return response
+
+    runner.generate_tool_call_response = checked_tool_response
 
     if stream:
         def events() -> Iterator[Any]:
@@ -1389,14 +1474,6 @@ def run_messages(client, messages, model: str,
                         yield event
             except anthropic.AnthropicError as exc:
                 raise _model_backend_error(exc, "messages", client) from exc
-            except TypeError as exc:
-                # the SDK's request-time credential-resolution failure
-                if "authentication" not in str(exc).lower():
-                    raise
-                raise PageIndexAPIError(
-                    "The Anthropic backend is not configured: set the "
-                    "ANTHROPIC_API_KEY environment variable, or pass an "
-                    f"api_key in chat_backend / backend. ({exc})") from exc
             finally:
                 # runs on exhaustion and abandonment (GeneratorExit) alike
                 if owns_transport:
@@ -1404,23 +1481,17 @@ def run_messages(client, messages, model: str,
         return events()
 
     try:
-        turns = [turn for turn in runner]
+        turns = list(runner)
     except anthropic.AnthropicError as exc:
         raise _model_backend_error(exc, "messages", client) from exc
-    except TypeError as exc:
-        # the SDK's request-time credential-resolution failure
-        if "authentication" not in str(exc).lower():
-            raise
-        raise PageIndexAPIError(
-            "The Anthropic backend is not configured: set the "
-            "ANTHROPIC_API_KEY environment variable, or pass an "
-            f"api_key in chat_backend / backend. ({exc})") from exc
     finally:
         # safe here: the params read-back below does no HTTP
         if owns_transport:
             backend_client.close()
     if not turns:
         raise PageIndexAPIError("The model returned no response.")
+    for block in moved:
+        block.pop("cache_control", None)  # a request's breakpoint, not history
     captured: dict = {}
 
     def capture(params):

@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 744" width="1600" height="744" role="img" aria-labelledby="title desc">
+  <title id="title">Vectorless RAG with PageIndex</title>
+  <desc id="desc">A document is turned into a tree, then an LLM reasons over it to answer a query.</desc>
+  <style>
+    text { font-family: Arial, Helvetica, sans-serif; }
+    .steel { stroke: #53657d; color: #53657d; }
+    .muted { stroke: #707782; }
+    .blue { stroke: #2f87d7; }
+    .line { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+  <defs>
+    <marker id="arrowSteel" viewBox="0 0 10 10" refX="8.7" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M0 0 10 5 0 10Z" fill="#53657d"/>
+    </marker>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="8.7" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto">
+      <path d="M0 0 10 5 0 10Z" fill="#2f87d7"/>
+    </marker>
+  </defs>
+
+  <!-- Heading -->
+  <text x="356" y="104" fill="#53657d" font-size="62" font-weight="400" letter-spacing=".3">Vectorless RAG with <tspan fill="#2f87d7" font-weight="700">PageIndex</tspan></text>
+
+  <!-- Dashed system boundary -->
+  <rect x="305" y="160" width="1014" height="527" rx="70" fill="none" stroke="#53657d" stroke-width="9" stroke-dasharray="27 24"/>
+
+  <!-- Document icon and incoming arrow -->
+  <g class="line steel" stroke-width="5">
+    <path d="M75 397h65l40 40v78a14 14 0 0 1-14 14H88a14 14 0 0 1-14-14V411a14 14 0 0 1 14-14Z"/>
+    <path d="M140 398v39h39"/>
+    <path d="M100 442h14M100 468h53M100 494h53"/>
+    <path d="M210 466h194" marker-end="url(#arrowSteel)"/>
+  </g>
+
+  <!-- Tree -->
+  <text x="455" y="279" fill="#53657d" font-size="46">Tree Index</text>
+  <g class="line muted" stroke-width="2.2">
+    <path d="M565 347 494 415M565 347v67M565 347l70 68"/>
+    <path d="M494 434 454 493M565 434l-32 59M565 434l29 59M635 434l40 59"/>
+    <path d="M454 516l-33 59M454 516l35 59M594 516l-33 59M594 516l35 59M675 516l34 59"/>
+    <circle cx="565" cy="334" r="19" fill="#fff"/>
+    <circle cx="494" cy="421" r="19" fill="#fff"/>
+    <circle cx="565" cy="421" r="19" fill="#fff"/>
+    <circle cx="635" cy="421" r="19" fill="#fff"/>
+    <circle cx="454" cy="506" r="19" fill="#fff"/>
+    <circle cx="533" cy="506" r="19" fill="#fff"/>
+    <circle cx="594" cy="506" r="19" fill="#fff"/>
+    <circle cx="675" cy="506" r="19" fill="#fff"/>
+    <circle cx="421" cy="575" r="4.8" fill="#707782" stroke="none"/>
+    <circle cx="489" cy="575" r="4.8" fill="#707782" stroke="none"/>
+    <circle cx="561" cy="575" r="4.8" fill="#707782" stroke="none"/>
+    <circle cx="629" cy="575" r="4.8" fill="#707782" stroke="none"/>
+    <circle cx="709" cy="575" r="4.8" fill="#707782" stroke="none"/>
+  </g>
+
+  <!-- Tree to reasoning arrow -->
+  <path d="M713 463h168" fill="none" stroke="#53657d" stroke-width="5" marker-end="url(#arrowSteel)"/>
+
+  <!-- Reasoning panel -->
+  <text x="918" y="275" fill="#53657d" font-size="46">Tree Search</text>
+  <rect x="902" y="315" width="292" height="292" rx="24" fill="#fff" stroke="#53657d" stroke-width="2.8"/>
+  <g class="line muted" stroke-width="2.2">
+    <path d="M965 327l-16 39M1029 327l-14 39M1074 327l10 39M1163 327l-15 39"/>
+    <path d="M949 398l-31 59M949 398l30 63M1084 399l42 62"/>
+    <path d="M979 493l-38 51M979 493l33 52"/>
+    <circle cx="949" cy="380" r="20" fill="#fff"/>
+    <circle cx="1019" cy="380" r="20" fill="#fff"/>
+    <circle cx="1084" cy="380" r="20" fill="#fff"/>
+    <circle cx="1151" cy="380" r="20" fill="#fff"/>
+    <circle cx="979" cy="475" r="20" fill="#fff"/>
+    <circle cx="1125" cy="475" r="20" fill="#fff"/>
+    <circle cx="918" cy="457" r="5" fill="#707782" stroke="none"/>
+    <circle cx="941" cy="544" r="5" fill="#707782" stroke="none"/>
+    <circle cx="1012" cy="544" r="5" fill="#707782" stroke="none"/>
+  </g>
+  <g class="line blue" stroke-width="5.5">
+    <path d="M1074 328l10 32"/>
+    <circle cx="1084" cy="380" r="20" fill="#fff"/>
+    <path d="M1078 400l-27 56"/>
+    <circle cx="1050" cy="475" r="20" fill="#fff"/>
+    <path d="M1056 495l26 53" marker-end="url(#arrowBlue)"/>
+  </g>
+  <circle cx="1086" cy="570" r="22" fill="#2f87d7"/>
+
+  <!-- Query and answer -->
+  <path d="M1412 379H1216" fill="none" stroke="#53657d" stroke-width="5" marker-end="url(#arrowSteel)"/>
+  <text x="1434" y="393" fill="#53657d" font-size="46">Query</text>
+  <path d="M1216 559h198" fill="none" stroke="#53657d" stroke-width="5" marker-end="url(#arrowSteel)"/>
+  <text x="1434" y="572" fill="#53657d" font-size="46">Answer</text>
+</svg>

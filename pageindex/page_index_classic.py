@@ -5,6 +5,7 @@ import math
 import random
 import re
 from .utils import *
+from .naming import sanitize_filename as sanitize_upload_filename
 from .tree_optimize import merge_tree
 import os
 
@@ -1234,7 +1235,8 @@ def page_index_main(doc, opt=None, logger=None, page_list=None):
     logger = logger or JsonLogger(doc)
 
     is_valid_pdf = (
-        (isinstance(doc, str) and os.path.isfile(doc) and doc.lower().endswith(".pdf")) or
+        (isinstance(doc, str) and os.path.isfile(doc)
+         and sanitize_upload_filename(os.path.basename(doc)).lower().endswith(".pdf")) or
         isinstance(doc, BytesIO)
     )
     if not is_valid_pdf:
