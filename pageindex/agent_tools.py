@@ -14,8 +14,10 @@ same JSON envelope the cloud emits ({"success": true, ...} /
 {"error": ...}) — arguments outside a pruned local signature come back as
 that envelope too, on the direct and the call_tool path alike, except
 browse_documents' ``recursive``: call_tool honors it, because the flat
-no-folders shape it asks for is trivially true here. One exception to
-never-raise: a cloud 401/403 re-raises PageIndexAPIError.
+no-folders shape it asks for is trivially true here. The exceptions to
+never-raise, all cloud: a 401/403, a 429/5xx that outlived the bridge's
+retries, an unreachable server and a RATE_LIMITED / USAGE_LIMIT_REACHED
+tool error re-raise PageIndexAPIError.
 """
 from __future__ import annotations
 
@@ -29,7 +31,10 @@ import time
 import weakref
 from typing import Any, Callable, Optional
 
+import requests
+
 from .errors import PageIndexAPIError
+from .mcp_bridge import render_prompt_text, render_text
 
 TOOL_RESPONSE_CHAR_LIMIT = 100_000
 STRUCTURE_FIRST_PAGE_THRESHOLD = 20
@@ -120,8 +125,8 @@ TOOL_CONTRACT: dict[str, dict[str, Any]] = {
                 "query": {
                     "type": "string",
                     "description": (
-                        "Search query for relevance ranking. Required when "
-                        'sort="relevance"; must be omitted when sort="time".'
+                        "Search query for relevance ranking. "
+                        'Required when sort="relevance".'
                     ),
                 },
                 "offset": {
@@ -1356,22 +1361,46 @@ def _annotation_for(spec: dict) -> Any:
     return Optional[base] if nullable else base
 
 
+_ACCOUNT_LIMITS = {"RATE_LIMITED": 429, "USAGE_LIMIT_REACHED": 402}
+
+
+def _raise_account_limit(blocks: list) -> None:
+    """The cloud's account-level tool errors (retried server-side already;
+    the model can act on neither) re-raise as the status they stand for."""
+    try:
+        payload = json.loads(blocks[0]["text"])
+        status = _ACCOUNT_LIMITS[payload["errorCode"]]
+    except (LookupError, TypeError, ValueError):
+        return
+    message = str(payload.get("error") or payload["errorCode"])
+    for key in ("retry_after_seconds", "open_url"):
+        if key in payload:
+            message += f" ({key}: {payload[key]})"
+    raise PageIndexAPIError(message, status_code=status)
+
+
 def _bridge_invoker(bridge, name: str, schema: dict,
-                    ) -> "Callable[[dict], tuple[str, bool]]":
+                    ) -> "Callable[[dict], tuple[list, bool]]":
     """One cloud tool call proxied over MCP: string booleans are coerced
     (same as call_tool), None-valued arguments are dropped (None ≡ omitted,
     matching the contract's "omit if ..." semantics) and failures are
-    contained in the error envelope — except 401/403, which re-raise.
-    Returns (envelope_text, is_error), like call_tool."""
-    def _invoke(arguments: dict[str, Any]) -> tuple[str, bool]:
+    contained in the error envelope — except auth failures, what
+    survived the bridge's own retries (401/403/429/5xx), an unreachable
+    server and the cloud's RATE_LIMITED / USAGE_LIMIT_REACHED tool errors
+    (429 / 402), which re-raise: the model can act on none of them. Returns
+    (content blocks, is_error), like the bridge."""
+    def _invoke(arguments: dict[str, Any]) -> tuple[list, bool]:
         try:
             arguments = {key: value for key, value in arguments.items()
                          if value is not None}
             _coerce_bool_args(schema, arguments)
-            return bridge.call_tool(name, arguments)
+            blocks, is_error = bridge.call_tool(name, arguments)
         except Exception as exc:
-            if (isinstance(exc, PageIndexAPIError)
-                    and exc.status_code in (401, 403)):
+            if isinstance(exc, PageIndexAPIError) and (
+                    exc.status_code in (401, 403, 429)
+                    or (exc.status_code or 0) >= 500
+                    or (exc.status_code is None and isinstance(
+                        exc.__cause__, requests.RequestException))):
                 raise
             payload, _ = _failure(
                 f"{name} failed: {exc}", None,
@@ -1381,16 +1410,20 @@ def _bridge_invoker(bridge, name: str, schema: dict,
                                "try the request again"},
                 "INTERNAL_ERROR",
             )
-            return _dumps(payload), True
+            return [{"type": "text", "text": _dumps(payload)}], True
+        if is_error:
+            _raise_account_limit(blocks)
+        return blocks, is_error
     return _invoke
 
 
 def _make_tool_function(name: str, description: str, schema: dict,
-                        invoke: "Callable[[dict], tuple[str, bool]]",
+                        invoke: "Callable[[dict], tuple[list, bool]]",
                         ) -> Callable[..., str]:
     """One plain function for a tool: real signature and docstring from the
-    schema, errors contained by the invoker; arguments the signature
-    rejects come back as the guided envelope instead of raising."""
+    schema, the result rendered as text, errors contained by the invoker;
+    arguments the signature rejects come back as the guided envelope
+    instead of raising."""
     import keyword
 
     properties: dict[str, Any] = schema.get("properties") or {}
@@ -1398,11 +1431,11 @@ def _make_tool_function(name: str, description: str, schema: dict,
     _invoke = invoke
 
     params_usable = all(param.isidentifier() and not keyword.iskeyword(param)
-                        and param != "_invoke"
+                        and param not in ("_invoke", "_render")
                         for param in properties)
     if not params_usable:
         def inner(**kwargs: Any) -> str:
-            return _invoke(kwargs)[0]
+            return render_text(_invoke(kwargs)[0])
     else:
         ordered = ([p for p in properties if p in required]
                    + [p for p in properties if p not in required])
@@ -1411,9 +1444,10 @@ def _make_tool_function(name: str, description: str, schema: dict,
             for p in ordered
         )
         args_literal = "{" + ", ".join(f"'{p}': {p}" for p in ordered) + "}"
-        namespace: dict[str, Any] = {"_invoke": _invoke}
+        namespace: dict[str, Any] = {"_invoke": _invoke,
+                                     "_render": render_text}
         exec(f"def _synthesized({rendered}):\n"
-             f"    return _invoke({args_literal})[0]", namespace)
+             f"    return _render(_invoke({args_literal})[0])", namespace)
         inner = namespace["_synthesized"]
         # binding TypeErrors quote __qualname__, not __name__
         inner.__name__ = inner.__qualname__ = name or "tool"
@@ -1429,8 +1463,8 @@ def _make_tool_function(name: str, description: str, schema: dict,
         inner.__annotations__ = annotations
 
     def proxy(*args: Any, **kwargs: Any) -> str:
-        # The invoker lets only 401/403 auth failures through, so a
-        # TypeError here is the binding rejecting the arguments.
+        # The invoker lets only PageIndexAPIError through, so a TypeError
+        # here is the binding rejecting the arguments.
         try:
             return inner(*args, **kwargs)
         except TypeError as exc:
@@ -1485,26 +1519,14 @@ def _require_doc_selection(doc_ids) -> None:
             "doc_id to give the agent the whole library.")
 
 
-def _require_local_scope(client, doc_ids) -> None:
-    """The allowlist is enforced in-process; cloud tools take none, so
-    accepting doc_ids there would be advisory-only — refuse loudly."""
-    _require_doc_selection(doc_ids)
-    if doc_ids is not None and getattr(client, "api_key", None):
-        raise PageIndexAPIError(
-            "doc_ids scoping applies to local tools only — the managed "
-            "cloud chat scopes doc_id server-side, and own-model chat "
-            "over cloud documents targets documents at the prompt level, "
-            "without a tool-layer allowlist."
-        )
-
-
 def _tool_specs(client, include_management: bool = False, doc_ids=None,
-                ) -> "list[tuple[str, str, dict, Callable[[dict], tuple[str, bool]]]]":
+                ) -> "list[tuple[str, str, dict, Callable[[dict], tuple[list, bool]]]]":
     """(name, description, schema, invoke) per tool, for adapters that take
-    the wire schema verbatim. ``invoke`` returns (envelope_text, is_error).
-    Schemas are copies (frameworks keep the dict by reference). ``doc_ids``
-    is the local chat scope."""
-    _require_local_scope(client, doc_ids)
+    the wire schema verbatim. ``invoke`` returns (content blocks, is_error):
+    the MCP content as the server sent it, one text block from the local
+    tools. Schemas are copies (frameworks keep the dict by reference).
+    ``doc_ids`` is the local chat scope, already validated and dropped on
+    cloud by ``_local_doc_scope``."""
     if getattr(client, "api_key", None):
         bridge = _cloud_bridge(client, gated=not include_management)
         tools_meta = bridge.list_tools()
@@ -1522,9 +1544,11 @@ def _tool_specs(client, include_management: bool = False, doc_ids=None,
                                  meta.get("inputSchema") or {}))
                 for meta in tools_meta]
 
-    def local_invoke(name: str) -> "Callable[[dict], tuple[str, bool]]":
-        def invoke(arguments: dict) -> tuple[str, bool]:
-            return call_tool(client, name, arguments, doc_ids=doc_ids)
+    def local_invoke(name: str) -> "Callable[[dict], tuple[list, bool]]":
+        def invoke(arguments: dict) -> tuple[list, bool]:
+            text, is_error = call_tool(client, name, arguments,
+                                       doc_ids=doc_ids)
+            return [{"type": "text", "text": text}], is_error
         return invoke
 
     return [(name, _local_description(name), _local_schema(name),
@@ -1533,21 +1557,23 @@ def _tool_specs(client, include_management: bool = False, doc_ids=None,
 
 
 def build_agent_tools(client, include_management: bool = False,
-                      doc_ids=None) -> list[Callable[..., str]]:
+                      ) -> list[Callable[..., str]]:
     """Plain synchronous functions bound to `client`.
 
     Cloud: one function per tool of the live cloud MCP tool set, signatures
     synthesized from the server's schemas, calls proxied over MCP. Local:
     the built-in contract tools over the local store. Every function returns
-    the JSON envelope as a string and never raises for arguments its
-    signature accepts — except a cloud 401/403, which re-raises
+    the JSON envelope as a string (binary content, such as a cloud page
+    image, as a size stub) and never raises for arguments its
+    signature accepts — except a cloud 401/403, a 429/5xx that outlived
+    the bridge's retries, an unreachable server or a RATE_LIMITED /
+    USAGE_LIMIT_REACHED tool error, which re-raise
     PageIndexAPIError (cloud-only parameters are absent from the local
     signatures; the call_tool path answers them with the guided envelope).
-    ``doc_ids`` is the local allowlist, as in ``_tool_specs``.
     """
     return [_make_tool_function(name, description, schema, invoke)
             for name, description, schema, invoke
-            in _tool_specs(client, include_management, doc_ids)]
+            in _tool_specs(client, include_management)]
 
 
 # ── agent instructions ──
@@ -1570,7 +1596,7 @@ TOOL USAGE RULES:
 
 _DISCOVERY = """\
 DOCUMENT DISCOVERY:
-- browse_documents() — DEFAULT discovery tool, first choice for any document-related question. It lists your documents newest first with names and descriptions; match them against the user's intent, and page through with `offset: next_offset` while has_more is true."""
+- browse_documents() — DEFAULT discovery tool, first choice for any document-related question. The bare call returns your documents newest first with names and descriptions; match them against the user's intent."""
 
 _DECISION = """\
 DECISION:
@@ -1586,9 +1612,9 @@ _PERSISTENCE = """\
 PERSISTENCE (before concluding the target document is not in the library):
 This protocol applies both when results are empty AND when results are returned but none match the user's intent. Do NOT give up after a single discovery attempt. Follow these steps in order:
 1. browse_documents() and compare every returned name/description against the user's intent
-2. Page through the ENTIRE library with `limit: 50` and `offset: next_offset` until has_more is false — MANDATORY, must be completed before concluding "not found"
-3. Re-scan for loose matches: synonyms, abbreviations, and partial titles in names/descriptions can identify the target
-Only after ALL three steps have been tried may you conclude the document is not in the library. Do NOT fall back to general knowledge — if the user's question references their own documents, exhaust every discovery path first."""
+2. Rephrase the query with synonyms or alternative terms and browse again
+3. Page through the ENTIRE library with `limit: 50` and `offset: next_offset` until has_more is false — MANDATORY, must be completed before concluding "not found"
+Only after ALL steps have been tried may you conclude the document is not in the library. Do NOT fall back to general knowledge — if the user's question references their own documents, exhaust every discovery path first."""
 
 AGENT_INSTRUCTIONS = "\n\n".join([
     _INSTRUCTIONS_HEADER,
@@ -1601,34 +1627,82 @@ AGENT_INSTRUCTIONS = "\n\n".join([
 ])
 
 
+# Frozen from the cloud MCP server's ``cited_answer`` prompt, minus the
+# bullet naming the cloud-only get_document_image() tool. Local page
+# content carries no block_id, so the block rules stay dormant and
+# citations resolve to pages.
+LOCAL_CITATION_PROMPTS: dict[str, str] = {
+    "markdown": """\
+GROUNDING
+- Answer only from the user's PageIndex documents. Call get_page_content() and state only what was actually read there.
+- Never fill a gap from general knowledge. When the documents do not answer the question, say so.
+
+CITATIONS
+- Cite only statements supported by tool outputs, as a bracketed reference: [{docName}, p. {pageNumber}] or [{docName}, p. {pageNumber}, block {blockId}]. Place immediately after the claim.
+- When page content includes block_id values, citations MUST be block-level: copy the exact block_id of the supporting block. Page-only cites are allowed ONLY when the tool output carries no block_id (legacy documents, structure outlines). NEVER invent or alter block_id values.
+- For a claim drawn from multiple blocks on one page, add one reference per supporting block (at most 3); beyond that, cite the single strongest block.
+- Each reference must reference a SINGLE page integer. For multi-page citations, use separate references.""",
+    "cite": """\
+GROUNDING
+- Answer only from the user's PageIndex documents. Call get_page_content() and state only what was actually read there.
+- Never fill a gap from general knowledge. When the documents do not answer the question, say so.
+
+CITATIONS
+- Cite only statements supported by tool outputs: <cite doc="{docName}" page="{pageNumber}"/> or <cite doc="{docName}" page="{pageNumber}" block="{blockId}"/>. Place immediately after the claim.
+- When page content includes block_id values, citations MUST be block-level: copy the exact block_id of the supporting block. Page-only cites are allowed ONLY when the tool output carries no block_id (legacy documents, structure outlines). NEVER invent or alter block_id values.
+- For a claim drawn from multiple blocks on one page, add one tag per supporting block (at most 3); beyond that, cite the single strongest block.
+- Each tag must reference a SINGLE page integer. For multi-page citations, use separate tags.""",
+}
+
+
+def fetch_citation_prompt(client, format: str) -> str:
+    """The MCP server's ``cited_answer`` prompt as system-prompt text;
+    ``format`` rides as its one argument. Local: the frozen copy,
+    page-level."""
+    if format not in LOCAL_CITATION_PROMPTS:
+        raise PageIndexAPIError(
+            f"citations format {format!r} is not one of "
+            f"{', '.join(LOCAL_CITATION_PROMPTS)}.")
+    if not getattr(client, "api_key", None):
+        return LOCAL_CITATION_PROMPTS[format]
+    _, messages = _cloud_bridge(client, gated=True).get_prompt(
+        "cited_answer", {"format": format})
+    text = render_prompt_text(messages)
+    if not text.strip():
+        raise PageIndexAPIError(
+            "The MCP server returned an empty cited_answer prompt.")
+    return text
+
+
 def _base_instructions(client, include_management: bool = False) -> str:
     """Cloud: the live instructions the MCP server serves for the tool set
     actually shipped. Local: the built-in subset instructions."""
     if not getattr(client, "api_key", None):
-        return AGENT_INSTRUCTIONS
-    instructions = _cloud_bridge(
-        client, gated=not include_management).instructions()
-    if not isinstance(instructions, str) or not instructions.strip():
-        raise PageIndexAPIError(
-            "The MCP server returned no agent instructions — refusing to "
-            "substitute the SDK's local-subset guidance, which does not "
-            "cover the cloud tool set."
-        )
-    return instructions
+        base = AGENT_INSTRUCTIONS
+    else:
+        base = _cloud_bridge(
+            client, gated=not include_management).instructions()
+        if not isinstance(base, str) or not base.strip():
+            raise PageIndexAPIError(
+                "The MCP server returned no agent instructions — refusing "
+                "to substitute the SDK's local-subset guidance, which does "
+                "not cover the cloud tool set."
+            )
+    own = getattr(client, "instructions", None)
+    return f"{base}\n\n{own}" if own else base
 
 
-def doc_targeting_block(client, doc_id, scoped: bool = False) -> Optional[str]:
-    """The doc_id targeting text: names, metadata, and the directive to work
-    within those documents. Shared by agent_instructions and the local chat
-    surfaces (a leading conversation item on the OpenAI surfaces, a system
-    block on the Messages lane). Raises when a doc_id's name is shadowed by a
-    newer
-    same-name document — the name-addressed tools could not reach it. With
-    ``scoped`` (surfaces whose tools resolve names inside the doc_id
-    allowlist) only a same-name duplicate within the targeted set
-    shadows."""
+def doc_targeting_block(client, doc_id) -> Optional[str]:
+    """The doc_id targeting text, rendered as the cloud's managed chat
+    renders its own: the documents' metadata rows and the directive to
+    work within them. Conversation content, never system prompt: the chat
+    lanes prepend it as the first user message, and document_context()
+    hands it to callers who own the conversation."""
     if doc_id is None:
         return None
+    if not isinstance(doc_id, (str, list)):
+        raise PageIndexAPIError("doc_id must be a string or a list of "
+                                "strings.")
     doc_ids = [doc_id] if isinstance(doc_id, str) else list(doc_id)
     _require_doc_selection(doc_ids)
     details = []
@@ -1646,51 +1720,59 @@ def doc_targeting_block(client, doc_id, scoped: bool = False) -> Optional[str]:
     if missing:
         raise PageIndexAPIError(
             "Documents not found or access denied: " + ", ".join(missing))
-    # Scoped: the listing only backfills the target docs' metadata (list
-    # entries carry it, get_document does not — cloud parity), so paging
-    # can stop at those ids. Unscoped needs it all for the shadow check.
-    listing = _all_documents(client, stop_ids=doc_ids if scoped else None)
-    documents = ([{**detail, "id": one_id}
-                  for one_id, detail in zip(doc_ids, details)]
-                 if scoped else listing)
-    for one_id, detail in zip(doc_ids, details):
-        entry, _ = _resolve_document(client, str(detail.get("name")),
-                                     documents=documents)
-        if entry is not None and entry.get("id") != one_id:
-            raise PageIndexAPIError(
-                f'Document "{detail.get("name")}" (doc_id: {one_id}) is '
-                "shadowed by a newer document with the same name (doc_id: "
-                f'{entry.get("id")}). The tools address documents by name '
-                "and would read the newer one. Rename or remove the "
-                "duplicate, or pass the newer doc_id."
-            )
-    by_id = {doc.get("id"): doc for doc in listing}
-    for one_id, detail in zip(doc_ids, details):
-        if detail.get("metadata") is None:
-            tags = _flat_metadata(by_id.get(one_id, {}).get("metadata"))
-            if tags is not None:
-                detail["metadata"] = tags
-    context = json.dumps(details, ensure_ascii=False)
     if len(details) == 1:
         return (
             f"The user has specified document: {details[0].get('name')}\n"
-            f"Document metadata: {context}\n"
+            f"Document metadata: {json.dumps(details[0], ensure_ascii=False)}\n"
             "Use this document's name to retrieve its content with "
             "get_document_structure() and get_page_content()."
         )
     names = ", ".join(str(item.get("name")) for item in details)
     return (
         f"The user has specified documents: {names}\n"
-        f"Documents metadata: {context}\n"
+        f"Documents metadata: {json.dumps(details, ensure_ascii=False)}\n"
         "Use these documents' names to retrieve their content with "
         "get_document_structure() and get_page_content()."
     )
 
 
-def build_agent_instructions(client, doc_id=None, scoped: bool = False,
-                             include_management: bool = False) -> str:
-    """Orchestration guidance for document QA agents; with doc_id, appends
-    the target documents and directs the agent to work within them."""
-    base = _base_instructions(client, include_management)
-    block = doc_targeting_block(client, doc_id, scoped=scoped)
-    return base if block is None else base + "\n\n" + block
+def folder_targeting_block(client, folder_id) -> Optional[str]:
+    """The folder_id targeting text, rendered as the cloud's managed chat
+    renders its own: the folder's name and metadata and the directive to
+    discover its documents there. None for no folder — None, "", and
+    "root", the library itself, which the managed chat leaves untargeted.
+    A folder proper is cloud-only: local libraries have none."""
+    if folder_id is None:
+        return None
+    if not isinstance(folder_id, str):
+        raise PageIndexAPIError("folder_id must be a string.")
+    if folder_id in ("", "root"):
+        return None
+    if not getattr(client, "api_key", None):
+        raise PageIndexAPIError(
+            "folder_id is cloud-only — folders are not supported in local "
+            "mode. Create the client with an api_key to use folders.")
+    folders = client.list_folders().get("folders") or []
+    folder = next((f for f in folders if f.get("id") == folder_id), None)
+    if folder is None:
+        raise PageIndexAPIError(
+            f"Folder not found or access denied: {folder_id}")
+    metadata = {key: folder[key] for key in ("id", "name", "description")
+                if folder.get(key)}
+    return (
+        f"The user has specified folder: {folder.get('name')}\n"
+        f"Folder metadata: {json.dumps(metadata, ensure_ascii=False)}\n"
+        "Discover its documents with "
+        f'browse_documents(folder_id="{folder_id}", recursive=true) '
+        f'or search_documents(query, folder_id="{folder_id}", '
+        "recursive=true)."
+    )
+
+
+def targeting_block(client, doc_id, folder_id=None) -> Optional[str]:
+    """The chat lanes' leading user message: the folder block, then the
+    document block, joined as the managed chat joins them; None when
+    there is nothing to place."""
+    blocks = [folder_targeting_block(client, folder_id),
+              doc_targeting_block(client, doc_id)]
+    return "\n\n".join(block for block in blocks if block) or None

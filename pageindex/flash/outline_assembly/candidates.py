@@ -136,30 +136,6 @@ def heading_order_key(heading_candidate: HeadingCandidate) -> tuple:
 # --------------------------------------------------------------------------- #
 
 
-def is_script_compatible(number: int, other_heading_candidate: HeadingCandidate) -> bool:
-    """Return whether candidate script/type is compatible with prior context. Args: a: integer previous script/type context b: heading candidate """
-    candidate_item = other_heading_candidate.state_slot
-    if candidate_item == 0 or candidate_item == 2 or candidate_item == 10:
-        return True
-    if number == candidate_item:
-        return False
-    if other_heading_candidate.type == 5:
-        return False
-    if other_heading_candidate.is_prominent:
-        return False
-    if len(other_heading_candidate.numbering) > 0:
-        return False
-    if number == 3 and candidate_item == 9:
-        return False
-    if number == 9 and candidate_item == 3:
-        return False
-    if number == 7 and candidate_item == 5:
-        return False
-    if number == 6 and candidate_item == 3:
-        return False
-    return True
-
-
 def heading_signature(heading_candidate: HeadingCandidate) -> str:
     """Return a full heading signature including numbering or text."""
     if len(heading_candidate.numbering) > 0:

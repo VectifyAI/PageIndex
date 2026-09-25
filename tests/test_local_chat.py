@@ -1,6 +1,7 @@
 """Local chat surfaces: three protocols over fake backends — no network,
 no LLM keys. Tool execution runs for real against a seeded local store."""
 import asyncio
+import inspect
 import json
 import sys
 import types
@@ -313,9 +314,6 @@ def test_cloud_guards(monkeypatch):
         cloud.chat_completions([{"role": "user", "content": "x"}],
                                reasoning_effort="low")
     with pytest.raises(PageIndexAPIError, match="own chat model"):
-        cloud.chat_completions([{"role": "user", "content": "x"}],
-                               extra_body={"service_tier": "auto"})
-    with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.chat_completions([{"role": "user", "content": "x"}], top_p=0.9)
     with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.chat_completions([{"role": "user", "content": "x"}],
@@ -338,8 +336,6 @@ def test_cloud_guards(monkeypatch):
         cloud._responses("x")
     with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud._messages("x", model="m")
-    with pytest.raises(PageIndexAPIError, match="own chat model"):
-        cloud.chat("x", instructions="be brief")
     with pytest.raises(PageIndexAPIError, match="own chat model"):
         cloud.chat("x", max_turns=2)
 
@@ -704,7 +700,8 @@ def test_chat_stream_events_typed_sequence(client, store_path, fake_model):
     assert result["name"] == "get_document"
     assert result["call_id"] == "call_1"
     assert "... (+" not in str(result["output"])  # never clipped
-    assert '"next_steps"' in result["output"]
+    # The result as the framework recorded it: its text item.
+    assert '"next_steps"' in result["output"]["text"]
     assert "".join(ev["delta"] for ev in events
                    if ev["type"] == "answer") == "The answer"
 
@@ -1005,8 +1002,8 @@ def test_doc_id_conversations_get_distinct_cache_keys(client, store_path,
     keys = []
     real = local_chat._conversation_cache_key
 
-    def spy(model_name, instructions, doc_id, items):
-        key = real(model_name, instructions, doc_id, items)
+    def spy(model_name, instructions, doc_id, items, folder_id=None):
+        key = real(model_name, instructions, doc_id, items, folder_id)
         keys.append(key)
         return key
 
@@ -1035,6 +1032,16 @@ def test_doc_id_conversations_get_distinct_cache_keys(client, store_path,
     fake_model([[_msg_item("f")]])
     client._responses("What is the CAGR?", doc_id="pi-b")
     assert keys[5] != keys[0]  # same opener, different doc: no pooling
+
+
+def test_folder_less_cache_key_is_the_pre_folder_key():
+    """Adding folder_id to the seed must not rotate every existing
+    conversation's prompt_cache_key on upgrade."""
+    items = [{"role": "user", "content": "hi"}]
+    key = local_chat._conversation_cache_key("m", "sys", "d1", items)
+    assert key == "pageindex-b0ab095344ee8f89"
+    assert local_chat._conversation_cache_key(
+        "m", "sys", "d1", items, "f-1") != key
 
 
 @needs_agents
@@ -1156,6 +1163,34 @@ def _anthropic_message(content, stop_reason):
     }
 
 
+def _anthropic_sse(message):
+    """Render text/tool turns for the real streaming tool runner."""
+    events = [{"type": "message_start", "message": {
+        **message, "content": [], "stop_reason": None}}]
+    for index, block in enumerate(message["content"]):
+        if block["type"] == "tool_use":
+            initial = {**block, "input": {}}
+            delta = {"type": "input_json_delta",
+                     "partial_json": json.dumps(block["input"])}
+        else:
+            initial = {**block, "text": ""}
+            delta = {"type": "text_delta", "text": block["text"]}
+        events.extend([
+            {"type": "content_block_start", "index": index,
+             "content_block": initial},
+            {"type": "content_block_delta", "index": index, "delta": delta},
+            {"type": "content_block_stop", "index": index},
+        ])
+    events.extend([
+        {"type": "message_delta", "delta": {
+            "stop_reason": message["stop_reason"], "stop_sequence": None},
+         "usage": {"output_tokens": message["usage"]["output_tokens"]}},
+        {"type": "message_stop"},
+    ])
+    return "".join(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n"
+                   for event in events)
+
+
 @pytest.fixture
 def fake_anthropic(monkeypatch):
     state = {"calls": []}
@@ -1177,7 +1212,7 @@ def fake_anthropic(monkeypatch):
             http_client=anthropic_httpx.Client(
                 transport=anthropic_httpx.MockTransport(handler)))
         monkeypatch.setattr(local_chat, "_anthropic_client",
-                            lambda backend=None: fake)
+                            lambda backend=None, route="anthropic": fake)
         return state["calls"]
 
     return install
@@ -1218,15 +1253,25 @@ def test_messages_end_to_end(client, store_path, fake_anthropic):
 
 @needs_anthropic
 def test_messages_doc_block_and_system(client, store_path, fake_anthropic):
+    """Doc block leads as a user message; system keeps the cached header."""
     doc_id = seed_doc(store_path, "pi-a", "report.pdf")
     calls = fake_anthropic([
+        _anthropic_message(
+            [{"type": "tool_use", "id": "tu_1", "name": "get_document",
+              "input": {"doc_name": "report.pdf"}}], "tool_use"),
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn"),
     ])
-    client._messages([{"role": "user", "content": "hi"}], model="claude-test",
-                    max_tokens=100, doc_id=doc_id, system="Answer in French.")
+    result = client._messages([{"role": "user", "content": "hi"}],
+                              model="claude-test", max_tokens=100,
+                              doc_id=doc_id, system="Answer in French.")
+    first, second = calls[0]["messages"][:2]
+    assert first["role"] == "user"
+    assert "The user has specified document: report.pdf" in first["content"]
+    assert second == {"role": "user", "content": "hi"}
     system = calls[0]["system"]
-    assert "The user has specified document: report.pdf" in system[1]["text"]
-    assert system[-1]["text"] == "Answer in French."
+    assert [block["text"] for block in system[1:]] == ["Answer in French."]
+    roles = [message["role"] for message in result["messages"]]
+    assert roles == ["assistant", "user", "assistant"]
 
 
 @needs_anthropic
@@ -1685,12 +1730,33 @@ def test_doc_id_scopes_tools_to_targeted_documents(client, store_path,
     client.chat_completions("q", doc_id="pi-a")
 
     def tool_outputs(items):
-        return [item["output"] for item in items
+        # function_call_output.output: the framework's structured text item
+        return [item["output"][0]["text"] for item in items
                 if item.get("type") == "function_call_output"]
 
     assert "NOT_FOUND" in tool_outputs(fake.inputs[1])[-1]
     browse = json.loads(tool_outputs(fake.inputs[2])[-1])
     assert [doc["name"] for doc in browse["documents"]] == ["report.pdf"]
+
+
+@needs_agents
+def test_malformed_tool_arguments_answer_the_model(client, store_path,
+                                                    fake_model):
+    """A truncated argument string reaches the tool (strict schemas are
+    off). The tools are the framework's own MCP conversion, so its failure
+    pipeline hands the model an error message and the run goes on: no
+    aborted run, no SDK envelope."""
+    from openai.types.responses import ResponseFunctionToolCall
+    seed_doc(store_path, "pi-a", "report.pdf")
+    bad_call = ResponseFunctionToolCall(
+        id="fc_1", type="function_call", call_id="call_1",
+        name="get_document", arguments="{not json", status="completed")
+    fake = fake_model([[bad_call], [_msg_item("The answer")]])
+    result = client.chat_completions("What?")
+    assert result["choices"][0]["message"]["content"] == "The answer"
+    outputs = [item["output"] for item in fake.inputs[1]
+               if item.get("type") == "function_call_output"]
+    assert "Invalid JSON" in json.dumps(outputs[-1])
 
 
 @needs_agents
@@ -1703,9 +1769,7 @@ def test_empty_doc_id_is_refused(client, store_path):
     with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
         client.chat_completions("q", doc_id=[])
     with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
-        client.as_openai_tools(doc_id=[])
-    with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
-        client.agent_instructions(doc_id=[])
+        client.document_context([])
 
 
 @needs_agents
@@ -2014,7 +2078,7 @@ def test_messages_provider_errors_wrap_as_sdk_errors(client, store_path,
         http_client=anthropic_httpx.Client(
             transport=anthropic_httpx.MockTransport(handler)))
     monkeypatch.setattr(local_chat, "_anthropic_client",
-                        lambda backend=None: fake)
+                        lambda backend=None, route="anthropic": fake)
     with pytest.raises(PageIndexAPIError, match="model backend failed"):
         client._messages("q", model="claude-test")
     with pytest.raises(PageIndexAPIError, match="model backend failed"):
@@ -2139,13 +2203,13 @@ def test_chat_stream_abandonment_cancels_pending_turn(client, store_path,
 
 
 @needs_anthropic
-def test_messages_max_tokens_default_resolves_per_model(client, fake_anthropic):
-    """The wire-required budget must not exceed the model's ceiling: the
-    claude-3 generation caps output at 4096."""
+def test_messages_max_tokens_default(client, fake_anthropic):
+    """The wire-required budget defaults to 8192 whatever the model names;
+    an explicit value passes through."""
     calls = fake_anthropic([
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
     client._messages("q", model="claude-3-opus-20240229")
-    assert calls[0]["max_tokens"] == 4096
+    assert calls[0]["max_tokens"] == 8192
     calls = fake_anthropic([
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
     client._messages("q", model="claude-sonnet-4-5")
@@ -2154,6 +2218,62 @@ def test_messages_max_tokens_default_resolves_per_model(client, fake_anthropic):
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
     client._messages("q", model="claude-3-opus-20240229", max_tokens=1234)
     assert calls[0]["max_tokens"] == 1234
+
+
+@needs_anthropic
+def test_messages_accepts_the_litellm_spelling(client, fake_anthropic):
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
+    client._messages("q", model="anthropic/claude-3-opus-20240229")
+    assert calls[0]["model"] == "claude-3-opus-20240229"
+
+
+@needs_anthropic
+def test_messages_carries_a_claude_chat_model(store_path, fake_anthropic):
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
+    local = PageIndexLocalClient(storage_path=store_path,
+                                 chat_model="anthropic/claude-3-opus-20240229")
+    # Through the public door: chat() must not demand model= itself.
+    local.chat("q", protocol="messages")
+    assert calls[0]["model"] == "claude-3-opus-20240229"
+    # The stock default was never chosen: nothing to send.
+    with pytest.raises(PageIndexAPIError, match="needs a model"):
+        PageIndexLocalClient(storage_path=store_path).chat(
+            "q", protocol="messages")
+
+
+@needs_anthropic
+def test_messages_cleared_chat_model_gets_the_own_model_refusal(
+        store_path, fake_anthropic):
+    """'' and None both mean "configures nothing": clearing chat_model
+    drops the client back to no-own-chat, and messages() refuses in its
+    own voice — never model='' on the wire, never a NoneType crash."""
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "never"}], "end_turn")])
+    local = PageIndexLocalClient(storage_path=store_path,
+                                 chat_model="claude-sonnet-4-5")
+    for cleared in ("", None):
+        local.chat_model = cleared
+        with pytest.raises(PageIndexAPIError, match="chat_model="):
+            local._messages("q")
+    assert calls == []
+
+
+@needs_anthropic
+def test_messages_route_prefix_needs_a_model_id(store_path, fake_anthropic):
+    """A prefix-only name selects a channel and names nothing — sending
+    model='' (or switching transports with no model chosen) is the worst
+    of both; refuse it in this SDK's own voice."""
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "never"}], "end_turn")])
+    local = PageIndexLocalClient(storage_path=store_path,
+                                 chat_model="claude-sonnet-4-5")
+    for name in ("bedrock/", "vertex_ai/", "azure_ai/", "anthropic/",
+                 "litellm/"):
+        with pytest.raises(PageIndexAPIError, match="no model id"):
+            local._messages("q", model=name)
+    assert calls == []
 
 
 @needs_anthropic
@@ -2385,6 +2505,37 @@ def test_messages_top_level_cache_control(client, store_path, fake_anthropic):
     assert "cache_control" not in calls[0]
 
 
+@needs_anthropic
+@pytest.mark.parametrize("stream", [False, True])
+def test_messages_bedrock_moves_an_explicit_breakpoint(client, store_path,
+                                                       fake_anthropic, stream):
+    """Bedrock's InvokeModel integration rejects the top-level field (Opus
+    4.6 and earlier): each turn's newest tool result carries the one moving
+    breakpoint instead, and none leaks into the returned history."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    replies = [_anthropic_message([_anthropic_tool_use(tool_id)], "tool_use")
+               for tool_id in ("tu_1", "tu_2")]
+    replies.append(_anthropic_message([{"type": "text", "text": "Done"}],
+                                      "end_turn"))
+    calls = fake_anthropic([_anthropic_sse(reply) for reply in replies]
+                          if stream else replies)
+    result = client._messages("q", model="bedrock/anthropic.claude-sonnet-4-6",
+                              max_tokens=50, stream=stream)
+    if stream:
+        list(result)
+
+    def marked(call):
+        return [block.get("tool_use_id")
+                for message in call["messages"]
+                if isinstance(message["content"], list)
+                for block in message["content"] if block.get("cache_control")]
+
+    assert all("cache_control" not in call for call in calls)
+    assert [marked(call) for call in calls] == [[], ["tu_1"], ["tu_2"]]
+    if not stream:
+        assert "cache_control" not in json.dumps(result["messages"])
+
+
 def test_merged_backend_precedence():
     from types import SimpleNamespace
     stub = SimpleNamespace(chat_backend={"api_key": "a", "api_version": "v1"})
@@ -2397,11 +2548,11 @@ def test_merged_backend_precedence():
 def test_messages_backend_merges_and_reaches_the_client(client, fake_anthropic,
                                                         monkeypatch):
     real = local_chat._anthropic_client({"api_key": "kk",
-                                         "base_url": "http://x"})
+                                         "base_url": "http://x"}, "anthropic")
     assert real.api_key == "kk"
     assert str(real.base_url).rstrip("/") == "http://x"
     real = local_chat._anthropic_client({"api_key": "kk",
-                                         "api_base": "http://y"})
+                                         "api_base": "http://y"}, "anthropic")
     assert str(real.base_url).rstrip("/") == "http://y"
 
     calls = fake_anthropic([
@@ -2410,8 +2561,8 @@ def test_messages_backend_merges_and_reaches_the_client(client, fake_anthropic,
     seen = {}
     monkeypatch.setattr(
         local_chat, "_anthropic_client",
-        lambda backend=None: (seen.setdefault("backend", backend),
-                              fixture_client())[1])
+        lambda backend=None, route="anthropic": (
+            seen.setdefault("backend", backend), fixture_client())[1])
     client.chat_backend = {"base_url": "http://cb"}
     client._messages("q", model="claude-sonnet-4-5", backend={"api_key": "z"})
     assert seen["backend"] == {"base_url": "http://cb", "api_key": "z"}
@@ -2421,7 +2572,7 @@ def test_messages_backend_merges_and_reaches_the_client(client, fake_anthropic,
 def test_messages_bad_backend_wraps_like_the_other_doors():
     with pytest.raises(PageIndexAPIError,
                        match="Anthropic backend is not configured"):
-        local_chat._anthropic_client({"no_such_param": 1})
+        local_chat._anthropic_client({"no_such_param": 1}, "anthropic")
 
 
 @needs_agents
@@ -2459,7 +2610,7 @@ def test_messages_extra_headers_reach_the_wire(client, monkeypatch):
         api_key="t", http_client=anthropic_httpx.Client(
             transport=anthropic_httpx.MockTransport(handler)))
     monkeypatch.setattr(local_chat, "_anthropic_client",
-                        lambda backend=None: fake)
+                        lambda backend=None, route="anthropic": fake)
     client._messages("q", model="claude-sonnet-4-5",
                     extra_headers={"anthropic-beta": "context-1m-2025"})
     assert seen["beta"] == "context-1m-2025"
@@ -2509,9 +2660,21 @@ def test_anthropic_client_cached_per_backend(monkeypatch):
     """One real client per backend: construction pays ~45ms of SSL-context
     build and a cold connection pool each call otherwise."""
     monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
-    a = local_chat._anthropic_client({"api_key": "k"})
-    assert local_chat._anthropic_client({"api_key": "k"}) is a
-    assert local_chat._anthropic_client({"api_key": "k2"}) is not a
+    a = local_chat._anthropic_client({"api_key": "k"}, "anthropic")
+    assert local_chat._anthropic_client({"api_key": "k"}, "anthropic") is a
+    assert local_chat._anthropic_client({"api_key": "k2"}, "anthropic") is not a
+
+
+@needs_anthropic
+def test_anthropic_client_cache_keys_on_the_route(monkeypatch):
+    """Same backend, another route: a cached direct client must never
+    carry a Bedrock id to api.anthropic.com."""
+    monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    direct = local_chat._anthropic_client({"api_key": "k"}, "anthropic")
+    bedrock = local_chat._anthropic_client({"api_key": "k"}, "bedrock")
+    assert isinstance(bedrock, anthropic.AnthropicBedrock)
+    assert not isinstance(direct, anthropic.AnthropicBedrock)
 
 
 @needs_anthropic
@@ -2523,10 +2686,11 @@ def test_anthropic_client_construction_race_keeps_first(monkeypatch):
     real = anthropic.Anthropic
 
     def racing(**kwargs):
-        local_chat._ANTHROPIC_CLIENTS[(("api_key", "k"),)] = winner
+        local_chat._ANTHROPIC_CLIENTS[
+            ("anthropic", (("api_key", "k"),))] = winner
         return real(**kwargs)
     monkeypatch.setattr(anthropic, "Anthropic", racing)
-    assert local_chat._anthropic_client({"api_key": "k"}) is winner
+    assert local_chat._anthropic_client({"api_key": "k"}, "anthropic") is winner
 
 
 @needs_anthropic
@@ -2543,7 +2707,7 @@ def test_messages_reuses_cached_client_across_runs(client, monkeypatch):
         http_client=anthropic_httpx.Client(
             transport=anthropic_httpx.MockTransport(handler)))
     monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS",
-                        {(("api_key", "test"),): cached})
+                        {("anthropic", (("api_key", "test"),)): cached})
 
     def boom(**kwargs):
         raise AssertionError("cache hit expected — no new construction")
@@ -2789,20 +2953,19 @@ def test_messages_keeps_caller_owned_http_client_open(client):
 
 
 @needs_anthropic
-def test_messages_without_credentials_raises_contract_error(client,
-                                                            monkeypatch,
-                                                            tmp_path):
-    """No pre-check: the SDK's own request-time credential-resolution
-    failure is translated into the contract's PageIndexAPIError — for a
-    bare call, a credential-less backend dict, and the unset-env-var
-    shape ({"api_key": None}) alike."""
+def test_messages_without_credentials_raises_the_sdks_own_error(client,
+                                                                monkeypatch,
+                                                                tmp_path):
+    """No pre-check and no translation: the SDK's own request-time
+    credential-resolution failure propagates as itself (its text already
+    names api_key / auth_token) — for a bare call, a credential-less
+    backend dict, and the unset-env-var shape ({"api_key": None}) alike."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
     monkeypatch.delenv("ANTHROPIC_PROFILE", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))  # no ant-auth profile fallback
     for backend in (None, {"timeout": 30}, {"api_key": None}):
-        with pytest.raises(PageIndexAPIError,
-                           match="Anthropic backend is not configured"):
+        with pytest.raises(TypeError, match="authentication"):
             client._messages("q", model="claude-test", backend=backend)
 
 
@@ -2873,20 +3036,17 @@ def test_dump_block_omits_unset_response_defaults():
         "id": "tu_1", "input": {}, "name": "t", "type": "tool_use"}
 
 
-def test_default_max_tokens_respects_output_ceilings():
-    """A lifted thinking default must not overshoot the model's output
-    ceiling — the wire rejects max_tokens above it; bool is not a budget."""
+def test_default_max_tokens_is_pure_arithmetic(capsys):
+    """The thinking default is budget + 8192, full stop: the model's real
+    ceiling is the API's to enforce (its 400 names both numbers), so no
+    third-party lookup runs — no I/O, no hang, nothing printed, for any
+    spelling. bool is not a budget."""
     lift = local_chat._default_max_tokens
-    enabled = {"type": "enabled", "budget_tokens": 30000}
-    assert lift("claude-opus-4-1", enabled) == 32000
-    assert lift("claude-sonnet-4-5-20250929",
-                {"type": "enabled", "budget_tokens": 60000}) == 64000
-    assert lift("claude-opus-4-1",
-                {"type": "enabled", "budget_tokens": 10000}) == 18192
-    assert lift("claude-test",
-                {"type": "enabled", "budget_tokens": 10000}) == 18192
-    assert lift("claude-sonnet-4-5",
-                {"type": "enabled", "budget_tokens": True}) == 8192
+    assert lift({"type": "enabled", "budget_tokens": 30000}) == 38192
+    assert lift({"type": "enabled", "budget_tokens": 10000}) == 18192
+    assert lift({"type": "enabled", "budget_tokens": True}) == 8192
+    assert lift() == 8192
+    assert capsys.readouterr().out == ""
 
 
 # ── own-model chat over cloud documents (the bridge) ──
@@ -2910,8 +3070,8 @@ class FakeBridge:
 
     def call_tool(self, name, arguments):
         self.calls.append((name, arguments))
-        return json.dumps({"status": "success",
-                           "data": {"doc": "cloud-doc"}}), False
+        return [{"type": "text", "text": json.dumps(
+            {"status": "success", "data": {"doc": "cloud-doc"}})}], False
 
 
 @pytest.fixture
@@ -2946,26 +3106,120 @@ def test_bridge_chat_runs_engine_over_cloud_tools(bridge_client, fake_model):
 
 
 @needs_agents
+def test_process_display_elides_image_payloads(bridge_client, fake_model):
+    """A [tool_result] line shows an image item as it is, minus the base64
+    payload; the model still receives the image itself."""
+    client, bridge = bridge_client
+    bridge.call_tool = lambda name, arguments: (
+        [{"type": "text", "text": "page 1"},
+         {"type": "image", "mimeType": "image/png", "data": "A" * 8192}],
+        False)
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "r.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    text = "".join(client.chat("What?", stream=True))
+    assert ('[tool_result] get_document: page 1 {"type": "image", '
+            '"image_url": "data:image/png;base64,..."}') in text
+    assert "AAAA" not in text
+    assert "AAAA" in json.dumps(fake.inputs[1])  # the model got the image
+
+
+@needs_agents
 def test_bridge_doc_id_targets_at_prompt_level(bridge_client, fake_model,
                                                monkeypatch):
     """On cloud tools there is no local allowlist: doc_id becomes the
-    prompt-level targeting block only. (Had the tool layer received the
-    doc_ids, _require_local_scope would raise on a cloud client — this
-    call succeeding is the proof it did not.)"""
+    prompt-level targeting block only."""
     client, _ = bridge_client
     monkeypatch.setattr(client, "get_document",
                         lambda doc_id: {"name": "r.pdf", "description": "d",
                                         "status": "completed",
                                         "metadata": None})
-    monkeypatch.setattr(
-        client, "list_documents",
-        lambda **kw: {"documents": [{"id": "pi-a", "name": "r.pdf"}],
-                      "total": 1})
     fake = fake_model([[_msg_item("ok")]])
     client.chat_completions("q", doc_id="pi-a")
     first = fake.inputs[0][0]
     assert "specified document" in first["content"]
     assert "r.pdf" in first["content"]
+
+
+def test_targeting_block_orders_folder_before_documents(bridge_client,
+                                                        monkeypatch):
+    """The folder block leads the document block, joined as the managed
+    chat joins them; "root" and no folder place nothing of their own."""
+    from pageindex.agent_tools import targeting_block
+    client, _ = bridge_client
+    monkeypatch.setattr(client, "list_folders", lambda: {"folders": [
+        {"id": "f-1", "name": "Team", "description": None}]})
+    monkeypatch.setattr(client, "get_document",
+                        lambda doc_id: {"name": "r.pdf", "status": "completed"})
+    both = targeting_block(client, "pi-a", "f-1")
+    assert both is not None
+    folder, doc = both.split("\n\n")
+    assert folder.startswith("The user has specified folder: Team\n")
+    assert 'Folder metadata: {"id": "f-1", "name": "Team"}\n' in folder
+    assert doc.startswith("The user has specified document: r.pdf\n")
+    assert targeting_block(client, "pi-a", "root") == doc
+    assert targeting_block(client, None, "f-1") == folder
+    assert targeting_block(client, None, None) is None
+
+
+@needs_agents
+def test_bridge_folder_id_targets_ahead_of_documents(bridge_client, fake_model,
+                                                     monkeypatch):
+    """folder_id is prompt-level targeting on cloud tools, one leading
+    user message with the folder block ahead of the document block."""
+    client, _ = bridge_client
+    monkeypatch.setattr(client, "list_folders", lambda: {"folders": [
+        {"id": "f-1", "name": "Team", "description": "shared"}]})
+    monkeypatch.setattr(client, "get_document",
+                        lambda doc_id: {"name": "r.pdf", "status": "completed"})
+    fake = fake_model([[_msg_item("ok")]])
+    with pytest.raises(PageIndexAPIError, match="not found"):
+        client.chat_completions("q", folder_id="f-9")
+    client.chat_completions("q", doc_id="pi-a", folder_id="f-1")
+    first, question = fake.inputs[0][:2]
+    assert first["content"].startswith("The user has specified folder: Team\n")
+    assert "The user has specified document: r.pdf" in first["content"]
+    assert question == {"role": "user", "content": "q"}
+
+
+@needs_agents
+def test_bridge_folder_id_reaches_the_protocol_lanes(bridge_client, fake_model,
+                                                     monkeypatch):
+    """chat(protocol="responses") threads folder_id to its engine."""
+    client, _ = bridge_client
+    monkeypatch.setattr(client, "list_folders", lambda: {"folders": [
+        {"id": "f-1", "name": "Team"}]})
+    fake = fake_model([[_msg_item("ok")]])
+    client.chat("q", protocol="responses", folder_id="f-1")
+    assert fake.inputs[0][0]["content"].startswith(
+        "The user has specified folder: Team\n")
+    assert fake.inputs[0][1] == {"role": "user", "content": "q"}
+
+
+@needs_anthropic
+def test_bridge_folder_id_reaches_the_messages_lane(bridge_client,
+                                                    fake_anthropic,
+                                                    monkeypatch):
+    """chat(protocol="messages") threads folder_id to its engine."""
+    client, _ = bridge_client
+    monkeypatch.setattr(client, "list_folders", lambda: {"folders": [
+        {"id": "f-1", "name": "Team"}]})
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
+    client.chat("q", protocol="messages", model="claude-test",
+                folder_id="f-1")
+    first, second = calls[0]["messages"][:2]
+    assert first["content"].startswith("The user has specified folder: Team\n")
+    assert second == {"role": "user", "content": "q"}
+
+
+@needs_agents
+def test_folder_id_is_cloud_only(client):
+    """A local library has no folders: folder_id refuses before any model
+    call, like the folder methods."""
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        client.chat_completions("q", folder_id="f-1")
 
 
 def test_bridge_gate_and_citations(monkeypatch):
@@ -3044,7 +3298,7 @@ def test_messages_auth_failure_teaches_architecture(bridge_client,
                        "error": {"type": "authentication_error",
                                  "message": "invalid x-api-key"}})
 
-    def fresh_fake(backend=None):
+    def fresh_fake(backend=None, route="anthropic"):
         # per call: run_messages closes a per-call transport it owns
         return anthropic.Anthropic(
             api_key="test",
@@ -3062,8 +3316,9 @@ def test_messages_auth_failure_teaches_architecture(bridge_client,
 @needs_anthropic
 def test_messages_no_backend_leak_when_tool_build_fails(bridge_client,
                                                         monkeypatch):
-    """build_anthropic_tools is network I/O on a bridge client — a
-    failure there must not strand an opened per-call transport."""
+    """build_anthropic_tools is network I/O on a bridge client, and it
+    runs before the transport exists — a failure there must construct no
+    transport to strand."""
     client, _ = bridge_client
     made = []
 
@@ -3077,17 +3332,47 @@ def test_messages_no_backend_leak_when_tool_build_fails(bridge_client,
             self.closed = True
 
     monkeypatch.setattr(local_chat, "_anthropic_client",
-                        lambda backend=None: made.append(FakeAnthropic())
-                        or made[-1])
+                        lambda backend=None, route="anthropic":
+                        made.append(FakeAnthropic()) or made[-1])
 
-    def boom(client, doc_ids=None):
+    def boom(client, doc_ids=None, **kwargs):
         raise PageIndexAPIError("Could not reach the PageIndex MCP server")
 
     monkeypatch.setattr(
         "pageindex.integrations.anthropic_sdk.build_anthropic_tools", boom)
     with pytest.raises(PageIndexAPIError, match="MCP server"):
         client._messages("q", model="claude-test", max_tokens=100)
-    assert all(fake.closed for fake in made)
+    # Tools are deliberately built BEFORE the transport, so a tool-build
+    # failure must find no transport constructed at all — if this list is
+    # ever non-empty, that ordering (and its no-leak guarantee) broke.
+    assert not made
+
+
+@needs_anthropic
+def test_messages_no_backend_leak_when_runner_build_fails(client, monkeypatch):
+    """A failure between transport construction and the runner handoff
+    (the runner rejecting a passthrough kwarg, say) must not strand the
+    per-call transport either."""
+    made = []
+
+    class FakeAnthropic:
+        def __init__(self):
+            self.closed = False
+
+            def explode(**kw):
+                raise TypeError("unexpected keyword argument 'thinking'")
+            self.beta = types.SimpleNamespace(
+                messages=types.SimpleNamespace(tool_runner=explode))
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(local_chat, "_anthropic_client",
+                        lambda backend=None, route="anthropic":
+                        made.append(FakeAnthropic()) or made[-1])
+    with pytest.raises(TypeError, match="thinking"):
+        client._messages("q", model="claude-test", max_tokens=100)
+    assert made and all(fake.closed for fake in made)
 
 
 @needs_agents
@@ -3135,6 +3420,176 @@ def test_bridge_openai_agent_config_carries_configured_model(bridge_client):
     assert "CLOUD LIVE INSTRUCTIONS" in config["instructions"]
 
 
+@needs_anthropic
+def test_messages_routes_by_model_prefix(client, fake_anthropic, monkeypatch):
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
+    fixture_client = local_chat._anthropic_client
+    seen = {}
+    monkeypatch.setattr(
+        local_chat, "_anthropic_client",
+        lambda backend=None, route="anthropic": (
+            seen.setdefault("route", route), fixture_client())[1])
+    client._messages(
+        "q", model="bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0")
+    assert seen["route"] == "bedrock"
+    assert calls[0]["model"] == "anthropic.claude-3-5-sonnet-20241022-v2:0"
+
+
+@needs_anthropic
+def test_anthropic_client_route_picks_the_transport_class(monkeypatch):
+    """The model's routing prefix selects the SDK client class — the
+    bedrock/vertex ids only mean something to their own transports."""
+    monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
+    # AnthropicBedrock defaults api_key from this env var, and refuses
+    # api_key alongside AWS credential kwargs — a developer machine that
+    # exports it must not fail this construction.
+    monkeypatch.delenv("AWS_BEARER_TOKEN_BEDROCK", raising=False)
+    bedrock = local_chat._anthropic_client(
+        {"aws_region": "us-east-1", "aws_access_key": "a",
+         "aws_secret_key": "s"}, "bedrock")
+    assert isinstance(bedrock, anthropic.AnthropicBedrock)
+    direct = local_chat._anthropic_client({"api_key": "k"}, "anthropic")
+    assert isinstance(direct, anthropic.Anthropic)
+    assert not isinstance(direct, anthropic.AnthropicBedrock)
+
+
+@needs_anthropic
+def test_anthropic_client_vertex_route(monkeypatch):
+    monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
+    vertex = local_chat._anthropic_client(
+        {"region": "us-east5", "project_id": "p", "access_token": "t"},
+        "vertex_ai")
+    assert isinstance(vertex, anthropic.AnthropicVertex)
+
+
+@needs_anthropic
+def test_anthropic_client_foundry_route(monkeypatch):
+    if not hasattr(anthropic, "AnthropicFoundry"):
+        pytest.skip("this anthropic build has no Foundry client")
+    monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
+    # AnthropicFoundry fills base_url from this and refuses it beside resource=.
+    monkeypatch.delenv("ANTHROPIC_FOUNDRY_BASE_URL", raising=False)
+    foundry = local_chat._anthropic_client(
+        {"resource": "r", "api_key": "k"}, "azure_ai")
+    assert isinstance(foundry, anthropic.AnthropicFoundry)
+
+
+@needs_anthropic
+def test_anthropic_client_unconfigured_route_keeps_the_error_contract(
+        monkeypatch):
+    """Vertex and Foundry fail at construction (region, credentials) —
+    those failures must wrap the constructors' documented refusals."""
+    # skip decided first: a skip after assertions would discard the
+    # vertex coverage those assertions already ran.
+    if not hasattr(anthropic, "AnthropicFoundry"):
+        pytest.skip("this anthropic build has no Foundry client")
+    monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
+    for name in ("CLOUD_ML_REGION", "GOOGLE_CLOUD_PROJECT",
+                 "ANTHROPIC_FOUNDRY_API_KEY", "ANTHROPIC_FOUNDRY_BASE_URL",
+                 "ANTHROPIC_FOUNDRY_RESOURCE"):
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(PageIndexAPIError,
+                       match="Anthropic backend is not configured"):
+        local_chat._anthropic_client(None, "vertex_ai")
+    with pytest.raises(PageIndexAPIError,
+                       match="Anthropic backend is not configured"):
+        local_chat._anthropic_client(None, "azure_ai")
+
+
+@needs_anthropic
+def test_missing_route_client_class_names_the_upgrade(monkeypatch):
+    # A build predating a route's client class gets the tool-runner
+    # probe's contract, not a bare AttributeError.
+    import anthropic
+    monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
+    monkeypatch.delattr(anthropic, "AnthropicFoundry", raising=False)
+    with pytest.raises(PageIndexAPIError,
+                       match="AnthropicFoundry.*pip install -U anthropic"):
+        local_chat._anthropic_client(None, "azure_ai")
+
+
+@needs_anthropic
+def test_messages_names_the_missing_tool_runner(client, monkeypatch):
+    # anthropic 0.108–0.121 constructs Bedrock/Vertex clients whose beta
+    # surface has no tool runner: name the gap, not an AttributeError.
+    class _Runnerless:
+        class beta:
+            class messages: ...
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(local_chat, "_anthropic_client",
+                        lambda backend=None, route="anthropic": _Runnerless())
+    with pytest.raises(PageIndexAPIError, match="tool runner"):
+        client._messages("q", model="bedrock/anthropic.claude-sonnet-4-6-v1:0")
+
+
+def _failing_runner_client(monkeypatch, exc):
+    # A transport whose runner dies on first turn — the shape of a
+    # request-time credential failure (auth resolves per request).
+    class _FailingRunner:
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            raise exc
+
+        def generate_tool_call_response(self):
+            return None
+
+    class _Fake:
+        class beta:
+            class messages:
+                @staticmethod
+                def tool_runner(**kwargs):
+                    return _FailingRunner()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(local_chat, "_anthropic_client",
+                        lambda backend=None, route="anthropic": _Fake())
+
+
+@needs_anthropic
+def test_messages_request_failures_propagate_raw(client, monkeypatch):
+    """No second-guessing the transports: a request-time failure that is
+    not the anthropic SDK's own error type propagates as itself — the
+    stacks' original text and traceback are the diagnostic, on every
+    route and on both paths. (Construction-time misconfiguration still
+    wraps, in _anthropic_client — that is the constructors' documented
+    contract.)"""
+    cases = (RuntimeError("could not resolve credentials from session"),
+             TypeError("Could not resolve authentication method"),
+             ModuleNotFoundError("No module named 'botocore'",
+                                 name="botocore"))
+    for exc in cases:
+        _failing_runner_client(monkeypatch, exc)
+        with pytest.raises(type(exc)):
+            client._messages(
+                "q", model="bedrock/anthropic.claude-sonnet-4-6-v1:0")
+        _failing_runner_client(monkeypatch, exc)
+        with pytest.raises(type(exc)):
+            list(client._messages("q", stream=True,
+                                  model="claude-sonnet-4-5"))
+
+
+def test_route_tables_and_marks_agree():
+    """One route concept, three tables — the client's route/env map, this
+    module's client classes, and the marks predicate. A new route must
+    land in every one; a miss is a silent env no-op or full-price turns."""
+    from pageindex.client import _CLAUDE_ROUTES
+    assert set(local_chat._ROUTE_CLIENTS) == {"anthropic", *_CLAUDE_ROUTES}
+    for wire in ("anthropic/claude-opus-4-6",
+                 *(f"{route}/claude-opus-4-6" for route in _CLAUDE_ROUTES)):
+        assert local_chat._litellm_claude_marks(wire), wire
+    # Claude-gated on the cloud routes: other models get no marks.
+    assert local_chat._litellm_claude_marks(
+        "azure_ai/Meta-Llama-3-70B-Instruct") is None
+
+
 # ── chat(protocol=): the protocol doors behind the front door ──
 
 def test_old_door_names_point_at_chat_protocol(client):
@@ -3144,6 +3599,68 @@ def test_old_door_names_point_at_chat_protocol(client):
         assert not hasattr(client, name)
     with pytest.raises(AttributeError, match="no attribute 'no_such_thing'"):
         client.no_such_thing
+
+
+def test_chat_protocol_chat_completions_is_the_door(client, monkeypatch):
+    seen = []
+    monkeypatch.setattr(local_chat, "run_chat_completions",
+                        lambda c, messages, **kw: seen.append((messages, kw))
+                        or "door")
+    knobs = dict(doc_id="pi-a", model="gpt-x", max_turns=3,
+                 reasoning_effort="low", backend={"api_key": "k"},
+                 extra_headers={"x": "1"}, extra_body={"seed": 1})
+    for streaming in (False, True):
+        assert client.chat("q", protocol="chat_completions", stream=streaming,
+                           **knobs) == "door"
+        # the protocol's own stream is its chunk dicts, never text pieces
+        assert client.chat_completions("q", stream=streaming,
+                                       stream_metadata=True,
+                                       **knobs) == "door"
+        assert seen[-2] == seen[-1]
+    assert seen[0][0] == [{"role": "user", "content": "q"}]
+    client.chat("q", protocol="chat_completions", instructions="be brief")
+    assert seen[-1][0] == [{"role": "system", "content": "be brief"},
+                           {"role": "user", "content": "q"}]
+    with pytest.raises(PageIndexAPIError, match="show_process"):
+        client.chat("q", protocol="chat_completions", stream=True,
+                    show_process=True)
+    assert client.chat_completions("q") == "door"
+
+
+def test_chat_protocol_chat_completions_serves_managed_cloud(monkeypatch):
+    """Unlike the own-model protocols, the managed cloud chat speaks
+    chat.completions itself, so the lane opens without a chat model;
+    the own-model knobs still refuse there."""
+    from pageindex import PageIndexClient
+    cloud = PageIndexClient(api_key="pi-k")
+    seen = []
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kw: seen.append(kw) or {"choices": []})
+    assert cloud.chat("q", protocol="chat_completions") == {"choices": []}
+    assert seen[-1] == {"messages": [{"role": "user", "content": "q"}],
+                        "stream": False, "doc_id": None, "temperature": None,
+                        "stream_metadata": True, "enable_citations": False,
+                        "extra_body": None, "folder_id": None}
+    cloud.chat("q", protocol="chat_completions",
+               extra_body={"temperature": 0.2, "enable_citations": True})
+    assert seen[-1]["extra_body"] == {"temperature": 0.2,
+                                      "enable_citations": True}
+    with pytest.raises(PageIndexAPIError, match="extra_body cannot carry"):
+        cloud.chat("q", protocol="chat_completions",
+                   extra_body={"messages": []})
+    with pytest.raises(PageIndexAPIError, match="chat_model="):
+        cloud.chat("q", protocol="chat_completions", model="m")
+
+
+def test_chat_takes_only_messages_by_position():
+    """chat_completions() puts stream before doc_id; chat() the reverse.
+    A positional rewrite must fail loudly, never bind doc_id=True."""
+    params = list(inspect.signature(PageIndexClient.chat).parameters.values())
+    assert [p.name for p in params[:2]] == ["self", "messages"]
+    assert {p.kind for p in params[2:]} == {inspect.Parameter.KEYWORD_ONLY}
+    cloud = PageIndexClient(api_key="pi-k")
+    with pytest.raises(TypeError, match="positional"):
+        cloud.chat("q", True, "pi-1")
 
 
 def test_chat_protocol_responses_is_the_door(client, monkeypatch):
@@ -3227,6 +3744,46 @@ def test_extra_body_refuses_skeleton_keys():
                                  None, None, extra_body={"input": "x"})
 
 
+def test_extra_body_refuses_non_dicts_and_argument_keys():
+    """The same gate: a non-dict would be splatted into the payload as
+    fabricated fields; stream / doc_id select the SDK's parser and scope,
+    so they ride their own arguments on every lane."""
+    for bad in (["ab"], "messages", 5, [("a", 1)]):
+        with pytest.raises(PageIndexAPIError,
+                           match="extra_body must be a dict"):
+            local_chat._refuse_skeleton(bad)
+    for key in ("stream", "doc_id"):
+        with pytest.raises(PageIndexAPIError,
+                           match=rf"extra_body cannot carry {key}: use {key}="):
+            local_chat._refuse_skeleton({key: True})
+    local_chat._refuse_skeleton(None)
+    local_chat._refuse_skeleton({})
+    local_chat._refuse_skeleton({"service_tier": "auto"})
+
+
+def test_chat_refuses_bad_extra_body_before_any_lane(client, monkeypatch):
+    """chat() and chat_completions() check extra_body before entering a
+    lane, so no lane does I/O (or, on Responses, an effort merge) on a
+    bad value."""
+    entered = []
+    for door in ("run_chat_completions", "run_responses", "run_messages"):
+        monkeypatch.setattr(local_chat, door,
+                            lambda c, *a, **kw: entered.append(1))
+    for protocol, knobs in ((None, {}), ("chat_completions", {}),
+                            ("responses", {}),
+                            ("messages", {"model": "claude-x"})):
+        with pytest.raises(PageIndexAPIError,
+                           match="extra_body must be a dict"):
+            client.chat("q", protocol=protocol, reasoning_effort="low",
+                        extra_body=["ab"], **knobs)
+        with pytest.raises(PageIndexAPIError, match="cannot carry stream"):
+            client.chat("q", protocol=protocol, extra_body={"stream": True},
+                        **knobs)
+    with pytest.raises(PageIndexAPIError, match="cannot carry stream"):
+        client.chat_completions("q", extra_body={"stream": True})
+    assert entered == []
+
+
 @needs_anthropic
 def test_messages_extra_body_refuses_skeleton_before_transport(client,
                                                                 monkeypatch):
@@ -3235,7 +3792,7 @@ def test_messages_extra_body_refuses_skeleton_before_transport(client,
                         lambda backend=None: made.append(1))
     with pytest.raises(PageIndexAPIError, match="instructions="):
         local_chat.run_messages(client, "q", model="claude-x",
-                                extra_body={"system": "x"})
+                                route="anthropic", extra_body={"system": "x"})
     assert made == []
 
 
@@ -3283,6 +3840,101 @@ def test_chat_instructions_precede_history_system_rows(client, store_path,
     assert seen["extra"] == []
 
 
+def _citing(bridge):
+    """Teach a FakeBridge the cited_answer prompt, recording each fetch."""
+    bridge.prompts = []
+
+    def get_prompt(name, arguments=None):
+        bridge.prompts.append((name, arguments))
+        fmt = (arguments or {}).get("format", "markdown")
+        return "Cited answers", [{"role": "user", "content": {
+            "type": "text", "text": f"CITATIONS — {fmt}"}}]
+
+    bridge.get_prompt = get_prompt
+
+
+@needs_agents
+def test_chat_citations_join_the_managed_prompt(bridge_client, fake_model):
+    """citations=True on own-model chat: the server's cited_answer prompt
+    (PageIndex chat's cite format) joins the system prompt after the
+    managed prompt and before the caller's instructions; off fetches
+    nothing."""
+    client, bridge = bridge_client
+    _citing(bridge)
+    fake = fake_model([[_msg_item("ok")], [_msg_item("ok")]])
+    assert client.chat("q", citations=True, instructions="analyst") == "ok"
+    system = fake.instructions[0]
+    assert (system.index("CLOUD LIVE INSTRUCTIONS")
+            < system.index("CITATIONS — cite") < system.index("analyst"))
+    assert bridge.prompts == [("cited_answer", {"format": "cite"})]
+    client.chat("q")
+    assert "CITATIONS" not in fake.instructions[1]
+    assert len(bridge.prompts) == 1
+
+
+def test_chat_citations_on_protocol_lanes(bridge_client, monkeypatch):
+    """The protocol lanes carry the same guidance in their instructions /
+    system: prepended to a string, a leading block before caller blocks."""
+    client, bridge = bridge_client
+    _citing(bridge)
+    seen = []
+    monkeypatch.setattr(local_chat, "run_responses",
+                        lambda c, input, **kw: seen.append(kw) or "door")
+    monkeypatch.setattr(local_chat, "run_messages",
+                        lambda c, messages, **kw: seen.append(kw) or "door")
+    client.chat("q", protocol="responses", citations=True,
+                instructions="be brief")
+    assert seen[-1]["instructions"] == "CITATIONS — cite\n\nbe brief"
+    blocks = [{"type": "text", "text": "persona"}]
+    client.chat("q", protocol="messages", model="claude-x", citations=True,
+                instructions=blocks)
+    assert seen[-1]["system"] == [
+        {"type": "text", "text": "CITATIONS — cite"}, *blocks]
+    client.chat("q", protocol="messages", model="claude-x", citations=True)
+    assert seen[-1]["system"] == "CITATIONS — cite"
+
+
+def test_chat_citations_managed(monkeypatch):
+    """Managed chat: citations=True is the endpoint's enable_citations; a
+    format name raises rather than silently meaning True."""
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    seen = []
+    monkeypatch.setattr(
+        cloud._api, "chat_completions",
+        lambda **kw: seen.append(kw) or (
+            iter([_cloud_chunk("ok")]) if kw.get("stream")
+            else {"choices": [{"message": {"content": "ok"}}]}))
+    assert cloud.chat("q", citations=True) == "ok"
+    assert seen[-1]["enable_citations"] is True
+    assert "".join(cloud.chat("q", stream=True, citations=True)) == "ok"
+    assert seen[-1]["enable_citations"] is True
+    cloud.chat("q")
+    assert seen[-1]["enable_citations"] is False
+    cloud.chat("q", protocol="chat_completions", citations=True)
+    assert seen[-1]["enable_citations"] is True
+    with pytest.raises(PageIndexAPIError, match="True or False"):
+        cloud.chat("q", citations="cite")
+
+
+def test_chat_citations_local_documents_use_the_frozen_copy(client, monkeypatch):
+    """Local documents: the frozen copy joins the system prompt the same
+    way (pages are all local content has); a format name raises rather
+    than silently meaning cite."""
+    from pageindex.agent_tools import LOCAL_CITATION_PROMPTS
+    seen = []
+    monkeypatch.setattr(
+        local_chat, "run_chat_completions",
+        lambda c, messages, **kw: seen.append(messages) or {
+            "choices": [{"message": {"content": "ok"}}]})
+    assert client.chat("q", citations=True, instructions="analyst") == "ok"
+    assert seen[-1][0] == {"role": "system", "content":
+                           LOCAL_CITATION_PROMPTS["cite"] + "\n\nanalyst"}
+    client.chat("q")
+    assert seen[-1][0]["role"] == "user"
+    with pytest.raises(PageIndexAPIError, match="True or False"):
+        client.chat("q", citations="markdown")
+
+
 def test_chat_answer_lane_forwards_the_promoted_knobs(client, monkeypatch):
     seen = {}
     monkeypatch.setattr(local_chat, "run_chat_completions",
@@ -3297,3 +3949,327 @@ def test_chat_answer_lane_forwards_the_promoted_knobs(client, monkeypatch):
                         lambda c, messages, **kw: streamed.update(kw) or "s")
     assert client.chat("q", stream=True, **knobs) == "s"
     assert {k: streamed[k] for k in knobs} == knobs
+
+
+# ── a tool failure that survived the bridge's retries fails the run fast ──
+
+@needs_agents
+def test_translate_run_error_unwraps_a_tool_failure():
+    """A failure the invoker re-raised leaves the run wrapped in the
+    framework's exception; the caller gets it back with its status."""
+    from agents.exceptions import AgentsException
+    wrapped = AgentsException("Error invoking MCP tool get_document")
+    wrapped.__cause__ = PageIndexAPIError("MCP request failed: HTTP 429",
+                                          status_code=429)
+    err = local_chat._translate_run_error(wrapped, None, "chat")
+    assert err.status_code == 429 and "HTTP 429" in str(err)
+    plain = local_chat._translate_run_error(AgentsException("boom"), None,
+                                            "chat")
+    assert plain.status_code is None and "agent backend failed" in str(plain)
+
+
+def test_model_backend_error_keeps_the_status_code():
+    limited = Exception("rate limited")
+    limited.status_code = 429
+    assert local_chat._model_backend_error(limited, "chat").status_code == 429
+    assert local_chat._model_backend_error(
+        Exception("x"), "chat").status_code is None
+
+
+def _rate_limited(name, arguments):
+    raise PageIndexAPIError("MCP request failed: HTTP 429", status_code=429)
+
+
+@needs_agents
+def test_bridge_chat_fails_fast_on_a_rate_limited_tool(bridge_client,
+                                                        fake_model):
+    """A 429 that survived the bridge's retries ends the run with its
+    status — no second model turn over an error envelope."""
+    client, bridge = bridge_client
+    bridge.call_tool = _rate_limited
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "r.pdf"})],
+        [_msg_item("never reached")],
+    ])
+    with pytest.raises(PageIndexAPIError, match="HTTP 429") as info:
+        client.chat_completions("What?")
+    assert info.value.status_code == 429
+    assert len(fake.instructions) == 1
+
+
+@needs_anthropic
+def test_messages_fail_fast_is_quiet(bridge_client, fake_anthropic, caplog):
+    """The runner's own tool-error logging never reports the failure the
+    lane is about to raise."""
+    client, bridge = bridge_client
+    bridge.call_tool = _rate_limited
+    fake_anthropic([_anthropic_message(
+        [{"type": "tool_use", "id": "tu_1", "name": "get_document",
+          "input": {"doc_name": "r.pdf"}}], "tool_use")])
+    with pytest.raises(PageIndexAPIError, match="HTTP 429"):
+        client.chat("q", protocol="messages", model="claude-test",
+                    extra_body={"max_tokens": 100})
+    assert not [r for r in caplog.records if r.name.startswith("anthropic")]
+
+
+@needs_anthropic
+@pytest.mark.parametrize("stop_reason", ["tool_use", "max_tokens", "refusal"])
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("max_turns", [1, 2])
+def test_messages_fail_fast_on_a_rate_limited_tool(
+        bridge_client, fake_anthropic, stop_reason, stream, max_turns):
+    """Real runners must surface executed tools' failures before another
+    model call or a max_turns exit, and preserve terminal-turn policy."""
+    client, bridge = bridge_client
+    tool_calls = []
+
+    def fail(name, arguments):
+        tool_calls.append((name, arguments))
+        return _rate_limited(name, arguments)
+
+    bridge.call_tool = fail
+    replies = [
+        _anthropic_message([{"type": "tool_use", "id": "tu_1",
+                             "name": "get_document",
+                             "input": {"doc_name": "r.pdf"}}], stop_reason),
+        _anthropic_message([{"type": "text", "text": "never reached"}],
+                           "end_turn"),
+    ]
+    calls = fake_anthropic([_anthropic_sse(reply) for reply in replies]
+                          if stream else replies)
+
+    def run():
+        result = client.chat("q", protocol="messages", model="claude-test",
+                             extra_body={"max_tokens": 100}, stream=stream,
+                             max_turns=max_turns)
+        return list(result) if stream else result
+
+    executes_tools = (stop_reason == "tool_use"
+                      or (stop_reason == "max_tokens"
+                          and _ANTHROPIC_RUNS_CUT_TOOL_TURNS))
+    if executes_tools:
+        with pytest.raises(PageIndexAPIError, match="HTTP 429") as info:
+            run()
+        assert info.value.status_code == 429
+        assert tool_calls == [("get_document", {"doc_name": "r.pdf"})]
+    else:
+        run()
+        assert tool_calls == []
+    assert len(calls) == 1, "a second model turn ran"
+
+
+@needs_anthropic
+@pytest.mark.parametrize("stream", [False, True])
+def test_messages_runs_each_tool_once(bridge_client, fake_anthropic, stream):
+    """Failure checks preserve normal tool execution across multiple turns."""
+    client, bridge = bridge_client
+    replies = [_anthropic_message([
+        {"type": "tool_use", "id": tool_id, "name": "get_document",
+         "input": {"doc_name": "r.pdf"}}], "tool_use")
+        for tool_id in ("tu_1", "tu_2")]
+    replies.append(_anthropic_message([{"type": "text", "text": "Done"}],
+                                      "end_turn"))
+    calls = fake_anthropic([_anthropic_sse(reply) for reply in replies]
+                          if stream else replies)
+    result = client.chat("q", protocol="messages", model="claude-test",
+                         extra_body={"max_tokens": 100}, stream=stream)
+    if stream:
+        list(result)
+    assert len(calls) == 3
+    assert bridge.calls == [("get_document", {"doc_name": "r.pdf"})] * 2
+
+
+@needs_anthropic
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("cached", [False, True])
+def test_messages_tool_failure_preserves_client_lifecycle(
+        bridge_client, fake_anthropic, monkeypatch, stream, cached):
+    """Failed runs close owned clients and leave cached clients reusable,
+    with no failure state leaking into the next run."""
+    client, bridge = bridge_client
+    replies = [
+        _anthropic_message([_anthropic_tool_use()], "tool_use"),
+        _anthropic_message([_anthropic_tool_use()], "tool_use"),
+        _anthropic_message([{"type": "text", "text": "Recovered"}],
+                           "end_turn"),
+    ]
+    calls = fake_anthropic([_anthropic_sse(reply) for reply in replies]
+                          if stream else replies)
+    backend = local_chat._anthropic_client()
+    monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS",
+                        {"test": backend} if cached else {})
+    original_call = bridge.call_tool
+    bridge.call_tool = _rate_limited
+
+    def run():
+        result = client.chat("q", protocol="messages", model="claude-test",
+                             extra_body={"max_tokens": 100}, stream=stream)
+        return list(result) if stream else result
+
+    try:
+        with pytest.raises(PageIndexAPIError, match="HTTP 429"):
+            run()
+        assert len(calls) == 1
+        assert backend.is_closed() is (not cached)
+        if cached:
+            bridge.call_tool = original_call
+            run()
+            assert len(calls) == 3
+            assert len(bridge.calls) == 1
+            assert not backend.is_closed()
+    finally:
+        backend.close()
+
+
+@needs_agents
+def test_bridge_chat_keeps_model_slips_model_visible(bridge_client,
+                                                     fake_model):
+    """Only the invoker's re-raised failures escape: a model-side slip (bad
+    JSON arguments) still comes back to the model as text and the run
+    goes on."""
+    from openai.types.responses import ResponseFunctionToolCall
+    client, bridge = bridge_client
+    fake = fake_model([
+        [ResponseFunctionToolCall(id="fc_1", type="function_call",
+                                  call_id="call_1", name="get_document",
+                                  arguments="{not json", status="completed")],
+        [_msg_item("Recovered")],
+    ])
+    result = client.chat_completions("What?")
+    assert result["choices"][0]["message"]["content"] == "Recovered"
+    assert len(fake.instructions) == 2 and bridge.calls == []
+
+
+# ── client-level instructions: after the managed base, on every surface ──
+
+def test_client_instructions_follow_the_managed_base_everywhere(store_path):
+    from pageindex.agent_tools import AGENT_INSTRUCTIONS
+    client = PageIndexLocalClient(storage_path=store_path,
+                                  instructions="PERSONA")
+    assert client.agent_instructions() == AGENT_INSTRUCTIONS + "\n\nPERSONA"
+    managed = local_chat._managed_instructions(client, ["CALL", "HISTORY"])
+    marks = [managed.index(m) for m in
+             (CHAT_HEADER, AGENT_INSTRUCTIONS, "PERSONA", "CALL", "HISTORY")]
+    assert marks == sorted(marks)
+    blocks = local_chat._anthropic_system(client, "CALL")
+    assert blocks[0]["text"].endswith("\n\nPERSONA")
+    assert blocks[1]["text"] == "CALL"
+    plain = PageIndexLocalClient(storage_path=store_path)
+    assert plain.agent_instructions() == AGENT_INSTRUCTIONS
+
+
+@needs_agents
+def test_chat_reaches_the_model_with_client_instructions(store_path,
+                                                          fake_model):
+    client = PageIndexLocalClient(storage_path=store_path,
+                                  instructions="PERSONA")
+    fake = fake_model([[_msg_item("ok")]])
+    assert client.chat([{"role": "system", "content": "CALL"},
+                        {"role": "user", "content": "hi"}]) == "ok"
+    assert fake.instructions[0].endswith("\n\nPERSONA\n\nCALL")
+
+
+def test_bridge_client_instructions_follow_the_live_instructions(
+        bridge_client):
+    client, _ = bridge_client
+    client.instructions = "PERSONA"
+    assert client.agent_instructions() == "CLOUD LIVE INSTRUCTIONS\n\nPERSONA"
+
+
+@needs_agents
+def test_openai_agent_config_carries_client_instructions(store_path):
+    client = PageIndexLocalClient(storage_path=store_path,
+                                  instructions="PERSONA")
+    assert client.openai_agent_config()["instructions"].endswith("PERSONA")
+
+
+def test_anthropic_runner_config_carries_client_instructions(store_path):
+    pytest.importorskip("anthropic")
+    client = PageIndexLocalClient(storage_path=store_path,
+                                  instructions="PERSONA")
+    assert client.anthropic_runner_config("claude-x")["system"].endswith(
+        "PERSONA")
+
+
+def test_claude_agent_config_carries_client_instructions(store_path):
+    pytest.importorskip("claude_agent_sdk")
+    client = PageIndexLocalClient(storage_path=store_path,
+                                  instructions="PERSONA")
+    assert client.claude_agent_config()["system_prompt"].endswith("PERSONA")
+
+
+def test_managed_chat_sends_one_leading_system_row(monkeypatch):
+    """One system row first: the client's, the call's, then the history's."""
+    cloud = PageIndexCloudClient(api_key="pi-k", instructions="PERSONA")
+    seen = {}
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kw: seen.update(kw) or {
+                            "choices": [{"message": {"content": "ok"}}]})
+    history = [{"role": "user", "content": "q1"},
+               {"role": "assistant", "content": "a1"},
+               {"role": "system", "content": "HISTORY"},
+               {"role": "user", "content": "q2"}]
+    assert cloud.chat(history, instructions="CALL") == "ok"
+    assert seen["messages"] == [
+        {"role": "system", "content": "PERSONA\n\nCALL\n\nHISTORY"},
+        {"role": "user", "content": "q1"},
+        {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": "q2"}]
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kw: seen.update(kw) or iter([]))
+    assert list(cloud.chat("q", stream=True, show_process=False)) == []
+    assert seen["messages"] == [{"role": "system", "content": "PERSONA"},
+                                {"role": "user", "content": "q"}]
+    cloud.chat_completions([{"role": "user", "content": "q"},
+                            {"role": "developer", "content": "DEV"}])
+    assert seen["messages"][0] == {"role": "system",
+                                   "content": "PERSONA\n\nDEV"}
+
+
+def test_managed_fold_leaves_non_system_rows_to_the_endpoint(monkeypatch):
+    """Only system rows fold; blank ones drop; the rest is not validated."""
+    cloud = PageIndexCloudClient(api_key="pi-k")
+    seen = {}
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kw: seen.update(kw) or {
+                            "choices": [{"message": {"content": "ok"}}]})
+    leading = [{"role": "system", "content": "S"},
+               {"role": "user", "content": "q"}]
+    cloud.chat(leading)
+    assert seen["messages"] == leading
+    history = [{"role": "user", "content": [{"type": "text", "text": "q"}],
+                "name": "ray"},
+               {"role": "assistant", "content": None,
+                "tool_calls": [{"id": "c"}]},
+               {"role": "tool", "tool_call_id": "c", "content": "x"},
+               {"role": "system", "content": "   "}]
+    cloud.chat(history)
+    assert seen["messages"] == history[:-1]
+
+
+def test_chat_history_takes_any_iterable(monkeypatch):
+    """Tuples and generators ride both lanes; the call's instructions land."""
+    cloud = PageIndexCloudClient(api_key="pi-k")
+    seen = {}
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kw: seen.update(kw) or {
+                            "choices": [{"message": {"content": "ok"}}]})
+    row = {"role": "user", "content": "q"}
+    cloud.chat(iter([row]), instructions="CALL")
+    assert seen["messages"] == [{"role": "system", "content": "CALL"}, row]
+    assert local_chat._split_chat_messages((row,)) == ([], [row])
+
+
+def test_system_text_refuses_non_text_parts():
+    text = {"type": "text", "text": "A"}
+    assert local_chat._system_text(
+        [text, {"type": "text", "text": "B"}]) == "A\nB"
+    with pytest.raises(PageIndexAPIError, match="text parts"):
+        local_chat._system_text(
+            [text, {"type": "image_url", "image_url": {"url": "u"}}])
+
+
+def test_managed_instructions_drop_blank_system_texts(store_path):
+    client = PageIndexLocalClient(storage_path=store_path)
+    assert (local_chat._managed_instructions(client, ["", "  ", "X"])
+            == local_chat._managed_instructions(client, ["X"]))
