@@ -54,7 +54,7 @@ def test_import_pageindex_is_lazy():
         "import sys; import pageindex; "
         "heavy = [m for m in ('pageindex.page_index_classic', 'pageindex.flash', "
         "'pageindex.utils', 'pageindex.tree_optimize', "
-        "'pageindex.local_chat', 'numpy', 'PyPDF2', "
+        "'pageindex.local_chat', 'numpy', 'pypdf', 'PyPDF2', "
         "'agents', 'litellm', 'openai', 'anthropic') if m in sys.modules]; "
         "print(','.join(heavy) or 'clean'); "
         "print(type(pageindex.page_index_main).__name__)"
