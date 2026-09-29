@@ -103,7 +103,9 @@ class DocStore:
             import fcntl
         except ImportError:
             import msvcrt
-            fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
+            fd = os.open(
+                str(lock_path), os.O_CREAT | os.O_RDWR | os.O_BINARY, 0o644
+            )
             try:
                 # msvcrt locks a byte range, and an empty file has no byte
                 # to lock, so seed one exactly once. A concurrent seeder
