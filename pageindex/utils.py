@@ -1276,6 +1276,30 @@ def create_node_mapping(tree, include_page_ranges=False, max_page=None):
             }
     return mapping
 
+def get_node_path(tree, node_id):
+    """[top-level ancestor, ..., node] for node_id; [] if absent."""
+    for node in [tree] if isinstance(tree, dict) else tree:
+        if node.get('node_id') == node_id:
+            return [node]
+        path = get_node_path(node.get('nodes') or [], node_id)
+        if path:
+            return [node] + path
+    return []
+
+def get_node(tree, node_id):
+    """The node with node_id, or None."""
+    path = get_node_path(tree, node_id)
+    return path[-1] if path else None
+
+def get_node_parent(tree, node_id):
+    """The parent of node_id; None for a top-level or absent node."""
+    path = get_node_path(tree, node_id)
+    return path[-2] if len(path) > 1 else None
+
+def get_node_map(tree):
+    """{node_id: node} for every node in tree."""
+    return create_node_mapping(tree)
+
 def print_tree(tree, exclude_fields=None, indent=0):
     """Outline view; passing exclude_fields gives the 0.2.8 pprint view."""
     if exclude_fields is not None:
