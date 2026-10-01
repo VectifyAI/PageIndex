@@ -41,6 +41,7 @@ class LocalAPI:
                  index_backend: dict | None = None,
                  summary_max_words: int | None = None,
                  summary_concurrency: int | None = None,
+                 summary_max_input_tokens: int | None = None,
                  use_embedded_toc: bool = True,
                  optimize: str = "full"):
         self._store = DocStore(storage_path)
@@ -49,6 +50,7 @@ class LocalAPI:
         self._index_backend = index_backend
         self._summary_max_words = summary_max_words
         self._summary_concurrency = summary_concurrency
+        self._summary_max_input_tokens = summary_max_input_tokens
         self._use_embedded_toc = use_embedded_toc
         self._optimize = optimize
         from .utils import ConfigLoader
@@ -254,6 +256,7 @@ class LocalAPI:
         description = generate_doc_description(
             create_clean_structure_for_description(structure),
             model=self._summary_model,
+            max_input_tokens=self._summary_max_input_tokens,
         )
         return structure, description
 

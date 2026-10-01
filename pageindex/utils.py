@@ -820,6 +820,15 @@ SUMMARY_CONCURRENCY = 64        # simultaneous summary model calls
 SUMMARY_RAW_TEXT_TOKENS = 200   # leaves under this reuse their raw text as the summary
 SUMMARY_INTRO_MAX_PAGES = 3     # cap on leading pages fed into a parent summary
 SUMMARY_MAX_WORDS = 150         # word cap the summary prompts ask for
+INPUT_BUDGET_MARGIN = 0.85      # share of max_input_tokens a prompt's text may use
+INPUT_BUDGET_OVERHEAD = 200     # tokens kept for the instructions and the reply
+
+
+def input_budget(max_input_tokens):
+    """Tokens of document text one prompt may carry, or None when unbounded."""
+    if max_input_tokens is None:
+        return None
+    return max(int(max_input_tokens * INPUT_BUDGET_MARGIN) - INPUT_BUDGET_OVERHEAD, 1)
 
 
 class _PriorityGate:
@@ -1213,7 +1222,33 @@ def create_clean_structure_for_description(structure):
         return structure
 
 
-def generate_doc_description(structure, model=None):
+def _tree_depth(nodes):
+    return 1 + max((_tree_depth(n["nodes"]) for n in nodes if n.get("nodes")), default=0)
+
+
+def _prune_depth(nodes, depth):
+    return [{**{k: v for k, v in n.items() if k != "nodes"},
+             **({"nodes": _prune_depth(n["nodes"], depth - 1)} if depth and n.get("nodes") else {})}
+            for n in nodes]
+
+
+def fit_structure(structure, budget, model=None):
+    """The structure, cut from its deepest level up until it fits `budget` tokens."""
+    if count_tokens(str(structure), model=model) <= budget:
+        return structure
+    pruned = structure
+    for depth in range(_tree_depth(structure) - 2, -1, -1):
+        pruned = _prune_depth(structure, depth)
+        if count_tokens(str(pruned), model=model) <= budget:
+            return pruned
+    logging.warning("document structure exceeds the %d token input budget", budget)
+    return pruned
+
+
+def generate_doc_description(structure, model=None, max_input_tokens=None):
+    budget = input_budget(max_input_tokens)
+    if budget is not None:
+        structure = fit_structure(structure, budget, model)
     prompt = f"""Your are an expert in generating descriptions for a document.
     You are given a structure of a document. Your task is to generate a one-sentence description for the document, which makes it easy to distinguish the document from other documents.
         

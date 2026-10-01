@@ -34,6 +34,7 @@ class LocalIndexConfig(TypedDict, total=False):
     summary_model: str
     summary_max_words: int
     summary_concurrency: int
+    summary_max_input_tokens: int
     use_embedded_toc: bool
     optimize: Literal["full", "merge", "off"]
     backend: dict
