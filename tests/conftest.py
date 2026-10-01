@@ -10,7 +10,7 @@ def _llm_key(monkeypatch):
 
 def build_pdf(page_texts):
     """Build a minimal, uncompressed PDF (one Helvetica line per page) whose
-    text PyPDF2 can extract. Returns the PDF file bytes."""
+    text pypdf can extract. Returns the PDF file bytes."""
     n = len(page_texts)
     objects = []
     kids = " ".join(f"{3 + i} 0 R" for i in range(n))

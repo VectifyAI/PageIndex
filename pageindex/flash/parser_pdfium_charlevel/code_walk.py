@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from PyPDF2.generic import (
+from pypdf.generic import (
     IndirectObject as PdfIndirectRef, NameObject as PdfName, NumberObject as PdfNumber,
     FloatObject as PdfFloat, BooleanObject as PdfBoolean,
     DictionaryObject as PdfDictionary, ArrayObject as PdfArray,
