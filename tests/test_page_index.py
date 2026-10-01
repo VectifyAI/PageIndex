@@ -3,6 +3,7 @@ from unittest.mock import Mock, patch
 
 from pageindex.page_index_classic import (
     _secure_doc_text,
+    page_list_to_group_text,
     process_no_toc,
     process_toc_no_page_numbers,
 )
@@ -63,6 +64,40 @@ class ProcessTocNoPageNumbersTest(unittest.TestCase):
         self.assertIn("&lt;/user_document>", wrapped)
         self.assertIn("&lt; USER_DOCUMENT>", wrapped)
         self.assertIn("<physical_index_1>", wrapped)
+
+
+class PageListToGroupTextTest(unittest.TestCase):
+    PAGES = ["PAGE-A", "PAGE-B", "PAGE-C"]
+
+    def test_oversized_first_page_does_not_emit_an_empty_chunk(self):
+        chunks = page_list_to_group_text(
+            self.PAGES, [60000, 500, 500], max_tokens=20000
+        )
+
+        self.assertNotIn("", chunks)
+
+    def test_every_page_survives_an_oversized_first_page(self):
+        chunks = page_list_to_group_text(
+            self.PAGES, [60000, 500, 500], max_tokens=20000
+        )
+
+        joined = "".join(chunks)
+        for page in self.PAGES:
+            self.assertIn(page, joined)
+
+    def test_oversized_middle_page_is_unaffected(self):
+        chunks = page_list_to_group_text(
+            self.PAGES, [100, 60000, 100], max_tokens=20000
+        )
+
+        self.assertNotIn("", chunks)
+
+    def test_document_under_the_limit_stays_one_chunk(self):
+        chunks = page_list_to_group_text(
+            self.PAGES, [100, 100, 100], max_tokens=20000
+        )
+
+        self.assertEqual(chunks, ["PAGE-APAGE-BPAGE-C"])
 
 
 if __name__ == "__main__":
