@@ -62,8 +62,8 @@ import re
 import sys
 from types import SimpleNamespace
 
-from .utils import (ConfigLoader, _is_unrecoverable, llm_acompletion,
-                    strip_internal_keys)
+from .utils import (ConfigLoader, _is_unrecoverable, intro_title, is_intro,
+                    llm_acompletion, strip_internal_keys)
 
 TRIGGER_PAGES = 5        # only look ahead on nodes larger than this
 ROUTING_COST = 1         # R(v), in pages
@@ -171,11 +171,13 @@ def is_frontier(node):
 
 
 def heading_at_page_start(lines, page_no, heading):
-    """Is the heading the first line on its page?"""
+    """Is the heading the first line on its page? No when that cannot be told
+    (a heading with no Latin letter or digit to match), so the page is shared."""
     page = lines[page_no - 1]
-    if not page:
+    key = normalize(heading)
+    if not page or not key:
         return False
-    return normalize(heading) in normalize(page[0])
+    return key in normalize(page[0])
 
 
 def assign_ends(node, children, lines):
@@ -202,7 +204,28 @@ def attach_children(node, children, lines):
     # so gaining children leaves it unchanged
     sized = assign_ends(node, children, lines)
     node["nodes"] = sized
+    add_intro_nodes([node], lines)
+    if len(node["nodes"]) > len(sized):  # an intro went in; numbered like the proposals
+        node["nodes"][0]["node_id"] = f"{node['node_id']}.0"
     return sized
+
+
+def add_intro_nodes(structure, lines=None):
+    """Give every parent whose first child starts on a later page an intro child
+    for the pages before it, titled "<parent title> (intro)". It ends where the
+    parent's own pages do, and no later than the first child's page, the page
+    before it when that child's heading opens its page."""
+    for node, _ in list(flatten(structure)):
+        children = node.get("nodes") or []
+        first = children[0]["start_index"] if children else None
+        if first is None or first <= node["start_index"]:
+            continue
+        opens = bool(lines) and first <= len(lines) and heading_at_page_start(
+            lines, first, children[0]["title"])
+        end = max(node["start_index"], min(node["end_index"], first - 1 if opens else first))
+        node["nodes"] = [{"title": intro_title(node.get("title")),
+                          "start_index": node["start_index"], "end_index": end}] + children
+    return structure
 
 
 def relabel(structure, width=4):
@@ -558,8 +581,9 @@ def merge(structure, routing, log, frozen, progress=False):
             # titles are routing information; keep them on the parent, in document
             # order, carrying forward anything an earlier merge already folded in
             titles = []
-            for child, _ in flatten(node["nodes"]):
-                titles.append(child["title"])
+            for child, parent in flatten(node["nodes"]):
+                if not is_intro(parent or node, child):  # its parent's heading again
+                    titles.append(child["title"])
                 titles.extend(child.get("key_items") or [])
             log.append({"op": "merge", "node_id": node.get("node_id"),
                         "S": span, "tree_cost": cost, "frontier_cost": checked,

@@ -260,17 +260,32 @@ class LocalAPI:
     # ── tree / ocr ──
 
     def _load_tree_with_text(self, doc_id: str, error_prefix: str) -> list:
-        from .utils import add_node_text
+        """Each node's own text. A parent's runs onto the page its first child
+        starts on, where that child's heading may sit mid-page; it is empty when
+        an intro child holds the parent's opening pages."""
+        from .utils import get_text_of_pdf_pages, is_intro
         structure = self._require_data(
             self._store.get_tree(doc_id), error_prefix)
         pages = self._require_pages(doc_id, error_prefix)
         pdf_pages = [(p.get("markdown", ""), 0) for p in pages]
-        add_node_text(structure, pdf_pages)
+
+        def add_own_text(nodes):
+            for node in nodes:
+                children = node.get("nodes") or []
+                end = node.get("end_index")
+                first = children[0].get("start_index") if children else None
+                if children and is_intro(node, children[0]):
+                    end = None
+                elif end is not None and first is not None:
+                    end = min(end, first)
+                node["text"] = get_text_of_pdf_pages(pdf_pages, node.get("start_index"), end)
+                add_own_text(children)
+
+        add_own_text(structure)
         return structure
 
     def raw_tree(self, doc_id: str) -> list | None:
-        """Stored tree verbatim — keeps start_index/end_index, which
-        get_tree's cloud wire shape renames and drops."""
+        """Stored tree verbatim, every key kept."""
         return self._store.get_tree(doc_id)
 
     def get_tree(self, doc_id: str, node_summary: bool = False,
@@ -398,17 +413,15 @@ def _format_tree_node(node: dict, node_summary: bool) -> dict:
     out = {
         "title": node.get("title", ""),
         "node_id": node.get("node_id"),
-        "page_index": node.get("start_index"),
+        "start_index": node.get("start_index"),
+        "end_index": node.get("end_index"),
     }
     if node.get("key_items"):
         out["key_items"] = node["key_items"]
     if node_summary:
         summary = node.get("summary")
         if summary is not None:
-            if children:
-                out["prefix_summary"] = summary
-            else:
-                out["summary"] = summary
+            out["summary"] = summary
     if "text" in node:
         out["text"] = node["text"]
     if children:
