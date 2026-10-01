@@ -708,8 +708,7 @@ def convert_page_to_int(data):
 
 def add_node_text(node, pdf_pages):
     if isinstance(node, dict):
-        start_page = node.get('start_index')
-        end_page = node.get('end_index')
+        start_page, end_page = own_pages(node)
         node['text'] = get_text_of_pdf_pages(pdf_pages, start_page, end_page)
         if 'nodes' in node:
             add_node_text(node['nodes'], pdf_pages)
@@ -721,8 +720,7 @@ def add_node_text(node, pdf_pages):
 
 def add_node_text_with_labels(node, pdf_pages):
     if isinstance(node, dict):
-        start_page = node.get('start_index')
-        end_page = node.get('end_index')
+        start_page, end_page = own_pages(node)
         node['text'] = get_text_of_pdf_pages_with_labels(pdf_pages, start_page, end_page)
         if 'nodes' in node:
             add_node_text_with_labels(node['nodes'], pdf_pages)
@@ -795,14 +793,19 @@ def is_intro(parent, child):
             and child.get('title') == intro_title(parent.get('title')))
 
 
-def remove_intro_parent_text(structure):
-    """Clear the text of every parent that opens with its intro: the intro
-    holds the same pages."""
-    for node in structure_to_list(structure):
-        children = node.get('nodes') or []
-        if children and is_intro(node, children[0]) and 'text' in node:
-            node['text'] = ""
-    return structure
+def own_pages(node):
+    """The first and last page of a node's own text. A parent's runs onto the
+    page its first child starts on, where that child's heading may sit mid-page;
+    it has none (end None) when its intro holds those pages."""
+    start, end = node.get('start_index'), node.get('end_index')
+    children = node.get('nodes') or []
+    if children:
+        first = children[0].get('start_index')
+        if is_intro(node, children[0]):
+            end = None
+        elif end is not None and first is not None:
+            end = min(end, first)
+    return start, end
 
 
 def cover_subtree_ranges(structure):

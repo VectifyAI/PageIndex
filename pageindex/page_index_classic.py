@@ -1260,11 +1260,9 @@ def page_index_main(doc, opt=None, logger=None, page_list=None):
             write_node_id(structure)
         if opt.if_add_node_text == 'yes':
             add_node_text(structure, page_list)
-            remove_intro_parent_text(structure)
         if opt.if_add_node_summary == 'yes':
             if opt.if_add_node_text == 'no':
                 add_node_text(structure, page_list)
-                remove_intro_parent_text(structure)
             await generate_summaries_for_structure(structure, model=getattr(opt, 'summary_model', None) or opt.model)
             if opt.if_add_node_text == 'no':
                 remove_structure_text(structure)
