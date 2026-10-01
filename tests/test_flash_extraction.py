@@ -798,3 +798,94 @@ def test_flash_cli_summary_flags_refuse_standard_mode(monkeypatch, tmp_path):
     for flag in ("--summary-concurrency", "--summary-max-words"):
         with pytest.raises(ValueError, match=f"{flag} requires Flash mode"):
             _run_flash_cli(monkeypatch, tmp_path, ["--mode", "standard", flag, "8"], [])
+
+
+def _optimization_report_pdf(tmp_path, unicode_titles, heading_at_top):
+    """A ten-page report with coarse bookmarks and two printed subsections.
+
+    All text uses one body style, leaving the subsections for model expansion.
+    Reuse the committed Japanese fixture's embedded font so the Unicode text
+    is both rendered and extracted, without a font-generation dependency.
+    """
+    import io
+    import re
+    import PyPDF2
+    from PyPDF2.generic import DecodedStreamObject, NameObject
+    from conftest import build_pdf
+
+    if unicode_titles:
+        source = PyPDF2.PdfReader(str(FLASH_DATA / "ja_report.pdf"))
+        font = source.pages[0]["/Resources"]["/Font"]["/f"]
+        cmap = font["/ToUnicode"].get_data().decode()
+        codes = {}
+        for start, end, dest in re.findall(
+                r"(?m)^<([0-9a-fA-F]+)>[ \t]*<([0-9a-fA-F]+)>[ \t]*<([0-9a-fA-F]+)>$", cmap):
+            for offset in range(int(end, 16) - int(start, 16) + 1):
+                codes[chr(int(dest, 16) + offset)] = int(start, 16) + offset
+        def operand(text):
+            return "<" + "".join(f"{codes[c]:04x}" for c in text) + ">"
+        font_name = "f"
+        titles = ["年次報告書", "財務ハイライト", "リスク要因", "今後の見通し", "取締役会"]
+        body = "当社は、お客様に高品質な製品とサービスを提供しています。"
+    else:
+        source = PyPDF2.PdfReader(io.BytesIO(build_pdf(["Placeholder"])))
+        def operand(text):
+            return "(" + text + ")"
+        font_name = "F1"
+        titles = ["Annual Report", "Finance", "Risk", "Outlook", "Board"]
+        body = "The company provides products and services to its customers."
+
+    writer = PyPDF2.PdfWriter()
+    headings = dict(zip([0, 1, 4, 8, 9], titles))
+    for index in range(10):
+        writer.add_blank_page(595, 842)
+        page = writer.pages[-1]
+        page[NameObject("/Resources")] = source.pages[0]["/Resources"].clone(writer)
+        lines = [headings[index], body] if index in headings else [body, body]
+        if index == 4 and not heading_at_top:
+            lines.reverse()  # preceding subsection continues onto this page
+        content = DecodedStreamObject()
+        content.set_data("\n".join(
+            f"BT /{font_name} 11 Tf 72 {750 - 100 * row} Td {operand(text)} Tj ET"
+            for row, text in enumerate(lines)).encode())
+        page[NameObject("/Contents")] = writer._add_object(content)
+    for title, page in [(titles[0], 0), (titles[3], 8), (titles[4], 9)]:
+        writer.add_outline_item(title, page)
+    pdf = tmp_path / "report.pdf"
+    with pdf.open("wb") as stream:
+        writer.write(stream)
+    return pdf, titles
+
+
+@pytest.mark.parametrize("unicode_titles", [True, False], ids=["japanese", "ascii"])
+@pytest.mark.parametrize("heading_at_top", [True, False], ids=["page-start", "mid-page"])
+def test_flash_expand_preserves_unicode_headings_and_page_boundaries(
+        tmp_path, monkeypatch, unicode_titles, heading_at_top):
+    import json
+    from pageindex.flash import page_index_flash
+    import pageindex.tree_optimize as tree_optimize
+
+    pdf, titles = _optimization_report_pdf(tmp_path, unicode_titles, heading_at_top)
+    calls = []
+    async def complete(model, prompt):
+        calls.append(prompt)
+        return json.dumps({"subsections": [
+            {"title": titles[0], "page": 1},  # section's own title
+            {"title": titles[1], "page": 2},
+            {"title": titles[1], "page": 2},  # duplicate proposal
+            {"title": titles[2], "page": 5},
+            {"title": "不存在", "page": 6},  # absent from the PDF
+        ]}, ensure_ascii=False)
+    monkeypatch.setattr(tree_optimize, "llm_acompletion", complete)
+
+    result = page_index_flash(str(pdf), summary=False, optimize="full")
+
+    assert calls, "native page text must reach the model proposal lane"
+    assert titles[1] in calls[0] and titles[2] in calls[0]
+    assert result["optimize"]["expands"] == 1
+    assert len(calls) == 1
+    children = result["structure"][0]["nodes"]
+    assert [(n["title"], n["start_index"], n["end_index"]) for n in children] == [
+        (titles[1], 2, 4 if heading_at_top else 5),
+        (titles[2], 5, 9),
+    ]
