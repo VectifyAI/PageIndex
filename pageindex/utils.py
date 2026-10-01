@@ -899,6 +899,13 @@ def _reply_json(reply):
     return None
 
 
+def _unparsed_field(reply, key):
+    """The value of `key` in a reply whose JSON does not parse, or None."""
+    match = isinstance(reply, str) and re.search(
+        rf'"{key}"\s*:\s*"(.*?)"\s*(?:,\s*"[^"]+"\s*:|\}}\s*(?:```)?\s*$)', reply.strip(), re.S)
+    return match.group(1).replace('\\"', '"') if match else None
+
+
 def parse_summary(reply):
     """The `summary` field of a model reply, or the reply itself when there is no
     such field."""
@@ -910,7 +917,7 @@ def parse_summary(reply):
         if isinstance(summary, list):
             summary = ' '.join(str(item).strip() for item in summary if str(item).strip())
         return str(summary).strip() if summary else ""
-    return reply.strip()
+    return (_unparsed_field(reply, 'summary') or reply).strip()
 
 
 def parse_title(reply):
@@ -921,9 +928,7 @@ def parse_title(reply):
     deterministic one it already has.
     """
     parsed = _reply_json(reply)
-    if not isinstance(parsed, dict):
-        return ""
-    title = parsed.get('title')
+    title = parsed.get('title') if isinstance(parsed, dict) else _unparsed_field(reply, 'title')
     if isinstance(title, list):
         title = ' '.join(str(item).strip() for item in title if str(item).strip())
     return ' '.join(str(title).split()) if title else ""
