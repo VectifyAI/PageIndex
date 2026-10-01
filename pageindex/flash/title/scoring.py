@@ -15,7 +15,6 @@ from ..model import (
     Line,
     last_line_of,
     first_span_of,
-    block_text,
     deaccented_text,
     letter_count,
     dominant_style_of,
@@ -24,7 +23,7 @@ from ..model import (
     alignment_code,
     Block,
 )
-from ..stats import DocStats, column_index_of, tally_scripts, dominant_script_family, ScriptHistogram
+from ..stats import DocStats, column_index_of
 from ..tokens import is_superscript_adjacent, clamp_value, enumerate_tokens, jenkins_hash, trie_prefix_match, set_case_fold, TrieConfig, build_trie, tokenize_block, _de_norm, BuiltTrie, is_word_token
 
 from .dicts import (
@@ -247,17 +246,10 @@ def score_title_candidate(zp_state, page, index: int) -> None:
     # Email penalty
     email = 1.0 / ((1 + email_count) ** 2)
 
-    # Script-family match: build a script histogram over the candidate group's text and
-    # compare the candidate script family against the document script family.
-    script_acc = ScriptHistogram()
-    for result_value in group:
-        tally_scripts(script_acc, block_text(result_value))
-    script = 1.0 if dominant_script_family(script_acc) == doc_state.secondary_slot.tertiary_slot else 0.5
-
     score = (
         max_heading_score * len_value * width_ratio_sq * right_pen * bracket_factor * page_pos
         * density_factor * top * factor * recurrence_factor * institution * label
-        * email * script
+        * email
     )
 
     if zp_state.secondary_slot is None or score > zp_state.secondary_slot.score:

@@ -1596,7 +1596,7 @@ TOOL USAGE RULES:
 
 _DISCOVERY = """\
 DOCUMENT DISCOVERY:
-- browse_documents() — DEFAULT discovery tool, first choice for any document-related question. It lists your documents newest first with names and descriptions; match them against the user's intent, and page through with `offset: next_offset` while has_more is true."""
+- browse_documents() — DEFAULT discovery tool, first choice for any document-related question. The bare call returns your documents newest first with names and descriptions; match them against the user's intent."""
 
 _DECISION = """\
 DECISION:
@@ -1612,9 +1612,9 @@ _PERSISTENCE = """\
 PERSISTENCE (before concluding the target document is not in the library):
 This protocol applies both when results are empty AND when results are returned but none match the user's intent. Do NOT give up after a single discovery attempt. Follow these steps in order:
 1. browse_documents() and compare every returned name/description against the user's intent
-2. Page through the ENTIRE library with `limit: 50` and `offset: next_offset` until has_more is false — MANDATORY, must be completed before concluding "not found"
-3. Re-scan for loose matches: synonyms, abbreviations, and partial titles in names/descriptions can identify the target
-Only after ALL three steps have been tried may you conclude the document is not in the library. Do NOT fall back to general knowledge — if the user's question references their own documents, exhaust every discovery path first."""
+2. Rephrase the query with synonyms or alternative terms and browse again
+3. Page through the ENTIRE library with `limit: 50` and `offset: next_offset` until has_more is false — MANDATORY, must be completed before concluding "not found"
+Only after ALL steps have been tried may you conclude the document is not in the library. Do NOT fall back to general knowledge — if the user's question references their own documents, exhaust every discovery path first."""
 
 AGENT_INSTRUCTIONS = "\n\n".join([
     _INSTRUCTIONS_HEADER,
@@ -1651,8 +1651,7 @@ CITATIONS
 - Cite only statements supported by tool outputs: <cite doc="{docName}" page="{pageNumber}"/> or <cite doc="{docName}" page="{pageNumber}" block="{blockId}"/>. Place immediately after the claim.
 - When page content includes block_id values, citations MUST be block-level: copy the exact block_id of the supporting block. Page-only cites are allowed ONLY when the tool output carries no block_id (legacy documents, structure outlines). NEVER invent or alter block_id values.
 - For a claim drawn from multiple blocks on one page, add one tag per supporting block (at most 3); beyond that, cite the single strongest block.
-- Each tag must reference a SINGLE page integer. For multi-page citations, use separate tags.
-- Close every answer with a "Sources" section: one plain-text line per cited block, formatted `- <document name>, page <page> (block <block_id>)`. Keep it even when the inline tags are present — a client that strips unknown HTML tags would otherwise leave the answer with no visible citations at all.""",
+- Each tag must reference a SINGLE page integer. For multi-page citations, use separate tags.""",
     "footnote": """\
 GROUNDING
 - Answer only from the user's PageIndex documents. Call get_page_content() and state only what was actually read there.
