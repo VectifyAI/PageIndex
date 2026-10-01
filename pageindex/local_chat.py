@@ -902,7 +902,8 @@ def run_cloud_chat_stream(chunks,
         events=("chat events are produced by the in-process agent, "
                 "which the managed chat endpoint does not serve — "
                 "construct the client with chat_model=... (or a chat= "
-                "model) to run the agent in your process."))
+                "model) to run the agent in your process."),
+        on_close=getattr(chunks, "close", None))
 
 
 def run_chat_stream(client, messages, doc_id=None, model=None,
