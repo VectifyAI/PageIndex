@@ -42,6 +42,7 @@ class LocalAPI:
                  summary_max_words: int | None = None,
                  summary_concurrency: int | None = None,
                  summary_max_input_tokens: int | None = None,
+                 summary_scope: str = "pages",
                  use_embedded_toc: bool = True,
                  optimize: str = "full"):
         self._store = DocStore(storage_path)
@@ -51,6 +52,7 @@ class LocalAPI:
         self._summary_max_words = summary_max_words
         self._summary_concurrency = summary_concurrency
         self._summary_max_input_tokens = summary_max_input_tokens
+        self._summary_scope = summary_scope
         self._use_embedded_toc = use_embedded_toc
         self._optimize = optimize
         from .utils import ConfigLoader
@@ -248,6 +250,7 @@ class LocalAPI:
                                   summary_concurrency=self._summary_concurrency,
                                   summary_max_words=self._summary_max_words,
                                   summary_max_input_tokens=self._summary_max_input_tokens,
+                                  summary_scope=self._summary_scope,
                                   use_embedded_toc=self._use_embedded_toc)
         structure = result.get("structure", [])
         reason = flash_rejection_reason(result)

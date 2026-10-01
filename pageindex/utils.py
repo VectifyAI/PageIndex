@@ -998,6 +998,7 @@ def strip_internal_keys(structure):
         if not isinstance(node, dict):
             continue
         node.pop('_same_page', None)
+        node.pop('_pos', None)
         if node.get('nodes'):
             strip_internal_keys(node['nodes'])
     return structure
@@ -1022,7 +1023,7 @@ class SummaryScheduler:
     def __init__(self, structure, pdf_pages, model=None,
                  small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
                  max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None,
-                 max_words=None, max_input_tokens=None):
+                 max_words=None, max_input_tokens=None, blocks=None):
         self.structure = structure
         self._pdf_pages = pdf_pages
         self._model = model
@@ -1030,6 +1031,7 @@ class SummaryScheduler:
         self._max_intro_pages = max_intro_pages
         self._max_words = max_words or SUMMARY_MAX_WORDS
         self._budget = input_budget(max_input_tokens)
+        self._blocks = blocks
         self._gate = _PriorityGate(concurrency or SUMMARY_CONCURRENCY)
         self._asked = self._answered = False
         self._marks = {}     # id(node) -> future resolved once the node is final
@@ -1078,8 +1080,18 @@ class SummaryScheduler:
             self._answered = True
         return reply
 
+    def _section_text(self, node):
+        """The blocks from this node's heading to the next heading in the document, or None."""
+        start = node.get('_pos')
+        if self._blocks is None or start is None:
+            return None
+        later = [p for p in (n.get('_pos') for n in _subtree(self.structure)) if p is not None and p > start]
+        return "\n".join(self._blocks[start:min(later, default=len(self._blocks))])
+
     async def _leaf_summary(self, node, prio):
-        text = get_text_of_pdf_pages(self._pdf_pages, node['start_index'], node['end_index'])
+        text = self._section_text(node)
+        if text is None:
+            text = get_text_of_pdf_pages(self._pdf_pages, node['start_index'], node['end_index'])
         tokens = count_tokens(text, model=self._model)
         if tokens < self._small_node_tokens:
             return text.strip()
@@ -1234,7 +1246,7 @@ class SummaryScheduler:
 async def summarize_tree(structure, pdf_pages, model=None,
                          small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
                          max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None,
-                         max_words=None, max_input_tokens=None):
+                         max_words=None, max_input_tokens=None, blocks=None):
     """Bottom-up summaries: leaves from their own pages, parents composed from
     child summaries plus the pages no child covers. A parent's summary describes
     its whole subtree (end_index union semantics). Nodes that already carry a
@@ -1247,7 +1259,7 @@ async def summarize_tree(structure, pdf_pages, model=None,
                                  small_node_tokens=small_node_tokens,
                                  max_intro_pages=max_intro_pages,
                                  concurrency=concurrency, max_words=max_words,
-                                 max_input_tokens=max_input_tokens)
+                                 max_input_tokens=max_input_tokens, blocks=blocks)
     scheduler.mark_final(list(_subtree(structure)))
     return await scheduler.finish()
 
