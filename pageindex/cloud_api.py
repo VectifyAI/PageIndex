@@ -14,6 +14,26 @@ def _enc(value: str) -> str:
     return urllib.parse.quote(str(value), safe="")
 
 
+def _sse_data(response: requests.Response) -> Iterator[str]:
+    """Complete SSE data frames; fields join with LF and EOF discards a
+    pending frame. SSE is UTF-8 regardless of the response charset."""
+    data_lines = []
+    first_line = True
+    for raw_line in response.iter_lines():
+        line = raw_line.decode("utf-8", errors="replace")
+        if first_line:
+            line = line.removeprefix("\ufeff")
+            first_line = False
+        if not line:
+            if data_lines:
+                yield "\n".join(data_lines)
+                data_lines = []
+            continue
+        field, _, value = line.partition(":")
+        if field == "data":
+            data_lines.append(value.removeprefix(" "))
+
+
 class CloudAPI:
     """
     Python SDK client for the PageIndex API.
@@ -350,49 +370,39 @@ class CloudAPI:
             str: Content chunks from the streaming response
         """
         try:
-            for line in response.iter_lines():
-                if line:
-                    line = line.decode('utf-8')
-                    if line.startswith('data: '):
-                        data = line[6:]
-                        if data == '[DONE]':
-                            break
-
-                        try:
-                            chunk = json.loads(data)
-                            if chunk.get("error"):
-                                raise PageIndexAPIError(
-                                    "Chat completion failed mid-stream: "
-                                    f"{chunk['error']}")
-                            choices = chunk.get("choices") or [{}]
-                            content = choices[0].get("delta", {}).get("content", "")
-                            if content:
-                                yield content
-                        except json.JSONDecodeError:
-                            continue
+            for data in _sse_data(response):
+                if data == '[DONE]':
+                    break
+                try:
+                    chunk = json.loads(data)
+                    if chunk.get("error"):
+                        raise PageIndexAPIError(
+                            "Chat completion failed mid-stream: "
+                            f"{chunk['error']}")
+                    choices = chunk.get("choices") or [{}]
+                    content = choices[0].get("delta", {}).get("content", "")
+                    if content:
+                        yield content
+                except json.JSONDecodeError:
+                    continue
         finally:
             response.close()
 
     def _stream_chat_response_raw(self, response: requests.Response) -> Iterator[Dict[str, Any]]:
         """Streaming chat completion with full metadata, including citation events."""
         try:
-            for line in response.iter_lines():
-                if line:
-                    line = line.decode('utf-8')
-                    if line.startswith('data: '):
-                        data = line[6:]
-                        if data == '[DONE]':
-                            break
-
-                        try:
-                            chunk = json.loads(data)
-                            if chunk.get("error"):
-                                raise PageIndexAPIError(
-                                    "Chat completion failed mid-stream: "
-                                    f"{chunk['error']}")
-                            yield chunk
-                        except json.JSONDecodeError:
-                            continue
+            for data in _sse_data(response):
+                if data == '[DONE]':
+                    break
+                try:
+                    chunk = json.loads(data)
+                    if chunk.get("error"):
+                        raise PageIndexAPIError(
+                            "Chat completion failed mid-stream: "
+                            f"{chunk['error']}")
+                    yield chunk
+                except json.JSONDecodeError:
+                    continue
         finally:
             response.close()
 
