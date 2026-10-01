@@ -145,3 +145,49 @@ def test_a_node_merged_from_same_page_siblings_is_not_split(monkeypatch):
     lines = [f"line {i} " + "word " * 10 for i in range(400)]
     prompts, _ = _leaf(monkeypatch, lines, 1200, _same_page=True, key_items=["A", "B"])
     assert len(prompts) == 1
+
+
+def _expand(monkeypatch, args, pages):
+    import asyncio
+    from types import SimpleNamespace
+    import pageindex.tree_optimize as tree_optimize
+    asked = []
+
+    async def fake_ask(model, prompt):
+        asked.append(prompt)
+        return {"subsections": []}
+    monkeypatch.setattr(tree_optimize, "ask_model", fake_ask)
+    node = {"title": "References", "start_index": 1, "end_index": 3, "node_id": "n1"}
+    out = asyncio.run(tree_optimize.propose_children(node, pages, SimpleNamespace(model="m", **args)))
+    return out, asked
+
+
+def test_expand_is_skipped_when_the_pages_overrun_the_budget(monkeypatch, caplog):
+    pages = ["word " * 400] * 3
+    with caplog.at_level(logging.WARNING):
+        out, asked = _expand(monkeypatch, {"input_budget": 500}, pages)
+    assert out == [] and asked == []
+    assert "expand skipped for 'References': pages 1-3 exceed the 500 token input budget" in caplog.text
+
+
+def test_expand_asks_the_model_within_the_budget_or_without_one(monkeypatch):
+    pages = ["word " * 400] * 3
+    assert len(_expand(monkeypatch, {"input_budget": 10 ** 6}, pages)[1]) == 1
+    assert len(_expand(monkeypatch, {"input_budget": None}, pages)[1]) == 1
+    assert len(_expand(monkeypatch, {}, pages)[1]) == 1
+
+
+def test_optimize_leaves_the_node_collapsed_when_the_budget_is_too_small(monkeypatch):
+    import asyncio
+    import pageindex.tree_optimize as tree_optimize
+    from test_client import _expand_fixture
+    tree, pages, lines = _expand_fixture()
+    asked = []
+
+    async def fake_ask(model, prompt):
+        asked.append(prompt)
+        return {"subsections": [{"title": "Sub One", "page": 4}]}
+    monkeypatch.setattr(tree_optimize, "ask_model", fake_ask)
+    asyncio.run(tree_optimize.optimize(tree, pages, lines, model="m", do_expand=True,
+                                       max_input_tokens=300))
+    assert asked == []

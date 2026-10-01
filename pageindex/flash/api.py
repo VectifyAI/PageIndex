@@ -81,7 +81,7 @@ async def _summarize(structure, page_list, model, concurrency=None, max_words=No
 
 
 async def _optimize_async(structure, page_texts, do_expand, model, on_final=None,
-                          concurrency=None):
+                          concurrency=None, max_input_tokens=None):
     """Merge/expand refinement after extraction, overlapped with the summaries
     when `on_final` is passed; without it the caller runs them after.
 
@@ -93,7 +93,8 @@ async def _optimize_async(structure, page_texts, do_expand, model, on_final=None
     lines = _page_lines(page_texts)
     outcome = await optimize(structure, page_texts, lines, model=model,
                              do_expand=do_expand, page_count=len(page_texts),
-                             on_final=on_final, concurrency=concurrency)
+                             on_final=on_final, concurrency=concurrency,
+                             max_input_tokens=max_input_tokens)
     return {"merges": outcome["merges"], "expands": outcome["expands"],
             "same_page_merges": outcome["same_page_merges"],
             "same_page_dropped": outcome["same_page_dropped"],
@@ -117,7 +118,8 @@ async def _optimize_and_summarize(structure, page_texts, optimize_model, summary
                                  max_words=max_words, max_input_tokens=max_input_tokens)
     report = await _optimize_async(structure, page_texts, True, optimize_model,
                                    on_final=scheduler.mark_final,
-                                   concurrency=concurrency)
+                                   concurrency=concurrency,
+                                   max_input_tokens=max_input_tokens)
     await scheduler.finish()
     return report
 

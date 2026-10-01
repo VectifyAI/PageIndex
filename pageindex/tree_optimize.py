@@ -57,12 +57,14 @@ import argparse
 import asyncio
 import copy
 import json
+import logging
 import os
 import re
 import sys
 from types import SimpleNamespace
 
-from .utils import (ConfigLoader, _is_unrecoverable, intro_title, is_intro,
+from .utils import (ConfigLoader, _is_unrecoverable, count_tokens, input_budget,
+                    intro_title, is_intro,
                     llm_acompletion, strip_internal_keys)
 
 TRIGGER_PAGES = 5        # only look ahead on nodes larger than this
@@ -656,6 +658,11 @@ async def propose_children(node, pages, args):
         return []               # the whole span is beyond the loaded pages
     block = "\n".join(
         f"<page_{n}>\n{pages[n - 1][:PAGE_CHARS]}\n</page_{n}>" for n in range(start, end + 1))
+    budget = getattr(args, "input_budget", None)
+    if budget is not None and count_tokens(block, model=args.model) > budget:
+        logging.warning("expand skipped for %r: pages %d-%d exceed the %d token input budget",
+                        node["title"], start, end, budget)
+        return []
     answer = await ask_model(args.model, EXPAND_PROMPT.format(
         title=node["title"], start=start, end=end, pages=block))
 
@@ -816,7 +823,7 @@ async def optimize(structure, pages, lines, model=None, routing=ROUTING_COST,
                    do_merge=True, do_expand=True, max_rounds=3, page_count=None,
                    cache=None, kinds=("section", "table"), empty_retries=1,
                    do_relabel=True, progress=False, on_final=None,
-                   concurrency=None):
+                   concurrency=None, max_input_tokens=None):
     """Run merge and expand over a tree until neither changes anything.
 
     Mutates `structure` in place and returns a summary.
@@ -844,6 +851,7 @@ async def optimize(structure, pages, lines, model=None, routing=ROUTING_COST,
                            kinds=set(kinds) if kinds else None,
                            empty_retries=empty_retries, progress=progress,
                            settled=settled, do_merge=do_merge,
+                           input_budget=input_budget(max_input_tokens),
                            concurrency=min(EXPAND_CONCURRENCY,
                                            concurrency or EXPAND_CONCURRENCY))
     baseline = set(validate(structure, page_count)) if page_count else set()
