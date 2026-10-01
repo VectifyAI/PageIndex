@@ -64,6 +64,8 @@ def test_node_navigation():
     assert get_node_path(TREE, "9999") == []
     assert get_node(root, "0001") is child
     assert get_node_map(TREE) == {"0000": root, "0001": child, "0002": tail}
+    leaf = {"node_id": "0000", "nodes": None}
+    assert get_node_map([leaf]) == {"0000": leaf}
 
 
 def test_node_navigation_rejects_wrong_input():

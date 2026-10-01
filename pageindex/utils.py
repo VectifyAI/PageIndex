@@ -1257,7 +1257,7 @@ def create_node_mapping(tree, include_page_ranges=False, max_page=None):
     "end_index"} (end = next node's page_index, or max_page for the last node)."""
     def get_all_nodes(tree):
         if isinstance(tree, dict):
-            return [tree] + [node for child in tree.get('nodes', []) for node in get_all_nodes(child)]
+            return [tree] + [node for child in tree.get('nodes') or [] for node in get_all_nodes(child)]
         elif isinstance(tree, list):
             return [node for item in tree for node in get_all_nodes(item)]
         return []
