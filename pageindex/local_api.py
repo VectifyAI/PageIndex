@@ -247,6 +247,7 @@ class LocalAPI:
                                   optimize_model=self._summary_model,
                                   summary_concurrency=self._summary_concurrency,
                                   summary_max_words=self._summary_max_words,
+                                  summary_max_input_tokens=self._summary_max_input_tokens,
                                   use_embedded_toc=self._use_embedded_toc)
         structure = result.get("structure", [])
         reason = flash_rejection_reason(result)

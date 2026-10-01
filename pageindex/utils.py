@@ -831,6 +831,26 @@ def input_budget(max_input_tokens):
     return max(int(max_input_tokens * INPUT_BUDGET_MARGIN) - INPUT_BUDGET_OVERHEAD, 1)
 
 
+def _pack(units, budget, model=None):
+    """Whole units grouped to at most `budget` tokens; a unit over budget is cut at spaces."""
+    flat = []
+    for unit in units:
+        if count_tokens(unit, model=model) > budget and " " in unit:
+            flat += [" ".join(group) for group in _pack(unit.split(" "), budget, model)]
+        else:
+            flat.append(unit)
+    groups, size = [], 0
+    for unit in flat:
+        tokens = count_tokens(unit, model=model) + 1
+        if groups and size + tokens <= budget:
+            groups[-1].append(unit)
+            size += tokens
+        else:
+            groups.append([unit])
+            size = tokens
+    return groups
+
+
 class _PriorityGate:
     """Semaphore that admits the highest-priority waiter first, FIFO within a priority."""
 
@@ -1002,13 +1022,14 @@ class SummaryScheduler:
     def __init__(self, structure, pdf_pages, model=None,
                  small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
                  max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None,
-                 max_words=None):
+                 max_words=None, max_input_tokens=None):
         self.structure = structure
         self._pdf_pages = pdf_pages
         self._model = model
         self._small_node_tokens = small_node_tokens
         self._max_intro_pages = max_intro_pages
         self._max_words = max_words or SUMMARY_MAX_WORDS
+        self._budget = input_budget(max_input_tokens)
         self._gate = _PriorityGate(concurrency or SUMMARY_CONCURRENCY)
         self._asked = self._answered = False
         self._marks = {}     # id(node) -> future resolved once the node is final
@@ -1059,7 +1080,8 @@ class SummaryScheduler:
 
     async def _leaf_summary(self, node, prio):
         text = get_text_of_pdf_pages(self._pdf_pages, node['start_index'], node['end_index'])
-        if count_tokens(text, model=self._model) < self._small_node_tokens:
+        tokens = count_tokens(text, model=self._model)
+        if tokens < self._small_node_tokens:
             return text.strip()
 
         # A node merged from same-page siblings carries a title joined from theirs.
@@ -1074,7 +1096,8 @@ class SummaryScheduler:
         title_field = ('\n        "title": <a short title naming what the whole page covers>,'
                        if retitle else "")
 
-        prompt = f"""You are given a text chunk from a document.
+        def prompt_for(text):
+            return f"""You are given a text chunk from a document.
     Your task is to generate a concise description of everything that is covered in the text, summarizing all its points without omitting any type of content.
     Keep the description concise and to the point, avoiding unnecessary details, within {self._max_words} words.{ask_title}
 
@@ -1087,12 +1110,41 @@ class SummaryScheduler:
 
     Follow strictly the above JSON return format. Do not include any other text!
     """
-        reply = await self._ask(prompt, prio)
+        if self._budget is not None and not retitle and tokens > self._budget:
+            chunks = ["\n".join(lines) for lines in _pack(text.split("\n"), self._budget, self._model)]
+            replies = await asyncio.gather(*(self._ask(prompt_for(chunk), prio) for chunk in chunks))
+            return await self._reduce([parse_summary(reply) for reply in replies], prio)
+        reply = await self._ask(prompt_for(text), prio)
         if retitle:
             written = parse_title(reply)
             if written:
                 node['title'] = written
         return parse_summary(reply)
+
+    async def _combine(self, summaries, prio):
+        parts = "\n".join(f"Part {i}: {summary}" for i, summary in enumerate(summaries, 1))
+        prompt = f"""You are given summaries of consecutive parts of one section of a document.
+    Your task is to combine them into a single concise description of the whole section, within {self._max_words} words.
+
+    Part Summaries: {parts}
+
+    Reply strictly in the following JSON format:
+    {{
+        "summary": <the combined description>
+    }}
+
+    Follow strictly the above JSON return format. Do not include any other text!
+    """
+        return parse_summary(await self._ask(prompt, prio))
+
+    async def _reduce(self, summaries, prio):
+        while True:
+            groups = _pack(summaries, self._budget, self._model)
+            if len(groups) == len(summaries):
+                groups = [summaries[i:i + 2] for i in range(0, len(summaries), 2)]
+            summaries = await asyncio.gather(*(self._combine(group, prio) for group in groups))
+            if len(summaries) == 1:
+                return summaries[0]
 
     async def _parent_summary(self, node, prio):
         children = node['nodes']
@@ -1182,7 +1234,7 @@ class SummaryScheduler:
 async def summarize_tree(structure, pdf_pages, model=None,
                          small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
                          max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None,
-                         max_words=None):
+                         max_words=None, max_input_tokens=None):
     """Bottom-up summaries: leaves from their own pages, parents composed from
     child summaries plus the pages no child covers. A parent's summary describes
     its whole subtree (end_index union semantics). Nodes that already carry a
@@ -1194,7 +1246,8 @@ async def summarize_tree(structure, pdf_pages, model=None,
     scheduler = SummaryScheduler(structure, pdf_pages, model=model,
                                  small_node_tokens=small_node_tokens,
                                  max_intro_pages=max_intro_pages,
-                                 concurrency=concurrency, max_words=max_words)
+                                 concurrency=concurrency, max_words=max_words,
+                                 max_input_tokens=max_input_tokens)
     scheduler.mark_final(list(_subtree(structure)))
     return await scheduler.finish()
 

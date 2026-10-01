@@ -86,3 +86,62 @@ def test_the_budget_reaches_the_description(tmp_path, sample_pdf, monkeypatch):
     monkeypatch.chdir(tmp_path)
     PageIndexLocalClient(summary_max_input_tokens=8192).submit_document(sample_pdf)
     assert seen == {"max_input_tokens": 8192}
+
+
+def _leaf(monkeypatch, lines, max_input_tokens, reply=lambda prompt: '{"summary": "ok"}', **node):
+    import asyncio
+    prompts = []
+
+    async def fake(model, prompt):
+        prompts.append(prompt)
+        return reply(prompt)
+    monkeypatch.setattr(utils, "llm_acompletion", fake)
+    structure = [{"title": "T", "start_index": 1, "end_index": 1, **node}]
+    asyncio.run(utils.summarize_tree(structure, [("\n".join(lines), 0)], small_node_tokens=0,
+                                     max_input_tokens=max_input_tokens))
+    return prompts, structure[0]["summary"]
+
+
+def _chunk(prompt):
+    return prompt.split("Given Text: ")[1].split("\n\n    Reply strictly")[0].split("\n")
+
+
+def test_leaf_within_the_budget_is_one_call(monkeypatch):
+    lines = [f"line {i} about apples" for i in range(20)]
+    assert len(_leaf(monkeypatch, lines, None)[0]) == 1
+    assert len(_leaf(monkeypatch, lines, 8192)[0]) == 1
+
+
+def test_long_leaf_is_split_by_lines_and_combined(monkeypatch):
+    lines = [f"line {i} " + "word " * 10 for i in range(400)]
+    budget = utils.input_budget(1200)
+    prompts, summary = _leaf(monkeypatch, lines, 1200,
+                             reply=lambda p: '{"summary": "combined"}' if "Part Summaries" in p else '{"summary": "part"}')
+    parts, combine = prompts[:-1], prompts[-1]
+    assert len(parts) > 2 and "Part Summaries" in combine and summary == "combined"
+    assert [line for p in parts for line in _chunk(p)] == lines
+    assert all(utils.count_tokens("\n".join(_chunk(p))) <= budget for p in parts)
+    assert combine.count("Part ") == len(parts) + 1  # one per part, plus the instruction
+
+
+def test_many_parts_are_combined_in_levels(monkeypatch):
+    lines = ["word " * 40 for _ in range(300)]
+    prompts, summary = _leaf(monkeypatch, lines, 1000,
+                             reply=lambda p: '{"summary": "' + "long " * 120 + '"}')
+    assert sum("Part Summaries" in p for p in prompts) > 1
+    assert summary.startswith("long")
+
+
+def test_a_line_over_the_budget_is_cut_at_spaces(monkeypatch):
+    prompts, _ = _leaf(monkeypatch, ["start", "word " * 3000, "end"], 1000)
+    budget = utils.input_budget(1000)
+    parts = [p for p in prompts if "Part Summaries" not in p]
+    assert len(parts) > 3
+    assert all(utils.count_tokens("\n".join(_chunk(p))) <= budget for p in parts)
+    assert _chunk(parts[0])[0] == "start" and _chunk(parts[-1])[-1].endswith("end")
+
+
+def test_a_node_merged_from_same_page_siblings_is_not_split(monkeypatch):
+    lines = [f"line {i} " + "word " * 10 for i in range(400)]
+    prompts, _ = _leaf(monkeypatch, lines, 1200, _same_page=True, key_items=["A", "B"])
+    assert len(prompts) == 1
