@@ -42,15 +42,6 @@ def test_create_node_mapping_page_ranges():
     assert mapping["0002"] == {"node": TREE[1], "start_index": 5, "end_index": 9}
 
 
-def test_create_node_mapping_page_ranges_raw_tree():
-    child = {"title": "B", "node_id": "0001", "start_index": 2, "end_index": 4}
-    raw = [{"title": "A", "node_id": "0000", "start_index": 1, "end_index": 2,
-            "nodes": [child]}]
-    mapping = create_node_mapping(raw, include_page_ranges=True, max_page=9)
-    assert mapping["0000"] == {"node": raw[0], "start_index": 1, "end_index": 2}
-    assert mapping["0001"] == {"node": child, "start_index": 2, "end_index": 4}
-
-
 def test_print_tree_exclude_fields(capsys):
     print_tree(TREE, exclude_fields=["text"])
     out = capsys.readouterr().out

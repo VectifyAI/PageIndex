@@ -1254,8 +1254,7 @@ class ConfigLoader:
 
 def create_node_mapping(tree, include_page_ranges=False, max_page=None):
     """Map node_id to node; with include_page_ranges, to {"node", "start_index",
-    "end_index"}: a node's own start_index/end_index if it has them, else its
-    page_index and the next node's page_index (max_page for the last node)."""
+    "end_index"} (end = next node's page_index, or max_page for the last node)."""
     def get_all_nodes(tree):
         if isinstance(tree, dict):
             return [tree] + [node for child in tree.get('nodes', []) for node in get_all_nodes(child)]
@@ -1272,8 +1271,8 @@ def create_node_mapping(tree, include_page_ranges=False, max_page=None):
             end_page = all_nodes[i + 1].get("page_index") if i + 1 < len(all_nodes) else max_page
             mapping[node["node_id"]] = {
                 "node": node,
-                "start_index": node.get("start_index", node.get("page_index")),
-                "end_index": node.get("end_index", end_page),
+                "start_index": node["page_index"],
+                "end_index": end_page,
             }
     return mapping
 
