@@ -3271,11 +3271,17 @@ def test_summary_concurrency_caps_both_lanes_on_every_path(tmp_path, monkeypatch
         "structure": roots(), "page_texts": list(pages)})
     in_flight = {"expand": 0, "summary": 0}
     peak = {"expand": 0, "summary": 0}
+    want = {}
 
     async def track(lane):
         in_flight[lane] += 1
         peak[lane] = max(peak[lane], in_flight[lane])
         await asyncio.sleep(0.02)
+        # Hold until the expected overlap is reached, so a slow runner that
+        # starts the calls far apart cannot read as a lower peak.
+        deadline = asyncio.get_running_loop().time() + 5
+        while peak[lane] < want[lane] and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0.005)
         in_flight[lane] -= 1
 
     async def propose(model, prompt):
@@ -3288,17 +3294,18 @@ def test_summary_concurrency_caps_both_lanes_on_every_path(tmp_path, monkeypatch
         return '{"summary": "ok"}'
     monkeypatch.setattr(pageindex.utils, "llm_acompletion", summarize)
 
-    def run(**kwargs):
+    def run(expected, **kwargs):
+        want.update(expand=expected[0], summary=expected[1])
         peak.update(expand=0, summary=0)
         flash_api.page_index_flash(str(pdf), summary_model="m", **kwargs)
-        return peak["expand"], peak["summary"]
+        assert (peak["expand"], peak["summary"]) == expected
 
-    assert run(summary_concurrency=1) == (1, 1)
-    assert run() == (3, 3)  # control: the three overlap
-    assert run(summary=False, summary_concurrency=1) == (1, 0)
-    assert run(summary=False) == (3, 0)
-    assert run(optimize="merge", summary_concurrency=1) == (0, 1)
-    assert run(optimize="merge") == (0, 3)
+    run((1, 1), summary_concurrency=1)
+    run((3, 3))  # control: the three overlap
+    run((1, 0), summary=False, summary_concurrency=1)
+    run((3, 0), summary=False)
+    run((0, 1), optimize="merge", summary_concurrency=1)
+    run((0, 3), optimize="merge")
 
 
 def test_count_tokens_falls_back_to_the_default_tokenizer(monkeypatch):
