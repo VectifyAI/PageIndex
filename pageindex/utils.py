@@ -741,38 +741,17 @@ async def generate_node_summary(node, model=None):
     return response
 
 
-async def generate_section_summary(node, model=None):
-    listing = json.dumps(
-        [{'title': child.get('title', ''), 'summary': child.get('summary', '')}
-         for child in node['nodes']],
-        ensure_ascii=False)
-    prompt = f"""You are given a section of a document: the text that opens the section (possibly empty) and the titles and summaries of its subsections.
-    Your task is to generate a concise description of everything that is covered in the whole section, summarizing all its points without omitting any type of content.
-    Keep the description concise and to the point, avoiding unnecessary details.
-
-    Section Title: {node.get('title', '')}
-
-    Opening Text: {node.get('text') or ''}
-
-    Subsection Titles and Summaries: {listing}
-
-    Directly return the description, do not include any other text.
-    """
-    return await llm_acompletion(model, prompt)
-
-
 FALLBACK_SUMMARY_CHARS = 600
 
 
-def fallback_summary(node, text=None):
+def fallback_summary(node, text=""):
     """The summary of a node the model left unsummarized, so no node goes
-    without one: a parent's subsection titles, a leaf's opening text."""
+    without one: a parent's subsection titles, a leaf's own text."""
     children = node.get('nodes') or []
     if children:
         summary = "; ".join(child['title'] for child in children if child.get('title'))
     else:
-        source = node.get('text') if text is None else text
-        summary = " ".join((source or "").split())
+        summary = " ".join(text.split())
     return summary[:FALLBACK_SUMMARY_CHARS] or node.get('title') or ""
 
 
@@ -820,40 +799,15 @@ def cover_subtree_ranges(structure):
 
 
 async def generate_summaries_for_structure(structure, model=None):
-    """Leaves are summarized from their own text, parents from their children's
-    summaries, deepest first; a node the model leaves unsummarized gets
-    fallback_summary. Fails loud when no call got an answer."""
     nodes = structure_to_list(structure)
-    levels = []
+    tasks = [generate_node_summary(node, model=model) for node in nodes]
+    summaries = await asyncio.gather(*tasks, return_exceptions=True)
 
-    def collect(siblings, depth):
-        for node in siblings:
-            if node.get('nodes'):
-                if len(levels) <= depth:
-                    levels.append([])
-                levels[depth].append(node)
-                collect(node['nodes'], depth + 1)
-
-    collect(structure if isinstance(structure, list) else [structure], 0)
-    answered = False
-
-    async def summarize(group, ask):
-        nonlocal answered
-        replies = await asyncio.gather(*(ask(node, model=model) for node in group),
-                                       return_exceptions=True)
-        for node, reply in zip(group, replies):
-            if isinstance(reply, Exception) and _is_unrecoverable(reply):
-                raise reply
-            if isinstance(reply, str) and reply:
-                answered = True
-                node['summary'] = reply
-            else:
-                node['summary'] = fallback_summary(node)
-
-    await summarize([node for node in nodes if not node.get('nodes')], generate_node_summary)
-    for parents in reversed(levels):
-        await summarize(parents, generate_section_summary)
-    if nodes and not answered:
+    for node, summary in zip(nodes, summaries):
+        if isinstance(summary, Exception) and _is_unrecoverable(summary):
+            raise summary
+        node['summary'] = "" if isinstance(summary, BaseException) else summary
+    if nodes and not any(node['summary'] for node in nodes):
         raise RuntimeError(
             "Summary generation failed for all nodes "
             "(every summary call failed or returned empty; "
@@ -1142,7 +1096,7 @@ class SummaryScheduler:
             if _is_unrecoverable(e):
                 raise
         if not node['summary']:
-            node['summary'] = fallback_summary(node, None if children else get_text_of_pdf_pages(
+            node['summary'] = fallback_summary(node, "" if children else get_text_of_pdf_pages(
                 self._pdf_pages, node['start_index'], node['end_index']))
 
     async def finish(self):

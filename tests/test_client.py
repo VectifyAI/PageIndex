@@ -1228,8 +1228,7 @@ def test_generate_summaries_partial_failure_absorbed(monkeypatch):
     result = asyncio.run(pageindex.utils.generate_summaries_for_structure(structure))
     summaries = {n["title"]: n["summary"]
                  for n in pageindex.utils.structure_to_list(result)}
-    # the failed parent falls back to its subsection titles
-    assert summaries == {"A": "B", "B": "ok"}
+    assert summaries == {"A": "", "B": "ok"}
 
 
 def test_generate_summaries_unrecoverable_raises(monkeypatch):

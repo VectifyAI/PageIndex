@@ -1261,11 +1261,7 @@ def page_index_main(doc, opt=None, logger=None, page_list=None):
         if opt.if_add_node_text == 'yes':
             add_node_text(structure, page_list)
         if opt.if_add_node_summary == 'yes':
-            if opt.if_add_node_text == 'no':
-                add_node_text(structure, page_list)
-            await generate_summaries_for_structure(structure, model=getattr(opt, 'summary_model', None) or opt.model)
-            if opt.if_add_node_text == 'no':
-                remove_structure_text(structure)
+            await summarize_tree(structure, page_list, model=getattr(opt, 'summary_model', None) or opt.model)
             if opt.if_add_doc_description == 'yes':
                 # Create a clean structure without unnecessary fields for description generation
                 clean_structure = create_clean_structure_for_description(structure)

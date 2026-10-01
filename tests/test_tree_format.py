@@ -132,9 +132,7 @@ def test_standard_index_stores_intros_covering_ranges_and_section_summaries(tmp_
 
     async def reply(model, prompt):
         prompts.append(prompt)
-        if "Section Title: " in prompt:
-            return "whole " + prompt.split("Section Title: ")[1].split("\n")[0]
-        return "leaf"
+        return "whole " + prompt.split("Section Title: ")[1].split("\n")[0]
     monkeypatch.setattr(classic, "tree_parser", tree_parser)
     monkeypatch.setattr(utils, "llm_acompletion", reply)
     monkeypatch.setattr(utils, "llm_completion", lambda model, prompt, **kw: "d")
@@ -153,9 +151,11 @@ def test_standard_index_stores_intros_covering_ranges_and_section_summaries(tmp_
     assert "Opening words" in p["nodes"][0]["text"]
     # C2's first child starts on C2's page; C2 keeps that page as its opening
     assert (c2["text"], c2["summary"]) == ("page 21", "whole C2")
-    assert any("Section Title: C2" in q and "Opening Text: page 21" in q for q in prompts)
-    assert [n["summary"] for n in p["nodes"]] == ["leaf", "leaf", "whole C2"]
-    assert '"summary": "whole C2"' in prompts[-1]    # deepest first: P is asked last
+    # short leaves keep their own text; only the parents are asked, deepest first
+    assert [n["summary"] for n in p["nodes"][:2]] == [
+        "Opening wordspage 2", "".join(f"page {n}" for n in range(3, 21))]
+    assert [q.split("Section Title: ")[1].split("\n")[0] for q in prompts] == ["C2", "P"]
+    assert '"summary": "whole C2"' in prompts[-1]
 
 
 def test_flash_gives_parents_their_intro_nodes(tmp_path, monkeypatch):
