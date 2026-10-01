@@ -3,6 +3,8 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 from pageindex.utils import (create_node_mapping, get_node, get_node_map,
                              get_node_parent, get_node_path, print_tree,
                              remove_fields)
@@ -40,6 +42,15 @@ def test_create_node_mapping_page_ranges():
     assert mapping["0002"] == {"node": TREE[1], "start_index": 5, "end_index": 9}
 
 
+def test_create_node_mapping_page_ranges_raw_tree():
+    child = {"title": "B", "node_id": "0001", "start_index": 2, "end_index": 4}
+    raw = [{"title": "A", "node_id": "0000", "start_index": 1, "end_index": 2,
+            "nodes": [child]}]
+    mapping = create_node_mapping(raw, include_page_ranges=True, max_page=9)
+    assert mapping["0000"] == {"node": raw[0], "start_index": 1, "end_index": 2}
+    assert mapping["0001"] == {"node": child, "start_index": 2, "end_index": 4}
+
+
 def test_print_tree_exclude_fields(capsys):
     print_tree(TREE, exclude_fields=["text"])
     out = capsys.readouterr().out
@@ -62,6 +73,18 @@ def test_node_navigation():
     assert get_node_path(TREE, "9999") == []
     assert get_node(root, "0001") is child
     assert get_node_map(TREE) == {"0000": root, "0001": child, "0002": tail}
+
+
+def test_node_navigation_rejects_wrong_input():
+    envelope = {"doc_id": "d", "status": "completed", "result": TREE}
+    with pytest.raises(TypeError, match="got dict"):
+        get_node(envelope, "0001")
+    with pytest.raises(TypeError, match="got dict"):
+        get_node_map(envelope)
+    with pytest.raises(TypeError, match="got NoneType"):
+        get_node_map(None)
+    with pytest.raises(TypeError, match="node_id"):
+        get_node(TREE, 1)
 
 
 # ── import cost: the SDK must not pay for the indexing stack ──
