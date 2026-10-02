@@ -20,6 +20,7 @@ import logging
 import yaml
 from pathlib import Path
 from types import SimpleNamespace as config
+import math
 import re
 
 # litellm is imported inside the functions that use it; eager import is slow
@@ -833,7 +834,7 @@ def input_budget(max_input_tokens):
 
 def budget_tokens(text, model=None):
     """count_tokens, plus the digits a per-digit tokenizer counts and tiktoken packs three to a token."""
-    return count_tokens(text, model=model) + sum(len(d) - -(-len(d) // 3) for d in re.findall(r"\d+", text))
+    return count_tokens(text, model=model) + sum(len(d) - math.ceil(len(d) / 3) for d in re.findall(r"\d+", text))
 
 
 def _pack(units, budget, model=None):
@@ -964,6 +965,7 @@ def _unparsed_field(reply, key):
 
 
 def _field(reply, parsed, key):
+    """`key` of the parsed reply, read raw instead when decoding mangled its LaTeX."""
     value = parsed.get(key)
     return (_unparsed_field(reply, key) or value) if isinstance(value, str) and _mangled(value) else value
 
@@ -1161,9 +1163,10 @@ class SummaryScheduler:
         return parse_summary(await self._ask(prompt, prio))
 
     async def _reduce(self, summaries, prio):
+        """Combine part summaries in budget-sized groups, level by level, into one."""
         while True:
             groups = _pack(summaries, self._budget, self._model)
-            if len(groups) == len(summaries):
+            if len(groups) == len(summaries):     # no two fit together: pair them anyway
                 groups = [summaries[i:i + 2] for i in range(0, len(summaries), 2)]
             summaries = await asyncio.gather(*(self._combine(group, prio) for group in groups))
             if len(summaries) == 1:
@@ -1258,7 +1261,7 @@ async def summarize_tree(structure, pdf_pages, model=None,
                          small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
                          max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None,
                          max_words=None, max_input_tokens=None, blocks=None):
-    """Bottom-up summaries: leaves from their own pages, parents composed from
+    """Bottom-up summaries: leaves from their own pages (or section blocks), parents composed from
     child summaries plus the pages no child covers. A parent's summary describes
     its whole subtree (end_index union semantics). Nodes that already carry a
     summary are left untouched; leaves under `small_node_tokens` use their raw
