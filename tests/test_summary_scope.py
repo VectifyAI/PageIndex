@@ -155,3 +155,17 @@ def test_a_bookmark_one_page_off_finds_the_heading_block_on_the_next_or_previous
     finally:
         fm.block_text = saved
     assert tree[0]["_pos"] == 1 and tree[1]["_pos"] == 3 and "_pos" not in tree[2]
+
+
+def test_an_intro_node_starts_at_its_parent_heading():
+    from pageindex.tree_optimize import add_intro_nodes
+    tree = [{"title": "Ch", "start_index": 1, "end_index": 3, "_pos": 0,
+             "nodes": [{"title": "Sec", "start_index": 2, "end_index": 3, "_pos": 2}]},
+            {"title": "Next", "start_index": 3, "end_index": 3, "_pos": 4}]
+    add_intro_nodes(tree)
+    intro, sec = tree[0]["nodes"]
+    assert intro["title"] == "Ch (intro)" and intro["_pos"] == 0
+    blocks = ["Ch", "chapter text", "Sec", "section text", "Next"]
+    prompts = _prompts(tree, blocks)
+    assert any("Ch\nchapter text" in p and "section text" not in p for p in prompts)
+    assert any("Sec\nsection text" in p and "Next" not in p for p in prompts)

@@ -224,8 +224,11 @@ def add_intro_nodes(structure, lines=None):
         opens = bool(lines) and first <= len(lines) and heading_at_page_start(
             lines, first, children[0]["title"])
         end = max(node["start_index"], min(node["end_index"], first - 1 if opens else first))
-        node["nodes"] = [{"title": intro_title(node.get("title")),
-                          "start_index": node["start_index"], "end_index": end}] + children
+        intro = {"title": intro_title(node.get("title")),
+                 "start_index": node["start_index"], "end_index": end}
+        if node.get("_pos") is not None:     # the intro's text starts at the parent's heading
+            intro["_pos"] = node["_pos"]
+        node["nodes"] = [intro] + children
     return structure
 
 
