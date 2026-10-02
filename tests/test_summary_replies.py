@@ -46,3 +46,8 @@ def test_latex_that_json_decodes_to_control_characters_is_read_raw():
 def test_valid_json_with_escaped_latex_and_paragraphs_is_unchanged():
     assert utils.parse_summary(r'{"summary": "First $\\alpha$.\n\nSecond."}') == "First $\\alpha$.\n\nSecond."
     assert utils.parse_summary(r'{"summary": "Costs $5.\n\nLater $10."}') == "Costs $5.\n\nLater $10."
+
+
+def test_latex_commands_outside_math_are_kept():
+    reply = r'{"summary": "A leap (\text{Eq. } \ref{eq:71}).\n\nThen\tDone."}'
+    assert utils.parse_summary(reply) == 'A leap (\\text{Eq. } \\ref{eq:71}).\n\nThen\tDone.'

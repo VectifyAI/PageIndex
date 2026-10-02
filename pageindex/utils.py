@@ -939,7 +939,8 @@ _JSON_ESCAPES = {'n': '\n', 't': '\t', 'r': '\r', 'b': '\b', 'f': '\f'}
 
 def _decode_escapes(raw):
     """Decode the escapes of a JSON string written by a model that does not escape
-    LaTeX: inside $...$ a backslash before a letter starts a command (\\nu, \\times)."""
+    LaTeX: inside $...$ a backslash before a letter starts a command (\\nu, \\times),
+    and so does \\t, \\r, \\b or \\f before a lowercase letter outside it (\\text, \\ref)."""
     def decode(text, math):
         def one(m):
             c = m.group(1)
@@ -947,7 +948,8 @@ def _decode_escapes(raw):
                 return chr(int(c[1:], 16))
             if c in '"\\/':
                 return c
-            return _JSON_ESCAPES[c] if c in _JSON_ESCAPES and not math else m.group(0)
+            latex = math or (c in 'trbf' and text[m.end():m.end() + 1].islower())
+            return _JSON_ESCAPES[c] if c in _JSON_ESCAPES and not latex else m.group(0)
         return re.sub(r'\\(u[0-9a-fA-F]{4}|.)', one, text, flags=re.S)
     return ''.join(decode(part, i % 2) for i, part in enumerate(re.split(r'(\$[^$]*\$)', raw)))
 
