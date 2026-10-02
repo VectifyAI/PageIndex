@@ -146,7 +146,7 @@ def test_a_bookmark_one_page_off_finds_the_heading_block_on_the_next_or_previous
             self.text, self.type = text, kind
     import pageindex.flash.main as fm
     body = [B("previous paragraph mentions reliability and operational challenges", 0),
-            B("3.3.4 Reliability and Operational Challenges", 7), B("body", 0), B("4 Annex", 7)]
+            B("3.3.4 Reliability and Operational Challenges", 8), B("body", 0), B("4 Annex", 7)]
     saved, fm.block_text = fm.block_text, lambda b: b.text
     try:
         tree = [{"title": "Reliability and Operational Challenges", "start_index": 12},

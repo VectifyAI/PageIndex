@@ -120,6 +120,8 @@ def page_by_block_lookup(pages, block) -> Optional[PageView]:
 # Heading positions #
 # --------------------------------------------------------------------------- #
 
+HEADING_TYPES = (7, 8)   # unnumbered and numbered outline headings (mark_outline_block_types)
+
 
 def _loose(text: str) -> str:
     return " ".join(re.sub(r"\W+", " ", unicodedata.normalize("NFKC", text).lower()).split())
@@ -132,7 +134,7 @@ def _find_heading(title: str, candidates: list) -> Optional[int]:
     for headings_only in (True, False):
         best = None
         for pos, text, kind in candidates:
-            if not text or (headings_only and kind != 7) or (kind != 7 and len(text) > 1.6 * len(wanted)):
+            if not text or (headings_only and kind not in HEADING_TYPES) or (kind not in HEADING_TYPES and len(text) > 1.6 * len(wanted)):
                 continue
             head = text[:len(wanted) + 14]
             reach = min(len(wanted), len(head))
@@ -162,7 +164,7 @@ def locate_headings(structure: list[dict], body: list[Block], block_pages: list[
         found = _find_heading(node["title"], by_page.get(start, []))
         for near in (start + 1, start - 1):
             if found is None:
-                found = _find_heading(node["title"], [c for c in by_page.get(near, []) if c[2] == 7])
+                found = _find_heading(node["title"], [c for c in by_page.get(near, []) if c[2] in HEADING_TYPES])
         if found is not None:
             node["_pos"] = found
 
@@ -325,7 +327,7 @@ def extract_toc(
     if with_blocks:
         for page in pages:
             for block in sorted(page.secondary_slot or [], key=lambda b: b.reading_order_index):
-                if block.type in (0, 7):
+                if block.type == 0 or block.type in HEADING_TYPES:
                     body.append(block)
                     block_pages.append(page.page_index)
         block_pos = {id(block): index for index, block in enumerate(body)}
