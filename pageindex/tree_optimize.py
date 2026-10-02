@@ -749,6 +749,13 @@ async def expand(structure, pages, lines, args, log, frozen):
         # strict: at cost == span the next round's merge (span <= cost) would
         # fold the node right back, touching children already marked final
         keep = cost < span and ratio >= args.min_gain_ratio
+        if keep and args.do_merge:
+            # the lookahead misses the intro and same-page fusions attach adds; merge
+            # judges the node as attached, so judge it the same way here
+            trial = copy.deepcopy(node)
+            attach_children(trial, best["children"], lines)
+            merge_same_page([trial], [])
+            keep = tree_cost(trial, args.routing) < span
 
         note(args.progress,
              f"           -> {len(best['children'])} children from {best['source']}, "
