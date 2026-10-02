@@ -415,15 +415,17 @@ class PageIndexClient:
             expand up to its own ceiling of 32. The lanes overlap, so up to
             cap + min(32, cap) calls run at once. Defaults to 64. A
             ``mode="standard"`` submit refuses either summary knob.
-        summary_max_input_tokens (int, optional): Local mode only — the
-            context size of the indexing model. The document description
-            is cut from its deepest level until it fits, instead of
-            overrunning the context. Defaults to unbounded.
+        summary_max_input_tokens (int, optional): Local mode only - the
+            context size of the indexing model. Prompts that grow with the
+            document stay within it: the document description is cut from
+            its deepest level, a flash leaf too long for one call is
+            summarized in parts, and an expand prompt that would overrun it
+            is skipped. Defaults to unbounded.
         summary_scope (str, optional): Local flash mode only - ``"pages"``
             summarizes a leaf from the pages of its node, ``"section"`` from
-            the layout blocks between its heading and the next one, which
-            leaves out the end of the previous section and the start of the
-            next. Defaults to ``"pages"``.
+            the layout blocks between its heading and the next located one,
+            which leaves out the end of the previous section and the start
+            of the next. Defaults to ``"pages"``.
         use_embedded_toc (bool, optional): Local mode only — whether flash
             indexing consumes the PDF's embedded bookmarks when they look
             trustworthy. Defaults to True.
