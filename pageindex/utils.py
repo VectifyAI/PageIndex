@@ -1085,7 +1085,13 @@ class SummaryScheduler:
         start = node.get('_pos')
         if self._blocks is None or start is None:
             return None
-        later = [p for p in (n.get('_pos') for n in _subtree(self.structure)) if p is not None and p > start]
+        nodes = list(_subtree(self.structure))
+        if any(n is not node and n.get('_pos') is None
+               and node['start_index'] <= n['start_index'] <= node['end_index']
+               and not any(m is node for m in _subtree(n.get('nodes') or []))
+               for n in nodes):
+            return None     # a section without a located heading may start inside this one
+        later = [p for p in (n.get('_pos') for n in nodes) if p is not None and p > start]
         return "\n".join(self._blocks[start:min(later, default=len(self._blocks))])
 
     async def _leaf_summary(self, node, prio):

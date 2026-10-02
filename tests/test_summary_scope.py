@@ -76,6 +76,18 @@ def test_a_leaf_falls_back_to_its_pages_without_its_own_position_or_blocks():
     assert _prompts(_tree(0, 2), None) == ["page one\npage two"] * 2
 
 
+def test_a_leaf_falls_back_to_its_pages_when_a_section_without_a_position_starts_inside_it():
+    pages = (("page one", 0), ("page two", 0), ("page three", 0))
+    blocks = ["a0", "a1", "b0"]
+
+    def tree(unlocated_page):
+        return [{"title": "S0", "start_index": 1, "end_index": 2, "_pos": 0},
+                {"title": "S1", "start_index": unlocated_page, "end_index": unlocated_page},
+                {"title": "S2", "start_index": 3, "end_index": 3, "_pos": 2}]
+    assert set(_prompts(tree(2), blocks, pages)) == {"page onepage two", "page two", "b0"}
+    assert "a0\na1" in set(_prompts(tree(3), blocks, pages))
+
+
 def test_the_internal_position_is_dropped_from_the_summarized_tree():
     structure = _tree(0, 2)
     _prompts(structure, ["a0", "a1", "b0"])
