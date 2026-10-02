@@ -425,7 +425,8 @@ class PageIndexClient:
             summarizes a leaf from the pages of its node, ``"section"`` from
             the layout blocks between its heading and the next located one,
             which leaves out the end of the previous section and the start
-            of the next. Defaults to ``"pages"``.
+            of the next. Defaults to ``"pages"``; a ``mode="standard"``
+            submit refuses ``"section"``.
         use_embedded_toc (bool, optional): Local mode only — whether flash
             indexing consumes the PDF's embedded bookmarks when they look
             trustworthy. Defaults to True.

@@ -111,11 +111,12 @@ class LocalAPI:
         if mode is None:
             mode = "flash"
         if mode == "standard" and (self._summary_max_words is not None
-                                   or self._summary_concurrency is not None):
+                                   or self._summary_concurrency is not None
+                                   or self._summary_scope != "pages"):
             raise PageIndexAPIError(
-                "Failed to submit document: summary_max_words and "
-                "summary_concurrency are flash-only; mode='standard' does not "
-                "support them.")
+                "Failed to submit document: summary_max_words, "
+                "summary_concurrency and summary_scope are flash-only; "
+                "mode='standard' does not support them.")
         file_path = os.path.abspath(os.path.expanduser(str(file_path)))
         if not os.path.isfile(file_path):
             raise FileNotFoundError(f"No such file: {file_path}")
