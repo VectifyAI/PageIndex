@@ -124,8 +124,34 @@ def test_a_title_is_located_by_its_heading_block_then_by_a_block_that_is_mostly_
               (1, "5 2 4 multilingual benchmarks", 7),
               (2, "mgsm", 0),
               (3, "safety pretraining", 7)]
-    assert _find_heading("Multilingual Benchmarks", blocks, -1) == 1      # numbering prefix
-    assert _find_heading("MGSM", blocks, -1) == 2                         # not the paragraph that starts with it
-    assert _find_heading("Safety Pre-training", blocks, -1) == 3          # close enough
-    assert _find_heading("Multilingual Benchmarks", blocks, 1) is None    # positions must grow
-    assert _find_heading("Something else", blocks, -1) is None
+    assert _find_heading("Multilingual Benchmarks", blocks) == 1      # numbering prefix
+    assert _find_heading("MGSM", blocks) == 2                         # not the paragraph that starts with it
+    assert _find_heading("Safety Pre-training", blocks) == 3          # close enough
+    assert _find_heading("Something else", blocks) is None
+
+
+def test_the_closest_match_on_a_page_wins_over_the_first_one():
+    from pageindex.flash.main import _find_heading
+    blocks = [(0, "contributors and acknowledgements", 7), (1, "6 1 pre training evaluations", 7),
+              (2, "contributors", 7), (3, "6 2 post training evaluations", 7)]
+    assert _find_heading("Contributors", blocks) == 2
+    assert _find_heading("6.2. Post-training Evaluations", blocks) == 3
+
+
+def test_a_bookmark_one_page_off_finds_the_heading_block_on_the_next_or_previous_page():
+    from pageindex.flash.main import locate_headings
+
+    class B:
+        def __init__(self, text, kind):
+            self.text, self.type = text, kind
+    import pageindex.flash.main as fm
+    body = [B("previous paragraph mentions reliability and operational challenges", 0),
+            B("3.3.4 Reliability and Operational Challenges", 7), B("body", 0), B("4 Annex", 7)]
+    saved, fm.block_text = fm.block_text, lambda b: b.text
+    try:
+        tree = [{"title": "Reliability and Operational Challenges", "start_index": 12},
+                {"title": "Annex", "start_index": 14}, {"title": "Missing", "start_index": 12}]
+        locate_headings(tree, body, [12, 13, 13, 13])
+    finally:
+        fm.block_text = saved
+    assert tree[0]["_pos"] == 1 and tree[1]["_pos"] == 3 and "_pos" not in tree[2]

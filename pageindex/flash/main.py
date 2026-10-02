@@ -125,41 +125,46 @@ def _loose(text: str) -> str:
     return " ".join(re.sub(r"\W+", " ", unicodedata.normalize("NFKC", text).lower()).split())
 
 
-def _find_heading(title: str, candidates: list, after: int) -> Optional[int]:
-    """Position of the block printing `title`: a heading block first, any block whose text is mostly the title second."""
+def _find_heading(title: str, candidates: list) -> Optional[int]:
+    """Position of the block printing `title`: the closest match among heading blocks first, then
+    among blocks whose text is mostly the title (exact, numbered, prefixed, then near spelling)."""
     wanted = _loose(title)
     for headings_only in (True, False):
+        best = None
         for pos, text, kind in candidates:
-            if pos <= after or not text or (headings_only and kind != 7):
-                continue
-            if kind != 7 and len(text) > 1.6 * len(wanted):
+            if not text or (headings_only and kind != 7) or (kind != 7 and len(text) > 1.6 * len(wanted)):
                 continue
             head = text[:len(wanted) + 14]
             reach = min(len(wanted), len(head))
-            if (text == wanted or text.startswith(wanted) or text.endswith(wanted)
-                    or bounded_edit_distance(head[:reach], wanted[:reach], 0.2 * reach) < 0.2 * reach):
-                return pos
+            rank = (0 if text == wanted else 1 if text.endswith(wanted) else 2 if text.startswith(wanted)
+                    else 3 if bounded_edit_distance(head[:reach], wanted[:reach], 0.2 * reach) < 0.2 * reach
+                    else None)
+            if rank is not None and (best is None or rank < best[0]):
+                best = (rank, pos)
+        if best is not None:
+            return best[1]
     return None
 
 
 def locate_headings(structure: list[dict], body: list[Block], block_pages: list[int]) -> None:
-    """Give each node without `_pos` the position of the block that prints its title on its start page."""
+    """Give each node without `_pos` the position of the block that prints its title: on its
+    start page, or a heading block on the page after or before it (bookmarks can be one page off)."""
     by_page: dict[int, list] = {}
     for pos, (block, page_no) in enumerate(zip(body, block_pages)):
         by_page.setdefault(page_no, []).append((pos, _loose(block_text(block)), block.type))
-    last = -1
-
-    def walk(nodes: list[dict]) -> None:
-        nonlocal last
-        for node in nodes:
-            if node.get("_pos") is None and _loose(node["title"]):
-                found = _find_heading(node["title"], by_page.get(node["start_index"], []), last)
-                if found is not None:
-                    node["_pos"] = found
-            last = max(last, node.get("_pos") if node.get("_pos") is not None else last)
-            walk(node.get("nodes") or [])
-
-    walk(structure)
+    stack = list(structure)
+    while stack:
+        node = stack.pop()
+        stack.extend(node.get("nodes") or [])
+        if node.get("_pos") is not None or not _loose(node["title"]):
+            continue
+        start = node["start_index"]
+        found = _find_heading(node["title"], by_page.get(start, []))
+        for near in (start + 1, start - 1):
+            if found is None:
+                found = _find_heading(node["title"], [c for c in by_page.get(near, []) if c[2] == 7])
+        if found is not None:
+            node["_pos"] = found
 
 
 # --------------------------------------------------------------------------- #
