@@ -63,9 +63,8 @@ import re
 import sys
 from types import SimpleNamespace
 
-from .utils import (ConfigLoader, _is_unrecoverable, count_tokens, input_budget,
-                    intro_title, is_intro,
-                    llm_acompletion, strip_internal_keys)
+from .utils import (ConfigLoader, _is_unrecoverable, budget_tokens, input_budget,
+                    intro_title, is_intro, llm_acompletion, strip_internal_keys)
 
 TRIGGER_PAGES = 5        # only look ahead on nodes larger than this
 ROUTING_COST = 1         # R(v), in pages
@@ -659,7 +658,7 @@ async def propose_children(node, pages, args):
     block = "\n".join(
         f"<page_{n}>\n{pages[n - 1][:PAGE_CHARS]}\n</page_{n}>" for n in range(start, end + 1))
     budget = getattr(args, "input_budget", None)
-    if budget is not None and count_tokens(block, model=args.model) > budget:
+    if budget is not None and budget_tokens(block, model=args.model) > budget:
         logging.warning("expand skipped for %r: pages %d-%d exceed the %d token input budget",
                         node["title"], start, end, budget)
         return []

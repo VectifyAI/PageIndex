@@ -191,3 +191,18 @@ def test_optimize_leaves_the_node_collapsed_when_the_budget_is_too_small(monkeyp
     asyncio.run(tree_optimize.optimize(tree, pages, lines, model="m", do_expand=True,
                                        max_input_tokens=300))
     assert asked == []
+
+
+def test_budget_tokens_count_the_digits_tiktoken_packs_together():
+    text = "kernel, 8, 10, 317, 3482, 2024"
+    assert utils.budget_tokens(text) == utils.count_tokens(text) + 0 + 1 + 2 + 2 + 2  # 8, 10, 317, 3482, 2024
+    assert utils.budget_tokens("no digits here") == utils.count_tokens("no digits here")
+
+
+def test_an_index_full_of_page_numbers_is_split_by_its_digit_aware_size(monkeypatch):
+    lines = [f"term {i}, " + ", ".join(str(100 + 7 * k) for k in range(30)) for i in range(120)]
+    budget = utils.input_budget(1200)
+    prompts, _ = _leaf(monkeypatch, lines, 1200)
+    parts = [p for p in prompts if "Part Summaries" not in p]
+    assert all(utils.budget_tokens("\n".join(_chunk(p))) <= budget for p in parts)
+    assert any(utils.count_tokens("\n".join(_chunk(p))) < budget * 0.8 for p in parts)

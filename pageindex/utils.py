@@ -831,17 +831,22 @@ def input_budget(max_input_tokens):
     return max(int(max_input_tokens * INPUT_BUDGET_MARGIN) - INPUT_BUDGET_OVERHEAD, 1)
 
 
+def budget_tokens(text, model=None):
+    """count_tokens, plus the digits a per-digit tokenizer counts and tiktoken packs three to a token."""
+    return count_tokens(text, model=model) + sum(len(d) - -(-len(d) // 3) for d in re.findall(r"\d+", text))
+
+
 def _pack(units, budget, model=None):
     """Whole units grouped to at most `budget` tokens; a unit over budget is cut at spaces."""
     flat = []
     for unit in units:
-        if count_tokens(unit, model=model) > budget and " " in unit:
+        if budget_tokens(unit, model=model) > budget and " " in unit:
             flat += [" ".join(group) for group in _pack(unit.split(" "), budget, model)]
         else:
             flat.append(unit)
     groups, size = [], 0
     for unit in flat:
-        tokens = count_tokens(unit, model=model) + 1
+        tokens = budget_tokens(unit, model=model) + 1
         if groups and size + tokens <= budget:
             groups[-1].append(unit)
             size += tokens
@@ -1128,7 +1133,7 @@ class SummaryScheduler:
 
     Follow strictly the above JSON return format. Do not include any other text!
     """
-        if self._budget is not None and not retitle and tokens > self._budget:
+        if self._budget is not None and not retitle and budget_tokens(text, self._model) > self._budget:
             chunks = ["\n".join(lines) for lines in _pack(text.split("\n"), self._budget, self._model)]
             replies = await asyncio.gather(*(self._ask(prompt_for(chunk), prio) for chunk in chunks))
             return await self._reduce([parse_summary(reply) for reply in replies], prio)
@@ -1305,12 +1310,12 @@ def _prune_depth(nodes, depth):
 
 def fit_structure(structure, budget, model=None):
     """The structure, cut from its deepest level up until it fits `budget` tokens."""
-    if count_tokens(str(structure), model=model) <= budget:
+    if budget_tokens(str(structure), model=model) <= budget:
         return structure
     pruned = structure
     for depth in range(_tree_depth(structure) - 2, -1, -1):
         pruned = _prune_depth(structure, depth)
-        if count_tokens(str(pruned), model=model) <= budget:
+        if budget_tokens(str(pruned), model=model) <= budget:
             return pruned
     logging.warning("document structure exceeds the %d token input budget", budget)
     return pruned
