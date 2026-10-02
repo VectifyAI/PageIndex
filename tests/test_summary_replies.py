@@ -30,3 +30,19 @@ def test_parse_title_reads_the_field_of_unparseable_json():
 def test_parse_title_still_refuses_a_reply_without_the_field():
     assert utils.parse_title("Just a sentence.") == ""
     assert utils.parse_title(None) == ""
+
+
+def test_latex_in_invalid_json_keeps_its_backslashes():
+    reply = r'{"summary": "Shows $\alpha \to \nu$ as $L\times W$ \u2190 width.\n\nThen \"more\"."}'
+    assert utils.parse_summary(reply) == 'Shows $\\alpha \\to \\nu$ as $L\\times W$ ← width.\n\nThen "more".'
+
+
+def test_latex_that_json_decodes_to_control_characters_is_read_raw():
+    reply = r'{"summary": "A $W \times L$ grid of $\boldsymbol{x}$ and $\nu$.", "title": "The $\times$ map"}'
+    assert utils.parse_summary(reply) == r"A $W \times L$ grid of $\boldsymbol{x}$ and $\nu$."
+    assert utils.parse_title(reply) == r"The $\times$ map"
+
+
+def test_valid_json_with_escaped_latex_and_paragraphs_is_unchanged():
+    assert utils.parse_summary(r'{"summary": "First $\\alpha$.\n\nSecond."}') == "First $\\alpha$.\n\nSecond."
+    assert utils.parse_summary(r'{"summary": "Costs $5.\n\nLater $10."}') == "Costs $5.\n\nLater $10."

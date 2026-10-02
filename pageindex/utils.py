@@ -899,11 +899,39 @@ def _reply_json(reply):
     return None
 
 
+_JSON_ESCAPES = {'n': '\n', 't': '\t', 'r': '\r', 'b': '\b', 'f': '\f'}
+
+
+def _decode_escapes(raw):
+    """Decode the escapes of a JSON string written by a model that does not escape
+    LaTeX: inside $...$ a backslash before a letter starts a command (\\nu, \\times)."""
+    def decode(text, math):
+        def one(m):
+            c = m.group(1)
+            if len(c) == 5:
+                return chr(int(c[1:], 16))
+            if c in '"\\/':
+                return c
+            return _JSON_ESCAPES[c] if c in _JSON_ESCAPES and not math else m.group(0)
+        return re.sub(r'\\(u[0-9a-fA-F]{4}|.)', one, text, flags=re.S)
+    return ''.join(decode(part, i % 2) for i, part in enumerate(re.split(r'(\$[^$]*\$)', raw)))
+
+
+def _mangled(text):
+    """True when JSON decoding turned LaTeX commands into control characters."""
+    return bool(re.search(r'[\b\t\f\r]', text))
+
+
 def _unparsed_field(reply, key):
-    """The value of `key` in a reply whose JSON does not parse, or None."""
+    """The value of `key` read from the raw reply, or None."""
     match = isinstance(reply, str) and re.search(
         rf'"{key}"\s*:\s*"(.*?)"\s*(?:,\s*"[^"]+"\s*:|\}}\s*(?:```)?\s*$)', reply.strip(), re.S)
-    return match.group(1).replace('\\"', '"') if match else None
+    return _decode_escapes(match.group(1)) if match else None
+
+
+def _field(reply, parsed, key):
+    value = parsed.get(key)
+    return (_unparsed_field(reply, key) or value) if isinstance(value, str) and _mangled(value) else value
 
 
 def parse_summary(reply):
@@ -913,7 +941,7 @@ def parse_summary(reply):
         return ""
     parsed = _reply_json(reply)
     if isinstance(parsed, dict) and 'summary' in parsed:
-        summary = parsed['summary']
+        summary = _field(reply, parsed, 'summary')
         if isinstance(summary, list):
             summary = ' '.join(str(item).strip() for item in summary if str(item).strip())
         return str(summary).strip() if summary else ""
@@ -928,7 +956,7 @@ def parse_title(reply):
     deterministic one it already has.
     """
     parsed = _reply_json(reply)
-    title = parsed.get('title') if isinstance(parsed, dict) else _unparsed_field(reply, 'title')
+    title = _field(reply, parsed, 'title') if isinstance(parsed, dict) else _unparsed_field(reply, 'title')
     if isinstance(title, list):
         title = ' '.join(str(item).strip() for item in title if str(item).strip())
     return ' '.join(str(title).split()) if title else ""
