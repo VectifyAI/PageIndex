@@ -152,7 +152,8 @@ def _needs_model(surface: str) -> PageIndexAPIError:
 
 _LOCAL_INDEX_KEYS = ("model", "summary_model", "backend", "storage_path",
                      "summary_max_words", "summary_concurrency",
-                     "use_embedded_toc", "optimize")
+                     "summary_max_input_tokens", "summary_scope", "use_embedded_toc",
+                     "optimize")
 
 # Near-synonyms of "cloud" that would otherwise parse as model names —
 # a silent wrong mode. They error, pointing at the real word.
@@ -178,7 +179,9 @@ def _env_cloud_key(spelling: str, inline: str = "api_key=...") -> str:
 _ARG_TYPES: "dict[str, tuple[type, ...]]" = {
     "model": (str,), "index_model": (str,), "summary_model": (str,),
     "chat_model": (str,), "retrieve_model": (str,), "summary_max_words": (int,),
-    "summary_concurrency": (int,), "use_embedded_toc": (bool,), "optimize": (str,),
+    "summary_concurrency": (int,), "summary_max_input_tokens": (int,),
+    "summary_scope": (str,),
+    "use_embedded_toc": (bool,), "optimize": (str,),
     "storage_path": (str, os.PathLike), "index_backend": (dict,),
     "chat_backend": (dict,)}
 
@@ -356,7 +359,8 @@ class PageIndexClient:
             environment), ``"local"``, a local index model name, or a
             dict: ``{"api_key": ...}`` for cloud, ``{"model",
             "summary_model", "backend", "storage_path",
-            "summary_max_words", "summary_concurrency", "use_embedded_toc",
+            "summary_max_words", "summary_concurrency",
+            "summary_max_input_tokens", "summary_scope", "use_embedded_toc",
             "optimize"}`` for local. An
             optional ``"mode"`` key (``"cloud"`` / ``"local"``) states
             the side and must agree with the other keys; ``{"mode":
@@ -411,6 +415,18 @@ class PageIndexClient:
             expand up to its own ceiling of 32. The lanes overlap, so up to
             cap + min(32, cap) calls run at once. Defaults to 64. A
             ``mode="standard"`` submit refuses either summary knob.
+        summary_max_input_tokens (int, optional): Local mode only - the
+            context size of the indexing model. Prompts that grow with the
+            document stay within it: the document description is cut from
+            its deepest level, a flash leaf too long for one call is
+            summarized in parts, and an expand prompt that would overrun it
+            is skipped. Defaults to unbounded.
+        summary_scope (str, optional): Local flash mode only - ``"pages"``
+            summarizes a leaf from the pages of its node, ``"section"`` from
+            the layout blocks between its heading and the next located one,
+            which leaves out the end of the previous section and the start
+            of the next. Defaults to ``"pages"``; a ``mode="standard"``
+            submit refuses ``"section"``.
         use_embedded_toc (bool, optional): Local mode only — whether flash
             indexing consumes the PDF's embedded bookmarks when they look
             trustworthy. Defaults to True.
@@ -467,6 +483,8 @@ class PageIndexClient:
         summary_model: Optional[str] = None,
         summary_max_words: Optional[int] = None,
         summary_concurrency: Optional[int] = None,
+        summary_max_input_tokens: Optional[int] = None,
+        summary_scope: Optional[str] = None,
         use_embedded_toc: Optional[bool] = None,
         optimize: Optional[str] = None,
         retrieve_model: Optional[str] = None,
@@ -496,6 +514,8 @@ class PageIndexClient:
              ("summary_model", summary_model),
              ("summary_max_words", summary_max_words),
              ("summary_concurrency", summary_concurrency),
+             ("summary_max_input_tokens", summary_max_input_tokens),
+             ("summary_scope", summary_scope),
              ("use_embedded_toc", use_embedded_toc),
              ("optimize", optimize),
              ("index_backend", index_backend),
@@ -582,10 +602,14 @@ class PageIndexClient:
                     raise PageIndexAPIError(
                         f"{shown} is empty — it configures nothing. Pass a "
                         "real value, or drop the argument.")
+                if name == "summary_scope" and value not in ("pages", "section"):
+                    raise PageIndexAPIError(
+                        f'{shown} must be "pages" or "section", got {value!r}.')
                 if name == "optimize" and value not in ("full", "merge", "off"):
                     raise PageIndexAPIError(
                         f'{shown} must be "full", "merge" or "off", got {value!r}.')
-                if (name in ("summary_max_words", "summary_concurrency")
+                if (name in ("summary_max_words", "summary_concurrency",
+                             "summary_max_input_tokens")
                         and isinstance(value, int) and value < 1):
                     raise PageIndexAPIError(
                         f"{shown} must be a positive int, got {value!r}.")
@@ -660,6 +684,8 @@ class PageIndexClient:
                 index_backend=index_conf.get("index_backend"),
                 summary_max_words=index_conf.get("summary_max_words"),
                 summary_concurrency=index_conf.get("summary_concurrency"),
+                summary_max_input_tokens=index_conf.get("summary_max_input_tokens"),
+                summary_scope=index_conf.get("summary_scope", "pages"),
                 use_embedded_toc=index_conf.get("use_embedded_toc", True),
                 optimize=index_conf.get("optimize", "full"),
             )
@@ -2698,6 +2724,8 @@ class PageIndexLocalClient(PageIndexClient):
         summary_model: Optional[str] = None,
         summary_max_words: Optional[int] = None,
         summary_concurrency: Optional[int] = None,
+        summary_max_input_tokens: Optional[int] = None,
+        summary_scope: Optional[str] = None,
         use_embedded_toc: Optional[bool] = None,
         optimize: Optional[str] = None,
         retrieve_model: Optional[str] = None,
@@ -2711,6 +2739,8 @@ class PageIndexLocalClient(PageIndexClient):
                          model=model, summary_model=summary_model,
                          summary_max_words=summary_max_words,
                          summary_concurrency=summary_concurrency,
+                         summary_max_input_tokens=summary_max_input_tokens,
+                         summary_scope=summary_scope,
                          use_embedded_toc=use_embedded_toc, optimize=optimize,
                          retrieve_model=retrieve_model, storage_path=storage_path,
                          index_backend=index_backend, chat_backend=chat_backend,

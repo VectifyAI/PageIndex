@@ -244,7 +244,8 @@ def _heading_appears_at_page_top(heading: HeadingCandidate) -> bool:
     return True
 
 
-def outline_to_dict_tree(outline_node_list: list[OutlineNode], total_pages: int) -> list[dict]:
+def outline_to_dict_tree(outline_node_list: list[OutlineNode], total_pages: int,
+                         block_pos: Optional[dict] = None) -> list[dict]:
     """Convert the outline tree directly to PageIndex JSON shape. Preserves the natural outline nesting without font-overlay rewriting. """
     flat_nodes: list[dict] = []
 
@@ -276,6 +277,8 @@ def outline_to_dict_tree(outline_node_list: list[OutlineNode], total_pages: int)
                 "nodes": _walk_nodes(item.child_nodes) if item.child_nodes else [],
                 "_appear_start": _heading_appears_at_page_top(item.heading),
             }
+            if block_pos is not None:
+                node["_pos"] = block_pos.get(id(item.heading.group_slot))
             flat_nodes.append(node)
             result.append(node)
         return result

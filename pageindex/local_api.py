@@ -41,6 +41,8 @@ class LocalAPI:
                  index_backend: dict | None = None,
                  summary_max_words: int | None = None,
                  summary_concurrency: int | None = None,
+                 summary_max_input_tokens: int | None = None,
+                 summary_scope: str = "pages",
                  use_embedded_toc: bool = True,
                  optimize: str = "full"):
         self._store = DocStore(storage_path)
@@ -49,6 +51,8 @@ class LocalAPI:
         self._index_backend = index_backend
         self._summary_max_words = summary_max_words
         self._summary_concurrency = summary_concurrency
+        self._summary_max_input_tokens = summary_max_input_tokens
+        self._summary_scope = summary_scope
         self._use_embedded_toc = use_embedded_toc
         self._optimize = optimize
         from .utils import ConfigLoader
@@ -107,11 +111,12 @@ class LocalAPI:
         if mode is None:
             mode = "flash"
         if mode == "standard" and (self._summary_max_words is not None
-                                   or self._summary_concurrency is not None):
+                                   or self._summary_concurrency is not None
+                                   or self._summary_scope != "pages"):
             raise PageIndexAPIError(
-                "Failed to submit document: summary_max_words and "
-                "summary_concurrency are flash-only; mode='standard' does not "
-                "support them.")
+                "Failed to submit document: summary_max_words, "
+                "summary_concurrency and summary_scope are flash-only; "
+                "mode='standard' does not support them.")
         file_path = os.path.abspath(os.path.expanduser(str(file_path)))
         if not os.path.isfile(file_path):
             raise FileNotFoundError(f"No such file: {file_path}")
@@ -245,6 +250,8 @@ class LocalAPI:
                                   optimize_model=self._summary_model,
                                   summary_concurrency=self._summary_concurrency,
                                   summary_max_words=self._summary_max_words,
+                                  summary_max_input_tokens=self._summary_max_input_tokens,
+                                  summary_scope=self._summary_scope,
                                   use_embedded_toc=self._use_embedded_toc)
         structure = result.get("structure", [])
         reason = flash_rejection_reason(result)
@@ -254,6 +261,7 @@ class LocalAPI:
         description = generate_doc_description(
             create_clean_structure_for_description(structure),
             model=self._summary_model,
+            max_input_tokens=self._summary_max_input_tokens,
         )
         return structure, description
 
