@@ -105,6 +105,9 @@ print(answer)
 
 Configure other models, streaming, multi-document search, citations, and more.
 
+For a local indexed document store, see the [local MCP server guide](docs/local-mcp.md)
+for a Python stdio launcher and MCP client configuration.
+
 ### [Integrate PageIndex with your own agent →](https://docs.pageindex.ai/sdk/agents)
 
 Drop PageIndex tools into the OpenAI Agents SDK, the Claude Agent SDK, or any other framework.
@@ -205,7 +208,7 @@ print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 | OCR & image understanding | — | ✓ |
 | [Metadata](https://docs.pageindex.ai/sdk/documents#metadata-cloud) | — | ✓ |
 | [Folders](https://docs.pageindex.ai/sdk/documents#folders-cloud) | — | ✓ |
-| [MCP server](https://docs.pageindex.ai/mcp) | — | ✓ |
+| [MCP server](https://docs.pageindex.ai/mcp) | [Python stdio launcher](docs/local-mcp.md) | ✓ |
 
 ### More About PageIndex Cloud
 
