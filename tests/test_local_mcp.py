@@ -1,7 +1,12 @@
 """Local MCP protocol tests against a seeded store, without LLM calls."""
 import asyncio
 import json
+import os
+import shutil
+import subprocess
 import sys
+import sysconfig
+from pathlib import Path
 
 import anyio
 import pytest
@@ -29,6 +34,70 @@ def wire(result):
 
 def payload(result):
     return json.loads(wire(result)["content"][0]["text"])
+
+
+@pytest.fixture
+def executable():
+    """Use the installed entry point, including its generated console wrapper."""
+    suffix = ".exe" if sys.platform == "win32" else ""
+    command = Path(sysconfig.get_path("scripts")) / f"pageindex-mcp{suffix}"
+    if command.is_file():
+        return str(command)
+    found = shutil.which("pageindex-mcp")
+    if found:
+        return found
+    # CI installs the checkout, so a missing command there is a real failure.
+    if os.environ.get("CI"):
+        pytest.fail("pageindex-mcp is not installed")
+    pytest.skip("pageindex-mcp is not installed; run python -m pip install -e .")
+
+
+@pytest.mark.parametrize("management", [False, True])
+def test_installed_executable_round_trip(executable, local_client, tmp_path, management):
+    """The command selects the requested store and gates deletion over stdio."""
+    async def check():
+        with anyio.fail_after(15):
+            args = ["--storage-path", str(local_client.storage_path)]
+            if management:
+                args.append("--management")
+            parameters = StdioServerParameters(
+                command=executable, args=args, cwd=str(tmp_path),
+            )
+            async with stdio_client(parameters) as streams, ClientSession(*streams) as session:
+                await session.initialize()
+                catalog = await session.list_tools()
+                assert [tool.name for tool in catalog.tools] == list(tool_names(management))
+                result = await session.call_tool("browse_documents", {})
+                assert not wire(result)["isError"]
+                assert payload(result)["documents"][0]["name"] == "report.pdf"
+                removed = await session.call_tool(
+                    "remove_document", {"doc_names": ["report.pdf"]},
+                )
+                assert wire(removed)["isError"] is (not management)
+                remaining = await session.call_tool("browse_documents", {})
+                assert len(payload(remaining)["documents"]) == (0 if management else 1)
+
+    asyncio.run(check())
+
+
+def test_executable_help_and_invalid_arguments(executable, tmp_path):
+    help_result = subprocess.run(
+        [executable, "--help"], capture_output=True, text=True, timeout=10,
+    )
+    assert help_result.returncode == 0
+    assert "--storage-path" in help_result.stdout
+    assert "--management" in help_result.stdout
+    for arguments in [
+        [],
+        ["--storage-path", str(tmp_path), "--management", "false"],
+        ["--storage-path", str(tmp_path / "missing")],
+    ]:
+        result = subprocess.run(
+            [executable, *arguments], capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 2
+        assert result.stdout == ""
+        assert "error:" in result.stderr
 
 
 async def round_trip(server, assertions):

@@ -26,8 +26,8 @@ class LocalMcpServer(Server):
         include_management: Expose and allow remove_document when True.
             The default tool set is read-only.
 
-    Constructing this object does not start a transport. Pass its streams and
-    initialization options to ``run``; see docs/local-mcp.md for stdio usage.
+    Constructing this object does not start a transport: await
+    ``serve_stdio()``, or run the ``pageindex-mcp`` command.
     """
 
     def __init__(self, client, include_management: bool = False):
@@ -130,3 +130,24 @@ class LocalMcpServer(Server):
                 pass  # host already closed the pipe
             os.dup2(protocol_fd, 1)
             os.close(protocol_fd)
+
+
+def main():
+    """Launch the local stdio server from the ``pageindex-mcp`` command."""
+    from argparse import ArgumentParser
+
+    from .client import PageIndexLocalClient
+
+    parser = ArgumentParser(description="Serve a local PageIndex document store over MCP stdio.")
+    parser.add_argument("--storage-path", required=True,
+                        help="Path to an existing indexed document store.")
+    parser.add_argument("--management", action="store_true",
+                        help="Enable document deletion (disabled by default).")
+    args = parser.parse_args()
+    if not os.path.isdir(args.storage_path):
+        # A typo would otherwise serve an empty library without complaint.
+        parser.error(f"--storage-path {args.storage_path!r} is not a directory")
+
+    client = PageIndexLocalClient(storage_path=args.storage_path)
+    mcp_server = LocalMcpServer(client, include_management=args.management)
+    asyncio.run(mcp_server.serve_stdio())
