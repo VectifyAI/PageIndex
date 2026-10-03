@@ -6,7 +6,11 @@ that were previously indexed with a PageIndexLocalClient.
 """
 
 import asyncio
+import io
+import os
+import sys
 
+import anyio
 from mcp import types
 from mcp.server.lowlevel import Server
 
@@ -54,7 +58,7 @@ class LocalMcpServer(Server):
                 return await self.call_tool(None, params)
 
             Server.list_tools(self)(list_handler)
-            Server.call_tool(self)(call_handler)
+            Server.call_tool(self, validate_input=False)(call_handler)
         else:
             super().__init__(
                 "pageindex-local-mcp", **options,
@@ -97,3 +101,32 @@ class LocalMcpServer(Server):
         blocks, is_error = await asyncio.to_thread(invoke, params.arguments or {})
         return types.CallToolResult.model_validate(
             {"content": blocks, "isError": is_error})
+
+    async def serve_stdio(self):
+        """Serve over stdin/stdout until the host closes the pipe.
+
+        While serving, fd 1 points at stderr and the protocol writes to a
+        private duplicate of the original stdout, so stray output from tools,
+        C extensions or child processes never corrupts the JSON-RPC stream.
+        MCP 2.x's stdio_server diverts stdout itself; 1.x does not.
+        """
+        from mcp.server.stdio import stdio_server
+
+        sys.stdout.flush()
+        protocol_fd = os.dup(1)
+        os.dup2(2, 1)
+        protocol_out = io.TextIOWrapper(
+            os.fdopen(protocol_fd, "wb", closefd=False), encoding="utf-8")
+        try:
+            async with stdio_server(stdout=anyio.wrap_file(protocol_out)) as (
+                    read_stream, write_stream):
+                await self.run(read_stream, write_stream,
+                               self.create_initialization_options())
+        finally:
+            sys.stdout.flush()
+            try:
+                protocol_out.flush()
+            except (OSError, ValueError):
+                pass  # host already closed the pipe
+            os.dup2(protocol_fd, 1)
+            os.close(protocol_fd)

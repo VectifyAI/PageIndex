@@ -47,20 +47,13 @@ outside the package or in your application:
 import asyncio
 import sys
 
-from mcp.server.stdio import stdio_server
 from pageindex import PageIndexLocalClient
 from pageindex.local_mcp_server import LocalMcpServer
 
 
 async def main():
     client = PageIndexLocalClient(storage_path=sys.argv[1])
-    server = LocalMcpServer(client)
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream,
-            write_stream,
-            server.create_initialization_options(),
-        )
+    await LocalMcpServer(client).serve_stdio()
 
 
 if __name__ == "__main__":
@@ -88,7 +81,9 @@ directory and PATH. The host starts and stops the subprocess. There is no
 HTTP endpoint or listening port. Starting the launcher in a terminal leaves it
 waiting for MCP messages rather than displaying an interactive prompt.
 
-Keep stdout reserved for MCP messages. Send application logs to stderr. The
+`serve_stdio()` points stdout at stderr while serving, so stray output from
+tools or libraries cannot corrupt the MCP stream on either MCP SDK version.
+Send application logs to stderr. The
 server accepts only `PageIndexLocalClient`; a cloud client is rejected.
 
 ## Development checks

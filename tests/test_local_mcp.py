@@ -109,6 +109,20 @@ def test_management_opt_in_allows_deletion(local_client):
     asyncio.run(round_trip(LocalMcpServer(local_client, True), assertions))
 
 
+def test_string_booleans_reach_the_tool_layer(local_client):
+    """Models often send booleans as strings; the tool layer coerces them, as
+    on cloud. SDK-side schema validation must not reject them first."""
+    async def assertions(session, initialized):
+        result = await session.call_tool(
+            "get_document",
+            {"doc_name": "report.pdf", "wait_for_completion": "false"},
+        )
+        assert not wire(result)["isError"], wire(result)["content"][0]["text"]
+        assert payload(result)["success"] is True
+
+    asyncio.run(round_trip(LocalMcpServer(local_client), assertions))
+
+
 def test_cloud_client_is_rejected():
     with pytest.raises(TypeError, match="PageIndexLocalClient"):
         LocalMcpServer(PageIndexCloudClient(api_key="test-key"))
@@ -138,14 +152,12 @@ def test_stdio_subprocess_round_trip(local_client):
     source = """
 import asyncio
 import sys
-from mcp.server.stdio import stdio_server
 from pageindex import PageIndexLocalClient
 from pageindex.local_mcp_server import LocalMcpServer
 
 async def main():
     server = LocalMcpServer(PageIndexLocalClient(storage_path=sys.argv[1]))
-    async with stdio_server() as streams:
-        await server.run(*streams, server.create_initialization_options())
+    await server.serve_stdio()
 
 asyncio.run(main())
 """
@@ -162,5 +174,44 @@ asyncio.run(main())
                     assert [tool.name for tool in (await session.list_tools()).tools] == list(tool_names())
                     result = await session.call_tool("browse_documents", {})
                     assert payload(result)["documents"][0]["name"] == "report.pdf"
+
+    asyncio.run(check())
+
+
+def test_stdio_survives_stray_stdout_from_a_tool(local_client):
+    """A tool that writes to stdout mid-call must not corrupt the JSON-RPC
+    stream; no trailing newline, so the noise would fuse with the reply."""
+    source = """
+import asyncio
+import sys
+from pageindex import PageIndexLocalClient
+from pageindex.local_mcp_server import LocalMcpServer
+
+async def main():
+    server = LocalMcpServer(PageIndexLocalClient(storage_path=sys.argv[1]))
+    browse = server.invokers["browse_documents"]
+
+    def noisy(arguments):
+        print("stray tool output", end="", flush=True)
+        return browse(arguments)
+
+    server.invokers["browse_documents"] = noisy
+    await server.serve_stdio()
+
+asyncio.run(main())
+"""
+
+    async def check():
+        with anyio.fail_after(15):
+            parameters = StdioServerParameters(
+                command=sys.executable,
+                args=["-c", source, str(local_client.storage_path)],
+            )
+            async with stdio_client(parameters) as streams, \
+                ClientSession(*streams) as session:
+                    await session.initialize()
+                    for _ in range(2):  # the second reply would carry the noise
+                        result = await session.call_tool("browse_documents", {})
+                        assert payload(result)["documents"][0]["name"] == "report.pdf"
 
     asyncio.run(check())
