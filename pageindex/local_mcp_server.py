@@ -137,6 +137,7 @@ def main():
     from argparse import ArgumentParser
 
     from .client import PageIndexLocalClient
+    from .errors import PageIndexAPIError
 
     parser = ArgumentParser(description="Serve a local PageIndex document store over MCP stdio.")
     parser.add_argument("--storage-path", required=True,
@@ -144,10 +145,24 @@ def main():
     parser.add_argument("--management", action="store_true",
                         help="Enable document deletion (disabled by default).")
     args = parser.parse_args()
+    # The store reads as an empty library when it is missing or unreadable,
+    # so a bad path would otherwise serve nothing without complaint.
     if not os.path.isdir(args.storage_path):
-        # A typo would otherwise serve an empty library without complaint.
         parser.error(f"--storage-path {args.storage_path!r} is not a directory")
+    if not os.access(args.storage_path, os.R_OK | os.X_OK):
+        parser.error(f"--storage-path {args.storage_path!r} is not readable")
+    if not os.path.isfile(os.path.join(args.storage_path, "manifest.json")):
+        # Not fatal: a fresh store has no manifest until the first document.
+        print(f"pageindex-mcp: warning: no indexed documents in "
+              f"{args.storage_path!r}; index with PageIndexLocalClient first",
+              file=sys.stderr)
 
-    client = PageIndexLocalClient(storage_path=args.storage_path)
-    mcp_server = LocalMcpServer(client, include_management=args.management)
-    asyncio.run(mcp_server.serve_stdio())
+    try:
+        client = PageIndexLocalClient(storage_path=args.storage_path)
+        mcp_server = LocalMcpServer(client, include_management=args.management)
+    except (PageIndexAPIError, OSError) as exc:
+        parser.exit(1, f"pageindex-mcp: error: {exc}\n")
+    try:
+        asyncio.run(mcp_server.serve_stdio())
+    except KeyboardInterrupt:
+        sys.exit(130)

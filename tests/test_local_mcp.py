@@ -100,6 +100,36 @@ def test_executable_help_and_invalid_arguments(executable, tmp_path):
         assert "error:" in result.stderr
 
 
+@pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0,
+                    reason="needs POSIX permissions and a non-root user")
+def test_executable_rejects_unreadable_store(executable, tmp_path):
+    store = tmp_path / "locked"
+    store.mkdir()
+    store.chmod(0)
+    try:
+        result = subprocess.run(
+            [executable, "--storage-path", str(store)],
+            capture_output=True, text=True, timeout=10,
+        )
+    finally:
+        store.chmod(0o755)
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "is not readable" in result.stderr
+
+
+def test_executable_warns_on_empty_store_and_exits_on_eof(executable, tmp_path):
+    """An empty store still serves, but says so on stderr; closing stdin, as
+    a host does, shuts the server down cleanly."""
+    result = subprocess.run(
+        [executable, "--storage-path", str(tmp_path)],
+        input="", capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert "warning: no indexed documents" in result.stderr
+
+
 async def round_trip(server, assertions):
     """Exercise real initialization and dispatch with a bounded lifetime."""
     with anyio.fail_after(10):
