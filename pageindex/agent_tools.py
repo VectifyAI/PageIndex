@@ -920,12 +920,9 @@ def _get_document_structure(client, doc_name: str,
                                 waited and entry.get("status") != "failed")
 
     try:
-        raw_tree = getattr(getattr(client, "_api", None), "raw_tree", None)
-        tree = raw_tree(entry["id"]) if raw_tree is not None else None
-        if tree is None:
-            # _format_structure strips text anyway — don't download it.
-            tree = client.get_tree(entry["id"], node_summary=True,
-                                   include_text=False).get("result")
+        # _format_structure strips text anyway — don't download it.
+        tree = client.get_tree(entry["id"], node_summary=True,
+                               include_text=False).get("result")
     except PageIndexAPIError as exc:
         return _failure(
             f"Failed to retrieve document structure: {exc}",

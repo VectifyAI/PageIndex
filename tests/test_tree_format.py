@@ -74,6 +74,63 @@ def test_expand_gives_a_split_node_its_intro(monkeypatch):
     assert all(n["summary"] == "ok" for n in utils._subtree(tree))
 
 
+def test_a_running_header_or_a_word_prefix_does_not_open_the_page():
+    page = ["4.1. Discriminant Functions 181", "opening words", "4.1. Discriminant Functions"]
+    assert not tree_optimize.heading_at_page_start([page], 1, "4.1. Discriminant Functions")
+    assert tree_optimize.heading_at_page_start([page[2:]], 1, "4.1. Discriminant Functions")
+    assert not tree_optimize.heading_at_page_start([["Filed 03/04/24", "I. Background"]], 1, "I.")
+
+
+def test_expand_prices_a_level_with_the_intro_it_gets(monkeypatch):
+    body = "body " * 250
+    pages = [body] * 12
+    pages[10] = body + "\nSub Late\n" + body     # mid-page: the intro shares page 11
+    lines = [[line for line in page.splitlines() if line.strip()] for page in pages]
+    tree = [{"title": "R", "start_index": 1, "end_index": 12, "node_id": "0000", "nodes": [
+        {"title": "A", "start_index": 1, "end_index": 3, "node_id": "0001"},
+        {"title": "X", "start_index": 4, "end_index": 12, "node_id": "0002"}]}]
+
+    async def propose(model, prompt):
+        return {"subsections": [{"title": "Sub Late", "page": 11}]}
+
+    async def summarize(model, prompt):
+        return '{"summary": "ok"}'
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+    monkeypatch.setattr(utils, "llm_acompletion", summarize)
+
+    async def run():
+        scheduler = utils.SummaryScheduler(tree, [(page, 0) for page in pages], model="m")
+        await tree_optimize.optimize(tree, pages, lines, model="m", do_expand=True,
+                                     on_final=scheduler.mark_final)
+        await scheduler.finish()
+    asyncio.run(run())
+
+    # intro 4-11 + Sub Late 11-12 costs 1 + 8 = 9 pages, no better than reading X's 9
+    assert "nodes" not in tree[0]["nodes"][1]
+
+
+def test_expand_skips_the_heading_of_a_neighbor_sharing_the_last_page(monkeypatch):
+    body = "body " * 250
+    pages = [body] * 20
+    pages[5] = "Setup\n" + body
+    pages[11] = body + "\n3 Results\n" + body    # mid-page: Methods runs onto page 12
+    lines = [[line for line in page.splitlines() if line.strip()] for page in pages]
+    tree = [{"title": "R", "start_index": 1, "end_index": 20, "node_id": "0000", "nodes": [
+        {"title": "A", "start_index": 1, "end_index": 3, "node_id": "0001"},
+        {"title": "Methods", "start_index": 4, "end_index": 12, "node_id": "0002"},
+        {"title": "3 Results", "start_index": 12, "end_index": 20, "node_id": "0003"}]}]
+
+    async def propose(model, prompt):
+        if "Section title: Methods\n" in prompt:
+            return {"subsections": [{"title": "Setup", "page": 6}, {"title": "Results", "page": 12}]}
+        return {"subsections": []}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+
+    asyncio.run(tree_optimize.optimize(tree, pages, lines, model="m", do_expand=True))
+
+    assert shape(tree[0]["nodes"][1]["nodes"]) == [("Methods (intro)", 4, 5), ("Setup", 6, 12)]
+
+
 def test_merge_folds_an_intro_without_listing_its_title():
     tree = [{"title": "P", "start_index": 1, "end_index": 4, "nodes": [
         {"title": "P (intro)", "start_index": 1, "end_index": 1},
@@ -156,6 +213,40 @@ def test_standard_index_stores_intros_covering_ranges_and_section_summaries(tmp_
         "Opening wordspage 2", "".join(f"page {n}" for n in range(3, 21))]
     assert [q.split("Section Title: ")[1].split("\n")[0] for q in prompts] == ["C2", "P"]
     assert '"summary": "whole C2"' in prompts[-1]
+
+
+def test_standard_index_gives_toc_and_split_parents_intros(tmp_path, monkeypatch):
+    texts = [f"page {n}" for n in range(1, 41)]
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(texts))
+
+    splits = {1: [{"structure": "1", "title": "P", "physical_index": 1},       # P's long opening
+                  {"structure": "2", "title": "Background", "physical_index": 8}],
+              20: [{"structure": "1", "title": "C2", "physical_index": 20},    # the large leaf C2
+                   {"structure": "2", "title": "C2.a", "physical_index": 25},
+                   {"structure": "3", "title": "C2.b", "physical_index": 32}]}
+
+    async def meta_processor(page_list, mode=None, start_index=1, **kwargs):
+        if len(page_list) == len(texts):
+            return [{"structure": "1", "title": "P", "physical_index": 1},
+                    {"structure": "1.1", "title": "C1", "physical_index": 15},
+                    {"structure": "1.2", "title": "C2", "physical_index": 20}]
+        return splits[start_index]
+
+    async def appear(items, *args, **kwargs):
+        return items
+    monkeypatch.setattr(classic, "check_toc", lambda page_list, opt: {"toc_content": None})
+    monkeypatch.setattr(classic, "meta_processor", meta_processor)
+    monkeypatch.setattr(classic, "check_title_appearance_in_start_concurrent", appear)
+    opt = utils.ConfigLoader().load({"model": "m", "if_add_node_summary": "no"})
+
+    result = classic.page_index_main(str(pdf), opt, logger=SimpleNamespace(info=print),
+                                     page_list=[(text, 3000) for text in texts])
+
+    assert shape(result["structure"]) == [
+        ("P", 1, 40), ("P (intro)", 1, 15), ("P (intro)", 1, 8), ("Background", 8, 15),
+        ("C1", 15, 20),
+        ("C2", 20, 40), ("C2 (intro)", 20, 25), ("C2.a", 25, 32), ("C2.b", 32, 40)]
 
 
 def test_flash_gives_parents_their_intro_nodes(tmp_path, monkeypatch):

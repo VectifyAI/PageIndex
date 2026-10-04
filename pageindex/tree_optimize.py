@@ -11,7 +11,7 @@ expand() - for a collapsed node, one-step lookahead, children treated as collaps
 
     trigger:       S(v) > TRIGGER_PAGES        (cost control on generation, not the rule)
     collapse_cost = S(v)
-    expand_cost   = R(v) + max(S_residual(v), max_i S(c_i))
+    expand_cost   = R(v) + max_i S(c_i)    the c_i include the intro attach_children adds
     expand iff     expand_cost < collapse_cost                  (ties keep collapsed)
     expand_gain   = collapse_cost - expand_cost
 
@@ -172,12 +172,14 @@ def is_frontier(node):
 
 def heading_at_page_start(lines, page_no, heading):
     """Is the heading the first line on its page? No when that cannot be told
-    (a heading with no Latin letter or digit to match), so the page is shared."""
+    (a heading with no Latin letter to match, or a first line that a later line
+    repeats, as a running header does), so the page is shared."""
     page = lines[page_no - 1]
     key = normalize(heading)
-    if not page or not key:
+    if not page or not re.search("[a-z]", key):
         return False
-    return key in normalize(page[0])
+    starts = [(normalize(line) + " ").startswith(key + " ") for line in page]
+    return starts[0] and not any(starts[1:])
 
 
 def assign_ends(node, children, lines):
@@ -304,14 +306,13 @@ def tree_cost_via_frontier(node, routing=ROUTING_COST):
     return max(d * routing + s for d, s, _ in entries) if entries else 0
 
 
-def expand_cost(node, children, routing=ROUTING_COST):
-    """Cost after one-step lookahead, children treated as collapsed."""
-    covered = set()
-    for child in children:
-        covered |= set(range(child["start_index"], child["end_index"] + 1))
-    residual = len(pages_of(node) - covered)
-    scans = [child["end_index"] - child["start_index"] + 1 for child in children]
-    return routing + max([residual] + scans), residual
+def expand_cost(node, children, lines, routing=ROUTING_COST):
+    """Cost after one-step lookahead, children treated as collapsed, priced with
+    the intro node attach_children would give them."""
+    trial = dict(node, nodes=children)
+    residual = S_residual(trial)
+    add_intro_nodes([trial], lines)
+    return tree_cost(trial, routing), residual
 
 
 # --------------------------------------------------------------------------
@@ -676,6 +677,13 @@ async def propose_children(node, pages, args):
     return accepted
 
 
+def heading_key(node):
+    """A node's page and heading, compared without the number printed before it;
+    None when no text is left to compare."""
+    title = re.sub(r"^(?:[0-9]+ )+", "", normalize(node["title"]))
+    return (node["start_index"], title) if title else None
+
+
 async def expand(structure, pages, lines, args, log, frozen):
     """One-step lookahead on every collapsed node over the trigger, recursively.
 
@@ -725,6 +733,11 @@ async def expand(structure, pages, lines, args, log, frozen):
         if cached:
             candidates.append(("cache", cached))
         candidates.extend(llm_candidates)
+        # a heading the tree holds already: a neighbor's on a shared page, a parent's atop its intro
+        taken = {heading_key(n) for n, _ in flatten(structure)} - {None}
+        candidates = [(source, [c for c in children if heading_key(c) not in taken])
+                      for source, children in candidates]
+        candidates = [(source, children) for source, children in candidates if children]
 
         if not candidates:
             note(args.progress, f"           -> no children found, kept collapsed")
@@ -737,7 +750,7 @@ async def expand(structure, pages, lines, args, log, frozen):
         scored = []
         for source, children in candidates:
             sized = assign_ends(node, children, lines)
-            cost, residual = expand_cost(node, sized, args.routing)
+            cost, residual = expand_cost(node, sized, lines, args.routing)
             scored.append({"source": source, "children": sized,
                            "expand_cost": cost, "S_residual": residual})
         scored.sort(key=lambda s: s["expand_cost"])
