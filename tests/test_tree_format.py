@@ -2,6 +2,7 @@
 splitting, and summaries every node gets, a parent's built from its children's."""
 
 import asyncio
+import copy
 import importlib
 from types import SimpleNamespace
 
@@ -36,13 +37,14 @@ def test_intro_node_holds_the_pages_a_parent_opens_with():
         ("Ch 3", 10, 30), ("Ch 3 (intro)", 10, 11), ("3.1 Scope", 12, 20),
         ("3.2", 21, 30), ("3.2.1", 21, 30),     # a first child on its parent's page: no intro
         ("", 31, 40), ("Intro", 31, 33), ("4.1", 33, 40)]
-    assert tree_optimize.add_intro_nodes(tree, lines) == tree
+    assert shape(tree_optimize.add_intro_nodes(copy.deepcopy(tree), lines)) == shape(tree)
     # a standard parent ends where its first child starts; a split intro keeps its title
     split = [{"title": "Ch 3 (intro)", "start_index": 10, "end_index": 11, "nodes": [
         {"title": "Background", "start_index": 12, "end_index": 14}]}]
     assert shape(tree_optimize.add_intro_nodes(split))[1] == ("Ch 3 (intro)", 10, 11)
     # a heading with nothing to match cannot be placed on its page, so the page is shared
     assert not tree_optimize.heading_at_page_start([["第一章 总则"]], 1, "第一章 总则")
+    assert not tree_optimize.heading_at_page_start([["2", "Body text"]], 1, "2")   # or a page number
 
 
 def test_expand_gives_a_split_node_its_intro(monkeypatch):
