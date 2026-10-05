@@ -118,15 +118,19 @@ def test_expand_skips_the_heading_of_a_neighbor_sharing_the_last_page(monkeypatc
     body = "body " * 250
     pages = [body] * 20
     pages[5] = "Setup\n" + body
-    pages[11] = body + "\n3 Results\n" + body    # mid-page: Methods runs onto page 12
+    # mid-page, so Methods runs onto page 12; run in, so only the tree knows the headings below it
+    pages[11] = body + "\n3 Results. We report three findings.\n3.1 Data\n" + body
     lines = [[line for line in page.splitlines() if line.strip()] for page in pages]
     tree = [{"title": "R", "start_index": 1, "end_index": 20, "node_id": "0000", "nodes": [
         {"title": "A", "start_index": 1, "end_index": 3, "node_id": "0001"},
         {"title": "Methods", "start_index": 4, "end_index": 12, "node_id": "0002"},
-        {"title": "3 Results", "start_index": 12, "end_index": 20, "node_id": "0003"}]}]
+        {"title": "3 Results", "start_index": 12, "end_index": 20, "node_id": "0003", "nodes": [
+            {"title": "3.1 Data", "start_index": 12, "end_index": 15, "node_id": "0004"},
+            {"title": "3.2 More", "start_index": 16, "end_index": 20, "node_id": "0005"}]}]}]
 
-    replies = [[{"title": "Results", "page": 12}],
-               [{"title": "Setup", "page": 6}, {"title": "Results", "page": 12}]]
+    replies = [[{"title": "Results", "page": 12}, {"title": "3.1 Data", "page": 12}],
+               [{"title": "Setup", "page": 6}, {"title": "Results", "page": 12},
+                {"title": "3.1 Data", "page": 12}]]
 
     async def propose(model, prompt):
         if "Section title: Methods\n" in prompt:   # a reply the filter empties is asked again
@@ -140,6 +144,66 @@ def test_expand_skips_the_heading_of_a_neighbor_sharing_the_last_page(monkeypatc
     assert shape(tree[0]["nodes"][1]["nodes"]) == [("Methods (intro)", 4, 5), ("Setup", 6, 12)]
 
 
+def test_expand_filters_cached_headings_like_proposed_ones(monkeypatch):
+    body = "body " * 250
+    pages = [body] * 20
+    pages[5] = "Setup\n" + body
+    pages[11] = body + "\n3 Results\n" + body
+    lines = [[line for line in page.splitlines() if line.strip()] for page in pages]
+    tree = [{"title": "R", "start_index": 1, "end_index": 20, "node_id": "0000", "nodes": [
+        {"title": "A", "start_index": 1, "end_index": 3, "node_id": "0001"},
+        {"title": "Methods", "start_index": 4, "end_index": 12, "node_id": "0002"},
+        {"title": "3 Results", "start_index": 12, "end_index": 20, "node_id": "0003"}]}]
+    cache = {6: [{"title": "Setup", "kind": "section"}],
+             12: [{"title": "3 Results", "kind": "section"}]}
+
+    async def propose(model, prompt):
+        return {"subsections": []}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+
+    asyncio.run(tree_optimize.optimize(tree, pages, lines, model="m", do_expand=True, cache=cache))
+
+    assert shape(tree[0]["nodes"][1]["nodes"]) == [("Methods (intro)", 4, 5), ("Setup", 6, 12)]
+
+
+def test_expand_hands_each_new_child_its_ancestors_and_next_node(monkeypatch):
+    body = "body " * 250
+    pages = [body] * 30
+    pages[3] = "P\nP.a Early\n" + body
+    pages[6] = "P.b Later\n" + body
+    pages[9] = body + "\nQ\nQ.0 Overview\n" + body
+    pages[12] = "Q.i Intro part\n" + body
+    pages[16] = "Q.1 First\n" + body
+    pages[19] = "Q.2 Second\n" + body
+    pages[24] = body + "\nS\nS.1 Part\n" + body
+    lines = [[line for line in page.splitlines() if line.strip()] for page in pages]
+    tree = [{"title": "R", "start_index": 1, "end_index": 30, "node_id": "0000", "nodes": [
+        {"title": "A", "start_index": 1, "end_index": 3, "node_id": "0001"},
+        {"title": "P", "start_index": 4, "end_index": 25, "node_id": "0002"},
+        {"title": "S", "start_index": 25, "end_index": 30, "node_id": "0003"}]}]
+    replies = {
+        "P": [("Q", 10)],
+        # Q, made in this pass, is P's intro's next node: what follows its heading is not the intro's
+        "P (intro)": [("P.a Early", 4), ("P.b Later", 7), ("Q.0 Overview", 10)],
+        # Q's next node is P's: S
+        "Q": [("Q.1 First", 17), ("Q.2 Second", 20), ("S.1 Part", 25)],
+        # Q's intro sits under Q, an ancestor made in this pass
+        "Q (intro)": [("Q", 10), ("Q.0 Overview", 10), ("Q.i Intro part", 13)]}
+
+    async def propose(model, prompt):
+        title = prompt.split("Section title: ")[1].split("\n")[0]
+        return {"subsections": [{"title": t, "page": p} for t, p in replies.get(title, [])]}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+
+    asyncio.run(tree_optimize.optimize(tree, pages, lines, model="m", do_expand=True, do_relabel=False))
+
+    assert shape(tree) == [
+        ("R", 1, 30), ("A", 1, 3), ("P", 4, 25),
+        ("P (intro)", 4, 10), ("P.a Early", 4, 6), ("P.b Later", 7, 10),
+        ("Q", 10, 25), ("Q (intro)", 10, 16), ("Q.0 Overview", 10, 12), ("Q.i Intro part", 13, 16),
+        ("Q.1 First", 17, 19), ("Q.2 Second", 20, 25), ("S", 25, 30)]
+
+
 def test_a_proposed_child_must_be_printed_inside_its_nodes_own_text():
     lines = [["body"] for _ in range(20)]
     lines[11] = ["2.3 Limits", "3 Results", "Scope", "3.1 Data", "3.2 Results"]
@@ -150,13 +214,17 @@ def test_a_proposed_child_must_be_printed_inside_its_nodes_own_text():
     for node, _ in tree_optimize.flatten([root]):
         known.setdefault(node["start_index"], []).append(node["title"])
 
-    def kept(node, ancestors, nxt, *titles):
+    def kept(node, ancestors, nxt, *titles, known=known):
         children = [{"title": title, "start_index": 12} for title in titles]
         return [c["title"] for c in
                 tree_optimize.own_children(node, children, lines, known, ancestors, nxt)]
 
     # on a shared last page: the next node's heading, and what is printed below it
     assert kept(methods, [root], results, "2.3 Limits", "Results", "3.1 Data") == ["2.3 Limits"]
+    # a heading that already is a node, wherever it sits on the page and in the tree
+    assert kept(methods, [root], None, "2.3 Limits", "Results") == ["2.3 Limits"]
+    assert kept(methods, [root], None, "2.3 Limits", "3.1 Data", known={12: ["3.1 Data"]}) == [
+        "2.3 Limits"]
     # on a shared first page: what is printed above the node's heading; a number tells headings apart
     assert kept(results, [root], None, "2.3 Limits", "Results", "3.1 Data", "3.2 Results") == [
         "3.1 Data", "3.2 Results"]
@@ -165,9 +233,35 @@ def test_a_proposed_child_must_be_printed_inside_its_nodes_own_text():
     intro = {"title": "3 Results (intro)", "start_index": 12, "end_index": 12}
     results["nodes"] = [intro, data]
     assert kept(intro, [results, root], data, "2.3 Limits", "Results", "Scope", "3.1 Data") == ["Scope"]
+    # ... and knows them through its lineage when this pass made them
+    assert kept(intro, [results, root], None, "Results", "Scope", "3.1 Data", known={}) == ["Scope"]
     # a next heading not found on the page decides nothing
     assert kept(methods, [root], dict(results, title="Findings"), "2.3 Limits", "3.2 Results") == [
         "2.3 Limits", "3.2 Results"]
+
+
+def test_own_children_errs_toward_keeping_where_a_heading_repeats():
+    methods = {"title": "2 Methods", "start_index": 4, "end_index": 12}
+    results = {"title": "3 Results", "start_index": 12, "end_index": 20}
+
+    def kept(node, nxt, page, *titles):
+        lines = [["body"] for _ in range(20)]
+        lines[11] = page
+        children = [{"title": title, "start_index": 12} for title in titles]
+        return [c["title"] for c in tree_optimize.own_children(node, children, lines, {}, [], nxt)]
+
+    # a running header repeats the next heading: the heading is its last line
+    assert kept(methods, results, ["3 Results", "2.4 Tail", "3 Results", "3.1 Data"],
+                "2.4 Tail", "3.1 Data") == ["2.4 Tail"]
+    # a child also mentioned above the node's heading: the child is its last line
+    assert kept(results, None, ["see 3.1 Data", "3 Results", "3.1 Data"], "3.1 Data") == ["3.1 Data"]
+    # the next heading spelled otherwise, on the very line the proposal is printed on
+    assert kept(methods, dict(results, title="IV. Results"), ["Tail", "IV. Results"],
+                "Tail", "Results") == ["Tail"]
+    # a same-page fusion is found by its headings, not the title the summary pass rewrites
+    fused = dict(results, title="Rewritten", _same_page=True, key_items=["3 Results"])
+    assert kept(methods, fused, ["2.4 Tail", "3 Results", "3.1 Data"], "2.4 Tail", "3.1 Data") == [
+        "2.4 Tail"]
 
 
 @pytest.mark.parametrize("methods_delay", [0, 0.05])
@@ -211,9 +305,10 @@ def test_merge_folds_an_intro_without_listing_its_title():
 def test_a_toc_item_whose_page_the_next_opens_still_ends_on_its_own_page():
     items = [{"structure": "1", "title": "Overview", "physical_index": 5},
              {"structure": "2", "title": "Scope", "physical_index": 5, "appear_start": "yes"},
-             {"structure": "3", "title": "Terms", "physical_index": 9}]
+             {"structure": "3", "title": "Terms", "physical_index": 9},
+             {"structure": "4", "title": "Annex", "physical_index": 8}]    # listed out of order
     assert shape(utils.post_processing(items, 12)) == [
-        ("Overview", 5, 5), ("Scope", 5, 9), ("Terms", 9, 12)]
+        ("Overview", 5, 5), ("Scope", 5, 9), ("Terms", 9, 9), ("Annex", 8, 12)]
 
 
 LARGE = SimpleNamespace(max_page_num_each_node=10, max_token_num_each_node=20000, model="m")
