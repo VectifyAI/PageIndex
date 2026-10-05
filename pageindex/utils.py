@@ -591,9 +591,9 @@ def post_processing(structure, end_physical_index):
         item['start_index'] = item.get('physical_index')
         if i < len(structure) - 1:
             if structure[i + 1].get('appear_start') == 'yes':
-                item['end_index'] = structure[i + 1]['physical_index']-1
+                item['end_index'] = max(item['start_index'], structure[i + 1]['physical_index']-1)
             else:
-                item['end_index'] = structure[i + 1]['physical_index']
+                item['end_index'] = max(item['start_index'], structure[i + 1]['physical_index'])
         else:
             item['end_index'] = end_physical_index
     tree = list_to_tree(structure)
@@ -1011,7 +1011,7 @@ class SummaryScheduler:
         self._asked = True
         async with self._gate.slot(prio):
             reply = await llm_acompletion(self._model, prompt)
-        if reply:
+        if parse_summary(reply):
             self._answered = True
         return reply
 

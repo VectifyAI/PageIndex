@@ -5,6 +5,8 @@ import asyncio
 import importlib
 from types import SimpleNamespace
 
+import pytest
+
 import pageindex.flash
 import pageindex.tree_optimize as tree_optimize
 import pageindex.utils as utils
@@ -131,12 +133,80 @@ def test_expand_skips_the_heading_of_a_neighbor_sharing_the_last_page(monkeypatc
     assert shape(tree[0]["nodes"][1]["nodes"]) == [("Methods (intro)", 4, 5), ("Setup", 6, 12)]
 
 
+def test_a_proposed_child_must_be_printed_inside_its_nodes_own_text():
+    lines = [["body"] for _ in range(20)]
+    lines[11] = ["2.3 Limits", "3 Results", "Scope", "3.1 Data", "3.2 Results"]
+    methods = {"title": "2 Methods", "start_index": 4, "end_index": 12}
+    results = {"title": "3 Results", "start_index": 12, "end_index": 20}
+    root = {"title": "R", "start_index": 1, "end_index": 20, "nodes": [methods, results]}
+    known = {}
+    for node, _ in tree_optimize.flatten([root]):
+        known.setdefault(node["start_index"], []).append(node["title"])
+
+    def kept(node, ancestors, nxt, *titles):
+        children = [{"title": title, "start_index": 12} for title in titles]
+        return [c["title"] for c in
+                tree_optimize.own_children(node, children, lines, known, ancestors, nxt)]
+
+    # on a shared last page: the next node's heading, and what is printed below it
+    assert kept(methods, [root], results, "2.3 Limits", "Results", "3.1 Data") == ["2.3 Limits"]
+    # on a shared first page: what is printed above the node's heading; a number tells headings apart
+    assert kept(results, [root], None, "2.3 Limits", "Results", "3.1 Data", "3.2 Results") == [
+        "3.1 Data", "3.2 Results"]
+    # an intro sits under its parent's heading and above the siblings expand made with it
+    data = {"title": "3.1 Data", "start_index": 12, "end_index": 20}
+    intro = {"title": "3 Results (intro)", "start_index": 12, "end_index": 12}
+    results["nodes"] = [intro, data]
+    assert kept(intro, [results, root], data, "2.3 Limits", "Results", "Scope", "3.1 Data") == ["Scope"]
+    # a next heading not found on the page decides nothing
+    assert kept(methods, [root], dict(results, title="Findings"), "2.3 Limits", "3.2 Results") == [
+        "2.3 Limits", "3.2 Results"]
+
+
+@pytest.mark.parametrize("methods_delay", [0, 0.05])
+def test_expand_gives_one_tree_whichever_reply_lands_first(monkeypatch, methods_delay):
+    body = "body " * 250
+    pages = [body] * 20
+    pages[5] = "Setup\n" + body
+    pages[11] = body + "\n3 Results\nlead\n3.1 Data\n" + body
+    pages[14] = "3.2 Analysis\n" + body
+    lines = [[line for line in page.splitlines() if line.strip()] for page in pages]
+    tree = [{"title": "R", "start_index": 1, "end_index": 20, "node_id": "0000", "nodes": [
+        {"title": "A", "start_index": 1, "end_index": 3, "node_id": "0001"},
+        {"title": "Methods", "start_index": 4, "end_index": 12, "node_id": "0002"},
+        {"title": "3 Results", "start_index": 12, "end_index": 20, "node_id": "0003"}]}]
+
+    async def propose(model, prompt):
+        if "Section title: Methods\n" in prompt:
+            await asyncio.sleep(methods_delay)
+            return {"subsections": [{"title": "Setup", "page": 6}, {"title": "3.1 Data", "page": 12}]}
+        if "Section title: 3 Results\n" in prompt:
+            await asyncio.sleep(0.05 - methods_delay)
+            return {"subsections": [{"title": "3.1 Data", "page": 12}, {"title": "3.2 Analysis", "page": 15}]}
+        return {"subsections": []}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+
+    asyncio.run(tree_optimize.optimize(tree, pages, lines, model="m", do_expand=True))
+
+    assert shape(tree[0]["nodes"][1:]) == [
+        ("Methods", 4, 12), ("Methods (intro)", 4, 5), ("Setup", 6, 12),
+        ("3 Results", 12, 20), ("3.1 Data", 12, 14), ("3.2 Analysis", 15, 20)]
+
+
 def test_merge_folds_an_intro_without_listing_its_title():
     tree = [{"title": "P", "start_index": 1, "end_index": 4, "nodes": [
         {"title": "P (intro)", "start_index": 1, "end_index": 1},
         {"title": "C", "start_index": 2, "end_index": 4}]}]
     tree_optimize.merge_tree(tree)
     assert "nodes" not in tree[0] and tree[0]["key_items"] == ["C"]
+
+
+def test_a_toc_item_whose_page_the_next_opens_still_ends_on_its_own_page():
+    items = [{"structure": "1", "title": "Overview", "physical_index": 5},
+             {"structure": "2", "title": "Scope", "physical_index": 5, "appear_start": "yes"},
+             {"structure": "3", "title": "Terms", "physical_index": 9}]
+    assert shape(utils.post_processing(items, 12)) == [
+        ("Overview", 5, 5), ("Scope", 5, 9), ("Terms", 9, 12)]
 
 
 LARGE = SimpleNamespace(max_page_num_each_node=10, max_token_num_each_node=20000, model="m")

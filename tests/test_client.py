@@ -2532,12 +2532,13 @@ def test_format_tree_node_keeps_key_items():
 
 # ── retry-ladder and summary fail-loud edges (twelfth review) ──
 
-def test_summarize_tree_all_empty_replies_fail_loud(monkeypatch):
+@pytest.mark.parametrize("reply", ["", '{"summary": ""}'])
+def test_summarize_tree_all_empty_replies_fail_loud(monkeypatch, reply):
     """Empty-content replies (content filter, spent output cap) must not
     vouch for the model: a raw-text short leaf cannot carry the run when
     every model reply comes back blank."""
     async def blank(model, prompt):
-        return ""
+        return reply
     monkeypatch.setattr(pageindex.utils, "llm_acompletion", blank)
     pdf_pages = [("tiny", 1), ("beta " * 300, 300)]
     structure = [{"title": "R", "start_index": 1, "end_index": 2,

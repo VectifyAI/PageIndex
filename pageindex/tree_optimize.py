@@ -677,11 +677,55 @@ async def propose_children(node, pages, args):
     return accepted
 
 
-def heading_key(node):
-    """A node's page and heading, compared without the number printed before it;
-    None when no text is left to compare."""
-    title = re.sub(r"^(?:[0-9]+ )+", "", normalize(node["title"]))
-    return (node["start_index"], title) if title else None
+def same_heading(a, b):
+    """Whether two titles name one heading: equal once normalized, or equal but
+    for a leading number only one of them prints."""
+    a, b = normalize(a), normalize(b)
+    bare_a, bare_b = (re.sub(r"^(?:[0-9]+ )+", "", t) for t in (a, b))
+    return bool(a) and (a == b or (bare_a == bare_b and (a == bare_a or b == bare_b)))
+
+
+def headings(node):
+    """The headings printed for a node. A same-page fusion keeps them in its
+    key_items: the summary pass may rewrite the fused title while expand runs."""
+    return node["key_items"] if node.get("_same_page") else [node["title"]]
+
+
+def own_children(node, children, lines, known, ancestors, nxt):
+    """The proposed children printed inside the node's own text.
+
+    Dropped: a heading that already is a node, in the tree as expand found it
+    (`known`, page -> headings) or made by the node's own ancestors; and on a
+    page the node shares, anything printed above its heading or at and below
+    the next node's. Other branches grow concurrently, so nothing they add is
+    read. A heading not found on its page decides nothing.
+    """
+    start, end = node["start_index"], subtree_end(node)
+    lineage = [n for a in ancestors for n in [a] + a["nodes"]]
+    above = [t for n in [node] + ancestors if n["start_index"] == start for t in headings(n)]
+    after = headings(nxt) if nxt is not None and nxt["start_index"] == end else []
+
+    def found(page, matches):
+        page_lines = lines[page - 1] if lines and page <= len(lines) else []
+        return [i for i, line in enumerate(page_lines) if matches(line)]
+
+    def is_node(page, title):
+        titles = known.get(page, []) + [t for n in lineage if n["start_index"] == page
+                                        for t in headings(n)]
+        return any(same_heading(title, t) for t in titles)
+
+    top = found(start, lambda line: any(same_heading(line, t) for t in above))
+    bottom = found(end, lambda line: any(same_heading(line, t) for t in after)) if after else []
+    kept = []
+    for child in children:
+        page, key = child["start_index"], normalize(child["title"])
+        printed = found(page, lambda line: key in normalize(line)) if key else []
+        if (is_node(page, child["title"])
+                or page == start and top and printed and printed[-1] < top[0]
+                or page == end and bottom and printed and printed[0] >= bottom[-1]):
+            continue
+        kept.append(child)
+    return kept
 
 
 async def expand(structure, pages, lines, args, log, frozen):
@@ -695,7 +739,7 @@ async def expand(structure, pages, lines, args, log, frozen):
     changed = False
     semaphore = asyncio.Semaphore(args.concurrency)
 
-    async def proposals_for(node):
+    async def proposals_for(node, own):
         """The model half of one node's lookahead: the empty-retry ladder and
         absorbed errors run inside the task; log entries come back so a
         node's entries stay contiguous under concurrency."""
@@ -704,7 +748,7 @@ async def expand(structure, pages, lines, args, log, frozen):
             attempts += 1
             try:
                 async with semaphore:
-                    proposed = await propose_children(node, pages, args)
+                    proposed = own(await propose_children(node, pages, args))
             except Exception as exc:
                 if _is_unrecoverable(exc):
                     raise  # every remaining node would fail identically
@@ -717,7 +761,7 @@ async def expand(structure, pages, lines, args, log, frozen):
                 break                    # an empty answer is retried, not trusted
         return llm_candidates, attempts, entries
 
-    async def process(node):
+    async def process(node, ancestors, nxt):
         nonlocal changed
         if not is_frontier(node) or node.get("node_id") in frozen:
             return
@@ -726,18 +770,16 @@ async def expand(structure, pages, lines, args, log, frozen):
             return                       # below the trigger, stay collapsed
         note(args.progress, f"    expand {node.get('node_id'):>8}  S={span}  "
                             f"pages {node['start_index']}-{subtree_end(node)} ...")
-        llm_candidates, attempts, entries = await proposals_for(node)
+
+        def own(children):
+            return own_children(node, children, lines, known, ancestors, nxt)
+        llm_candidates, attempts, entries = await proposals_for(node, own)
         log.extend(entries)
         candidates = []
-        cached = children_from_cache(node, args.cache, args.kinds)
+        cached = own(children_from_cache(node, args.cache, args.kinds))
         if cached:
             candidates.append(("cache", cached))
         candidates.extend(llm_candidates)
-        # a heading the tree holds already: a neighbor's on a shared page, a parent's atop its intro
-        taken = {heading_key(n) for n, _ in flatten(structure)} - {None}
-        candidates = [(source, [c for c in children if heading_key(c) not in taken])
-                      for source, children in candidates]
-        candidates = [(source, children) for source, children in candidates if children]
 
         if not candidates:
             note(args.progress, f"           -> no children found, kept collapsed")
@@ -790,15 +832,24 @@ async def expand(structure, pages, lines, args, log, frozen):
             merge_same_page([node], log)
         # settle after the fusion: mark_final snapshots the children, finish() rejects a later change
         args.settled([node])
-        results = await asyncio.gather(*(process(child)
-                                         for child in node["nodes"]),
+        children = node["nodes"]
+        results = await asyncio.gather(*(process(child, [node] + ancestors, after)
+                                         for child, after in zip(children, children[1:] + [nxt])),
                                        return_exceptions=True)
         for result in results:
             if isinstance(result, BaseException):
                 raise result
 
-    results = await asyncio.gather(*(process(node)
-                                     for node, _ in flatten(structure)),
+    # the tree as it stands now: expand only ever adds below a leaf it is
+    # processing, so the nodes around another leaf never change under it
+    flat = list(flatten(structure))
+    known, ancestry = {}, {}
+    for node, parent in flat:
+        known.setdefault(node["start_index"], []).extend(headings(node))
+        ancestry[id(node)] = [parent] + ancestry[id(parent)] if parent else []
+    results = await asyncio.gather(*(process(node, ancestry[id(node)], after)
+                                     for (node, _), after in
+                                     zip(flat, [n for n, _ in flat[1:]] + [None])),
                                    return_exceptions=True)
     for result in results:
         if isinstance(result, BaseException):
