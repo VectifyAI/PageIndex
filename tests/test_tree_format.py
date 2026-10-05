@@ -44,7 +44,8 @@ def test_intro_node_holds_the_pages_a_parent_opens_with():
     assert shape(tree_optimize.add_intro_nodes(split))[1] == ("Ch 3 (intro)", 10, 11)
     # a heading with nothing to match cannot be placed on its page, so the page is shared
     assert not tree_optimize.heading_at_page_start([["第一章 总则"]], 1, "第一章 总则")
-    assert not tree_optimize.heading_at_page_start([["2", "Body text"]], 1, "2")   # or a page number
+    # nor can digits alone, which may be a page number
+    assert not tree_optimize.heading_at_page_start([["2", "Body text"]], 1, "2")
 
 
 def test_expand_gives_a_split_node_its_intro(monkeypatch):
@@ -124,14 +125,18 @@ def test_expand_skips_the_heading_of_a_neighbor_sharing_the_last_page(monkeypatc
         {"title": "Methods", "start_index": 4, "end_index": 12, "node_id": "0002"},
         {"title": "3 Results", "start_index": 12, "end_index": 20, "node_id": "0003"}]}]
 
+    replies = [[{"title": "Results", "page": 12}],
+               [{"title": "Setup", "page": 6}, {"title": "Results", "page": 12}]]
+
     async def propose(model, prompt):
-        if "Section title: Methods\n" in prompt:
-            return {"subsections": [{"title": "Setup", "page": 6}, {"title": "Results", "page": 12}]}
+        if "Section title: Methods\n" in prompt:   # a reply the filter empties is asked again
+            return {"subsections": replies.pop(0)}
         return {"subsections": []}
     monkeypatch.setattr(tree_optimize, "ask_model", propose)
 
     asyncio.run(tree_optimize.optimize(tree, pages, lines, model="m", do_expand=True))
 
+    assert not replies
     assert shape(tree[0]["nodes"][1]["nodes"]) == [("Methods (intro)", 4, 5), ("Setup", 6, 12)]
 
 

@@ -706,7 +706,7 @@ def own_children(node, children, lines, known, ancestors, nxt):
     after = headings(nxt) if nxt is not None and nxt["start_index"] == end else []
 
     def found(page, matches):
-        page_lines = lines[page - 1] if lines and page <= len(lines) else []
+        page_lines = lines[page - 1] if page <= len(lines) else []
         return [i for i, line in enumerate(page_lines) if matches(line)]
 
     def is_node(page, title):
@@ -748,7 +748,7 @@ async def expand(structure, pages, lines, args, log, frozen):
             attempts += 1
             try:
                 async with semaphore:
-                    proposed = own(await propose_children(node, pages, args))
+                    proposed = await propose_children(node, pages, args)
             except Exception as exc:
                 if _is_unrecoverable(exc):
                     raise  # every remaining node would fail identically
@@ -756,6 +756,7 @@ async def expand(structure, pages, lines, args, log, frozen):
                                 "decision": "error", "attempt": attempts,
                                 "detail": f"{type(exc).__name__}: {exc}"})
                 continue
+            proposed = own(proposed)
             if proposed:
                 llm_candidates.append((f"llm:{attempts}", proposed))
                 break                    # an empty answer is retried, not trusted
