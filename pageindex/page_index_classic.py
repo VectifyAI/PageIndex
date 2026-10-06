@@ -1165,13 +1165,17 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
             raise Exception('Processing failed')
         
  
-async def process_large_node_recursively(node, page_list, opt=None, logger=None):
+async def process_large_node_recursively(node, page_list, opt=None, logger=None, split=None):
+    # split: the pages last split above this node; the model can rebuild the
+    # node over them, e.g. when another heading sits above its own
     node_page_list = page_list[node['start_index']-1:node['end_index']]
     token_num = sum([page[1] for page in node_page_list])
     
     if (not node.get('nodes') and node['end_index'] - node['start_index'] > opt.max_page_num_each_node
-            and token_num >= opt.max_token_num_each_node):
+            and token_num >= opt.max_token_num_each_node
+            and (node['start_index'], node['end_index']) != split):
         print('large node:', node['title'], 'start_index:', node['start_index'], 'end_index:', node['end_index'], 'token_num:', token_num)
+        split = (node['start_index'], node['end_index'])
 
         node_toc_tree = await meta_processor(node_page_list, mode='process_no_toc', start_index=node['start_index'], opt=opt, logger=logger)
         node_toc_tree = await check_title_appearance_in_start_concurrent(node_toc_tree, page_list, model=opt.model, logger=logger)
@@ -1190,7 +1194,7 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None)
         
     if 'nodes' in node and node['nodes']:
         tasks = [
-            process_large_node_recursively(child_node, page_list, opt, logger=logger)
+            process_large_node_recursively(child_node, page_list, opt, logger=logger, split=split)
             for child_node in node['nodes']
         ]
         await asyncio.gather(*tasks)

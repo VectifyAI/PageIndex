@@ -44,7 +44,7 @@ def indexed_doc(local_client, sample_pdf, monkeypatch):
     """A document indexed through a stubbed standard pipeline."""
     def fake_page_index_main(doc, opt=None, logger=None, page_list=None):
         assert opt.if_add_node_summary == "yes"
-        assert opt.if_add_node_text == "yes"
+        assert opt.if_add_node_text == "no"
         assert logger is not None
         assert page_list is not None
         assert all(isinstance(t, tuple) and len(t) == 2 for t in page_list)

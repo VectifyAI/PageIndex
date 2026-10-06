@@ -238,6 +238,9 @@ def test_a_proposed_child_must_be_printed_inside_its_nodes_own_text():
     # a next heading not found on the page decides nothing
     assert kept(methods, [root], dict(results, title="Findings"), "2.3 Limits", "3.2 Results") == [
         "2.3 Limits", "3.2 Results"]
+    # ... the heading of its first descendant opening that page does
+    part = {"title": "Part II", "start_index": 12, "end_index": 20, "nodes": [results]}
+    assert kept(methods, [root], part, "2.3 Limits", "Scope") == ["2.3 Limits"]
 
 
 def test_own_children_errs_toward_keeping_where_a_heading_repeats():
@@ -297,6 +300,23 @@ def test_a_node_sharing_its_first_page_with_its_parent_owns_only_what_follows_it
     data["end_index"] = analysis["start_index"] = 4
     assert kept(analysis, None, ["3 Results", "3.1 Data", "3.1.1 Sources", "3.2 Analysis"],
                 ("3.1.1 Sources", 4), ("Method", 9)) == ["Method"]
+
+
+def test_pdf_lines_read_a_two_column_page_column_by_column(tmp_path):
+    page = []
+    for x, heading, inner in [(72, "2.3 Setup", "Limitations"), (320, "3 Conclusion", None)]:
+        page.append((x, 712, 11, heading))
+        for row in range(6):
+            y = 692 - row * 14
+            page.append((x, y, 11, inner) if inner and row == 3 else
+                        (x, y, 9, "the method is applied to each"))
+    pdf = tmp_path / "two.pdf"
+    pdf.write_bytes(build_pdf([page]))
+
+    _, lines = tree_optimize.load_pages(pdf)
+
+    headings = [line for line in lines[0] if line in ("2.3 Setup", "Limitations", "3 Conclusion")]
+    assert headings == ["2.3 Setup", "Limitations", "3 Conclusion"]
 
 
 @pytest.mark.parametrize("methods_delay", [0, 0.05])
@@ -378,6 +398,27 @@ def test_split_intro_skips_its_parents_heading(monkeypatch):
     asyncio.run(classic.process_large_node_recursively(intro, [("page", 5000)] * 14, LARGE))
 
     assert [child["title"] for child in intro["nodes"]] == ["Background", "Scope"]
+
+
+def test_pages_rebuilt_unchanged_by_a_split_are_not_split_again(monkeypatch):
+    calls = []
+
+    async def meta_processor(*args, **kwargs):
+        calls.append(1)
+        assert len(calls) < 5, "the same pages are split again and again"
+        # page 1 holds "Part II" right above the section's own heading
+        return [{"structure": "1", "title": "Part II", "physical_index": 1},
+                {"structure": "1.1", "title": "Ch 3", "physical_index": 1}]
+
+    async def appear(items, *args, **kwargs):
+        return items
+    monkeypatch.setattr(classic, "meta_processor", meta_processor)
+    monkeypatch.setattr(classic, "check_title_appearance_in_start_concurrent", appear)
+    node = {"title": "Ch 3", "start_index": 1, "end_index": 40}
+
+    asyncio.run(classic.process_large_node_recursively(node, [("page", 5000)] * 40, LARGE))
+
+    assert len(calls) == 1
 
 
 def test_standard_index_stores_intros_covering_ranges_and_section_summaries(tmp_path, monkeypatch):

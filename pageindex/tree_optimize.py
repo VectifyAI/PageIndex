@@ -132,21 +132,11 @@ async def ask_model(model, prompt):
 
 
 def load_pages(pdf_path):
-    """Per-page text, and per-page lines ordered top to bottom."""
-    import pymupdf
-    doc = pymupdf.open(pdf_path)
-    text, lines = [], []
-    for page in doc:
-        text.append(page.get_text())
-        ordered = []
-        for block in page.get_text("dict")["blocks"]:
-            for line in block.get("lines", []):
-                content = "".join(s["text"] for s in line["spans"]).strip()
-                if content:
-                    ordered.append((line["bbox"][1], content))
-        ordered.sort()
-        lines.append([c for _, c in ordered])
-    return text, lines
+    """Per-page text, and per-page lines in reading order, as flash reads them."""
+    from .flash.api import _page_lines
+    from .flash.main import extract_toc
+    text = extract_toc(pdf_path, use_embedded_toc=False)["page_texts"]
+    return text, _page_lines(text)
 
 
 # --------------------------------------------------------------------------
@@ -699,13 +689,16 @@ def own_children(node, children, lines, known, ancestors, nxt):
     Dropped: a heading that already is a node, in the tree as expand found it
     (`known`, page -> headings) or made by the node's own ancestors; and on a
     page the node shares, anything printed above its heading (else above the
-    nearest ancestor heading found there) or at and below the next node's.
-    Other branches grow concurrently, so nothing they add is read. A heading
-    not found on its page decides nothing.
+    nearest ancestor heading found there) or at and below the next node's (else
+    its first descendant's found there). Other branches grow concurrently, so
+    nothing they add is read. A heading not found on its page decides nothing.
     """
     start, end = node["start_index"], subtree_end(node)
     lineage = [n for a in ancestors for n in [a] + a["nodes"]]
-    after = headings(nxt) if nxt is not None and nxt["start_index"] == end else []
+    after = []
+    while nxt is not None and nxt["start_index"] == end:
+        after.append(nxt)
+        nxt = (nxt.get("nodes") or [None])[0]
 
     def found(page, matches):
         page_lines = lines[page - 1] if page <= len(lines) else []
@@ -719,7 +712,9 @@ def own_children(node, children, lines, known, ancestors, nxt):
     tops = (found(start, lambda line: any(same_heading(line, t) for t in headings(n)))
             for n in [node] + ancestors if n["start_index"] == start)
     top = next((hits for hits in tops if hits), [])
-    bottom = found(end, lambda line: any(same_heading(line, t) for t in after)) if after else []
+    bottoms = (found(end, lambda line: any(same_heading(line, t) for t in headings(n)))
+               for n in after)
+    bottom = next((hits for hits in bottoms if hits), [])
     kept = []
     for child in children:
         page, key = child["start_index"], normalize(child["title"])

@@ -223,7 +223,7 @@ class LocalAPI:
             "summary_model": self._summary_model,
             "if_add_node_id": "yes",
             "if_add_node_summary": "yes",
-            "if_add_node_text": "yes",
+            "if_add_node_text": "no",
             "if_add_doc_description": "yes",
         })
         result = page_index_main(file_path, opt, logger=logger, page_list=page_list)
