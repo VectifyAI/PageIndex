@@ -264,6 +264,41 @@ def test_own_children_errs_toward_keeping_where_a_heading_repeats():
         "2.4 Tail"]
 
 
+def test_a_number_alone_does_not_name_a_non_latin_heading():
+    # normalize keeps no CJK: "1. 概要" reads as "1", "1.1 背景" as "1 1"
+    lines = [["body"] for _ in range(20)]
+    lines[1] = ["1. 概要", "body", "1.1 背景"]
+    lines[11] = ["1.2 目的", "2. 方法", "2.1 データ", "2.2 手順"]
+    overview = {"title": "1. 概要", "start_index": 2, "end_index": 12}
+    method = {"title": "2. 方法", "start_index": 12, "end_index": 20}
+    known = {2: ["1. 概要"], 12: ["2. 方法"]}
+    children = [{"title": title, "start_index": page}
+                for title, page in [("1.1 背景", 2), ("1.2 目的", 12), ("2.1 データ", 12)]]
+    kept = tree_optimize.own_children(overview, children, lines, known, [], method)
+    # 1.1 is not "1.", 1.2 is not "2.", and "2.2" is not the line "2." is printed on
+    assert [c["title"] for c in kept] == ["1.1 背景", "1.2 目的"]
+
+
+def test_a_node_sharing_its_first_page_with_its_parent_owns_only_what_follows_its_heading():
+    data = {"title": "3.1 Data", "start_index": 4, "end_index": 12}
+    analysis = {"title": "3.2 Analysis", "start_index": 12, "end_index": 20}
+    results = {"title": "3 Results", "start_index": 4, "end_index": 20, "nodes": [data, analysis]}
+
+    def kept(node, nxt, page, *children):
+        lines = [["body"] for _ in range(20)]
+        lines[3] = page
+        return [c["title"] for c in tree_optimize.own_children(
+            node, [{"title": t, "start_index": p} for t, p in children], lines, {}, [results], nxt)]
+
+    # the parent's heading is printed above the node's: what sits between is the parent's
+    assert kept(data, analysis, ["3 Results", "Overview", "3.1 Data"],
+                ("Overview", 4), ("Data sources", 7)) == ["Data sources"]
+    # ... and a sibling's subsection printed above the node's heading is the sibling's
+    data["end_index"] = analysis["start_index"] = 4
+    assert kept(analysis, None, ["3 Results", "3.1 Data", "3.1.1 Sources", "3.2 Analysis"],
+                ("3.1.1 Sources", 4), ("Method", 9)) == ["Method"]
+
+
 @pytest.mark.parametrize("methods_delay", [0, 0.05])
 def test_expand_gives_one_tree_whichever_reply_lands_first(monkeypatch, methods_delay):
     body = "body " * 250

@@ -679,10 +679,12 @@ async def propose_children(node, pages, args):
 
 def same_heading(a, b):
     """Whether two titles name one heading: equal once normalized, or equal but
-    for a leading number only one of them prints."""
+    for a leading number only one of them prints. A title with no Latin letter
+    is its number alone, so it never matches by that second rule."""
     a, b = normalize(a), normalize(b)
     bare_a, bare_b = (re.sub(r"^(?:[0-9]+ )+", "", t) for t in (a, b))
-    return bool(a) and (a == b or (bare_a == bare_b and (a == bare_a or b == bare_b)))
+    return bool(a) and (a == b or (bare_a == bare_b and bool(re.search("[a-z]", bare_a))
+                                   and (a == bare_a or b == bare_b)))
 
 
 def headings(node):
@@ -696,13 +698,13 @@ def own_children(node, children, lines, known, ancestors, nxt):
 
     Dropped: a heading that already is a node, in the tree as expand found it
     (`known`, page -> headings) or made by the node's own ancestors; and on a
-    page the node shares, anything printed above its heading or at and below
-    the next node's. Other branches grow concurrently, so nothing they add is
-    read. A heading not found on its page decides nothing.
+    page the node shares, anything printed above its heading (else above the
+    nearest ancestor heading found there) or at and below the next node's.
+    Other branches grow concurrently, so nothing they add is read. A heading
+    not found on its page decides nothing.
     """
     start, end = node["start_index"], subtree_end(node)
     lineage = [n for a in ancestors for n in [a] + a["nodes"]]
-    above = [t for n in [node] + ancestors if n["start_index"] == start for t in headings(n)]
     after = headings(nxt) if nxt is not None and nxt["start_index"] == end else []
 
     def found(page, matches):
@@ -714,7 +716,9 @@ def own_children(node, children, lines, known, ancestors, nxt):
                                         for t in headings(n)]
         return any(same_heading(title, t) for t in titles)
 
-    top = found(start, lambda line: any(same_heading(line, t) for t in above))
+    tops = (found(start, lambda line: any(same_heading(line, t) for t in headings(n)))
+            for n in [node] + ancestors if n["start_index"] == start)
+    top = next((hits for hits in tops if hits), [])
     bottom = found(end, lambda line: any(same_heading(line, t) for t in after)) if after else []
     kept = []
     for child in children:
