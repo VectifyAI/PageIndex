@@ -949,14 +949,22 @@ class PageIndexClient:
 
         Returns:
             dict: {'doc_id', 'status', 'retrieval_ready', 'result', ...} where
-            result nodes are {'title', 'node_id', 'page_index', ('summary' /
-            'prefix_summary',) ('text',) 'nodes'}.
+            result nodes are {'title', 'node_id', 'start_index', 'end_index',
+            ('summary',) ('text',) 'nodes'} in both modes. Each node's summary
+            describes its own pages start_index..end_index; its text is the
+            part no child holds, though a parent's may share the page its
+            first child starts on.
         """
         tree = self._api.get_tree(doc_id=doc_id, node_summary=node_summary,
                                   include_text=include_text)
-        if not include_text and tree.get("result"):
-            from .utils import remove_fields
-            tree["result"] = remove_fields(tree["result"], fields=["text"])
+        if tree.get("result"):
+            from .utils import _subtree, remove_fields, unify_tree
+            page_count = None
+            if any("end_index" not in node for node in _subtree(tree["result"])):
+                page_count = self._api.get_document(doc_id).get("pageNum")
+            tree["result"] = unify_tree(tree["result"], page_count)
+            if not include_text:
+                tree["result"] = remove_fields(tree["result"], fields=["text"])
         return tree
 
     def get_document_structure(self, doc_id: str) -> list[dict[str, Any]]:
@@ -975,7 +983,7 @@ class PageIndexClient:
         failures, timeouts) propagate.
         """
         try:
-            result = self.get_tree(doc_id)
+            result = self._api.get_tree(doc_id)
             return result.get("retrieval_ready", False)
         except PageIndexAPIError:
             return False

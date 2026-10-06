@@ -223,7 +223,7 @@ class LocalAPI:
             "summary_model": self._summary_model,
             "if_add_node_id": "yes",
             "if_add_node_summary": "yes",
-            "if_add_node_text": "yes",
+            "if_add_node_text": "no",
             "if_add_doc_description": "yes",
         })
         result = page_index_main(file_path, opt, logger=logger, page_list=page_list)
@@ -260,6 +260,7 @@ class LocalAPI:
     # ── tree / ocr ──
 
     def _load_tree_with_text(self, doc_id: str, error_prefix: str) -> list:
+        """Each node's own text (see utils.own_pages)."""
         from .utils import add_node_text
         structure = self._require_data(
             self._store.get_tree(doc_id), error_prefix)
@@ -267,11 +268,6 @@ class LocalAPI:
         pdf_pages = [(p.get("markdown", ""), 0) for p in pages]
         add_node_text(structure, pdf_pages)
         return structure
-
-    def raw_tree(self, doc_id: str) -> list | None:
-        """Stored tree verbatim — keeps start_index/end_index, which
-        get_tree's cloud wire shape renames and drops."""
-        return self._store.get_tree(doc_id)
 
     def get_tree(self, doc_id: str, node_summary: bool = False,
                  include_text: bool = True) -> dict[str, Any]:
@@ -398,17 +394,15 @@ def _format_tree_node(node: dict, node_summary: bool) -> dict:
     out = {
         "title": node.get("title", ""),
         "node_id": node.get("node_id"),
-        "page_index": node.get("start_index"),
+        "start_index": node.get("start_index"),
+        "end_index": node.get("end_index"),
     }
     if node.get("key_items"):
         out["key_items"] = node["key_items"]
     if node_summary:
         summary = node.get("summary")
         if summary is not None:
-            if children:
-                out["prefix_summary"] = summary
-            else:
-                out["summary"] = summary
+            out["summary"] = summary
     if "text" in node:
         out["text"] = node["text"]
     if children:

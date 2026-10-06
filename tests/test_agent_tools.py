@@ -287,6 +287,18 @@ def test_structure_strips_text_and_orders_keys(client, store_path):
     assert root["nodes"][0]["end_index"] == 1
 
 
+def test_structure_shows_the_ranges_get_tree_serves(client, store_path):
+    # a leaf stored ending before it starts: its successor was judged to open the same page
+    tree = [{"title": "Doc", "node_id": "0000", "start_index": 1, "end_index": 2, "nodes": [
+        {"title": "A", "node_id": "0001", "start_index": 2, "end_index": 1},
+        {"title": "B", "node_id": "0002", "start_index": 2, "end_index": 2}]}]
+    seed_doc(store_path, "pi-a", "report.pdf", tree=tree)
+    payload, _ = run(client, "get_document_structure", doc_name="report.pdf")
+    served = client.get_tree("pi-a", include_text=False)["result"]
+    assert [(n["start_index"], n["end_index"]) for n in payload["structure"][0]["nodes"]] == [
+        (n["start_index"], n["end_index"]) for n in served[0]["nodes"]] == [(2, 2), (2, 2)]
+
+
 def test_structure_multipart_pagination(client, store_path):
     big_tree = [{
         "title": f"Chapter {index}", "node_id": f"{index:04d}",

@@ -44,7 +44,7 @@ def indexed_doc(local_client, sample_pdf, monkeypatch):
     """A document indexed through a stubbed standard pipeline."""
     def fake_page_index_main(doc, opt=None, logger=None, page_list=None):
         assert opt.if_add_node_summary == "yes"
-        assert opt.if_add_node_text == "yes"
+        assert opt.if_add_node_text == "no"
         assert logger is not None
         assert page_list is not None
         assert all(isinstance(t, tuple) and len(t) == 2 for t in page_list)
@@ -549,24 +549,24 @@ def test_submit_and_get_tree(local_client, indexed_doc, tmp_path, monkeypatch):
     assert tree["status"] == "completed"
     assert tree["retrieval_ready"] is True
     root = tree["result"][0]
-    assert root["page_index"] == 1
-    assert "start_index" not in root and "end_index" not in root
-    assert root["prefix_summary"] == "root summary"
-    assert "summary" not in root
-    child = root["nodes"][0]
+    assert (root["start_index"], root["end_index"]) == (1, 2)
+    assert "page_index" not in root and "prefix_summary" not in root
+    assert root["summary"] == "root summary"
+    assert "Hello page one" in root["text"]
+    child, = root["nodes"]
+    assert (child["start_index"], child["end_index"]) == (2, 2)
     assert child["summary"] == "child summary"
     assert child["text"] == "Second page about bananas"
 
     no_summary = local_client.get_tree(indexed_doc)["result"][0]
-    assert "summary" not in no_summary and "prefix_summary" not in no_summary
+    assert all("summary" not in node for node in [no_summary, *no_summary["nodes"]])
 
 
 def test_get_tree_include_text_false(local_client, indexed_doc):
     tree = local_client.get_tree(indexed_doc, include_text=False)
     root = tree["result"][0]
-    assert "text" not in root
-    assert "text" not in root["nodes"][0]
-    assert root["page_index"] == 1
+    assert all("text" not in node for node in [root, *root["nodes"]])
+    assert (root["start_index"], root["end_index"]) == (1, 2)
 
     with_text = local_client.get_tree(indexed_doc)["result"][0]
     assert "text" in with_text
@@ -576,10 +576,72 @@ def test_get_document_structure(local_client, indexed_doc):
     result = local_client.get_document_structure(indexed_doc)
     assert isinstance(result, list)
     root = result[0]
-    assert "text" not in root
-    assert "text" not in root["nodes"][0]
-    assert "prefix_summary" in root
-    assert root["nodes"][0]["summary"] == "child summary"
+    assert all("text" not in node for node in [root, *root["nodes"]])
+    assert (root["start_index"], root["end_index"]) == (1, 2)
+    assert [node.get("summary") for node in [root, *root["nodes"]]] == [
+        "root summary", "child summary"]
+
+
+@pytest.mark.parametrize("mode", ["flash", "standard"])
+def test_get_tree_keeps_each_index_self_consistent(local_client, tmp_path,
+                                                   monkeypatch, mode):
+    """get_tree adds and moves no node: every node keeps the summary written
+    for its own range, a flash parent's range covering its subtree and a
+    standard parent's ending where its first child starts."""
+    from conftest import build_pdf
+    pdf = tmp_path / "report.pdf"
+    pdf.write_bytes(build_pdf(["Opening words", "Alpha body", "Beta body"]))
+    structure = [{"title": "Report", "node_id": "0000", "start_index": 1,
+                  "end_index": 3 if mode == "flash" else 2, "summary": "report",
+                  "nodes": [{"title": "Alpha", "node_id": "0001", "start_index": 2,
+                             "end_index": 2, "summary": "alpha"},
+                            {"title": "Beta", "node_id": "0002", "start_index": 3,
+                             "end_index": 3, "summary": "beta"}]}]
+    result = {"doc_name": "report.pdf", "doc_description": "d", "structure": structure}
+    monkeypatch.setattr(pageindex.flash, "page_index_flash", lambda pdf, **kw: result)
+    monkeypatch.setattr(page_index_module, "page_index_main", lambda *a, **kw: result)
+    monkeypatch.setattr(pageindex.utils, "llm_completion", lambda model, prompt, **kw: "d")
+    doc_id = local_client.submit_document(str(pdf), mode=mode)["doc_id"]
+
+    root = local_client.get_tree(doc_id, node_summary=True)["result"][0]
+    assert [(node["title"], node["start_index"], node["end_index"], node["summary"])
+            for node in [root, *root["nodes"]]] == [
+        ("Report", 1, 3 if mode == "flash" else 2, "report"),
+        ("Alpha", 2, 2, "alpha"), ("Beta", 3, 3, "beta")]
+    # the parent's text runs onto its first child's page, where that heading may sit mid-page
+    assert "Alpha body" in root["text"] and "Beta body" not in root["text"]
+
+
+def test_unify_tree_edges():
+    from pageindex.utils import unify_tree
+    tree = [{"title": "A", "page_index": 3, "prefix_summary": "a",
+             "nodes": [{"title": "A.1", "page_index": 5, "summary": "a1"},
+                       {"title": "A.2", "page_index": 7, "prefix_summary": "a2",
+                        "nodes": [{"title": "A.2.1", "page_index": 8}]}]}]
+    once = unify_tree(tree, 9)
+    # without end_index each node ends where the next one in reading order
+    # starts: a parent's range is its own opening, as its summary describes
+    assert once == [
+        {"title": "A", "start_index": 3, "end_index": 5, "summary": "a", "nodes": [
+            {"title": "A.1", "start_index": 5, "end_index": 7, "summary": "a1"},
+            {"title": "A.2", "start_index": 7, "end_index": 8, "summary": "a2", "nodes": [
+                {"title": "A.2.1", "start_index": 8, "end_index": 9}]}]}]
+    assert unify_tree(once, 9) == once
+    # a node with no page (a hand-edited store) passes through without raising
+    assert unify_tree([{"title": "B", "start_index": None}], None) == [
+        {"title": "B", "start_index": None, "end_index": None}]
+
+
+def test_create_node_mapping_reads_get_tree_ranges():
+    from pageindex.utils import create_node_mapping
+    tree = [{"title": "A", "node_id": "0000", "start_index": 1, "end_index": 9,
+             "nodes": [{"title": "B", "node_id": "0001", "start_index": 4, "end_index": 9}]}]
+    mapping = create_node_mapping(tree, include_page_ranges=True, max_page=12)
+    assert [(m["start_index"], m["end_index"]) for m in mapping.values()] == [(1, 9), (4, 9)]
+    legacy = [{"title": "A", "node_id": "0000", "page_index": 1,
+               "nodes": [{"title": "B", "node_id": "0001", "page_index": 4}]}]
+    mapping = create_node_mapping(legacy, include_page_ranges=True, max_page=12)
+    assert [(m["start_index"], m["end_index"]) for m in mapping.values()] == [(1, 4), (4, 12)]
 
 
 def test_get_page_content(local_client, indexed_doc):
@@ -1696,6 +1758,69 @@ def test_cloud_request_wiring(cloud, sample_pdf):
     assert calls[-1]["headers"] == {"api_key": "other"}
 
 
+def test_cloud_get_tree_unified_shape(monkeypatch):
+    """An older server's tree wire (page_index only, a parent's
+    prefix_summary) leaves the SDK in local's field names: a node ends where
+    the next one in reading order starts, the last on the document's page
+    count, so a parent's range is the opening its summary describes."""
+    client = PageIndexClient(api_key="secret")
+    wire = {"doc_id": "pi-1", "status": "completed", "retrieval_ready": True,
+            "metadata": None, "features": {}, "result": [
+        {"title": "Ch 1", "node_id": "0000", "page_index": 2,
+         "prefix_summary": "opening", "text": "ch1 own", "nodes": [
+            {"title": "1.1", "node_id": "0001", "page_index": 4, "summary": "s11", "text": "t11"},
+            {"title": "1.2", "node_id": "0002", "page_index": 6, "summary": "s12", "text": "t12"}]},
+        {"title": "Ch 2", "node_id": "0003", "page_index": 9,
+         "prefix_summary": "same page", "text": "ch2 own", "nodes": [
+            {"title": "2.1", "node_id": "0004", "page_index": 9, "summary": "s21", "text": "t21"}]}]}
+    urls = []
+
+    def handler(method, url, kw):
+        urls.append(url)
+        return FakeResponse(wire if "type=tree" in url else {"pageNum": 12})
+    _patch_requests(monkeypatch, handler)
+
+    result = client.get_tree("pi-1", node_summary=True)["result"]
+    assert result == [
+        {"title": "Ch 1", "node_id": "0000", "start_index": 2, "end_index": 4,
+         "summary": "opening", "text": "ch1 own", "nodes": [
+            {"title": "1.1", "node_id": "0001", "start_index": 4, "end_index": 6,
+             "summary": "s11", "text": "t11"},
+            {"title": "1.2", "node_id": "0002", "start_index": 6, "end_index": 9,
+             "summary": "s12", "text": "t12"}]},
+        {"title": "Ch 2", "node_id": "0003", "start_index": 9, "end_index": 9,
+         "summary": "same page", "text": "ch2 own", "nodes": [
+            {"title": "2.1", "node_id": "0004", "start_index": 9, "end_index": 12,
+             "summary": "s21", "text": "t21"}]}]
+    assert list(result[0]) == ["title", "node_id", "start_index", "end_index",
+                               "summary", "text", "nodes"]
+    assert urls[-1] == "https://api.pageindex.ai/doc/pi-1/metadata/"
+
+
+def test_cloud_get_tree_takes_served_ranges(monkeypatch):
+    """A server that sends start_index/end_index has its ranges taken as
+    given, with no metadata request."""
+    client = PageIndexClient(api_key="secret")
+    wire = {"status": "completed", "retrieval_ready": True, "result": [
+        {"title": "Ch", "node_id": "0000", "page_index": 2, "start_index": 2,
+         "end_index": 3, "prefix_summary": "opening", "nodes": [
+            {"title": "S", "node_id": "0001", "page_index": 4, "start_index": 4,
+             "end_index": 8, "summary": "s"}]}]}
+    urls = []
+
+    def handler(method, url, kw):
+        urls.append(url)
+        return FakeResponse(wire)
+    _patch_requests(monkeypatch, handler)
+
+    assert client.get_tree("pi-1", node_summary=True)["result"] == [
+        {"title": "Ch", "node_id": "0000", "start_index": 2, "end_index": 3,
+         "summary": "opening", "nodes": [
+            {"title": "S", "node_id": "0001", "start_index": 4, "end_index": 8,
+             "summary": "s"}]}]
+    assert len(urls) == 1
+
+
 def test_cloud_error_and_empty_delete(cloud, monkeypatch):
     client, calls, fake = cloud
     _patch_requests(monkeypatch,
@@ -2407,12 +2532,13 @@ def test_format_tree_node_keeps_key_items():
 
 # ── retry-ladder and summary fail-loud edges (twelfth review) ──
 
-def test_summarize_tree_all_empty_replies_fail_loud(monkeypatch):
+@pytest.mark.parametrize("reply", ["", '{"summary": ""}'])
+def test_summarize_tree_all_empty_replies_fail_loud(monkeypatch, reply):
     """Empty-content replies (content filter, spent output cap) must not
     vouch for the model: a raw-text short leaf cannot carry the run when
     every model reply comes back blank."""
     async def blank(model, prompt):
-        return ""
+        return reply
     monkeypatch.setattr(pageindex.utils, "llm_acompletion", blank)
     pdf_pages = [("tiny", 1), ("beta " * 300, 300)]
     structure = [{"title": "R", "start_index": 1, "end_index": 2,
@@ -2424,8 +2550,8 @@ def test_summarize_tree_all_empty_replies_fail_loud(monkeypatch):
 
 
 def test_summarize_tree_partial_empty_reply_absorbed(monkeypatch):
-    """One blank reply among good ones stays the documented per-node
-    absorption: blank summary, run survives."""
+    """One blank reply among good ones is absorbed per node: the node falls
+    back to its own text, the run survives."""
     async def flaky(model, prompt):
         if "alpha" in prompt:
             return ""
@@ -2435,7 +2561,7 @@ def test_summarize_tree_partial_empty_reply_absorbed(monkeypatch):
     structure = [{"title": "A", "start_index": 1, "end_index": 1},
                  {"title": "B", "start_index": 2, "end_index": 2}]
     out = asyncio.run(pageindex.utils.summarize_tree(structure, pdf_pages))
-    assert [n["summary"] for n in out] == ["", "ok"]
+    assert [n["summary"] for n in out] == [" ".join(["alpha"] * 300)[:600], "ok"]
 
 
 def test_generate_doc_description_absorbs_context_overflow(monkeypatch):

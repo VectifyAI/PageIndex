@@ -591,9 +591,9 @@ def post_processing(structure, end_physical_index):
         item['start_index'] = item.get('physical_index')
         if i < len(structure) - 1:
             if structure[i + 1].get('appear_start') == 'yes':
-                item['end_index'] = structure[i + 1]['physical_index']-1
+                item['end_index'] = max(item['start_index'], structure[i + 1]['physical_index']-1)
             else:
-                item['end_index'] = structure[i + 1]['physical_index']
+                item['end_index'] = max(item['start_index'], structure[i + 1]['physical_index'])
         else:
             item['end_index'] = end_physical_index
     tree = list_to_tree(structure)
@@ -708,8 +708,7 @@ def convert_page_to_int(data):
 
 def add_node_text(node, pdf_pages):
     if isinstance(node, dict):
-        start_page = node.get('start_index')
-        end_page = node.get('end_index')
+        start_page, end_page = own_pages(node)
         node['text'] = get_text_of_pdf_pages(pdf_pages, start_page, end_page)
         if 'nodes' in node:
             add_node_text(node['nodes'], pdf_pages)
@@ -721,8 +720,7 @@ def add_node_text(node, pdf_pages):
 
 def add_node_text_with_labels(node, pdf_pages):
     if isinstance(node, dict):
-        start_page = node.get('start_index')
-        end_page = node.get('end_index')
+        start_page, end_page = own_pages(node)
         node['text'] = get_text_of_pdf_pages_with_labels(pdf_pages, start_page, end_page)
         if 'nodes' in node:
             add_node_text_with_labels(node['nodes'], pdf_pages)
@@ -741,6 +739,63 @@ async def generate_node_summary(node, model=None):
     """
     response = await llm_acompletion(model, prompt)
     return response
+
+
+FALLBACK_SUMMARY_CHARS = 600
+
+
+def fallback_summary(node, text=""):
+    """The summary of a node the model left unsummarized, so no node goes
+    without one: a parent's subsection titles, a leaf's own text."""
+    children = node.get('nodes') or []
+    if children:
+        summary = "; ".join(child['title'] for child in children if child.get('title'))
+    else:
+        summary = " ".join(text.split())
+    return summary[:FALLBACK_SUMMARY_CHARS] or node.get('title') or ""
+
+
+INTRO_SUFFIX = " (intro)"
+
+
+def intro_title(title):
+    """The title of a parent's intro node; a split intro keeps its own."""
+    title = (title or "").strip()
+    if title and not title.endswith(INTRO_SUFFIX):
+        title += INTRO_SUFFIX
+    return title or "Intro"
+
+
+def is_intro(parent, child):
+    """Whether child is the intro node holding parent's opening pages."""
+    return (child.get('start_index') == parent.get('start_index')
+            and child.get('title') == intro_title(parent.get('title')))
+
+
+def own_pages(node):
+    """The first and last page of a node's own text. A parent's runs onto the
+    page its first child starts on, where that child's heading may sit mid-page;
+    it has none (end None) when its intro holds those pages."""
+    start, end = node.get('start_index'), node.get('end_index')
+    children = node.get('nodes') or []
+    if children:
+        first = children[0].get('start_index')
+        if is_intro(node, children[0]):
+            end = None
+        elif end is not None and first is not None:
+            end = min(end, first)
+    return start, end
+
+
+def cover_subtree_ranges(structure):
+    """Widen every parent's range to cover its whole subtree."""
+    for node in structure if isinstance(structure, list) else [structure]:
+        children = node.get('nodes') or []
+        if children:
+            cover_subtree_ranges(children)
+            node['start_index'] = min([node['start_index']] + [c['start_index'] for c in children])
+            node['end_index'] = max([node['end_index']] + [c['end_index'] for c in children])
+    return structure
 
 
 async def generate_summaries_for_structure(structure, model=None):
@@ -956,7 +1011,7 @@ class SummaryScheduler:
         self._asked = True
         async with self._gate.slot(prio):
             reply = await llm_acompletion(self._model, prompt)
-        if reply:
+        if parse_summary(reply):
             self._answered = True
         return reply
 
@@ -1040,6 +1095,9 @@ class SummaryScheduler:
             node['summary'] = ""
             if _is_unrecoverable(e):
                 raise
+        if not node['summary']:
+            node['summary'] = fallback_summary(node, "" if children else get_text_of_pdf_pages(
+                self._pdf_pages, node['start_index'], node['end_index']))
 
     async def finish(self):
         """Wait for every summary; fails loud if the model never answered."""
@@ -1252,9 +1310,58 @@ class ConfigLoader:
         _resolve_models(merged)
         return config(**merged)
 
+_TREE_WIRE_KEYS = frozenset({"title", "node_id", "start_index", "end_index", "page_index",
+                             "summary", "prefix_summary", "text", "nodes"})
+
+
+def unify_tree(nodes, page_count=None):
+    """get_tree's nodes in the field names both modes return.
+
+    The structure is the index's own: nodes are neither added nor moved, so
+    every node keeps the summary written for its own pages start_index ..
+    end_index. A node's first page comes as start_index (local) or
+    page_index (cloud), and a parent's summary as summary or prefix_summary.
+    Without an end_index (an older server) a node ends on the page where the
+    next node in reading order starts, the last on page_count.
+    """
+    flat = list(_subtree(nodes))
+    starts = [node.get("start_index", node.get("page_index")) for node in flat]
+    ranges = {}
+    for i, node in enumerate(flat):
+        start, end = starts[i], node.get("end_index")
+        if end is None:
+            end = starts[i + 1] if i + 1 < len(flat) else page_count
+        if end is None or (start is not None and end < start):
+            end = start
+        ranges[id(node)] = (start, end)
+
+    def build(siblings):
+        out = []
+        for node in siblings:
+            unified = {"title": node.get("title", "")}
+            if "node_id" in node:
+                unified["node_id"] = node["node_id"]
+            unified["start_index"], unified["end_index"] = ranges[id(node)]
+            unified.update((key, value) for key, value in node.items()
+                           if key not in _TREE_WIRE_KEYS)
+            for key in ("summary", "prefix_summary"):
+                if key in node:
+                    unified["summary"] = node[key]
+            if "text" in node:
+                unified["text"] = node["text"]
+            if node.get("nodes"):
+                unified["nodes"] = build(node["nodes"])
+            out.append(unified)
+        return out
+
+    return build(nodes)
+
+
 def create_node_mapping(tree, include_page_ranges=False, max_page=None):
     """Map node_id to node; with include_page_ranges, to {"node", "start_index",
-    "end_index"} (end = next node's page_index, or max_page for the last node)."""
+    "end_index"}: the node's own range as get_tree returns it, or, for a tree
+    that carries page_index only, end = next node's page_index (max_page for
+    the last node)."""
     def get_all_nodes(tree):
         if isinstance(tree, dict):
             return [tree] + [node for child in tree.get('nodes') or [] for node in get_all_nodes(child)]
@@ -1268,10 +1375,14 @@ def create_node_mapping(tree, include_page_ranges=False, max_page=None):
     mapping = {}
     for i, node in enumerate(all_nodes):
         if node.get("node_id"):
-            end_page = all_nodes[i + 1].get("page_index") if i + 1 < len(all_nodes) else max_page
+            if "end_index" in node:
+                start_page, end_page = node["start_index"], node["end_index"]
+            else:
+                start_page = node["page_index"]
+                end_page = all_nodes[i + 1].get("page_index") if i + 1 < len(all_nodes) else max_page
             mapping[node["node_id"]] = {
                 "node": node,
-                "start_index": node["page_index"],
+                "start_index": start_page,
                 "end_index": end_page,
             }
     return mapping

@@ -6,7 +6,7 @@ import random
 import re
 from .utils import *
 from .naming import sanitize_filename as sanitize_upload_filename
-from .tree_optimize import merge_tree
+from .tree_optimize import add_intro_nodes, merge_tree
 import os
 
 ######################### Hardening for prompt injection patterns ####################################################
@@ -1165,12 +1165,17 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
             raise Exception('Processing failed')
         
  
-async def process_large_node_recursively(node, page_list, opt=None, logger=None):
+async def process_large_node_recursively(node, page_list, opt=None, logger=None, split=None):
+    # split: the pages last split above this node; the model can rebuild the
+    # node over them, e.g. when another heading sits above its own
     node_page_list = page_list[node['start_index']-1:node['end_index']]
     token_num = sum([page[1] for page in node_page_list])
     
-    if node['end_index'] - node['start_index'] > opt.max_page_num_each_node and token_num >= opt.max_token_num_each_node:
+    if (not node.get('nodes') and node['end_index'] - node['start_index'] > opt.max_page_num_each_node
+            and token_num >= opt.max_token_num_each_node
+            and (node['start_index'], node['end_index']) != split):
         print('large node:', node['title'], 'start_index:', node['start_index'], 'end_index:', node['end_index'], 'token_num:', token_num)
+        split = (node['start_index'], node['end_index'])
 
         node_toc_tree = await meta_processor(node_page_list, mode='process_no_toc', start_index=node['start_index'], opt=opt, logger=logger)
         node_toc_tree = await check_title_appearance_in_start_concurrent(node_toc_tree, page_list, model=opt.model, logger=logger)
@@ -1178,7 +1183,9 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None)
         # Filter out items with None physical_index before post_processing
         valid_node_toc_items = [item for item in node_toc_tree if item.get('physical_index') is not None]
         
-        if valid_node_toc_items and node['title'].strip() == valid_node_toc_items[0]['title'].strip():
+        # an intro node's pages open with its parent's heading
+        title = node['title'].strip()
+        if valid_node_toc_items and valid_node_toc_items[0]['title'].strip() in (title, title.removesuffix(INTRO_SUFFIX)):
             node['nodes'] = post_processing(valid_node_toc_items[1:], node['end_index'])
             node['end_index'] = valid_node_toc_items[1]['start_index'] if len(valid_node_toc_items) > 1 else node['end_index']
         else:
@@ -1187,7 +1194,7 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None)
         
     if 'nodes' in node and node['nodes']:
         tasks = [
-            process_large_node_recursively(child_node, page_list, opt, logger=logger)
+            process_large_node_recursively(child_node, page_list, opt, logger=logger, split=split)
             for child_node in node['nodes']
         ]
         await asyncio.gather(*tasks)
@@ -1221,14 +1228,15 @@ async def tree_parser(page_list, opt, doc=None, logger=None):
     # Filter out items with None physical_index before post_processings
     valid_toc_items = [item for item in toc_with_page_number if item.get('physical_index') is not None]
     
-    toc_tree = post_processing(valid_toc_items, len(page_list))
+    toc_tree = add_intro_nodes(post_processing(valid_toc_items, len(page_list)))
     tasks = [
         process_large_node_recursively(node, page_list, opt, logger=logger)
         for node in toc_tree
     ]
     await asyncio.gather(*tasks)
-    
-    return toc_tree
+
+    # a split leaf is now a parent that may open before its first child
+    return add_intro_nodes(toc_tree)
 
 
 def page_index_main(doc, opt=None, logger=None, page_list=None):
@@ -1257,21 +1265,19 @@ def page_index_main(doc, opt=None, logger=None, page_list=None):
         if opt.if_add_node_text == 'yes':
             add_node_text(structure, page_list)
         if opt.if_add_node_summary == 'yes':
-            if opt.if_add_node_text == 'no':
-                add_node_text(structure, page_list)
-            await generate_summaries_for_structure(structure, model=getattr(opt, 'summary_model', None) or opt.model)
-            if opt.if_add_node_text == 'no':
-                remove_structure_text(structure)
+            await summarize_tree(structure, page_list, model=getattr(opt, 'summary_model', None) or opt.model)
             if opt.if_add_doc_description == 'yes':
                 # Create a clean structure without unnecessary fields for description generation
                 clean_structure = create_clean_structure_for_description(structure)
                 doc_description = generate_doc_description(clean_structure, model=getattr(opt, 'summary_model', None) or opt.model)
+                cover_subtree_ranges(structure)
                 structure = format_structure(structure, order=['title', 'node_id', 'start_index', 'end_index', 'key_items', 'summary', 'text', 'nodes'])
                 return {
                     'doc_name': get_pdf_name(doc),
                     'doc_description': doc_description,
                     'structure': structure,
                 }
+        cover_subtree_ranges(structure)
         structure = format_structure(structure, order=['title', 'node_id', 'start_index', 'end_index', 'key_items', 'summary', 'text', 'nodes'])
         return {
             'doc_name': get_pdf_name(doc),

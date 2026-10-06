@@ -707,9 +707,12 @@ def test_every_page_is_in_a_node(tmp_path):
         covered = {page for node in structure
                    for page in range(node["start_index"], node["end_index"] + 1)}
         assert covered == set(range(1, pages + 1)), pdf.name
-        assert structure[0] == {"title": "Preface", "node_id": "0000",
-                                "start_index": 1, "end_index": 1}, pdf.name
-        assert structure[1]["node_id"] == "0001", pdf.name
+        preface, first = structure[0], structure[1]
+        assert (preface["title"], preface["node_id"], preface["start_index"]) == (
+            "Preface", "0000", 1), pdf.name
+        # it runs onto the first section's page unless that heading is known to open it
+        assert preface["end_index"] in (first["start_index"] - 1, first["start_index"]), pdf.name
+        assert first["node_id"] == "0001", pdf.name
 
 
 def test_preface_page_is_retrievable(tmp_path, monkeypatch):
@@ -732,8 +735,8 @@ def test_preface_page_is_retrievable(tmp_path, monkeypatch):
     client = PageIndexClient(storage_path=str(tmp_path / "store"))
     doc_id = client.submit_document(str(pdf), mode="flash")["doc_id"]
     tree = client.get_tree(doc_id)["result"]
-    assert [(node["title"], node["page_index"]) for node in tree] == [
-        ("Preface", 1), ("Budget", 2), ("Team", 3)]
+    assert [(node["title"], node["start_index"], node["end_index"]) for node in tree] == [
+        ("Preface", 1, 1), ("Budget", 2, 2), ("Team", 3, 3)]
     assert "Skylark" in tree[0]["text"]
 
 
