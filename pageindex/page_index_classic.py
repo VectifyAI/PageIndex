@@ -504,11 +504,18 @@ def calculate_page_offset(pairs):
     return most_common
 
 def add_page_offset_to_toc_json(data, offset):
+    if offset is None:
+        # calculate_page_offset() returns None when no reliable page->physical
+        # offset exists (e.g. no title matches between the printed TOC and the
+        # extracted physical indices). Leave the items untouched instead of
+        # crashing on `page + None`: process_none_page_numbers() downstream
+        # already resolves physical indices for items that lack one.
+        return data
     for i in range(len(data)):
         if data[i].get('page') is not None and isinstance(data[i]['page'], int):
             data[i]['physical_index'] = data[i]['page'] + offset
             del data[i]['page']
-    
+
     return data
 
 
