@@ -71,6 +71,42 @@ def test_rtl_sign_takes_a_multi_code_point_glyph():
     assert _rtl_sign("") == 1
 
 
+def test_ink_past_the_advance_does_not_split_the_word(tmp_path):
+    """A glyph whose ink reaches past its advance (a bold-italic 'f') must not
+    open a space before the next letters: the gap is measured from the pen
+    end the font's width for the char's code gives, not from the ink."""
+    from conftest import build_pdf
+    from pageindex.flash.main import extract_toc
+
+    widths = [556] * 95
+    widths[ord("f") - 32] = 50   # Helvetica's 'f' ink now reaches into the 'e'
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["inference"], font=(
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding "
+        f"/FirstChar 32 /LastChar 126 /Widths [{' '.join(map(str, widths))}] >>")))
+    assert extract_toc(str(pdf))["page_texts"] == ["inference"]
+
+
+def test_composite_font_widths_read_both_w_forms():
+    """/W holds `c [w1 w2 ...]` and `c_first c_last w` entries, /DW covers
+    the rest, and a range is bounded to two-byte codes."""
+    from types import SimpleNamespace
+    from PyPDF2.generic import ArrayObject, DictionaryObject, NameObject, NumberObject
+    from pageindex.flash.parser_pdfium_charlevel.font_unicode import _font_widths
+
+    def array(*items):
+        return ArrayObject(NumberObject(item) if isinstance(item, int) else item for item in items)
+
+    descendant = DictionaryObject({NameObject("/DW"): NumberObject(800),
+                                   NameObject("/W"): array(10, array(500, 600), 20, 2 ** 31, 700)})
+    font = DictionaryObject({NameObject("/Subtype"): NameObject("/Type0"),
+                             NameObject("/Encoding"): NameObject("/Identity-H"),
+                             NameObject("/DescendantFonts"): ArrayObject([descendant])})
+    widths = _font_widths(SimpleNamespace(_resolve_object=lambda xref: font), 1)
+    assert [widths(code) for code in (10, 11, 12, 20, 0xFFFF, 5)] == pytest.approx(
+        [0.5, 0.6, 0.8, 0.7, 0.7, 0.8])
+
+
 def test_optimize_full_keyless_reports_file_errors_first(tmp_path, monkeypatch):
     """No credential pre-check: a bad path is a FileNotFoundError even
     keyless (validation runs first), and the LLM-free spellings still run

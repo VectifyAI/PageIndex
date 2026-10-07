@@ -8,10 +8,10 @@ def _llm_key(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 
 
-def build_pdf(page_texts):
-    """Build a minimal, uncompressed PDF (one Helvetica line per page, or a
-    page's (x, y, size, text) lines) whose text PyPDF2 can extract. Returns
-    the PDF file bytes."""
+def build_pdf(page_texts, font="<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"):
+    """Build a minimal, uncompressed PDF (one line per page, or a page's
+    (x, y, size, text) lines, in ``font``, Helvetica by default) whose text
+    PyPDF2 can extract. Returns the PDF file bytes."""
     n = len(page_texts)
     objects = []
     kids = " ".join(f"{3 + i} 0 R" for i in range(n))
@@ -31,7 +31,7 @@ def build_pdf(page_texts):
             parts.append(f"BT /F1 {size} Tf {x} {y} Td ({safe}) Tj ET")
         stream = " ".join(parts).encode()
         objects.append(b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream))
-    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    objects.append(font.encode())
 
     out = bytearray(b"%PDF-1.4\n")
     offsets = []
