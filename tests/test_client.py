@@ -3360,8 +3360,9 @@ def test_standard_mode_refuses_the_flash_summary_knobs(tmp_path, sample_pdf, mon
     monkeypatch.setattr(classic, "page_index_main", lambda *a, **kw: {
         "structure": [{"title": "T", "start_index": 1, "end_index": 1, "nodes": []}]})
     monkeypatch.chdir(tmp_path)
-    for name, value in (("summary_concurrency", 2), ("summary_max_words", 7)):
-        with pytest.raises(PageIndexAPIError, match="summary_concurrency are flash-only"):
+    for name, value in (("summary_concurrency", 2), ("summary_max_words", 7),
+                        ("summary_scope", "section")):
+        with pytest.raises(PageIndexAPIError, match="summary_scope are flash-only"):
             PageIndexLocalClient(**{name: value}).submit_document(sample_pdf, mode="standard")
     PageIndexLocalClient().submit_document(sample_pdf, mode="standard")
 
