@@ -243,6 +243,10 @@ def clean_tree_for_output(tree_nodes):
 
 
 async def md_to_tree(md_path, if_thinning=False, min_token_threshold=None, if_add_node_summary='no', summary_token_threshold=None, model=None, if_add_doc_description='no', if_add_node_text='no', if_add_node_id='yes', summary_model=None):
+    if min_token_threshold is None:
+        min_token_threshold = 5000
+    if summary_token_threshold is None:
+        summary_token_threshold = 200
     with open(md_path, 'r', encoding='utf-8') as f:
         markdown_content = f.read()
     line_count = markdown_content.count('\n') + 1
