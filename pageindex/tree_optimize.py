@@ -102,7 +102,7 @@ def note(enabled, message):
         print(message, file=sys.stderr, flush=True)
 
 def normalize(text):
-    return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
+    return re.sub(r"[\W_]+", " ", (text or "").lower()).strip()
 
 
 def flatten(nodes, parent=None):
