@@ -71,6 +71,11 @@ def test_rtl_sign_takes_a_multi_code_point_glyph():
     assert _rtl_sign("") == 1
 
 
+def _helvetica(widths, encoding="/WinAnsiEncoding"):
+    return ("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica "
+            f"/Encoding {encoding} /FirstChar 32 /LastChar 126 /Widths [{' '.join(map(str, widths))}] >>")
+
+
 def test_ink_past_the_advance_does_not_split_the_word(tmp_path):
     """A glyph whose ink reaches past its advance (a bold-italic 'f') must not
     open a space before the next letters: the gap is measured from the pen
@@ -81,10 +86,54 @@ def test_ink_past_the_advance_does_not_split_the_word(tmp_path):
     widths = [556] * 95
     widths[ord("f") - 32] = 50   # Helvetica's 'f' ink now reaches into the 'e'
     pdf = tmp_path / "doc.pdf"
-    pdf.write_bytes(build_pdf(["inference"], font=(
-        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding "
-        f"/FirstChar 32 /LastChar 126 /Widths [{' '.join(map(str, widths))}] >>")))
+    pdf.write_bytes(build_pdf(["inference"], font=_helvetica(widths)))
     assert extract_toc(str(pdf))["page_texts"] == ["inference"]
+
+
+def test_dropped_glyph_after_ink_past_the_advance_does_not_split_the_word(tmp_path):
+    """Drawn one glyph per show op, the second 'f' of 'ff' overlaps the first
+    one's ink and PDFium drops it; the re-emitted 'f' starts at the first
+    one's pen end and advances by its own width."""
+    from conftest import build_pdf
+    from pageindex.flash.main import extract_toc
+
+    widths = [556] * 95
+    widths[ord("f") - 32] = 50
+    lines, x = [], 72.0
+    for ch in "the effects of":
+        lines.append((round(x, 3), 720, 12, ch))
+        x += widths[ord(ch) - 32] * 12 / 1000
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf([lines], font=_helvetica(widths)))
+    assert extract_toc(str(pdf))["page_texts"] == ["the effects of"]
+
+
+def test_rotated_text_ignores_code_widths(tmp_path):
+    """A rotated pen moves along y, so a narrow glyph's code width must not
+    open gaps in rotated words."""
+    from conftest import build_pdf
+    from pageindex.flash.main import extract_toc
+
+    widths = [556] * 95
+    widths[ord("'") - 32] = 191
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf([b"BT /F1 12 Tf 0 -1 1 0 300 700 Tm (O'Brien rock'n'roll) Tj ET"],
+                              font=_helvetica(widths)))
+    assert extract_toc(str(pdf))["page_texts"] == ["O'Brien rock'n'roll"]
+
+
+def test_rtl_chars_ignore_code_widths(tmp_path):
+    """PDFium returns Hebrew in logical order, so the code walk pairs each
+    char with its mirror's code; that width must not move the line's gaps."""
+    from conftest import build_pdf
+    from pageindex.flash.main import extract_toc
+
+    widths = [556] * 95
+    widths[ord("a") - 32], widths[ord("b") - 32] = 550, 150
+    hebrew = "<< /Type /Encoding /BaseEncoding /WinAnsiEncoding /Differences [97 /afii57664 /afii57665] >>"
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["xyba z"], font=_helvetica(widths, hebrew)))
+    assert extract_toc(str(pdf))["page_texts"] == ["xy \u05d0\u05d1 z"]
 
 
 def test_composite_font_widths_read_both_w_forms():

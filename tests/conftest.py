@@ -9,9 +9,10 @@ def _llm_key(monkeypatch):
 
 
 def build_pdf(page_texts, font="<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"):
-    """Build a minimal, uncompressed PDF (one line per page, or a page's
-    (x, y, size, text) lines, in ``font``, Helvetica by default) whose text
-    PyPDF2 can extract. Returns the PDF file bytes."""
+    """Build a minimal, uncompressed PDF (one line per page, a page's
+    (x, y, size, text) lines, or a page's raw content stream as bytes, in
+    ``font``, Helvetica by default) whose text PyPDF2 can extract. Returns
+    the PDF file bytes."""
     n = len(page_texts)
     objects = []
     kids = " ".join(f"{3 + i} 0 R" for i in range(n))
@@ -25,11 +26,14 @@ def build_pdf(page_texts, font="<< /Type /Font /Subtype /Type1 /BaseFont /Helvet
             f"/Contents {3 + n + i} 0 R >>".encode()
         )
     for page in page_texts:
-        parts = []
-        for x, y, size, text in [(72, 720, 12, page)] if isinstance(page, str) else page:
-            safe = text.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
-            parts.append(f"BT /F1 {size} Tf {x} {y} Td ({safe}) Tj ET")
-        stream = " ".join(parts).encode()
+        if isinstance(page, bytes):
+            stream = page
+        else:
+            parts = []
+            for x, y, size, text in [(72, 720, 12, page)] if isinstance(page, str) else page:
+                safe = text.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
+                parts.append(f"BT /F1 {size} Tf {x} {y} Td ({safe}) Tj ET")
+            stream = " ".join(parts).encode()
         objects.append(b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream))
     objects.append(font.encode())
 
