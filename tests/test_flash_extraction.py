@@ -91,9 +91,9 @@ def test_ink_past_the_advance_does_not_split_the_word(tmp_path):
 
 
 def test_dropped_glyph_after_ink_past_the_advance_does_not_split_the_word(tmp_path):
-    """Drawn one glyph per show op, the second 'f' of 'ff' overlaps the first
-    one's ink and PDFium drops it; the re-emitted 'f' starts at the first
-    one's pen end and advances by its own width."""
+    """An 'f' painted first where the word's second 'f' lands makes PDFium drop
+    that glyph; the re-emitted 'f' starts at the first one's pen end, not at
+    its ink edge. The 'f' PDFium keeps reads last."""
     from conftest import build_pdf
     from pageindex.flash.main import extract_toc
 
@@ -104,8 +104,21 @@ def test_dropped_glyph_after_ink_past_the_advance_does_not_split_the_word(tmp_pa
         lines.append((round(x, 3), 720, 12, ch))
         x += widths[ord(ch) - 32] * 12 / 1000
     pdf = tmp_path / "doc.pdf"
-    pdf.write_bytes(build_pdf([lines], font=_helvetica(widths)))
-    assert extract_toc(str(pdf))["page_texts"] == ["the effects of"]
+    pdf.write_bytes(build_pdf([[(lines[6][0], 720, 12, "f")] + lines], font=_helvetica(widths)))
+    assert extract_toc(str(pdf))["page_texts"] == ["the effects off"]
+
+
+def test_dropped_glyph_with_no_next_survivor_advances_by_its_code_width():
+    """With no later glyph to measure against, a re-emitted glyph starts at
+    the previous glyph's pen end and advances by its own code width."""
+    from pageindex.flash.parser_pdfium_charlevel.unicode_apply import _synthesize_dropped_glyphs
+
+    obj = {"fs_raw": 10.0, "scale_x": 1.0, "fs_eff": 10.0, "l": 0.0, "b": 0.0, "font_name": "F"}
+    prev = {"i": 0, "ch": "f", "ox": 100.0, "oy": 700.0, "right": 104.0, "code_w": 0.25, "obj": obj}
+    raw_chars = [prev]
+    _synthesize_dropped_glyphs([{"t": "f", "owner": obj, "w": 0.25, "prev_i": 0, "next_i": None}],
+                               raw_chars, {0: prev})
+    assert (raw_chars[-1]["ox"], raw_chars[-1]["w_synth"]) == (102.5, 2.5)
 
 
 def test_rotated_text_ignores_code_widths(tmp_path):
