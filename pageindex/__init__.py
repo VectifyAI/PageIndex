@@ -12,6 +12,7 @@ if _TYPE_CHECKING:
     from .imaging import highlight_region
     from .page_index_classic import page_index, page_index_main
     from .page_index_md import md_to_tree
+    from .page_index_txt import txt_to_tree
     from .tree_optimize import optimize_tree
 
 __all__ = [
@@ -20,7 +21,7 @@ __all__ = [
     "IndexConfig", "CloudIndexConfig", "LocalIndexConfig", "ChatConfig",
     "ChatProcessOptions", "ChatStream",
     "page_index", "page_index_main", "page_index_flash",
-    "optimize_tree", "md_to_tree", "highlight_region",
+    "optimize_tree", "md_to_tree", "txt_to_tree", "highlight_region",
 ]
 
 _LAZY = {
@@ -28,11 +29,12 @@ _LAZY = {
     "page_index_flash": ".flash",
     "optimize_tree": ".tree_optimize",
     "md_to_tree": ".page_index_md",
+    "txt_to_tree": ".page_index_txt",
 }
 _SUBMODULES = {"agent_tools", "chat_stream", "client", "cloud_api", "errors",
                "flash", "imaging", "integrations", "local_api", "local_chat",
                "local_store", "mcp_bridge", "page_index_classic",
-               "page_index_md", "tree_optimize", "types", "utils"}
+               "page_index_md", "page_index_txt", "tree_optimize", "types", "utils"}
 
 
 def __getattr__(name):
