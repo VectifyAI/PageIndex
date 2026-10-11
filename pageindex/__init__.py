@@ -6,6 +6,7 @@ from .client import PageIndexClient, PageIndexCloudClient, PageIndexLocalClient
 from .errors import PageIndexAPIError
 from .types import (ChatConfig, ChatProcessOptions, CloudIndexConfig,
                     IndexConfig, LocalIndexConfig)
+from .usage import ChatUsage, ModelCallUsage
 
 if _TYPE_CHECKING:
     from .flash import page_index_flash
@@ -18,7 +19,7 @@ __all__ = [
     "PageIndexClient", "PageIndexCloudClient", "PageIndexLocalClient",
     "PageIndexAPIError",
     "IndexConfig", "CloudIndexConfig", "LocalIndexConfig", "ChatConfig",
-    "ChatProcessOptions", "ChatStream",
+    "ChatProcessOptions", "ChatStream", "ChatUsage", "ModelCallUsage",
     "page_index", "page_index_main", "page_index_flash",
     "optimize_tree", "md_to_tree", "highlight_region",
 ]
@@ -32,7 +33,7 @@ _LAZY = {
 _SUBMODULES = {"agent_tools", "chat_stream", "client", "cloud_api", "errors",
                "flash", "imaging", "integrations", "local_api", "local_chat",
                "local_store", "mcp_bridge", "page_index_classic",
-               "page_index_md", "tree_optimize", "types", "utils"}
+               "page_index_md", "tree_optimize", "types", "usage", "utils"}
 
 
 def __getattr__(name):

@@ -80,6 +80,21 @@ def _usage():
                  total_tokens=15)
 
 
+def _planned_usage(plan):
+    from agents.usage import Usage
+    from openai.types.responses.response_usage import (InputTokensDetails,
+                                                       OutputTokensDetails)
+    return Usage(
+        requests=1, input_tokens=plan["input_tokens"],
+        output_tokens=plan["output_tokens"],
+        total_tokens=plan["input_tokens"] + plan["output_tokens"],
+        input_tokens_details=InputTokensDetails(
+            cached_tokens=plan.get("cached", 0),
+            cache_write_tokens=plan.get("cache_write", 0)),
+        output_tokens_details=OutputTokensDetails(
+            reasoning_tokens=plan.get("reasoning", 0)))
+
+
 if _HAS_AGENTS:
     from agents.models.interface import Model  # noqa: E402
 else:  # pragma: no cover - placeholder so the class statement parses
@@ -87,13 +102,33 @@ else:  # pragma: no cover - placeholder so the class statement parses
 
 
 class FakeModel(Model):
-    """Scripted backend: one list of output items per model turn."""
+    """Scripted backend: one list of output items per model turn.
+
+    Optional per-test knobs: ``usage_plan`` — one entry per turn, None
+    for the default usage, "missing" for none reported, or a dict of
+    counters (``raw`` adds the provider payload); ``fail_from`` — the
+    turn number from which the backend raises a provider error;
+    ``blocked`` — a threading.Event set once a ``block_from`` turn
+    hangs."""
 
     def __init__(self, turns):
         self.turns = list(turns)
         self.inputs = []
         self.instructions = []
         self.deltas_emitted = 0
+
+    def _maybe_fail(self):
+        fail_from = getattr(self, "fail_from", None)
+        if fail_from is not None and len(self.inputs) + 1 >= fail_from:
+            import openai
+            request = httpx.Request("POST", "https://backend.test/v1")
+            raise openai.BadRequestError(
+                "backend refused", body=None,
+                response=httpx.Response(400, request=request))
+
+    def _next_usage(self):
+        plan = getattr(self, "usage_plan", None)
+        return plan.pop(0) if plan else None
 
     def _record(self, system_instructions, input):
         self.instructions.append(system_instructions)
@@ -106,14 +141,26 @@ class FakeModel(Model):
                            tools, output_schema, handoffs, tracing,
                            **kwargs):
         from agents.items import ModelResponse
+        self._maybe_fail()
         self._record(system_instructions, input)
         # Mimic the real model's transport hop when a test attaches one, so
         # the transport-level status recorder sees each turn.
         transport = getattr(getattr(self, "_client", None), "responses", None)
         if transport is not None:
             await transport.create()
-        return ModelResponse(output=self.turns.pop(0), usage=_usage(),
-                             response_id=None)
+        plan, extra = self._next_usage(), {}
+        if plan == "missing":
+            from agents.usage import Usage
+            usage = Usage()  # what the SDK fills when the provider sends none
+        elif plan:
+            usage = _planned_usage(plan)
+            if plan.get("raw") is not None:
+                extra["raw_usage"] = plan["raw"]
+        else:
+            usage = _usage()
+        return ModelResponse(output=self.turns.pop(0), usage=usage,
+                             response_id=f"resp_turn_{len(self.inputs)}",
+                             **extra)
 
     async def stream_response(self, system_instructions, input,
                               model_settings, tools, output_schema, handoffs,
@@ -125,8 +172,11 @@ class FakeModel(Model):
             InputTokensDetails, OutputTokensDetails, ResponseUsage)
         block_from = getattr(self, "block_from", None)
         if block_from is not None and len(self.inputs) + 1 >= block_from:
+            if getattr(self, "blocked", None) is not None:
+                self.blocked.set()
             while True:  # released only by task cancellation
                 await aio.sleep(0.01)
+        self._maybe_fail()
         self._record(system_instructions, input)
         output = self.turns.pop(0)
         sequence = 0
@@ -169,6 +219,9 @@ class FakeModel(Model):
                         logprobs=[], sequence_number=sequence)
         if getattr(self, "no_terminal", False):
             return  # backend died mid-stream: no terminal event
+        plan = self._next_usage()
+        plan = plan if plan == "missing" else {
+            "input_tokens": 10, "output_tokens": 5, **(plan or {})}
         sequence += 1
         yield ResponseCompletedEvent(
             type="response.completed", sequence_number=sequence,
@@ -176,12 +229,15 @@ class FakeModel(Model):
                 id="resp_fake", created_at=0.0, model="fake",
                 object="response", output=output, parallel_tool_calls=False,
                 tool_choice="auto", tools=[],
-                usage=ResponseUsage(
-                    input_tokens=10, output_tokens=5, total_tokens=15,
+                usage=None if plan == "missing" else ResponseUsage(
+                    input_tokens=plan["input_tokens"],
+                    output_tokens=plan["output_tokens"],
+                    total_tokens=plan["input_tokens"] + plan["output_tokens"],
                     input_tokens_details=InputTokensDetails(
-                        cached_tokens=0, cache_write_tokens=0),
+                        cached_tokens=plan.get("cached", 0),
+                        cache_write_tokens=plan.get("cache_write", 0)),
                     output_tokens_details=OutputTokensDetails(
-                        reasoning_tokens=0))))
+                        reasoning_tokens=plan.get("reasoning", 0)))))
 
 
 @pytest.fixture
@@ -1201,6 +1257,11 @@ def fake_anthropic(monkeypatch):
         def handler(request):
             state["calls"].append(json.loads(request.content))
             body = responses[len(state["calls"]) - 1]
+            if isinstance(body, int):  # a non-retried provider error
+                return anthropic_httpx.Response(body, json={
+                    "type": "error", "error": {
+                        "type": "invalid_request_error",
+                        "message": "backend refused"}})
             if isinstance(body, str):  # pre-rendered SSE
                 return anthropic_httpx.Response(
                     200, content=body.encode(),
@@ -4273,3 +4334,383 @@ def test_managed_instructions_drop_blank_system_texts(store_path):
     client = PageIndexLocalClient(storage_path=store_path)
     assert (local_chat._managed_instructions(client, ["", "  ", "X"])
             == local_chat._managed_instructions(client, ["X"]))
+
+
+# ── usage measurement (on_usage / PageIndexAPIError.usage) ──
+# Deterministic contract tests over the fake backends: per-call records,
+# completeness, and the report on success, failure and cancellation.
+
+def _two_turns(store_path):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    return [[_call_item("get_document", {"doc_name": "report.pdf"})],
+            [_msg_item("The answer")]]
+
+
+def _consume(result):
+    if isinstance(result, (str, dict)):
+        return result
+    return list(result)
+
+
+_AGENT_LANES = {
+    "answer": lambda c, **kw: c.chat("q", **kw),
+    "answer_stream": lambda c, **kw: c.chat("q", stream=True,
+                                            show_process=False, **kw),
+    "chat_completions": lambda c, **kw: c.chat(
+        "q", protocol="chat_completions", **kw),
+    "chat_completions_stream": lambda c, **kw: c.chat(
+        "q", protocol="chat_completions", stream=True, **kw),
+    "responses": lambda c, **kw: c.chat("q", protocol="responses", **kw),
+    "responses_stream": lambda c, **kw: c.chat(
+        "q", protocol="responses", stream=True, **kw),
+}
+
+
+@needs_agents
+@pytest.mark.parametrize("lane", sorted(_AGENT_LANES))
+def test_usage_multi_turn_success(client, store_path, fake_model, lane):
+    """Every OpenAI-engine lane reports one record per model call, in
+    order, and rates a fully reported run complete — once."""
+    fake_model(_two_turns(store_path))
+    seen = []
+    _consume(_AGENT_LANES[lane](client, on_usage=seen.append))
+    assert len(seen) == 1
+    report = seen[0]
+    assert report.outcome == "completed" and report.error is None
+    assert report.completeness == "complete"
+    assert report.protocol == ("responses" if lane.startswith("responses")
+                               else "chat_completions")
+    calls = report.calls
+    assert [call.index for call in calls] == [0, 1]
+    assert all(call.measurement == "complete" for call in calls)
+    assert {call.backend for call in calls} == {
+        "openai" if lane.startswith("responses") else "litellm"}
+    assert {call.model for call in calls} == {
+        local_chat._reported_model(client.chat_model)}
+    assert [(call.input_tokens, call.output_tokens) for call in calls] \
+        == [(10, 5), (10, 5)]
+    totals = report.totals()
+    assert totals["input_tokens"] == 20 and totals["output_tokens"] == 10
+
+
+@needs_agents
+def test_usage_records_call_identity(client, store_path, fake_model):
+    fake_model(_two_turns(store_path))
+    seen = []
+    client.chat("q", protocol="responses", on_usage=seen.append)
+    assert [call.response_id for call in seen[0].calls] \
+        == ["resp_turn_1", "resp_turn_2"]
+
+
+@needs_agents
+def test_usage_missing_on_one_turn(client, store_path, fake_model):
+    """The SDK's zero fill for an omitted usage is not zero usage: the
+    call is missing, its fields None, the run partial, and the totals
+    cover only what was reported."""
+    fake = fake_model(_two_turns(store_path))
+    fake.usage_plan = [None, "missing"]
+    seen = []
+    result = client.chat("q", protocol="chat_completions",
+                         on_usage=seen.append)
+    report = seen[0]
+    assert report.outcome == "completed"
+    first, second = report.calls
+    assert first.measurement == "complete"
+    assert second.measurement == "missing"
+    assert second.input_tokens is None and second.output_tokens is None
+    assert report.completeness == "partial"
+    assert report.totals()["input_tokens"] == 10
+    # the protocol envelope's aggregate is unchanged (a convenience sum)
+    assert result["usage"]["prompt_tokens"] == 10
+
+
+@needs_agents
+def test_usage_missing_on_one_streamed_turn(client, store_path, fake_model):
+    fake = fake_model(_two_turns(store_path))
+    fake.usage_plan = ["missing", None]
+    seen = []
+    list(client.chat("q", protocol="responses", stream=True,
+                     on_usage=seen.append))
+    assert [call.measurement for call in seen[0].calls] \
+        == ["missing", "complete"]
+    assert seen[0].completeness == "partial"
+
+
+@needs_agents
+def test_usage_all_missing_is_unknown(client, store_path, fake_model):
+    fake = fake_model(_two_turns(store_path))
+    fake.usage_plan = ["missing", "missing"]
+    seen = []
+    client.chat("q", protocol="responses", on_usage=seen.append)
+    assert seen[0].completeness == "unknown"
+    assert seen[0].totals() == dict.fromkeys(
+        ("input_tokens", "output_tokens", "cache_read_tokens",
+         "cache_write_tokens", "reasoning_tokens"))
+
+
+@needs_agents
+def test_usage_genuine_zero_is_reported(client, store_path, fake_model):
+    """With the provider payload present, zero counters are a reported
+    zero, not an absence."""
+    fake = fake_model([[_msg_item("ok")]])
+    zero = {"input_tokens": 0, "output_tokens": 0,
+            "input_tokens_details": {"cached_tokens": 0},
+            "output_tokens_details": {"reasoning_tokens": 0}}
+    fake.usage_plan = [{"input_tokens": 0, "output_tokens": 0, "raw": zero}]
+    seen = []
+    client.chat("q", protocol="responses", on_usage=seen.append)
+    (call,) = seen[0].calls
+    assert call.measurement == "complete"
+    assert call.input_tokens == 0 and call.output_tokens == 0
+    assert call.cache_read_tokens == 0
+    assert call.cache_write_tokens is None  # absent from the payload
+    assert seen[0].completeness == "complete"
+
+
+@needs_agents
+@pytest.mark.parametrize("stream", [False, True])
+def test_usage_provider_failure_after_successful_turn(client, store_path,
+                                                      fake_model, stream):
+    """A provider error on turn 2: the raised error carries the report,
+    turn 1's usage survives, the failed call is recorded missing."""
+    fake = fake_model(_two_turns(store_path))
+    fake.fail_from = 2
+    seen = []
+    with pytest.raises(PageIndexAPIError,
+                       match="model backend failed") as caught:
+        _consume(client.chat("q", protocol="responses", stream=stream,
+                             on_usage=seen.append))
+    report = caught.value.usage
+    assert seen == [report]
+    assert report.outcome == "failed" and report.error is caught.value
+    assert [call.measurement for call in report.calls] \
+        == ["complete", "missing"]
+    assert report.calls[0].input_tokens == 10
+    assert report.completeness == "partial"
+
+
+@needs_agents
+def test_usage_attached_without_callback(client, store_path, fake_model):
+    fake = fake_model(_two_turns(store_path))
+    fake.fail_from = 2
+    with pytest.raises(PageIndexAPIError) as caught:
+        client.chat("q", protocol="chat_completions")
+    assert caught.value.usage.calls[0].measurement == "complete"
+
+
+@needs_agents
+def test_usage_tool_failure_keeps_complete_measurement(client, store_path,
+                                                       fake_model):
+    """A run failing outside a model call (a tool error) still measured
+    every call it made: failed, yet complete."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([[_call_item("get_document", {"doc_name": "report.pdf"})],
+                [_msg_item("never")]])
+    seen = []
+    with pytest.raises(PageIndexAPIError):
+        client.chat("q", protocol="responses", max_turns=1,
+                    on_usage=seen.append)
+    assert seen[0].outcome == "failed"
+    assert [call.measurement for call in seen[0].calls] == ["complete"]
+    assert seen[0].completeness == "complete"
+
+
+@needs_agents
+def test_usage_cancellation_mid_run(client, store_path, fake_model):
+    """Closing a stream while turn 2 is in flight: close() returns after
+    the report is final; the in-flight call is missing (never recovered),
+    turn 1 is kept."""
+    import threading
+    fake = fake_model(_two_turns(store_path))
+    fake.block_from = 2
+    fake.blocked = threading.Event()
+    seen = []
+    stream = client.chat("q", stream=True, on_usage=seen.append)
+    assert next(stream).startswith("[tool_call] get_document")
+    assert fake.blocked.wait(3.0)
+    stream.close()
+    assert len(seen) == 1  # no join: close() waited for the teardown
+    report = seen[0]
+    assert report.outcome == "cancelled" and report.error is None
+    assert [call.measurement for call in report.calls] \
+        == ["complete", "missing"]
+    assert report.completeness == "partial"
+
+
+@needs_agents
+def test_usage_cancellation_between_turns_is_complete(client, store_path,
+                                                      fake_model):
+    """Closed after turn 1 ended and before another call began: nothing
+    was in flight, so the measurement is complete despite the cancel."""
+    fake = fake_model([[_msg_item("The answer")]])
+    seen = []
+    chunks = client.chat("q", protocol="chat_completions", stream=True,
+                         on_usage=seen.append)
+    for chunk in chunks:
+        if chunk["choices"] and chunk["choices"][0]["finish_reason"]:
+            break  # the run is over; the trailing usage chunk unread
+    chunks.close()
+    assert fake.deltas_emitted == 2
+    assert seen[0].completeness == "complete"
+
+
+@needs_agents
+def test_usage_cache_fields_preserved(client, store_path, fake_model):
+    """Cache reads, cache writes and reasoning survive per call on every
+    OpenAI lane — chat_completions included, whose envelope has no
+    cache-write field."""
+    for lane in ("chat_completions", "responses"):
+        fake = fake_model([[_msg_item("ok")]])
+        fake.usage_plan = [{"input_tokens": 100, "output_tokens": 20,
+                            "cached": 40, "cache_write": 30,
+                            "reasoning": 7}]
+        seen = []
+        client.chat("q", protocol=lane, on_usage=seen.append)
+        (call,) = seen[0].calls
+        assert (call.input_tokens, call.output_tokens, call.cache_read_tokens,
+                call.cache_write_tokens, call.reasoning_tokens) \
+            == (100, 20, 40, 30, 7), lane
+
+
+@needs_agents
+def test_usage_unreported_details_are_none(client, store_path, fake_model):
+    """With the provider payload in hand, a detail it never sent is None
+    — and so is that field's total — rather than a silent 0."""
+    fake = fake_model([[_msg_item("ok")]])
+    raw = {"prompt_tokens": 12, "completion_tokens": 3,
+           "cache_creation": {"ephemeral_5m_input_tokens": 2,
+                              "ephemeral_1h_input_tokens": 0}}
+    fake.usage_plan = [{"input_tokens": 12, "output_tokens": 3, "raw": raw}]
+    seen = []
+    client.chat("q", protocol="chat_completions", on_usage=seen.append)
+    (call,) = seen[0].calls
+    assert call.provider_usage == raw
+    assert call.cache_read_tokens is None and call.reasoning_tokens is None
+    assert call.cache_write_tokens_by_ttl == {"5m": 2, "1h": 0}
+    assert seen[0].totals()["reasoning_tokens"] is None
+
+
+@needs_agents
+def test_on_usage_validation(client, store_path, fake_model):
+    fake_model([[_msg_item("ok")]])
+    with pytest.raises(PageIndexAPIError, match="callable"):
+        client.chat("q", on_usage="not callable")
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    with pytest.raises(PageIndexAPIError, match="server-side"):
+        cloud.chat("q", on_usage=print)
+    with pytest.raises(PageIndexAPIError, match="server-side"):
+        cloud.chat_completions("q", on_usage=print)
+
+
+@needs_agents
+def test_on_usage_callback_errors(client, store_path, fake_model, caplog):
+    """A callback's own error surfaces from a completed run, but never
+    masks a failed run's error."""
+    def broken(report):
+        raise RuntimeError("callback bug")
+
+    fake_model([[_msg_item("ok")]])
+    with pytest.raises(RuntimeError, match="callback bug"):
+        client.chat("q", on_usage=broken)
+
+    fake = fake_model(_two_turns(store_path))
+    fake.fail_from = 1
+    with pytest.raises(PageIndexAPIError, match="model backend failed"):
+        client.chat("q", on_usage=broken)
+    assert "on_usage callback raised" in caplog.text
+
+
+# Messages engine: native counters folded to the shared convention.
+
+def _anthropic_usage_message(content, stop_reason, usage):
+    return {**_anthropic_message(content, stop_reason), "usage": usage}
+
+
+_TOOL_TURN = [{"type": "tool_use", "id": "tu_1", "name": "get_document",
+               "input": {"doc_name": "report.pdf"}}]
+_TEXT_TURN = [{"type": "text", "text": "The answer"}]
+
+
+@needs_anthropic
+@pytest.mark.parametrize("stream", [False, True])
+def test_usage_messages_multi_turn_success(client, store_path,
+                                           fake_anthropic, stream):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    turns = [_anthropic_message(_TOOL_TURN, "tool_use"),
+             _anthropic_message(_TEXT_TURN, "end_turn")]
+    fake_anthropic([_anthropic_sse(t) for t in turns] if stream else turns)
+    seen = []
+    _consume(client.chat("q", protocol="messages", model="claude-test",
+                         stream=stream, on_usage=seen.append))
+    report = seen[0]
+    assert report.protocol == "messages" and report.outcome == "completed"
+    assert report.completeness == "complete"
+    assert [(c.index, c.measurement, c.backend, c.model, c.response_id)
+            for c in report.calls] == [
+        (0, "complete", "anthropic", "claude-test", "msg_fake"),
+        (1, "complete", "anthropic", "claude-test", "msg_fake")]
+    assert report.totals()["input_tokens"] == 20
+    assert report.totals()["output_tokens"] == 10
+    assert report.totals()["reasoning_tokens"] is None  # no split on wire
+
+
+@needs_anthropic
+def test_usage_messages_cache_fields_and_ttl(client, store_path,
+                                             fake_anthropic):
+    """Native input_tokens excludes the cache; the record's input counts
+    the whole prompt, with reads, writes and lifetimes kept, and the
+    native payload in provider_usage."""
+    native = {"input_tokens": 10, "output_tokens": 5,
+              "cache_read_input_tokens": 400,
+              "cache_creation_input_tokens": 300,
+              "cache_creation": {"ephemeral_5m_input_tokens": 100,
+                                 "ephemeral_1h_input_tokens": 200}}
+    fake_anthropic([_anthropic_usage_message(_TEXT_TURN, "end_turn",
+                                             native)])
+    seen = []
+    client.chat("q", protocol="messages", model="claude-test",
+                on_usage=seen.append)
+    (call,) = seen[0].calls
+    assert call.input_tokens == 710
+    assert (call.cache_read_tokens, call.cache_write_tokens) == (400, 300)
+    assert call.cache_write_tokens_by_ttl == {"5m": 100, "1h": 200}
+    assert call.provider_usage["input_tokens"] == 10
+    assert call.provider_usage["cache_creation"] \
+        == native["cache_creation"]
+
+
+@needs_anthropic
+def test_usage_messages_failure_after_successful_turn(client, store_path,
+                                                      fake_anthropic):
+    """The runner reports no call starts, so a failed run can't vouch
+    for an unseen call: partial, with turn 1 kept."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_anthropic([_anthropic_message(_TOOL_TURN, "tool_use"), 400])
+    seen = []
+    with pytest.raises(PageIndexAPIError,
+                       match="model backend failed") as caught:
+        client.chat("q", protocol="messages", model="claude-test",
+                    on_usage=seen.append)
+    report = caught.value.usage
+    assert seen == [report] and report.outcome == "failed"
+    assert [call.measurement for call in report.calls] == ["complete"]
+    assert report.completeness == "partial"
+
+
+@needs_anthropic
+def test_usage_messages_stream_cancelled_mid_turn(client, store_path,
+                                                  fake_anthropic):
+    """A stream closed mid-turn keeps that turn's counts so far, marked
+    partial (lower bounds), and the run cancelled."""
+    fake_anthropic([_anthropic_sse(
+        _anthropic_message(_TEXT_TURN, "end_turn"))])
+    seen = []
+    events = client.chat("q", protocol="messages", model="claude-test",
+                         stream=True, on_usage=seen.append)
+    assert next(events).type == "message_start"
+    events.close()
+    report = seen[0]
+    assert report.outcome == "cancelled"
+    (call,) = report.calls
+    assert call.measurement == "partial" and call.input_tokens == 10
+    assert report.completeness == "partial"
