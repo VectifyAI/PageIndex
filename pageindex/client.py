@@ -1039,6 +1039,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
+        on_measurement: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> str: ...
 
     @overload
@@ -1059,6 +1060,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
+        on_measurement: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> ChatStream: ...
 
     @overload
@@ -1079,6 +1081,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
+        on_measurement: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> dict[str, Any]: ...
 
     @overload
@@ -1099,6 +1102,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
+        on_measurement: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> Iterator[dict[str, Any]]: ...
 
     @overload
@@ -1119,6 +1123,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
+        on_measurement: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> Iterator[Any]: ...
 
     @overload
@@ -1139,6 +1144,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
+        on_measurement: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> Union[str, ChatStream]: ...
 
     @overload
@@ -1160,6 +1166,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
+        on_measurement: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> Union[str, ChatStream, dict[str, Any], Iterator[Any]]: ...
 
     def chat(
@@ -1180,6 +1187,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
+        on_measurement: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> Union[str, ChatStream, dict[str, Any], Iterator[Any]]:
         """
         Ask a question about your documents.
@@ -1335,6 +1343,29 @@ class PageIndexClient:
                 leading system row in ``messages``. ``stream`` / ``doc_id``
                 are refused too: each has its own argument. Credentials
                 belong in ``backend``, never here.
+            on_measurement: Optional callback invoked immediately upon normal
+                completion of each individual model call / turn during the
+                conversation (across both streaming and non-streaming
+                execution on all protocols). Not invoked on failed calls or
+                streams closed early before a model call completes.
+                Exceptions raised by ``on_measurement`` are not caught and
+                propagate directly to the caller.
+                Receives a dict with keys:
+                - ``"call_id"``: unique identifier for the model call /
+                  response (e.g. ``"chatcmpl-..."``, ``"resp_..."``,
+                  ``"msg_..."``), or ``None`` if unavailable.
+                - ``"turn_index"``: 0-based integer index of the model call
+                  within the conversation run.
+                - ``"model"``: model name reported for this call.
+                - ``"backend"``: backend protocol (``"chat_completions"``,
+                  ``"responses"``, or ``"messages"``).
+                - ``"usage"``: dict of token usage for this call (e.g.
+                  ``{"input_tokens": ..., "output_tokens": ...}``) or ``None``.
+                - ``"status"``: measurement completeness status for this call
+                  (``"complete"`` when required base counters are reported as
+                  non-negative integers, ``"partial"`` when exactly one is reported,
+                  or ``"unknown"`` when neither is reported). Missing optional
+                  details do not downgrade base completeness.
 
         Returns:
             - answer lane, stream=False: the answer string
@@ -1344,15 +1375,34 @@ class PageIndexClient:
               yields typed event dicts:
               ``{"type": "thinking"|"answer", "delta": ...}``,
               ``{"type": "tool_call", "call_id", "name", "arguments"}``,
-              ``{"type": "tool_result", "call_id", "name", "output"}``
+              ``{"type": "tool_result", "call_id", "name", "output"}``.
+              Exposes ``execution_outcome`` (``"in_progress"``, ``"completed"``,
+              ``"failed"``, or ``"cancelled"``), ``measurements``,
+              ``measurement_status``, ``usage``, and ``close()``.
             - protocol lane, stream=False: the protocol's response
-              envelope — Chat Completions: ``choices`` and ``usage``;
-              Responses: ``output`` plus an ``items``
-              transcript and cross-turn ``usage``; Messages: the final
-              message with a ``messages`` turn sequence and aggregated
-              ``usage``
-            - protocol lane, stream=True: an iterator of the protocol's
-              own stream events
+              envelope — Chat Completions: ``choices``, ``usage``,
+              ``measurement_status``, and ``execution_outcome="completed"``
+              (cached input and reasoning details are breakdowns of base
+              input/output counts); Responses: ``output`` plus an ``items``
+              transcript, cross-turn ``usage``, ``measurement_status``, and
+              ``execution_outcome="completed"``; Messages: the final message with a
+              ``messages`` turn sequence, aggregated ``usage``,
+              ``measurement_status``, and ``execution_outcome="completed"``.
+            - protocol lane, stream=True: a ``StreamIterator`` yielding the
+              protocol's own stream events and exposing ``execution_outcome``,
+              ``measurements``, ``measurement_status``, ``usage``, and ``close()``.
+
+        Raises:
+            PageIndexAPIError: On failure. If earlier turns completed before
+                failure, ``exc.measurements`` contains their records,
+                ``exc.measurement_status`` reflects their completeness,
+                ``exc.usage`` contains their aggregate usage, and
+                ``exc.execution_outcome="failed"``. Closing an active stream via
+                ``close()`` stops further turns and transitions ``execution_outcome``
+                to ``"cancelled"``; an in-flight network call to a provider backend
+                cannot be terminated mid-flight, and usage never reported by a
+                provider is not fabricated. Streams abandoned but still referenced
+                remain in-progress until explicitly closed or garbage-collected.
         """
         if protocol not in (None, "chat_completions", "responses",
                             "messages"):
@@ -1416,7 +1466,8 @@ class PageIndexClient:
                     folder_id=folder_id,
                     instructions=cast(Optional[str], instructions),
                     max_turns=max_turns, extra_body=body,
-                    extra_headers=extra_headers, backend=backend)
+                    extra_headers=extra_headers, backend=backend,
+                    on_measurement=on_measurement)
             body = extra_body
             if reasoning_effort:
                 # Anthropic's own effort field, beside the caller's other
@@ -1429,7 +1480,8 @@ class PageIndexClient:
                 messages, model=model, stream=stream, doc_id=doc_id,
                 folder_id=folder_id,
                 system=instructions, max_turns=max_turns, extra_body=body,
-                extra_headers=extra_headers, backend=backend)
+                extra_headers=extra_headers, backend=backend,
+                on_measurement=on_measurement)
         if instructions:
             if isinstance(messages, str):
                 if not messages.strip():
@@ -1447,7 +1499,8 @@ class PageIndexClient:
                 enable_citations=enable_citations, folder_id=folder_id,
                 model=model, max_turns=max_turns,
                 reasoning_effort=reasoning_effort, extra_body=extra_body,
-                extra_headers=extra_headers, backend=backend)
+                extra_headers=extra_headers, backend=backend,
+                on_measurement=on_measurement)
         if stream:
             # the default means "on where available"
             resolved = True if show_process is None else show_process
@@ -1459,7 +1512,8 @@ class PageIndexClient:
                                        show_process=resolved,
                                        max_turns=max_turns, backend=backend,
                                        extra_headers=extra_headers,
-                                       extra_body=extra_body)
+                                       extra_body=extra_body,
+                                       on_measurement=on_measurement)
             from .local_chat import run_cloud_chat_stream
             chunks = self.chat_completions(messages, stream=True,
                                            stream_metadata=True,
@@ -1470,7 +1524,8 @@ class PageIndexClient:
                                            max_turns=max_turns,
                                            backend=backend,
                                            extra_headers=extra_headers,
-                                           extra_body=extra_body)
+                                           extra_body=extra_body,
+                                           on_measurement=on_measurement)
             return run_cloud_chat_stream(
                 cast(Iterator[dict[str, Any]], chunks), resolved)
         result = self.chat_completions(messages, doc_id=doc_id, model=model,
@@ -1479,7 +1534,8 @@ class PageIndexClient:
                                        reasoning_effort=reasoning_effort,
                                        max_turns=max_turns, backend=backend,
                                        extra_headers=extra_headers,
-                                       extra_body=extra_body)
+                                       extra_body=extra_body,
+                                       on_measurement=on_measurement)
         envelope = cast(dict[str, Any], result)
         try:
             return envelope["choices"][0]["message"]["content"] or ""
@@ -1506,6 +1562,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         *,
         folder_id: Optional[str] = None,
+        on_measurement: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> Union[dict[str, Any], Iterator[str], Iterator[dict[str, Any]]]:
         """
         Kept for existing code — new code calls ``chat()``. Everything
@@ -1602,12 +1659,41 @@ class PageIndexClient:
                 (per-call keys win). Keys are LiteLLM's own connection
                 params — ``api_key``, ``base_url``, ``api_version``,
                 ``aws_*``, … — passed through verbatim.
+            on_measurement: Optional callback invoked immediately upon normal
+                completion of each individual model call / turn during the
+                run (across both streaming and non-streaming execution).
+                Receives a dict with ``call_id``, ``turn_index``, ``model``,
+                ``backend``, ``usage``, and per-call ``status`` (``"complete"``,
+                ``"partial"``, or ``"unknown"``). Not invoked on failed calls or
+                streams closed early before a call completes.
 
         Returns:
             - stream=False: complete response dict ({'id', 'object', 'created',
-              'choices', 'usage'})
-            - stream=True, stream_metadata=False: iterator of text chunks
-            - stream=True, stream_metadata=True: iterator of chunk dicts
+              'choices', 'usage', 'measurement_status', 'execution_outcome'}). In ``usage``, cached input
+              and reasoning details are breakdowns of base input/output counts;
+              consumers must not add them again to those totals.
+              ``measurement_status`` indicates aggregate measurement completeness:
+              ``"complete"`` (all contributing calls complete), ``"partial"``
+              (at least one measurement known, but not all calls complete), or
+              ``"unknown"`` (no contributing calls or all unknown).
+              ``execution_outcome`` is ``"completed"``.
+            - stream=True, stream_metadata=False: StreamIterator of text chunks.
+              Exposes ``execution_outcome``, ``measurements``,
+              ``measurement_status``, ``usage``, and ``close()``.
+            - stream=True, stream_metadata=True: StreamIterator of chunk dicts (the trailing
+              chunk carries ``usage``, ``measurement_status``, and
+              ``execution_outcome="completed"``). Exposes ``execution_outcome``,
+              ``measurements``, ``measurement_status``, ``usage``, and ``close()``.
+
+        Raises:
+            PageIndexAPIError: On failure. If earlier turns completed before
+                failure, ``exc.measurements`` contains their measurement records,
+                ``exc.measurement_status`` reflects their completeness, ``exc.usage``
+                carries their aggregate usage, and ``exc.execution_outcome="failed"``.
+                Closing a stream early via ``close()`` transitions ``execution_outcome``
+                to ``"cancelled"`` between turns; an in-flight provider backend request
+                cannot be aborted mid-turn, and PageIndex never fabricates usage that
+                the provider never delivered.
         """
         if isinstance(messages, str):
             if not messages.strip():
@@ -1627,6 +1713,7 @@ class PageIndexClient:
                 max_turns=max_turns, top_p=top_p, max_tokens=max_tokens,
                 reasoning_effort=reasoning_effort, extra_body=extra_body,
                 extra_headers=extra_headers, backend=backend,
+                on_measurement=on_measurement,
             )
         if not getattr(self, "api_key", None):
             raise PageIndexAPIError(
@@ -1683,6 +1770,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         *,
         folder_id: Optional[str] = None,
+        on_measurement: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> Union[dict[str, Any], Iterator[dict[str, Any]]]:
         """
         The engine behind ``chat(protocol="responses")``: document QA over
@@ -1697,7 +1785,11 @@ class PageIndexClient:
         in the extra ``items`` field.
         Append the returned ``items`` to your next call's ``input`` verbatim
         to keep provider prompt-cache prefix continuity and the agent's
-        memory of what it already read.
+        memory of what it already read. Cross-turn ``usage`` reports input and
+        output totals; cached input and reasoning details are breakdowns of
+        their respective base input/output counts and must not be added again.
+        The envelope also carries ``measurement_status`` (``"complete"``,
+        ``"partial"``, or ``"unknown"``) and ``execution_outcome="completed"``.
 
         Requires a backend that supports the
         Responses API; backends that only speak chat.completions should use
@@ -1711,14 +1803,18 @@ class PageIndexClient:
             input: A user message string, or a list of Responses input items
                 (round-trip prior ``items`` here).
             model: Backend model name (defaults to ``chat_model``).
-            stream: Yield Responses stream events as dicts — one logical
+            stream: Yield Responses stream events as dicts via a ``StreamIterator``
+                (exposing ``execution_outcome``, ``measurements``,
+                ``measurement_status``, ``usage``, and ``close()``) — one logical
                 response per call: per-turn backend lifecycle events are
                 collapsed to one opening ``response.created`` and one
                 final terminal event, sequence numbers are reassigned
                 monotonically, and ``output_index`` is re-based onto the
                 single logical ``output``. The final event is the
                 terminal ``response.*`` for the run's status; its
-                ``response`` carries the tool outputs in ``items``.
+                ``response`` carries the tool outputs in ``items``,
+                ``usage``, ``measurement_status``, and
+                ``execution_outcome="completed"``.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call and is part
@@ -1751,6 +1847,38 @@ class PageIndexClient:
                 win). Keys are the openai SDK's client params —
                 ``api_key``, ``base_url``, ``organization``, … — passed
                 verbatim; unknown keys raise.
+            on_measurement: Optional callback invoked immediately upon normal
+                completion of each individual model call / turn during the
+                run (across both streaming and non-streaming execution).
+                Receives a dict with ``call_id``, ``turn_index``, ``model``,
+                ``backend``, ``usage``, and per-call ``status`` (``"complete"``,
+                ``"partial"``, or ``"unknown"``). Not invoked on failed calls or
+                streams closed early before a call completes.
+
+        Returns:
+            - stream=False: Response dict ({'id', 'object', 'created', 'model', 'output',
+              'items', 'usage', 'measurement_status', 'execution_outcome'}).
+              In ``usage``, cached input and reasoning details are breakdowns of base
+              input/output counts and must not be added again.
+              ``measurement_status`` indicates aggregate measurement completeness:
+              ``"complete"`` (all contributing calls complete), ``"partial"``
+              (at least one measurement known, but not all calls complete), or
+              ``"unknown"`` (no contributing calls or all unknown).
+              ``execution_outcome`` is ``"completed"``.
+            - stream=True: ``StreamIterator`` yielding event dicts (the final event carries
+              ``usage``, ``measurement_status``, and ``execution_outcome="completed"``).
+              Exposes ``execution_outcome``, ``measurements``, ``measurement_status``,
+              ``usage``, and ``close()``.
+
+        Raises:
+            PageIndexAPIError: On failure. If earlier turns completed before
+                failure, ``exc.measurements`` contains their measurement records,
+                ``exc.measurement_status`` reflects their completeness, ``exc.usage``
+                carries their aggregate usage, and ``exc.execution_outcome="failed"``.
+                Closing a stream early via ``close()`` transitions ``execution_outcome``
+                to ``"cancelled"`` between turns; an in-flight provider backend request
+                cannot be aborted mid-turn, and PageIndex never fabricates usage that
+                the provider never delivered.
         """
         self._require_own_chat("chat(protocol='responses')")
         from .local_chat import run_responses
@@ -1761,6 +1889,7 @@ class PageIndexClient:
             max_turns=max_turns, max_output_tokens=max_output_tokens,
             reasoning=reasoning, extra_body=extra_body,
             extra_headers=extra_headers, backend=backend,
+            on_measurement=on_measurement,
         )
 
     def _messages(
@@ -1782,6 +1911,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         *,
         folder_id: Optional[str] = None,
+        on_measurement: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> Union[dict[str, Any], Iterator[Any]]:
         """
         The engine behind ``chat(protocol="messages")``: document QA over
@@ -1797,7 +1927,13 @@ class PageIndexClient:
         format's native behavior: the response is the
         final message envelope with cross-turn aggregated ``usage`` plus a
         ``messages`` field — the full new turn sequence, valid for verbatim
-        append to your history. The managed system prompt carries a
+        append to your history. In ``usage``, ``input_tokens`` is uncached
+        input only; total input volume is ``input_tokens + cache_read_input_tokens + cache_creation_input_tokens``.
+        Lifetime quantities in ``cache_creation`` break down
+        ``cache_creation_input_tokens`` (not added to total input), and
+        ``output_tokens`` includes ``output_tokens_details.thinking_tokens``.
+        The envelope also carries ``measurement_status`` (``"complete"``,
+        ``"partial"``, or ``"unknown"``) and ``execution_outcome="completed"``. The managed system prompt carries a
         ``cache_control`` breakpoint, and the request sets the top-level
         ``cache_control`` so each turn re-reads the growing conversation
         from cache — skipped when your own blocks already use the three
@@ -1822,9 +1958,10 @@ class PageIndexClient:
                 only a question, and rises to
                 budget_tokens + 8192 when ``thinking`` is enabled (the wire
                 requires max_tokens above the budget). Passed through.
-            stream: Yield the Anthropic SDK's event stream across turns
-                (its native event objects, including SDK-synthesized
-                convenience events), one message sequence per turn.
+            stream: Yield the Anthropic SDK's event stream across turns via a
+                ``StreamIterator`` (exposing ``execution_outcome``, ``measurements``,
+                ``measurement_status``, ``usage``, and ``close()``), one message
+                sequence per turn.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call. Local
@@ -1856,13 +1993,42 @@ class PageIndexClient:
                 ``base_url``, ``auth_token``, …; the cloud routes take
                 their own client's (``aws_region``, ``project_id``, …) —
                 and unknown keys raise.
+            on_measurement: Optional callback invoked immediately upon normal
+                completion of each individual model call / turn during the
+                run (across both streaming and non-streaming execution).
+                Receives a dict with ``call_id``, ``turn_index``, ``model``,
+                ``backend``, ``usage``, and per-call ``status`` (``"complete"``,
+                ``"partial"``, or ``"unknown"``). Not invoked on failed calls or
+                streams closed early before a call completes.
+
+        Returns:
+            - stream=False: Response envelope with ``messages``, aggregated ``usage``,
+              ``measurement_status`` (``"complete"``, ``"partial"``, or ``"unknown"``),
+              and ``execution_outcome="completed"``. In ``usage``, ``input_tokens`` is uncached
+              input only; total input volume is ``input_tokens + cache_read_input_tokens + cache_creation_input_tokens``.
+              Lifetime quantities in ``cache_creation`` break down ``cache_creation_input_tokens``
+              (not added separately to total input), and ``output_tokens`` includes
+              ``output_tokens_details.thinking_tokens``.
+            - stream=True: ``StreamIterator`` yielding Anthropic event objects across turns.
+              Exposes ``execution_outcome``, ``measurements``, ``measurement_status``,
+              ``usage``, and ``close()``.
+
+        Raises:
+            PageIndexAPIError: On failure. If earlier turns completed before failure,
+                ``exc.measurements`` contains their measurement records,
+                ``exc.measurement_status`` reflects their completeness, ``exc.usage``
+                carries their aggregate usage, and ``exc.execution_outcome="failed"``.
+                Closing a stream early via ``close()`` transitions ``execution_outcome``
+                to ``"cancelled"`` between turns; an in-flight provider backend request
+                cannot be aborted mid-turn, and PageIndex never fabricates usage that
+                the provider never delivered.
         """
         self._require_own_chat("chat(protocol='messages')")
         if not model and self._chat_model_stock:
             raise _needs_model("chat(protocol='messages')")
         from .local_chat import run_messages
         wire, route = _claude_wire(model or self.chat_model,
-                                   "chat(protocol='messages')")
+                                    "chat(protocol='messages')")
         return run_messages(
             self, messages, model=wire, route=route, max_tokens=max_tokens,
             stream=stream, doc_id=doc_id, folder_id=folder_id, system=system,
@@ -1870,6 +2036,7 @@ class PageIndexClient:
             stop_sequences=stop_sequences, max_turns=max_turns,
             thinking=thinking, extra_body=extra_body,
             extra_headers=extra_headers, backend=backend,
+            on_measurement=on_measurement,
         )
 
     # ---------- DOCUMENT MANAGEMENT ----------
