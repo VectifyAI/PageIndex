@@ -70,6 +70,7 @@ ROUTING_COST = 1         # R(v), in pages
 EXPAND_CONCURRENCY = 32  # measured plateau: the ready frontier is 21-28 wide on few-hundred-page PDFs
 PAGE_CHARS = 6000        # per-page text handed to the model
 TITLE_MAX_CHARS = 200    # a union title longer than this falls back to a page label
+EMPTY_RETRIES = 0
 
 EXPAND_PROMPT = """You are splitting an over-long section of a PDF into its subsections.
 
@@ -758,7 +759,7 @@ async def expand(structure, pages, lines, args, log, frozen):
             proposed = own(proposed)
             if proposed:
                 llm_candidates.append((f"llm:{attempts}", proposed))
-                break                    # an empty answer is retried, not trusted
+                break
         return llm_candidates, attempts, entries
 
     async def process(node, ancestors, nxt):
@@ -878,7 +879,7 @@ def final_nodes(nodes, trigger, frozen):
 async def optimize(structure, pages, lines, model=None, routing=ROUTING_COST,
                    trigger_pages=TRIGGER_PAGES, min_gain_ratio=0.0,
                    do_merge=True, do_expand=True, max_rounds=3, page_count=None,
-                   cache=None, kinds=("section", "table"), empty_retries=1,
+                   cache=None, kinds=("section", "table"), empty_retries=EMPTY_RETRIES,
                    do_relabel=True, progress=False, on_final=None,
                    concurrency=None):
     """Run merge and expand over a tree until neither changes anything.
@@ -1007,7 +1008,7 @@ async def main():
                         help="per-page detection cache used as an extra candidate source")
     parser.add_argument("--kinds", default="section,table",
                         help="heading kinds accepted from the cache (default section,table)")
-    parser.add_argument("--empty-retries", type=int, default=1,
+    parser.add_argument("--empty-retries", type=int, default=EMPTY_RETRIES,
                         help="extra lookahead attempts when the model returns no children")
     parser.add_argument("--no-relabel", dest="relabel", action="store_false",
                         help="keep provenance ids like 0266.1 instead of renumbering")

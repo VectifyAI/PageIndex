@@ -138,10 +138,27 @@ def test_expand_skips_the_heading_of_a_neighbor_sharing_the_last_page(monkeypatc
         return {"subsections": []}
     monkeypatch.setattr(tree_optimize, "ask_model", propose)
 
-    asyncio.run(tree_optimize.optimize(tree, pages, lines, model="m", do_expand=True))
+    asyncio.run(tree_optimize.optimize(tree, pages, lines, model="m", do_expand=True,
+                                       empty_retries=1))
 
     assert not replies
     assert shape(tree[0]["nodes"][1]["nodes"]) == [("Methods (intro)", 4, 5), ("Setup", 6, 12)]
+
+
+def test_expand_asks_once_when_the_model_finds_no_subsections(monkeypatch):
+    pages = ["body " * 250] * 20
+    lines = [[line for line in page.splitlines() if line.strip()] for page in pages]
+    tree = [{"title": "R", "start_index": 1, "end_index": 20, "node_id": "0000"}]
+    asked = []
+
+    async def propose(model, prompt):
+        asked.append(prompt)
+        return {"subsections": []}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+
+    asyncio.run(tree_optimize.optimize(tree, pages, lines, model="m", do_expand=True))
+
+    assert len(asked) == 1 and "nodes" not in tree[0]
 
 
 def test_expand_filters_cached_headings_like_proposed_ones(monkeypatch):
