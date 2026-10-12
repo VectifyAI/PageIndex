@@ -213,7 +213,7 @@ def _openai_model(protocol: str, model_name: str, backend=None):
     except ImportError:
         raise PageIndexAPIError(
             f"'{model_name}' routes through LiteLLM, but litellm is not "
-            "installed. Run:  pip install 'litellm>=1.97'"
+            "installed. Run:  pip install -U litellm"
         )
     from .utils import (_litellm_model, _mute_litellm_bridge_usage_warning,
                         _quiet_litellm, _repair_litellm_types)

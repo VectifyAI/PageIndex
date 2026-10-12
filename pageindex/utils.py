@@ -53,9 +53,9 @@ def _repair_litellm_types() -> None:
 def _mute_litellm_bridge_usage_warning() -> None:
     """litellm's chat→Responses bridge (e.g. OpenAI gpt-5.4+ with function
     tools) logs a chat-shaped usage dict inside a ResponseAPIUsage field
-    (litellm_logging._get_assembled_streaming_response, 1.97–1.98), and
-    pydantic reports it on every streamed turn. Hide exactly that message;
-    every other warning still surfaces."""
+    (litellm_logging._get_assembled_streaming_response, 1.97 through at
+    least 1.105), and pydantic reports it on every streamed turn. Hide
+    exactly that message; every other warning still surfaces."""
     import warnings
     warnings.filterwarnings(
         "ignore",
