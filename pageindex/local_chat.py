@@ -596,40 +596,71 @@ def _wrap_max_turns(max_turns) -> PageIndexAPIError:
     )
 
 
-def _usage_sums(raw_responses) -> "tuple[int, int, int, int, int]":
-    prompt = completion = cached = cache_write = reasoning = 0
+def _run_usage(shape, raw_responses) -> dict:
+    """Cross-turn sums in one dialect, plus each model call's own usage in
+    request_usage_entries (openai-agents' name for that list)."""
+    counts = []  # (input, output, cache read, cache write, reasoning)
     for r in raw_responses:
         if r.usage is None:
             continue
-        prompt += r.usage.input_tokens or 0
-        completion += r.usage.output_tokens or 0
-        details = getattr(r.usage, "input_tokens_details", None)
-        cached += getattr(details, "cached_tokens", 0) or 0
-        cache_write += getattr(details, "cache_write_tokens", 0) or 0
-        details = getattr(r.usage, "output_tokens_details", None)
-        reasoning += getattr(details, "reasoning_tokens", 0) or 0
-    return prompt, completion, cached, cache_write, reasoning
+        details_in = getattr(r.usage, "input_tokens_details", None)
+        details_out = getattr(r.usage, "output_tokens_details", None)
+        counts.append((r.usage.input_tokens or 0, r.usage.output_tokens or 0,
+                       getattr(details_in, "cached_tokens", 0) or 0,
+                       getattr(details_in, "cache_write_tokens", 0) or 0,
+                       getattr(details_out, "reasoning_tokens", 0) or 0))
+    usage = shape(*([sum(column) for column in zip(*counts)] or [0] * 5))
+    usage["request_usage_entries"] = [shape(*call) for call in counts]
+    return usage
 
 
-def _openai_usage(raw_responses) -> dict:
-    """Cross-turn sums, chat.completions dialect."""
-    prompt, completion, cached, _, reasoning = _usage_sums(raw_responses)
+def _chat_shape(prompt, completion, cached, cache_write, reasoning) -> dict:
     return {"prompt_tokens": prompt, "completion_tokens": completion,
             "total_tokens": prompt + completion,
-            "prompt_tokens_details": {"cached_tokens": cached},
+            "prompt_tokens_details": {"cached_tokens": cached,
+                                      "cache_write_tokens": cache_write},
             "completion_tokens_details": {"reasoning_tokens": reasoning}}
 
 
-def _responses_usage(raw_responses) -> dict:
-    """Cross-turn sums, Responses dialect."""
-    prompt, completion, cached, cache_write, reasoning = (
-        _usage_sums(raw_responses))
+def _responses_shape(prompt, completion, cached, cache_write,
+                     reasoning) -> dict:
     return {"input_tokens": prompt,
             "input_tokens_details": {"cached_tokens": cached,
                                      "cache_write_tokens": cache_write},
             "output_tokens": completion,
             "output_tokens_details": {"reasoning_tokens": reasoning},
             "total_tokens": prompt + completion}
+
+
+def _openai_usage(raw_responses) -> dict:
+    """chat.completions dialect."""
+    return _run_usage(_chat_shape, raw_responses)
+
+
+def _responses_usage(raw_responses) -> dict:
+    """Responses dialect."""
+    return _run_usage(_responses_shape, raw_responses)
+
+
+def _usage_recorder():
+    """Run hooks keeping every model response: a non-streamed run that
+    raises has no result to read raw_responses from, and openai-agents
+    attaches its run data only to its own exceptions, not a provider's."""
+    from agents import RunHooks
+
+    class Recorder(RunHooks):
+        def __init__(self):
+            self.responses = []
+
+        async def on_llm_end(self, context, agent, response):
+            self.responses.append(response)
+
+    return Recorder()
+
+
+def _with_usage(error: PageIndexAPIError, usage: dict) -> PageIndexAPIError:
+    error.usage = usage
+    return error
 
 
 def _chat_agent(client, messages, doc_id, model, temperature=None,
@@ -731,7 +762,9 @@ async def _chat_events_agen(client, agent, items, run_kwargs):
     from openai.types.responses import (
         ResponseReasoningSummaryTextDeltaEvent,
         ResponseReasoningTextDeltaEvent, ResponseTextDeltaEvent)
-    streamed = Runner.run_streamed(agent, input=items, **run_kwargs)
+    recorder = _usage_recorder()
+    streamed = Runner.run_streamed(agent, input=items, hooks=recorder,
+                                   **run_kwargs)
     completed = False
     names = {}  # call_id -> tool name, to label results
     try:
@@ -768,8 +801,10 @@ async def _chat_events_agen(client, agent, items, run_kwargs):
                            "output": event.item.output}
         completed = True
     except (MaxTurnsExceeded, AgentsException, openai.OpenAIError) as exc:
-        raise _translate_run_error(exc, run_kwargs.get("max_turns"),
-                                   "chat", client) from exc
+        raise _with_usage(
+            _translate_run_error(exc, run_kwargs.get("max_turns"), "chat",
+                                 client),
+            _openai_usage(recorder.responses)) from exc
     finally:
         if not completed and hasattr(streamed, "cancel"):
             streamed.cancel()  # abandoned/failed: stop the agent task
@@ -1007,12 +1042,16 @@ def run_chat_completions(client, messages, stream: bool = False,
     from agents import Runner
     from agents.exceptions import AgentsException, MaxTurnsExceeded
     if not stream:
+        recorder = _usage_recorder()
         try:
             result = _run_sync(_run_closing(agent,
-                Runner.run(agent, input=items, **run_kwargs)))
+                Runner.run(agent, input=items, hooks=recorder,
+                           **run_kwargs)))
         except (MaxTurnsExceeded, AgentsException,
                 openai.OpenAIError) as exc:
-            raise _translate_run_error(exc, max_turns, "chat", client) from exc
+            raise _with_usage(
+                _translate_run_error(exc, max_turns, "chat", client),
+                _openai_usage(recorder.responses)) from exc
         return {
             "id": f"chatcmpl-{uuid.uuid4().hex}",
             "object": "chat.completion",
@@ -1040,7 +1079,9 @@ def run_chat_completions(client, messages, stream: bool = False,
 
     async def agen():
         from openai.types.responses import ResponseTextDeltaEvent
-        streamed = Runner.run_streamed(agent, input=items, **run_kwargs)
+        recorder = _usage_recorder()
+        streamed = Runner.run_streamed(agent, input=items, hooks=recorder,
+                                       **run_kwargs)
         completed = False
         # First yield inside the try: a consumer that stops on the opening
         # chunk must still tear the run down via the finally below.
@@ -1053,7 +1094,9 @@ def run_chat_completions(client, messages, stream: bool = False,
             completed = True
         except (MaxTurnsExceeded, AgentsException,
                 openai.OpenAIError) as exc:
-            raise _translate_run_error(exc, max_turns, "chat", client) from exc
+            raise _with_usage(
+                _translate_run_error(exc, max_turns, "chat", client),
+                _openai_usage(recorder.responses)) from exc
         finally:
             if not completed and hasattr(streamed, "cancel"):
                 streamed.cancel()  # abandoned/failed: stop the agent task
@@ -1156,14 +1199,16 @@ def run_responses(client, input, model: Optional[str] = None,
 
     if not stream:
         _record_response_status(agent, recorded)
+        recorder = _usage_recorder()
         try:
             result = _run_sync(_run_closing(agent,
                 Runner.run(agent, input=[dict(item) for item in items],
-                           **run_kwargs)))
+                           hooks=recorder, **run_kwargs)))
         except (MaxTurnsExceeded, AgentsException,
                 openai.OpenAIError) as exc:
-            raise _translate_run_error(exc, max_turns,
-                                       "responses", client) from exc
+            raise _with_usage(
+                _translate_run_error(exc, max_turns, "responses", client),
+                _responses_usage(recorder.responses)) from exc
         transcript = result.to_input_list()[len(items):]
         return envelope(transcript, result.raw_responses)
 
@@ -1172,9 +1217,11 @@ def run_responses(client, input, model: Optional[str] = None,
                  "response.incomplete", "response.queued"}
 
     async def agen():
+        from types import SimpleNamespace
+        recorder = _usage_recorder()
         streamed = Runner.run_streamed(agent,
                                        input=[dict(item) for item in items],
-                                       **run_kwargs)
+                                       hooks=recorder, **run_kwargs)
         sequence = 0
         # output_index addresses an item's position in the logical
         # response.output (the final envelope's list). Backend events
@@ -1214,6 +1261,13 @@ def run_responses(client, input, model: Optional[str] = None,
                                 if state.get(field) is not None:
                                     recorded[field] = state[field]
                             output_offset += len(state.get("output") or [])
+                            cut = getattr(getattr(event.data, "response",
+                                                  None), "usage", None)
+                            if data["type"] != "response.completed" and cut:
+                                # openai-agents raises on a call cut short
+                                # before its hooks see it; it was billed.
+                                recorder.responses.append(
+                                    SimpleNamespace(usage=cut))
                         continue
                     if isinstance(data.get("output_index"), int):
                         data["output_index"] += output_offset
@@ -1226,12 +1280,14 @@ def run_responses(client, input, model: Optional[str] = None,
             # except for max_turns, which always gets its guidance
             if (isinstance(exc, MaxTurnsExceeded)
                     or recorded.get("status") not in ("failed", "incomplete")):
-                raise _translate_run_error(exc, max_turns,
-                                           "responses", client) from exc
+                raise _with_usage(
+                    _translate_run_error(exc, max_turns, "responses", client),
+                    _responses_usage(recorder.responses)) from exc
             completed = True
         except openai.OpenAIError as exc:
-            raise _translate_run_error(exc, max_turns,
-                                       "responses", client) from exc
+            raise _with_usage(
+                _translate_run_error(exc, max_turns, "responses", client),
+                _responses_usage(recorder.responses)) from exc
         finally:
             if not completed and hasattr(streamed, "cancel"):
                 streamed.cancel()  # abandoned/failed: stop the agent task
@@ -1243,7 +1299,7 @@ def run_responses(client, input, model: Optional[str] = None,
                     "failed": "response.failed"}.get(status,
                                                      "response.completed")
         yield {"type": terminal, "sequence_number": sequence,
-               "response": envelope(transcript, streamed.raw_responses)}
+               "response": envelope(transcript, recorder.responses)}
 
     return _stream_sync(agen)
 
@@ -1367,12 +1423,28 @@ def _dump_message(message) -> dict:
     return message
 
 
-def _anthropic_usage(dumps) -> dict:
-    """The turns' native usage dicts merged field by field (None-safe):
-    counts add up, nested count objects (cache_creation, server_tool_use,
-    output_tokens_details) key by key, the per-iteration breakdown lists
-    concatenate, and labels (service_tier, fallback_credit) keep the last
-    value a turn set."""
+def _anthropic_usage(turns) -> dict:
+    """The turns' native usage dicts, given as (usage, model) pairs, merged
+    field by field (None-safe): counts add up, nested count objects
+    (cache_creation, server_tool_use, output_tokens_details) key by key,
+    labels (service_tier, fallback_credit) keep the last value a turn set,
+    and iterations — the API's per-sampling-iteration breakdown —
+    concatenate, a turn that reports none counting as one iteration."""
+    dumps = []
+    for usage, model in turns:
+        if not usage.get("iterations"):
+            usage = {**usage, "iterations": [{
+                "type": "message", "model": model,
+                "input_tokens": usage.get("input_tokens") or 0,
+                "output_tokens": usage.get("output_tokens") or 0,
+                "cache_creation_input_tokens":
+                    usage.get("cache_creation_input_tokens") or 0,
+                "cache_read_input_tokens":
+                    usage.get("cache_read_input_tokens") or 0,
+                "cache_creation": usage.get("cache_creation")}]}
+        dumps.append(usage)
+    if not dumps:
+        return {"input_tokens": 0, "output_tokens": 0, "iterations": []}
     return {key: _merge_usage([dump.get(key) for dump in dumps])
             for key in dumps[-1]}
 
@@ -1516,93 +1588,112 @@ def run_messages(client, messages, model: str, route: str,
 
     runner.generate_tool_call_response = checked_tool_response
 
+    def run_usage(turns) -> dict:
+        return _anthropic_usage([(turn.usage.model_dump(mode="json"),
+                                  turn.model) for turn in turns])
+
+    def transcript(turns) -> list:
+        """The full turn sequence (assistant tool_use + user tool_result +
+        final), valid for verbatim append to the caller's history. Reads
+        the runner's params back, which does no HTTP."""
+        final = turns[-1]
+        for block in moved:
+            # a request's breakpoint, not history
+            block.pop("cache_control", None)
+        captured: dict = {}
+
+        def capture(params):
+            captured.update(params)
+            return params
+
+        runner.set_messages_params(capture)
+        if not captured.get("messages"):
+            # The conversation is read back through a mutator; if a vendor
+            # change stops it delivering params, the envelope would silently
+            # lose the tool turns — fail loudly instead.
+            raise _with_usage(PageIndexAPIError(
+                "Could not read the conversation back from the anthropic "
+                "tool runner — the installed anthropic version is "
+                "incompatible with this pageindex release."
+            ), run_usage(turns))
+        conversation = list(captured["messages"])
+        # The runner appends a turn to its params only when it executed
+        # tools from it, and which turns qualify is vendor policy that has
+        # changed across anthropic releases, so stop_reason alone cannot
+        # tell. Whether final's tool_use ids already sit in the history is
+        # the ground truth for "already appended".
+        new_messages = [_dump_message(message)
+                        for message in conversation[len(prepared):]]
+        final_blocks = [_dump_block(item) for item in final.content]
+        final_ids = {block.get("id") for block in final_blocks
+                     if block.get("type") == "tool_use"}
+        history_ids = {block.get("id")
+                       for message in new_messages
+                       if (message.get("role") == "assistant"
+                           and isinstance(message.get("content"), list))
+                       for block in message["content"]
+                       if (isinstance(block, dict)
+                           and block.get("type") == "tool_use")}
+        if not final_ids or not final_ids <= history_ids:
+            # Unexecuted tool_use blocks (refusal turns) have no tool_result,
+            # so they cannot enter an appendable history — strip them, as the
+            # SDK itself does when it rebuilds params around such a turn.
+            appendable = [block for block in final_blocks
+                          if block.get("type") != "tool_use"]
+            if appendable:
+                new_messages = new_messages + [
+                    {"role": "assistant", "content": appendable}]
+        return new_messages
+
     if stream:
         class Result(anthropic.BaseModel):
             type: str
             usage: dict
+            messages: list
 
         def events() -> Iterator[Any]:
-            usages = []
+            turns: list = []  # each finished turn's message snapshot
             try:
                 for turn_stream in runner:
                     for event in turn_stream:
                         if event.type == "message_stop":
-                            usages.append(
-                                event.message.usage.model_dump(mode="json"))
+                            turns.append(event.message)
                         yield event
             except anthropic.AnthropicError as exc:
-                raise _model_backend_error(exc, "messages", client) from exc
+                raise _with_usage(
+                    _model_backend_error(exc, "messages", client),
+                    run_usage(turns)) from exc
+            except PageIndexAPIError as exc:  # a tool failure, re-raised
+                raise _with_usage(exc, run_usage(turns))
             finally:
                 # runs on exhaustion and abandonment (GeneratorExit) alike
                 if owns_transport:
                     backend_client.close()
-            if usages:
-                yield Result(type="result", usage=_anthropic_usage(usages))
+            if turns:
+                yield Result(type="result", usage=run_usage(turns),
+                             messages=transcript(turns))
         return events()
 
+    turns: list = []
     try:
-        turns = list(runner)
+        for turn in runner:
+            turns.append(turn)
     except anthropic.AnthropicError as exc:
-        raise _model_backend_error(exc, "messages", client) from exc
+        raise _with_usage(_model_backend_error(exc, "messages", client),
+                          run_usage(turns)) from exc
+    except PageIndexAPIError as exc:  # a tool failure, re-raised
+        raise _with_usage(exc, run_usage(turns))
     finally:
         # safe here: the params read-back below does no HTTP
         if owns_transport:
             backend_client.close()
     if not turns:
         raise PageIndexAPIError("The model returned no response.")
-    for block in moved:
-        block.pop("cache_control", None)  # a request's breakpoint, not history
-    captured: dict = {}
-
-    def capture(params):
-        captured.update(params)
-        return params
-
-    runner.set_messages_params(capture)
-    if not captured.get("messages"):
-        # The conversation is read back through a mutator; if a vendor
-        # change stops it delivering params, the envelope would silently
-        # lose the tool turns — fail loudly instead.
-        raise PageIndexAPIError(
-            "Could not read the conversation back from the anthropic tool "
-            "runner — the installed anthropic version is incompatible with "
-            "this pageindex release."
-        )
-    conversation = list(captured["messages"])
     final = turns[-1]
     envelope = final.model_dump(mode="json")
     envelope["content"] = [_dump_block(item) for item in final.content]
-    envelope["usage"] = _anthropic_usage(
-        [turn.usage.model_dump(mode="json") for turn in turns])
-    # The full turn sequence (assistant tool_use + user tool_result + final),
-    # valid for verbatim append to the caller's history. The runner appends
-    # a turn to its params only when it executed tools from it, and which
-    # turns qualify is vendor policy that has changed across anthropic
-    # releases, so stop_reason alone cannot tell. Whether final's tool_use
-    # ids already sit in the history is the ground truth for "already
-    # appended".
-    new_messages = [_dump_message(message)
-                    for message in conversation[len(prepared):]]
-    final_blocks = [_dump_block(item) for item in final.content]
-    final_ids = {block.get("id") for block in final_blocks
-                 if block.get("type") == "tool_use"}
-    history_ids = {block.get("id")
-                   for message in new_messages
-                   if (message.get("role") == "assistant"
-                       and isinstance(message.get("content"), list))
-                   for block in message["content"]
-                   if (isinstance(block, dict)
-                       and block.get("type") == "tool_use")}
-    if not final_ids or not final_ids <= history_ids:
-        # Unexecuted tool_use blocks (refusal turns) have no tool_result,
-        # so they cannot enter an appendable history — strip them, as the
-        # SDK itself does when it rebuilds params around such a turn.
-        appendable = [block for block in final_blocks
-                      if block.get("type") != "tool_use"]
-        if appendable:
-            new_messages = new_messages + [
-                {"role": "assistant", "content": appendable}]
-    envelope["messages"] = new_messages
+    envelope["usage"] = run_usage(turns)
+    envelope["messages"] = transcript(turns)
     return envelope
 
 
