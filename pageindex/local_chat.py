@@ -1367,13 +1367,12 @@ def _dump_message(message) -> dict:
     return message
 
 
-def _anthropic_usage(turns) -> dict:
+def _anthropic_usage(dumps) -> dict:
     """The turns' native usage dicts merged field by field (None-safe):
     counts add up, nested count objects (cache_creation, server_tool_use,
     output_tokens_details) key by key, the per-iteration breakdown lists
     concatenate, and labels (service_tier, fallback_credit) keep the last
     value a turn set."""
-    dumps = [turn.usage.model_dump(mode="json") for turn in turns]
     return {key: _merge_usage([dump.get(key) for dump in dumps])
             for key in dumps[-1]}
 
@@ -1518,10 +1517,18 @@ def run_messages(client, messages, model: str, route: str,
     runner.generate_tool_call_response = checked_tool_response
 
     if stream:
+        class Result(anthropic.BaseModel):
+            type: str
+            usage: dict
+
         def events() -> Iterator[Any]:
+            usages = []
             try:
                 for turn_stream in runner:
                     for event in turn_stream:
+                        if event.type == "message_stop":
+                            usages.append(
+                                event.message.usage.model_dump(mode="json"))
                         yield event
             except anthropic.AnthropicError as exc:
                 raise _model_backend_error(exc, "messages", client) from exc
@@ -1529,6 +1536,8 @@ def run_messages(client, messages, model: str, route: str,
                 # runs on exhaustion and abandonment (GeneratorExit) alike
                 if owns_transport:
                     backend_client.close()
+            if usages:
+                yield Result(type="result", usage=_anthropic_usage(usages))
         return events()
 
     try:
@@ -1563,7 +1572,8 @@ def run_messages(client, messages, model: str, route: str,
     final = turns[-1]
     envelope = final.model_dump(mode="json")
     envelope["content"] = [_dump_block(item) for item in final.content]
-    envelope["usage"] = _anthropic_usage(turns)
+    envelope["usage"] = _anthropic_usage(
+        [turn.usage.model_dump(mode="json") for turn in turns])
     # The full turn sequence (assistant tool_use + user tool_result + final),
     # valid for verbatim append to the caller's history. The runner appends
     # a turn to its params only when it executed tools from it, and which
