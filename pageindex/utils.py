@@ -32,6 +32,30 @@ import re
 _llm_backend: contextvars.ContextVar = contextvars.ContextVar(
     "pageindex_llm_backend", default=None)
 
+# Same scope: the dict the token usage of every indexing model call is
+# summed into, which LocalAPI returns from submit_document.
+_llm_usage: contextvars.ContextVar = contextvars.ContextVar(
+    "pageindex_llm_usage", default=None)
+
+
+def _add_usage(response) -> None:
+    usage, counted = _llm_usage.get(), getattr(response, "usage", None)
+    if usage is None or counted is None:
+        return
+    prompt = getattr(counted, "prompt_tokens", 0) or 0
+    completion = getattr(counted, "completion_tokens", 0) or 0
+    details = getattr(counted, "prompt_tokens_details", None)
+    cached = getattr(details, "cached_tokens", 0)
+    cache_write = getattr(details, "cache_write_tokens", 0)
+    reasoning = getattr(getattr(counted, "completion_tokens_details", None),
+                        "reasoning_tokens", 0)
+    usage["prompt_tokens"] += prompt
+    usage["completion_tokens"] += completion
+    usage["total_tokens"] += prompt + completion
+    usage["prompt_tokens_details"]["cached_tokens"] += cached or 0
+    usage["prompt_tokens_details"]["cache_write_tokens"] += cache_write or 0
+    usage["completion_tokens_details"]["reasoning_tokens"] += reasoning or 0
+
 
 def _repair_litellm_types() -> None:
     """litellm 1.97.0's Message/Delta annotations carry nested forward refs
@@ -189,6 +213,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
                 "max_retries": 0,
                 **(backend or {}),
             })
+            _add_usage(response)
             content = response.choices[0].message.content
             if return_finish_reason:
                 finish_reason = "max_output_reached" if response.choices[0].finish_reason == "length" else "finished"
@@ -229,6 +254,7 @@ async def llm_acompletion(model, prompt, **params):
                 **(backend or {}),
                 **params,
             })
+            _add_usage(response)
             return response.choices[0].message.content
         except Exception as e:
             if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
