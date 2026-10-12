@@ -1796,8 +1796,7 @@ def test_openai_model_resolves_provider_prefixes():
     model = local_chat._openai_model("responses", "openai/gpt-5.2")
     assert isinstance(model, OpenAIResponsesModel)
     assert str(model.model) == "gpt-5.2"
-    # litellm/ is routing grammar, not a provider: it strips before the
-    # provider-prefix guard, so an OpenAI model stays reachable.
+    # litellm/ is routing grammar, not a provider: it strips here too.
     model = local_chat._openai_model("responses", "litellm/gpt-5.2")
     assert isinstance(model, OpenAIResponsesModel)
     assert str(model.model) == "gpt-5.2"
@@ -1814,17 +1813,38 @@ def test_chat_refuses_unknown_litellm_provider():
 
 
 @needs_agents
-def test_responses_refuses_litellm_routed_models(store_path):
-    """LiteLLM speaks chat.completions, not /responses — the responses
-    protocol must refuse the silent downgrade, at agent-build time and
-    before any backend call."""
-    for name in ("anthropic/claude-x", "litellm/anthropic/claude-x"):
-        with pytest.raises(PageIndexAPIError, match="Responses API"):
-            local_chat._openai_model("responses", name)
-    client = PageIndexLocalClient(storage_path=store_path,
-                                  retrieve_model="anthropic/claude-x")
-    with pytest.raises(PageIndexAPIError, match="chat_completions"):
-        client._responses("q")
+def test_responses_sends_model_names_as_written():
+    """The responses lane is the OpenAI SDK, never LiteLLM: litellm/ and
+    openai/ strip, any other name reaches the backend verbatim and the
+    destination judges it — a gateway (OpenRouter) serves slashed ids."""
+    from agents.models.openai_responses import OpenAIResponsesModel
+
+    for name, wire in (("deepseek/deepseek-chat", "deepseek/deepseek-chat"),
+                       ("anthropic/claude-x", "anthropic/claude-x"),
+                       ("litellm/anthropic/claude-x", "anthropic/claude-x"),
+                       ("openai/deepseek/deepseek-chat",
+                        "deepseek/deepseek-chat")):
+        model = local_chat._openai_model("responses", name)
+        assert isinstance(model, OpenAIResponsesModel), name
+        assert str(model.model) == wire, name
+
+
+@needs_agents
+def test_responses_lane_never_takes_litellm_settings(monkeypatch):
+    """Whatever the name looks like, the responses lane's request is an
+    OpenAI one: the cache key and caller extras ride extra_body, and
+    LiteLLM's Claude cache marker stays out — responses.create() raises
+    TypeError on that unknown kwarg."""
+    monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
+    monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
+                        lambda *a, **k: [])
+    for name in ("anthropic/claude-x", "bedrock/us.anthropic.claude-x"):
+        agent = local_chat._openai_agent(
+            None, "responses", name, "sys", None, None,
+            cache_key="pageindex-k", extra_body={"x_custom": 1})
+        assert agent.model_settings.extra_args is None, name
+        assert agent.model_settings.extra_body == {
+            "prompt_cache_key": "pageindex-k", "x_custom": 1}, name
 
 
 @needs_agents
