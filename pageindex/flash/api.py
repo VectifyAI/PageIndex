@@ -82,7 +82,7 @@ async def _summarize(structure, page_list, model, concurrency=None, max_words=No
 
 
 async def _optimize_async(structure, page_texts, do_expand, model, on_final=None,
-                          concurrency=None):
+                          concurrency=None, summary_words=0):
     """Merge/expand refinement after extraction, overlapped with the summaries
     when `on_final` is passed; without it the caller runs them after.
 
@@ -94,7 +94,8 @@ async def _optimize_async(structure, page_texts, do_expand, model, on_final=None
     lines = _page_lines(page_texts)
     outcome = await optimize(structure, page_texts, lines, model=model,
                              do_expand=do_expand, page_count=len(page_texts),
-                             on_final=on_final, concurrency=concurrency)
+                             on_final=on_final, concurrency=concurrency,
+                             summary_words=summary_words)
     return {"merges": outcome["merges"], "expands": outcome["expands"],
             "same_page_merges": outcome["same_page_merges"],
             "same_page_dropped": outcome["same_page_dropped"],
@@ -102,24 +103,25 @@ async def _optimize_async(structure, page_texts, do_expand, model, on_final=None
             "before": outcome["before"], "after": outcome["after"]}
 
 
-def _optimize(structure, page_texts, do_expand, model, concurrency=None):
+def _optimize(structure, page_texts, do_expand, model, concurrency=None, summary_words=0):
     import asyncio
     return asyncio.run(_optimize_async(structure, page_texts, do_expand, model,
-                                       concurrency=concurrency))
+                                       concurrency=concurrency, summary_words=summary_words))
 
 
 async def _optimize_and_summarize(structure, page_texts, optimize_model, summary_model,
                                   concurrency, max_words=None, reasoning_effort=None):
     """Expand and summarize on one loop: a node is summarized as soon as
     expand can no longer change it, a parent once its children are done."""
-    from ..utils import SummaryScheduler
+    from ..utils import SUMMARY_MAX_WORDS, SummaryScheduler
     scheduler = SummaryScheduler(structure, [(text, 0) for text in page_texts],
                                  model=summary_model, concurrency=concurrency,
                                  max_words=max_words, split_shared_pages=True,
                                  reasoning_effort=reasoning_effort)
     report = await _optimize_async(structure, page_texts, True, optimize_model,
                                    on_final=scheduler.mark_final,
-                                   concurrency=concurrency)
+                                   concurrency=concurrency,
+                                   summary_words=max_words or SUMMARY_MAX_WORDS)
     await scheduler.finish()
     return report
 
@@ -229,7 +231,7 @@ def page_index_flash(pdf, summary=True, summary_model=None,
         from ..utils import ConfigLoader
         cfg = ConfigLoader().load()
         summary_model = getattr(cfg, 'summary_model', None) or cfg.model
-    from ..utils import default_summary_reasoning_effort
+    from ..utils import SUMMARY_MAX_WORDS, default_summary_reasoning_effort
     effort = summary_reasoning_effort and summary_reasoning_effort.strip()
     if summary and structure and not effort:
         effort = default_summary_reasoning_effort(summary_model)
@@ -247,7 +249,9 @@ def page_index_flash(pdf, summary=True, summary_model=None,
     if optimize and structure:
         result["optimize"] = _optimize(structure, pages, do_expand,
                                        optimize_model or summary_model,
-                                       concurrency=summary_concurrency)
+                                       concurrency=summary_concurrency,
+                                       summary_words=(summary_max_words or SUMMARY_MAX_WORDS)
+                                       if summary else 0)
     if summary and structure:
         import asyncio
         page_list = [(text, 0) for text in pages]

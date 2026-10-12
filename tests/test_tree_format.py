@@ -161,6 +161,31 @@ def test_expand_asks_once_when_the_model_finds_no_subsections(monkeypatch):
     assert len(asked) == 1 and "nodes" not in tree[0]
 
 
+@pytest.mark.parametrize("headings, summary_words, splits", [
+    ({p: f"Part {p}" for p in range(2, 21)}, 150, False),
+    ({p: f"Part {p}" for p in range(2, 21)}, 0, True),
+    ({6: "Part A", 11: "Part B", 16: "Part C"}, 150, True),
+])
+def test_expand_weighs_what_the_pieces_cost_to_read(monkeypatch, headings, summary_words, splits):
+    """Nineteen one-page pieces each add a structure entry: with summaries
+    those entries outweigh reading the section itself, without them they
+    do not; three five-page parts are worth their entries either way."""
+    pages = [(headings[p] + "\n" if p in headings else "") + "body " * 150 for p in range(1, 21)]
+    lines = [[line for line in page.splitlines() if line.strip()] for page in pages]
+    tree = [{"title": "R", "start_index": 1, "end_index": 20, "node_id": "0000"}]
+
+    async def propose(model, prompt):
+        return {"subsections": [{"title": t, "page": p} for p, t in headings.items()]}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+
+    out = asyncio.run(tree_optimize.optimize(tree, pages, lines, model="m", do_expand=True,
+                                             summary_words=summary_words))
+    decision = next(e for e in out["log"] if e.get("op") == "expand")
+    assert decision["expand_cost"] < decision["S"]
+    assert (decision["read_after"] < decision["read_before"]) == splits
+    assert bool(tree[0].get("nodes")) == splits
+
+
 def test_expand_filters_cached_headings_like_proposed_ones(monkeypatch):
     body = "body " * 250
     pages = [body] * 20

@@ -3395,6 +3395,40 @@ def test_page_index_flash_plumbs_summary_max_words(tmp_path, monkeypatch):
         assert prompts and all("within 80 words" in p for p in prompts), optimize
 
 
+def test_page_index_flash_prices_expand_with_the_run_summary_length(tmp_path, monkeypatch):
+    from conftest import build_pdf
+    import copy
+    import pageindex.flash.api as flash_api
+    import pageindex.tree_optimize as tree_optimize
+    from pageindex.utils import SUMMARY_MAX_WORDS
+
+    tree, pages, _ = _expand_fixture()
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: {
+        "structure": copy.deepcopy(tree), "page_texts": list(pages)})
+
+    async def propose(model, prompt):
+        return {"subsections": []}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+
+    async def summarize(model, prompt, **params):
+        return '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", summarize)
+    seen, real = [], tree_optimize.optimize
+
+    async def spy(*a, **kw):
+        seen.append(kw.get("summary_words"))
+        return await real(*a, **kw)
+    monkeypatch.setattr(tree_optimize, "optimize", spy)
+
+    for kwargs, words in (({}, SUMMARY_MAX_WORDS), ({"summary_max_words": 80}, 80),
+                          ({"summary": False}, 0)):
+        seen.clear()
+        flash_api.page_index_flash(str(pdf), summary_model="m", optimize="full", **kwargs)
+        assert seen == [words], kwargs
+
+
 def test_page_index_flash_splits_shared_pages_on_both_summary_paths(tmp_path, monkeypatch):
     from conftest import build_pdf
     import copy
