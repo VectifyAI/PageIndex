@@ -8,8 +8,8 @@ mcp>=1.19.0,<3
 # pymupdf  # optional
 PyPDF2==3.0.1
 pypdfium2==5.13.0
-python-dotenv==1.2.2
-pyyaml==6.0.3
+python-dotenv>=1.2.2
+pyyaml>=6.0.3
 regex>=2024.0.0
 sortedcontainers==2.4.0
 Pillow>=9.0
