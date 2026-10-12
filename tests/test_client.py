@@ -612,6 +612,26 @@ def test_get_tree_keeps_each_index_self_consistent(local_client, tmp_path,
     assert "Alpha body" in root["text"] and "Beta body" not in root["text"]
 
 
+def test_flash_description_reads_only_the_top_level(local_client, tmp_path, monkeypatch):
+    """A parent's summary already covers its subtree, so the description
+    prompt carries the top level alone."""
+    from conftest import build_pdf
+    pdf = tmp_path / "report.pdf"
+    pdf.write_bytes(build_pdf(["Alpha body", "Beta body"]))
+    structure = [{"title": "Report", "start_index": 1, "end_index": 2,
+                  "summary": "report summary",
+                  "nodes": [{"title": "Alpha", "start_index": 1, "end_index": 2,
+                             "summary": "alpha summary"}]}]
+    monkeypatch.setattr(pageindex.flash, "page_index_flash",
+                        lambda pdf, **kw: {"structure": structure})
+    prompts = []
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda model, prompt, **kw: prompts.append(prompt) or "d")
+    local_client.submit_document(str(pdf), mode="flash")
+    assert len(prompts) == 1
+    assert "report summary" in prompts[0] and "alpha summary" not in prompts[0]
+
+
 def test_unify_tree_edges():
     from pageindex.utils import unify_tree
     tree = [{"title": "A", "page_index": 3, "prefix_summary": "a",
@@ -1293,6 +1313,79 @@ def test_summarize_tree_all_short_leaves_need_no_model(monkeypatch):
     structure = [{"title": "A", "start_index": 1, "end_index": 1}]
     out = asyncio.run(pageindex.utils.summarize_tree(structure, [("tiny", 1)]))
     assert out[0]["summary"] == "tiny"
+
+
+def test_leaf_summaries_split_a_shared_page_at_the_heading(monkeypatch):
+    """Two leaves sharing a page each read their own side of the next heading,
+    and between them every line is read."""
+    prompts = []
+
+    async def fake(model, prompt):
+        prompts.append(prompt)
+        return '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", fake)
+    pages = ["Alpha\nfirst body\n", "first tail\nBeta\nsecond body\n", "second more\n"]
+    a = {"title": "Alpha", "start_index": 1, "end_index": 2}
+    b = {"title": "Beta", "start_index": 2, "end_index": 3}
+    pdf_pages = [(p, 0) for p in pages]
+    own = [pageindex.utils.leaf_own_text([a, b], n, pdf_pages) for n in (a, b)]
+    assert own == ["Alpha\nfirst body\nfirst tail\n", "Beta\nsecond body\nsecond more\n"]
+    asyncio.run(pageindex.utils.summarize_tree([a, b], pdf_pages, small_node_tokens=0,
+                                               split_shared_pages=True))
+    alpha, beta = sorted(prompts, key=lambda p: "Alpha" not in p)
+    assert "first tail" in alpha and "second body" not in alpha
+    assert "second body" in beta and "first tail" not in beta
+
+    prompts.clear()
+    a.pop("summary"), b.pop("summary")
+    asyncio.run(pageindex.utils.summarize_tree([a, b], pdf_pages, small_node_tokens=0))
+    assert all("first tail" in p and "second body" in p for p in prompts)
+
+    one_page = [{"title": t, "start_index": 1, "end_index": 1} for t in ("A x", "B x", "C x")]
+    page = [("A x\na\nB x\nb\nC x\nc\n", 0)]
+    assert [pageindex.utils.leaf_own_text(one_page, n, page) for n in one_page] == [
+        "A x\na\n", "B x\nb\n", "C x\nc\n"]
+
+    numbered = [("A x\na\n2.1 B x\nb\n", 0)]
+    assert pageindex.utils.leaf_own_text(one_page[:2], one_page[0], numbered) == "A x\na\n"
+
+
+@pytest.mark.parametrize("page2, title, same_page", [
+    ("alpha tail\nBeta body\nBeta\n", "Beta", False),
+    ("alpha tail\nno heading here\n", "Beta", False),
+    ("alpha tail\n第二章\nbody\n", "第二章", False),
+    ("alpha tail\nBeta\nbody\n", "Beta", True),
+])
+def test_leaf_keeps_a_shared_page_whole_when_the_heading_cannot_be_placed(page2, title,
+                                                                          same_page):
+    a = {"title": "Alpha", "start_index": 1, "end_index": 2}
+    b = {"title": title, "start_index": 2, "end_index": 2, "_same_page": same_page}
+    pdf_pages = [("Alpha\n", 0), (page2, 0)]
+    assert pageindex.utils.leaf_own_text([a, b], a, pdf_pages) == "Alpha\n" + page2
+    assert pageindex.utils.leaf_own_text([a, b], b, pdf_pages) == page2
+
+
+def test_first_child_opens_at_its_parents_heading():
+    """A parent's opening lines on its first child's page have no reader but
+    that child, so the child starts at the parent's heading."""
+    w = {"title": "Wrap", "start_index": 1, "end_index": 2}
+    c = {"title": "Child", "start_index": 2, "end_index": 2}
+    p = {"title": "Part", "start_index": 2, "end_index": 2, "nodes": [c]}
+    pdf_pages = [("Wrap\n", 0), ("last words\nPart\nopening words\nChild\nmore words\n", 0)]
+    assert pageindex.utils.leaf_own_text([w, p], w, pdf_pages) == "Wrap\nlast words\n"
+    assert pageindex.utils.leaf_own_text([w, p], c, pdf_pages) == (
+        "Part\nopening words\nChild\nmore words\n")
+
+
+def test_leaf_keeps_a_page_whose_rest_no_leaf_reads():
+    """The next heading sits on the leaf's last page, but the next leaf starts
+    a page later: the lines after the heading stay with this leaf."""
+    a = {"title": "Alpha", "start_index": 1, "end_index": 2}
+    p = {"title": "Part", "start_index": 2, "end_index": 3,
+         "nodes": [{"title": "Child", "start_index": 3, "end_index": 3}]}
+    pdf_pages = [("Alpha\n", 0), ("last words\nPart\nopening words\n", 0), ("Child\n", 0)]
+    assert pageindex.utils.leaf_own_text([a, p], a, pdf_pages) == (
+        "Alpha\nlast words\nPart\nopening words\n")
 
 
 def test_summarize_tree_starts_the_deepest_leaf_first(monkeypatch):
@@ -2893,7 +2986,7 @@ def test_flash_summaries_start_while_expand_is_still_deciding(tmp_path, monkeypa
                                 {"title": "Sub Two", "page": 8}]}
     monkeypatch.setattr(tree_optimize, "ask_model", propose)
 
-    async def summarize(model, prompt):
+    async def summarize(model, prompt, **params):
         models.append(("summary", model))
         started.append(prompt)
         await asyncio.sleep(0.01)
@@ -3290,7 +3383,7 @@ def test_page_index_flash_plumbs_summary_max_words(tmp_path, monkeypatch):
     monkeypatch.setattr(tree_optimize, "ask_model", propose)
     prompts = []
 
-    async def capture(model, prompt):
+    async def capture(model, prompt, **params):
         prompts.append(prompt)
         return '{"summary": "ok"}'
     monkeypatch.setattr(pageindex.utils, "llm_acompletion", capture)
@@ -3300,6 +3393,116 @@ def test_page_index_flash_plumbs_summary_max_words(tmp_path, monkeypatch):
         flash_api.page_index_flash(str(pdf), summary_model="m", optimize=optimize,
                                    summary_max_words=80)
         assert prompts and all("within 80 words" in p for p in prompts), optimize
+
+
+def test_page_index_flash_prices_expand_with_the_run_summary_length(tmp_path, monkeypatch):
+    from conftest import build_pdf
+    import copy
+    import pageindex.flash.api as flash_api
+    import pageindex.tree_optimize as tree_optimize
+    from pageindex.utils import SUMMARY_MAX_WORDS
+
+    tree, pages, _ = _expand_fixture()
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: {
+        "structure": copy.deepcopy(tree), "page_texts": list(pages)})
+
+    async def propose(model, prompt):
+        return {"subsections": []}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+
+    async def summarize(model, prompt, **params):
+        return '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", summarize)
+    seen, real = [], tree_optimize.optimize
+
+    async def spy(*a, **kw):
+        seen.append(kw.get("summary_words"))
+        return await real(*a, **kw)
+    monkeypatch.setattr(tree_optimize, "optimize", spy)
+
+    for kwargs, words in (({}, SUMMARY_MAX_WORDS), ({"summary_max_words": 80}, 80),
+                          ({"summary": False}, 0)):
+        seen.clear()
+        flash_api.page_index_flash(str(pdf), summary_model="m", optimize="full", **kwargs)
+        assert seen == [words], kwargs
+
+
+def test_page_index_flash_splits_shared_pages_on_both_summary_paths(tmp_path, monkeypatch):
+    from conftest import build_pdf
+    import copy
+    import pageindex.flash.api as flash_api
+    import pageindex.tree_optimize as tree_optimize
+
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    tree = [{"title": "Alpha", "start_index": 1, "end_index": 2},
+            {"title": "Beta", "start_index": 2, "end_index": 2}]
+    pages = ["Alpha\n" + "oakwood " * 300 + "\n",
+             "pinecone " * 300 + "\nBeta\n" + "elmtree " * 300 + "\n"]
+    monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: {
+        "structure": copy.deepcopy(tree), "page_texts": list(pages)})
+
+    async def propose(model, prompt):
+        return {"subsections": []}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+    prompts = []
+
+    async def capture(model, prompt, **params):
+        prompts.append(prompt)
+        return '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", capture)
+
+    for optimize in (False, "full"):
+        prompts.clear()
+        flash_api.page_index_flash(str(pdf), summary_model="m", optimize=optimize)
+        alpha, beta = sorted(prompts, key=lambda p: "Alpha" not in p)
+        assert "pinecone" in alpha and "elmtree" not in alpha, optimize
+        assert "elmtree" in beta and "pinecone" not in beta, optimize
+
+
+def test_flash_summaries_send_the_reasoning_effort_and_expand_does_not(tmp_path, monkeypatch):
+    from conftest import build_pdf
+    import copy
+    import pageindex.flash.api as flash_api
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, _ = _expand_fixture()
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: {
+        "structure": copy.deepcopy(tree), "page_texts": list(pages)})
+    sent = []
+
+    async def capture(model, prompt, **params):
+        expand = prompt.startswith("You are splitting")
+        sent.append(("expand" if expand else "summary", params))
+        return '{"subsections": []}' if expand else '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", capture)
+    monkeypatch.setattr(tree_optimize, "llm_acompletion", capture)
+
+    for model, optimize, effort, backend, expected in (
+            ("gpt-5.1", False, None, None, "none"),
+            ("gpt-5.1", "full", None, None, "none"),
+            ("gpt-5.1", "full", None, {"reasoning_effort": "high"}, None),
+            ("o4-mini", "full", None, None, None),
+            ("o4-mini", "full", "high", None, "high")):
+        sent.clear()
+        token = pageindex.utils._llm_backend.set(backend)
+        try:
+            flash_api.page_index_flash(str(pdf), summary_model=model, optimize=optimize,
+                                       summary_reasoning_effort=effort)
+        finally:
+            pageindex.utils._llm_backend.reset(token)
+        assert {p.get("reasoning_effort") for kind, p in sent if kind == "summary"} == {expected}
+        expands = [p for kind, p in sent if kind == "expand"]
+        assert bool(expands) == (optimize == "full")
+        assert all("reasoning_effort" not in p for p in expands)
+
+    monkeypatch.setattr(pageindex.utils, "default_summary_reasoning_effort",
+                        lambda model: pytest.fail("looked up with summaries off"))
+    flash_api.page_index_flash(str(pdf), summary=False, optimize=False)
 
 
 def test_summary_max_words_reaches_the_local_indexer():
@@ -3332,17 +3535,22 @@ def test_flash_knobs_reach_the_local_indexer(tmp_path, sample_pdf, monkeypatch):
         captured.clear()
         PageIndexLocalClient(**kwargs).submit_document(sample_pdf)
         return (captured.get("summary_concurrency"), captured.get("summary_max_words"),
-                captured["use_embedded_toc"], captured["optimize"])
+                captured["use_embedded_toc"], captured["optimize"],
+                captured.get("summary_reasoning_effort"))
 
     assert run(summary_concurrency=8, summary_max_words=80, use_embedded_toc=False,
-               optimize="merge") == (8, 80, False, "merge")
+               optimize="merge", summary_reasoning_effort="low") == (
+        8, 80, False, "merge", "low")
     assert run(index={"summary_concurrency": 8, "summary_max_words": 80,
-                      "use_embedded_toc": False, "optimize": "off"}) == (8, 80, False, False)
-    assert run() == (None, None, True, "full")
+                      "use_embedded_toc": False, "optimize": "off",
+                      "summary_reasoning_effort": "low"}) == (8, 80, False, False, "low")
+    assert run() == (None, None, True, "full", None)
     for kwargs, msg in (({"index": {"use_embedded_toc": "no"}},
                          r'index\["use_embedded_toc"\] must be a bool'),
                         ({"optimize": "sometimes"},
                          r'optimize must be "full", "merge" or "off"'),
+                        ({"summary_reasoning_effort": 5}, "summary_reasoning_effort must be a str"),
+                        ({"summary_reasoning_effort": " "}, "summary_reasoning_effort is empty"),
                         ({"summary_concurrency": "8"}, "summary_concurrency must be a"),
                         ({"summary_concurrency": -1},
                          "summary_concurrency must be a positive int"),
@@ -3360,8 +3568,9 @@ def test_standard_mode_refuses_the_flash_summary_knobs(tmp_path, sample_pdf, mon
     monkeypatch.setattr(classic, "page_index_main", lambda *a, **kw: {
         "structure": [{"title": "T", "start_index": 1, "end_index": 1, "nodes": []}]})
     monkeypatch.chdir(tmp_path)
-    for name, value in (("summary_concurrency", 2), ("summary_max_words", 7)):
-        with pytest.raises(PageIndexAPIError, match="summary_concurrency are flash-only"):
+    for name, value in (("summary_concurrency", 2), ("summary_max_words", 7),
+                        ("summary_reasoning_effort", "none")):
+        with pytest.raises(PageIndexAPIError, match="summary_reasoning_effort are flash-only"):
             PageIndexLocalClient(**{name: value}).submit_document(sample_pdf, mode="standard")
     PageIndexLocalClient().submit_document(sample_pdf, mode="standard")
 
@@ -3415,7 +3624,7 @@ def test_summary_concurrency_caps_both_lanes_on_every_path(tmp_path, monkeypatch
         return {"subsections": []}
     monkeypatch.setattr(tree_optimize, "ask_model", propose)
 
-    async def summarize(model, prompt):
+    async def summarize(model, prompt, **params):
         await track("summary")
         return '{"summary": "ok"}'
     monkeypatch.setattr(pageindex.utils, "llm_acompletion", summarize)

@@ -62,14 +62,17 @@ import re
 import sys
 from types import SimpleNamespace
 
-from .utils import (ConfigLoader, _is_unrecoverable, intro_title, is_intro,
-                    llm_acompletion, strip_internal_keys)
+from .utils import (SUMMARY_MAX_WORDS, ConfigLoader, _is_unrecoverable, count_tokens,
+                    intro_title, is_intro, llm_acompletion, strip_internal_keys)
 
 TRIGGER_PAGES = 5        # only look ahead on nodes larger than this
 ROUTING_COST = 1         # R(v), in pages
 EXPAND_CONCURRENCY = 32  # measured plateau: the ready frontier is 21-28 wide on few-hundred-page PDFs
 PAGE_CHARS = 6000        # per-page text handed to the model
 TITLE_MAX_CHARS = 200    # a union title longer than this falls back to a page label
+EMPTY_RETRIES = 0
+ENTRY_TOKENS = 45        # a node's structure entry less its summary: title, id, pages
+TOKENS_PER_WORD = 1.3
 
 EXPAND_PROMPT = """You are splitting an over-long section of a PDF into its subsections.
 
@@ -303,6 +306,21 @@ def expand_cost(node, children, lines, routing=ROUTING_COST):
     residual = S_residual(trial)
     add_intro_nodes([trial], lines)
     return tree_cost(trial, routing), residual
+
+
+def expand_read_tokens(node, children, lines, page_tokens, summary_words):
+    """Tokens read to reach any page of the node: its whole text while it
+    stays collapsed, else every child's structure entry plus the largest
+    child's text. A child's summary is its text when that is shorter."""
+    trial = dict(node, nodes=children)
+    add_intro_nodes([trial], lines)
+
+    def text(n):
+        return sum(page_tokens[n["start_index"] - 1:subtree_end(n)])
+    summary = TOKENS_PER_WORD * summary_words
+    kids = trial["nodes"]
+    entries = sum(ENTRY_TOKENS + min(text(c), summary) for c in kids)
+    return text(node), entries + max(text(c) for c in kids)
 
 
 # --------------------------------------------------------------------------
@@ -758,7 +776,7 @@ async def expand(structure, pages, lines, args, log, frozen):
             proposed = own(proposed)
             if proposed:
                 llm_candidates.append((f"llm:{attempts}", proposed))
-                break                    # an empty answer is retried, not trusted
+                break
         return llm_candidates, attempts, entries
 
     async def process(node, ancestors, nxt):
@@ -801,9 +819,11 @@ async def expand(structure, pages, lines, args, log, frozen):
         cost = best["expand_cost"]
         gain = span - cost
         ratio = gain / span if span else 0.0
+        read_before, read_after = expand_read_tokens(node, best["children"], lines,
+                                                     args.page_tokens, args.summary_words)
         # strict: at cost == span the next round's merge (span <= cost) would
         # fold the node right back, touching children already marked final
-        keep = cost < span and ratio >= args.min_gain_ratio
+        keep = cost < span and ratio >= args.min_gain_ratio and read_after < read_before
 
         note(args.progress,
              f"           -> {len(best['children'])} children from {best['source']}, "
@@ -813,6 +833,7 @@ async def expand(structure, pages, lines, args, log, frozen):
                     "decision": "expand" if keep else "keep_collapsed",
                     "S": span, "expand_cost": cost, "expand_gain": gain,
                     "gain_ratio": round(ratio, 3), "S_residual": best["S_residual"],
+                    "read_before": read_before, "read_after": round(read_after),
                     "source": best["source"],
                     "considered": [{"source": s["source"], "children": len(s["children"]),
                                     "expand_cost": s["expand_cost"]} for s in scored],
@@ -878,9 +899,9 @@ def final_nodes(nodes, trigger, frozen):
 async def optimize(structure, pages, lines, model=None, routing=ROUTING_COST,
                    trigger_pages=TRIGGER_PAGES, min_gain_ratio=0.0,
                    do_merge=True, do_expand=True, max_rounds=3, page_count=None,
-                   cache=None, kinds=("section", "table"), empty_retries=1,
+                   cache=None, kinds=("section", "table"), empty_retries=EMPTY_RETRIES,
                    do_relabel=True, progress=False, on_final=None,
-                   concurrency=None):
+                   concurrency=None, summary_words=SUMMARY_MAX_WORDS):
     """Run merge and expand over a tree until neither changes anything.
 
     Mutates `structure` in place and returns a summary.
@@ -894,6 +915,9 @@ async def optimize(structure, pages, lines, model=None, routing=ROUTING_COST,
     `on_final(nodes)` hears, as the run goes, which nodes will not change any
     more (see final_nodes): after each round's merges, as expand decides each
     candidate, and for the whole tree at the end.
+
+    `summary_words` is the summary length the tree's nodes will carry (0 for
+    none); expand prices each child's structure entry with it.
     """
     if do_expand and pages is None:
         raise ValueError("expand needs the PDF pages; pass pages/lines or do_expand=False")
@@ -909,7 +933,9 @@ async def optimize(structure, pages, lines, model=None, routing=ROUTING_COST,
                            empty_retries=empty_retries, progress=progress,
                            settled=settled, do_merge=do_merge,
                            concurrency=min(EXPAND_CONCURRENCY,
-                                           concurrency or EXPAND_CONCURRENCY))
+                                           concurrency or EXPAND_CONCURRENCY),
+                           page_tokens=[count_tokens(p) for p in pages] if do_expand else [],
+                           summary_words=summary_words)
     baseline = set(validate(structure, page_count)) if page_count else set()
     before = complexity(structure, page_count, routing=routing) if page_count else {}
 
@@ -1007,7 +1033,7 @@ async def main():
                         help="per-page detection cache used as an extra candidate source")
     parser.add_argument("--kinds", default="section,table",
                         help="heading kinds accepted from the cache (default section,table)")
-    parser.add_argument("--empty-retries", type=int, default=1,
+    parser.add_argument("--empty-retries", type=int, default=EMPTY_RETRIES,
                         help="extra lookahead attempts when the model returns no children")
     parser.add_argument("--no-relabel", dest="relabel", action="store_false",
                         help="keep provenance ids like 0266.1 instead of renumbering")

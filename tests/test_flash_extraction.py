@@ -346,7 +346,7 @@ def test_optimize_wins_over_deprecated_optimize_expand(tmp_path, monkeypatch):
     from pageindex.flash import api as flash_api
     seen = {}
 
-    def fake_optimize(structure, pages, do_expand, model, concurrency=None):
+    def fake_optimize(structure, pages, do_expand, model, concurrency=None, summary_words=0):
         seen["do_expand"] = do_expand
         return {"merges": 0}
 
@@ -465,7 +465,7 @@ def test_optimize_full_skips_expand_without_page_texts(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     calls = {}
 
-    def fake_optimize(structure, pages, do_expand, model, concurrency=None):
+    def fake_optimize(structure, pages, do_expand, model, concurrency=None, summary_words=0):
         calls["pages"] = pages
         calls["do_expand"] = do_expand
         return {"merges": 0}
@@ -491,7 +491,7 @@ def test_optimize_full_skips_expand_on_textless_pages(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     calls = {}
 
-    def fake_optimize(structure, pages, do_expand, model, concurrency=None):
+    def fake_optimize(structure, pages, do_expand, model, concurrency=None, summary_words=0):
         calls["do_expand"] = do_expand
         return {"merges": 0}
 
@@ -895,7 +895,13 @@ def test_flash_cli_summary_max_words_reaches_the_indexer(monkeypatch, tmp_path):
     assert captured["summary_max_words"] == 80
 
 
+def test_flash_cli_summary_reasoning_effort_reaches_the_indexer(monkeypatch, tmp_path):
+    captured = _run_flash_cli(monkeypatch, tmp_path, ["--summary-reasoning-effort", "low"],
+                              [{"title": "A", "start_index": 1, "end_index": 1}])
+    assert captured["summary_reasoning_effort"] == "low"
+
+
 def test_flash_cli_summary_flags_refuse_standard_mode(monkeypatch, tmp_path):
-    for flag in ("--summary-concurrency", "--summary-max-words"):
+    for flag in ("--summary-concurrency", "--summary-max-words", "--summary-reasoning-effort"):
         with pytest.raises(ValueError, match=f"{flag} requires Flash mode"):
             _run_flash_cli(monkeypatch, tmp_path, ["--mode", "standard", flag, "8"], [])
