@@ -3,7 +3,8 @@ import os
 import json
 from pageindex import *
 from pageindex.page_index_md import md_to_tree
-from pageindex.utils import ConfigLoader, SUMMARY_CONCURRENCY, SUMMARY_MAX_WORDS
+from pageindex.utils import (ConfigLoader, SUMMARY_CONCURRENCY, SUMMARY_MAX_WORDS,
+                             SUMMARY_REASONING_EFFORT)
 from pageindex.tree_optimize import EXPAND_CONCURRENCY
 
 if __name__ == "__main__":
@@ -34,6 +35,8 @@ if __name__ == "__main__":
                       help=f'Word cap for each model-written node summary; short leaf nodes keep their own text (flash mode; default {SUMMARY_MAX_WORDS})')
     parser.add_argument('--summary-concurrency', type=int, default=None,
                       help=f'Cap on simultaneous indexing model calls per lane (flash mode; default {SUMMARY_CONCURRENCY}, expand tops out at {EXPAND_CONCURRENCY})')
+    parser.add_argument('--summary-reasoning-effort', type=str, default=None,
+                      help=f'Reasoning effort sent with each node-summary call; a model without the setting drops it (flash mode; default {SUMMARY_REASONING_EFFORT} where the model accepts it)')
 
     parser.add_argument('--toc-check-pages', type=int, default=None,
                       help='Number of pages to check for table of contents (PDF only)')
@@ -71,7 +74,8 @@ if __name__ == "__main__":
                         ('--embedded-toc', args.embedded_toc),
                         ('--summary', args.summary),
                         ('--summary-max-words', args.summary_max_words),
-                        ('--summary-concurrency', args.summary_concurrency)):
+                        ('--summary-concurrency', args.summary_concurrency),
+                        ('--summary-reasoning-effort', args.summary_reasoning_effort)):
         if value is not None and not (args.pdf_path and args.mode == 'flash'):
             raise ValueError(f"{flag} requires Flash mode with --pdf_path")
     if args.optimize is None:
@@ -112,6 +116,7 @@ if __name__ == "__main__":
                 summary=will_summarize,
                 summary_max_words=args.summary_max_words,
                 summary_concurrency=args.summary_concurrency,
+                summary_reasoning_effort=args.summary_reasoning_effort,
             )
             reason = flash_rejection_reason(toc_with_page_number,
                                             standard_hint="--mode standard")

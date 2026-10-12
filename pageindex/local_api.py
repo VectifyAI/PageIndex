@@ -42,12 +42,14 @@ class LocalAPI:
                  summary_max_words: int | None = None,
                  summary_concurrency: int | None = None,
                  use_embedded_toc: bool = True,
-                 optimize: str = "full"):
+                 optimize: str = "full",
+                 summary_reasoning_effort: str | None = None):
         self._store = DocStore(storage_path)
         self._model = model
         self._summary_model = summary_model
         self._index_backend = index_backend
         self._summary_max_words = summary_max_words
+        self._summary_reasoning_effort = summary_reasoning_effort
         self._summary_concurrency = summary_concurrency
         self._use_embedded_toc = use_embedded_toc
         self._optimize = optimize
@@ -107,11 +109,12 @@ class LocalAPI:
         if mode is None:
             mode = "flash"
         if mode == "standard" and (self._summary_max_words is not None
-                                   or self._summary_concurrency is not None):
+                                   or self._summary_concurrency is not None
+                                   or self._summary_reasoning_effort is not None):
             raise PageIndexAPIError(
-                "Failed to submit document: summary_max_words and "
-                "summary_concurrency are flash-only; mode='standard' does not "
-                "support them.")
+                "Failed to submit document: summary_max_words, "
+                "summary_concurrency and summary_reasoning_effort are "
+                "flash-only; mode='standard' does not support them.")
         file_path = os.path.abspath(os.path.expanduser(str(file_path)))
         if not os.path.isfile(file_path):
             raise FileNotFoundError(f"No such file: {file_path}")
@@ -245,6 +248,7 @@ class LocalAPI:
                                   optimize_model=self._summary_model,
                                   summary_concurrency=self._summary_concurrency,
                                   summary_max_words=self._summary_max_words,
+                                  summary_reasoning_effort=self._summary_reasoning_effort,
                                   use_embedded_toc=self._use_embedded_toc)
         structure = result.get("structure", [])
         reason = flash_rejection_reason(result)

@@ -200,7 +200,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
                 ) from e
 
 
-async def llm_acompletion(model, prompt):
+async def llm_acompletion(model, prompt, **params):
     import litellm
     max_retries = 10
     messages = [{"role": "user", "content": prompt}]
@@ -216,6 +216,7 @@ async def llm_acompletion(model, prompt):
                 "drop_params": True,
                 "max_retries": 0,
                 **(backend or {}),
+                **params,
             })
             return response.choices[0].message.content
         except Exception as e:
@@ -877,6 +878,22 @@ SUMMARY_CONCURRENCY = 64        # simultaneous summary model calls
 SUMMARY_RAW_TEXT_TOKENS = 200   # leaves under this reuse their raw text as the summary
 SUMMARY_INTRO_MAX_PAGES = 3     # cap on leading pages fed into a parent summary
 SUMMARY_MAX_WORDS = 150         # word cap the summary prompts ask for
+SUMMARY_REASONING_EFFORT = "none"
+
+
+def default_summary_reasoning_effort(model):
+    """SUMMARY_REASONING_EFFORT where LiteLLM lists the model as accepting it
+    and the indexing backend sets no reasoning_effort, else None."""
+    if "reasoning_effort" in (_llm_backend.get() or {}):
+        return None
+    import litellm
+    try:
+        info = litellm.get_model_info(_litellm_model(model))
+    except Exception:
+        return None
+    if info.get(f"supports_{SUMMARY_REASONING_EFFORT}_reasoning_effort"):
+        return SUMMARY_REASONING_EFFORT
+    return None
 
 
 class _PriorityGate:
@@ -1017,10 +1034,11 @@ class SummaryScheduler:
     def __init__(self, structure, pdf_pages, model=None,
                  small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
                  max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None,
-                 max_words=None, split_shared_pages=False):
+                 max_words=None, split_shared_pages=False, reasoning_effort=None):
         self.structure = structure
         self._pdf_pages = pdf_pages
         self._split_shared_pages = split_shared_pages
+        self._params = {"reasoning_effort": reasoning_effort} if reasoning_effort else {}
         self._model = model
         self._small_node_tokens = small_node_tokens
         self._max_intro_pages = max_intro_pages
@@ -1068,7 +1086,7 @@ class SummaryScheduler:
     async def _ask(self, prompt, prio):
         self._asked = True
         async with self._gate.slot(prio):
-            reply = await llm_acompletion(self._model, prompt)
+            reply = await llm_acompletion(self._model, prompt, **self._params)
         if parse_summary(reply):
             self._answered = True
         return reply
@@ -1202,22 +1220,25 @@ class SummaryScheduler:
 async def summarize_tree(structure, pdf_pages, model=None,
                          small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
                          max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None,
-                         max_words=None, split_shared_pages=False):
+                         max_words=None, split_shared_pages=False,
+                         reasoning_effort=None):
     """Bottom-up summaries: leaves from their own pages, parents composed from
     child summaries plus the pages no child covers. A parent's summary describes
     its whole subtree (end_index union semantics). Nodes that already carry a
     summary are left untouched; leaves under `small_node_tokens` use their raw
     text as the summary without a model call; every prompt asks for at most
     `max_words` words; with `split_shared_pages` a leaf reads only its side of
-    a page it shares with the next or previous leaf (see leaf_own_text). Model
-    calls run deepest node first, both in starting order and in leaving the
-    queue: depth counts the calls left on a node's path to the root, its own
-    included."""
+    a page it shares with the next or previous leaf (see leaf_own_text); a set
+    `reasoning_effort` goes with every summary call, over the indexing
+    backend's. Model calls run deepest node first, both in starting order and
+    in leaving the queue: depth counts the calls left on a node's path to the
+    root, its own included."""
     scheduler = SummaryScheduler(structure, pdf_pages, model=model,
                                  small_node_tokens=small_node_tokens,
                                  max_intro_pages=max_intro_pages,
                                  concurrency=concurrency, max_words=max_words,
-                                 split_shared_pages=split_shared_pages)
+                                 split_shared_pages=split_shared_pages,
+                                 reasoning_effort=reasoning_effort)
     scheduler.mark_final(list(_subtree(structure)))
     return await scheduler.finish()
 
