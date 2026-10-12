@@ -339,7 +339,7 @@ class PageIndexClient:
         client = PageIndexClient()                  # local docs + your model
         client = PageIndexClient(api_key="...")     # cloud docs + managed chat
         client = PageIndexClient(api_key="...",     # cloud docs + your model
-                                 chat_model="openai/gpt-5.2")
+                                 chat_model="openai/gpt-6-sol")
 
     ``index=`` / ``chat=`` are the grouped spelling of the same flat
     arguments — a string as shorthand, a dict for the full config; each
@@ -2186,7 +2186,7 @@ class PageIndexClient:
         call — only your ``messages`` remain::
 
             runner = anthropic_client.beta.messages.tool_runner(
-                **client.anthropic_runner_config(model="claude-sonnet-4-5"),
+                **client.anthropic_runner_config(model="claude-sonnet-5-5"),
                 messages=[{"role": "user", "content": "..."}],
             )
 
