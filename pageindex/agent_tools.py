@@ -33,7 +33,8 @@ from typing import Any, Callable, Optional
 
 import requests
 
-from .errors import PageIndexAPIError
+from . import deadline as _deadline
+from .errors import PageIndexAPIError, PageIndexTimeoutError
 from .mcp_bridge import render_prompt_text, render_text
 
 TOOL_RESPONSE_CHAR_LIMIT = 100_000
@@ -443,10 +444,13 @@ def _await_completion(client, entry: dict[str, Any], wait: bool) -> dict[str, An
     doc_id = entry.get("id")
     if not wait or not doc_id or entry.get("status") in ("completed", "failed"):
         return entry
-    deadline = time.monotonic() + _TOOL_WAIT_TIMEOUT
+    # Also capped by a chat run's own deadline, which it raises at.
+    deadline = time.monotonic() + _deadline.bound(_TOOL_WAIT_TIMEOUT)
     current = entry
     while time.monotonic() < deadline:
-        time.sleep(_TOOL_WAIT_INTERVAL)
+        time.sleep(min(_TOOL_WAIT_INTERVAL,
+                       max(0.0, deadline - time.monotonic())))
+        _deadline.check()
         refreshed = _refetch_entry(client, doc_id)
         if refreshed is None:
             continue  # transient refetch failure: poll on to the deadline
@@ -1245,6 +1249,8 @@ def call_tool(client, name: str, arguments: dict[str, Any],
         return _dumps(payload), is_error
     try:
         payload, is_error = implementation(*bound.args, **bound.kwargs)
+    except PageIndexTimeoutError:
+        raise  # the run's deadline ends the run, not just this tool
     except Exception as exc:  # tool calls must never raise into the agent loop
         payload, is_error = _failure(
             f"{name} failed: {exc}", None,
@@ -1393,6 +1399,8 @@ def _bridge_invoker(bridge, name: str, schema: dict,
             _coerce_bool_args(schema, arguments)
             blocks, is_error = bridge.call_tool(name, arguments)
         except Exception as exc:
+            if isinstance(exc, PageIndexTimeoutError):
+                raise  # the run's deadline: never model-visible text
             if isinstance(exc, PageIndexAPIError) and (
                     exc.status_code in (401, 403, 429)
                     or (exc.status_code or 0) >= 500
@@ -1543,6 +1551,7 @@ def _tool_specs(client, include_management: bool = False, doc_ids=None,
 
     def local_invoke(name: str) -> "Callable[[dict], tuple[list, bool]]":
         def invoke(arguments: dict) -> tuple[list, bool]:
+            _deadline.check()  # no tool work starts past a run's deadline
             text, is_error = call_tool(client, name, arguments,
                                        doc_ids=doc_ids)
             return [{"type": "text", "text": text}], is_error
