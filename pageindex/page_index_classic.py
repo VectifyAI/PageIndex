@@ -1268,7 +1268,7 @@ def page_index_main(doc, opt=None, logger=None, page_list=None):
             await summarize_tree(structure, page_list, model=getattr(opt, 'summary_model', None) or opt.model)
             if opt.if_add_doc_description == 'yes':
                 # Create a clean structure without unnecessary fields for description generation
-                clean_structure = create_clean_structure_for_description(structure)
+                clean_structure = create_clean_structure_for_description(structure, top_level_only=True)
                 doc_description = generate_doc_description(clean_structure, model=getattr(opt, 'summary_model', None) or opt.model)
                 cover_subtree_ranges(structure)
                 structure = format_structure(structure, order=['title', 'node_id', 'start_index', 'end_index', 'key_items', 'summary', 'text', 'nodes'])

@@ -76,7 +76,7 @@ def _validate_pdf(pdf):
 async def _summarize(structure, page_list, model, concurrency=None, max_words=None):
     from ..utils import summarize_tree
     await summarize_tree(structure, page_list, model=model, concurrency=concurrency,
-                         max_words=max_words)
+                         max_words=max_words, split_shared_pages=True)
 
 
 async def _optimize_async(structure, page_texts, do_expand, model, on_final=None,
@@ -113,7 +113,7 @@ async def _optimize_and_summarize(structure, page_texts, optimize_model, summary
     from ..utils import SummaryScheduler
     scheduler = SummaryScheduler(structure, [(text, 0) for text in page_texts],
                                  model=summary_model, concurrency=concurrency,
-                                 max_words=max_words)
+                                 max_words=max_words, split_shared_pages=True)
     report = await _optimize_async(structure, page_texts, True, optimize_model,
                                    on_final=scheduler.mark_final,
                                    concurrency=concurrency)

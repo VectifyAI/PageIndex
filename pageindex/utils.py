@@ -787,6 +787,63 @@ def own_pages(node):
     return start, end
 
 
+def _heading_offset(page_text, node):
+    """Where the one line opening with the node's heading, its section number
+    aside, starts in the page text. None when that cannot be told (no Latin
+    letter to match, not exactly one such line, or a same-page keeper, whose
+    title its summary call rewrites mid-run), so the page stays whole."""
+    if not node or node.get('_same_page'):
+        return None
+    from .tree_optimize import normalize
+    key = normalize(node.get('title'))
+    if not re.search("[a-z]", key):
+        return None
+    hits, offset = [], 0
+    for line in page_text.splitlines(keepends=True):
+        norm = normalize(line)
+        if any((n + " ").startswith(key + " ") for n in (norm, re.sub(r"^(\d+ )+", "", norm))):
+            hits.append(offset)
+        offset += len(line)
+    return hits[0] if len(hits) == 1 else None
+
+
+def leaf_own_text(structure, leaf, pdf_pages):
+    """A leaf's pages, less what the neighbouring leaf reads of a page they
+    share: the lines before the heading this leaf opens with, and the lines
+    from the next heading on. Both leaves split that page at the same line,
+    so every line still reaches one of them; a heading that cannot be placed
+    leaves the page whole on both sides."""
+    start, end = leaf.get('start_index'), leaf.get('end_index')
+    text = get_text_of_pdf_pages(pdf_pages, start, end)
+    nodes = list(_subtree(structure))
+    i = next((i for i, n in enumerate(nodes) if n is leaf), None)
+    if not isinstance(start, int) or not isinstance(end, int) or i is None:
+        return text
+    # the heading the leaf opens with: the topmost node it is the first leaf of
+    top = i
+    while top > 0 and (nodes[top - 1].get('nodes') or [None])[0] is nodes[top]:
+        top -= 1
+    head = (nodes[top] if top > 0 and nodes[top - 1].get('end_index') == start
+            and nodes[top].get('start_index') == start else None)
+    tail = nodes[i + 1] if i + 1 < len(nodes) else {}
+    next_leaf = tail
+    while next_leaf.get('nodes'):
+        next_leaf = next_leaf['nodes'][0]
+    tail = tail if tail.get('start_index') == end == next_leaf.get('start_index') else None
+
+    first, last = pdf_pages[start - 1][0], pdf_pages[end - 1][0]
+    cut_start = _heading_offset(first, head)
+    cut_end = _heading_offset(last, tail)
+    if start == end and cut_start is not None and cut_end is not None and cut_end <= cut_start:
+        cut_start = cut_end = None
+    if cut_start is None and cut_end is None:
+        return text
+    if start == end:
+        return first[cut_start or 0:cut_end]
+    return (first[cut_start or 0:] + get_text_of_pdf_pages(pdf_pages, start + 1, end - 1)
+            + last[:cut_end])
+
+
 def cover_subtree_ranges(structure):
     """Widen every parent's range to cover its whole subtree."""
     for node in structure if isinstance(structure, list) else [structure]:
@@ -960,9 +1017,10 @@ class SummaryScheduler:
     def __init__(self, structure, pdf_pages, model=None,
                  small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
                  max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None,
-                 max_words=None):
+                 max_words=None, split_shared_pages=False):
         self.structure = structure
         self._pdf_pages = pdf_pages
+        self._split_shared_pages = split_shared_pages
         self._model = model
         self._small_node_tokens = small_node_tokens
         self._max_intro_pages = max_intro_pages
@@ -1015,8 +1073,13 @@ class SummaryScheduler:
             self._answered = True
         return reply
 
+    def _leaf_text(self, node):
+        if self._split_shared_pages:
+            return leaf_own_text(self.structure, node, self._pdf_pages)
+        return get_text_of_pdf_pages(self._pdf_pages, node['start_index'], node['end_index'])
+
     async def _leaf_summary(self, node, prio):
-        text = get_text_of_pdf_pages(self._pdf_pages, node['start_index'], node['end_index'])
+        text = self._leaf_text(node)
         if count_tokens(text, model=self._model) < self._small_node_tokens:
             return text.strip()
 
@@ -1096,8 +1159,7 @@ class SummaryScheduler:
             if _is_unrecoverable(e):
                 raise
         if not node['summary']:
-            node['summary'] = fallback_summary(node, "" if children else get_text_of_pdf_pages(
-                self._pdf_pages, node['start_index'], node['end_index']))
+            node['summary'] = fallback_summary(node, "" if children else self._leaf_text(node))
 
     async def finish(self):
         """Wait for every summary; fails loud if the model never answered."""
@@ -1140,27 +1202,31 @@ class SummaryScheduler:
 async def summarize_tree(structure, pdf_pages, model=None,
                          small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
                          max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None,
-                         max_words=None):
+                         max_words=None, split_shared_pages=False):
     """Bottom-up summaries: leaves from their own pages, parents composed from
     child summaries plus the pages no child covers. A parent's summary describes
     its whole subtree (end_index union semantics). Nodes that already carry a
     summary are left untouched; leaves under `small_node_tokens` use their raw
     text as the summary without a model call; every prompt asks for at most
-    `max_words` words. Model calls run deepest node first, both in starting
-    order and in leaving the queue: depth counts the calls left on a node's
-    path to the root, its own included."""
+    `max_words` words; with `split_shared_pages` a leaf reads only its side of
+    a page it shares with the next or previous leaf (see leaf_own_text). Model
+    calls run deepest node first, both in starting order and in leaving the
+    queue: depth counts the calls left on a node's path to the root, its own
+    included."""
     scheduler = SummaryScheduler(structure, pdf_pages, model=model,
                                  small_node_tokens=small_node_tokens,
                                  max_intro_pages=max_intro_pages,
-                                 concurrency=concurrency, max_words=max_words)
+                                 concurrency=concurrency, max_words=max_words,
+                                 split_shared_pages=split_shared_pages)
     scheduler.mark_final(list(_subtree(structure)))
     return await scheduler.finish()
 
 
-def create_clean_structure_for_description(structure):
+def create_clean_structure_for_description(structure, top_level_only=False):
     """
     Create a clean structure for document description generation,
-    excluding unnecessary fields like 'text'.
+    excluding unnecessary fields like 'text'. `top_level_only` drops the
+    children, for trees whose parent summaries already cover their subtrees.
     """
     if isinstance(structure, dict):
         clean_node = {}
@@ -1170,12 +1236,12 @@ def create_clean_structure_for_description(structure):
                 clean_node[key] = structure[key]
         
         # Recursively process child nodes
-        if 'nodes' in structure and structure['nodes']:
+        if 'nodes' in structure and structure['nodes'] and not top_level_only:
             clean_node['nodes'] = create_clean_structure_for_description(structure['nodes'])
-        
+
         return clean_node
     elif isinstance(structure, list):
-        return [create_clean_structure_for_description(item) for item in structure]
+        return [create_clean_structure_for_description(item, top_level_only) for item in structure]
     else:
         return structure
 

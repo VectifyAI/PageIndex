@@ -612,6 +612,26 @@ def test_get_tree_keeps_each_index_self_consistent(local_client, tmp_path,
     assert "Alpha body" in root["text"] and "Beta body" not in root["text"]
 
 
+def test_flash_description_reads_only_the_top_level(local_client, tmp_path, monkeypatch):
+    """A parent's summary already covers its subtree, so the description
+    prompt carries the top level alone."""
+    from conftest import build_pdf
+    pdf = tmp_path / "report.pdf"
+    pdf.write_bytes(build_pdf(["Alpha body", "Beta body"]))
+    structure = [{"title": "Report", "start_index": 1, "end_index": 2,
+                  "summary": "report summary",
+                  "nodes": [{"title": "Alpha", "start_index": 1, "end_index": 2,
+                             "summary": "alpha summary"}]}]
+    monkeypatch.setattr(pageindex.flash, "page_index_flash",
+                        lambda pdf, **kw: {"structure": structure})
+    prompts = []
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda model, prompt, **kw: prompts.append(prompt) or "d")
+    local_client.submit_document(str(pdf), mode="flash")
+    assert len(prompts) == 1
+    assert "report summary" in prompts[0] and "alpha summary" not in prompts[0]
+
+
 def test_unify_tree_edges():
     from pageindex.utils import unify_tree
     tree = [{"title": "A", "page_index": 3, "prefix_summary": "a",
@@ -1293,6 +1313,79 @@ def test_summarize_tree_all_short_leaves_need_no_model(monkeypatch):
     structure = [{"title": "A", "start_index": 1, "end_index": 1}]
     out = asyncio.run(pageindex.utils.summarize_tree(structure, [("tiny", 1)]))
     assert out[0]["summary"] == "tiny"
+
+
+def test_leaf_summaries_split_a_shared_page_at_the_heading(monkeypatch):
+    """Two leaves sharing a page each read their own side of the next heading,
+    and between them every line is read."""
+    prompts = []
+
+    async def fake(model, prompt):
+        prompts.append(prompt)
+        return '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", fake)
+    pages = ["Alpha\nfirst body\n", "first tail\nBeta\nsecond body\n", "second more\n"]
+    a = {"title": "Alpha", "start_index": 1, "end_index": 2}
+    b = {"title": "Beta", "start_index": 2, "end_index": 3}
+    pdf_pages = [(p, 0) for p in pages]
+    own = [pageindex.utils.leaf_own_text([a, b], n, pdf_pages) for n in (a, b)]
+    assert own == ["Alpha\nfirst body\nfirst tail\n", "Beta\nsecond body\nsecond more\n"]
+    asyncio.run(pageindex.utils.summarize_tree([a, b], pdf_pages, small_node_tokens=0,
+                                               split_shared_pages=True))
+    alpha, beta = sorted(prompts, key=lambda p: "Alpha" not in p)
+    assert "first tail" in alpha and "second body" not in alpha
+    assert "second body" in beta and "first tail" not in beta
+
+    prompts.clear()
+    a.pop("summary"), b.pop("summary")
+    asyncio.run(pageindex.utils.summarize_tree([a, b], pdf_pages, small_node_tokens=0))
+    assert all("first tail" in p and "second body" in p for p in prompts)
+
+    one_page = [{"title": t, "start_index": 1, "end_index": 1} for t in ("A x", "B x", "C x")]
+    page = [("A x\na\nB x\nb\nC x\nc\n", 0)]
+    assert [pageindex.utils.leaf_own_text(one_page, n, page) for n in one_page] == [
+        "A x\na\n", "B x\nb\n", "C x\nc\n"]
+
+    numbered = [("A x\na\n2.1 B x\nb\n", 0)]
+    assert pageindex.utils.leaf_own_text(one_page[:2], one_page[0], numbered) == "A x\na\n"
+
+
+@pytest.mark.parametrize("page2, title, same_page", [
+    ("alpha tail\nBeta body\nBeta\n", "Beta", False),
+    ("alpha tail\nno heading here\n", "Beta", False),
+    ("alpha tail\n第二章\nbody\n", "第二章", False),
+    ("alpha tail\nBeta\nbody\n", "Beta", True),
+])
+def test_leaf_keeps_a_shared_page_whole_when_the_heading_cannot_be_placed(page2, title,
+                                                                          same_page):
+    a = {"title": "Alpha", "start_index": 1, "end_index": 2}
+    b = {"title": title, "start_index": 2, "end_index": 2, "_same_page": same_page}
+    pdf_pages = [("Alpha\n", 0), (page2, 0)]
+    assert pageindex.utils.leaf_own_text([a, b], a, pdf_pages) == "Alpha\n" + page2
+    assert pageindex.utils.leaf_own_text([a, b], b, pdf_pages) == page2
+
+
+def test_first_child_opens_at_its_parents_heading():
+    """A parent's opening lines on its first child's page have no reader but
+    that child, so the child starts at the parent's heading."""
+    w = {"title": "Wrap", "start_index": 1, "end_index": 2}
+    c = {"title": "Child", "start_index": 2, "end_index": 2}
+    p = {"title": "Part", "start_index": 2, "end_index": 2, "nodes": [c]}
+    pdf_pages = [("Wrap\n", 0), ("last words\nPart\nopening words\nChild\nmore words\n", 0)]
+    assert pageindex.utils.leaf_own_text([w, p], w, pdf_pages) == "Wrap\nlast words\n"
+    assert pageindex.utils.leaf_own_text([w, p], c, pdf_pages) == (
+        "Part\nopening words\nChild\nmore words\n")
+
+
+def test_leaf_keeps_a_page_whose_rest_no_leaf_reads():
+    """The next heading sits on the leaf's last page, but the next leaf starts
+    a page later: the lines after the heading stay with this leaf."""
+    a = {"title": "Alpha", "start_index": 1, "end_index": 2}
+    p = {"title": "Part", "start_index": 2, "end_index": 3,
+         "nodes": [{"title": "Child", "start_index": 3, "end_index": 3}]}
+    pdf_pages = [("Alpha\n", 0), ("last words\nPart\nopening words\n", 0), ("Child\n", 0)]
+    assert pageindex.utils.leaf_own_text([a, p], a, pdf_pages) == (
+        "Alpha\nlast words\nPart\nopening words\n")
 
 
 def test_summarize_tree_starts_the_deepest_leaf_first(monkeypatch):
@@ -3300,6 +3393,39 @@ def test_page_index_flash_plumbs_summary_max_words(tmp_path, monkeypatch):
         flash_api.page_index_flash(str(pdf), summary_model="m", optimize=optimize,
                                    summary_max_words=80)
         assert prompts and all("within 80 words" in p for p in prompts), optimize
+
+
+def test_page_index_flash_splits_shared_pages_on_both_summary_paths(tmp_path, monkeypatch):
+    from conftest import build_pdf
+    import copy
+    import pageindex.flash.api as flash_api
+    import pageindex.tree_optimize as tree_optimize
+
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    tree = [{"title": "Alpha", "start_index": 1, "end_index": 2},
+            {"title": "Beta", "start_index": 2, "end_index": 2}]
+    pages = ["Alpha\n" + "oakwood " * 300 + "\n",
+             "pinecone " * 300 + "\nBeta\n" + "elmtree " * 300 + "\n"]
+    monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: {
+        "structure": copy.deepcopy(tree), "page_texts": list(pages)})
+
+    async def propose(model, prompt):
+        return {"subsections": []}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+    prompts = []
+
+    async def capture(model, prompt):
+        prompts.append(prompt)
+        return '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", capture)
+
+    for optimize in (False, "full"):
+        prompts.clear()
+        flash_api.page_index_flash(str(pdf), summary_model="m", optimize=optimize)
+        alpha, beta = sorted(prompts, key=lambda p: "Alpha" not in p)
+        assert "pinecone" in alpha and "elmtree" not in alpha, optimize
+        assert "elmtree" in beta and "pinecone" not in beta, optimize
 
 
 def test_summary_max_words_reaches_the_local_indexer():
