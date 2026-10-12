@@ -788,6 +788,9 @@ class PageIndexClient:
             dict: {'doc_id': ..., 'name': ...}. 'name' is the stored document
                 name: a taken name gains a numeric suffix (name_1..name_99)
                 and a UserWarning is emitted. Older cloud servers omit 'name'.
+                Local also returns 'usage', the indexing model's tokens summed
+                over every call, in the Chat Completions usage shape
+                LiteLLM returns.
         """
         result = self._api.submit_document(
             file_path=file_path, mode=mode,
