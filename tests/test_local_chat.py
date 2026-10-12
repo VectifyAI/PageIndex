@@ -112,8 +112,10 @@ class FakeModel(Model):
         transport = getattr(getattr(self, "_client", None), "responses", None)
         if transport is not None:
             await transport.create()
-        return ModelResponse(output=self.turns.pop(0), usage=_usage(),
-                             response_id=None)
+        output = self.turns.pop(0)
+        if isinstance(output, BaseException):
+            raise output  # the backend fails this turn
+        return ModelResponse(output=output, usage=_usage(), response_id=None)
 
     async def stream_response(self, system_instructions, input,
                               model_settings, tools, output_schema, handoffs,
@@ -129,6 +131,8 @@ class FakeModel(Model):
                 await aio.sleep(0.01)
         self._record(system_instructions, input)
         output = self.turns.pop(0)
+        if isinstance(output, BaseException):
+            raise output  # the backend fails this turn
         sequence = 0
         for index, piece in enumerate(getattr(self, "thinking_pieces", ())):
             from openai.types.responses import (
@@ -220,11 +224,19 @@ def test_chat_completions_end_to_end(client, store_path, fake_model):
     assert result["choices"][0]["message"] == {"role": "assistant",
                                                "content": "The answer"}
     assert result["choices"][0]["finish_reason"] == "stop"
-    assert result["usage"] == {"prompt_tokens": 20, "completion_tokens": 10,
-                               "total_tokens": 30,
-                               "prompt_tokens_details": {"cached_tokens": 0},
-                               "completion_tokens_details":
-                                   {"reasoning_tokens": 0}}
+    call = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+            "prompt_tokens_details": {"cached_tokens": 0,
+                                      "cache_write_tokens": 0},
+            "completion_tokens_details": {"reasoning_tokens": 0}}
+    assert result["usage"] == {
+        "prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30,
+        "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+        "completion_tokens_details": {"reasoning_tokens": 0},
+        "request_usage_entries": [call, call]}
+    from openai.types import CompletionUsage
+    typed = CompletionUsage.model_validate(result["usage"])
+    assert typed.prompt_tokens_details is not None
+    assert typed.prompt_tokens_details.cache_write_tokens == 0
     assert fake_model.state["protocols"][0][0] == "chat"
     # The tool ran for real: turn 2's input carries its output.
     turn2 = json.dumps(fake.inputs[1])
@@ -936,12 +948,19 @@ def test_responses_end_to_end(client, store_path, fake_model):
     assert result["id"].startswith("resp_")
     assert result["object"] == "response"
     assert result["status"] == "completed"
+    call = {"input_tokens": 10,
+            "input_tokens_details": {"cached_tokens": 0,
+                                     "cache_write_tokens": 0},
+            "output_tokens": 5,
+            "output_tokens_details": {"reasoning_tokens": 0},
+            "total_tokens": 15}
     assert result["usage"] == {
         "input_tokens": 20,
         "input_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
         "output_tokens": 10,
         "output_tokens_details": {"reasoning_tokens": 0},
-        "total_tokens": 30}
+        "total_tokens": 30,
+        "request_usage_entries": [call, call]}
     assert fake_model.state["protocols"][0][0] == "responses"
     assert [item.get("type", "message") for item in result["output"]] == [
         "function_call", "message"]
@@ -1073,6 +1092,49 @@ def test_responses_stream_passthrough(client, store_path, fake_model):
 
 
 @needs_agents
+def test_responses_stream_counts_a_call_cut_short(client, store_path,
+                                                  fake_model):
+    """openai-agents raises on response.incomplete before its hooks see
+    the call, yet that call was billed: the terminal envelope counts it."""
+    from openai.types.responses import Response, ResponseIncompleteEvent
+    from openai.types.responses.response import IncompleteDetails
+    from openai.types.responses.response_usage import (
+        InputTokensDetails, OutputTokensDetails, ResponseUsage)
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([[_call_item("get_document", {"doc_name": "report.pdf"})],
+                       [_msg_item("cut")]])
+    first_turn = fake.stream_response
+
+    async def stream_response(*args, **kwargs):
+        if not fake.inputs:
+            async for event in first_turn(*args, **kwargs):
+                yield event
+            return
+        fake._record(args[0], args[1])
+        yield ResponseIncompleteEvent(
+            type="response.incomplete", sequence_number=1,
+            response=Response(
+                id="resp_cut", created_at=0.0, model="fake",
+                object="response", output=[], parallel_tool_calls=False,
+                tool_choice="auto", tools=[], status="incomplete",
+                incomplete_details=IncompleteDetails(
+                    reason="max_output_tokens"),
+                usage=ResponseUsage(
+                    input_tokens=40, output_tokens=99, total_tokens=139,
+                    input_tokens_details=InputTokensDetails(
+                        cached_tokens=0, cache_write_tokens=0),
+                    output_tokens_details=OutputTokensDetails(
+                        reasoning_tokens=0))))
+
+    fake.stream_response = stream_response
+    final = list(client._responses("q", stream=True))[-1]
+    assert final["type"] == "response.incomplete"
+    usage = final["response"]["usage"]
+    assert (usage["input_tokens"], usage["output_tokens"]) == (50, 104)
+    assert len(usage["request_usage_entries"]) == 2
+
+
+@needs_agents
 def test_responses_stream_opens_with_created(client, store_path, fake_model):
     """N per-turn openings collapse to one response.created, not zero —
     the logical stream must open with a response object carrying the same
@@ -1201,6 +1263,8 @@ def fake_anthropic(monkeypatch):
         def handler(request):
             state["calls"].append(json.loads(request.content))
             body = responses[len(state["calls"]) - 1]
+            if isinstance(body, anthropic_httpx.Response):  # an error reply
+                return body
             if isinstance(body, str):  # pre-rendered SSE
                 return anthropic_httpx.Response(
                     200, content=body.encode(),
@@ -1234,6 +1298,14 @@ def test_messages_end_to_end(client, store_path, fake_anthropic):
     assert result["content"][0]["text"] == "The answer"
     assert result["usage"]["input_tokens"] == 20
     assert result["usage"]["output_tokens"] == 10
+    # Each turn is one sampling iteration of the API's own breakdown.
+    assert result["usage"]["iterations"] == 2 * [{
+        "type": "message", "model": "claude-test", "input_tokens": 10,
+        "output_tokens": 5, "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0, "cache_creation": None}]
+    from anthropic.types.beta import BetaMessageIterationUsage, BetaUsage
+    native = BetaUsage.model_validate(result["usage"]).iterations or []
+    assert all(isinstance(it, BetaMessageIterationUsage) for it in native)
     # Full new-turn sequence, valid for verbatim history append.
     roles = [message["role"] for message in result["messages"]]
     assert roles == ["assistant", "user", "assistant"]
@@ -1286,7 +1358,8 @@ def test_messages_usage_sums_every_count_across_turns():
         "service_tier": "standard",
         "fallback_credit": {"status": {"type": "redeemed"}}})
 
-    usage = local_chat._anthropic_usage([first, last])
+    usage = local_chat._anthropic_usage([(first, "claude-test"),
+                                         (last, "claude-test")])
     assert usage == {
         **last,
         "input_tokens": 30, "output_tokens": 11,
@@ -1323,6 +1396,116 @@ def test_messages_stream_ends_with_the_run_usage(client, store_path,
     result = client._messages(question, model="claude-test", max_tokens=100)
     assert result["usage"]["input_tokens"] == 30
     assert events[-1].usage == result["usage"]
+    # The same continuation transcript the non-stream envelope carries.
+    assert [m["role"] for m in events[-1].messages] == [
+        "assistant", "user", "assistant", "user", "assistant"]
+    assert events[-1].messages == result["messages"]
+
+
+@needs_agents
+@pytest.mark.parametrize("run, key", [
+    (lambda c: c.chat_completions("q"), "prompt_tokens"),
+    (lambda c: list(c.chat_completions("q", stream=True)), "prompt_tokens"),
+    (lambda c: c.chat("q"), "prompt_tokens"),
+    (lambda c: list(c.chat("q", stream=True)), "prompt_tokens"),
+    (lambda c: c._responses("q"), "input_tokens"),
+    (lambda c: list(c._responses("q", stream=True)), "input_tokens"),
+])
+def test_failed_run_carries_the_usage_already_spent(client, store_path,
+                                                    fake_model, run, key):
+    """A provider error on turn 2: openai-agents attaches no run data to
+    it, yet turn 1 was billed and is reported."""
+    import openai
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([[_call_item("get_document", {"doc_name": "report.pdf"})],
+                openai.APIConnectionError(
+                    request=httpx.Request("POST", "https://backend"))])
+    with pytest.raises(PageIndexAPIError, match="model backend failed") as err:
+        run(client)
+    usage = err.value.usage
+    assert usage is not None
+    assert usage[key] == 10 and usage["total_tokens"] == 15
+    assert len(usage["request_usage_entries"]) == 1
+
+
+def test_run_usage_with_no_finished_call_is_zero():
+    assert local_chat._openai_usage([]) == {
+        "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+        "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+        "completion_tokens_details": {"reasoning_tokens": 0},
+        "request_usage_entries": []}
+    assert local_chat._responses_usage([])["request_usage_entries"] == []
+
+
+def test_run_usage_maps_each_count_to_its_field():
+    """Distinct non-zero counts, so a swapped column cannot pass."""
+    call = types.SimpleNamespace(usage=types.SimpleNamespace(
+        input_tokens=100, output_tokens=20,
+        input_tokens_details=types.SimpleNamespace(cached_tokens=7,
+                                                   cache_write_tokens=11),
+        output_tokens_details=types.SimpleNamespace(reasoning_tokens=3)))
+    chat = local_chat._openai_usage([call, call])
+    assert chat["request_usage_entries"][0] == {
+        "prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
+        "prompt_tokens_details": {"cached_tokens": 7, "cache_write_tokens": 11},
+        "completion_tokens_details": {"reasoning_tokens": 3}}
+    assert chat["prompt_tokens_details"] == {"cached_tokens": 14,
+                                             "cache_write_tokens": 22}
+    responses = local_chat._responses_usage([call])
+    assert responses["input_tokens_details"] == {"cached_tokens": 7,
+                                                 "cache_write_tokens": 11}
+    assert responses["output_tokens_details"] == {"reasoning_tokens": 3}
+
+
+@needs_agents
+def test_max_turns_error_carries_the_usage_already_spent(client, store_path,
+                                                         fake_model):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([[_call_item("get_document", {"doc_name": "report.pdf"})],
+                [_msg_item("too late")]])
+    with pytest.raises(PageIndexAPIError, match="max_turns") as err:
+        client.chat_completions("q", max_turns=1)
+    usage = err.value.usage
+    assert usage is not None
+    assert usage["prompt_tokens"] == 10
+    assert len(usage["request_usage_entries"]) == 1
+
+
+@needs_anthropic
+@pytest.mark.parametrize("stream", [False, True])
+def test_messages_failed_run_carries_the_usage_already_spent(
+        client, store_path, fake_anthropic, stream):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    tool_turn = _anthropic_message(
+        [{"type": "tool_use", "id": "tu_1", "name": "get_document",
+          "input": {"doc_name": "report.pdf"}}], "tool_use")
+    refused = anthropic_httpx.Response(400, json={
+        "type": "error",
+        "error": {"type": "invalid_request_error", "message": "no"}})
+    fake_anthropic([_anthropic_sse(tool_turn) if stream else tool_turn,
+                    refused])
+    with pytest.raises(PageIndexAPIError, match="model backend failed") as err:
+        result = client._messages("q", model="claude-test", max_tokens=100,
+                                  stream=stream)
+        list(result) if stream else result
+    usage = err.value.usage
+    assert usage is not None
+    assert usage["input_tokens"] == 10 and usage["output_tokens"] == 5
+    assert len(usage["iterations"]) == 1
+
+    fake_anthropic([refused])  # nothing finished before the failure
+    with pytest.raises(PageIndexAPIError) as err:
+        result = client._messages("q", model="claude-test", max_tokens=100,
+                                  stream=stream)
+        list(result) if stream else result
+    assert err.value.usage == {"input_tokens": 0, "output_tokens": 0,
+                               "iterations": []}
+
+
+def test_validation_error_has_no_usage(client):
+    with pytest.raises(PageIndexAPIError) as err:
+        client.chat_completions("q", max_turns=0)
+    assert err.value.usage is None
 
 
 @needs_anthropic
@@ -1417,9 +1600,11 @@ def test_messages_raises_when_runner_params_unreadable(client, fake_anthropic,
     ])
     monkeypatch.setattr(BetaToolRunner, "set_messages_params",
                         lambda self, params: None)
-    with pytest.raises(PageIndexAPIError, match="anthropic version"):
+    with pytest.raises(PageIndexAPIError, match="anthropic version") as err:
         client._messages([{"role": "user", "content": "hi"}],
                         model="claude-test", max_tokens=100)
+    usage = err.value.usage  # the finished turn was still billed
+    assert usage is not None and usage["input_tokens"] == 10
 
 
 def test_messages_missing_framework(client, monkeypatch):
@@ -4071,6 +4256,30 @@ def test_bridge_chat_fails_fast_on_a_rate_limited_tool(bridge_client,
     assert len(fake.instructions) == 1
 
 
+@needs_agents
+@pytest.mark.parametrize("run, key", [
+    (lambda c: c.chat_completions("q"), "prompt_tokens"),
+    (lambda c: list(c.chat_completions("q", stream=True)), "prompt_tokens"),
+    (lambda c: c.chat("q"), "prompt_tokens"),
+    (lambda c: list(c.chat("q", stream=True)), "prompt_tokens"),
+    (lambda c: c._responses("q"), "input_tokens"),
+    (lambda c: list(c._responses("q", stream=True)), "input_tokens"),
+])
+def test_tool_failure_keeps_the_usage_of_its_turn(bridge_client, fake_model,
+                                                  run, key):
+    """openai-agents records a streamed turn only after its tools ran, so
+    the turn whose tool failed was missing from streamed usage."""
+    client, bridge = bridge_client
+    bridge.call_tool = _rate_limited
+    fake_model([[_call_item("get_document", {"doc_name": "r.pdf"})],
+                [_msg_item("never reached")]])
+    with pytest.raises(PageIndexAPIError, match="HTTP 429") as info:
+        run(client)
+    usage = info.value.usage
+    assert usage is not None and usage[key] == 10
+    assert len(usage["request_usage_entries"]) == 1
+
+
 @needs_anthropic
 def test_messages_fail_fast_is_quiet(bridge_client, fake_anthropic, caplog):
     """The runner's own tool-error logging never reports the failure the
@@ -4125,6 +4334,8 @@ def test_messages_fail_fast_on_a_rate_limited_tool(
         with pytest.raises(PageIndexAPIError, match="HTTP 429") as info:
             run()
         assert info.value.status_code == 429
+        usage = info.value.usage
+        assert usage is not None and usage["input_tokens"] == 10  # billed
         assert tool_calls == [("get_document", {"doc_name": "r.pdf"})]
     else:
         run()
