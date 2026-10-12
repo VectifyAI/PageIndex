@@ -87,8 +87,8 @@ from pageindex import PageIndexClient
 os.environ["OPENAI_API_KEY"] = "your-openai-key"
 
 client = PageIndexClient(
-    index="gpt-5.6-luna",               # model to build the tree index
-    chat="gpt-5.6-sol",                 # model to search the tree
+    index="gpt-6-luna",                 # model to build the tree index
+    chat="gpt-6-sol",                   # model to search the tree
 )
 doc_id = client.submit_document("report.pdf")["doc_id"]
 
@@ -190,7 +190,7 @@ os.environ["OPENAI_API_KEY"] = "your-openai-key"
 
 client = PageIndexClient(
     index="cloud",                       # build and store the index in PageIndex Cloud
-    chat="gpt-5.6-sol",                  # use your preferred compatible model for chat
+    chat="gpt-6-sol",                    # use your preferred compatible model for chat
 )
 doc_id = client.submit_document("report.pdf", wait=True)["doc_id"]
 print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
