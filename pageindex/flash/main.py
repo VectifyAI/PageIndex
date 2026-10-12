@@ -17,7 +17,7 @@ from typing import Optional, Union
 # (re is used by the title-reject regex below)
 
 from .blocks import cluster_lines_into_blocks, BlockClusterContext
-from .classification import is_body_paragraph, detect_header_footer, HeaderFooterContext, mark_watermarks, mark_toc_and_boilerplate
+from .classification import is_body_paragraph, detect_header_footer, HeaderFooterContext, mark_watermarks, mark_toc_and_boilerplate, bounded_edit_distance
 from .labels import detect_captions, build_caption_regions, CaptionContext
 from .model import Rect, numbering_kind, block_text, deaccented_text, Block
 from .outline_assembly import (
@@ -117,6 +117,59 @@ def page_by_block_lookup(pages, block) -> Optional[PageView]:
 
 
 # --------------------------------------------------------------------------- #
+# Heading positions #
+# --------------------------------------------------------------------------- #
+
+HEADING_TYPES = (7, 8)   # unnumbered and numbered outline headings (mark_outline_block_types)
+
+
+def _loose(text: str) -> str:
+    return " ".join(re.sub(r"\W+", " ", unicodedata.normalize("NFKC", text).lower()).split())
+
+
+def _find_heading(title: str, candidates: list) -> Optional[int]:
+    """Position of the block printing `title`: the closest match among heading blocks first, then
+    among blocks whose text is mostly the title (exact, numbered, prefixed, then near spelling)."""
+    wanted = _loose(title)
+    for headings_only in (True, False):
+        best = None
+        for pos, text, kind in candidates:
+            if not text or (headings_only and kind not in HEADING_TYPES) or (kind not in HEADING_TYPES and len(text) > 1.6 * len(wanted)):
+                continue
+            head = text[:len(wanted) + 14]
+            reach = min(len(wanted), len(head))
+            rank = (0 if text == wanted else 1 if text.endswith(wanted) else 2 if text.startswith(wanted)
+                    else 3 if bounded_edit_distance(head[:reach], wanted[:reach], 0.2 * reach) < 0.2 * reach
+                    else None)
+            if rank is not None and (best is None or rank < best[0]):
+                best = (rank, pos)
+        if best is not None:
+            return best[1]
+    return None
+
+
+def locate_headings(structure: list[dict], body: list[Block], block_pages: list[int]) -> None:
+    """Give each node without `_pos` the position of the block that prints its title: on its
+    start page, or a heading block on the page after or before it (bookmarks can be one page off)."""
+    by_page: dict[int, list] = {}
+    for pos, (block, page_no) in enumerate(zip(body, block_pages)):
+        by_page.setdefault(page_no, []).append((pos, _loose(block_text(block)), block.type))
+    stack = list(structure)
+    while stack:
+        node = stack.pop()
+        stack.extend(node.get("nodes") or [])
+        if node.get("_pos") is not None or not _loose(node["title"]):
+            continue
+        start = node["start_index"]
+        found = _find_heading(node["title"], by_page.get(start, []))
+        for near in (start + 1, start - 1):
+            if found is None:
+                found = _find_heading(node["title"], [c for c in by_page.get(near, []) if c[2] in HEADING_TYPES])
+        if found is not None:
+            node["_pos"] = found
+
+
+# --------------------------------------------------------------------------- #
 # End-to-end entry point #
 # --------------------------------------------------------------------------- #
 
@@ -125,6 +178,7 @@ def extract_toc(
     doc_handle: Union[str, Path, BytesIO],
     workers: Optional[int] = None,
     use_embedded_toc: bool = True,
+    with_blocks: bool = False,
 ) -> dict:
     """Run the full pipeline. Returns a dict shaped like:: { "doc_name": "...", "doc_title": "...", "structure": [ {"title": "...", "start_index": 1, "end_index": 3, "nodes": [...]}, ... ], "has_abstract_or_references_section": False } ``has_abstract_or_references_section`` is True when any TOP-LEVEL outline entry is an abstract-keyword heading or carries the prominent-heading flag (a references-keyword heading, plain or numbered). The valid-outline branch reports False. ``workers`` sets the process count for the per-page parallel parser: None = auto (CPU count - 1), 1 forces the sequential path; output is identical either way. ``use_embedded_toc`` consumes the PDF's embedded bookmarks when trustworthy: deep bookmarks become the frame with the detected sections they lack grafted back in, coarse ones become the chapter frame with detected nodes re-hung under them, garbage ones are ignored. On by default; pass False for the pure detected structure. ``toc_source`` is always present: ``"detected"``, ``"bookmarks"``, or ``"hybrid"``. """
     # ----- 1) Parse PDF -> flat spans per page --------------------------
@@ -269,8 +323,16 @@ def extract_toc(
         ):
             outline_nodes = []
         has_abstract_or_references = has_table_or_prominent(outline_nodes)
+    body, block_pages, block_pos = [], [], None
+    if with_blocks:
+        for page in pages:
+            for block in sorted(page.secondary_slot or [], key=lambda b: b.reading_order_index):
+                if block.type == 0 or block.type in HEADING_TYPES:
+                    body.append(block)
+                    block_pages.append(page.page_index)
+        block_pos = {id(block): index for index, block in enumerate(body)}
     if outline_nodes:
-        structure = outline_to_dict_tree(outline_nodes, total_pages=len(pages))
+        structure = outline_to_dict_tree(outline_nodes, total_pages=len(pages), block_pos=block_pos)
     else:
         structure = []
 
@@ -300,6 +362,9 @@ def extract_toc(
         result["structure"], result["toc_source"] = apply_embedded_toc(
             structure, doc_handle, len(pages), page_texts=page_texts
         )
+    if with_blocks:
+        result["block_texts"] = [block_text(block) for block in body]
+        locate_headings(result["structure"], body, block_pages)
     return result
 
 

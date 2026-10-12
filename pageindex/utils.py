@@ -20,6 +20,7 @@ import logging
 import yaml
 from pathlib import Path
 from types import SimpleNamespace as config
+import math
 import re
 
 # litellm is imported inside the functions that use it; eager import is slow
@@ -820,6 +821,40 @@ SUMMARY_CONCURRENCY = 64        # simultaneous summary model calls
 SUMMARY_RAW_TEXT_TOKENS = 200   # leaves under this reuse their raw text as the summary
 SUMMARY_INTRO_MAX_PAGES = 3     # cap on leading pages fed into a parent summary
 SUMMARY_MAX_WORDS = 150         # word cap the summary prompts ask for
+INPUT_BUDGET_MARGIN = 0.85      # share of max_input_tokens a prompt's text may use
+INPUT_BUDGET_OVERHEAD = 200     # tokens kept for the instructions and the reply
+
+
+def input_budget(max_input_tokens):
+    """Tokens of document text one prompt may carry, or None when unbounded."""
+    if max_input_tokens is None:
+        return None
+    return max(int(max_input_tokens * INPUT_BUDGET_MARGIN) - INPUT_BUDGET_OVERHEAD, 1)
+
+
+def budget_tokens(text, model=None):
+    """count_tokens, plus the digits a per-digit tokenizer counts and tiktoken packs three to a token."""
+    return count_tokens(text, model=model) + sum(len(d) - math.ceil(len(d) / 3) for d in re.findall(r"\d+", text))
+
+
+def _pack(units, budget, model=None):
+    """Whole units grouped to at most `budget` tokens; a unit over budget is cut at spaces."""
+    flat = []
+    for unit in units:
+        if budget_tokens(unit, model=model) > budget and " " in unit:
+            flat += [" ".join(group) for group in _pack(unit.split(" "), budget, model)]
+        else:
+            flat.append(unit)
+    groups, size = [], 0
+    for unit in flat:
+        tokens = budget_tokens(unit, model=model) + 1
+        if groups and size + tokens <= budget:
+            groups[-1].append(unit)
+            size += tokens
+        else:
+            groups.append([unit])
+            size = tokens
+    return groups
 
 
 class _PriorityGate:
@@ -899,6 +934,44 @@ def _reply_json(reply):
     return None
 
 
+_JSON_ESCAPES = {'n': '\n', 't': '\t', 'r': '\r', 'b': '\b', 'f': '\f'}
+
+
+def _decode_escapes(raw):
+    """Decode the escapes of a JSON string written by a model that does not escape
+    LaTeX: inside $...$ a backslash before a letter starts a command (\\nu, \\times),
+    and so does \\t, \\r, \\b or \\f before a lowercase letter outside it (\\text, \\ref)."""
+    def decode(text, math):
+        def one(m):
+            c = m.group(1)
+            if len(c) == 5:
+                return chr(int(c[1:], 16))
+            if c in '"\\/':
+                return c
+            latex = math or (c in 'trbf' and text[m.end():m.end() + 1].islower())
+            return _JSON_ESCAPES[c] if c in _JSON_ESCAPES and not latex else m.group(0)
+        return re.sub(r'\\(u[0-9a-fA-F]{4}|.)', one, text, flags=re.S)
+    return ''.join(decode(part, i % 2) for i, part in enumerate(re.split(r'(\$[^$]*\$)', raw)))
+
+
+def _mangled(text):
+    """True when JSON decoding turned LaTeX commands into control characters."""
+    return bool(re.search(r'[\b\t\f\r]', text))
+
+
+def _unparsed_field(reply, key):
+    """The value of `key` read from the raw reply, or None."""
+    match = isinstance(reply, str) and re.search(
+        rf'"{key}"\s*:\s*"(.*?)"\s*(?:,\s*"[^"]+"\s*:|\}}\s*(?:```)?\s*$)', reply.strip(), re.S)
+    return _decode_escapes(match.group(1)) if match else None
+
+
+def _field(reply, parsed, key):
+    """`key` of the parsed reply, read raw instead when decoding mangled its LaTeX."""
+    value = parsed.get(key)
+    return (_unparsed_field(reply, key) or value) if isinstance(value, str) and _mangled(value) else value
+
+
 def parse_summary(reply):
     """The `summary` field of a model reply, or the reply itself when there is no
     such field."""
@@ -906,11 +979,11 @@ def parse_summary(reply):
         return ""
     parsed = _reply_json(reply)
     if isinstance(parsed, dict) and 'summary' in parsed:
-        summary = parsed['summary']
+        summary = _field(reply, parsed, 'summary')
         if isinstance(summary, list):
             summary = ' '.join(str(item).strip() for item in summary if str(item).strip())
         return str(summary).strip() if summary else ""
-    return reply.strip()
+    return (_unparsed_field(reply, 'summary') or reply).strip()
 
 
 def parse_title(reply):
@@ -921,9 +994,7 @@ def parse_title(reply):
     deterministic one it already has.
     """
     parsed = _reply_json(reply)
-    if not isinstance(parsed, dict):
-        return ""
-    title = parsed.get('title')
+    title = _field(reply, parsed, 'title') if isinstance(parsed, dict) else _unparsed_field(reply, 'title')
     if isinstance(title, list):
         title = ' '.join(str(item).strip() for item in title if str(item).strip())
     return ' '.join(str(title).split()) if title else ""
@@ -936,6 +1007,7 @@ def strip_internal_keys(structure):
         if not isinstance(node, dict):
             continue
         node.pop('_same_page', None)
+        node.pop('_pos', None)
         if node.get('nodes'):
             strip_internal_keys(node['nodes'])
     return structure
@@ -960,13 +1032,15 @@ class SummaryScheduler:
     def __init__(self, structure, pdf_pages, model=None,
                  small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
                  max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None,
-                 max_words=None):
+                 max_words=None, max_input_tokens=None, blocks=None):
         self.structure = structure
         self._pdf_pages = pdf_pages
         self._model = model
         self._small_node_tokens = small_node_tokens
         self._max_intro_pages = max_intro_pages
         self._max_words = max_words or SUMMARY_MAX_WORDS
+        self._budget = input_budget(max_input_tokens)
+        self._blocks = blocks
         self._gate = _PriorityGate(concurrency or SUMMARY_CONCURRENCY)
         self._asked = self._answered = False
         self._marks = {}     # id(node) -> future resolved once the node is final
@@ -1015,9 +1089,26 @@ class SummaryScheduler:
             self._answered = True
         return reply
 
+    def _section_text(self, node):
+        """The blocks from this node's heading to the next heading in the document, or None."""
+        start = node.get('_pos')
+        if self._blocks is None or start is None:
+            return None
+        nodes = list(_subtree(self.structure))
+        if any(n is not node and n.get('_pos') is None
+               and node['start_index'] <= n['start_index'] <= node['end_index']
+               and not any(m is node for m in _subtree(n.get('nodes') or []))
+               for n in nodes):
+            return None     # a section without a located heading may start inside this one
+        later = [p for p in (n.get('_pos') for n in nodes) if p is not None and p > start]
+        return "\n".join(self._blocks[start:min(later, default=len(self._blocks))])
+
     async def _leaf_summary(self, node, prio):
-        text = get_text_of_pdf_pages(self._pdf_pages, node['start_index'], node['end_index'])
-        if count_tokens(text, model=self._model) < self._small_node_tokens:
+        text = self._section_text(node)
+        if text is None:
+            text = get_text_of_pdf_pages(self._pdf_pages, node['start_index'], node['end_index'])
+        tokens = count_tokens(text, model=self._model)
+        if tokens < self._small_node_tokens:
             return text.strip()
 
         # A node merged from same-page siblings carries a title joined from theirs.
@@ -1032,7 +1123,8 @@ class SummaryScheduler:
         title_field = ('\n        "title": <a short title naming what the whole page covers>,'
                        if retitle else "")
 
-        prompt = f"""You are given a text chunk from a document.
+        def prompt_for(text):
+            return f"""You are given a text chunk from a document.
     Your task is to generate a concise description of everything that is covered in the text, summarizing all its points without omitting any type of content.
     Keep the description concise and to the point, avoiding unnecessary details, within {self._max_words} words.{ask_title}
 
@@ -1045,12 +1137,42 @@ class SummaryScheduler:
 
     Follow strictly the above JSON return format. Do not include any other text!
     """
-        reply = await self._ask(prompt, prio)
+        if self._budget is not None and not retitle and budget_tokens(text, self._model) > self._budget:
+            chunks = ["\n".join(lines) for lines in _pack(text.split("\n"), self._budget, self._model)]
+            replies = await asyncio.gather(*(self._ask(prompt_for(chunk), prio) for chunk in chunks))
+            return await self._reduce([parse_summary(reply) for reply in replies], prio)
+        reply = await self._ask(prompt_for(text), prio)
         if retitle:
             written = parse_title(reply)
             if written:
                 node['title'] = written
         return parse_summary(reply)
+
+    async def _combine(self, summaries, prio):
+        parts = "\n".join(f"Part {i}: {summary}" for i, summary in enumerate(summaries, 1))
+        prompt = f"""You are given summaries of consecutive parts of one section of a document.
+    Your task is to combine them into a single concise description of the whole section, within {self._max_words} words.
+
+    Part Summaries: {parts}
+
+    Reply strictly in the following JSON format:
+    {{
+        "summary": <the combined description>
+    }}
+
+    Follow strictly the above JSON return format. Do not include any other text!
+    """
+        return parse_summary(await self._ask(prompt, prio))
+
+    async def _reduce(self, summaries, prio):
+        """Combine part summaries in budget-sized groups, level by level, into one."""
+        while True:
+            groups = _pack(summaries, self._budget, self._model)
+            if len(groups) == len(summaries):     # no two fit together: pair them anyway
+                groups = [summaries[i:i + 2] for i in range(0, len(summaries), 2)]
+            summaries = await asyncio.gather(*(self._combine(group, prio) for group in groups))
+            if len(summaries) == 1:
+                return summaries[0]
 
     async def _parent_summary(self, node, prio):
         children = node['nodes']
@@ -1140,8 +1262,8 @@ class SummaryScheduler:
 async def summarize_tree(structure, pdf_pages, model=None,
                          small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
                          max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None,
-                         max_words=None):
-    """Bottom-up summaries: leaves from their own pages, parents composed from
+                         max_words=None, max_input_tokens=None, blocks=None):
+    """Bottom-up summaries: leaves from their own pages (or section blocks), parents composed from
     child summaries plus the pages no child covers. A parent's summary describes
     its whole subtree (end_index union semantics). Nodes that already carry a
     summary are left untouched; leaves under `small_node_tokens` use their raw
@@ -1152,7 +1274,8 @@ async def summarize_tree(structure, pdf_pages, model=None,
     scheduler = SummaryScheduler(structure, pdf_pages, model=model,
                                  small_node_tokens=small_node_tokens,
                                  max_intro_pages=max_intro_pages,
-                                 concurrency=concurrency, max_words=max_words)
+                                 concurrency=concurrency, max_words=max_words,
+                                 max_input_tokens=max_input_tokens, blocks=blocks)
     scheduler.mark_final(list(_subtree(structure)))
     return await scheduler.finish()
 
@@ -1180,7 +1303,33 @@ def create_clean_structure_for_description(structure):
         return structure
 
 
-def generate_doc_description(structure, model=None):
+def _tree_depth(nodes):
+    return 1 + max((_tree_depth(n["nodes"]) for n in nodes if n.get("nodes")), default=0)
+
+
+def _prune_depth(nodes, depth):
+    return [{**{k: v for k, v in n.items() if k != "nodes"},
+             **({"nodes": _prune_depth(n["nodes"], depth - 1)} if depth and n.get("nodes") else {})}
+            for n in nodes]
+
+
+def fit_structure(structure, budget, model=None):
+    """The structure, cut from its deepest level up until it fits `budget` tokens."""
+    if budget_tokens(str(structure), model=model) <= budget:
+        return structure
+    pruned = structure
+    for depth in range(_tree_depth(structure) - 2, -1, -1):
+        pruned = _prune_depth(structure, depth)
+        if budget_tokens(str(pruned), model=model) <= budget:
+            return pruned
+    logging.warning("document structure exceeds the %d token input budget", budget)
+    return pruned
+
+
+def generate_doc_description(structure, model=None, max_input_tokens=None):
+    budget = input_budget(max_input_tokens)
+    if budget is not None:
+        structure = fit_structure(structure, budget, model)
     prompt = f"""Your are an expert in generating descriptions for a document.
     You are given a structure of a document. Your task is to generate a one-sentence description for the document, which makes it easy to distinguish the document from other documents.
         
