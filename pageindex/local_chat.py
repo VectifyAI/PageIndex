@@ -11,6 +11,8 @@ import queue
 import threading
 import time
 import uuid
+from contextlib import contextmanager
+from functools import wraps
 from typing import Any, Iterator, Mapping, Optional, Union
 
 from .agent_tools import _base_instructions, targeting_block
@@ -96,10 +98,9 @@ _SENTINEL = object()
 def _stream_sync(agen_factory) -> Iterator[Any]:
     """Drive an async generator from a background thread; yield synchronously.
 
-    Closing the iterator cancels the run between items: the pump stops, and
-    the async generator's cleanup cancels the underlying agent task, so no
-    further model turns or tool executions start. An in-flight backend
-    request cannot be aborted mid-turn.
+    Closing cancels the local run and waits for its cleanup. This can wait
+    for a blocking backend; it does not confirm that a remote provider
+    stopped generating or billing.
     """
     items: "queue.Queue[Any]" = queue.Queue(maxsize=32)
     cancelled = threading.Event()
@@ -135,7 +136,8 @@ def _stream_sync(agen_factory) -> Iterator[Any]:
                 try:
                     await task
                 except asyncio.CancelledError:
-                    pass
+                    if not cancelled.is_set():
+                        raise
             finally:
                 await agen.aclose()
 
@@ -146,7 +148,8 @@ def _stream_sync(agen_factory) -> Iterator[Any]:
             return
         deliver(_SENTINEL)
 
-    threading.Thread(target=pump, daemon=True).start()
+    thread = threading.Thread(target=pump, daemon=True)
+    thread.start()
     try:
         while True:
             item = items.get()
@@ -157,6 +160,266 @@ def _stream_sync(agen_factory) -> Iterator[Any]:
             yield item
     finally:
         cancelled.set()
+        thread.join()
+
+
+_TOKEN_FIELDS = ("input_tokens", "ordinary_input_tokens", "output_tokens",
+                 "cache_read_tokens",
+                 "cache_write_tokens", "reasoning_tokens")
+
+
+def _model_call(call_id, model, backend) -> dict:
+    return {"call_id": call_id, "model": model, "backend": backend,
+            "response_id": None, "reported_model": None,
+            "status": "in_progress", "usage_complete": False,
+            **dict.fromkeys(_TOKEN_FIELDS), "cache_write_by_ttl": None}
+
+
+def _usage_dict(value) -> dict:
+    if hasattr(value, "model_dump"):
+        return value.model_dump(exclude_unset=True)
+    return value if isinstance(value, dict) else {}
+
+
+def _read_usage(call, usage, protocol, *, final=True) -> None:
+    usage = _usage_dict(usage)
+    if not usage:
+        return
+    details_in = {}
+    if protocol == "messages":
+        fields = {"ordinary_input_tokens": "input_tokens",
+                  "output_tokens": "output_tokens",
+                  "cache_read_tokens": "cache_read_input_tokens",
+                  "cache_write_tokens": "cache_creation_input_tokens"}
+        for field, key in fields.items():
+            if key in usage:
+                call[field] = usage[key]
+        # Messages input excludes both cache buckets.
+        values = [call[field] for field in (
+            "ordinary_input_tokens", "cache_read_tokens",
+            "cache_write_tokens")]
+        call["input_tokens"] = sum(values) if None not in values else None
+    else:
+        chat = protocol == "chat_completions"
+        input_key = "prompt_tokens" if chat else "input_tokens"
+        output_key = "completion_tokens" if chat else "output_tokens"
+        details_in = _usage_dict(usage.get(input_key + "_details"))
+        details_out = _usage_dict(usage.get(output_key + "_details"))
+        cache_write = details_in.get("cache_write_tokens")
+        if cache_write is None:
+            cache_write = details_in.get(
+                "cache_creation_tokens",
+                usage.get("cache_creation_input_tokens"))
+        values = {"input_tokens": usage.get(input_key),
+                  "output_tokens": usage.get(output_key),
+                  "cache_read_tokens": details_in.get(
+                      "cached_tokens", usage.get("cache_read_input_tokens")),
+                  "cache_write_tokens": cache_write,
+                  "reasoning_tokens": details_out.get("reasoning_tokens")}
+        for field, value in values.items():
+            if value is not None:
+                call[field] = value
+        values = [call[field] for field in (
+            "input_tokens", "cache_read_tokens", "cache_write_tokens")]
+        if None not in values:
+            call["ordinary_input_tokens"] = values[0] - values[1] - values[2]
+    creation = _usage_dict(usage.get("cache_creation") or
+                           details_in.get("cache_creation_token_details"))
+    buckets = {ttl: creation[key] for ttl, key in (
+        ("5m", "ephemeral_5m_input_tokens"),
+        ("1h", "ephemeral_1h_input_tokens"))
+        if creation.get(key) is not None}
+    if buckets:
+        call["cache_write_by_ttl"] = buckets
+    details_out = _usage_dict(usage.get("output_tokens_details"))
+    if details_out.get("reasoning_tokens") is not None:
+        call["reasoning_tokens"] = details_out["reasoning_tokens"]
+    if call["cache_write_tokens"] == 0:
+        call["cache_write_by_ttl"] = {}
+    elif (call["cache_write_tokens"] is not None
+          and call["cache_write_by_ttl"] is None
+          and call.get("_cache_ttl")):
+        call["cache_write_by_ttl"] = {
+            call["_cache_ttl"]: call["cache_write_tokens"]}
+    call["usage_complete"] = final
+
+
+def _measurement_totals(calls):
+    totals, completeness = {}, {}
+    for field in _TOKEN_FIELDS:
+        known = [call[field] for call in calls if call[field] is not None]
+        totals[field] = sum(known) if known else None
+        completeness[field] = (
+            "complete" if calls and len(known) == len(calls)
+            and all(call["usage_complete"] for call in calls)
+            else "partial" if known else "unknown")
+    buckets = [call["cache_write_by_ttl"] for call in calls
+               if call["cache_write_by_ttl"] is not None]
+    combined = {}
+    for bucket in buckets:
+        for ttl, count in bucket.items():
+            combined[ttl] = combined.get(ttl, 0) + count
+    totals["cache_write_by_ttl"] = combined if buckets else None
+    completeness["cache_write_by_ttl"] = (
+        "complete" if calls and len(buckets) == len(calls)
+        and all(call["usage_complete"] and sum(bucket.values())
+                == call["cache_write_tokens"]
+                for call, bucket in zip(calls, buckets))
+        else "partial" if buckets else "unknown")
+    return totals, completeness
+
+
+def _start_call(measurement):
+    if measurement is None:
+        return None
+    calls = measurement["calls"]
+    call = _model_call(f"{measurement['run_id']}:{len(calls) + 1}",
+                       measurement["model"], measurement["backend"])
+    call["_cache_ttl"] = measurement.get("_cache_ttl")
+    calls.append(call)
+    return call
+
+
+def _current_call(measurement):
+    if measurement is None:
+        return None
+    return (measurement["calls"][-1] if measurement["calls"]
+            else _start_call(measurement))
+
+
+def _measurement_backend(measurement, backend, adapter):
+    if measurement is None:
+        return
+    from urllib.parse import urlsplit, urlunsplit
+    url = str(getattr(backend, "base_url", "") or "")
+    parts = urlsplit(url)
+    authority = parts.netloc.rsplit("@", 1)[-1]
+    measurement["backend"] = {
+        "adapter": adapter,
+        "base_url": urlunsplit((parts.scheme, authority, parts.path, "", ""))
+        if url else None}
+
+
+def _cache_lifetime(*values):
+    lifetimes = set()
+
+    def visit(value):
+        if isinstance(value, dict):
+            control = value.get("cache_control")
+            if (isinstance(control, dict)
+                    and control.get("type") == "ephemeral"):
+                lifetimes.add(control.get("ttl", "5m"))
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    for value in values:
+        visit(value)
+    return next(iter(lifetimes)) if len(lifetimes) == 1 else None
+
+
+def _note_response(call, response, protocol, *, final=True):
+    if call is None:
+        return
+    call["_raw"] = True
+    data = _usage_dict(response)
+    for target, source in (("response_id", "id"), ("reported_model", "model")):
+        if data.get(source) is not None:
+            call[target] = data[source]
+    _read_usage(call, data.get("usage"), protocol, final=final)
+    if final:
+        call["status"] = data.get("status") or "completed"
+
+
+def _usage_outcome(result, protocol):
+    data = _usage_dict(result)
+    if protocol == "responses":
+        return (data.get("response") or data).get("status")
+    if protocol == "messages":
+        reason = (data.get("delta") or data).get("stop_reason")
+        if reason:
+            return ("incomplete" if reason in (
+                "max_tokens", "tool_use", "pause_turn") else "completed")
+    choices = data.get("choices") or []
+    reason = choices[0].get("finish_reason") if choices else None
+    if reason:
+        return "completed" if reason == "stop" else "incomplete"
+
+
+def _measured(protocol):
+    """Deliver one report after the synchronous call or iterator closes."""
+    def decorate(run):
+        @wraps(run)
+        def measured(client, *args, on_usage=None, **kwargs):
+            if on_usage is None:
+                return run(client, *args, **kwargs)
+            if not callable(on_usage):
+                raise TypeError("on_usage must be callable.")
+            model = kwargs.get("model") or client.chat_model
+            measurement = {"run_id": uuid.uuid4().hex, "protocol": protocol,
+                           "model": model, "backend": None, "calls": []}
+
+            def finish(outcome, error=None):
+                measurement.pop("_cache_ttl", None)
+                terminal = measurement.pop("_outcome", None)
+                if outcome == "cancelled" and terminal is not None:
+                    outcome = terminal
+                for call in measurement["calls"]:
+                    call.pop("_raw", None)
+                    call.pop("_cache_ttl", None)
+                    if call["status"] == "in_progress":
+                        call["status"] = outcome
+                    _, call["completeness"] = _measurement_totals([call])
+                totals, completeness = _measurement_totals(
+                    measurement["calls"])
+                measurement.update(outcome=outcome, totals=totals,
+                                   completeness=completeness)
+                try:
+                    on_usage(measurement)
+                except Exception as exc:
+                    if error is None:
+                        raise
+                    if hasattr(error, "add_note"):
+                        error.add_note(
+                            f"on_usage failed: {type(exc).__name__}")
+
+            try:
+                result = run(client, *args, _measurement=measurement, **kwargs)
+            except BaseException as exc:
+                finish("cancelled" if isinstance(exc, (
+                    asyncio.CancelledError, KeyboardInterrupt)) else "failed",
+                       exc)
+                raise
+            if not kwargs.get("stream"):
+                finish(_usage_outcome(result, protocol) or "completed")
+                return result
+
+            def events():
+                outcome, error = "cancelled", None
+                try:
+                    for event in result:
+                        yield event
+                    outcome = measurement.get("_outcome", "completed")
+                except BaseException as exc:
+                    error = exc
+                    if not isinstance(exc, (GeneratorExit,
+                                            asyncio.CancelledError,
+                                            KeyboardInterrupt)):
+                        outcome = "failed"
+                    raise
+                finally:
+                    try:
+                        result.close()
+                    except BaseException as exc:
+                        outcome, error = "failed", exc
+                        raise
+                    finally:
+                        finish(outcome, error)
+            return events()
+        return measured
+    return decorate
 
 
 # ── OpenAI engine (chat_completions / responses) ──
@@ -489,12 +752,36 @@ def _run_kwargs(max_turns) -> dict:
     return kwargs
 
 
-def _record_response_status(agent, recorded: dict) -> None:
+def _check_stream_cancelled(streamed):
+    task = getattr(streamed, "run_loop_task", None)
+    if task is not None and task.cancelled():
+        raise asyncio.CancelledError()
+
+
+def _record_response_status(agent, recorded: dict, measurement=None) -> None:
     """Capture each turn's terminal Response status at the transport client:
     openai-agents' non-streaming path discards Response.status, so a final
     turn truncated at the output cap would otherwise report as a clean
     completion. No-op for backends without an OpenAI responses resource
     (the streaming path records from lifecycle events instead)."""
+    if measurement is not None:
+        stream_response = agent.model.stream_response
+
+        async def recording_stream(*args, **kwargs):
+            call = _current_call(measurement)
+            call["_raw"] = True
+            stream = stream_response(*args, **kwargs)
+            try:
+                async for event in stream:
+                    if getattr(event, "type", None) in (
+                            "response.completed", "response.incomplete",
+                            "response.failed"):
+                        _note_response(call, event.response, "responses")
+                    yield event
+            finally:
+                await stream.aclose()
+
+        agent.model.stream_response = recording_stream
     responses = getattr(getattr(getattr(agent, "model", None), "_client", None),
                         "responses", None)
     create = getattr(responses, "create", None)
@@ -503,6 +790,9 @@ def _record_response_status(agent, recorded: dict) -> None:
 
     async def recording_create(*args, **kwargs):
         response = await create(*args, **kwargs)
+        call = _current_call(measurement)
+        if not kwargs.get("stream"):
+            _note_response(call, response, "responses")
         if getattr(response, "status", None):
             recorded["status"] = response.status
             for field in ("incomplete_details", "error"):
@@ -520,7 +810,7 @@ def _record_response_status(agent, recorded: dict) -> None:
     responses.create = recording_create
 
 
-def _record_chat_finish(agent, recorded: dict) -> None:
+def _record_chat_finish(agent, recorded: dict, measurement=None) -> None:
     """Capture each turn's native finish_reason from the raw LiteLLM
     response: openai-agents' ModelResponse drops it, so a truncated or
     content-filtered final turn would otherwise report as a clean "stop".
@@ -532,7 +822,9 @@ def _record_chat_finish(agent, recorded: dict) -> None:
     if fetch is None:
         return
 
-    def note(item) -> None:
+    def note(item, *, final=True) -> None:
+        _note_response(_current_call(measurement), item, "chat_completions",
+                       final=final)
         choices = getattr(item, "choices", None)
         finish = getattr(choices[0], "finish_reason", None) if choices else None
         if finish:
@@ -550,13 +842,16 @@ def _record_chat_finish(agent, recorded: dict) -> None:
 
         async def __anext__(self):
             chunk = await self._inner.__anext__()
-            note(chunk)
+            note(chunk, final=getattr(chunk, "usage", None) is not None)
             return chunk
 
         def __getattr__(self, name):
             return getattr(self._inner, name)
 
     async def recording_fetch(*args, **kwargs):
+        call = _current_call(measurement)
+        if call is not None:
+            call["_raw"] = True
         result = await fetch(*args, **kwargs)
         if isinstance(result, tuple):
             response, stream = result
@@ -644,7 +939,7 @@ def _responses_usage(raw_responses) -> dict:
     return _run_usage(_responses_shape, raw_responses)
 
 
-def _usage_recorder():
+def _usage_recorder(measurement=None):
     """Run hooks keeping every model response: a non-streamed run that
     raises has no result to read raw_responses from, and openai-agents
     attaches its run data only to its own exceptions, not a provider's."""
@@ -654,8 +949,24 @@ def _usage_recorder():
         def __init__(self):
             self.responses = []
 
+        async def on_llm_start(self, context, agent, *args, **kwargs):
+            _start_call(measurement)
+
         async def on_llm_end(self, context, agent, response):
             self.responses.append(response)
+            call = _current_call(measurement)
+            if call is not None:
+                if not call.get("_raw"):
+                    # Framework defaults cannot establish a measured zero.
+                    usage = getattr(response, "usage", None)
+                    for field in ("input_tokens", "output_tokens"):
+                        value = getattr(usage, field, None)
+                        if isinstance(value, int) and value > 0:
+                            call[field] = value
+                    call["response_id"] = response.response_id
+                    call["usage_complete"] = usage is not None
+                if call["status"] == "in_progress":
+                    call["status"] = "completed"
 
     return Recorder()
 
@@ -973,6 +1284,7 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
     return ChatStream(text=lambda: _weave(events(), options), events=events)
 
 
+@_measured("chat_completions")
 def run_chat_completions(client, messages, stream: bool = False,
                          doc_id=None, temperature: Optional[float] = None,
                          stream_metadata: bool = False,
@@ -986,6 +1298,7 @@ def run_chat_completions(client, messages, stream: bool = False,
                          extra_headers: Optional[dict] = None,
                          backend: Optional[dict] = None,
                          folder_id: Optional[str] = None,
+                         _measurement=None,
                          ) -> Union[dict, Iterator[str], Iterator[dict]]:
     if enable_citations:
         raise PageIndexAPIError(
@@ -1002,13 +1315,14 @@ def run_chat_completions(client, messages, stream: bool = False,
         extra_headers=extra_headers, folder_id=folder_id)
     reported_model = _reported_model(model_name)
     recorded: dict = {}
-    _record_chat_finish(agent, recorded)
+    _measurement_backend(_measurement, agent.model, type(agent.model).__name__)
+    _record_chat_finish(agent, recorded, _measurement)
     run_kwargs = _run_kwargs(max_turns)
     import openai
     from agents import Runner
     from agents.exceptions import AgentsException, MaxTurnsExceeded
     if not stream:
-        recorder = _usage_recorder()
+        recorder = _usage_recorder(_measurement)
         try:
             result = _run_sync(_run_closing(agent,
                 Runner.run(agent, input=items, hooks=recorder,
@@ -1045,7 +1359,7 @@ def run_chat_completions(client, messages, stream: bool = False,
 
     async def agen():
         from openai.types.responses import ResponseTextDeltaEvent
-        recorder = _usage_recorder()
+        recorder = _usage_recorder(_measurement)
         streamed = Runner.run_streamed(agent, input=items, hooks=recorder,
                                        **run_kwargs)
         completed = False
@@ -1057,6 +1371,7 @@ def run_chat_completions(client, messages, stream: bool = False,
                 if (event.type == "raw_response_event"
                         and isinstance(event.data, ResponseTextDeltaEvent)):
                     yield chunk({"content": event.data.delta})
+            _check_stream_cancelled(streamed)
             completed = True
         except (MaxTurnsExceeded, AgentsException,
                 openai.OpenAIError) as exc:
@@ -1067,7 +1382,11 @@ def run_chat_completions(client, messages, stream: bool = False,
             if not completed and hasattr(streamed, "cancel"):
                 streamed.cancel()  # abandoned/failed: stop the agent task
             await _aclose_backend(agent)
-        yield chunk({}, finish=recorded.get("finish_reason") or "stop")
+        finish = recorded.get("finish_reason") or "stop"
+        if _measurement is not None:
+            _measurement["_outcome"] = (
+                "completed" if finish == "stop" else "incomplete")
+        yield chunk({}, finish=finish)
         yield {
             "id": chat_id, "object": "chat.completion.chunk",
             "created": created, "model": reported_model, "choices": [],
@@ -1083,6 +1402,7 @@ def run_chat_completions(client, messages, stream: bool = False,
             and piece["choices"][0]["delta"]["content"])
 
 
+@_measured("responses")
 def run_responses(client, input, model: Optional[str] = None,
                   stream: bool = False, doc_id=None,
                   instructions: Optional[str] = None,
@@ -1095,6 +1415,7 @@ def run_responses(client, input, model: Optional[str] = None,
                   extra_headers: Optional[dict] = None,
                   backend: Optional[dict] = None,
                   folder_id: Optional[str] = None,
+                  _measurement=None,
                   ) -> Union[dict, Iterator[dict]]:
     _require_openai_agents("chat(protocol='responses')")
     _validate_max_turns(max_turns)
@@ -1125,6 +1446,8 @@ def run_responses(client, input, model: Optional[str] = None,
                           extra_headers=extra_headers)
     run_kwargs = _run_kwargs(max_turns)
     recorded: dict = {}
+    _measurement_backend(_measurement, getattr(agent.model, "_client", None),
+                         type(agent.model).__name__)
     import openai
     from agents import Runner
     from agents.exceptions import AgentsException, MaxTurnsExceeded
@@ -1164,8 +1487,8 @@ def run_responses(client, input, model: Optional[str] = None,
         }
 
     if not stream:
-        _record_response_status(agent, recorded)
-        recorder = _usage_recorder()
+        _record_response_status(agent, recorded, _measurement)
+        recorder = _usage_recorder(_measurement)
         try:
             result = _run_sync(_run_closing(agent,
                 Runner.run(agent, input=[dict(item) for item in items],
@@ -1184,7 +1507,9 @@ def run_responses(client, input, model: Optional[str] = None,
 
     async def agen():
         from types import SimpleNamespace
-        recorder = _usage_recorder()
+        if _measurement is not None:
+            _record_response_status(agent, recorded, _measurement)
+        recorder = _usage_recorder(_measurement)
         streamed = Runner.run_streamed(agent,
                                        input=[dict(item) for item in items],
                                        hooks=recorder, **run_kwargs)
@@ -1240,6 +1565,7 @@ def run_responses(client, input, model: Optional[str] = None,
                     sequence += 1
                     data["sequence_number"] = sequence
                     yield data
+            _check_stream_cancelled(streamed)
             completed = True
         except AgentsException as exc:
             # a run the envelope already reports failed/incomplete is done —
@@ -1261,6 +1587,8 @@ def run_responses(client, input, model: Optional[str] = None,
         transcript = streamed.to_input_list()[len(items):]
         sequence += 1
         status = recorded.get("status") or "completed"
+        if _measurement is not None:
+            _measurement["_outcome"] = status
         terminal = {"incomplete": "response.incomplete",
                     "failed": "response.failed"}.get(status,
                                                      "response.completed")
@@ -1448,6 +1776,7 @@ def _default_max_tokens(thinking=None) -> int:
     return 8192
 
 
+@_measured("messages")
 def run_messages(client, messages, model: str, route: str,
                  max_tokens: Optional[int] = None,
                  stream: bool = False, doc_id=None, system=None,
@@ -1461,6 +1790,7 @@ def run_messages(client, messages, model: str, route: str,
                  extra_headers: Optional[dict] = None,
                  backend: Optional[dict] = None,
                  folder_id: Optional[str] = None,
+                 _measurement=None,
                  ) -> Union[dict, Iterator[Any]]:
     from .integrations.anthropic_sdk import build_anthropic_tools
 
@@ -1494,12 +1824,16 @@ def run_messages(client, messages, model: str, route: str,
     cached: dict[str, Any] = (
         {"cache_control": {"type": "ephemeral"}}
         if marks_fit and route != "bedrock" else {})
+    if _measurement is not None:
+        _measurement["_cache_ttl"] = _cache_lifetime(
+            system_blocks, prepared, cached, extra_body)
     # Tools before the transport: on a bridge client building them is
     # network I/O, and a failure there must not strand the client below.
     failures: list = []
     tools = build_anthropic_tools(client, doc_ids=scope, failures=failures)
     merged = _merged_backend(client, backend)
     backend_client = _anthropic_client(merged, route)
+    _measurement_backend(_measurement, backend_client, route)
     # Close only a per-call construction: cached clients stay open for
     # reuse; a caller-owned http_client survives regardless.
     # list(): an atomic snapshot — a bare .values() scan breaks under a
@@ -1530,6 +1864,20 @@ def run_messages(client, messages, model: str, route: str,
             **passthrough,
             **cached,
         )
+        if _measurement is not None:
+            handle = getattr(runner, "_handle_request", None)
+            if handle is None:
+                raise PageIndexAPIError(
+                    "on_usage needs an anthropic tool runner with request "
+                    "hooks — upgrade anthropic.")
+
+            @contextmanager
+            def measured_request(*args, **kwargs):
+                _start_call(_measurement)
+                with handle(*args, **kwargs) as response:
+                    yield response
+
+            runner._handle_request = measured_request
     except BaseException:
         # A failure before the runner handoff must not strand the transport
         # the branches below would have closed.
@@ -1619,11 +1967,22 @@ def run_messages(client, messages, model: str, route: str,
 
         def events() -> Iterator[Any]:
             turns: list = []  # each finished turn's message snapshot
+            call = None
+            turn_stream = None
             try:
                 for turn_stream in runner:
+                    call = _current_call(_measurement)
                     for event in turn_stream:
+                        if event.type == "message_start":
+                            _note_response(call, event.message, "messages",
+                                           final=False)
+                        elif (event.type == "message_delta"
+                              and call is not None):
+                            _read_usage(call, event.usage, "messages",
+                                        final=False)
                         if event.type == "message_stop":
                             turns.append(event.message)
+                            _note_response(call, event.message, "messages")
                         yield event
             except anthropic.AnthropicError as exc:
                 raise _with_usage(
@@ -1633,17 +1992,24 @@ def run_messages(client, messages, model: str, route: str,
                 raise _with_usage(exc, run_usage(turns))
             finally:
                 # runs on exhaustion and abandonment (GeneratorExit) alike
+                if turn_stream is not None:
+                    turn_stream.close()
                 if owns_transport:
                     backend_client.close()
             if turns:
+                messages = transcript(turns)
+                if _measurement is not None:
+                    _measurement["_outcome"] = _usage_outcome(
+                        turns[-1], "messages") or "completed"
                 yield Result(type="result", usage=run_usage(turns),
-                             messages=transcript(turns))
+                             messages=messages)
         return events()
 
     turns: list = []
     try:
         for turn in runner:
             turns.append(turn)
+            _note_response(_current_call(_measurement), turn, "messages")
     except anthropic.AnthropicError as exc:
         raise _with_usage(_model_backend_error(exc, "messages", client),
                           run_usage(turns)) from exc

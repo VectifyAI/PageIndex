@@ -80,6 +80,349 @@ def _usage():
                  total_tokens=15)
 
 
+@needs_agents
+@pytest.mark.parametrize("protocol", ["chat_completions", "responses"])
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_chat_measurements_survive_provider_failure(
+        client, store_path, fake_model, protocol, stream, cancelled):
+    import openai
+    reports = []
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        asyncio.CancelledError() if cancelled else openai.APIConnectionError(
+            request=httpx.Request("POST", "http://llm")),
+    ])
+    error = asyncio.CancelledError if cancelled else PageIndexAPIError
+    with pytest.raises(error):
+        result = client.chat("hi", protocol=protocol, stream=stream,
+                             on_usage=reports.append)
+        if stream:
+            list(result)
+    assert len(reports) == 1
+    report = reports[0]
+    assert report["outcome"] == ("cancelled" if cancelled else "failed")
+    assert len(report["calls"]) == 2
+    assert report["calls"][0]["input_tokens"] == 10
+    assert report["calls"][1]["input_tokens"] is None
+    assert report["totals"]["input_tokens"] == 10
+    assert report["completeness"]["input_tokens"] == "partial"
+
+
+def test_measurement_retains_missing_calls_and_cache_lifetimes():
+    calls = [local_chat._model_call("run:1", "model", "backend"),
+             local_chat._model_call("run:2", "model", "backend")]
+    local_chat._read_usage(calls[0], {
+        "input_tokens": 100, "output_tokens": 20,
+        "input_tokens_details": {"cached_tokens": 30,
+                                 "cache_write_tokens": 10},
+        "output_tokens_details": {"reasoning_tokens": 5},
+    }, "responses")
+    totals, completeness = local_chat._measurement_totals(calls)
+    assert totals["input_tokens"] == 100
+    assert completeness["input_tokens"] == "partial"
+    assert calls[1]["input_tokens"] is None
+    assert calls[0]["cache_write_tokens"] == 10
+    assert calls[0]["cache_write_by_ttl"] is None
+    local_chat._read_usage(calls[1], {
+        "input_tokens": 50, "output_tokens": 0,
+        "cache_read_input_tokens": 20,
+        "cache_creation_input_tokens": 15,
+        "cache_creation": {"ephemeral_5m_input_tokens": 5,
+                           "ephemeral_1h_input_tokens": 10},
+    }, "messages")
+    assert calls[1]["input_tokens"] == 85
+    assert calls[1]["output_tokens"] == 0
+    assert calls[1]["cache_write_by_ttl"] == {"5m": 5, "1h": 10}
+    totals, completeness = local_chat._measurement_totals(calls)
+    assert totals["input_tokens"] == 185
+    assert completeness["input_tokens"] == "complete"
+
+
+@needs_agents
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("usage", [None, {"input_tokens": 0,
+                                         "output_tokens": 0,
+                                         "total_tokens": 0}])
+def test_responses_measurement_reads_provider_usage(
+        client, stream, usage):
+    body = {"id": "resp-provider", "object": "response", "created_at": 0,
+            "model": "served-model", "status": "completed",
+            "output": [_msg_item("ok").model_dump()], "usage": usage,
+            "parallel_tool_calls": False, "tool_choice": "auto", "tools": []}
+
+    def handler(request):
+        if not stream:
+            return httpx.Response(200, json=body)
+        event = {"type": "response.completed", "sequence_number": 0,
+                 "response": body}
+        return httpx.Response(200, text=f"data: {json.dumps(event)}\n\n",
+                              headers={"content-type": "text/event-stream"})
+
+    transport = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    reports = []
+    try:
+        result = client.chat(
+            "hi", protocol="responses", stream=stream, model="openai/test",
+            backend={"api_key": "secret", "base_url": "https://llm.test/v1",
+                     "http_client": transport}, on_usage=reports.append)
+        if stream:
+            list(result)
+    finally:
+        asyncio.run(transport.aclose())
+    assert len(reports) == 1
+    report = reports[0]
+    assert report["outcome"] == "completed"
+    assert len(report["calls"]) == 1
+    call = report["calls"][0]
+    assert call["response_id"] == "resp-provider"
+    assert call["reported_model"] == "served-model"
+    assert call["model"] == "openai/test"
+    assert call["backend"]["base_url"].rstrip("/") == "https://llm.test/v1"
+    assert "secret" not in json.dumps(report)
+    assert call["input_tokens"] == (0 if usage else None)
+    assert call["cache_read_tokens"] is None
+    assert report["completeness"]["input_tokens"] == (
+        "complete" if usage else "unknown")
+
+
+@needs_agents
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("missing", [False, True])
+def test_responses_measurements_keep_individual_contexts(
+        client, store_path, stream, missing):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        first = len(requests) == 1
+        usage = {"input_tokens": 180000, "output_tokens": 20,
+                 "total_tokens": 180020,
+                 "input_tokens_details": {"cached_tokens": 30000,
+                                          "cache_write_tokens": 15},
+                 "output_tokens_details": {"reasoning_tokens": 5},
+                 "cache_creation": {"ephemeral_5m_input_tokens": 5,
+                                    "ephemeral_1h_input_tokens": 10}}
+        output = (_call_item("get_document", {"doc_name": "report.pdf"})
+                  if first else _msg_item("ok"))
+        body = {"id": f"resp-{len(requests)}", "object": "response",
+                "created_at": 0, "model": "served-model",
+                "status": "completed", "output": [output.model_dump()],
+                "usage": None if missing and not first else usage,
+                "parallel_tool_calls": False, "tool_choice": "auto",
+                "tools": []}
+        if not stream:
+            return httpx.Response(200, json=body)
+        event = {"type": "response.completed", "sequence_number": 0,
+                 "response": body}
+        return httpx.Response(200, text=f"data: {json.dumps(event)}\n\n",
+                              headers={"content-type": "text/event-stream"})
+
+    transport = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    reports = []
+    try:
+        result = client.chat(
+            "hi", protocol="responses", stream=stream, model="openai/test",
+            backend={"api_key": "test", "base_url": "https://llm.test/v1",
+                     "http_client": transport}, on_usage=reports.append)
+        if stream:
+            list(result)
+    finally:
+        asyncio.run(transport.aclose())
+    assert len(reports) == 1
+    report = reports[0]
+    assert report["outcome"] == "completed"
+    first, last = report["calls"]
+    assert first["call_id"] != last["call_id"]
+    assert first["response_id"] == "resp-1"
+    assert last["response_id"] == "resp-2"
+    assert first["input_tokens"] == 180000
+    assert last["input_tokens"] == (None if missing else 180000)
+    assert report["totals"]["input_tokens"] == (180000 if missing else 360000)
+    assert report["completeness"]["input_tokens"] == (
+        "partial" if missing else "complete")
+    assert first["cache_write_by_ttl"] == {"5m": 5, "1h": 10}
+    assert first["reasoning_tokens"] == 5
+    assert first["completeness"]["cache_write_by_ttl"] == "complete"
+
+
+@needs_agents
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("usage", [None, {"prompt_tokens": 0,
+                                         "completion_tokens": 0,
+                                         "total_tokens": 0}])
+def test_chat_measurement_precedes_agents_zero_fill(
+        client, monkeypatch, stream, usage):
+    import litellm
+
+    async def completion(**kwargs):
+        if not stream:
+            from litellm.litellm_core_utils.llm_response_utils import (
+                convert_dict_to_response)
+            data = {"id": "chat-provider", "model": "served-model",
+                    "choices": [{
+                    "index": 0, "finish_reason": "stop",
+                    "message": {"role": "assistant", "content": "ok"}}]}
+            if usage is not None:
+                data["usage"] = usage
+            return convert_dict_to_response.convert_to_model_response_object(
+                response_object=data,
+                model_response_object=litellm.ModelResponse())
+
+        async def chunks():
+            from litellm.types.utils import ModelResponseStream
+            yield ModelResponseStream(
+                id="chat-provider", model="served-model",
+                choices=[{"index": 0, "delta": {"content": "ok"},
+                          "finish_reason": "stop", "logprobs": None}])
+            if usage:
+                yield ModelResponseStream(
+                    id="chat-provider", model="served-model",
+                    choices=[], usage=litellm.Usage(**usage))
+        return chunks()
+
+    monkeypatch.setattr(litellm, "acompletion", completion)
+    reports = []
+    result = client.chat("hi", protocol="chat_completions", stream=stream,
+                         model="openai/test", on_usage=reports.append)
+    if stream:
+        list(result)
+    assert len(reports) == 1
+    report = reports[0]
+    assert len(report["calls"]) == 1
+    call = report["calls"][0]
+    assert call["response_id"] == "chat-provider"
+    assert call["input_tokens"] == (0 if usage else None)
+    assert call["cache_read_tokens"] is None
+    assert report["completeness"]["input_tokens"] == (
+        "complete" if usage else "unknown")
+
+
+@needs_agents
+@pytest.mark.parametrize("protocol", ["chat_completions", "responses"])
+def test_measurement_callback_waits_for_stream_cleanup(
+        client, fake_model, protocol):
+    import threading
+    closed = threading.Event()
+    fake = fake_model([[_msg_item("ok")]])
+
+    async def blocked(*args, **kwargs):
+        from openai.types.responses import ResponseTextDeltaEvent
+        try:
+            yield ResponseTextDeltaEvent(
+                type="response.output_text.delta", delta="started",
+                content_index=0, item_id="msg", output_index=0,
+                logprobs=[], sequence_number=1)
+            await asyncio.Event().wait()
+        finally:
+            closed.set()
+
+    fake.stream_response = blocked
+    reports = []
+
+    def receive(report):
+        assert closed.is_set()
+        reports.append(report)
+
+    result = client.chat("hi", protocol=protocol, stream=True,
+                         on_usage=receive)
+    for event in result:
+        if (event.get("type") == "response.output_text.delta"
+                or (event.get("choices") and
+                    event["choices"][0]["delta"].get("content") == "started")):
+            break
+    result.close()
+    result.close()
+    assert len(reports) == 1
+    assert reports[0]["outcome"] == "cancelled"
+    assert len(reports[0]["calls"]) == 1
+    assert reports[0]["completeness"]["input_tokens"] == "unknown"
+
+
+@needs_agents
+def test_responses_close_before_terminal_keeps_call_cancelled(
+        client, monkeypatch):
+    import openai
+    from agents.models.openai_responses import OpenAIResponsesModel
+    closed = []
+
+    class Body(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            event = {"type": "response.output_text.delta", "delta": "hi",
+                     "content_index": 0, "output_index": 0, "item_id": "msg",
+                     "sequence_number": 0, "logprobs": []}
+            yield f"data: {json.dumps(event)}\n\n".encode()
+            await asyncio.Event().wait()
+
+        async def aclose(self):
+            closed.append(True)
+
+    transport = httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, stream=Body(), headers={
+            "content-type": "text/event-stream"})))
+    provider = openai.AsyncOpenAI(api_key="test", http_client=transport)
+    provider._pageindex_caller_http = True
+    monkeypatch.setattr(provider.responses, "with_streaming_response", None)
+    monkeypatch.setattr(local_chat, "_openai_model", lambda *a:
+                        OpenAIResponsesModel("test", openai_client=provider))
+    reports = []
+    result = client.chat("hi", protocol="responses", stream=True,
+                         on_usage=reports.append)
+    try:
+        assert next(result)["type"] == "response.output_text.delta"
+        result.close()
+        assert closed
+        assert not transport.is_closed
+    finally:
+        result.close()
+        asyncio.run(transport.aclose())
+    assert reports[0]["outcome"] == "cancelled"
+    assert reports[0]["calls"][0]["status"] == "cancelled"
+
+
+@needs_agents
+@pytest.mark.parametrize("protocol", ["chat_completions", "responses"])
+def test_measurement_close_after_terminal_keeps_completed_outcome(
+        client, fake_model, protocol):
+    fake_model([[_msg_item("ok")]])
+    reports = []
+    result = client.chat("hi", protocol=protocol, stream=True,
+                         on_usage=reports.append)
+    for event in result:
+        if (event.get("type") == "response.completed"
+                or event.get("choices") == []):
+            break
+    result.close()
+    assert len(reports) == 1
+    assert reports[0]["outcome"] == "completed"
+
+
+@needs_agents
+@pytest.mark.parametrize("fail", [False, True])
+@pytest.mark.parametrize("stream", [False, True])
+def test_measurement_callback_errors_preserve_execution_failure(
+        client, fake_model, stream, fail):
+    import openai
+    fake_model([openai.APIConnectionError(
+        request=httpx.Request("POST", "http://llm"))
+        if fail else [_msg_item("ok")]])
+    reports = []
+
+    def receive(report):
+        reports.append(report)
+        raise ValueError("consumer failed")
+
+    with pytest.raises(PageIndexAPIError if fail else ValueError):
+        result = client.chat("hi", protocol="responses", stream=stream,
+                             on_usage=receive)
+        if stream:
+            list(result)
+    assert len(reports) == 1
+    assert reports[0]["outcome"] == ("failed" if fail else "completed")
+
+
 if _HAS_AGENTS:
     from agents.models.interface import Model  # noqa: E402
 else:  # pragma: no cover - placeholder so the class statement parses
@@ -1280,6 +1623,152 @@ def fake_anthropic(monkeypatch):
         return state["calls"]
 
     return install
+
+
+@needs_anthropic
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("fail", [False, True])
+def test_messages_measurements_at_run_end(
+        client, store_path, fake_anthropic, stream, fail):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    first = _anthropic_message([{"type": "tool_use", "id": "call-1",
+        "name": "get_document", "input": {"doc_name": "report.pdf"}}],
+        "tool_use")
+    first["usage"].update(cache_read_input_tokens=20,
+                          cache_creation_input_tokens=15,
+                          cache_creation={"ephemeral_5m_input_tokens": 5,
+                                          "ephemeral_1h_input_tokens": 10})
+    last = _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")
+    last["usage"].update(cache_read_input_tokens=0,
+                         cache_creation_input_tokens=0)
+    responses = [_anthropic_sse(first) if stream else first]
+    if fail:
+        responses.append(anthropic_httpx.Response(400, json={
+            "type": "error", "error": {"type": "invalid_request_error",
+                                        "message": "provider failed"}}))
+    else:
+        responses.append(_anthropic_sse(last) if stream else last)
+    fake_anthropic(responses)
+    reports = []
+
+    def execute():
+        result = client.chat("hi", protocol="messages", model="claude-test",
+                             stream=stream, on_usage=reports.append)
+        return list(result) if stream else result
+
+    if fail:
+        with pytest.raises(PageIndexAPIError):
+            execute()
+    else:
+        execute()
+    assert len(reports) == 1
+    report = reports[0]
+    assert report["outcome"] == ("failed" if fail else "completed")
+    assert len(report["calls"]) == 2
+    first, last = report["calls"]
+    assert first["call_id"] != last["call_id"]
+    assert first["input_tokens"] == 45
+    assert first["cache_write_by_ttl"] == {"5m": 5, "1h": 10}
+    assert last["input_tokens"] == (None if fail else 10)
+    assert report["totals"]["input_tokens"] == (45 if fail else 55)
+    assert report["completeness"]["input_tokens"] == (
+        "partial" if fail else "complete")
+    assert report["completeness"]["reasoning_tokens"] == "unknown"
+
+
+@needs_anthropic
+def test_messages_close_retains_partial_usage(client, fake_anthropic):
+    reply = _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")
+    reply["usage"].update(cache_read_input_tokens=0,
+                          cache_creation_input_tokens=0)
+    fake_anthropic([_anthropic_sse(reply)])
+    reports = []
+    result = client.chat("hi", protocol="messages", model="claude-test",
+                         stream=True, on_usage=reports.append)
+    assert next(result).type == "message_start"
+    result.close()
+    assert len(reports) == 1
+    report = reports[0]
+    assert report["outcome"] == "cancelled"
+    assert report["calls"][0]["input_tokens"] == 10
+    assert report["completeness"]["input_tokens"] == "partial"
+
+
+@needs_anthropic
+@pytest.mark.parametrize("mixed", [False, True])
+def test_messages_measurement_cache_lifetime_from_request(
+        client, fake_anthropic, mixed):
+    reply = _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")
+    reply["usage"].update(cache_read_input_tokens=0,
+                          cache_creation_input_tokens=15)
+    fake_anthropic([reply])
+    instructions = ([{"type": "text", "text": "be brief",
+                      "cache_control": {"type": "ephemeral", "ttl": "1h"}}]
+                    if mixed else None)
+    reports = []
+    client.chat("hi", protocol="messages", model="claude-test",
+                instructions=instructions, on_usage=reports.append)
+    call = reports[0]["calls"][0]
+    assert call["cache_write_tokens"] == 15
+    assert call["cache_write_by_ttl"] == (None if mixed else {"5m": 15})
+
+
+@needs_anthropic
+def test_messages_nonstream_cancel_keeps_the_inflight_call(
+        client, store_path, monkeypatch):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        if len(requests) == 2:
+            raise KeyboardInterrupt()
+        reply = _anthropic_message([{"type": "tool_use", "id": "call-1",
+            "name": "get_document", "input": {"doc_name": "report.pdf"}}],
+            "tool_use")
+        reply["usage"].update(cache_read_input_tokens=0,
+                              cache_creation_input_tokens=0)
+        return anthropic_httpx.Response(200, json=reply)
+
+    provider = anthropic.Anthropic(
+        api_key="test", http_client=anthropic_httpx.Client(
+            transport=anthropic_httpx.MockTransport(handler)))
+    monkeypatch.setattr(local_chat, "_anthropic_client", lambda *a: provider)
+    reports = []
+    with pytest.raises(KeyboardInterrupt):
+        client.chat("hi", protocol="messages", model="claude-test",
+                    on_usage=reports.append)
+    assert len(reports) == 1
+    report = reports[0]
+    assert report["outcome"] == "cancelled"
+    assert len(report["calls"]) == 2
+    assert report["calls"][1]["status"] == "cancelled"
+    assert report["completeness"]["input_tokens"] == "partial"
+
+
+@needs_agents
+def test_chat_measurement_retains_litellm_cache_buckets(client, monkeypatch):
+    import litellm
+
+    async def completion(**kwargs):
+        return litellm.ModelResponse(
+            id="chat-provider", model="claude-test", choices=[{
+                "index": 0, "finish_reason": "stop",
+                "message": {"role": "assistant", "content": "ok"}}],
+            usage=litellm.Usage(prompt_tokens=100, completion_tokens=20,
+                total_tokens=120, prompt_tokens_details={
+                    "cached_tokens": 30, "cache_creation_tokens": 15,
+                    "cache_creation_token_details": {
+                        "ephemeral_5m_input_tokens": 5,
+                        "ephemeral_1h_input_tokens": 10}}))
+
+    monkeypatch.setattr(litellm, "acompletion", completion)
+    reports = []
+    client.chat("hi", protocol="chat_completions", model="openai/test",
+                on_usage=reports.append)
+    call = reports[0]["calls"][0]
+    assert call["cache_write_tokens"] == 15
+    assert call["cache_write_by_ttl"] == {"5m": 5, "1h": 10}
 
 
 @needs_anthropic

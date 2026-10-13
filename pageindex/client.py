@@ -1093,6 +1093,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
+        on_usage: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> dict[str, Any]: ...
 
     @overload
@@ -1113,6 +1114,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
+        on_usage: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> Iterator[dict[str, Any]]: ...
 
     @overload
@@ -1133,6 +1135,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
+        on_usage: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> Iterator[Any]: ...
 
     @overload
@@ -1174,6 +1177,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
+        on_usage: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> Union[str, ChatStream, dict[str, Any], Iterator[Any]]: ...
 
     def chat(
@@ -1194,6 +1198,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
+        on_usage: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> Union[str, ChatStream, dict[str, Any], Iterator[Any]]:
         """
         Ask a question about your documents.
@@ -1376,7 +1381,35 @@ class PageIndexClient:
         An own-model run that fails raises PageIndexAPIError with
         ``usage``: what its finished model calls spent, in the protocol's
         usage shape (Chat Completions on the answer lane).
+
+        ``on_usage(report)`` receives one protocol-independent measurement
+        report after an own-model protocol run finishes, fails or closes.
+        It is synchronous and runs on the consuming thread. A stream must
+        be exhausted or explicitly closed; close waits for local cleanup,
+        which may wait for a blocking provider. It cannot guarantee remote
+        cancellation or recover usage the provider never sent. A stream
+        closed before its first iteration has not started a measured run.
+
+        The report has run_id, protocol, outcome, calls, totals and
+        per-field completeness (complete, partial, unknown). Each call
+        carries its identity, requested/reported model, backend and token
+        counts. Input includes cache reads/writes; output includes reasoning.
+        ordinary_input_tokens excludes cache reads/writes and retains the
+        native Messages input even when its cache quantities are unknown.
+        Missing counts and unknown cache_write_by_ttl are None. Totals are
+        known subtotals when completeness is partial. Measurements describe
+        SDK-visible model invocations, not hidden provider retries.
+        Callback exceptions propagate after success; during an execution
+        failure the original exception is preserved. Async callbacks are
+        not supported; a host can hand the report to its own async finalizer.
         """
+        if on_usage is not None:
+            if not callable(on_usage):
+                raise TypeError("on_usage must be callable.")
+            if protocol is None or not self._local_chat:
+                raise PageIndexAPIError(
+                    "on_usage requires an own-model chat protocol: "
+                    "chat_completions, responses or messages.")
         if protocol not in (None, "chat_completions", "responses",
                             "messages"):
             raise PageIndexAPIError(
@@ -1439,7 +1472,8 @@ class PageIndexClient:
                     folder_id=folder_id,
                     instructions=cast(Optional[str], instructions),
                     max_turns=max_turns, extra_body=body,
-                    extra_headers=extra_headers, backend=backend)
+                    extra_headers=extra_headers, backend=backend,
+                    on_usage=on_usage)
             body = extra_body
             if reasoning_effort:
                 # Anthropic's own effort field, beside the caller's other
@@ -1452,7 +1486,8 @@ class PageIndexClient:
                 messages, model=model, stream=stream, doc_id=doc_id,
                 folder_id=folder_id,
                 system=instructions, max_turns=max_turns, extra_body=body,
-                extra_headers=extra_headers, backend=backend)
+                extra_headers=extra_headers, backend=backend,
+                on_usage=on_usage)
         if instructions:
             if isinstance(messages, str):
                 if not messages.strip():
@@ -1470,7 +1505,8 @@ class PageIndexClient:
                 enable_citations=enable_citations, folder_id=folder_id,
                 model=model, max_turns=max_turns,
                 reasoning_effort=reasoning_effort, extra_body=extra_body,
-                extra_headers=extra_headers, backend=backend)
+                extra_headers=extra_headers, backend=backend,
+                on_usage=on_usage)
         if stream:
             # the default means "on where available"
             resolved = True if show_process is None else show_process
@@ -1529,6 +1565,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         *,
         folder_id: Optional[str] = None,
+        on_usage: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> Union[dict[str, Any], Iterator[str], Iterator[dict[str, Any]]]:
         """
         Kept for existing code — new code calls ``chat()``. Everything
@@ -1650,7 +1687,10 @@ class PageIndexClient:
                 max_turns=max_turns, top_p=top_p, max_tokens=max_tokens,
                 reasoning_effort=reasoning_effort, extra_body=extra_body,
                 extra_headers=extra_headers, backend=backend,
+                on_usage=on_usage,
             )
+        if on_usage is not None:
+            raise PageIndexAPIError("on_usage requires your own chat model.")
         if not getattr(self, "api_key", None):
             raise PageIndexAPIError(
                 "chat_model is empty — it configures nothing, and a local "
@@ -1706,6 +1746,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         *,
         folder_id: Optional[str] = None,
+        on_usage: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> Union[dict[str, Any], Iterator[dict[str, Any]]]:
         """
         The engine behind ``chat(protocol="responses")``: document QA over
@@ -1784,6 +1825,7 @@ class PageIndexClient:
             max_turns=max_turns, max_output_tokens=max_output_tokens,
             reasoning=reasoning, extra_body=extra_body,
             extra_headers=extra_headers, backend=backend,
+            on_usage=on_usage,
         )
 
     def _messages(
@@ -1805,6 +1847,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         *,
         folder_id: Optional[str] = None,
+        on_usage: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> Union[dict[str, Any], Iterator[Any]]:
         """
         The engine behind ``chat(protocol="messages")``: document QA over
@@ -1896,6 +1939,7 @@ class PageIndexClient:
             stop_sequences=stop_sequences, max_turns=max_turns,
             thinking=thinking, extra_body=extra_body,
             extra_headers=extra_headers, backend=backend,
+            on_usage=on_usage,
         )
 
     # ---------- DOCUMENT MANAGEMENT ----------
