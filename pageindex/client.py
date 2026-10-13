@@ -1392,6 +1392,10 @@ class PageIndexClient:
                 "instructions blocks are the Messages protocol's shape — "
                 "with protocol=\"messages\" they append after the managed "
                 "system blocks; the other lanes take a string.")
+        if instructions is not None and not isinstance(instructions, (str, list)):
+            raise PageIndexValidationError(
+                "instructions must be a string, or a list of system blocks "
+                "with protocol=\"messages\".")
         from .local_chat import _refuse_skeleton
         _refuse_skeleton(extra_body)
         if citations and citations is not True:
@@ -1450,8 +1454,9 @@ class PageIndexClient:
                 messages = [{"role": "user", "content": messages}]
             # The first system text: managed prompt, then instructions,
             # then the history's own system rows.
+            from .local_chat import _chat_message_iter
             messages = [{"role": "system", "content": instructions},
-                        *messages]
+                        *_chat_message_iter(messages)]
         if protocol == "chat_completions":
             return self.chat_completions(
                 messages, stream=stream, stream_metadata=True, doc_id=doc_id,

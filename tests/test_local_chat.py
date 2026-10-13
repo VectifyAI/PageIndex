@@ -4288,14 +4288,23 @@ def test_managed_instructions_drop_blank_system_texts(store_path):
 # ── public request-validation contract ──
 
 @pytest.mark.parametrize("protocol", [
-    None, "chat_completions", "responses", "messages"])
+    pytest.param(None, marks=needs_agents),
+    pytest.param("chat_completions", marks=needs_agents),
+    pytest.param("responses", marks=needs_agents),
+    pytest.param("messages", marks=needs_anthropic),
+])
 @pytest.mark.parametrize("stream", [False, True])
 @pytest.mark.parametrize("messages,kwargs", [
     ("q", {"extra_body": {"tools": []}}),
     ([], {}),
     ([None], {}),
     (None, {}),
+    (None, {"instructions": "Be brief"}),
+    (42, {"instructions": "Be brief"}),
     (" ", {}),
+    ("q", {"instructions": 42}),
+    ("q", {"instructions": {"text": "Be brief"}}),
+    ("q", {"instructions": {}}),
     ("q", {"max_turns": 0}),
     ("q", {"max_turns": -1}),
     ("q", {"max_turns": 1.5}),
@@ -4303,13 +4312,7 @@ def test_managed_instructions_drop_blank_system_texts(store_path):
     ("q", {"doc_id": []}),
 ])
 def test_chat_request_validation_is_typed(
-        client, monkeypatch, protocol, stream, messages, kwargs):
-    # These checks need no provider or agent runtime. Avoid optional
-    # dependency gates so every install shape tests the public contract.
-    monkeypatch.setattr(local_chat, "_require_openai_agents", lambda lane: None)
-    monkeypatch.setattr(local_chat, "_require_anthropic", lambda: None)
-    if protocol == "messages":
-        monkeypatch.setitem(sys.modules, "anthropic", types.ModuleType("anthropic"))
+        client, protocol, stream, messages, kwargs):
     with pytest.raises(PageIndexValidationError) as caught:
         result = client.chat(messages, protocol=protocol, stream=stream,
                              model="test-model", **kwargs)

@@ -47,17 +47,21 @@ def _system_text(content: Any) -> str:
     )
 
 
+def _chat_message_iter(messages):
+    """Check the container before prepending instructions or reading history."""
+    try:
+        return iter(messages)
+    except TypeError as exc:
+        raise PageIndexValidationError(
+            "messages must be a non-empty iterable of message dicts.") from exc
+
+
 def _split_chat_messages(messages) -> "tuple[list[str], list[dict]]":
     """Validate the chat_completions surface's messages: system/developer
     content joins the managed instructions; user/assistant history passes
     through. Tool-history round-trips belong to chat(protocol="responses")
     or chat(protocol="messages")."""
-    try:
-        messages = iter(messages)
-    except TypeError as exc:
-        raise PageIndexValidationError(
-            "messages must be a non-empty iterable of message dicts.") from exc
-    messages = list(messages)
+    messages = list(_chat_message_iter(messages))
     if not messages:
         raise PageIndexValidationError("messages must be a non-empty list.")
     system_texts: list[str] = []
