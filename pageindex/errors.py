@@ -8,12 +8,7 @@ class PageIndexAPIError(Exception):
 
 
 class PageIndexValidationError(PageIndexAPIError):
-    """A chat request rejected by the SDK's local argument validation.
-
-    Catch this before PageIndexAPIError. Messages are diagnostic prose, not
-    stable error codes, and may include caller-supplied values. Only expose
-    them to users allowed to see those values; causes are internal diagnostics.
-    """
+    """A chat request rejected by local validation; messages may echo input."""
 
 
 def _pageindex_cause(exc: BaseException | None) -> PageIndexAPIError | None:

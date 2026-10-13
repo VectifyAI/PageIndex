@@ -2035,45 +2035,57 @@ def test_responses_stream_backend_terminal_states_are_events(
 
 
 @needs_agents
-def test_provider_errors_wrap_as_sdk_errors(client, store_path, fake_model,
-                                            monkeypatch):
-    """Raw provider exceptions (network, auth, rate limit) surface as
-    PageIndexAPIError on every OpenAI-engine path, never as openai types."""
+@pytest.mark.parametrize("protocol", [None, "chat_completions", "responses"])
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("kind,status", [
+    ("provider", None), ("provider", 400), ("provider", 429), ("agent", None)])
+def test_provider_errors_wrap_as_sdk_errors(
+        client, fake_model, monkeypatch, protocol, stream, kind, status):
+    """Execution failures keep their status and cause on every OpenAI lane."""
     import openai
-    seed_doc(store_path, "pi-a", "report.pdf")
+    from agents.exceptions import AgentsException
     request = httpx.Request("POST", "https://backend.test")
+    if kind == "agent":
+        error = AgentsException("agent failed")
+    elif status is None:
+        error = openai.APIConnectionError(request=request)
+    else:
+        error = openai.APIStatusError(
+            "backend failure", response=httpx.Response(status, request=request),
+            body=None)
 
-    async def conn_err(*args, **kwargs):
-        raise openai.APIConnectionError(request=request)
+    async def fail(*args, **kwargs):
+        raise error
 
-    async def conn_err_stream(*args, **kwargs):
-        raise openai.APIConnectionError(request=request)
+    async def fail_stream(*args, **kwargs):
+        raise error
         yield  # unreached: makes this an async generator
 
-    fake = fake_model([[_msg_item("x")], [_msg_item("x")]])
-    monkeypatch.setattr(fake, "get_response", conn_err)
-    with pytest.raises(PageIndexAPIError, match="model backend failed"):
-        client.chat_completions("q")
-    with pytest.raises(PageIndexAPIError, match="model backend failed"):
-        client._responses("q")
-    monkeypatch.setattr(fake, "stream_response", conn_err_stream)
-    with pytest.raises(PageIndexAPIError, match="model backend failed"):
-        list(client.chat_completions("q", stream=True))
-    with pytest.raises(PageIndexAPIError, match="model backend failed"):
-        list(client._responses("q", stream=True))
+    fake = fake_model([])
+    monkeypatch.setattr(fake, "get_response", fail)
+    monkeypatch.setattr(fake, "stream_response", fail_stream)
+    with pytest.raises(PageIndexAPIError) as caught:
+        result = client.chat("q", protocol=protocol, stream=stream)
+        if stream:
+            list(result)
+    assert not isinstance(caught.value, PageIndexValidationError)
+    assert caught.value.status_code == status
+    assert caught.value.__cause__ is error
 
 
 @needs_anthropic
-def test_messages_provider_errors_wrap_as_sdk_errors(client, store_path,
-                                                     monkeypatch):
-    """Anthropic transport errors surface as PageIndexAPIError on both
-    messages() paths, never as anthropic types."""
-    seed_doc(store_path, "pi-a", "report.pdf")
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("status", [None, 400, 429])
+def test_messages_provider_errors_wrap_as_sdk_errors(client, monkeypatch,
+                                                     stream, status):
+    """Messages keeps transport failures distinct from local validation."""
 
     def handler(request):
-        return anthropic_httpx.Response(429, json={
+        if status is None:
+            raise anthropic_httpx.ConnectError("unreachable", request=request)
+        return anthropic_httpx.Response(status, json={
             "type": "error",
-            "error": {"type": "rate_limit_error", "message": "slow down"}})
+            "error": {"type": "api_error", "message": "backend failure"}})
 
     fake = anthropic.Anthropic(
         api_key="test", max_retries=0,
@@ -2081,10 +2093,17 @@ def test_messages_provider_errors_wrap_as_sdk_errors(client, store_path,
             transport=anthropic_httpx.MockTransport(handler)))
     monkeypatch.setattr(local_chat, "_anthropic_client",
                         lambda backend=None, route="anthropic": fake)
-    with pytest.raises(PageIndexAPIError, match="model backend failed"):
-        client._messages("q", model="claude-test")
-    with pytest.raises(PageIndexAPIError, match="model backend failed"):
-        list(client._messages("q", model="claude-test", stream=True))
+    with pytest.raises(PageIndexAPIError) as caught:
+        result = client.chat("q", protocol="messages", model="claude-test",
+                             stream=stream)
+        if stream:
+            list(result)
+    assert not isinstance(caught.value, PageIndexValidationError)
+    assert caught.value.status_code == status
+    cause = caught.value.__cause__
+    assert isinstance(cause, anthropic.APIConnectionError if status is None
+                      else anthropic.APIStatusError)
+    assert getattr(cause, "status_code", None) == status
 
 
 @needs_agents
@@ -4334,60 +4353,6 @@ def test_managed_chat_validation_is_typed(monkeypatch, stream):
         client.chat("q", stream=stream, extra_body={"tools": []})
 
 
-@needs_agents
-@pytest.mark.parametrize("protocol", [None, "chat_completions", "responses"])
-@pytest.mark.parametrize("stream", [False, True])
-@pytest.mark.parametrize("status", [None, 400, 429])
-def test_openai_execution_error_retains_type_status_and_cause(
-        client, fake_model, monkeypatch, protocol, stream, status):
-    import openai
-    request = httpx.Request("POST", "https://backend.test")
-    error = (openai.APIConnectionError(request=request) if status is None
-             else openai.APIStatusError(
-                 "backend failure", response=httpx.Response(status, request=request),
-                 body=None))
-
-    async def fail(*args, **kwargs):
-        raise error
-
-    async def fail_stream(*args, **kwargs):
-        raise error
-        yield
-
-    fake = fake_model([])
-    monkeypatch.setattr(fake, "get_response", fail)
-    monkeypatch.setattr(fake, "stream_response", fail_stream)
-    with pytest.raises(PageIndexAPIError) as caught:
-        result = client.chat("q", protocol=protocol, stream=stream)
-        if stream:
-            list(result)
-    assert not isinstance(caught.value, PageIndexValidationError)
-    assert caught.value.status_code == status
-    assert caught.value.__cause__ is error
-
-
-@needs_anthropic
-@pytest.mark.parametrize("stream", [False, True])
-@pytest.mark.parametrize("status", [None, 400, 429])
-def test_messages_execution_error_retains_type_status_and_cause(
-        client, monkeypatch, stream, status):
-    request = anthropic_httpx.Request("POST", "https://backend.test")
-    error = (anthropic.APIConnectionError(request=request) if status is None
-             else anthropic.APIStatusError(
-                 "backend failure",
-                 response=anthropic_httpx.Response(status, request=request),
-                 body=None))
-    _failing_runner_client(monkeypatch, error)
-    with pytest.raises(PageIndexAPIError) as caught:
-        result = client.chat("q", protocol="messages", model="test-model",
-                             stream=stream)
-        if stream:
-            list(result)
-    assert not isinstance(caught.value, PageIndexValidationError)
-    assert caught.value.status_code == status
-    assert caught.value.__cause__ is error
-
-
 @needs_anthropic
 def test_empty_messages_result_is_an_execution_error(client, monkeypatch):
     _failing_runner_client(monkeypatch, StopIteration())
@@ -4395,29 +4360,3 @@ def test_empty_messages_result_is_an_execution_error(client, monkeypatch):
         client.chat("q", protocol="messages", model="test-model")
     assert not isinstance(caught.value, PageIndexValidationError)
     assert caught.value.status_code is None
-
-
-@needs_agents
-@pytest.mark.parametrize("stream", [False, True])
-def test_agent_failure_is_an_execution_error(client, fake_model, monkeypatch,
-                                            stream):
-    from agents.exceptions import AgentsException
-    error = AgentsException("agent failed")
-
-    async def fail(*args, **kwargs):
-        raise error
-
-    async def fail_stream(*args, **kwargs):
-        raise error
-        yield
-
-    fake = fake_model([])
-    monkeypatch.setattr(fake, "get_response", fail)
-    monkeypatch.setattr(fake, "stream_response", fail_stream)
-    with pytest.raises(PageIndexAPIError) as caught:
-        result = client.chat("q", stream=stream)
-        if stream:
-            list(result)
-    assert not isinstance(caught.value, PageIndexValidationError)
-    assert caught.value.status_code is None
-    assert caught.value.__cause__ is error
