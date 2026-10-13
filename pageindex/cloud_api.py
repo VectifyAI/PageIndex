@@ -6,6 +6,7 @@ import json
 import urllib.parse
 
 from .errors import PageIndexAPIError
+from . import deadline as _deadline
 from .naming import sanitize_filename, validate_folder_name
 
 
@@ -416,7 +417,8 @@ class CloudAPI:
                 - folderId (str | None): Containing folder ID
                 - metadata (dict | None): Your own tags from submit_document
         """
-        response = requests.get(
+        get = _deadline.get if _deadline.current() else requests.get
+        response = get(
             f"{self.BASE_URL}/doc/{_enc(doc_id)}/metadata/",
             headers=self._headers(),
             timeout=30
@@ -552,7 +554,8 @@ class CloudAPI:
         if parent_folder_id is not None:
             params["parent_folder_id"] = parent_folder_id
 
-        response = requests.get(
+        get = _deadline.get if _deadline.current() else requests.get
+        response = get(
             f"{self.BASE_URL}/folders/",
             headers=self._headers(),
             params=params,

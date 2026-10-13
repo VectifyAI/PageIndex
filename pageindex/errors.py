@@ -7,6 +7,19 @@ class PageIndexAPIError(Exception):
         self.status_code = status_code
 
 
+class PageIndexTimeoutError(PageIndexAPIError):
+    """The whole-run deadline expired; local execution has been torn down.
+
+    Already dispatched remote work may still finish and be billed.
+    """
+
+    code = "deadline_exceeded"
+
+    def __init__(self, *args: object, timeout: float | None = None) -> None:
+        super().__init__(*args)
+        self.timeout = timeout
+
+
 def _pageindex_cause(exc: BaseException | None) -> PageIndexAPIError | None:
     """The PageIndexAPIError behind a framework's wrapper exception, if any."""
     while exc is not None:

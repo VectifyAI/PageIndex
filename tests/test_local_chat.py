@@ -2096,7 +2096,7 @@ def test_chat_stream_close_at_opening_chunk_cancels_run(client, store_path,
     fake.block_from = 1  # turn 1 hangs until cancelled
     captured = {}
 
-    def capture(agen_factory):
+    def capture(agen_factory, close_unused=None):
         captured["factory"] = agen_factory
         return iter(())  # drive the async generator by hand instead
 
