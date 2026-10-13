@@ -1138,8 +1138,7 @@ def test_responses_stream_events_validate_as_official_events(
 try:
     import anthropic
     _HAS_ANTHROPIC = True
-    # anthropic 1.1 made every non-tool_use stop reason terminal: the runner
-    # no longer executes tool_use blocks from a max_tokens-cut turn.
+    # anthropic 1.1 stopped executing tools from max_tokens-cut turns.
     try:
         _ANTHROPIC_RUNS_CUT_TOOL_TURNS = tuple(
             int(piece) for piece in anthropic.__version__.split(".")[:2]
@@ -1163,27 +1162,31 @@ def _anthropic_message(content, stop_reason):
     }
 
 
-def _anthropic_sse(message):
+def _anthropic_sse(message, delta=None):
     """Render text/tool turns for the real streaming tool runner."""
     events = [{"type": "message_start", "message": {
         **message, "content": [], "stop_reason": None}}]
     for index, block in enumerate(message["content"]):
         if block["type"] == "tool_use":
             initial = {**block, "input": {}}
-            delta = {"type": "input_json_delta",
-                     "partial_json": json.dumps(block["input"])}
+            change = {"type": "input_json_delta",
+                      "partial_json": json.dumps(block["input"])}
+        elif block["type"] == "compaction":
+            initial = {**block, "content": ""}
+            change = {"type": "compaction_delta", "content": block["content"]}
         else:
             initial = {**block, "text": ""}
-            delta = {"type": "text_delta", "text": block["text"]}
+            change = {"type": "text_delta", "text": block["text"]}
         events.extend([
             {"type": "content_block_start", "index": index,
              "content_block": initial},
-            {"type": "content_block_delta", "index": index, "delta": delta},
+            {"type": "content_block_delta", "index": index, "delta": change},
             {"type": "content_block_stop", "index": index},
         ])
     events.extend([
         {"type": "message_delta", "delta": {
-            "stop_reason": message["stop_reason"], "stop_sequence": None},
+            "stop_reason": message["stop_reason"], "stop_sequence": None,
+            **(delta or {})},
          "usage": {"output_tokens": message["usage"]["output_tokens"]}},
         {"type": "message_stop"},
     ])
@@ -1437,6 +1440,110 @@ def test_messages_usage_sums_final_turn_counts(bridge_client, fake_anthropic,
     assert usage["cache_creation"] == {"ephemeral_5m_input_tokens": 2,
                                        "ephemeral_1h_input_tokens": 4}
     assert stream.result["run"]["usage_complete"] is (not missing)
+
+
+@needs_anthropic
+@pytest.mark.parametrize("streaming", [False, True])
+def test_messages_preserves_native_usage(bridge_client, fake_anthropic,
+                                         streaming):
+    client, _ = bridge_client
+    replies = [_anthropic_message([_anthropic_tool_use()], "tool_use"),
+               _anthropic_message([{"type": "text", "text": "ok"}],
+                                  "end_turn")]
+    metadata = {"service_tier": "priority", "inference_geo": None,
+                "cache_creation": None,
+                "output_tokens_details": {"thinking_tokens": 2},
+                "server_tool_use": {"web_search_requests": 1,
+                                    "web_fetch_requests": 0}}
+    for reply in replies:
+        reply["usage"].update(cache_read_input_tokens=0,
+                              cache_creation_input_tokens=0,
+                              service_tier="standard")
+    replies[-1]["usage"].update(metadata)
+    fake_anthropic([_anthropic_sse(reply) for reply in replies]
+                   if streaming else replies)
+    result = client.chat("q", protocol="messages", model="claude-test",
+                         stream=streaming, extra_body={"service_tier": "auto"})
+    if streaming:
+        result = result.get_final_result()
+    for key, value in metadata.items():
+        assert result["usage"][key] == value
+    assert result["usage"]["input_tokens"] == 20
+    assert result["run"]["usage_complete"] is True
+
+
+@needs_anthropic
+def test_messages_terminal_delta_metadata(client, fake_anthropic):
+    metadata = {"stop_details": {"type": "refusal",
+                                 "category": "general_harms"},
+                "container": {"id": "container_test",
+                              "expires_at": "2028-01-01T00:00:00Z"}}
+    reply = _anthropic_message([{"type": "text", "text": "Cannot help"}],
+                               "refusal")
+    fake_anthropic([_anthropic_sse(reply, metadata)])
+    stream = client.chat("q", protocol="messages", model="claude-test",
+                         stream=True)
+    events = list(stream)
+    final = _consume_messages(events)
+    assert final.stop_details.category == "general_harms"
+    assert final.container.id == "container_test"
+    for field in metadata:
+        assert events[-2]["delta"][field] == stream.result[field]
+
+
+@needs_anthropic
+@pytest.mark.parametrize("streaming", [False, True])
+def test_messages_compaction_is_not_appendable(client, fake_anthropic,
+                                               monkeypatch, streaming):
+    from anthropic.lib.tools import BetaToolRunner
+    if not hasattr(BetaToolRunner, "compact_before_next_turn"):
+        pytest.skip("runner does not support explicit compaction")
+    replies = [_anthropic_message([
+        {"type": "compaction", "content": "Summary"}], "compaction"),
+        _anthropic_message([{"type": "text", "text": "Answer"}], "end_turn")]
+    requests = fake_anthropic([_anthropic_sse(reply) for reply in replies]
+                              if streaming else replies)
+    resource = local_chat._anthropic_client().beta.messages
+    create_runner = resource.tool_runner
+
+    def compact(**kwargs):
+        runner = create_runner(**kwargs)
+        runner.compact_before_next_turn()
+        return runner
+
+    monkeypatch.setattr(resource, "tool_runner", compact)
+    result = client.chat("Original conversation", protocol="messages",
+                         model="claude-test", stream=streaming, max_turns=1)
+    if streaming:
+        result = result.get_final_result()
+    assert len(requests) == 2
+    summary, = requests[1]["messages"]
+    assert summary["role"] == "assistant"
+    block, = summary["content"]
+    assert block["type"] == "compaction" and block["content"] == "Summary"
+    assert result["run"]["status"] == "completed"
+    assert result["run"]["can_resume"] is False
+
+
+@needs_anthropic
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize("max_turns", [1, 2])
+def test_messages_pause_follows_runner(client, fake_anthropic, streaming,
+                                       max_turns):
+    replies = [_anthropic_message([{"type": "text", "text": "Paused"}],
+                                  "pause_turn"),
+               _anthropic_message([{"type": "text", "text": "Done"}],
+                                  "end_turn")]
+    requests = fake_anthropic([_anthropic_sse(reply) for reply in replies]
+                              if streaming else replies)
+    result = client.chat("q", protocol="messages", model="claude-test",
+                         stream=streaming, max_turns=max_turns)
+    if streaming:
+        result = result.get_final_result()
+    resumes = not _ANTHROPIC_RUNS_CUT_TOOL_TURNS
+    expected = "max_turns" if resumes and max_turns == 1 else "completed"
+    assert result["run"]["status"] == expected
+    assert len(requests) == (max_turns if resumes else 1)
 
 
 @needs_anthropic
@@ -3751,6 +3858,10 @@ def _failing_runner_client(monkeypatch, exc):
 
         def generate_tool_call_response(self):
             return None
+
+        def append_messages(self, *messages):
+            raise AssertionError("the request failed before producing "
+                                 "a message")
 
     class _Fake:
         class beta:

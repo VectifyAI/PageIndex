@@ -1885,8 +1885,10 @@ class PageIndexClient:
             still distinguishes end_turn, max_tokens and refusal.
             ``run.tool_calls`` records each call's id, name, input, status
             (completed, failed, not_executed or unknown) and tool_result
-            in ``result``. ``run.can_resume`` is false when interrupted
-            tool execution is uncertain; reconcile those calls first.
+            in ``result``. ``run.can_resume`` is false after compaction or
+            uncertain tool execution. Compaction requires replacement
+            history; do not append these messages to the original input.
+            Reconcile uncertain tool calls before retrying.
             ``run.error`` is the execution error text, or None.
 
             ``usage`` sums final input/output/cache counters and any
@@ -1895,6 +1897,7 @@ class PageIndexClient:
             exclude cache reads/writes. ``run.usage_complete`` requires
             known counts and a completed or turn-limited run. After failure
             or cancellation, counts cover only the observed messages.
+            Other native usage fields describe the final observed turn.
 
             Stream events are JSON dicts, ready for SSE serialization.
             The official Anthropic consumer assembles one native message;

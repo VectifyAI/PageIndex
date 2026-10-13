@@ -1333,12 +1333,17 @@ def _dump_message(message) -> dict:
     return message
 
 
+_ANTHROPIC_TOKEN_FIELDS = ("input_tokens", "output_tokens",
+                          "cache_creation_input_tokens",
+                          "cache_read_input_tokens")
+
+
 def _anthropic_usage(turns) -> dict:
     """Native token counters; an unavailable count stays unknown."""
-    totals = {}
     usages = [getattr(turn, "usage", None) for turn in turns]
-    for field in ("input_tokens", "output_tokens",
-                  "cache_creation_input_tokens", "cache_read_input_tokens"):
+    totals = (usages[-1].model_dump(mode="json", exclude_unset=True)
+              if usages and usages[-1] is not None else {})
+    for field in _ANTHROPIC_TOKEN_FIELDS:
         values = [getattr(usage, field, None) for usage in usages]
         totals[field] = (sum(values) if values and all(
             isinstance(value, int) for value in values) else None)
@@ -1461,6 +1466,7 @@ def run_messages(client, messages, model: str, route: str,
     moved: list = []  # the block holding the bedrock breakpoint
     turns: list = []
     tool_responses: dict = {}
+    continued_turn = None
     uncertain_turn = None
     partial_turn = None
     result: dict = {}
@@ -1484,6 +1490,14 @@ def run_messages(client, messages, model: str, route: str,
         return response
 
     runner.generate_tool_call_response = checked_tool_response
+    append_messages = runner.append_messages
+
+    def append_turn(*messages):
+        nonlocal continued_turn
+        append_messages(*messages)
+        continued_turn = len(turns) - 1
+
+    runner.append_messages = append_turn
 
     def finish(status, error=None):
         if result:
@@ -1519,23 +1533,22 @@ def run_messages(client, messages, model: str, route: str,
             "type": "message", "role": "assistant", "model": model,
             "stop_reason": None, "stop_sequence": None}
         reason = final.get("stop_reason")
-        continuing = (len(turns) - 1 in tool_responses
-                      or reason in ("pause_turn", "compaction"))
-        if (status == "completed" and continuing
+        if (status == "completed" and continued_turn == len(turns) - 1
                 and len(turns) >= (max_turns or 10)):
             status = "max_turns"
         usage = _anthropic_usage(turns)
-        counts = [value for key, value in usage.items()
-                  if key != "cache_creation"]
-        counts += list(usage.get("cache_creation", {}).values())
+        counts = [usage[field] for field in _ANTHROPIC_TOKEN_FIELDS]
+        counts += list((usage.get("cache_creation") or {}).values())
         measured = (status in ("completed", "max_turns")
                     and all(value is not None for value in counts))
+        can_resume = uncertain_turn is None and not any(
+            turn.stop_reason == "compaction" for turn in turns)
         final.update(id=message_id, content=content + pending, usage=usage,
                      messages=messages, run={
                          "status": status, "turns": len(turns),
                          "model_stop_reason": reason, "tool_calls": calls,
                          "usage_complete": measured,
-                         "can_resume": uncertain_turn is None,
+                         "can_resume": can_resume,
                          "error": str(error) if error else None})
         if status == "max_turns":
             final["stop_reason"] = "pause_turn"
@@ -1615,10 +1628,12 @@ def run_messages(client, messages, model: str, route: str,
                     yield {"type": "content_block_start", "index": index,
                            "content_block": block}
                     yield {"type": "content_block_stop", "index": index}
-                yield {"type": "message_delta", "delta": {
-                    "stop_reason": result["stop_reason"],
-                    "stop_sequence": result.get("stop_sequence")},
-                    "usage": result["usage"]}
+                fields = ("stop_reason", "stop_sequence",
+                          "stop_details", "container")
+                delta = {field: result[field] for field in fields
+                         if field in result}
+                yield {"type": "message_delta", "delta": delta,
+                       "usage": result["usage"]}
                 yield {"type": "message_stop", "result": result}
         except GeneratorExit:
             finish("cancelled")
