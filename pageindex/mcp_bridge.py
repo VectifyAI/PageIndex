@@ -106,9 +106,9 @@ class McpBridge:
 
     def _post_with_deadline(self, payload, headers):
         deadline = _deadline.current()
-        for attempt in range(_RETRY.total + 1):
-            delay = (_RETRY.backoff_factor * 2 ** (attempt - 1)
-                     if attempt > 1 else 0)
+        retry = _RETRY
+        while True:
+            delay = retry.get_backoff_time()
             if delay:
                 time.sleep(min(delay, deadline.remaining()))
             deadline.remaining()
@@ -117,12 +117,13 @@ class McpBridge:
                     "POST", self._url, json=payload, headers=headers,
                     timeout=_TIMEOUT)
             except requests.ConnectionError:
-                if attempt == _RETRY.total:
+                if not retry.total:
                     raise
             else:
                 if (response.status_code not in _RETRY.status_forcelist
-                        or attempt == _RETRY.total):
+                        or not retry.total):
                     return response
+            retry = retry.increment(method="POST", url=self._url)
 
     def _extract_result(self, response: requests.Response, request_id: int) -> Any:
         content_type = response.headers.get("Content-Type", "")

@@ -105,27 +105,11 @@ print(answer)
 
 Configure other models, streaming, multi-document search, citations, and more.
 
-Own-model chat accepts a whole-run budget on every protocol, streamed or not:
-
-```python
-from pageindex import PageIndexTimeoutError
-
-try:
-    answer = client.chat("Summarise the report", doc_id=doc_id, timeout=30)
-except PageIndexTimeoutError as exc:
-    print(exc.code)  # deadline_exceeded
-```
-
-The budget starts at `chat()`, including setup, document access, model calls,
-tools and retries. Expiry stops new work and cancels supported in-flight I/O.
-The exception is raised after local teardown; closing a stream also waits for
-teardown. A synchronous tool already running must finish first, so returning
-can take longer than the budget. Remote work already sent may still finish
-and be billed. Services should leave room for cleanup before their ingress
-timeout. Exhaust or explicitly close streams, including ones not yet consumed.
-With a deadline, Messages uses the async Anthropic client with provider retries
-disabled; a custom `backend["http_client"]` must be async on that lane.
-The managed cloud chat endpoint does not support this client-side budget.
+Own-model `chat(..., timeout=30)` shares one budget across setup, model turns,
+tools and retries, on every protocol, streamed or not. Expiry raises
+`PageIndexTimeoutError` (`code="deadline_exceeded"`) after local cleanup.
+Running synchronous tools can delay cleanup; dispatched remote work may still
+finish and be billed. See `chat()`'s docstring for stream and backend details.
 
 ### [Integrate PageIndex with your own agent →](https://docs.pageindex.ai/sdk/agents)
 

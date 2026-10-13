@@ -10,51 +10,19 @@ import pytest
 import pageindex.local_chat as local_chat
 from pageindex import (PageIndexAPIError, PageIndexClient,
                        PageIndexTimeoutError)
-import test_local_chat as chat_tests
-from test_local_chat import (needs_agents, needs_anthropic, seed_doc,
+from test_local_chat import (_HAS_AGENTS, needs_agents, needs_anthropic,
+                             seed_doc,
+                             client as client, fake_model as fake_model,
+                             store_path as store_path,
                              _anthropic_message, _anthropic_sse,
                              _call_item, _msg_item)
-
-client = chat_tests.client
-fake_model = chat_tests.fake_model
-store_path = chat_tests.store_path
 
 
 @pytest.fixture(autouse=True)
 def warm_model_imports(client, fake_model):
-    if chat_tests._HAS_AGENTS:
+    if _HAS_AGENTS:
         fake_model([[_msg_item("warm")]])
         client.chat("warm")
-
-
-@needs_agents
-@pytest.mark.parametrize("protocol", [None, "chat_completions", "responses"])
-@pytest.mark.parametrize("stream", [False, True])
-def test_deadline_stops_model_and_joins_run(client, fake_model, protocol,
-                                          stream, monkeypatch):
-    fake = fake_model([[_msg_item("unreachable")]])
-    stopped = threading.Event()
-
-    async def blocked(*args, **kwargs):
-        try:
-            await asyncio.Event().wait()
-        finally:
-            stopped.set()
-
-    async def blocked_stream(*args, **kwargs):
-        await blocked()
-        yield
-
-    monkeypatch.setattr(fake, "get_response", blocked)
-    monkeypatch.setattr(fake, "stream_response", blocked_stream)
-    with pytest.raises(PageIndexAPIError) as caught:
-        result = client.chat("q", protocol=protocol, stream=stream,
-                             timeout=0.5)
-        if stream:
-            list(result)
-    assert caught.value.code == "deadline_exceeded"
-    assert caught.value.timeout == 0.5
-    assert stopped.is_set()
 
 
 @needs_agents
@@ -370,23 +338,35 @@ def test_budget_is_shared_by_model_turns(client, store_path, fake_model,
     ] + [[_msg_item("unreachable")]])
     response = fake.get_response
     stream_response = fake.stream_response
+    stopped = threading.Event()
 
     async def slow_response(*args, **kwargs):
-        await asyncio.sleep(0.3)
+        try:
+            await asyncio.sleep(0.3)
+        except asyncio.CancelledError:
+            stopped.set()
+            raise
         return await response(*args, **kwargs)
 
     async def slow_stream(*args, **kwargs):
-        await asyncio.sleep(0.3)
+        try:
+            await asyncio.sleep(0.3)
+        except asyncio.CancelledError:
+            stopped.set()
+            raise
         async for event in stream_response(*args, **kwargs):
             yield event
 
     monkeypatch.setattr(fake, "get_response", slow_response)
     monkeypatch.setattr(fake, "stream_response", slow_stream)
-    with pytest.raises(PageIndexTimeoutError):
+    with pytest.raises(PageIndexTimeoutError) as caught:
         result = client.chat("q", protocol=protocol, stream=stream, timeout=1)
         if stream:
             list(result)
     assert 2 <= len(fake.inputs) <= 3
+    assert stopped.is_set()
+    assert caught.value.code == "deadline_exceeded"
+    assert caught.value.timeout == 1
 
 
 def test_mcp_lock_wait_uses_remaining_budget(cloud_transport):

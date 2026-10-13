@@ -4,6 +4,7 @@ managed endpoint's chunk stream."""
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import dataclasses
 import hashlib
 import json
@@ -88,13 +89,7 @@ def _split_chat_messages(messages) -> "tuple[list[str], list[dict]]":
 
 def _run_sync(coro):
     from .utils import run_off_loop
-    deadline = _deadline.current()
-
-    async def run():
-        with _deadline.active(deadline):
-            return await coro
-
-    return run_off_loop(asyncio.run, run())
+    return run_off_loop(contextvars.copy_context().run, asyncio.run, coro)
 
 
 def _stream_sync(agen_factory, close_unused=None) -> Iterator[Any]:
@@ -147,8 +142,6 @@ def _stream_sync(agen_factory, close_unused=None) -> Iterator[Any]:
                     if not cancelled.is_set():
                         raise
             finally:
-                task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
                 await agen.aclose()
                 if not started and close_unused is not None:
                     await close_unused()
@@ -1301,7 +1294,7 @@ _ROUTE_CLIENTS = {"anthropic": "Anthropic", "bedrock": "AnthropicBedrock",
                   "azure_ai": "AnthropicFoundry"}
 
 
-def _anthropic_client(backend, route, asynchronous=False):
+def _anthropic_client(backend, route):
     """The backend client — the seam tests replace with a fake transport.
     ``route`` (declared by the model's prefix) picks the SDK client
     class. One client per (route, backend): each construction pays
@@ -1309,6 +1302,7 @@ def _anthropic_client(backend, route, asynchronous=False):
     whose values defeat hashing constructs per call, as before. Async
     clients are per-run, owned by that run's event loop."""
     import anthropic
+    asynchronous = _deadline.current() is not None
     kwargs = _sdk_backend(backend)
     try:
         key = (route, tuple(sorted(
@@ -1475,8 +1469,7 @@ def run_messages(client, messages, model: str, route: str,
     tools = build_anthropic_tools(client, doc_ids=scope, failures=failures,
                                   asynchronous=deadline is not None)
     merged = _merged_backend(client, backend)
-    backend_client = (_anthropic_client(merged, route, asynchronous=True)
-                      if deadline else _anthropic_client(merged, route))
+    backend_client = _anthropic_client(merged, route)
     # Close only a per-call construction: cached clients stay open for
     # reuse; a caller-owned http_client survives regardless.
     # list(): an atomic snapshot — a bare .values() scan breaks under a
@@ -1535,7 +1528,6 @@ def run_messages(client, messages, model: str, route: str,
         return response
 
     def checked_tool_response():
-        _deadline.check()
         return checked_response(generate_tool_response())
 
     async def checked_async_tool_response():
@@ -1564,25 +1556,15 @@ def run_messages(client, messages, model: str, route: str,
                 deadline.remaining()
                 raise _model_backend_error(exc, "messages", client) from exc
             finally:
-                if stream and owns_transport:
-                    await backend_client.close()
-
-        if stream:
-            return _stream_sync(async_events,
-                                close_unused=(backend_client.close
-                                              if owns_transport else None))
-
-        async def collect():
-            return [turn async for turn in async_events()]
-
-        async def run():
-            try:
-                return await deadline.run(collect())
-            finally:
                 if owns_transport:
                     await backend_client.close()
 
-        turns = _run_sync(run())
+        events = _stream_sync(async_events,
+                              close_unused=(backend_client.close
+                                            if owns_transport else None))
+        if stream:
+            return events
+        turns = list(events)
 
     elif stream:
         def events() -> Iterator[Any]:

@@ -434,8 +434,6 @@ def _resolve_document(
 def _refetch_entry(client, doc_id: str) -> Optional[dict[str, Any]]:
     try:
         return client.get_document(doc_id)
-    except PageIndexTimeoutError:
-        raise
     except PageIndexAPIError:
         return None
 
@@ -450,10 +448,7 @@ def _await_completion(client, entry: dict[str, Any], wait: bool) -> dict[str, An
     deadline = time.monotonic() + _TOOL_WAIT_TIMEOUT
     current = entry
     while time.monotonic() < deadline:
-        run = _deadline.current()
-        time.sleep(min(_TOOL_WAIT_INTERVAL, run.remaining())
-                   if run else _TOOL_WAIT_INTERVAL)
-        _deadline.check()
+        time.sleep(_TOOL_WAIT_INTERVAL)
         refreshed = _refetch_entry(client, doc_id)
         if refreshed is None:
             continue  # transient refetch failure: poll on to the deadline

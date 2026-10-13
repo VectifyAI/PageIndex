@@ -97,8 +97,4 @@ def request(method: str, url: str, *, timeout, **kwargs):
 
 
 def get(url: str, **kwargs):
-    import requests
-
-    if current() is None:
-        return requests.get(url, **kwargs)
     return request("GET", url, **kwargs)
