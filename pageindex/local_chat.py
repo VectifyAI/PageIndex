@@ -47,13 +47,18 @@ def _system_text(content: Any) -> str:
     )
 
 
-def _chat_message_iter(messages):
+def _chat_messages(messages):
     """Check the container before prepending instructions or reading history."""
     try:
-        return iter(messages)
+        iterator = iter(messages)
     except TypeError as exc:
         raise PageIndexValidationError(
             "messages must be a non-empty iterable of message dicts.") from exc
+    messages = list(iterator)
+    if not messages or not all(isinstance(message, dict) for message in messages):
+        raise PageIndexValidationError(
+            "messages must be a non-empty iterable of message dicts.")
+    return messages
 
 
 def _split_chat_messages(messages) -> "tuple[list[str], list[dict]]":
@@ -61,9 +66,7 @@ def _split_chat_messages(messages) -> "tuple[list[str], list[dict]]":
     content joins the managed instructions; user/assistant history passes
     through. Tool-history round-trips belong to chat(protocol="responses")
     or chat(protocol="messages")."""
-    messages = list(_chat_message_iter(messages))
-    if not messages:
-        raise PageIndexValidationError("messages must be a non-empty list.")
+    messages = _chat_messages(messages)
     system_texts: list[str] = []
     history: list[dict] = []
     for message in messages:
@@ -301,6 +304,14 @@ def _openai_protocol(model_name: str) -> bool:
     return (provider in ("openai", "azure", "openrouter")
             or provider in getattr(litellm, "openai_compatible_providers",
                                    ()))
+
+
+def _validate_model_backend(model, backend) -> None:
+    if model is not None and not isinstance(model, str):
+        raise PageIndexValidationError("model must be a string.")
+    if backend is not None and not isinstance(backend, Mapping):
+        raise PageIndexValidationError(
+            "backend must be a dict of connection parameters.")
 
 
 def _merged_backend(client, backend):
@@ -1384,10 +1395,6 @@ def run_messages(client, messages, model: str, route: str,
                  backend: Optional[dict] = None,
                  folder_id: Optional[str] = None,
                  ) -> Union[dict, Iterator[Any]]:
-    from .integrations.anthropic_sdk import build_anthropic_tools
-
-    _require_anthropic()
-    import anthropic
     _validate_max_turns(max_turns)
     _refuse_skeleton(extra_body)
     if isinstance(messages, str) and messages.strip():
@@ -1396,6 +1403,10 @@ def run_messages(client, messages, model: str, route: str,
             or not all(isinstance(message, dict) for message in messages)):
         raise PageIndexValidationError(
             "messages must be a non-empty string or a list of message dicts.")
+    _require_anthropic()
+    import anthropic
+    from .integrations.anthropic_sdk import build_anthropic_tools
+
     scope = client._local_doc_scope(doc_id)
     block = targeting_block(client, doc_id, folder_id)
     prepared = [dict(message) for message in messages]

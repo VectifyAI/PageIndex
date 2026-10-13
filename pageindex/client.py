@@ -1396,9 +1396,10 @@ class PageIndexClient:
             raise PageIndexValidationError(
                 "instructions must be a string, or a list of system blocks "
                 "with protocol=\"messages\".")
-        from .local_chat import _refuse_skeleton
+        from .local_chat import _refuse_skeleton, _validate_model_backend
         _refuse_skeleton(extra_body)
-        if citations and citations is not True:
+        _validate_model_backend(model, backend)
+        if not isinstance(citations, bool):
             raise PageIndexValidationError(
                 "citations must be True or False — for another format pass "
                 "citation_prompt(format=...) as instructions= (own-model "
@@ -1417,29 +1418,24 @@ class PageIndexClient:
                 enable_citations = True
         if protocol in ("responses", "messages"):
             self._require_own_chat(f"chat(protocol={protocol!r})")
+            body = extra_body
+            if reasoning_effort:
+                key = "reasoning" if protocol == "responses" else "output_config"
+                given = extra_body or {}
+                overrides = given.get(key, {})
+                if not isinstance(overrides, Mapping):
+                    raise PageIndexValidationError(
+                        f"extra_body[{key!r}] must be a dict when merging "
+                        "reasoning_effort.")
+                # Caller fields win over the named effort on either wire.
+                body = {**given, key: {"effort": reasoning_effort, **overrides}}
             if protocol == "responses":
-                body = extra_body
-                if reasoning_effort:
-                    # OpenAI's own effort field, beside the caller's other
-                    # reasoning keys — theirs still win.
-                    given = extra_body or {}
-                    body = {**given, "reasoning": {
-                        "effort": reasoning_effort,
-                        **given.get("reasoning", {})}}
                 return self._responses(
                     messages, model=model, stream=stream, doc_id=doc_id,
                     folder_id=folder_id,
                     instructions=cast(Optional[str], instructions),
                     max_turns=max_turns, extra_body=body,
                     extra_headers=extra_headers, backend=backend)
-            body = extra_body
-            if reasoning_effort:
-                # Anthropic's own effort field, beside the caller's other
-                # output_config keys — theirs still win.
-                given = extra_body or {}
-                body = {**given, "output_config": {
-                    "effort": reasoning_effort,
-                    **given.get("output_config", {})}}
             return self._messages(
                 messages, model=model, stream=stream, doc_id=doc_id,
                 folder_id=folder_id,
@@ -1454,9 +1450,9 @@ class PageIndexClient:
                 messages = [{"role": "user", "content": messages}]
             # The first system text: managed prompt, then instructions,
             # then the history's own system rows.
-            from .local_chat import _chat_message_iter
+            from .local_chat import _chat_messages
             messages = [{"role": "system", "content": instructions},
-                        *_chat_message_iter(messages)]
+                        *_chat_messages(messages)]
         if protocol == "chat_completions":
             return self.chat_completions(
                 messages, stream=stream, stream_metadata=True, doc_id=doc_id,
@@ -1631,8 +1627,11 @@ class PageIndexClient:
                     "messages must be a non-empty string or a list of "
                     "message dicts.")
             messages = [{"role": "user", "content": messages}]
-        from .local_chat import _refuse_skeleton
+        from .local_chat import (_chat_messages, _refuse_skeleton,
+                                 _validate_model_backend)
+        messages = _chat_messages(messages)
         _refuse_skeleton(extra_body)
+        _validate_model_backend(model, backend)
         if self._local_chat:
             from .local_chat import run_chat_completions
             return run_chat_completions(

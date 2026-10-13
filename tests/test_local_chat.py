@@ -4329,12 +4329,23 @@ def test_managed_instructions_drop_blank_system_texts(store_path):
     ("q", {"max_turns": 1.5}),
     ("q", {"max_turns": True}),
     ("q", {"doc_id": []}),
+    ("q", {"doc_id": 1}),
+    ("q", {"doc_id": [None]}),
+    ("q", {"folder_id": 1}),
+    ("q", {"folder_id": "folder-1"}),
+    ("q", {"model": 123}),
+    ("q", {"model": 0}),
+    ("q", {"citations": ""}),
+    ("q", {"citations": 0}),
+    ("q", {"citations": []}),
+    ("q", {"backend": 1}),
+    ("q", {"backend": []}),
 ])
 def test_chat_request_validation_is_typed(
         client, protocol, stream, messages, kwargs):
     with pytest.raises(PageIndexValidationError) as caught:
         result = client.chat(messages, protocol=protocol, stream=stream,
-                             model="test-model", **kwargs)
+                             **{"model": "test-model", **kwargs})
         if stream:
             list(result)
     assert isinstance(caught.value, PageIndexAPIError)
@@ -4342,7 +4353,14 @@ def test_chat_request_validation_is_typed(
 
 
 @pytest.mark.parametrize("stream", [False, True])
-def test_managed_chat_validation_is_typed(monkeypatch, stream):
+@pytest.mark.parametrize("surface", ["chat", "chat_completions"])
+@pytest.mark.parametrize("messages,kwargs", [
+    ("q", {"extra_body": {"tools": []}}),
+    (None, {}), ([], {}), ([None], {}),
+    ("q", {"backend": 1}), ("q", {"backend": []}),
+])
+def test_managed_chat_validation_is_typed(monkeypatch, stream, surface,
+                                         messages, kwargs):
     client = PageIndexCloudClient(api_key="pi-test-key")
 
     def unexpected_request(**kwargs):
@@ -4350,7 +4368,71 @@ def test_managed_chat_validation_is_typed(monkeypatch, stream):
 
     monkeypatch.setattr(client._api, "chat_completions", unexpected_request)
     with pytest.raises(PageIndexValidationError):
-        client.chat("q", stream=stream, extra_body={"tools": []})
+        getattr(client, surface)(messages, stream=stream, **kwargs)
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_managed_chat_checks_messages_before_instructions(stream):
+    client = PageIndexCloudClient(api_key="pi-test-key")
+    with pytest.raises(PageIndexValidationError):
+        client.chat([], instructions="Be brief", stream=stream)
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"model": 123}, {"model": 0}, {"backend": 1}, {"backend": []}])
+def test_chat_completions_checks_connection_overrides(client, kwargs):
+    with pytest.raises(PageIndexValidationError):
+        client.chat_completions("q", **kwargs)
+
+
+@pytest.mark.parametrize("messages,kwargs", [
+    ("q", {"max_turns": 0}), (None, {}), ([], {}), ([None], {}),
+])
+def test_messages_validation_precedes_optional_dependency(
+        client, monkeypatch, messages, kwargs):
+    monkeypatch.setitem(sys.modules, "anthropic", None)
+    with pytest.raises(PageIndexValidationError):
+        client.chat(messages, protocol="messages", model="claude-test", **kwargs)
+    with pytest.raises(PageIndexAPIError) as caught:
+        client.chat("q", protocol="messages", model="claude-test")
+    assert not isinstance(caught.value, PageIndexValidationError)
+    assert isinstance(caught.value.__cause__, ImportError)
+
+
+@pytest.mark.parametrize("protocol,key", [
+    ("responses", "reasoning"), ("messages", "output_config")])
+@pytest.mark.parametrize("value", [None, [], 1, "high"])
+def test_chat_checks_merged_reasoning_fields(client, monkeypatch, protocol,
+                                             key, value):
+    seen = []
+    monkeypatch.setattr(client, "_" + protocol,
+                        lambda *a, **kw: seen.append(kw))
+    with pytest.raises(PageIndexValidationError):
+        client.chat("q", protocol=protocol, reasoning_effort="high",
+                    extra_body={key: value})
+    assert seen == []
+    client.chat("q", protocol=protocol, extra_body={key: value})
+    assert seen[-1]["extra_body"] == {key: value}
+    client.chat("q", protocol=protocol, reasoning_effort="high",
+                extra_body={key: {"effort": "low"}, "seed": 1})
+    assert seen[-1]["extra_body"] == {key: {"effort": "low"}, "seed": 1}
+
+
+def test_targeting_lookup_failures_remain_execution_errors(bridge_client,
+                                                          monkeypatch):
+    from pageindex.agent_tools import doc_targeting_block, folder_targeting_block
+    client, _ = bridge_client
+    error = PageIndexAPIError("unavailable", status_code=503)
+
+    def fail(*args):
+        raise error
+
+    monkeypatch.setattr(client, "get_document", fail)
+    monkeypatch.setattr(client, "list_folders", fail)
+    for target in (doc_targeting_block, folder_targeting_block):
+        with pytest.raises(PageIndexAPIError) as caught:
+            target(client, "id-1")
+        assert caught.value is error
 
 
 @needs_anthropic
