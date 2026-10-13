@@ -1735,22 +1735,24 @@ def doc_targeting_block(client, doc_id) -> Optional[str]:
     )
 
 
+def _require_folder_selection(client, folder_id) -> None:
+    if folder_id is not None and not isinstance(folder_id, str):
+        raise PageIndexValidationError("folder_id must be a string.")
+    if folder_id not in (None, "", "root") and not getattr(client, "api_key", None):
+        raise PageIndexValidationError(
+            "folder_id is cloud-only — folders are not supported in local "
+            "mode. Create the client with an api_key to use folders.")
+
+
 def folder_targeting_block(client, folder_id) -> Optional[str]:
     """The folder_id targeting text, rendered as the cloud's managed chat
     renders its own: the folder's name and metadata and the directive to
     discover its documents there. None for no folder — None, "", and
     "root", the library itself, which the managed chat leaves untargeted.
     A folder proper is cloud-only: local libraries have none."""
-    if folder_id is None:
+    _require_folder_selection(client, folder_id)
+    if folder_id in (None, "", "root"):
         return None
-    if not isinstance(folder_id, str):
-        raise PageIndexValidationError("folder_id must be a string.")
-    if folder_id in ("", "root"):
-        return None
-    if not getattr(client, "api_key", None):
-        raise PageIndexValidationError(
-            "folder_id is cloud-only — folders are not supported in local "
-            "mode. Create the client with an api_key to use folders.")
     folders = client.list_folders().get("folders") or []
     folder = next((f for f in folders if f.get("id") == folder_id), None)
     if folder is None:

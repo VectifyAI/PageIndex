@@ -1632,6 +1632,9 @@ class PageIndexClient:
         messages = _chat_messages(messages)
         _refuse_skeleton(extra_body)
         _validate_model_backend(model, backend)
+        from .agent_tools import _require_doc_selection, _require_folder_selection
+        _require_doc_selection(doc_id)
+        _require_folder_selection(self, folder_id)
         if self._local_chat:
             from .local_chat import run_chat_completions
             return run_chat_completions(

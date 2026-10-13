@@ -4358,6 +4358,8 @@ def test_chat_request_validation_is_typed(
     ("q", {"extra_body": {"tools": []}}),
     (None, {}), ([], {}), ([None], {}),
     ("q", {"backend": 1}), ("q", {"backend": []}),
+    ("q", {"doc_id": 1}), ("q", {"doc_id": []}),
+    ("q", {"doc_id": [None]}), ("q", {"folder_id": 1}),
 ])
 def test_managed_chat_validation_is_typed(monkeypatch, stream, surface,
                                          messages, kwargs):
@@ -4397,6 +4399,56 @@ def test_messages_validation_precedes_optional_dependency(
         client.chat("q", protocol="messages", model="claude-test")
     assert not isinstance(caught.value, PageIndexValidationError)
     assert isinstance(caught.value.__cause__, ImportError)
+
+
+@pytest.mark.parametrize("cloud", [False, True])
+@pytest.mark.parametrize("kwargs", [
+    {"doc_id": []}, {"doc_id": 1}, {"doc_id": [None]}, {"folder_id": 1}])
+def test_messages_selectors_precede_optional_dependency(
+        client, monkeypatch, cloud, kwargs):
+    if cloud:
+        client = PageIndexClient(api_key="pi-test-key", chat_model="claude-test")
+    monkeypatch.setitem(sys.modules, "anthropic", None)
+    with pytest.raises(PageIndexValidationError):
+        client.chat("q", protocol="messages", model="claude-test", **kwargs)
+
+
+def test_local_messages_folder_precedes_optional_dependency(client, monkeypatch):
+    monkeypatch.setitem(sys.modules, "anthropic", None)
+    with pytest.raises(PageIndexValidationError):
+        client.chat("q", protocol="messages", model="claude-test", folder_id="f-1")
+
+
+def test_messages_dependency_precedes_selector_lookups(monkeypatch):
+    client = PageIndexClient(api_key="pi-test-key", chat_model="claude-test")
+    monkeypatch.setitem(sys.modules, "anthropic", None)
+
+    def unexpected_lookup(*args):
+        pytest.fail("selector lookup ran before the dependency check")
+
+    monkeypatch.setattr(client, "get_document", unexpected_lookup)
+    monkeypatch.setattr(client, "list_folders", unexpected_lookup)
+    with pytest.raises(PageIndexAPIError) as caught:
+        client.chat("q", protocol="messages", doc_id="d-1", folder_id="f-1")
+    assert not isinstance(caught.value, PageIndexValidationError)
+    assert isinstance(caught.value.__cause__, ImportError)
+
+
+@pytest.mark.parametrize("surface", ["chat", "chat_completions"])
+def test_managed_selectors_forward_without_lookups(monkeypatch, surface):
+    client = PageIndexCloudClient(api_key="pi-test-key")
+    seen = {}
+
+    def unexpected_lookup(*args):
+        pytest.fail("managed chat looked up selectors locally")
+
+    monkeypatch.setattr(client, "get_document", unexpected_lookup)
+    monkeypatch.setattr(client, "list_folders", unexpected_lookup)
+    monkeypatch.setattr(client._api, "chat_completions",
+                        lambda **kw: seen.update(kw) or {
+                            "choices": [{"message": {"content": "ok"}}]})
+    getattr(client, surface)("q", doc_id=["d-1"], folder_id="f-1")
+    assert seen["doc_id"] == ["d-1"] and seen["folder_id"] == "f-1"
 
 
 @pytest.mark.parametrize("protocol,key", [

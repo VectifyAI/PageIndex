@@ -13,7 +13,8 @@ import time
 import uuid
 from typing import Any, Iterator, Mapping, Optional, Union
 
-from .agent_tools import _base_instructions, targeting_block
+from .agent_tools import (_base_instructions, _require_folder_selection,
+                          targeting_block)
 from .chat_stream import ChatStream
 from .errors import PageIndexAPIError, PageIndexValidationError, _pageindex_cause
 
@@ -1403,11 +1404,12 @@ def run_messages(client, messages, model: str, route: str,
             or not all(isinstance(message, dict) for message in messages)):
         raise PageIndexValidationError(
             "messages must be a non-empty string or a list of message dicts.")
+    scope = client._local_doc_scope(doc_id)
+    _require_folder_selection(client, folder_id)
     _require_anthropic()
     import anthropic
     from .integrations.anthropic_sdk import build_anthropic_tools
 
-    scope = client._local_doc_scope(doc_id)
     block = targeting_block(client, doc_id, folder_id)
     prepared = [dict(message) for message in messages]
     if block:
