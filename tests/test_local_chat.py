@@ -1677,6 +1677,33 @@ def test_messages_measurements_at_run_end(
 
 
 @needs_anthropic
+@pytest.mark.parametrize("reason,outcome", [
+    ("end_turn", "completed"), ("max_tokens", "incomplete"),
+    ("tool_use", "cancelled"),
+])
+def test_messages_close_after_message_stop_keeps_run_outcome(
+        client, fake_anthropic, reason, outcome):
+    block = ({"type": "tool_use", "id": "call-1", "name": "get_document",
+              "input": {"doc_name": "report.pdf"}} if reason == "tool_use"
+             else {"type": "text", "text": "ok"})
+    reply = _anthropic_message([block], reason)
+    reply["usage"].update(cache_read_input_tokens=0,
+                          cache_creation_input_tokens=0)
+    calls = fake_anthropic([_anthropic_sse(reply)])
+    reports = []
+    result = client.chat("hi", protocol="messages", model="claude-test",
+                         stream=True, on_usage=reports.append)
+    for event in result:
+        if event.type == "message_stop":
+            break
+    result.close()
+    assert len(calls) == len(reports) == 1
+    assert reports[0]["outcome"] == outcome
+    assert reports[0]["totals"]["input_tokens"] == 10
+    assert reports[0]["completeness"]["input_tokens"] == "complete"
+
+
+@needs_anthropic
 def test_messages_close_retains_partial_usage(client, fake_anthropic):
     reply = _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")
     reply["usage"].update(cache_read_input_tokens=0,

@@ -1983,6 +1983,12 @@ def run_messages(client, messages, model: str, route: str,
                         if event.type == "message_stop":
                             turns.append(event.message)
                             _note_response(call, event.message, "messages")
+                            if (_measurement is not None
+                                    and event.message.stop_reason in (
+                                        "end_turn", "stop_sequence",
+                                        "refusal", "max_tokens")):
+                                _measurement["_outcome"] = _usage_outcome(
+                                    event.message, "messages")
                         yield event
             except anthropic.AnthropicError as exc:
                 raise _with_usage(
