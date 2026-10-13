@@ -64,6 +64,7 @@ from .keyword_tables import (
     FIGURE_KEYWORDS_TRIE,
     TABLE_KEYWORDS_TRIE,
     CHART_KEYWORDS_TRIE,
+    TOC_TITLES_TRIE,
     _search_trie,
 )
 from .body_text import (
@@ -295,6 +296,7 @@ def detect_header_footer(ctx: HeaderFooterContext) -> None:
             den = page.bounds.bbox_height()
             num = block.top_edge() if ctx.primary_slot == 1 else block.bottom_edge()
             relative = (num / den) if den else (math.copysign(math.inf, num) if num else math.nan)
+            stop_after = False
             if (ctx.primary_slot == 1 and relative < 0.8) or (ctx.primary_slot == 2 and relative > 0.2):
                 pass_value = False
             else:
@@ -306,9 +308,12 @@ def detect_header_footer(ctx: HeaderFooterContext) -> None:
                     or info_weight(block.char_stats) * (1 + block.bold_frac()) >= 200
                     or trie_prefix_match(FIGURE_KEYWORDS_TRIE, tokens)
                     or trie_prefix_match(CHART_KEYWORDS_TRIE, tokens)
-                    or trie_prefix_match(TABLE_KEYWORDS_TRIE, tokens)
                 ):
                     pass_value = False
+                elif trie_prefix_match(TABLE_KEYWORDS_TRIE, tokens):
+                    # "Table of Contents" is a contents title, not a table caption:
+                    # it may be a running header, but the walk still stops there
+                    pass_value = stop_after = trie_full_match(TOC_TITLES_TRIE, tokens)
                 else:
                     pass_value = True
             if not pass_value:
@@ -344,7 +349,7 @@ def detect_header_footer(ctx: HeaderFooterContext) -> None:
                         detected_page_number = span_page_number(span)
                         if detected_page_number is not None:
                             page_numbers.add(detected_page_number)
-            return False
+            return stop_after
 
         walk_from_page_edge(ctx, page.output_slot, walk_cb)
 

@@ -119,13 +119,14 @@ from .toc_boilerplate import (
     extract_number_column,
     pick_nearer_cluster,
     detect_toc_range,
+    running_contents_links,
     mark_toc_and_boilerplate,
 )
 
 __all__ = [
     "is_body_paragraph", "record_recurring_text", "span_style_text_key", "normalized_block_text", "span_page_number", "longest_word_and_number", "record_marked_block", "PageMarkState", "is_header_positioned", "has_adjacent_page_numbers", "mark_header_footer", "walk_from_page_edge", "find_cross_page_match",
     "HeaderFooterContext", "detect_header_footer", "mark_watermarks",
-    "is_boilerplate_block", "NumberColumnCluster", "extract_number_column", "pick_nearer_cluster", "detect_toc_range", "mark_toc_and_boilerplate",
+    "is_boilerplate_block", "NumberColumnCluster", "extract_number_column", "pick_nearer_cluster", "detect_toc_range", "running_contents_links", "mark_toc_and_boilerplate",
     "bounded_edit_distance",
     "COPYRIGHT_TRIE", "VOLUME_WORDS_TRIE", "TOC_TITLES_TRIE", "FIGURE_KEYWORDS_TRIE", "TABLE_KEYWORDS_TRIE", "CHART_KEYWORDS_TRIE", "APPENDIX_SECTION_TRIE", "INTRODUCTION_SECTION_TRIE", "BOX_KEYWORD_TRIE", "KEYWORDS_SECTION_TRIE",
 ]

@@ -593,21 +593,35 @@ def test_flash_cli_rejects_oversized_flat_tree(monkeypatch, tmp_path):
     assert not (tmp_path / "results").exists()
 
 
-def _layout_pdf(pages, landscape=False):
+def _layout_pdf(pages, landscape=False, glyph_headings=False):
     """Uncompressed PDF, per page a 20pt heading line then 11pt body lines:
-    ``pages`` is a list of ``(heading, [body line, ...])``."""
+    ``pages`` is a list of ``(heading, [body line, ...])``, optionally with a
+    third item, a 9pt line printed above the heading. ``glyph_headings``
+    draws each heading glyph by glyph in 13pt Courier-Bold instead, as some
+    SEC filings do."""
     width, height = (792, 612) if landscape else (595, 842)
     objs = {1: "<</Type/Catalog/Pages 2 0 R>>", 3: "<</Font<</F1 5 0 R>>>>",
             5: "<</Type/Font/Subtype/Type1/BaseFont/Helvetica"
                "/Encoding/WinAnsiEncoding>>"}
+    if glyph_headings:
+        objs[3] = "<</Font<</F1 5 0 R/F2 4 0 R>>>>"
+        objs[4] = "<</Type/Font/Subtype/Type1/BaseFont/Courier-Bold/Encoding/WinAnsiEncoding>>"
     kids, nxt = [], 6
-    for heading, lines in pages:
-        ops, y = [(20, height - 80, heading)], height - 120
+    for heading, lines, *above in pages:
+        ops = [(9, height - 40, line) for line in above]
+        if not glyph_headings:
+            ops.append((20, height - 80, heading))
+        y = height - 120
         for line in lines:
             ops.append((11, y, line))
             y -= 16
         stream = "".join(f"BT /F1 {size} Tf 72 {top} Td ({text}) Tj ET\n"
                          for size, top, text in ops)
+        if glyph_headings:
+            # Courier advances 0.6 em, so 13pt glyphs sit 7.8pt apart
+            stream += "BT /F2 13 Tf " + "".join(
+                f"1 0 0 1 {72 + 7.8 * i:.1f} {height - 80} Tm ({char}) Tj "
+                for i, char in enumerate(heading)) + "ET\n"
         objs[nxt] = f"<</Length {len(stream)}>>\nstream\n{stream}endstream"
         objs[nxt + 1] = (f"<</Type/Page/MediaBox[0 0 {width} {height}]"
                          f"/Resources 3 0 R/Parent 2 0 R/Contents {nxt} 0 R>>")
@@ -665,6 +679,114 @@ def test_short_document_headings_are_detected(tmp_path):
     result = extract_toc(str(pdf))
     assert [node["title"] for node in result["structure"]] == ["Budget", "Team"]
     assert result["doc_title"] == "Mission"
+
+
+def _body(title):
+    return [f"Line {n} of the {title.lower()} section with some body text."
+            for n in range(1, 6)]
+
+
+def test_running_contents_link_does_not_hide_headings(tmp_path, monkeypatch):
+    """SEC filings print a "Table of Contents" link at the top of pages (here
+    only the first half, as some filings do). Over mostly prose pages it is
+    a navigation link, so neither a body page nor a table page becomes a
+    contents page, while the contents page under it is still found by its
+    own title."""
+    from pageindex.flash.classification import toc_boilerplate
+    from pageindex.flash.main import extract_toc
+
+    flagged = []
+    detect = toc_boilerplate.detect_toc_range
+
+    def spy(doc, page, *args):
+        toc = detect(doc, page, *args)
+        if toc is not None:
+            flagged.append(page.page_index)
+        return toc
+    monkeypatch.setattr(toc_boilerplate, "detect_toc_range", spy)
+
+    linked = ["Mission", "Revenue", "Budget", "Team", "Risks"]
+    unlinked = ["Outlook", "Markets", "Partners", "Strategy", "Summary", "Glossary", "Contacts"]
+    titles = linked + unlinked
+    table = ["Product 2022 2021", "Cards 120 110", "Loans 80 75"]
+    pages = [("Annual Report", ["Fiscal year ended December 31, 2022"], "Table of Contents"),
+             ("Table of Contents", [f"{title} {page}" for page, title in enumerate(titles, 3)],
+              "Table of Contents"),
+             *[(title, table if title == "Revenue" else _body(title), "Table of Contents")
+               for title in linked],
+             *[(title, _body(title)) for title in unlinked]]
+    pdf = tmp_path / "filing.pdf"
+    pdf.write_bytes(_layout_pdf(pages))
+    result = extract_toc(str(pdf))
+    assert [node["title"] for node in result["structure"]] == titles
+    assert flagged == [2]
+
+
+def test_running_contents_link_leaves_headings_below_it(tmp_path):
+    """Header detection stops at the link: headings printed right under it,
+    glyph by glyph, are not read as running headers."""
+    from pageindex.flash.main import extract_toc
+
+    titles = ["Sales", "Leases", "Seals", "Lessees", "Assets", "Tassels",
+              "Easels", "Teases", "Stales", "Slates", "Steals", "Tales"]
+    pages = [("Report", ["Annual report for the year"], "Table of Contents"),
+             *[(title, _body(title), "Table of Contents") for title in titles]]
+    pdf = tmp_path / "filing.pdf"
+    pdf.write_bytes(_layout_pdf(pages, glyph_headings=True))
+    result = extract_toc(str(pdf))
+    assert [node["title"] for node in result["structure"]] == titles
+
+
+def test_running_contents_title_still_marks_its_pages(tmp_path):
+    """A "Contents" title repeated over the contents pages marks them all,
+    one with an introduction among them, so their entries yield no headings."""
+    from pageindex.flash.main import extract_toc
+
+    pdf = tmp_path / "handbook.pdf"
+    pdf.write_bytes(_layout_pdf([
+        ("Handbook", ["A practical guide"]),
+        ("Part One", ["Strategy 3", "Planning 5", *_body("Introduction")], "Contents"),
+        ("Part Two", ["People 9", "Reward 12"], "Contents"),
+        ("Part Three", ["Learning 15", "Wellbeing 18"], "Contents"),
+        ("Strategy", _body("Strategy")), ("People", _body("People")),
+        ("Learning", _body("Learning"))]))
+    result = extract_toc(str(pdf))
+    assert [node["title"] for node in result["structure"]] == ["Strategy", "People", "Learning"]
+
+
+def test_running_contents_links_weigh_body_text(tmp_path, monkeypatch):
+    """Contents pages whose entries outweigh a short introduction are not
+    prose, so their repeated title is no link even when most of them carry
+    a body paragraph."""
+    from pageindex.flash.classification import toc_boilerplate
+    from pageindex.flash.main import extract_toc
+
+    found = []
+    links = toc_boilerplate.running_contents_links
+
+    def spy(doc):
+        found.append(links(doc))
+        return found[-1]
+    monkeypatch.setattr(toc_boilerplate, "running_contents_links", spy)
+
+    def entries(first_page, *titles):
+        return [f"{title} {first_page + 2 * n}" for n, title in enumerate(titles)]
+    intro = ["This handbook covers how the firm manages people.",
+             "It is updated every year by the HR team."]
+    pdf = tmp_path / "handbook.pdf"
+    pdf.write_bytes(_layout_pdf([
+        ("Handbook", ["A practical guide"]),
+        ("Part One", [*entries(3, "Strategy", "Planning", "Design", "Jobs", "Culture", "Change"), "",
+                      *entries(15, "Roles", "Teams", "Skills", "Talent", "Careers", "Exits"), "",
+                      *intro], "Contents"),
+        ("Part Two", [*entries(27, "Reward", "Pay", "Benefits", "Bonuses", "Pensions", "Equity"), "",
+                      *entries(39, "Grading", "Markets", "Reviews", "Awards", "Leave", "Perks"), "",
+                      *intro], "Contents"),
+        ("Part Three", entries(51, "Learning", "Wellbeing", "Safety", "Diversity", "Voice", "Ethics"),
+         "Contents"),
+        ("Strategy", _body("Strategy"))]))
+    extract_toc(str(pdf))
+    assert found == [set()]
 
 
 def test_toc_source_is_always_present(tmp_path):
