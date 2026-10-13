@@ -1503,7 +1503,7 @@ def test_messages_compaction_is_not_appendable(client, fake_anthropic,
         _anthropic_message([{"type": "text", "text": "Answer"}], "end_turn")]
     requests = fake_anthropic([_anthropic_sse(reply) for reply in replies]
                               if streaming else replies)
-    resource = local_chat._anthropic_client().beta.messages
+    resource = local_chat._anthropic_client(None, "anthropic").beta.messages
     create_runner = resource.tool_runner
 
     def compact(**kwargs):
