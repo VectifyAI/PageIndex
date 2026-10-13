@@ -1274,37 +1274,6 @@ def test_messages_doc_block_and_system(client, store_path, fake_anthropic):
     assert roles == ["assistant", "user", "assistant"]
 
 
-@needs_anthropic
-def test_messages_stream_passthrough(client, store_path, fake_anthropic):
-    sse = "\n".join([
-        'event: message_start',
-        'data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-test","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":1}}}',
-        "",
-        'event: content_block_start',
-        'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
-        "",
-        'event: content_block_delta',
-        'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"The answer"}}',
-        "",
-        'event: content_block_stop',
-        'data: {"type":"content_block_stop","index":0}',
-        "",
-        'event: message_delta',
-        'data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":5}}',
-        "",
-        'event: message_stop',
-        'data: {"type":"message_stop"}',
-        "",
-        "",
-    ])
-    fake_anthropic([sse])
-    events = list(client._messages([{"role": "user", "content": "q"}],
-                                  model="claude-test", max_tokens=100,
-                                  stream=True))
-    types = [event["type"] for event in events]
-    assert "content_block_delta" in types and "message_stop" in types
-
-
 def _consume_messages(events):
     body = "".join(f"event: {event['type']}\n"
                    f"data: {json.dumps(event)}\n\n" for event in events)
@@ -1325,7 +1294,7 @@ def _consume_messages(events):
 
 
 @needs_anthropic
-@pytest.mark.parametrize("tool_turns", [1, 2])
+@pytest.mark.parametrize("tool_turns", [0, 1, 2])
 def test_messages_stream_is_one_message(bridge_client, fake_anthropic,
                                        tool_turns):
     client, bridge = bridge_client
@@ -1371,6 +1340,9 @@ def test_messages_limit_result_resumes_once(bridge_client, fake_anthropic,
     assert result["run"]["status"] == "max_turns"
     assert result["run"]["model_stop_reason"] == "tool_use"
     assert result["run"]["tool_calls"][0]["status"] == "completed"
+    assert result["content"] == []
+    assert [message["role"] for message in result["messages"]] == [
+        "assistant", "user"]
     assert len(bridge.calls) == 1
     requests = fake_anthropic([_anthropic_message(
         [{"type": "text", "text": "Resumed"}], "end_turn")])
@@ -2607,27 +2579,6 @@ def test_messages_envelope_json_and_no_internal_fields(client, store_path,
                              model="claude-test", max_tokens=100)
     dumped = json.dumps(result)  # the whole envelope must serialize
     assert "parsed_output" not in dumped
-
-
-@needs_anthropic
-def test_messages_max_turns_truncation_round_trippable(client, store_path,
-                                                       fake_anthropic):
-    """On a max_turns cut the runner has already appended the final turn —
-    no duplicate append, and the history stays valid for continuation."""
-    seed_doc(store_path, "pi-a", "report.pdf")
-    calls = fake_anthropic([
-        _anthropic_message([_anthropic_tool_use()], "tool_use"),
-        _anthropic_message([_anthropic_tool_use("tu_2")], "tool_use"),
-    ])
-    result = client._messages([{"role": "user", "content": "q"}],
-                             model="claude-test", max_tokens=100, max_turns=1)
-    assert len(calls) == 1
-    assert result["stop_reason"] == "pause_turn"
-    roles = [message["role"] for message in result["messages"]]
-    assert roles == ["assistant", "user"]  # tool_use, tool_result — no dup
-    assert json.dumps(result["messages"]).count('"tu_1"') == 2
-    assert result["content"] == []
-    json.dumps(result)
 
 
 @needs_anthropic

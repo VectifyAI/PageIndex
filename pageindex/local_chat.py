@@ -1461,16 +1461,17 @@ def run_messages(client, messages, model: str, route: str,
     moved: list = []  # the block holding the bedrock breakpoint
     turns: list = []
     tool_responses: dict = {}
-    uncertain: set = set()
-    partial: set = set()
+    uncertain_turn = None
+    partial_turn = None
     result: dict = {}
     message_id = f"msg_{uuid.uuid4().hex}"
 
     def checked_tool_response():
+        nonlocal uncertain_turn
         index = len(turns) - 1
-        uncertain.add(index)
+        uncertain_turn = index
         response = generate_tool_response()
-        uncertain.discard(index)
+        uncertain_turn = None
         if response:
             tool_responses[index] = response
         if failures:
@@ -1506,11 +1507,11 @@ def run_messages(client, messages, model: str, route: str,
                     state = "failed" if output.get("is_error") else "completed"
                     history.append(block)
                 else:
-                    state = ("unknown" if index in uncertain
+                    state = ("unknown" if index == uncertain_turn
                              else "not_executed")
                     pending.append(block)
                 calls.append({**block, "status": state, "result": output})
-            if history and index not in partial:
+            if history and index != partial_turn:
                 messages.append({"role": "assistant", "content": history})
             if response:
                 messages.append(_dump_message(response))
@@ -1534,7 +1535,7 @@ def run_messages(client, messages, model: str, route: str,
                          "status": status, "turns": len(turns),
                          "model_stop_reason": reason, "tool_calls": calls,
                          "usage_complete": measured,
-                         "can_resume": not uncertain,
+                         "can_resume": uncertain_turn is None,
                          "error": str(error) if error else None})
         if status == "max_turns":
             final["stop_reason"] = "pause_turn"
@@ -1545,6 +1546,7 @@ def run_messages(client, messages, model: str, route: str,
             backend_client.close()
 
     def events():
+        nonlocal partial_turn
         opened = False
         next_index = 0
         try:
@@ -1559,31 +1561,35 @@ def run_messages(client, messages, model: str, route: str,
                         kind = event.type
                         if kind == "message_stop":
                             complete = True
-                        if kind == "message_start" and not opened:
+                            continue
+                        if kind == "message_start":
+                            if opened:
+                                continue
                             opened = True
-                            data = event.model_dump(mode="json",
-                                                    exclude_unset=True)
-                            data["message"]["id"] = message_id
-                            # No turn has completed yet. Seeding cache fields
-                            # would survive a later unknown total in the
-                            # official accumulator, which ignores null updates.
-                            data["message"]["usage"] = {
-                                "input_tokens": 0, "output_tokens": 0}
-                            yield data
                         elif kind == "content_block_start":
-                            if event.content_block.type != "tool_use":
-                                indices[event.index] = next_index
-                                next_index += 1
-                                yield {**event.model_dump(mode="json",
-                                                         exclude_unset=True),
-                                       "index": indices[event.index]}
+                            if event.content_block.type == "tool_use":
+                                continue
+                            indices[event.index] = next_index
+                            next_index += 1
                         elif kind in ("content_block_delta",
                                       "content_block_stop"):
-                            if event.index in indices:
-                                data = event.model_dump(mode="json",
-                                                        exclude_unset=True)
+                            if event.index not in indices:
+                                continue
+                        else:
+                            continue
+                        data = event.model_dump(mode="json",
+                                                exclude_unset=True)
+                        if kind == "message_start":
+                            data["message"]["id"] = message_id
+                            # The accumulator ignores null usage updates;
+                            # leave cache fields unset until totals are known.
+                            data["message"]["usage"] = {
+                                "input_tokens": 0, "output_tokens": 0}
+                        else:
+                            data["index"] = indices[event.index]
+                            if kind == "content_block_stop":
                                 data.pop("content_block", None)
-                                yield {**data, "index": indices[event.index]}
+                        yield data
                     if not complete:
                         raise PageIndexAPIError(
                             "Messages stream ended before message_stop.")
@@ -1595,7 +1601,7 @@ def run_messages(client, messages, model: str, route: str,
                         pass  # the request failed before message_start
                     else:
                         if not complete:
-                            partial.add(len(turns))
+                            partial_turn = len(turns)
                             if getattr(snapshot, "usage", None):
                                 snapshot.usage.output_tokens = None
                         turns.append(snapshot)

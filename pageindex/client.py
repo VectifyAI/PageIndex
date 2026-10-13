@@ -1809,7 +1809,6 @@ class PageIndexClient:
         all model turns and aggregated ``usage``. Executed client tools
         live in the ``messages`` continuation transcript and ``run`` result.
         Append ``messages`` to your history when ``run.can_resume`` is true.
-        See docs/messages-stream.md for result and cancellation semantics.
         The managed system prompt carries a
         ``cache_control`` breakpoint, and the request sets the top-level
         ``cache_control`` so each turn re-reads the growing conversation
@@ -1871,6 +1870,47 @@ class PageIndexClient:
                 ``base_url``, ``auth_token``, …; the cloud routes take
                 their own client's (``aws_region``, ``project_id``, …) —
                 and unknown keys raise.
+
+        Result:
+            ``content`` holds visible blocks across turns, followed by
+            unexecuted client tool calls. ``messages`` holds the new
+            assistant/tool-result turns to append to the original input;
+            incomplete model turns and unexecuted calls stay out of it.
+            Keep the model, instructions and document scope when resuming.
+
+            ``run.status`` is completed, max_turns, failed or cancelled.
+            ``run.turns`` counts observed messages, including a partial
+            final one; ``run.model_stop_reason`` retains its native reason.
+            Completed means the runner stopped: the message stop_reason
+            still distinguishes end_turn, max_tokens and refusal.
+            ``run.tool_calls`` records each call's id, name, input, status
+            (completed, failed, not_executed or unknown) and tool_result
+            in ``result``. ``run.can_resume`` is false when interrupted
+            tool execution is uncertain; reconcile those calls first.
+            ``run.error`` is the execution error text, or None.
+
+            ``usage`` sums final input/output/cache counters and any
+            cache-creation TTL buckets. Missing counts stay None; an
+            interrupted message's output count is unknown. Input tokens
+            exclude cache reads/writes. ``run.usage_complete`` requires
+            known counts and a completed or turn-limited run. After failure
+            or cancellation, counts cover only the observed messages.
+
+            Stream events are JSON dicts, ready for SSE serialization.
+            The official Anthropic consumer assembles one native message;
+            message_stop.result also carries this full SDK result. Opening
+            usage starts at zero completed-turn tokens. Read result.usage
+            for unknown input totals and TTL buckets: native consumers
+            may retain the opening zero or omit delta-only TTL details.
+
+            Iteration raises on failure; stream.result and execution-time
+            PageIndexAPIError.result retain the failed result. Call close()
+            on the consuming thread when abandoning a stream. It releases
+            the response and stops local iterations, recording cancelled
+            unless already finalized. A stream closed before iteration
+            makes no model request. Dispatched external work may continue.
+            Breaking a loop does not close it. Setup errors have no result.
+            These result semantics apply to the Messages lane.
         """
         self._require_own_chat("chat(protocol='messages')")
         if not model and self._chat_model_stock:
