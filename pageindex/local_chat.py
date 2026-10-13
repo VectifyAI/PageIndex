@@ -1610,15 +1610,11 @@ def run_messages(client, messages, model: str, route: str,
                 raise PageIndexAPIError("The model returned no response.")
             finish("completed")
             if stream:
-                for call in result["run"]["tool_calls"]:
-                    if call["status"] == "not_executed":
-                        block = {k: v for k, v in call.items()
-                                 if k not in ("status", "result")}
-                        yield {"type": "content_block_start",
-                               "index": next_index, "content_block": block}
-                        yield {"type": "content_block_stop",
-                               "index": next_index}
-                        next_index += 1
+                for index, block in enumerate(result["content"][next_index:],
+                                               next_index):
+                    yield {"type": "content_block_start", "index": index,
+                           "content_block": block}
+                    yield {"type": "content_block_stop", "index": index}
                 yield {"type": "message_delta", "delta": {
                     "stop_reason": result["stop_reason"],
                     "stop_sequence": result.get("stop_sequence")},
