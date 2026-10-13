@@ -15,7 +15,7 @@ from typing import Any, Iterator, Mapping, Optional, Union
 
 from .agent_tools import _base_instructions, targeting_block
 from .chat_stream import ChatStream
-from .errors import PageIndexAPIError, _pageindex_cause
+from .errors import PageIndexAPIError, PageIndexValidationError, _pageindex_cause
 
 CHAT_HEADER = (
     "You are PageIndex by Vectify AI, a document-focused assistant. "
@@ -42,7 +42,7 @@ def _system_text(content: Any) -> str:
                  if isinstance(part, dict) and isinstance(part.get("text"), str)]
         if texts and len(texts) == len(content):
             return "\n".join(texts)
-    raise PageIndexAPIError(
+    raise PageIndexValidationError(
         "system message content must be a string or a list of text parts."
     )
 
@@ -52,14 +52,19 @@ def _split_chat_messages(messages) -> "tuple[list[str], list[dict]]":
     content joins the managed instructions; user/assistant history passes
     through. Tool-history round-trips belong to chat(protocol="responses")
     or chat(protocol="messages")."""
+    try:
+        messages = iter(messages)
+    except TypeError as exc:
+        raise PageIndexValidationError(
+            "messages must be a non-empty iterable of message dicts.") from exc
     messages = list(messages)
     if not messages:
-        raise PageIndexAPIError("messages must be a non-empty list.")
+        raise PageIndexValidationError("messages must be a non-empty list.")
     system_texts: list[str] = []
     history: list[dict] = []
     for message in messages:
         if not isinstance(message, dict) or "role" not in message:
-            raise PageIndexAPIError(
+            raise PageIndexValidationError(
                 "Each message must be a dict with 'role' and 'content'.")
         role = message["role"]
         if role in ("system", "developer"):
@@ -67,21 +72,21 @@ def _split_chat_messages(messages) -> "tuple[list[str], list[dict]]":
         elif role in ("user", "assistant"):
             content = message.get("content")
             if not isinstance(content, str):
-                raise PageIndexAPIError(
+                raise PageIndexValidationError(
                     "content must be a string on this lane; for "
                     "structured items use chat(protocol=\"responses\") "
                     "or chat(protocol=\"messages\")."
                 )
             history.append({"role": role, "content": content})
         else:
-            raise PageIndexAPIError(
+            raise PageIndexValidationError(
                 f"Unsupported role {role!r} on this lane. Tool history "
                 "round-trips belong to chat(protocol=\"responses\") or "
                 "chat(protocol=\"messages\")."
             )
     if not history:
-        raise PageIndexAPIError("messages must contain a user or assistant "
-                                "message.")
+        raise PageIndexValidationError(
+            "messages must contain a user or assistant message.")
     return system_texts, history
 
 
@@ -186,7 +191,7 @@ def _openai_model(protocol: str, model_name: str, backend=None):
     if protocol == "responses":
         model_name = model_name.removeprefix("litellm/")
         if "/" in model_name and not model_name.startswith("openai/"):
-            raise PageIndexAPIError(
+            raise PageIndexValidationError(
                 f"protocol='responses' cannot drive '{model_name}': "
                 "provider-prefixed models route through LiteLLM, which speaks "
                 "chat.completions, not the Responses API. Use chat() without "
@@ -315,19 +320,19 @@ def _refuse_skeleton(extra_body) -> None:
     if extra_body is None:
         return
     if not isinstance(extra_body, Mapping):
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             "extra_body must be a dict of request fields, got "
             f"{type(extra_body).__name__}.")
     hit = sorted(_SKELETON_KEYS.intersection(extra_body))
     if hit:
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             f"extra_body cannot carry {', '.join(hit)}: the managed prompt, "
             "conversation and tools are the SDK's. Extend the prompt with "
             "instructions= or a leading system row; pass the conversation "
             "as messages, the first argument.")
     hit = sorted(_ARGUMENT_KEYS.intersection(extra_body))
     if hit:
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             f"extra_body cannot carry {', '.join(hit)}: use "
             f"{' / '.join(key + '=' for key in hit)} instead.")
 
@@ -391,7 +396,7 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
             "extra_args": extra_args,
             **routed})
     except ValidationError as exc:
-        raise PageIndexAPIError(f"Invalid model settings: {exc}") from exc
+        raise PageIndexValidationError(f"Invalid model settings: {exc}") from exc
     return Agent(
         name="PageIndex",
         instructions=instructions,
@@ -403,8 +408,9 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
 
 def _validate_max_turns(max_turns) -> None:
     if max_turns is not None and (not isinstance(max_turns, int)
+                                  or isinstance(max_turns, bool)
                                   or max_turns < 1):
-        raise PageIndexAPIError("max_turns must be a positive integer.")
+        raise PageIndexValidationError("max_turns must be a positive integer.")
 
 
 def _conversation_cache_key(model_name: str, instructions: str, doc_id,
@@ -697,23 +703,23 @@ def _process_options(show_process) -> dict:
     if show_process is True:
         return dict(_PROCESS_DEFAULTS)
     if not isinstance(show_process, Mapping):
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             "show_process must be True, False, or a dict with the keys "
             "thinking / tool_call / tool_result (bools) and max_chars "
             "(int).")
     unknown = set(show_process) - set(_PROCESS_DEFAULTS)
     if unknown:
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             "Unknown show_process keys: "
             f"{', '.join(sorted(map(repr, unknown)))} "
             "— valid keys: thinking, tool_call, tool_result, max_chars.")
     options = {**_PROCESS_DEFAULTS, **show_process}
     for key in ("thinking", "tool_call", "tool_result"):
         if not isinstance(options[key], bool):
-            raise PageIndexAPIError(f"show_process[{key!r}] must be a bool.")
+            raise PageIndexValidationError(f"show_process[{key!r}] must be a bool.")
     cap = options["max_chars"]
     if not isinstance(cap, int) or isinstance(cap, bool) or cap < 1:
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             "show_process['max_chars'] must be a positive int.")
     return options
 
@@ -920,7 +926,7 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
     _validate_max_turns(max_turns)
     if isinstance(messages, str):
         if not messages.strip():
-            raise PageIndexAPIError(
+            raise PageIndexValidationError(
                 "messages must be a non-empty string or a list of "
                 "message dicts.")
         messages = [{"role": "user", "content": messages}]
@@ -953,7 +959,7 @@ def run_chat_completions(client, messages, stream: bool = False,
                          folder_id: Optional[str] = None,
                          ) -> Union[dict, Iterator[str], Iterator[dict]]:
     if enable_citations:
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             "enable_citations needs the managed chat endpoint — "
             + ("drop the chat model configuration to use it, or "
                if getattr(client, "api_key", None) else "")
@@ -1061,8 +1067,8 @@ def run_responses(client, input, model: Optional[str] = None,
             and all(isinstance(item, dict) for item in input)):
         items = list(input)
     else:
-        raise PageIndexAPIError("messages must be a non-empty string or list "
-                                "of item dicts.")
+        raise PageIndexValidationError(
+            "messages must be a non-empty string or list of item dicts.")
     scope = client._local_doc_scope(doc_id)
     block = targeting_block(client, doc_id, folder_id)
     conversation = items
@@ -1298,7 +1304,7 @@ def _anthropic_system(client, extra_system) -> list[dict]:
         return blocks
     if isinstance(extra_system, list):
         return blocks + list(extra_system)
-    raise PageIndexAPIError("system must be a string or a list of blocks.")
+    raise PageIndexValidationError("system must be a string or a list of blocks.")
 
 
 def _cache_marks(system_blocks, messages) -> int:
@@ -1384,8 +1390,8 @@ def run_messages(client, messages, model: str, route: str,
         messages = [{"role": "user", "content": messages}]
     if (not isinstance(messages, list) or not messages
             or not all(isinstance(message, dict) for message in messages)):
-        raise PageIndexAPIError("messages must be a non-empty string or a "
-                                "list of message dicts.")
+        raise PageIndexValidationError(
+            "messages must be a non-empty string or a list of message dicts.")
     scope = client._local_doc_scope(doc_id)
     block = targeting_block(client, doc_id, folder_id)
     prepared = [dict(message) for message in messages]

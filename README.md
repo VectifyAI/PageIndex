@@ -105,6 +105,42 @@ print(answer)
 
 Configure other models, streaming, multi-document search, citations, and more.
 
+### Chat errors
+
+`PageIndexValidationError` is a public subclass of `PageIndexAPIError` for
+chat requests rejected by the SDK's local argument checks, including managed
+`tools` overrides in `extra_body`, malformed message containers, and invalid
+`max_turns`. This applies to the answer lane, Chat Completions, Responses,
+and Messages. Catch the subclass first, and keep stream consumption inside
+the `try` block:
+
+```python
+from pageindex import PageIndexAPIError, PageIndexValidationError
+
+try:
+    for chunk in client.chat("Summarize the report", stream=True):
+        print(chunk, end="")
+except PageIndexValidationError:
+    print("Please check the chat request parameters.")
+except PageIndexAPIError:
+    print("The chat could not be completed.")
+```
+
+Provider and tool failures, exhausted turn limits, and missing model responses
+are execution errors. Available upstream HTTP status codes remain in
+`status_code`, and wrapped exceptions remain accessible through `__cause__`.
+An absent status does not identify a validation error. Provider-side request
+rejections remain provider errors; the SDK does not validate the entire
+provider schema. Native exceptions outside the SDK's wrapping contract may
+also propagate.
+
+Use exception types for program logic; message text is diagnostic prose and
+may change. Validation messages can include caller-supplied values and should
+only be displayed to users allowed to see those values. Execution messages,
+causes, and tracebacks can contain provider, tool, or document details: keep
+them in access-controlled diagnostics and show other users an application-owned
+message such as the ones above. Neither exception type guarantees redaction.
+
 ### [Integrate PageIndex with your own agent →](https://docs.pageindex.ai/sdk/agents)
 
 Drop PageIndex tools into the OpenAI Agents SDK, the Claude Agent SDK, or any other framework.

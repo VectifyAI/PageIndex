@@ -16,7 +16,8 @@ except ImportError:  # older anthropic rides classic httpx
 
 import pageindex.local_chat as local_chat
 from pageindex import (PageIndexAPIError, PageIndexClient,
-                       PageIndexCloudClient, PageIndexLocalClient)
+                       PageIndexCloudClient, PageIndexLocalClient,
+                       PageIndexValidationError)
 from pageindex.local_chat import CHAT_HEADER
 from pageindex.local_store import DocStore
 
@@ -1380,6 +1381,7 @@ def test_max_turns_wrapped(client, store_path, fake_model, surface, streaming):
         if streaming:
             list(result)
     assert type(caught.value.__cause__).__name__ == "MaxTurnsExceeded"
+    assert not isinstance(caught.value, PageIndexValidationError)
 
 
 @needs_agents
@@ -2983,11 +2985,11 @@ def test_cache_extra_args_follow_wire_normalization():
 
 @needs_agents
 def test_bad_model_settings_wrap_as_contract_error(client):
-    """A mistyped sampling param is the SDK's verdict (pydantic),
-    translated into the contract's PageIndexAPIError like every other
-    door failure."""
-    with pytest.raises(PageIndexAPIError, match="Invalid model settings"):
+    """Local model-settings validation retains its diagnostic cause."""
+    from pydantic import ValidationError
+    with pytest.raises(PageIndexValidationError) as caught:
         client.chat_completions("q", temperature="hot")
+    assert isinstance(caught.value.__cause__, ValidationError)
 
 
 @needs_agents
@@ -3981,8 +3983,10 @@ def _rate_limited(name, arguments):
 
 
 @needs_agents
-def test_bridge_chat_fails_fast_on_a_rate_limited_tool(bridge_client,
-                                                        fake_model):
+@pytest.mark.parametrize("protocol", [None, "chat_completions", "responses"])
+@pytest.mark.parametrize("stream", [False, True])
+def test_bridge_chat_fails_fast_on_a_rate_limited_tool(
+        bridge_client, fake_model, protocol, stream):
     """A 429 that survived the bridge's retries ends the run with its
     status — no second model turn over an error envelope."""
     client, bridge = bridge_client
@@ -3991,9 +3995,14 @@ def test_bridge_chat_fails_fast_on_a_rate_limited_tool(bridge_client,
         [_call_item("get_document", {"doc_name": "r.pdf"})],
         [_msg_item("never reached")],
     ])
-    with pytest.raises(PageIndexAPIError, match="HTTP 429") as info:
-        client.chat_completions("What?")
+    with pytest.raises(PageIndexAPIError) as info:
+        result = client.chat("What?", protocol=protocol, stream=stream)
+        if stream:
+            list(result)
+    assert not isinstance(info.value, PageIndexValidationError)
     assert info.value.status_code == 429
+    cause = local_chat._pageindex_cause(info.value.__cause__)
+    assert cause is not None and cause.status_code == 429
     assert len(fake.instructions) == 1
 
 
@@ -4048,8 +4057,9 @@ def test_messages_fail_fast_on_a_rate_limited_tool(
                       or (stop_reason == "max_tokens"
                           and _ANTHROPIC_RUNS_CUT_TOOL_TURNS))
     if executes_tools:
-        with pytest.raises(PageIndexAPIError, match="HTTP 429") as info:
+        with pytest.raises(PageIndexAPIError) as info:
             run()
+        assert not isinstance(info.value, PageIndexValidationError)
         assert info.value.status_code == 429
         assert tool_calls == [("get_document", {"doc_name": "r.pdf"})]
     else:
@@ -4273,3 +4283,138 @@ def test_managed_instructions_drop_blank_system_texts(store_path):
     client = PageIndexLocalClient(storage_path=store_path)
     assert (local_chat._managed_instructions(client, ["", "  ", "X"])
             == local_chat._managed_instructions(client, ["X"]))
+
+
+# ── public request-validation contract ──
+
+@pytest.mark.parametrize("protocol", [
+    None, "chat_completions", "responses", "messages"])
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("messages,kwargs", [
+    ("q", {"extra_body": {"tools": []}}),
+    ([], {}),
+    ([None], {}),
+    (None, {}),
+    (" ", {}),
+    ("q", {"max_turns": 0}),
+    ("q", {"max_turns": -1}),
+    ("q", {"max_turns": 1.5}),
+    ("q", {"max_turns": True}),
+    ("q", {"doc_id": []}),
+])
+def test_chat_request_validation_is_typed(
+        client, monkeypatch, protocol, stream, messages, kwargs):
+    # These checks need no provider or agent runtime. Avoid optional
+    # dependency gates so every install shape tests the public contract.
+    monkeypatch.setattr(local_chat, "_require_openai_agents", lambda lane: None)
+    monkeypatch.setattr(local_chat, "_require_anthropic", lambda: None)
+    if protocol == "messages":
+        monkeypatch.setitem(sys.modules, "anthropic", types.ModuleType("anthropic"))
+    with pytest.raises(PageIndexValidationError) as caught:
+        result = client.chat(messages, protocol=protocol, stream=stream,
+                             model="test-model", **kwargs)
+        if stream:
+            list(result)
+    assert isinstance(caught.value, PageIndexAPIError)
+    assert caught.value.status_code is None
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_managed_chat_validation_is_typed(monkeypatch, stream):
+    client = PageIndexCloudClient(api_key="pi-test-key")
+
+    def unexpected_request(**kwargs):
+        pytest.fail("validation reached the managed endpoint")
+
+    monkeypatch.setattr(client._api, "chat_completions", unexpected_request)
+    with pytest.raises(PageIndexValidationError):
+        client.chat("q", stream=stream, extra_body={"tools": []})
+
+
+@needs_agents
+@pytest.mark.parametrize("protocol", [None, "chat_completions", "responses"])
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("status", [None, 400, 429])
+def test_openai_execution_error_retains_type_status_and_cause(
+        client, fake_model, monkeypatch, protocol, stream, status):
+    import openai
+    request = httpx.Request("POST", "https://backend.test")
+    error = (openai.APIConnectionError(request=request) if status is None
+             else openai.APIStatusError(
+                 "backend failure", response=httpx.Response(status, request=request),
+                 body=None))
+
+    async def fail(*args, **kwargs):
+        raise error
+
+    async def fail_stream(*args, **kwargs):
+        raise error
+        yield
+
+    fake = fake_model([])
+    monkeypatch.setattr(fake, "get_response", fail)
+    monkeypatch.setattr(fake, "stream_response", fail_stream)
+    with pytest.raises(PageIndexAPIError) as caught:
+        result = client.chat("q", protocol=protocol, stream=stream)
+        if stream:
+            list(result)
+    assert not isinstance(caught.value, PageIndexValidationError)
+    assert caught.value.status_code == status
+    assert caught.value.__cause__ is error
+
+
+@needs_anthropic
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("status", [None, 400, 429])
+def test_messages_execution_error_retains_type_status_and_cause(
+        client, monkeypatch, stream, status):
+    request = anthropic_httpx.Request("POST", "https://backend.test")
+    error = (anthropic.APIConnectionError(request=request) if status is None
+             else anthropic.APIStatusError(
+                 "backend failure",
+                 response=anthropic_httpx.Response(status, request=request),
+                 body=None))
+    _failing_runner_client(monkeypatch, error)
+    with pytest.raises(PageIndexAPIError) as caught:
+        result = client.chat("q", protocol="messages", model="test-model",
+                             stream=stream)
+        if stream:
+            list(result)
+    assert not isinstance(caught.value, PageIndexValidationError)
+    assert caught.value.status_code == status
+    assert caught.value.__cause__ is error
+
+
+@needs_anthropic
+def test_empty_messages_result_is_an_execution_error(client, monkeypatch):
+    _failing_runner_client(monkeypatch, StopIteration())
+    with pytest.raises(PageIndexAPIError) as caught:
+        client.chat("q", protocol="messages", model="test-model")
+    assert not isinstance(caught.value, PageIndexValidationError)
+    assert caught.value.status_code is None
+
+
+@needs_agents
+@pytest.mark.parametrize("stream", [False, True])
+def test_agent_failure_is_an_execution_error(client, fake_model, monkeypatch,
+                                            stream):
+    from agents.exceptions import AgentsException
+    error = AgentsException("agent failed")
+
+    async def fail(*args, **kwargs):
+        raise error
+
+    async def fail_stream(*args, **kwargs):
+        raise error
+        yield
+
+    fake = fake_model([])
+    monkeypatch.setattr(fake, "get_response", fail)
+    monkeypatch.setattr(fake, "stream_response", fail_stream)
+    with pytest.raises(PageIndexAPIError) as caught:
+        result = client.chat("q", stream=stream)
+        if stream:
+            list(result)
+    assert not isinstance(caught.value, PageIndexValidationError)
+    assert caught.value.status_code is None
+    assert caught.value.__cause__ is error

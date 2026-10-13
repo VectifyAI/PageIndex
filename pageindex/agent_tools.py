@@ -33,7 +33,7 @@ from typing import Any, Callable, Optional
 
 import requests
 
-from .errors import PageIndexAPIError
+from .errors import PageIndexAPIError, PageIndexValidationError
 from .mcp_bridge import render_prompt_text, render_text
 
 TOOL_RESPONSE_CHAR_LIMIT = 100_000
@@ -1511,7 +1511,7 @@ def _require_doc_selection(doc_ids) -> None:
     """An empty selection fails loud: washed to None it would mean
     "everything", while the tool-layer allowlist would mean "nothing"."""
     if doc_ids is not None and not doc_ids:
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             "doc_id is empty. Pass one or more document IDs, or omit "
             "doc_id to give the agent the whole library.")
 

@@ -10,7 +10,7 @@ from typing import (TYPE_CHECKING, Any, Callable, Iterator, Literal, Mapping,
                     Optional, Union, cast, overload)
 
 from .chat_stream import ChatStream
-from .errors import PageIndexAPIError
+from .errors import PageIndexAPIError, PageIndexValidationError
 
 
 _litellm_preload_started = False
@@ -120,7 +120,7 @@ def _claude_wire(model, surface: str) -> "tuple[str, str]":
     no model: refused, so no surface ships model='' or switches a
     transport with no model chosen."""
     if not isinstance(model, str):
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             f"{surface} model must be a str, got {type(model).__name__}.")
     wire = model.removeprefix("litellm/")
     for route in _CLAUDE_ROUTES:
@@ -130,7 +130,7 @@ def _claude_wire(model, surface: str) -> "tuple[str, str]":
     else:
         wire, route = wire.removeprefix("anthropic/"), "anthropic"
     if not wire:
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             f"{surface} model {model!r} names a route but no model id.")
     return wire, route
 
@@ -142,10 +142,10 @@ def _yaml_names_chat(loader) -> bool:
                for key in ("chat_model", "retrieve_model", "model"))
 
 
-def _needs_model(surface: str) -> PageIndexAPIError:
+def _needs_model(surface: str) -> PageIndexValidationError:
     # The stock chat_model default is not the user's choice: never send
     # it on an Anthropic-native surface as if it were one.
-    return PageIndexAPIError(
+    return PageIndexValidationError(
         f"{surface} needs a model — pass a Claude model=..., or "
         "configure chat_model on the client.")
 
@@ -694,11 +694,11 @@ class PageIndexClient:
         if self._local_chat:
             return
         if not getattr(self, "api_key", None):
-            raise PageIndexAPIError(
+            raise PageIndexValidationError(
                 "chat_model is empty — it configures nothing, and a local "
                 "client has no managed chat to fall back to. Set "
                 "chat_model=... to run the agent with your own model.")
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             f"{lane} drives your own chat model — construct the client "
             "with chat_model=... (or a chat= model); the managed cloud chat "
             "serves the answer lane and chat(protocol=\"chat_completions\") "
@@ -1367,14 +1367,14 @@ class PageIndexClient:
         """
         if protocol not in (None, "chat_completions", "responses",
                             "messages"):
-            raise PageIndexAPIError(
+            raise PageIndexValidationError(
                 "protocol selects the wire: \"chat_completions\" (OpenAI Chat "
                 "Completions), \"responses\" (OpenAI Responses) or "
                 "\"messages\" (Anthropic Messages), or leave it unset for "
                 f"the answer lane — got {protocol!r}.")
         if (protocol is not None and show_process is not False
                 and show_process is not None):
-            raise PageIndexAPIError(
+            raise PageIndexValidationError(
                 "show_process weaves the answer lane's run; with "
                 f"protocol={protocol!r} the return is the protocol's own "
                 "envelope and events — drop show_process, or drop "
@@ -1383,19 +1383,19 @@ class PageIndexClient:
             from .local_chat import _process_options
             _process_options(show_process)  # a bad value chokes first
             if not stream:
-                raise PageIndexAPIError(
+                raise PageIndexValidationError(
                     "show_process shows the run as it happens and requires "
                     "stream=True; only show_process=False (or None) means "
                     f"off — got {show_process!r}.")
         if isinstance(instructions, list) and protocol != "messages":
-            raise PageIndexAPIError(
+            raise PageIndexValidationError(
                 "instructions blocks are the Messages protocol's shape — "
                 "with protocol=\"messages\" they append after the managed "
                 "system blocks; the other lanes take a string.")
         from .local_chat import _refuse_skeleton
         _refuse_skeleton(extra_body)
         if citations and citations is not True:
-            raise PageIndexAPIError(
+            raise PageIndexValidationError(
                 "citations must be True or False — for another format pass "
                 "citation_prompt(format=...) as instructions= (own-model "
                 "chat).")
@@ -1444,7 +1444,7 @@ class PageIndexClient:
         if instructions:
             if isinstance(messages, str):
                 if not messages.strip():
-                    raise PageIndexAPIError(
+                    raise PageIndexValidationError(
                         "messages must be a non-empty string or a list of "
                         "message dicts.")
                 messages = [{"role": "user", "content": messages}]
@@ -1622,7 +1622,7 @@ class PageIndexClient:
         """
         if isinstance(messages, str):
             if not messages.strip():
-                raise PageIndexAPIError(
+                raise PageIndexValidationError(
                     "messages must be a non-empty string or a list of "
                     "message dicts.")
             messages = [{"role": "user", "content": messages}]
@@ -1640,14 +1640,14 @@ class PageIndexClient:
                 extra_headers=extra_headers, backend=backend,
             )
         if not getattr(self, "api_key", None):
-            raise PageIndexAPIError(
+            raise PageIndexValidationError(
                 "chat_model is empty — it configures nothing, and a local "
                 "client has no managed chat to fall back to. Set "
                 "chat_model=... to run the agent with your own model.")
         if (model or max_turns is not None or top_p is not None
                 or max_tokens is not None or reasoning_effort
                 or extra_headers or backend):
-            raise PageIndexAPIError(
+            raise PageIndexValidationError(
                 "model, max_turns, top_p, max_tokens, reasoning_effort, "
                 "extra_headers and backend drive your own chat "
                 "model, which this client does not configure — construct "

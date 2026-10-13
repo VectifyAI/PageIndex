@@ -7,6 +7,15 @@ class PageIndexAPIError(Exception):
         self.status_code = status_code
 
 
+class PageIndexValidationError(PageIndexAPIError):
+    """A chat request rejected by the SDK's local argument validation.
+
+    Catch this before PageIndexAPIError. Messages are diagnostic prose, not
+    stable error codes, and may include caller-supplied values. Only expose
+    them to users allowed to see those values; causes are internal diagnostics.
+    """
+
+
 def _pageindex_cause(exc: BaseException | None) -> PageIndexAPIError | None:
     """The PageIndexAPIError behind a framework's wrapper exception, if any."""
     while exc is not None:
