@@ -1336,10 +1336,9 @@ class PageIndexClient:
                 before teardown can finish; returning may take longer
                 than timeout. Dispatched remote work may still finish
                 and be billed. Messages uses the async Anthropic client
-                with provider retries disabled under a deadline; a
-                supplied backend http_client must therefore be an async
-                client on that lane. Streams must be exhausted or closed;
-                close() waits for local teardown.
+                under a deadline; a supplied backend http_client must
+                therefore be an async client on that lane. Streams must
+                be exhausted or closed; close() waits for local teardown.
             backend: Own-model chat only — connection overrides for this
                 call's backend, merged over the client's ``chat_backend``
                 (per-call keys win): LiteLLM's connection params on the

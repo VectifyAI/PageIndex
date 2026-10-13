@@ -1313,7 +1313,6 @@ def _anthropic_client(backend, route):
         key = None
     if asynchronous:
         key = None
-        kwargs["max_retries"] = 0
     if key in _ANTHROPIC_CLIENTS:
         return _ANTHROPIC_CLIENTS[key]
     name = ("Async" if asynchronous else "") + _ROUTE_CLIENTS[route]

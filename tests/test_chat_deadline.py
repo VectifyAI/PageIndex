@@ -405,9 +405,9 @@ def test_managed_chat_refuses_deadline():
 
 
 @needs_anthropic
-@pytest.mark.parametrize("status", [200, 503])
-def test_messages_deadline_borrows_transport_and_disables_retries(client,
-                                                               status):
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("timeout", [0.5, 5])
+def test_messages_retries_share_deadline(client, stream, timeout):
     from test_local_chat import anthropic_httpx as httpx
 
     calls = []
@@ -415,22 +415,39 @@ def test_messages_deadline_borrows_transport_and_disables_retries(client,
     async def handle(request):
         calls.append(request)
         assert request.extensions["timeout"]["read"] == 0.1
-        return httpx.Response(status, json=_anthropic_message(
-            [{"type": "text", "text": "answer"}], "end_turn"))
+        if len(calls) == 1:
+            return httpx.Response(503, headers={"retry-after": "1"},
+                                  json={"error": {"message": "try again"}})
+        message = _anthropic_message(
+            [{"type": "text", "text": "answer"}], "end_turn")
+        if stream:
+            return httpx.Response(
+                200, text=_anthropic_sse(message),
+                headers={"content-type": "text/event-stream"})
+        return httpx.Response(200, json=message)
 
     transport = httpx.AsyncClient(transport=httpx.MockTransport(handle))
     try:
         options = {"http_client": transport, "timeout": 0.1, "max_retries": 3}
-        if status == 503:
-            with pytest.raises(PageIndexAPIError) as caught:
-                client.chat("q", protocol="messages", model="claude-test",
-                             timeout=5, backend=options)
-            assert caught.value.status_code == 503
+        if timeout < 1:
+            with pytest.raises(PageIndexTimeoutError):
+                result = client.chat("q", protocol="messages",
+                                     model="claude-test", stream=stream,
+                                     timeout=timeout, backend=options)
+                if stream:
+                    list(result)
+            time.sleep(1)
+            assert len(calls) == 1
         else:
             result = client.chat("q", protocol="messages", model="claude-test",
-                                 timeout=5, backend=options)
-            assert result["content"][0]["text"] == "answer"
-        assert len(calls) == 1
+                                 stream=stream, timeout=timeout, backend=options)
+            if stream:
+                events = list(result)
+                assert any(getattr(getattr(event, "delta", None), "text", None)
+                           == "answer" for event in events)
+            else:
+                assert result["content"][0]["text"] == "answer"
+            assert len(calls) == 2
         assert not transport.is_closed
     finally:
         asyncio.run(transport.aclose())
