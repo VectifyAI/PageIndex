@@ -1301,8 +1301,291 @@ def test_messages_stream_passthrough(client, store_path, fake_anthropic):
     events = list(client._messages([{"role": "user", "content": "q"}],
                                   model="claude-test", max_tokens=100,
                                   stream=True))
-    types = [event.type for event in events]
+    types = [event["type"] for event in events]
     assert "content_block_delta" in types and "message_stop" in types
+
+
+def _consume_messages(events):
+    body = "".join(f"event: {event['type']}\n"
+                   f"data: {json.dumps(event)}\n\n" for event in events)
+
+    def respond(request):
+        return anthropic_httpx.Response(
+            200, content=body.encode(),
+            headers={"content-type": "text/event-stream"})
+
+    with anthropic.Anthropic(
+            api_key="test", max_retries=0,
+            http_client=anthropic_httpx.Client(
+                transport=anthropic_httpx.MockTransport(respond))) as consumer:
+        with consumer.messages.stream(
+                model="claude-test", max_tokens=100,
+                messages=[{"role": "user", "content": "q"}]) as stream:
+            return stream.get_final_message()
+
+
+@needs_anthropic
+@pytest.mark.parametrize("tool_turns", [1, 2])
+def test_messages_stream_is_one_message(bridge_client, fake_anthropic,
+                                       tool_turns):
+    client, bridge = bridge_client
+    replies = [_anthropic_message([_anthropic_tool_use(f"tu_{index}")],
+                                  "tool_use")
+               for index in range(tool_turns)]
+    replies.append(_anthropic_message(
+        [{"type": "text", "text": "Cobalt-37"}], "end_turn"))
+    fake_anthropic([_anthropic_sse(reply) for reply in replies])
+    stream = client.chat("q", protocol="messages", model="claude-test",
+                         stream=True)
+    events = list(stream)
+    final = _consume_messages(events)
+    assert final.content[0].text == "Cobalt-37"
+    assert final.stop_reason == "end_turn"
+    assert final.usage.input_tokens == 10 * (tool_turns + 1)
+    assert final.usage.output_tokens == 5 * (tool_turns + 1)
+    assert [e["type"] for e in events].count("message_start") == 1
+    assert [e["type"] for e in events].count("message_stop") == 1
+    assert len(bridge.calls) == tool_turns
+    result = stream.get_final_result()
+    assert result == events[-1]["result"]
+    assert result["run"]["status"] == "completed"
+    assert all(call["status"] == "completed"
+               for call in result["run"]["tool_calls"])
+    assert result["content"] == [b.model_dump(exclude_none=True)
+                                  for b in final.content]
+
+
+@needs_anthropic
+@pytest.mark.parametrize("streaming", [False, True])
+def test_messages_limit_result_resumes_once(bridge_client, fake_anthropic,
+                                           streaming):
+    client, bridge = bridge_client
+    reply = _anthropic_message([_anthropic_tool_use()], "tool_use")
+    fake_anthropic([_anthropic_sse(reply)] if streaming else [reply])
+    result = client.chat("q", protocol="messages", model="claude-test",
+                         stream=streaming, max_turns=1)
+    if streaming:
+        events = list(result)
+        assert _consume_messages(events).stop_reason == "pause_turn"
+        result = result.get_final_result()
+    assert result["run"]["status"] == "max_turns"
+    assert result["run"]["model_stop_reason"] == "tool_use"
+    assert result["run"]["tool_calls"][0]["status"] == "completed"
+    assert len(bridge.calls) == 1
+    requests = fake_anthropic([_anthropic_message(
+        [{"type": "text", "text": "Resumed"}], "end_turn")])
+    client.chat([{"role": "user", "content": "q"}, *result["messages"]],
+                protocol="messages", model="claude-test")
+    assert len(bridge.calls) == 1
+    assert requests[0]["messages"][-1]["content"][0]["type"] == "tool_result"
+
+
+@needs_anthropic
+def test_messages_visible_blocks_match_nonstream(bridge_client,
+                                                 fake_anthropic):
+    client, bridge = bridge_client
+    replies = [
+        _anthropic_message([{"type": "text", "text": "Checking. "},
+                            _anthropic_tool_use()], "tool_use"),
+        _anthropic_message([{"type": "text", "text": "Answer."}],
+                           "end_turn"),
+    ]
+    fake_anthropic(replies)
+    plain = client.chat("q", protocol="messages", model="claude-test")
+    fake_anthropic([_anthropic_sse(reply) for reply in replies])
+    stream = client.chat("q", protocol="messages", model="claude-test",
+                         stream=True)
+    events = list(stream)
+    final = _consume_messages(events)
+    assert [b.text for b in final.content] == ["Checking. ", "Answer."]
+    assert [e["index"] for e in events
+            if e["type"] == "content_block_start"] == [0, 1]
+    result = stream.result
+    for field in ("content", "messages", "run", "usage", "stop_reason"):
+        assert result[field] == plain[field]
+    assert len(bridge.calls) == 2
+
+
+@needs_anthropic
+@pytest.mark.parametrize("reason", ["max_tokens", "refusal"])
+def test_messages_unexecuted_tools_remain_visible(bridge_client,
+                                                 fake_anthropic, reason):
+    client, bridge = bridge_client
+    reply = _anthropic_message([_anthropic_tool_use()], reason)
+    fake_anthropic([_anthropic_sse(reply)])
+    stream = client.chat("q", protocol="messages", model="claude-test",
+                         stream=True, max_turns=1)
+    final = _consume_messages(list(stream))
+    result = stream.result
+    executed = reason == "max_tokens" and _ANTHROPIC_RUNS_CUT_TOOL_TURNS
+    assert len(bridge.calls) == int(executed)
+    assert final.stop_reason == ("pause_turn" if executed else reason)
+    if executed:
+        assert final.content == []
+    else:
+        assert final.content[0].type == "tool_use"
+        assert final.content[0].input == {"doc_name": "report.pdf"}
+        assert result["run"]["tool_calls"][0]["status"] == "not_executed"
+        assert result["messages"] == []
+
+
+@needs_anthropic
+@pytest.mark.parametrize("missing", [False, True])
+def test_messages_usage_sums_final_turn_counts(bridge_client, fake_anthropic,
+                                              missing):
+    client, _ = bridge_client
+    replies = [_anthropic_message([_anthropic_tool_use()], "tool_use"),
+               _anthropic_message([{"type": "text", "text": "ok"}],
+                                  "end_turn")]
+    for reply in replies:
+        reply["usage"].update(cache_read_input_tokens=7,
+                              cache_creation_input_tokens=3,
+                              cache_creation={"ephemeral_5m_input_tokens": 1,
+                                              "ephemeral_1h_input_tokens": 2})
+    if missing:
+        replies[-1]["usage"].pop("cache_read_input_tokens")
+    sse = [_anthropic_sse(reply) for reply in replies]
+    intermediate = ('event: message_delta\ndata: {"type":"message_delta",'
+                    '"delta":{"stop_reason":null,"stop_sequence":null},'
+                    '"usage":{"output_tokens":2}}\n\n')
+    sse[-1] = sse[-1].replace("event: message_delta", intermediate
+                             + "event: message_delta")
+    fake_anthropic(sse)
+    stream = client.chat("q", protocol="messages", model="claude-test",
+                         stream=True)
+    final = _consume_messages(list(stream))
+    assert final.usage.input_tokens == 20
+    assert final.usage.output_tokens == 10
+    assert final.usage.cache_read_input_tokens == (None if missing else 14)
+    assert final.usage.cache_creation_input_tokens == 6
+    assert final.usage.cache_creation is None
+    usage = stream.result["usage"]
+    assert usage["cache_read_input_tokens"] == (None if missing else 14)
+    assert usage["cache_creation_input_tokens"] == 6
+    assert usage["cache_creation"] == {"ephemeral_5m_input_tokens": 2,
+                                       "ephemeral_1h_input_tokens": 4}
+    assert stream.result["run"]["usage_complete"] is (not missing)
+
+
+@needs_anthropic
+@pytest.mark.parametrize("started", [False, True])
+def test_messages_close_retains_result(bridge_client, fake_anthropic, started):
+    client, bridge = bridge_client
+    requests = fake_anthropic([_anthropic_sse(_anthropic_message(
+        [{"type": "text", "text": "Partial"}, _anthropic_tool_use()],
+        "tool_use"))])
+    stream = client.chat("q", protocol="messages", model="claude-test",
+                         stream=True)
+    assert stream.result is None
+    if started:
+        while next(stream)["type"] != "content_block_delta":
+            pass
+    stream.close()
+    result = stream.get_final_result()
+    assert result["run"]["status"] == "cancelled"
+    assert result["run"]["usage_complete"] is False
+    assert result["usage"]["output_tokens"] is None
+    assert result["stop_reason"] is None
+    assert result["messages"] == []
+    assert len(requests) == int(started)
+    assert bridge.calls == []
+    assert list(stream) == []
+    stream.close()
+    assert stream.result == result
+
+
+@needs_anthropic
+def test_messages_truncated_stream_retains_partial_result(client,
+                                                          fake_anthropic):
+    reply = _anthropic_message([{"type": "text", "text": "Partial"}],
+                               "end_turn")
+    body = _anthropic_sse(reply).split("event: message_delta")[0]
+    fake_anthropic([body])
+    stream = client.chat("q", protocol="messages", model="claude-test",
+                         stream=True)
+    with pytest.raises(PageIndexAPIError, match="message_stop"):
+        list(stream)
+    result = stream.result
+    assert result["run"]["status"] == "failed"
+    assert result["content"][0]["text"] == "Partial"
+    assert result["messages"] == []
+    assert result["usage"]["output_tokens"] is None
+
+
+@needs_anthropic
+def test_messages_missing_usage_stays_unknown(client, fake_anthropic):
+    reply = _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")
+    reply.pop("usage")
+    fake_anthropic([reply])
+    result = client.chat("q", protocol="messages", model="claude-test")
+    assert result["run"]["usage_complete"] is False
+    assert all(value is None for value in result["usage"].values())
+
+
+@needs_anthropic
+def test_messages_model_failure_keeps_executed_tools(bridge_client,
+                                                    fake_anthropic):
+    client, bridge = bridge_client
+    fake_anthropic([
+        _anthropic_sse(_anthropic_message([_anthropic_tool_use()],
+                                          "tool_use")),
+        'event: error\ndata: {"type":"error","error":'
+        '{"type":"overloaded_error","message":"busy"}}\n\n',
+    ])
+    stream = client.chat("q", protocol="messages", model="claude-test",
+                         stream=True)
+    with pytest.raises(PageIndexAPIError) as caught:
+        list(stream)
+    result = stream.result
+    assert caught.value.result is result
+    assert result["run"]["status"] == "failed"
+    assert result["run"]["usage_complete"] is False
+    assert result["run"]["tool_calls"][0]["status"] == "completed"
+    assert result["messages"][-1]["content"][0]["type"] == "tool_result"
+    assert len(bridge.calls) == 1
+
+
+@needs_anthropic
+@pytest.mark.parametrize("streaming", [False, True])
+def test_messages_tool_failure_retains_result(bridge_client, fake_anthropic,
+                                             streaming):
+    client, bridge = bridge_client
+    bridge.call_tool = _rate_limited
+    reply = _anthropic_message([_anthropic_tool_use()], "tool_use")
+    fake_anthropic([_anthropic_sse(reply)] if streaming else [reply])
+    with pytest.raises(PageIndexAPIError) as caught:
+        response = client.chat("q", protocol="messages", model="claude-test",
+                               stream=streaming, max_turns=1)
+        if streaming:
+            list(response)
+    result = caught.value.result
+    assert result["run"]["status"] == "failed"
+    assert result["run"]["tool_calls"][0]["status"] == "failed"
+    assert result["messages"][-1]["content"][0]["is_error"] is True
+    if streaming:
+        assert response.result == result
+
+
+@needs_anthropic
+def test_messages_interrupted_tool_is_uncertain(bridge_client, fake_anthropic):
+    client, bridge = bridge_client
+    calls = []
+
+    def interrupt(name, arguments):
+        calls.append(name)
+        raise KeyboardInterrupt()
+
+    bridge.call_tool = interrupt
+    fake_anthropic([_anthropic_sse(_anthropic_message(
+        [_anthropic_tool_use()], "tool_use"))])
+    stream = client.chat("q", protocol="messages", model="claude-test",
+                         stream=True)
+    with pytest.raises(KeyboardInterrupt):
+        list(stream)
+    assert calls == ["get_document"]
+    assert stream.result["run"]["tool_calls"][0]["status"] == "unknown"
+    assert stream.result["run"]["can_resume"] is False
+    assert stream.result["messages"] == []
 
 
 @needs_anthropic
@@ -1329,23 +1612,6 @@ def test_messages_validation(client, fake_anthropic):
                        match="Documents not found or access denied"):
         client._messages([{"role": "user", "content": "x"}],
                         model="claude-test", max_tokens=100, doc_id="ghost")
-
-
-@needs_anthropic
-def test_messages_raises_when_runner_params_unreadable(client, fake_anthropic,
-                                                       monkeypatch):
-    """The conversation is read back through set_messages_params (a mutator
-    used as a reader); if a vendor change stops it delivering params, the
-    envelope silently lost every tool turn — it must raise instead."""
-    from anthropic.lib.tools import BetaToolRunner
-    fake_anthropic([
-        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn"),
-    ])
-    monkeypatch.setattr(BetaToolRunner, "set_messages_params",
-                        lambda self, params: None)
-    with pytest.raises(PageIndexAPIError, match="anthropic version"):
-        client._messages([{"role": "user", "content": "hi"}],
-                        model="claude-test", max_tokens=100)
 
 
 def test_messages_missing_framework(client, monkeypatch):
@@ -2356,13 +2622,11 @@ def test_messages_max_turns_truncation_round_trippable(client, store_path,
     result = client._messages([{"role": "user", "content": "q"}],
                              model="claude-test", max_tokens=100, max_turns=1)
     assert len(calls) == 1
-    assert result["stop_reason"] == "tool_use"
+    assert result["stop_reason"] == "pause_turn"
     roles = [message["role"] for message in result["messages"]]
     assert roles == ["assistant", "user"]  # tool_use, tool_result — no dup
-    assert json.dumps(result).count('"tu_1"') == \
-        json.dumps(result["messages"][0]).count('"tu_1"') \
-        + json.dumps(result["messages"][1]).count('"tu_1"') \
-        + json.dumps(result["content"]).count('"tu_1"')
+    assert json.dumps(result["messages"]).count('"tu_1"') == 2
+    assert result["content"] == []
     json.dumps(result)
 
 
@@ -2370,12 +2634,8 @@ def test_messages_max_turns_truncation_round_trippable(client, store_path,
 def test_messages_tool_use_cut_by_max_tokens_not_duplicated(client,
                                                             store_path,
                                                             fake_anthropic):
-    """A max_tokens turn carrying complete tool_use blocks: anthropic < 1.1
-    executes and appends it, 1.1+ treats it as terminal and never executes.
-    The envelope keys on the runner's history rather than stop_reason
-    (keying on stop_reason once duplicated the tool_use id), so on either
-    side the id never duplicates and the appendable messages stay valid
-    for verbatim continuation."""
+    """A cut tool turn follows the runner's execution policy. Only calls
+    with recorded results enter the continuation history."""
     seed_doc(store_path, "pi-a", "report.pdf")
     calls = fake_anthropic([
         _anthropic_message([_anthropic_tool_use()], "max_tokens"),
@@ -2384,7 +2644,9 @@ def test_messages_tool_use_cut_by_max_tokens_not_duplicated(client,
     result = client._messages([{"role": "user", "content": "q"}],
                              model="claude-test", max_tokens=100, max_turns=1)
     assert len(calls) == 1
-    assert result["stop_reason"] == "max_tokens"
+    assert result["run"]["model_stop_reason"] == "max_tokens"
+    assert result["stop_reason"] == (
+        "pause_turn" if _ANTHROPIC_RUNS_CUT_TOOL_TURNS else "max_tokens")
     roles = [message["role"] for message in result["messages"]]
     if _ANTHROPIC_RUNS_CUT_TOOL_TURNS:
         assert roles == ["assistant", "user"]  # tool_use then tool_result
@@ -2429,7 +2691,7 @@ def test_messages_default_cap(client, store_path, fake_anthropic):
     result = client._messages([{"role": "user", "content": "q"}],
                              model="claude-test", max_tokens=100)
     assert len(calls) == 10  # bounded like the OpenAI surfaces
-    assert result["stop_reason"] == "tool_use"
+    assert result["stop_reason"] == "pause_turn"
     json.dumps(result)
 
 

@@ -9,7 +9,7 @@ import warnings
 from typing import (TYPE_CHECKING, Any, Callable, Iterator, Literal, Mapping,
                     Optional, Union, cast, overload)
 
-from .chat_stream import ChatStream
+from .chat_stream import ChatStream, MessagesStream
 from .errors import PageIndexAPIError
 
 
@@ -1130,7 +1130,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
-    ) -> Iterator[Any]: ...
+    ) -> MessagesStream: ...
 
     @overload
     def chat(
@@ -1171,7 +1171,8 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
-    ) -> Union[str, ChatStream, dict[str, Any], Iterator[Any]]: ...
+    ) -> Union[str, ChatStream, MessagesStream,
+               dict[str, Any], Iterator[Any]]: ...
 
     def chat(
         self,
@@ -1191,7 +1192,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
-    ) -> Union[str, ChatStream, dict[str, Any], Iterator[Any]]:
+    ) -> Union[str, ChatStream, MessagesStream, dict[str, Any], Iterator[Any]]:
         """
         Ask a question about your documents.
 
@@ -1317,8 +1318,8 @@ class PageIndexClient:
             max_turns: Own-model chat only — cap on agent turns per call
                 (default 10). The OpenAI lanes raise at the cap;
                 ``protocol="messages"`` returns the truncated run
-                (``stop_reason: "tool_use"``, its ``messages`` valid for
-                continuation).
+                (run.status "max_turns", stop_reason "pause_turn",
+                with executed tools retained in ``messages``).
             backend: Own-model chat only — connection overrides for this
                 call's backend, merged over the client's ``chat_backend``
                 (per-call keys win): LiteLLM's connection params on the
@@ -1793,7 +1794,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         *,
         folder_id: Optional[str] = None,
-    ) -> Union[dict[str, Any], Iterator[Any]]:
+    ) -> Union[dict[str, Any], MessagesStream]:
         """
         The engine behind ``chat(protocol="messages")``: document QA over
         the Anthropic Messages protocol, Claude-native.
@@ -1804,11 +1805,12 @@ class PageIndexClient:
         ``pageindex[anthropic]``); the model's routing prefix picks the
         transport — Anthropic directly by default (ANTHROPIC_API_KEY
         selects the backend), or that channel's own SDK client.
-        ``tool_use``/``tool_result`` round-trip is the
-        format's native behavior: the response is the
-        final message envelope with cross-turn aggregated ``usage`` plus a
-        ``messages`` field — the full new turn sequence, valid for verbatim
-        append to your history. The managed system prompt carries a
+        One call produces one logical message, with visible blocks from
+        all model turns and aggregated ``usage``. Executed client tools
+        live in the ``messages`` continuation transcript and ``run`` result.
+        Append ``messages`` to your history when ``run.can_resume`` is true.
+        See docs/messages-stream.md for result and cancellation semantics.
+        The managed system prompt carries a
         ``cache_control`` breakpoint, and the request sets the top-level
         ``cache_control`` so each turn re-reads the growing conversation
         from cache — skipped when your own blocks already use the three
@@ -1833,9 +1835,11 @@ class PageIndexClient:
                 only a question, and rises to
                 budget_tokens + 8192 when ``thinking`` is enabled (the wire
                 requires max_tokens above the budget). Passed through.
-            stream: Yield the Anthropic SDK's event stream across turns
-                (its native event objects, including SDK-synthesized
-                convenience events), one message sequence per turn.
+            stream: Return a MessagesStream of JSON event dicts: one
+                message lifecycle, with content indices across turns.
+                The terminal message_stop carries ``result``, also
+                available via get_final_result() or the stream's result
+                property after failure or close.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call. Local
@@ -1848,9 +1852,9 @@ class PageIndexClient:
             system: Appended after the managed system blocks.
             temperature / top_p / top_k / stop_sequences: Passed through.
             max_turns: Cap on agent turns per call (default 10, like the
-                OpenAI surfaces). A truncated run reports
-                ``stop_reason: "tool_use"`` and its ``messages`` remain
-                valid for continuation.
+                OpenAI surfaces). Exhaustion reports run.status
+                "max_turns" and stop_reason "pause_turn". The transcript
+                includes tools already executed at the limit.
             thinking: Anthropic thinking configuration, forwarded verbatim
                 (e.g. ``{"type": "adaptive"}``) — the values and their
                 constraints are the backend's. Unset sends nothing.
