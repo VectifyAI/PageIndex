@@ -384,17 +384,28 @@ def test_responses_close_before_terminal_keeps_call_cancelled(
 
 @needs_agents
 @pytest.mark.parametrize("protocol", ["chat_completions", "responses"])
+@pytest.mark.parametrize("callback_error", [False, True])
 def test_measurement_close_after_terminal_keeps_completed_outcome(
-        client, fake_model, protocol):
+        client, fake_model, protocol, callback_error):
     fake_model([[_msg_item("ok")]])
     reports = []
+
+    def receive(report):
+        reports.append(report)
+        if callback_error:
+            raise ValueError("consumer failed")
+
     result = client.chat("hi", protocol=protocol, stream=True,
-                         on_usage=reports.append)
+                         on_usage=receive)
     for event in result:
         if (event.get("type") == "response.completed"
                 or event.get("choices") == []):
             break
-    result.close()
+    if callback_error:
+        with pytest.raises(ValueError, match="consumer failed"):
+            result.close()
+    else:
+        result.close()
     assert len(reports) == 1
     assert reports[0]["outcome"] == "completed"
 
@@ -1681,8 +1692,9 @@ def test_messages_measurements_at_run_end(
     ("end_turn", "completed"), ("max_tokens", "incomplete"),
     ("tool_use", "cancelled"),
 ])
+@pytest.mark.parametrize("callback_error", [False, True])
 def test_messages_close_after_message_stop_keeps_run_outcome(
-        client, fake_anthropic, reason, outcome):
+        client, fake_anthropic, reason, outcome, callback_error):
     block = ({"type": "tool_use", "id": "call-1", "name": "get_document",
               "input": {"doc_name": "report.pdf"}} if reason == "tool_use"
              else {"type": "text", "text": "ok"})
@@ -1691,12 +1703,22 @@ def test_messages_close_after_message_stop_keeps_run_outcome(
                           cache_creation_input_tokens=0)
     calls = fake_anthropic([_anthropic_sse(reply)])
     reports = []
+
+    def receive(report):
+        reports.append(report)
+        if callback_error:
+            raise ValueError("consumer failed")
+
     result = client.chat("hi", protocol="messages", model="claude-test",
-                         stream=True, on_usage=reports.append)
+                         stream=True, on_usage=receive)
     for event in result:
         if event.type == "message_stop":
             break
-    result.close()
+    if callback_error:
+        with pytest.raises(ValueError, match="consumer failed"):
+            result.close()
+    else:
+        result.close()
     assert len(calls) == len(reports) == 1
     assert reports[0]["outcome"] == outcome
     assert reports[0]["totals"]["input_tokens"] == 10
@@ -3282,8 +3304,10 @@ def test_messages_top_level_cache_control(client, store_path, fake_anthropic):
 
 @needs_anthropic
 @pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("mixed", [False, True])
 def test_messages_bedrock_moves_an_explicit_breakpoint(client, store_path,
-                                                       fake_anthropic, stream):
+                                                       fake_anthropic, stream,
+                                                       mixed):
     """Bedrock's InvokeModel integration rejects the top-level field (Opus
     4.6 and earlier): each turn's newest tool result carries the one moving
     breakpoint instead, and none leaks into the returned history."""
@@ -3292,10 +3316,18 @@ def test_messages_bedrock_moves_an_explicit_breakpoint(client, store_path,
                for tool_id in ("tu_1", "tu_2")]
     replies.append(_anthropic_message([{"type": "text", "text": "Done"}],
                                       "end_turn"))
+    for reply in replies:
+        reply["usage"].update(cache_creation_input_tokens=15,
+                              cache_read_input_tokens=0)
     calls = fake_anthropic([_anthropic_sse(reply) for reply in replies]
                           if stream else replies)
+    reports = []
+    system = ([{"type": "text", "text": "be brief",
+                "cache_control": {"type": "ephemeral", "ttl": "1h"}}]
+              if mixed else None)
     result = client._messages("q", model="bedrock/anthropic.claude-sonnet-4-6",
-                              max_tokens=50, stream=stream)
+                              max_tokens=50, stream=stream, system=system,
+                              on_usage=reports.append)
     if stream:
         list(result)
 
@@ -3307,6 +3339,11 @@ def test_messages_bedrock_moves_an_explicit_breakpoint(client, store_path,
 
     assert all("cache_control" not in call for call in calls)
     assert [marked(call) for call in calls] == [[], ["tu_1"], ["tu_2"]]
+    assert len(reports) == 1
+    assert len(reports[0]["calls"]) == 3
+    for call in reports[0]["calls"]:
+        assert call["cache_write_tokens"] == 15
+        assert call["cache_write_by_ttl"] == (None if mixed else {"5m": 15})
     if not stream:
         assert "cache_control" not in json.dumps(result["messages"])
 

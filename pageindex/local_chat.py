@@ -403,7 +403,7 @@ def _measured(protocol):
                         yield event
                     outcome = measurement.get("_outcome", "completed")
                 except BaseException as exc:
-                    error = exc
+                    error = None if isinstance(exc, GeneratorExit) else exc
                     if not isinstance(exc, (GeneratorExit,
                                             asyncio.CancelledError,
                                             KeyboardInterrupt)):
