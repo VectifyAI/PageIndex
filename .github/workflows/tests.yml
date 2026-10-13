@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # Live cloud tests share one API key and its rate limit.
+      max-parallel: 1
       matrix:
         python-version: ["3.10", "3.13"]
         agent-frameworks: [without, with]
