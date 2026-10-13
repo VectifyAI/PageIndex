@@ -346,6 +346,7 @@ def _usage_outcome(result, protocol):
     reason = choices[0].get("finish_reason") if choices else None
     if reason:
         return "completed" if reason == "stop" else "incomplete"
+    return None
 
 
 def _measured(protocol):
