@@ -231,6 +231,30 @@ def test_propose_children_clamps_to_loaded_pages(monkeypatch):
     assert out == [] and "prompt" not in seen  # fully beyond: no model call
 
 
+def test_propose_children_keeps_non_latin_headings(monkeypatch):
+    """Headings in any script are told apart and checked against their page,
+    where a Han heading may be printed letter-spaced."""
+    import asyncio
+    from types import SimpleNamespace
+    import pageindex.tree_optimize as tree_optimize
+
+    async def fake_ask(model, prompt):
+        return {"subsections": [{"title": "第一节 范围", "page": 1},
+                                {"title": "第二节 定义", "page": 2},
+                                {"title": "第三节 附则", "page": 2}]}
+
+    monkeypatch.setattr(tree_optimize, "ask_model", fake_ask)
+    pages = ["第一章 总则\n第一节 范围\n本办法适用于", "第 二 节  定 义\n本办法所称"]
+    for title in ("第一章 总则", "Chapter 1"):
+        node = {"title": title, "start_index": 1, "end_index": 2, "node_id": "n1"}
+        out = asyncio.run(tree_optimize.propose_children(
+            node, pages, SimpleNamespace(model="m")))
+        assert [c["title"] for c in out] == ["第一节 范围", "第二节 定义"]
+    assert tree_optimize.same_heading("1 总则", "总则")
+    assert not tree_optimize.same_heading("第一章 总则", "第二章 总则")
+    assert not tree_optimize.same_heading("1", "2")
+
+
 def test_bootstrap_reimport_is_not_swallowed(monkeypatch):
     # An unguarded caller script re-imported by a spawn worker must die loudly,
     # not fall back to a silent full sequential rerun in every worker.

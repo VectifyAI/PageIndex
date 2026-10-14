@@ -60,6 +60,7 @@ import json
 import os
 import re
 import sys
+import unicodedata
 from types import SimpleNamespace
 
 from .utils import (SUMMARY_MAX_WORDS, ConfigLoader, _is_unrecoverable, count_tokens,
@@ -104,8 +105,17 @@ def note(enabled, message):
     if enabled:
         print(message, file=sys.stderr, flush=True)
 
+HAN_KANA = "\u3005-\u3007\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"
+
+
 def normalize(text):
-    return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
+    """Letters, digits and marks of any script, casefolded; other runs become one
+    space, and none stays between two Han or kana characters: those scripts put no
+    space between words, so one there is layout (letter spacing, a wrapped line)."""
+    text = unicodedata.normalize("NFKC", text or "").casefold()
+    text = " ".join("".join(c if unicodedata.category(c)[0] in "LMN" else " "
+                            for c in text).split())
+    return re.sub(f"(?<=[{HAN_KANA}]) (?=[{HAN_KANA}])", "", text)
 
 
 def flatten(nodes, parent=None):
@@ -687,11 +697,11 @@ async def propose_children(node, pages, args):
 
 def same_heading(a, b):
     """Whether two titles name one heading: equal once normalized, or equal but
-    for a leading number only one of them prints. A title with no Latin letter
-    is its number alone, so it never matches by that second rule."""
+    for a leading number only one of them prints. A title with no letter is its
+    number alone, so it never matches by that second rule."""
     a, b = normalize(a), normalize(b)
     bare_a, bare_b = (re.sub(r"^(?:[0-9]+ )+", "", t) for t in (a, b))
-    return bool(a) and (a == b or (bare_a == bare_b and bool(re.search("[a-z]", bare_a))
+    return bool(a) and (a == b or (bare_a == bare_b and bool(re.search(r"[^\W\d_]", bare_a))
                                    and (a == bare_a or b == bare_b)))
 
 
