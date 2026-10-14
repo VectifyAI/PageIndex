@@ -196,6 +196,17 @@ doc_id = client.submit_document("report.pdf", wait=True)["doc_id"]
 print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 ```
 
+To submit several documents first and wait for them later, use the public polling helper:
+
+```python
+submission = client.submit_document("report.pdf")
+document = client.wait_until_completed(
+    submission["doc_id"], timeout=300, poll_interval=5
+)
+```
+
+`poll_interval` is the initial delay between status requests. Repeated requests back off automatically to avoid excessive polling.
+
 | | **Local** | **Cloud** |
 |---|---|---|
 | Handles | Text-based PDFs | Text-based, scanned, and image-rich documents |
