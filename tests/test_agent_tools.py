@@ -617,7 +617,7 @@ def test_as_openai_tools_cloud_default_uses_bridge(monkeypatch):
     from agents import FunctionTool
     import pageindex.mcp_bridge as mcp_bridge
     monkeypatch.setattr(mcp_bridge, "McpBridge", _FakeBridge)
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     tools = cloud.as_openai_tools()
     assert all(isinstance(tool, FunctionTool) for tool in tools)
     assert [tool.name for tool in tools] == ["search_documents", "get_document"]
@@ -626,7 +626,7 @@ def test_as_openai_tools_cloud_default_uses_bridge(monkeypatch):
 def test_as_openai_tools_cloud_hosted_opt_in():
     pytest.importorskip("agents")
     from agents import HostedMCPTool
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     tools = cloud.as_openai_tools(hosted=True)
     assert len(tools) == 1
     assert isinstance(tools[0], HostedMCPTool)
@@ -698,7 +698,7 @@ def test_as_openai_tools_cloud_object_params_survive(monkeypatch):
             return _text_block(json.dumps({"success": True})), False
 
     monkeypatch.setattr(mcp_bridge, "McpBridge", _ObjBridge)
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     tools = cloud.as_openai_tools()
     assert len(tools) == 1
     assert tools[0].params_json_schema == schema
@@ -707,7 +707,7 @@ def test_as_openai_tools_cloud_object_params_survive(monkeypatch):
 
 def test_as_claude_mcp_cloud_needs_no_framework(monkeypatch):
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     # The URL is the gate: default → read-only endpoint, management opt-in
     # → the full tool set.
     assert cloud.as_claude_mcp() == {
@@ -767,12 +767,12 @@ def test_claude_agent_config_forwards_a_claude_chat_model(cloud_with_fake_bridge
     # own name, so LiteLLM's routing prefix is stripped.
     for name in ("anthropic/claude-sonnet-4-6", "claude-sonnet-4-6",
                  "litellm/anthropic/claude-sonnet-4-6"):
-        cloud = PageIndexCloudClient(api_key="pi-test-key", chat_model=name)
+        cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"], chat_model=name)
         assert cloud.claude_agent_config()["model"] == "claude-sonnet-4-6"
     # Names are sent as written — no model map gates them.
     for name in ("anthropic/claude-3-5-sonnet-latest",
                  "claude-3-5-sonnet-latest"):
-        cloud = PageIndexCloudClient(api_key="pi-test-key", chat_model=name)
+        cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"], chat_model=name)
         assert cloud.claude_agent_config()["model"] == "claude-3-5-sonnet-latest"
 
 
@@ -780,7 +780,7 @@ def test_claude_agent_config_carries_any_chosen_chat_model(
         cloud_with_fake_bridge):
     # A model you set is sent as written — the destination judges the id.
     for name in ("gpt-4.1", "openrouter/anthropic/claude-sonnet-4-6"):
-        cloud = PageIndexCloudClient(api_key="pi-test-key", chat_model=name)
+        cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"], chat_model=name)
         assert cloud.claude_agent_config()["model"] == name
         # An explicit model may be the SDK's own name (an alias included)...
         assert cloud.claude_agent_config(model="sonnet")["model"] == "sonnet"
@@ -790,7 +790,7 @@ def test_claude_agent_config_carries_any_chosen_chat_model(
             assert (cloud.claude_agent_config(model=spelling)["model"]
                     == "claude-sonnet-4-6")
     # Explicitly writing the stock value is a choice too: it carries.
-    cloud = PageIndexCloudClient(api_key="pi-test-key", chat_model="gpt-5.6-sol")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"], chat_model="gpt-5.6-sol")
     assert cloud.claude_agent_config()["model"] == "gpt-5.6-sol"
 
 
@@ -1021,7 +1021,7 @@ def test_anthropic_runner_config_shapes(client):
                for tool in async_tools)
     # The kwargs must construct a real runner (construction is offline —
     # requests start on iteration), pinning tool_runner's parameter names.
-    runner = anthropic.Anthropic(api_key="test").beta.messages.tool_runner(
+    runner = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"]).beta.messages.tool_runner(
         **client.anthropic_runner_config(model="claude-sonnet-4-5"),
         messages=[{"role": "user", "content": "q"}])
     assert runner is not None
@@ -1111,7 +1111,7 @@ def test_cloud_bridge_gates_the_endpoint(monkeypatch):
             return "SERVED"
 
     monkeypatch.setattr("pageindex.mcp_bridge.McpBridge", FakeBridge)
-    cloud = PageIndexCloudClient(api_key="pi-k")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     assert cloud.agent_instructions() == "SERVED"
     assert created == [f"{cloud.BASE_URL}/mcp?tools=read"]
     cloud.agent_instructions(include_management=True)
@@ -1342,7 +1342,7 @@ def cloud_with_fake_bridge(monkeypatch):
         return created["bridge"]
 
     monkeypatch.setattr(mcp_bridge, "McpBridge", factory)
-    return PageIndexCloudClient(api_key="pi-test-key"), created
+    return PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"]), created
 
 
 def test_cloud_agent_tools_discover_live_tool_set(cloud_with_fake_bridge):
@@ -1432,7 +1432,7 @@ def test_cloud_agent_tools_list_failure_raises(monkeypatch):
             raise PageIndexAPIError("Could not connect")
 
     monkeypatch.setattr(mcp_bridge, "McpBridge", _DeadBridge)
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     with pytest.raises(PageIndexAPIError, match="Could not connect"):
         cloud.agent_tools()
 
@@ -1729,7 +1729,7 @@ def test_agent_tools_functions_render_images_as_stubs(monkeypatch):
     """The str-returning surface keeps the size stub, never the blob."""
     import pageindex.mcp_bridge as mcp_bridge
     monkeypatch.setattr(mcp_bridge, "McpBridge", _ImageBridge)
-    fn = PageIndexCloudClient(api_key="pi-test-key").agent_tools()[0]
+    fn = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"]).agent_tools()[0]
     assert fn(image_path="x") == "page 1\n[image/png content omitted: ~1 KB]"
 
 
@@ -1751,7 +1751,7 @@ def test_openai_mcp_server_carries_mcp_types(client, store_path, monkeypatch):
 
     import pageindex.mcp_bridge as mcp_bridge
     monkeypatch.setattr(mcp_bridge, "McpBridge", _ImageBridge)
-    cloud = build_mcp_server(PageIndexCloudClient(api_key="pi-test-key"))
+    cloud = build_mcp_server(PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"]))
     result = asyncio.run(cloud.call_tool("get_document_image", {"image_path": "x"}))
     wire = result.model_dump(by_alias=True, exclude_none=True)
     assert not wire["isError"] and isinstance(result.content[1], ImageContent)
@@ -1765,7 +1765,7 @@ def test_as_openai_tools_images_reach_the_model(monkeypatch):
     pytest.importorskip("agents")
     import pageindex.mcp_bridge as mcp_bridge
     monkeypatch.setattr(mcp_bridge, "McpBridge", _ImageBridge)
-    tool = PageIndexCloudClient(api_key="pi-test-key").as_openai_tools()[0]
+    tool = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"]).as_openai_tools()[0]
     out = asyncio.run(tool.on_invoke_tool(None, '{"image_path": "x"}'))
     assert out == [{"type": "text", "text": "page 1"},
                    {"type": "image", "image_url": "data:image/png;base64,QUJD"}]
@@ -1778,7 +1778,7 @@ def test_as_anthropic_tools_images_reach_the_model(monkeypatch):
     from anthropic.lib.tools import ToolError
     import pageindex.mcp_bridge as mcp_bridge
     monkeypatch.setattr(mcp_bridge, "McpBridge", _ImageBridge)
-    tool = PageIndexCloudClient(api_key="pi-test-key").as_anthropic_tools()[0]
+    tool = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"]).as_anthropic_tools()[0]
     content = [{"type": "text", "text": "page 1"},
                {"type": "image", "source": {"type": "base64",
                                             "media_type": "image/png",
@@ -1977,7 +1977,7 @@ def test_cloud_agent_tools_trust_the_gated_endpoint(monkeypatch):
                      "inputSchema": {"type": "object", "properties": {}}}]
 
     monkeypatch.setattr(mcp_bridge, "McpBridge", _AllWriteBridge)
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     assert len(cloud.agent_tools()) == 1
     assert len(cloud.agent_tools(include_management=True)) == 1
 
@@ -2254,7 +2254,7 @@ def test_hosted_gate_is_the_endpoint():
     """The URL is the gate on hosted mode too — no approval-flow gating,
     the read-only endpoint simply has no write tools."""
     pytest.importorskip("agents")
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     gated = cloud.as_openai_tools(hosted=True)[0].tool_config
     assert gated["server_url"] == "https://api.pageindex.ai/mcp?tools=read"
     assert gated["require_approval"] == "never"
@@ -2562,7 +2562,7 @@ def test_cloud_agent_instructions_served_live(monkeypatch):
             return "LIVE CLOUD GUIDANCE"
 
     monkeypatch.setattr(mcp_bridge, "McpBridge", _Bridge)
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     cloud.agent_tools()
     assert cloud.agent_instructions() == "LIVE CLOUD GUIDANCE"
     assert len(created) == 1
@@ -2589,7 +2589,7 @@ def test_citation_prompt_cloud(monkeypatch):
                 "type": "text", "text": f"CITATIONS — {fmt}"}}]
 
     monkeypatch.setattr(mcp_bridge, "McpBridge", _Bridge)
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     cloud.agent_tools()
     assert cloud.citation_prompt() == "CITATIONS — cite"
     assert cloud.citation_prompt(format="markdown") == "CITATIONS — markdown"
@@ -2610,7 +2610,7 @@ def test_citation_prompt_empty_raises(monkeypatch):
 
     monkeypatch.setattr(mcp_bridge, "McpBridge", _Bridge)
     with pytest.raises(PageIndexAPIError, match="empty cited_answer prompt"):
-        PageIndexCloudClient(api_key="pi-test-key").citation_prompt()
+        PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"]).citation_prompt()
 
 
 def test_citation_prompt_local_frozen_copy(client):
@@ -2694,7 +2694,7 @@ def test_cloud_bridge_cache_threadsafe_and_pickle_clean(monkeypatch):
             return "LIVE"
 
     monkeypatch.setattr(mcp_bridge, "McpBridge", _Bridge)
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     workers = ([threading.Thread(target=cloud.agent_tools) for _ in range(4)]
                + [threading.Thread(target=cloud.agent_instructions)
                   for _ in range(4)])
@@ -2719,7 +2719,7 @@ def test_cloud_bridge_rebuilds_on_credential_change(monkeypatch):
             built.append((url, dict(headers)))
 
     monkeypatch.setattr(mcp_bridge, "McpBridge", _Bridge)
-    cloud = PageIndexCloudClient(api_key="pi-old")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     first = _cloud_bridge(cloud)
     assert _cloud_bridge(cloud) is first  # unchanged credentials: cached
     cloud.api_key = "pi-new"
@@ -2745,7 +2745,7 @@ def test_cloud_agent_instructions_blank_or_nonstring_raises(monkeypatch):
                 return _value
 
         monkeypatch.setattr(mcp_bridge, "McpBridge", _SilentBridge)
-        cloud = PageIndexCloudClient(api_key="pi-test-key")
+        cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
         with pytest.raises(PageIndexAPIError, match="no agent instructions"):
             cloud.agent_instructions()
 
@@ -2763,7 +2763,7 @@ def test_cloud_agent_instructions_empty_raises(monkeypatch):
             return None
 
     monkeypatch.setattr(mcp_bridge, "McpBridge", _SilentBridge)
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     with pytest.raises(PageIndexAPIError, match="no agent instructions"):
         cloud.agent_instructions()
 
@@ -2873,7 +2873,7 @@ def test_submit_wait_reraises_definite_poll_answers(fake_cloud_client,
 def test_document_context_rejects_empty_doc_id():
     """An explicitly empty selection must not silently widen to the whole
     library."""
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
         cloud.document_context([])
 
@@ -3038,7 +3038,7 @@ def test_cloud_tool_list_empty_raises(monkeypatch):
             return []
 
     monkeypatch.setattr(mcp_bridge, "McpBridge", _ToollessBridge)
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     with pytest.raises(PageIndexAPIError, match="no tools"):
         cloud.as_openai_tools()
 
@@ -3080,9 +3080,9 @@ def test_stock_chat_model_never_impersonates_a_choice(store_path):
         assert not PageIndexLocalClient(
             storage_path=store_path, **kwargs)._chat_model_stock
     # chat="local" alone names no model; managed chat has none at all.
-    assert PageIndexClient(api_key="pi-test-key",
+    assert PageIndexClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"],
                            chat="local")._chat_model_stock
-    assert PageIndexCloudClient(api_key="pi-test-key")._chat_model_stock
+    assert PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])._chat_model_stock
     # Assignment is a choice: the flag follows the write paths.
     stock.chat_model = "anthropic/claude-opus-4-1"
     assert not stock._chat_model_stock
@@ -3107,7 +3107,7 @@ def test_config_yaml_chat_model_is_a_choice(store_path, monkeypatch,
     local = PageIndexLocalClient(storage_path=store_path)
     assert not local._chat_model_stock
     assert local.anthropic_runner_config()["model"] == "claude-sonnet-4-6"
-    cloud = PageIndexCloudClient(api_key="pi-test-key", chat="local")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"], chat="local")
     assert not cloud._chat_model_stock
     assert cloud.claude_agent_config()["model"] == "claude-sonnet-4-6"
 
@@ -3281,7 +3281,7 @@ def test_as_openai_tools_transport_failure_escapes_the_run(monkeypatch):
     import pageindex.mcp_bridge as mcp_bridge
     from pageindex.errors import _pageindex_cause
     monkeypatch.setattr(mcp_bridge, "McpBridge", _RateLimitedBridge)
-    tool = PageIndexCloudClient(api_key="pi-test-key").as_openai_tools()[0]
+    tool = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"]).as_openai_tools()[0]
     with pytest.raises(Exception) as info:
         asyncio.run(tool.on_invoke_tool(None, '{"image_path": "x"}'))
     assert _pageindex_cause(info.value).status_code == 429
