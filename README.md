@@ -105,6 +105,20 @@ print(answer)
 
 Configure other models, streaming, multi-document search, citations, and more.
 
+### Chat errors
+
+`PageIndexValidationError` subclasses `PageIndexAPIError` for chat arguments
+rejected by the SDK's local checks, across all three protocols and the answer
+lane. Catch it before `PageIndexAPIError`, with stream iteration inside the
+`try` block. Branch on the exception type, not its message or a missing status.
+
+Provider and tool failures retain their available `status_code` and wrapped
+`__cause__`; provider-side request rejections remain provider errors.
+Validation messages may echo caller input: display them only to users allowed
+to see it. Execution messages, causes, and tracebacks may contain provider or
+document details; keep them in private diagnostics and show a generic failure
+message to other users. Error text is not a stable or redacted API.
+
 ### [Integrate PageIndex with your own agent →](https://docs.pageindex.ai/sdk/agents)
 
 Drop PageIndex tools into the OpenAI Agents SDK, the Claude Agent SDK, or any other framework.

@@ -33,7 +33,7 @@ from typing import Any, Callable, Optional
 
 import requests
 
-from .errors import PageIndexAPIError
+from .errors import PageIndexAPIError, PageIndexValidationError
 from .mcp_bridge import render_prompt_text, render_text
 
 TOOL_RESPONSE_CHAR_LIMIT = 100_000
@@ -1510,8 +1510,14 @@ def _cloud_bridge(client, gated: bool = False):
 def _require_doc_selection(doc_ids) -> None:
     """An empty selection fails loud: washed to None it would mean
     "everything", while the tool-layer allowlist would mean "nothing"."""
-    if doc_ids is not None and not doc_ids:
-        raise PageIndexAPIError(
+    if doc_ids is None:
+        return
+    if not (isinstance(doc_ids, str) or isinstance(doc_ids, list)
+            and all(isinstance(doc_id, str) and doc_id for doc_id in doc_ids)):
+        raise PageIndexValidationError(
+            "doc_id must be a string or a list of non-empty strings.")
+    if not doc_ids:
+        raise PageIndexValidationError(
             "doc_id is empty. Pass one or more document IDs, or omit "
             "doc_id to give the agent the whole library.")
 
@@ -1697,11 +1703,8 @@ def doc_targeting_block(client, doc_id) -> Optional[str]:
     hands it to callers who own the conversation."""
     if doc_id is None:
         return None
-    if not isinstance(doc_id, (str, list)):
-        raise PageIndexAPIError("doc_id must be a string or a list of "
-                                "strings.")
+    _require_doc_selection(doc_id)
     doc_ids = [doc_id] if isinstance(doc_id, str) else list(doc_id)
-    _require_doc_selection(doc_ids)
     details = []
     missing = []
     for one_id in doc_ids:
@@ -1732,22 +1735,24 @@ def doc_targeting_block(client, doc_id) -> Optional[str]:
     )
 
 
+def _require_folder_selection(client, folder_id) -> None:
+    if folder_id is not None and not isinstance(folder_id, str):
+        raise PageIndexValidationError("folder_id must be a string.")
+    if folder_id not in (None, "", "root") and not getattr(client, "api_key", None):
+        raise PageIndexValidationError(
+            "folder_id is cloud-only — folders are not supported in local "
+            "mode. Create the client with an api_key to use folders.")
+
+
 def folder_targeting_block(client, folder_id) -> Optional[str]:
     """The folder_id targeting text, rendered as the cloud's managed chat
     renders its own: the folder's name and metadata and the directive to
     discover its documents there. None for no folder — None, "", and
     "root", the library itself, which the managed chat leaves untargeted.
     A folder proper is cloud-only: local libraries have none."""
-    if folder_id is None:
+    _require_folder_selection(client, folder_id)
+    if folder_id in (None, "", "root"):
         return None
-    if not isinstance(folder_id, str):
-        raise PageIndexAPIError("folder_id must be a string.")
-    if folder_id in ("", "root"):
-        return None
-    if not getattr(client, "api_key", None):
-        raise PageIndexAPIError(
-            "folder_id is cloud-only — folders are not supported in local "
-            "mode. Create the client with an api_key to use folders.")
     folders = client.list_folders().get("folders") or []
     folder = next((f for f in folders if f.get("id") == folder_id), None)
     if folder is None:

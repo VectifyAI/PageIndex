@@ -10,7 +10,7 @@ from typing import (TYPE_CHECKING, Any, Callable, Iterator, Literal, Mapping,
                     Optional, Union, cast, overload)
 
 from .chat_stream import ChatStream
-from .errors import PageIndexAPIError
+from .errors import PageIndexAPIError, PageIndexValidationError
 
 
 _litellm_preload_started = False
@@ -120,7 +120,7 @@ def _claude_wire(model, surface: str) -> "tuple[str, str]":
     no model: refused, so no surface ships model='' or switches a
     transport with no model chosen."""
     if not isinstance(model, str):
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             f"{surface} model must be a str, got {type(model).__name__}.")
     wire = model.removeprefix("litellm/")
     for route in _CLAUDE_ROUTES:
@@ -130,7 +130,7 @@ def _claude_wire(model, surface: str) -> "tuple[str, str]":
     else:
         wire, route = wire.removeprefix("anthropic/"), "anthropic"
     if not wire:
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             f"{surface} model {model!r} names a route but no model id.")
     return wire, route
 
@@ -142,10 +142,10 @@ def _yaml_names_chat(loader) -> bool:
                for key in ("chat_model", "retrieve_model", "model"))
 
 
-def _needs_model(surface: str) -> PageIndexAPIError:
+def _needs_model(surface: str) -> PageIndexValidationError:
     # The stock chat_model default is not the user's choice: never send
     # it on an Anthropic-native surface as if it were one.
-    return PageIndexAPIError(
+    return PageIndexValidationError(
         f"{surface} needs a model — pass a Claude model=..., or "
         "configure chat_model on the client.")
 
@@ -696,11 +696,11 @@ class PageIndexClient:
         if self._local_chat:
             return
         if not getattr(self, "api_key", None):
-            raise PageIndexAPIError(
+            raise PageIndexValidationError(
                 "chat_model is empty — it configures nothing, and a local "
                 "client has no managed chat to fall back to. Set "
                 "chat_model=... to run the agent with your own model.")
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             f"{lane} drives your own chat model — construct the client "
             "with chat_model=... (or a chat= model); the managed cloud chat "
             "serves the answer lane and chat(protocol=\"chat_completions\") "
@@ -1369,14 +1369,14 @@ class PageIndexClient:
         """
         if protocol not in (None, "chat_completions", "responses",
                             "messages"):
-            raise PageIndexAPIError(
+            raise PageIndexValidationError(
                 "protocol selects the wire: \"chat_completions\" (OpenAI Chat "
                 "Completions), \"responses\" (OpenAI Responses) or "
                 "\"messages\" (Anthropic Messages), or leave it unset for "
                 f"the answer lane — got {protocol!r}.")
         if (protocol is not None and show_process is not False
                 and show_process is not None):
-            raise PageIndexAPIError(
+            raise PageIndexValidationError(
                 "show_process weaves the answer lane's run; with "
                 f"protocol={protocol!r} the return is the protocol's own "
                 "envelope and events — drop show_process, or drop "
@@ -1385,19 +1385,24 @@ class PageIndexClient:
             from .local_chat import _process_options
             _process_options(show_process)  # a bad value chokes first
             if not stream:
-                raise PageIndexAPIError(
+                raise PageIndexValidationError(
                     "show_process shows the run as it happens and requires "
                     "stream=True; only show_process=False (or None) means "
                     f"off — got {show_process!r}.")
         if isinstance(instructions, list) and protocol != "messages":
-            raise PageIndexAPIError(
+            raise PageIndexValidationError(
                 "instructions blocks are the Messages protocol's shape — "
                 "with protocol=\"messages\" they append after the managed "
                 "system blocks; the other lanes take a string.")
-        from .local_chat import _refuse_skeleton
+        if instructions is not None and not isinstance(instructions, (str, list)):
+            raise PageIndexValidationError(
+                "instructions must be a string, or a list of system blocks "
+                "with protocol=\"messages\".")
+        from .local_chat import _refuse_skeleton, _validate_model_backend
         _refuse_skeleton(extra_body)
-        if citations and citations is not True:
-            raise PageIndexAPIError(
+        _validate_model_backend(model, backend)
+        if not isinstance(citations, bool):
+            raise PageIndexValidationError(
                 "citations must be True or False — for another format pass "
                 "citation_prompt(format=...) as instructions= (own-model "
                 "chat).")
@@ -1415,29 +1420,24 @@ class PageIndexClient:
                 enable_citations = True
         if protocol in ("responses", "messages"):
             self._require_own_chat(f"chat(protocol={protocol!r})")
+            body = extra_body
+            if reasoning_effort:
+                key = "reasoning" if protocol == "responses" else "output_config"
+                given = extra_body or {}
+                overrides = given.get(key, {})
+                if not isinstance(overrides, Mapping):
+                    raise PageIndexValidationError(
+                        f"extra_body[{key!r}] must be a dict when merging "
+                        "reasoning_effort.")
+                # Caller fields win over the named effort on either wire.
+                body = {**given, key: {"effort": reasoning_effort, **overrides}}
             if protocol == "responses":
-                body = extra_body
-                if reasoning_effort:
-                    # OpenAI's own effort field, beside the caller's other
-                    # reasoning keys — theirs still win.
-                    given = extra_body or {}
-                    body = {**given, "reasoning": {
-                        "effort": reasoning_effort,
-                        **given.get("reasoning", {})}}
                 return self._responses(
                     messages, model=model, stream=stream, doc_id=doc_id,
                     folder_id=folder_id,
                     instructions=cast(Optional[str], instructions),
                     max_turns=max_turns, extra_body=body,
                     extra_headers=extra_headers, backend=backend)
-            body = extra_body
-            if reasoning_effort:
-                # Anthropic's own effort field, beside the caller's other
-                # output_config keys — theirs still win.
-                given = extra_body or {}
-                body = {**given, "output_config": {
-                    "effort": reasoning_effort,
-                    **given.get("output_config", {})}}
             return self._messages(
                 messages, model=model, stream=stream, doc_id=doc_id,
                 folder_id=folder_id,
@@ -1446,14 +1446,15 @@ class PageIndexClient:
         if instructions:
             if isinstance(messages, str):
                 if not messages.strip():
-                    raise PageIndexAPIError(
+                    raise PageIndexValidationError(
                         "messages must be a non-empty string or a list of "
                         "message dicts.")
                 messages = [{"role": "user", "content": messages}]
             # The first system text: managed prompt, then instructions,
             # then the history's own system rows.
+            from .local_chat import _chat_messages
             messages = [{"role": "system", "content": instructions},
-                        *messages]
+                        *_chat_messages(messages)]
         if protocol == "chat_completions":
             return self.chat_completions(
                 messages, stream=stream, stream_metadata=True, doc_id=doc_id,
@@ -1624,12 +1625,18 @@ class PageIndexClient:
         """
         if isinstance(messages, str):
             if not messages.strip():
-                raise PageIndexAPIError(
+                raise PageIndexValidationError(
                     "messages must be a non-empty string or a list of "
                     "message dicts.")
             messages = [{"role": "user", "content": messages}]
-        from .local_chat import _refuse_skeleton
+        from .local_chat import (_chat_messages, _refuse_skeleton,
+                                 _validate_model_backend)
+        messages = _chat_messages(messages)
         _refuse_skeleton(extra_body)
+        _validate_model_backend(model, backend)
+        from .agent_tools import _require_doc_selection, _require_folder_selection
+        _require_doc_selection(doc_id)
+        _require_folder_selection(self, folder_id)
         if self._local_chat:
             from .local_chat import run_chat_completions
             return run_chat_completions(
@@ -1642,14 +1649,14 @@ class PageIndexClient:
                 extra_headers=extra_headers, backend=backend,
             )
         if not getattr(self, "api_key", None):
-            raise PageIndexAPIError(
+            raise PageIndexValidationError(
                 "chat_model is empty — it configures nothing, and a local "
                 "client has no managed chat to fall back to. Set "
                 "chat_model=... to run the agent with your own model.")
         if (model or max_turns is not None or top_p is not None
                 or max_tokens is not None or reasoning_effort
                 or extra_headers or backend):
-            raise PageIndexAPIError(
+            raise PageIndexValidationError(
                 "model, max_turns, top_p, max_tokens, reasoning_effort, "
                 "extra_headers and backend drive your own chat "
                 "model, which this client does not configure — construct "

@@ -7,6 +7,10 @@ class PageIndexAPIError(Exception):
         self.status_code = status_code
 
 
+class PageIndexValidationError(PageIndexAPIError):
+    """A chat request rejected by local validation; messages may echo input."""
+
+
 def _pageindex_cause(exc: BaseException | None) -> PageIndexAPIError | None:
     """The PageIndexAPIError behind a framework's wrapper exception, if any."""
     while exc is not None:
