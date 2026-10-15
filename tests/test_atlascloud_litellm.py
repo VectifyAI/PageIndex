@@ -145,3 +145,20 @@ def test_llm_acompletion_routes_atlascloud_through_litellm(monkeypatch):
         "model": "openai/qwen/qwen3.5-flash",
         "max_retries": 0,
     }]
+
+
+def test_chat_lane_gets_atlascloud_endpoint_and_key(monkeypatch):
+    pytest.importorskip("agents.extensions.models.litellm_model")
+    from pageindex.local_chat import _openai_model
+
+    monkeypatch.setenv("ATLASCLOUD_API_KEY", "test-key")
+    monkeypatch.delenv("ATLASCLOUD_API_BASE", raising=False)
+    model = _openai_model("chat", "atlascloud/qwen/qwen3.5-flash")
+    assert model.model == "openai/qwen/qwen3.5-flash"
+    assert model.base_url == ATLASCLOUD_API_BASE
+    assert model.api_key == "test-key"
+
+    # an explicit chat_backend still wins over the Atlas defaults
+    model = _openai_model("chat", "atlascloud/qwen/qwen3.5-flash",
+                          {"api_key": "mine", "base_url": "http://x/v1"})
+    assert (model.api_key, model.base_url) == ("mine", "http://x/v1")

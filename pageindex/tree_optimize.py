@@ -11,7 +11,7 @@ expand() - for a collapsed node, one-step lookahead, children treated as collaps
 
     trigger:       S(v) > TRIGGER_PAGES        (cost control on generation, not the rule)
     collapse_cost = S(v)
-    expand_cost   = R(v) + max(S_residual(v), max_i S(c_i))
+    expand_cost   = R(v) + max_i S(c_i)    the c_i include the intro attach_children adds
     expand iff     expand_cost < collapse_cost                  (ties keep collapsed)
     expand_gain   = collapse_cost - expand_cost
 
@@ -36,7 +36,8 @@ When a subtree is merged away, the removed titles are kept on the parent as
 `key_items`: the pages stay reachable by scanning the parent, but the titles
 are routing information that would otherwise be lost.
 
-merge_same_page() runs first, as a special case of the same idea. Retrieval is
+merge_same_page() runs at every seam of optimize() where same-page duplicates can
+appear, as a special case of the same idea. Retrieval is
 page-granular, so frontier siblings covering identical pages cannot be told apart:
 an agent routed to any of them reads the same text, and because the leaf summary
 prompt sees only that text, their summaries come back near-identical. They collapse
@@ -59,16 +60,20 @@ import json
 import os
 import re
 import sys
+import unicodedata
 from types import SimpleNamespace
 
-from .utils import (ConfigLoader, _is_unrecoverable, llm_acompletion,
-                    strip_internal_keys)
+from .utils import (SUMMARY_MAX_WORDS, ConfigLoader, _is_unrecoverable, count_tokens,
+                    intro_title, is_intro, llm_acompletion, strip_internal_keys)
 
 TRIGGER_PAGES = 5        # only look ahead on nodes larger than this
 ROUTING_COST = 1         # R(v), in pages
 EXPAND_CONCURRENCY = 32  # measured plateau: the ready frontier is 21-28 wide on few-hundred-page PDFs
 PAGE_CHARS = 6000        # per-page text handed to the model
 TITLE_MAX_CHARS = 200    # a union title longer than this falls back to a page label
+EMPTY_RETRIES = 0
+ENTRY_TOKENS = 45        # a node's structure entry less its summary: title, id, pages
+TOKENS_PER_WORD = 1.3
 
 EXPAND_PROMPT = """You are splitting an over-long section of a PDF into its subsections.
 
@@ -100,8 +105,25 @@ def note(enabled, message):
     if enabled:
         print(message, file=sys.stderr, flush=True)
 
+HAN_KANA = "\u3005-\u3007\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"
+HAN_SPACE = f" (?=[{HAN_KANA}])|(?<=[{HAN_KANA}]) "
+
+
 def normalize(text):
-    return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
+    """Letters, digits and marks of any script, casefolded; other runs become one
+    space, and none stays between two Han or kana characters: those scripts put no
+    space between words, so one there is layout (letter spacing, a wrapped line)."""
+    text = unicodedata.normalize("NFKC", text or "").casefold()
+    text = " ".join("".join(c if unicodedata.category(c)[0] in "LMN" else " "
+                            for c in text).split())
+    return re.sub(f"(?<=[{HAN_KANA}]) (?=[{HAN_KANA}])", "", text)
+
+
+def heading_key(text):
+    """normalize, less any space beside a Han or kana character: extraction spaces
+    digits and Latin off Han ("2019 年度") where a title may not, or the reverse.
+    Expand compares headings by this key."""
+    return re.sub(HAN_SPACE, "", normalize(text))
 
 
 def flatten(nodes, parent=None):
@@ -131,21 +153,11 @@ async def ask_model(model, prompt):
 
 
 def load_pages(pdf_path):
-    """Per-page text, and per-page lines ordered top to bottom."""
-    import pymupdf
-    doc = pymupdf.open(pdf_path)
-    text, lines = [], []
-    for page in doc:
-        text.append(page.get_text())
-        ordered = []
-        for block in page.get_text("dict")["blocks"]:
-            for line in block.get("lines", []):
-                content = "".join(s["text"] for s in line["spans"]).strip()
-                if content:
-                    ordered.append((line["bbox"][1], content))
-        ordered.sort()
-        lines.append([c for _, c in ordered])
-    return text, lines
+    """Per-page text, and per-page lines in reading order, as flash reads them."""
+    from .flash.api import _page_lines
+    from .flash.main import extract_toc
+    text = extract_toc(pdf_path, use_embedded_toc=False)["page_texts"]
+    return text, _page_lines(text)
 
 
 # --------------------------------------------------------------------------
@@ -170,11 +182,15 @@ def is_frontier(node):
 
 
 def heading_at_page_start(lines, page_no, heading):
-    """Is the heading the first line on its page?"""
+    """Is the heading the first line on its page? No when that cannot be told
+    (a heading with no Latin letter to match, or a first line that a later line
+    repeats, as a running header does), so the page is shared."""
     page = lines[page_no - 1]
-    if not page:
+    key = normalize(heading)
+    if not page or not re.search("[a-z]", key):
         return False
-    return normalize(heading) in normalize(page[0])
+    starts = [(normalize(line) + " ").startswith(key + " ") for line in page]
+    return starts[0] and not any(starts[1:])
 
 
 def assign_ends(node, children, lines):
@@ -201,7 +217,28 @@ def attach_children(node, children, lines):
     # so gaining children leaves it unchanged
     sized = assign_ends(node, children, lines)
     node["nodes"] = sized
+    add_intro_nodes([node], lines)
+    if len(node["nodes"]) > len(sized):  # an intro went in; numbered like the proposals
+        node["nodes"][0]["node_id"] = f"{node['node_id']}.0"
     return sized
+
+
+def add_intro_nodes(structure, lines=None):
+    """Give every parent whose first child starts on a later page an intro child
+    for the pages before it, titled "<parent title> (intro)". It ends where the
+    parent's own pages do, and no later than the first child's page, the page
+    before it when that child's heading opens its page."""
+    for node, _ in list(flatten(structure)):
+        children = node.get("nodes") or []
+        first = children[0]["start_index"] if children else None
+        if first is None or first <= node["start_index"]:
+            continue
+        opens = bool(lines) and first <= len(lines) and heading_at_page_start(
+            lines, first, children[0]["title"])
+        end = max(node["start_index"], min(node["end_index"], first - 1 if opens else first))
+        node["nodes"] = [{"title": intro_title(node.get("title")),
+                          "start_index": node["start_index"], "end_index": end}] + children
+    return structure
 
 
 def relabel(structure, width=4):
@@ -280,14 +317,28 @@ def tree_cost_via_frontier(node, routing=ROUTING_COST):
     return max(d * routing + s for d, s, _ in entries) if entries else 0
 
 
-def expand_cost(node, children, routing=ROUTING_COST):
-    """Cost after one-step lookahead, children treated as collapsed."""
-    covered = set()
-    for child in children:
-        covered |= set(range(child["start_index"], child["end_index"] + 1))
-    residual = len(pages_of(node) - covered)
-    scans = [child["end_index"] - child["start_index"] + 1 for child in children]
-    return routing + max([residual] + scans), residual
+def expand_cost(node, children, lines, routing=ROUTING_COST):
+    """Cost after one-step lookahead, children treated as collapsed, priced with
+    the intro node attach_children would give them."""
+    trial = dict(node, nodes=children)
+    residual = S_residual(trial)
+    add_intro_nodes([trial], lines)
+    return tree_cost(trial, routing), residual
+
+
+def expand_read_tokens(node, children, lines, page_tokens, summary_words):
+    """Tokens read to reach any page of the node: its whole text while it
+    stays collapsed, else every child's structure entry plus the largest
+    child's text. A child's summary is its text when that is shorter."""
+    trial = dict(node, nodes=children)
+    add_intro_nodes([trial], lines)
+
+    def text(n):
+        return sum(page_tokens[n["start_index"] - 1:subtree_end(n)])
+    summary = TOKENS_PER_WORD * summary_words
+    kids = trial["nodes"]
+    entries = sum(ENTRY_TOKENS + min(text(c), summary) for c in kids)
+    return text(node), entries + max(text(c) for c in kids)
 
 
 # --------------------------------------------------------------------------
@@ -491,9 +542,10 @@ def union_title(titles, node):
 def merge_same_page(structure, log):
     """Collapse frontier siblings that cover exactly the same pages.
 
-    Deterministic and free. Runs before merge() because a narrower tree changes
-    its ancestors' tree_cost, and before expand() because children an expand pass
-    lands on one page are the same redundancy arriving later.
+    Deterministic and free. Runs at every optimize() seam where the redundancy can appear:
+    before merge() because a narrower tree changes its ancestors' tree_cost,
+    again after it because a collapsed subtree can land on a sibling's exact
+    pages, and on a node's children right after expand attaches them.
     """
     changed = False
 
@@ -556,8 +608,9 @@ def merge(structure, routing, log, frozen, progress=False):
             # titles are routing information; keep them on the parent, in document
             # order, carrying forward anything an earlier merge already folded in
             titles = []
-            for child, _ in flatten(node["nodes"]):
-                titles.append(child["title"])
+            for child, parent in flatten(node["nodes"]):
+                if not is_intro(parent or node, child):  # its parent's heading again
+                    titles.append(child["title"])
                 titles.extend(child.get("key_items") or [])
             log.append({"op": "merge", "node_id": node.get("node_id"),
                         "S": span, "tree_cost": cost, "frontier_cost": checked,
@@ -615,7 +668,7 @@ def children_from_cache(node, cache, kinds):
         for heading in cache.get(page) or []:
             if kinds and heading.get("kind") not in kinds:
                 continue
-            if normalize(heading["title"]) == normalize(node["title"]):
+            if heading_key(heading["title"]) == heading_key(node["title"]):
                 continue
             out.append({"title": heading["title"], "start_index": page, "end_index": end,
                         "node_id": f"{node['node_id']}.{len(out) + 1}"})
@@ -638,16 +691,78 @@ async def propose_children(node, pages, args):
         title, page = (item or {}).get("title"), (item or {}).get("page")
         if not isinstance(page, int) or not start <= page <= end or not title:
             continue
-        if normalize(title) not in normalize(pages[page - 1]):
+        key = heading_key(title)
+        if key not in heading_key(pages[page - 1]):
             continue                     # the heading must be printed on that page
-        if normalize(title) in seen or normalize(title) == normalize(node["title"]):
+        if key in seen or key == heading_key(node["title"]):
             continue
         if accepted and page < accepted[-1]["start_index"]:
             continue
-        seen.add(normalize(title))
+        seen.add(key)
         accepted.append({"title": title.strip(), "start_index": page, "end_index": end,
                          "node_id": f"{node['node_id']}.{len(accepted) + 1}"})
     return accepted
+
+
+def same_heading(a, b):
+    """Whether two titles name one heading: equal by heading_key, or equal but
+    for a leading number only one of them prints. A title with no letter is its
+    number alone, so it never matches by that second rule."""
+    a, b = normalize(a), normalize(b)
+    bare_a, bare_b = (re.sub(r"^(?:[0-9]+ )+", "", t) for t in (a, b))
+    a, b, bare_a, bare_b = (re.sub(HAN_SPACE, "", t) for t in (a, b, bare_a, bare_b))
+    return bool(a) and (a == b or (bare_a == bare_b and bool(re.search(r"[^\W\d_]", bare_a))
+                                   and (a == bare_a or b == bare_b)))
+
+
+def headings(node):
+    """The headings printed for a node. A same-page fusion keeps them in its
+    key_items: the summary pass may rewrite the fused title while expand runs."""
+    return node["key_items"] if node.get("_same_page") else [node["title"]]
+
+
+def own_children(node, children, lines, known, ancestors, nxt):
+    """The proposed children printed inside the node's own text.
+
+    Dropped: a heading that already is a node, in the tree as expand found it
+    (`known`, page -> headings) or made by the node's own ancestors; and on a
+    page the node shares, anything printed above its heading (else above the
+    nearest ancestor heading found there) or at and below the next node's (else
+    its first descendant's found there). Other branches grow concurrently, so
+    nothing they add is read. A heading not found on its page decides nothing.
+    """
+    start, end = node["start_index"], subtree_end(node)
+    lineage = [n for a in ancestors for n in [a] + a["nodes"]]
+    after = []
+    while nxt is not None and nxt["start_index"] == end:
+        after.append(nxt)
+        nxt = (nxt.get("nodes") or [None])[0]
+
+    def found(page, matches):
+        page_lines = lines[page - 1] if page <= len(lines) else []
+        return [i for i, line in enumerate(page_lines) if matches(line)]
+
+    def is_node(page, title):
+        titles = known.get(page, []) + [t for n in lineage if n["start_index"] == page
+                                        for t in headings(n)]
+        return any(same_heading(title, t) for t in titles)
+
+    tops = (found(start, lambda line: any(same_heading(line, t) for t in headings(n)))
+            for n in [node] + ancestors if n["start_index"] == start)
+    top = next((hits for hits in tops if hits), [])
+    bottoms = (found(end, lambda line: any(same_heading(line, t) for t in headings(n)))
+               for n in after)
+    bottom = next((hits for hits in bottoms if hits), [])
+    kept = []
+    for child in children:
+        page, key = child["start_index"], heading_key(child["title"])
+        printed = found(page, lambda line: key in heading_key(line)) if key else []
+        if (is_node(page, child["title"])
+                or page == start and top and printed and printed[-1] < top[0]
+                or page == end and bottom and printed and printed[0] >= bottom[-1]):
+            continue
+        kept.append(child)
+    return kept
 
 
 async def expand(structure, pages, lines, args, log, frozen):
@@ -659,9 +774,9 @@ async def expand(structure, pages, lines, args, log, frozen):
     priced with expand_cost and the cheapest is kept.
     """
     changed = False
-    semaphore = asyncio.Semaphore(EXPAND_CONCURRENCY)
+    semaphore = asyncio.Semaphore(args.concurrency)
 
-    async def proposals_for(node):
+    async def proposals_for(node, own):
         """The model half of one node's lookahead: the empty-retry ladder and
         absorbed errors run inside the task; log entries come back so a
         node's entries stay contiguous under concurrency."""
@@ -678,12 +793,13 @@ async def expand(structure, pages, lines, args, log, frozen):
                                 "decision": "error", "attempt": attempts,
                                 "detail": f"{type(exc).__name__}: {exc}"})
                 continue
+            proposed = own(proposed)
             if proposed:
                 llm_candidates.append((f"llm:{attempts}", proposed))
-                break                    # an empty answer is retried, not trusted
+                break
         return llm_candidates, attempts, entries
 
-    async def process(node):
+    async def process(node, ancestors, nxt):
         nonlocal changed
         if not is_frontier(node) or node.get("node_id") in frozen:
             return
@@ -692,10 +808,13 @@ async def expand(structure, pages, lines, args, log, frozen):
             return                       # below the trigger, stay collapsed
         note(args.progress, f"    expand {node.get('node_id'):>8}  S={span}  "
                             f"pages {node['start_index']}-{subtree_end(node)} ...")
-        llm_candidates, attempts, entries = await proposals_for(node)
+
+        def own(children):
+            return own_children(node, children, lines, known, ancestors, nxt)
+        llm_candidates, attempts, entries = await proposals_for(node, own)
         log.extend(entries)
         candidates = []
-        cached = children_from_cache(node, args.cache, args.kinds)
+        cached = own(children_from_cache(node, args.cache, args.kinds))
         if cached:
             candidates.append(("cache", cached))
         candidates.extend(llm_candidates)
@@ -705,12 +824,13 @@ async def expand(structure, pages, lines, args, log, frozen):
             log.append({"op": "expand", "node_id": node.get("node_id"),
                         "decision": "no_children", "S": span, "attempts": attempts})
             frozen.add(node.get("node_id"))
+            args.settled([node])
             return
 
         scored = []
         for source, children in candidates:
             sized = assign_ends(node, children, lines)
-            cost, residual = expand_cost(node, sized, args.routing)
+            cost, residual = expand_cost(node, sized, lines, args.routing)
             scored.append({"source": source, "children": sized,
                            "expand_cost": cost, "S_residual": residual})
         scored.sort(key=lambda s: s["expand_cost"])
@@ -719,7 +839,11 @@ async def expand(structure, pages, lines, args, log, frozen):
         cost = best["expand_cost"]
         gain = span - cost
         ratio = gain / span if span else 0.0
-        keep = cost < span and ratio >= args.min_gain_ratio
+        read_before, read_after = expand_read_tokens(node, best["children"], lines,
+                                                     args.page_tokens, args.summary_words)
+        # strict: at cost == span the next round's merge (span <= cost) would
+        # fold the node right back, touching children already marked final
+        keep = cost < span and ratio >= args.min_gain_ratio and read_after < read_before
 
         note(args.progress,
              f"           -> {len(best['children'])} children from {best['source']}, "
@@ -729,6 +853,7 @@ async def expand(structure, pages, lines, args, log, frozen):
                     "decision": "expand" if keep else "keep_collapsed",
                     "S": span, "expand_cost": cost, "expand_gain": gain,
                     "gain_ratio": round(ratio, 3), "S_residual": best["S_residual"],
+                    "read_before": read_before, "read_after": round(read_after),
                     "source": best["source"],
                     "considered": [{"source": s["source"], "children": len(s["children"]),
                                     "expand_cost": s["expand_cost"]} for s in scored],
@@ -739,18 +864,33 @@ async def expand(structure, pages, lines, args, log, frozen):
                                  for c in best["children"]]})
 
         frozen.add(node.get("node_id"))
-        if keep:
-            changed = True
-            attach_children(node, best["children"], lines)
-            results = await asyncio.gather(*(process(child)
-                                             for child in node["nodes"]),
-                                           return_exceptions=True)
-            for result in results:
-                if isinstance(result, BaseException):
-                    raise result
+        if not keep:
+            args.settled([node])
+            return
+        changed = True
+        attach_children(node, best["children"], lines)
+        if args.do_merge:
+            merge_same_page([node], log)
+        # settle after the fusion: mark_final snapshots the children, finish() rejects a later change
+        args.settled([node])
+        children = node["nodes"]
+        results = await asyncio.gather(*(process(child, [node] + ancestors, after)
+                                         for child, after in zip(children, children[1:] + [nxt])),
+                                       return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
 
-    results = await asyncio.gather(*(process(node)
-                                     for node, _ in flatten(structure)),
+    # the tree as it stands now: expand only ever adds below a leaf it is
+    # processing, so the nodes around another leaf never change under it
+    flat = list(flatten(structure))
+    known, ancestry = {}, {}
+    for node, parent in flat:
+        known.setdefault(node["start_index"], []).extend(headings(node))
+        ancestry[id(node)] = [parent] + ancestry[id(parent)] if parent else []
+    results = await asyncio.gather(*(process(node, ancestry[id(node)], after)
+                                     for (node, _), after in
+                                     zip(flat, [n for n, _ in flat[1:]] + [None])),
                                    return_exceptions=True)
     for result in results:
         if isinstance(result, BaseException):
@@ -768,11 +908,20 @@ def default_model():
     return getattr(opt, "summary_model", None) or opt.model
 
 
+def final_nodes(nodes, trigger, frozen):
+    """Nodes whose children will not change any more: everything but a
+    collapsed node over the trigger that expand has not judged yet."""
+    return [node for node, _ in flatten(nodes)
+            if not is_frontier(node) or S(node) <= trigger
+            or node.get("node_id") in frozen]
+
+
 async def optimize(structure, pages, lines, model=None, routing=ROUTING_COST,
                    trigger_pages=TRIGGER_PAGES, min_gain_ratio=0.0,
                    do_merge=True, do_expand=True, max_rounds=3, page_count=None,
-                   cache=None, kinds=("section", "table"), empty_retries=1,
-                   do_relabel=True, progress=False):
+                   cache=None, kinds=("section", "table"), empty_retries=EMPTY_RETRIES,
+                   do_relabel=True, progress=False, on_final=None,
+                   concurrency=None, summary_words=SUMMARY_MAX_WORDS):
     """Run merge and expand over a tree until neither changes anything.
 
     Mutates `structure` in place and returns a summary.
@@ -782,30 +931,57 @@ async def optimize(structure, pages, lines, model=None, routing=ROUTING_COST,
     ancestors' tree_cost. Nodes decided by either operator are frozen for the rest
     of the run, so a node cannot be collapsed and re-expanded in alternating
     rounds.
+
+    `on_final(nodes)` hears, as the run goes, which nodes will not change any
+    more (see final_nodes): after each round's merges, as expand decides each
+    candidate, and for the whole tree at the end.
+
+    `summary_words` is the summary length the tree's nodes will carry (0 for
+    none); expand prices each child's structure entry with it.
     """
     if do_expand and pages is None:
         raise ValueError("expand needs the PDF pages; pass pages/lines or do_expand=False")
+    log, frozen = [], set()
+
+    def settled(nodes):
+        if on_final is not None:
+            on_final(final_nodes(nodes, trigger_pages, frozen))
     opts = SimpleNamespace(model=model or default_model(), routing=routing,
                            trigger_pages=trigger_pages,
                            min_gain_ratio=min_gain_ratio, cache=cache,
                            kinds=set(kinds) if kinds else None,
-                           empty_retries=empty_retries, progress=progress)
+                           empty_retries=empty_retries, progress=progress,
+                           settled=settled, do_merge=do_merge,
+                           concurrency=min(EXPAND_CONCURRENCY,
+                                           concurrency or EXPAND_CONCURRENCY),
+                           page_tokens=[count_tokens(p) for p in pages] if do_expand else [],
+                           summary_words=summary_words)
     baseline = set(validate(structure, page_count)) if page_count else set()
     before = complexity(structure, page_count, routing=routing) if page_count else {}
 
-    log, frozen = [], set()
     rounds = 0
     for round_no in range(1, max_rounds + 1):
         rounds = round_no
         note(progress, f"  round {round_no}")
-        same_page = merge_same_page(structure, log) if do_merge else False
+        round_start = len(log)
+        if do_merge:
+            merge_same_page(structure, log)
         merged = merge(structure, routing, log, frozen, progress) if do_merge else False
+        if merged:
+            # a collapsed subtree can land on a sibling's exact pages
+            merge_same_page(structure, log)
+        settled(structure)
         expanded = await expand(structure, pages, lines, opts, log, frozen) \
             if do_expand else False
+        # derived from this round's log slice, so the flag counts the fusions
+        # inside expand too and cannot disagree with the run counters
+        same_page = any(e["op"] == "merge_same_page" for e in log[round_start:])
         log.append({"op": "round", "round": round_no, "same_page": same_page,
                     "merged": merged, "expanded": expanded})
         if not (same_page or merged or expanded):
             break
+    if on_final is not None:
+        on_final([node for node, _ in flatten(structure)])
 
     id_map = relabel(structure) if do_relabel else {}
     after = complexity(structure, page_count, routing=routing) if page_count else {}
@@ -877,7 +1053,7 @@ async def main():
                         help="per-page detection cache used as an extra candidate source")
     parser.add_argument("--kinds", default="section,table",
                         help="heading kinds accepted from the cache (default section,table)")
-    parser.add_argument("--empty-retries", type=int, default=1,
+    parser.add_argument("--empty-retries", type=int, default=EMPTY_RETRIES,
                         help="extra lookahead attempts when the model returns no children")
     parser.add_argument("--no-relabel", dest="relabel", action="store_false",
                         help="keep provenance ids like 0266.1 instead of renumbering")

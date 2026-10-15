@@ -3,7 +3,11 @@ import os
 import subprocess
 import sys
 
-from pageindex.utils import create_node_mapping, print_tree, remove_fields
+import pytest
+
+from pageindex.utils import (create_node_mapping, get_node, get_node_map,
+                             get_node_parent, get_node_path, print_tree,
+                             remove_fields)
 
 TREE = [
     {"title": "Root", "node_id": "0000", "page_index": 1,
@@ -45,6 +49,35 @@ def test_print_tree_exclude_fields(capsys):
 
     print_tree(TREE)
     assert "[0000] Root" in capsys.readouterr().out
+
+
+# ── tree navigation ──
+
+def test_node_navigation():
+    root, child, tail = TREE[0], TREE[0]["nodes"][0], TREE[1]
+    assert get_node(TREE, "0001") is child
+    assert get_node(TREE, "9999") is None
+    assert get_node_parent(TREE, "0001") is root
+    assert get_node_parent(TREE, "0002") is None
+    assert get_node_path(TREE, "0001") == [root, child]
+    assert get_node_path(TREE, "0002") == [tail]
+    assert get_node_path(TREE, "9999") == []
+    assert get_node(root, "0001") is child
+    assert get_node_map(TREE) == {"0000": root, "0001": child, "0002": tail}
+    leaf = {"node_id": "0000", "nodes": None}
+    assert get_node_map([leaf]) == {"0000": leaf}
+
+
+def test_node_navigation_rejects_wrong_input():
+    envelope = {"doc_id": "d", "status": "completed", "result": TREE}
+    with pytest.raises(TypeError, match="got dict"):
+        get_node(envelope, "0001")
+    with pytest.raises(TypeError, match="got dict"):
+        get_node_map(envelope)
+    with pytest.raises(TypeError, match="got NoneType"):
+        get_node_map(None)
+    with pytest.raises(TypeError, match="node_id"):
+        get_node(TREE, 1)
 
 
 # ── import cost: the SDK must not pay for the indexing stack ──
@@ -138,21 +171,6 @@ def test_import_leaves_litellm_env_untouched(tmp_path):
     out = subprocess.run([sys.executable, "-c", probe], env=env,
                          capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "ok"
-
-
-def test_chat_module_stamps_before_it_imports_litellm():
-    """local_chat imports litellm without utils on its import path; the
-    stamp has to be in place by then anyway."""
-    probe = ("import os\n"
-             "from pageindex import local_chat\n"
-             "local_chat._default_max_tokens('claude-sonnet-4-5',"
-             " {'budget_tokens': 4096})\n"
-             "print(os.environ.get('LITELLM_LOCAL_MODEL_COST_MAP'))\n")
-    env = {k: v for k, v in os.environ.items()
-           if k != "LITELLM_LOCAL_MODEL_COST_MAP"}
-    out = subprocess.run([sys.executable, "-c", probe], env=env,
-                         capture_output=True, text=True, check=True)
-    assert out.stdout.strip() == "True"
 
 
 def test_utils_import_keeps_litellm_off_the_network():

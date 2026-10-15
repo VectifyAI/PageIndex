@@ -260,8 +260,8 @@ def _apply_bidi_reordering(text: str, start_level: int = -1, vertical: bool = Fa
 
 
 def _rtl_sign(char: str) -> int:
-    """+1 for LTR runs, -1 for a strong right-to-left char (bidi class R/AL, e.g. Hebrew/Arabic). PDFium reports RTL text in logical order with decreasing char origins, so the LTR ``advance = ox - prev_text_x`` model (prev_text_x = ox+glyph_w, a right edge) yields a large negative advance. For RTL chunks the x-axis is signed with ``sign*ox`` so the reading-direction advance is positive and the existing LTR merge logic applies unchanged."""
-    return -1 if unicodedata.bidirectional(char) in ("R", "AL") else 1
+    """+1 for LTR runs, -1 for a strong right-to-left char (bidi class R/AL, e.g. Hebrew/Arabic). PDFium reports RTL text in logical order with decreasing char origins, so the LTR ``advance = ox - prev_text_x`` model (prev_text_x = ox+glyph_w, a right edge) yields a large negative advance. For RTL chunks the x-axis is signed with ``sign*ox`` so the reading-direction advance is positive and the existing LTR merge logic applies unchanged. A multi-code-point value (a ligature, a Devanagari conjunct, a Thai cluster) takes the class of its first code point, like ``_reverse_if_rtl``."""
+    return -1 if char and unicodedata.bidirectional(char[0]) in ("R", "AL") else 1
 
 
 def _reverse_if_rtl(chars: str) -> str:
@@ -275,8 +275,10 @@ def _reverse_if_rtl(chars: str) -> str:
 
 
 def _read_end(mapping: dict, sign: int) -> float:
-    """The reading-direction FAR edge of a glyph (the edge facing the next char). PDFium reports the origin (ox) as the glyph's LEFT edge in both directions; the glyph extends RIGHT by glyph_w. So: * LTR (reading right): far edge = right edge = max(ox+glyph_w, ink right). * RTL (reading left): far edge = LEFT edge = ox (the origin itself). The next char's gap is then measured to its NEAR edge -- ox for LTR, ox+glyph_w for RTL -- in ``_read_gap`` below. (Earlier this added glyph_w on the RTL side too, which used the PREVIOUS glyph's width and injected spurious spaces.)"""
+    """The reading-direction FAR edge of a glyph (the edge facing the next char). PDFium reports the origin (ox) as the glyph's LEFT edge in both directions; the glyph extends RIGHT by glyph_w. So: * LTR (reading right): far edge = the pen end the font's width for the char's code gives (code_end), else right edge = max(ox+glyph_w, ink right): glyph_w is looked up by unicode and can land on another glyph's width. * RTL (reading left): far edge = LEFT edge = ox (the origin itself). The next char's gap is then measured to its NEAR edge -- ox for LTR, ox+glyph_w for RTL -- in ``_read_gap`` below. (Earlier this added glyph_w on the RTL side too, which used the PREVIOUS glyph's width and injected spurious spaces.)"""
     if sign > 0:
+        if "code_end" in mapping:
+            return mapping["code_end"]
         return max(mapping["ox"] + mapping["glyph_w"], mapping["right"])
     return mapping["ox"]
 

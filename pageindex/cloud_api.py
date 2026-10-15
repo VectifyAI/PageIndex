@@ -1,10 +1,12 @@
 """Cloud mode of the PageIndex SDK, based on the 0.2.8 client."""
 import requests
+from pathlib import Path
 from typing import Optional, Dict, Any, List, Union, Iterator
 import json
 import urllib.parse
 
 from .errors import PageIndexAPIError
+from .naming import sanitize_filename, validate_folder_name
 
 
 def _enc(value: str) -> str:
@@ -73,7 +75,7 @@ class CloudAPI:
             response = requests.post(
                 f"{self.BASE_URL}/doc/",
                 headers=self._headers(),
-                files={'file': f},
+                files={'file': (sanitize_filename(Path(file_path).name), f)},
                 data=data
             )
 
@@ -109,6 +111,83 @@ class CloudAPI:
                 f"Failed to get OCR result: {response.text}",
                 status_code=response.status_code)
         return response.json()
+
+    def get_block(self, doc_id: str, block_id: str) -> Dict[str, Any]:
+        """
+        Get one layout block of a document by the block_id its page content
+        and block-level citations carry.
+
+        Args:
+            doc_id (str): Document ID.
+            block_id (str): Block ID, e.g. "p3_text_5".
+
+        Returns:
+            dict: The block as the API returns it: {'doc_id', 'page',
+                'block_id', 'bbox', 'block_type', ...}. bbox is
+                [x0, y0, x1, y1] in thousandths of the page's width and
+                height (0-1000), origin top-left. A 404 means the
+                document has no such block.
+        """
+        response = requests.get(
+            f"{self.BASE_URL}/doc/{_enc(doc_id)}/block/{_enc(block_id)}/",
+            headers=self._headers(),
+            timeout=30
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to get block: {response.text}",
+                status_code=response.status_code)
+        return response.json()
+
+    def get_page_image(self, doc_id: str, page: int) -> str:
+        """Presigned URL for a rendered page image.
+
+        Args:
+            doc_id (str): Document ID.
+            page (int): 1-based page number.
+
+        Returns:
+            str: A presigned URL to the page image (JPEG).
+        """
+        response = requests.get(
+            f"{self.BASE_URL}/doc/s3/{_enc(doc_id)}/images",
+            headers=self._headers(),
+            params={"start": page, "end": page},
+            timeout=30
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to get page image: {response.text}",
+                status_code=response.status_code)
+        for img in response.json().get("images") or []:
+            if img.get("page") == page and img.get("url"):
+                return img["url"]
+        raise PageIndexAPIError(f"No image URL returned for page {page}.")
+
+    def get_document_image(self, doc_id: str, img_id: str) -> str:
+        """Presigned URL for an embedded image extracted during OCR.
+
+        Args:
+            doc_id (str): Document ID.
+            img_id (str): Image ID as page content carries it,
+                e.g. ``"img-7.jpeg"``.
+
+        Returns:
+            str: A presigned URL to the image.
+        """
+        response = requests.get(
+            f"{self.BASE_URL}/doc/{_enc(doc_id)}/image/{_enc(img_id)}/",
+            headers=self._headers(),
+            timeout=30
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to get document image: {response.text}",
+                status_code=response.status_code)
+        url = response.json().get("url")
+        if not url:
+            raise PageIndexAPIError(f"No image URL returned for {img_id!r}.")
+        return url
 
     # ---------- TREE GENERATION ----------
 
@@ -197,7 +276,9 @@ class CloudAPI:
         doc_id: Optional[Union[str, List[str]]] = None,
         temperature: Optional[float] = None,
         stream_metadata: bool = False,
-        enable_citations: bool = False
+        enable_citations: bool = False,
+        extra_body: Optional[Dict[str, Any]] = None,
+        folder_id: Optional[str] = None,
     ) -> Union[Dict[str, Any], Iterator[str], Iterator[Dict[str, Any]]]:
         """
         PageIndex Chat Completions. Optionally scoped to specific PageIndex documents.
@@ -209,6 +290,8 @@ class CloudAPI:
             temperature (Optional[float], optional): Sampling temperature. Default is None (uses API default).
             stream_metadata (bool, optional): If True and stream=True, return raw chunks with metadata instead of just text. Default is False.
             enable_citations (bool, optional): Enable citation instructions in responses. Default is False.
+            extra_body (Optional[Dict[str, Any]], optional): Extra request fields, merged into the payload last.
+            folder_id (Optional[str], optional): Folder ID to steer discovery toward one folder; "root" means the whole library.
 
         Returns:
             Union[Dict[str, Any], Iterator[str], Iterator[Dict[str, Any]]]:
@@ -224,11 +307,16 @@ class CloudAPI:
         if doc_id is not None:
             payload["doc_id"] = doc_id
 
+        if folder_id:
+            payload["folder_id"] = folder_id
+
         if temperature is not None:
             payload["temperature"] = temperature
 
         if enable_citations:
             payload["enable_citations"] = enable_citations
+
+        payload.update(extra_body or {})
 
         response = requests.post(
             f"{self.BASE_URL}/chat/completions/",
@@ -312,7 +400,7 @@ class CloudAPI:
 
     def get_document(self, doc_id: str) -> Dict[str, Any]:
         """
-        Get document metadata including id, name, description, status, createdAt, and pageNum.
+        Get document metadata.
 
         Args:
             doc_id (str): Document ID.
@@ -325,6 +413,8 @@ class CloudAPI:
                 - status (str): Processing status (e.g., "queued", "processing", "completed", "failed")
                 - createdAt (str): Creation timestamp in ISO format
                 - pageNum (int): Number of pages in the document
+                - folderId (str | None): Containing folder ID
+                - metadata (dict | None): Your own tags from submit_document
         """
         response = requests.get(
             f"{self.BASE_URL}/doc/{_enc(doc_id)}/metadata/",
@@ -358,15 +448,17 @@ class CloudAPI:
                 status_code=response.status_code)
         return response.json() if response.content else {}
 
-    def list_documents(self, limit: int = 50, offset: int = 0, folder_id: Optional[str] = None) -> Dict[str, Any]:
+    def list_documents(self, limit: int = 50, offset: int = 0, folder_id: Optional[str] = None, name: Optional[str] = None, recursive: bool = False) -> Dict[str, Any]:
         """
         List all documents for the authenticated user with pagination.
 
         Args:
-            limit (int, optional): Maximum number of documents to return (1-100). Defaults to 50.
+            limit (int, optional): Maximum number of documents to return (1-10000). Defaults to 50.
             offset (int, optional): Number of documents to skip. Defaults to 0.
             folder_id (str, optional): Filter by folder (workspace) ID. If provided, only documents
                 in the specified folder are returned. Defaults to None (all documents).
+            recursive (bool, optional): Also return documents in descendant folders of folder_id.
+                Defaults to False (direct contents only).
 
         Returns:
             dict: API response containing:
@@ -375,14 +467,18 @@ class CloudAPI:
                 - limit (int): Applied limit
                 - offset (int): Applied offset
         """
-        if limit < 1 or limit > 100:
-            raise ValueError("limit must be between 1 and 100")
+        if limit < 1 or limit > 10000:
+            raise ValueError("limit must be between 1 and 10000")
         if offset < 0:
             raise ValueError("offset must be non-negative")
 
         params: Dict[str, Any] = {"limit": limit, "offset": offset}
         if folder_id is not None:
             params["folder_id"] = folder_id
+        if name is not None:
+            params["name"] = name
+        if recursive:
+            params["recursive"] = recursive
 
         response = requests.get(
             f"{self.BASE_URL}/docs/",
@@ -417,6 +513,10 @@ class CloudAPI:
                 - folder (dict): Folder info with id, name, description, parent_folder_id,
                     created_at, file_count, children_count
         """
+        try:
+            validate_folder_name(name)
+        except ValueError as exc:
+            raise PageIndexAPIError(str(exc)) from exc
         payload = {"name": name}
         if description is not None:
             payload["description"] = description

@@ -12,7 +12,8 @@ from typing import Any
 
 from .errors import PageIndexAPIError
 from .local_store import DocStore
-from .utils import run_off_loop
+from .naming import sanitize_filename, truncate_filename
+from .utils import count_tokens, run_off_loop
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +38,21 @@ class LocalAPI:
     """Backs PageIndexClient's local mode. One instance per client."""
 
     def __init__(self, storage_path: str, model: str, summary_model: str,
-                 index_backend: dict | None = None):
+                 index_backend: dict | None = None,
+                 summary_max_words: int | None = None,
+                 summary_concurrency: int | None = None,
+                 use_embedded_toc: bool = True,
+                 optimize: str = "full",
+                 summary_reasoning_effort: str | None = None):
         self._store = DocStore(storage_path)
         self._model = model
         self._summary_model = summary_model
         self._index_backend = index_backend
+        self._summary_max_words = summary_max_words
+        self._summary_reasoning_effort = summary_reasoning_effort
+        self._summary_concurrency = summary_concurrency
+        self._use_embedded_toc = use_embedded_toc
+        self._optimize = optimize
         from .utils import ConfigLoader
         self._config_loader = ConfigLoader()
 
@@ -97,10 +108,18 @@ class LocalAPI:
             )
         if mode is None:
             mode = "flash"
+        if mode == "standard" and (self._summary_max_words is not None
+                                   or self._summary_concurrency is not None
+                                   or self._summary_reasoning_effort is not None):
+            raise PageIndexAPIError(
+                "Failed to submit document: summary_max_words, "
+                "summary_concurrency and summary_reasoning_effort are "
+                "flash-only; mode='standard' does not support them.")
         file_path = os.path.abspath(os.path.expanduser(str(file_path)))
         if not os.path.isfile(file_path):
             raise FileNotFoundError(f"No such file: {file_path}")
-        if not file_path.lower().endswith(".pdf"):
+        doc_name = sanitize_filename(os.path.basename(file_path))
+        if not doc_name.lower().endswith(".pdf"):
             raise PageIndexAPIError(
                 "Failed to submit document: only PDF files are supported in local mode."
             )
@@ -117,10 +136,6 @@ class LocalAPI:
             raise PageIndexAPIError(
                 "Failed to submit document: PDF has no content. All pages are blank."
             )
-        # Surrogates from a surrogateescape'd filesystem name would be
-        # mangled by the store's errors="replace" write; scrub now so the
-        # returned name is byte-for-byte the stored name.
-        doc_name = _scrub_surrogates(os.path.basename(file_path))
         self._unique_doc_name(doc_name)
 
         try:
@@ -167,9 +182,8 @@ class LocalAPI:
         taken = {meta.get("name") for meta in self._store.list_metas()}
         if name not in taken:
             return name
-        base, ext = os.path.splitext(name)
         for num in range(1, 100):
-            candidate = f"{base}_{num}{ext}"
+            candidate = truncate_filename(name, suffix=f"_{num}")
             if candidate not in taken:
                 return candidate
         raise PageIndexAPIError(
@@ -206,15 +220,13 @@ class LocalAPI:
 
     def _index_standard(self, file_path: str, page_texts: list[str]) -> tuple[list, str | None]:
         from .page_index_classic import page_index_main
-        import litellm
-        page_list = [(text, litellm.token_counter(model=self._model, text=text))
-                     for text in page_texts]
+        page_list = [(text, count_tokens(text, model=self._model)) for text in page_texts]
         opt = self._config_loader.load({
             "model": self._model,
             "summary_model": self._summary_model,
             "if_add_node_id": "yes",
             "if_add_node_summary": "yes",
-            "if_add_node_text": "yes",
+            "if_add_node_text": "no",
             "if_add_doc_description": "yes",
         })
         result = page_index_main(file_path, opt, logger=logger, page_list=page_list)
@@ -227,22 +239,24 @@ class LocalAPI:
 
     def _index_flash(self, file_path: str) -> tuple[list, str | None]:
         from .flash import page_index_flash
+        from .flash.api import flash_rejection_reason
         from .utils import (create_clean_structure_for_description,
                             generate_doc_description, write_node_id)
         result = page_index_flash(file_path, summary=True,
                                   summary_model=self._summary_model,
-                                  optimize="full",
-                                  optimize_model=self._summary_model)
+                                  optimize=False if self._optimize == "off" else self._optimize,
+                                  optimize_model=self._summary_model,
+                                  summary_concurrency=self._summary_concurrency,
+                                  summary_max_words=self._summary_max_words,
+                                  summary_reasoning_effort=self._summary_reasoning_effort,
+                                  use_embedded_toc=self._use_embedded_toc)
         structure = result.get("structure", [])
-        if not structure:
-            raise PageIndexAPIError(
-                "Failed to submit document: PageIndex Flash could not extract "
-                "a structure from this PDF. Try mode='standard', which builds "
-                "the structure with the model."
-            )
+        reason = flash_rejection_reason(result)
+        if reason:
+            raise PageIndexAPIError(f"Failed to submit document: {reason}")
         write_node_id(structure)
         description = generate_doc_description(
-            create_clean_structure_for_description(structure),
+            create_clean_structure_for_description(structure, top_level_only=True),
             model=self._summary_model,
         )
         return structure, description
@@ -250,6 +264,7 @@ class LocalAPI:
     # ── tree / ocr ──
 
     def _load_tree_with_text(self, doc_id: str, error_prefix: str) -> list:
+        """Each node's own text (see utils.own_pages)."""
         from .utils import add_node_text
         structure = self._require_data(
             self._store.get_tree(doc_id), error_prefix)
@@ -257,11 +272,6 @@ class LocalAPI:
         pdf_pages = [(p.get("markdown", ""), 0) for p in pages]
         add_node_text(structure, pdf_pages)
         return structure
-
-    def raw_tree(self, doc_id: str) -> list | None:
-        """Stored tree verbatim — keeps start_index/end_index, which
-        get_tree's cloud wire shape renames and drops."""
-        return self._store.get_tree(doc_id)
 
     def get_tree(self, doc_id: str, node_summary: bool = False,
                  include_text: bool = True) -> dict[str, Any]:
@@ -335,7 +345,8 @@ class LocalAPI:
         if meta is None:
             raise PageIndexAPIError("Failed to get document metadata: Document not found")
         return {key: meta.get(key) for key in
-                ("id", "name", "description", "status", "createdAt", "pageNum", "folderId")}
+                ("id", "name", "description", "status", "createdAt", "pageNum",
+                 "folderId", "metadata")}
 
     def delete_document(self, doc_id: str) -> dict[str, Any]:
         if not self._store.delete_document(doc_id):
@@ -347,17 +358,21 @@ class LocalAPI:
         limit: int = 50,
         offset: int = 0,
         folder_id: str | None = None,
+        name: str | None = None,
+        recursive: bool = False,
     ) -> dict[str, Any]:
-        if limit < 1 or limit > 100:
-            raise ValueError("limit must be between 1 and 100")
+        if limit < 1 or limit > 10000:
+            raise ValueError("limit must be between 1 and 10000")
         if offset < 0:
             raise ValueError("offset must be non-negative")
-        if folder_id is not None:
+        if folder_id is not None and folder_id not in ("", "root"):
             raise PageIndexAPIError(
                 "Failed to list documents: folders are not supported in local mode."
             )
         metas = sorted(self._store.list_metas(), key=lambda m: m.get("id") or "")
         metas.sort(key=lambda m: m.get("createdAt") or "", reverse=True)
+        if name is not None:
+            metas = [m for m in metas if m.get("name") == name]
         documents = [{
             "id": m.get("id"),
             "name": m.get("name"),
@@ -366,6 +381,7 @@ class LocalAPI:
             "createdAt": m.get("createdAt"),
             "pageNum": m.get("pageNum", 0),
             "folderId": None,
+            "path": None,
             "metadata": m.get("metadata"),
             "features": {},
         } for m in metas[offset:offset + limit]]
@@ -382,17 +398,15 @@ def _format_tree_node(node: dict, node_summary: bool) -> dict:
     out = {
         "title": node.get("title", ""),
         "node_id": node.get("node_id"),
-        "page_index": node.get("start_index"),
+        "start_index": node.get("start_index"),
+        "end_index": node.get("end_index"),
     }
     if node.get("key_items"):
         out["key_items"] = node["key_items"]
     if node_summary:
         summary = node.get("summary")
         if summary is not None:
-            if children:
-                out["prefix_summary"] = summary
-            else:
-                out["summary"] = summary
+            out["summary"] = summary
     if "text" in node:
         out["text"] = node["text"]
     if children:

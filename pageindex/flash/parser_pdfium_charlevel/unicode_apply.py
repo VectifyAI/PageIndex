@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import bisect
 import difflib
+import itertools
 import re
 from collections import Counter
 
-from .text_normalize import _is_whitespace
-from .font_unicode import _font_unicode_map
+from .text_normalize import _is_whitespace, _rtl_sign
+from .font_unicode import _font_unicode_map, _font_widths
 from .code_walk import (
     _char_category,
     _walk_codes,
@@ -47,6 +48,43 @@ def _apply_font_unicode(
                     for code in other_numbers]
         return [_SURROGATES.sub("\ufffd", measure_item.get((other_numbers[key_value] << 8) | other_numbers[key_value + 1]) or chr((other_numbers[key_value] << 8) | other_numbers[key_value + 1]))
                 for key_value in range(0, len(other_numbers) - 1, 2)]
+
+    def widths_for(font_xref: int | None, other_numbers: tuple[int, ...], count: int) -> list[float | None]:
+        """Per-code advances at font size 1, parallel to a covered targets_for's output."""
+        if font_xref is None:
+            return [None] * count
+        key = ("widths", font_xref)
+        if key not in map_cache:
+            try:
+                map_cache[key] = _font_widths(pdf_doc, font_xref)
+            except Exception:
+                map_cache[key] = None
+        lookup = map_cache[key]
+        if lookup is None:
+            return [None] * count
+        codes = (other_numbers if map_cache[font_xref][0] == 1 else
+                 [(other_numbers[key_value] << 8) | other_numbers[key_value + 1] for key_value in range(0, len(other_numbers) - 1, 2)])
+        return [lookup(code) for code in codes]
+
+    walk_ids = itertools.count()
+
+    def record(consumed: list[tuple[int, int]], widths: list[float | None]) -> None:
+        walk = next(walk_ids)
+        for char_index, target_index in consumed:
+            candidate_item = chars_by_index.get(char_index)
+            if candidate_item is None:
+                continue
+            # The latest walk decides. A code width only measures a pen moving
+            # along +x: not rotated or mirrored text, and not PDFium's
+            # logical-order RTL chars, which pair with their mirror's code.
+            if (widths[target_index] is not None
+                    and candidate_item["obj"]["rot"] == 0 and candidate_item["obj"]["fs_raw"] > 0
+                    and _rtl_sign(candidate_item["ch"]) > 0):
+                candidate_item["code_w"] = widths[target_index]
+                candidate_item["code_key"] = (walk, target_index)
+            else:
+                candidate_item.pop("code_w", None)
+                candidate_item.pop("code_key", None)
 
     def apply(patches: list[tuple[int, str]], drops: list[int],
               chars_by_index: dict[int, dict]) -> None:
@@ -92,6 +130,7 @@ def _apply_font_unicode(
                 desynced.append(object_index)
                 continue
             apply(res[0], res[1], chars_by_index)
+            record(res[2], widths_for(font_index, encoded_text, len(target_text_items)))
         # Re-walk each window of desynced objects (bridging up to 2 covered,
         # successfully-walked objects between them) as one unit: boundary-
         # attribution errors cancel inside the window (the page-mode walk
@@ -105,11 +144,13 @@ def _apply_font_unicode(
                 (pair for state_item in window for pair in chars_by_obj.get(id(objects[state_item]), [])))
             text_transform: list[str] = []
             owner: list[int] = []
+            window_widths: list[float | None] = []
             for state_item in window:
                 target_text_items = targets_by_object_index[state_item]
                 assert target_text_items is not None
                 text_transform.extend(target_text_items)
                 owner.extend([state_item] * len(target_text_items))
+                window_widths.extend(widths_for(show_codes[state_item][0], show_codes[state_item][1], len(target_text_items)))
             def _commit(res) -> bool:
                 if res is None:
                     return False
@@ -118,12 +159,14 @@ def _apply_font_unicode(
                     candidate_item = chars_by_index.get(char_index)
                     if candidate_item is not None and candidate_item["obj"] is not objects[owner[text_index]]:
                         candidate_item["obj"] = objects[owner[text_index]]
+                record(res[2], window_widths)
                 # Skipped targets are glyphs PDFium never emitted; record
                 # each with its show op and surviving stream neighbours so
                 # _synthesize_dropped_glyphs can re-emit it (text extraction does).
                 for text_index, pos in res[3]:
                     synth_sites.append({
                         "t": text_transform[text_index], "owner": objects[owner[text_index]],
+                        "w": window_widths[text_index],
                         "prev_i": char_value[pos - 1][0] if pos > 0 else None,
                         "next_i": char_value[pos][0] if pos < len(char_value) else None,
                     })
@@ -195,6 +238,7 @@ def _apply_font_unicode(
                         normalized_token = mapped_tis[page_value] if page_value < len(mapped_tis) else None
                         synth_sites.append({
                             "t": tts[target_index], "owner": objects[owner[target_index]],
+                            "w": window_widths[target_index],
                             "prev_i": char_value[tgt_to_char[point_value]][0] if point_value is not None else None,
                             "next_i": char_value[tgt_to_char[normalized_token]][0] if normalized_token is not None else None,
                         })
@@ -202,6 +246,8 @@ def _apply_font_unicode(
                     candidate_item = chars_by_index.get(char_value[char_index][0])
                     if candidate_item is not None and candidate_item["obj"] is not objects[owner[target_index]]:
                         candidate_item["obj"] = objects[owner[target_index]]
+                record([(char_value[char_index][0], target_index) for char_index, target_index in char_to_tgt.items()],
+                       window_widths)
                 return True
             if _displacement_repair():
                 return True
@@ -298,6 +344,7 @@ def _apply_font_unicode(
     seq = [(raw_char["i"], raw_char["ch"])
            for raw_char in raw_chars if not raw_char["is_gen"]]
     targets: list[str] = []
+    page_widths: list[float | None] = []
     for font_index, encoded_text, _tz in show_codes:
         if not encoded_text:
             continue
@@ -305,16 +352,18 @@ def _apply_font_unicode(
         if text_state is None:
             return  # uncovered font used on this page: no patch
         targets.extend(text_state)
+        page_widths.extend(widths_for(font_index, encoded_text, len(text_state)))
     res = _walk_codes(seq, targets)
     if res is None:
         return
     apply(res[0], res[1], chars_by_index)
+    record(res[2], page_widths)
 
 
 def _synthesize_dropped_glyphs(
     sites: list[dict], raw_chars: list[dict], chars_by_index: dict[int, dict],
 ) -> None:
-    """Re-emit glyphs PDFium's font layer never produced, even though the content stream contains them. Geometry comes from the pen model rather than a guess: PDFium still advances the pen over the missing glyph when placing surviving neighbours, so a dropped glyph starts at the previous survivor's advance-cell right edge and its advance is the gap to the next survivor's origin. With no surviving neighbour on a side, the advance is unknowable; emit zero-width there so presence and stream order are preserved without inserting a synthetic gap."""
+    """Re-emit glyphs PDFium's font layer never produced, even though the content stream contains them. Geometry comes from the pen model rather than a guess: PDFium still advances the pen over the missing glyph when placing surviving neighbours, so a dropped glyph starts at the previous survivor's advance-cell right edge and its advance is the gap to the next survivor's origin. With no next survivor to measure against, the advance is the dropped codes' font widths when prev has a code width; otherwise it is unknowable, and the glyph is emitted zero-width so presence and stream order are preserved without inserting a synthetic gap."""
     groups: list[list[dict]] = []
     for site in sites:
         if (groups and groups[-1][0]["prev_i"] == site["prev_i"]
@@ -331,7 +380,10 @@ def _synthesize_dropped_glyphs(
         count_item = len(text)
         if not count_item:
             continue
-        if prev is not None:
+        if prev is not None and "code_w" in prev:
+            # prev's pen end, not its ink edge (which may reach past it).
+            pen, baseline_y = prev["ox"] + prev["code_w"] * prev["obj"]["fs_raw"] * prev["obj"]["scale_x"], prev["oy"]
+        elif prev is not None:
             pen, baseline_y = prev["right"], prev["oy"]
         elif nxt is not None:
             pen, baseline_y = nxt["ox"], nxt["oy"]
@@ -342,6 +394,8 @@ def _synthesize_dropped_glyphs(
         if (prev is not None and nxt is not None
                 and abs(nxt["oy"] - baseline_y) < 0.5 and nxt["ox"] > pen):
             total = nxt["ox"] - pen
+        elif prev is not None and "code_w" in prev and all(site["w"] is not None for site in group_value):
+            total = sum(site["w"] for site in group_value) * owner["fs_raw"] * owner["scale_x"]
         adv = total / count_item
         # Textpage index: fractional, slotted against the owner's own chars
         # so the paint-order sort keys (page_order, i) place the run in

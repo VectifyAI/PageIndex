@@ -255,6 +255,7 @@ def _apply_type3_sizes(raw_chars: list[dict], size_by_font: dict) -> None:
 def _finalize_chars(raw_chars: list[dict]) -> list[dict]:
     """Second pass: compute glyph_w per char and emit the merged-ready dicts. The right glyph width definition depends on how PDFium reports the font's metrics: (a) Normal Type 1 fonts (fs_raw >= 1.5, scale.a ~= 1): FPDFFont_GetGlyphWidth(font, code, fs_raw) returns the advance in page units. Use as-is x matrix.a. (b) Scaled-matrix Type 3 (fs_raw < 1.5 but matrix scale >= 1.5, e.g. vector-heavy page's a scaled Type-3 subset with scale=36.49): GetGlyphWidth at fs_raw=0.19 gives font-natural-unit width; x matrix scale recovers page units. (c) Identity-matrix Type 3 (fs_raw < 1.5, matrix.a ~= 1, e.g. identity-matrix Type-3 sample an identity-matrix Type-3 font): GetGlyphWidth's output is wrong by an unknown FontMatrix factor (PDFium doesn't fold this for these fonts). Fall back to neighbor-step fallback (next_char.ox - this_char.ox within same obj). """
     out: list[dict] = []
+    code_ends: dict[tuple[int, int], float] = {}
     for key_value, candidate_item in enumerate(raw_chars):
         if candidate_item.get("drop"):
             # Folded into the previous char by _apply_font_unicode (PDFium's
@@ -335,6 +336,13 @@ def _finalize_chars(raw_chars: list[dict]) -> list[dict]:
             reference_item["v_pen_y"] = pen_y
             # pen y after this glyph's advance (text extraction previous glyph transform[5])
             reference_item["v_after"] = min(candidate_item["cell_top"], candidate_item["cell_bot"])
+        elif "code_w" in candidate_item:
+            # The pen end the font's width for this char's code gives; chars
+            # consuming one code (a decomposed ligature) share the first one's.
+            key = candidate_item["code_key"]
+            if key not in code_ends:
+                code_ends[key] = candidate_item["ox"] + candidate_item["code_w"] * obj["fs_raw"] * obj["scale_x"]
+            reference_item["code_end"] = code_ends[key]
         out.append(reference_item)
     return out
 
