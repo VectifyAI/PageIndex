@@ -988,6 +988,24 @@ def test_title_printed_again_on_the_next_slides_continues_its_section(tmp_path, 
     assert (series_node["start_index"], series_node["end_index"], series_node.get("nodes", [])) == (6, 8, [])
 
 
+def test_bookmark_title_printed_a_page_after_its_target_is_no_child():
+    """A bookmark can target the page before its title is printed: a detected
+    heading with exactly the bookmark's title on the next page is the
+    bookmark's own heading, not a child of it, while another title there
+    stays a child, and so does one that only ends with the bookmark's title
+    (that looser match counts on the bookmark's own page only)."""
+    from pageindex.flash.embedded_toc import merge_bookmark_tree
+
+    entries = [{"title": "Overview", "level": 1, "page": 1}, {"title": "Declarations", "level": 1, "page": 5},
+               {"title": "Appendix", "level": 1, "page": 9}]
+    detected = [{"title": "Declarations", "start_index": 6, "end_index": 8, "nodes": []},
+                {"title": "Signatures", "start_index": 7, "end_index": 8, "nodes": []},
+                {"title": "A. Appendix", "start_index": 10, "end_index": 10, "nodes": []}]
+    tree = {node["title"]: node for node in merge_bookmark_tree(detected, entries, 10)}
+    assert [child["title"] for child in tree["Declarations"]["nodes"]] == ["Signatures"]
+    assert [child["title"] for child in tree["Appendix"]["nodes"]] == ["A. Appendix"]
+
+
 def test_toc_source_is_always_present(tmp_path):
     """The pure-detected path (no bookmark pass) labels its result too, so
     callers can rely on the key."""
