@@ -106,6 +106,7 @@ def note(enabled, message):
         print(message, file=sys.stderr, flush=True)
 
 HAN_KANA = "\u3005-\u3007\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"
+HAN_SPACE = f" (?=[{HAN_KANA}])|(?<=[{HAN_KANA}]) "
 
 
 def normalize(text):
@@ -116,6 +117,13 @@ def normalize(text):
     text = " ".join("".join(c if unicodedata.category(c)[0] in "LMN" else " "
                             for c in text).split())
     return re.sub(f"(?<=[{HAN_KANA}]) (?=[{HAN_KANA}])", "", text)
+
+
+def heading_key(text):
+    """normalize, less any space beside a Han or kana character: extraction spaces
+    digits and Latin off Han ("2019 年度") where a title may not, or the reverse.
+    Expand compares headings by this key."""
+    return re.sub(HAN_SPACE, "", normalize(text))
 
 
 def flatten(nodes, parent=None):
@@ -660,7 +668,7 @@ def children_from_cache(node, cache, kinds):
         for heading in cache.get(page) or []:
             if kinds and heading.get("kind") not in kinds:
                 continue
-            if normalize(heading["title"]) == normalize(node["title"]):
+            if heading_key(heading["title"]) == heading_key(node["title"]):
                 continue
             out.append({"title": heading["title"], "start_index": page, "end_index": end,
                         "node_id": f"{node['node_id']}.{len(out) + 1}"})
@@ -683,24 +691,26 @@ async def propose_children(node, pages, args):
         title, page = (item or {}).get("title"), (item or {}).get("page")
         if not isinstance(page, int) or not start <= page <= end or not title:
             continue
-        if normalize(title) not in normalize(pages[page - 1]):
+        key = heading_key(title)
+        if key not in heading_key(pages[page - 1]):
             continue                     # the heading must be printed on that page
-        if normalize(title) in seen or normalize(title) == normalize(node["title"]):
+        if key in seen or key == heading_key(node["title"]):
             continue
         if accepted and page < accepted[-1]["start_index"]:
             continue
-        seen.add(normalize(title))
+        seen.add(key)
         accepted.append({"title": title.strip(), "start_index": page, "end_index": end,
                          "node_id": f"{node['node_id']}.{len(accepted) + 1}"})
     return accepted
 
 
 def same_heading(a, b):
-    """Whether two titles name one heading: equal once normalized, or equal but
+    """Whether two titles name one heading: equal by heading_key, or equal but
     for a leading number only one of them prints. A title with no letter is its
     number alone, so it never matches by that second rule."""
     a, b = normalize(a), normalize(b)
     bare_a, bare_b = (re.sub(r"^(?:[0-9]+ )+", "", t) for t in (a, b))
+    a, b, bare_a, bare_b = (re.sub(HAN_SPACE, "", t) for t in (a, b, bare_a, bare_b))
     return bool(a) and (a == b or (bare_a == bare_b and bool(re.search(r"[^\W\d_]", bare_a))
                                    and (a == bare_a or b == bare_b)))
 
@@ -745,8 +755,8 @@ def own_children(node, children, lines, known, ancestors, nxt):
     bottom = next((hits for hits in bottoms if hits), [])
     kept = []
     for child in children:
-        page, key = child["start_index"], normalize(child["title"])
-        printed = found(page, lambda line: key in normalize(line)) if key else []
+        page, key = child["start_index"], heading_key(child["title"])
+        printed = found(page, lambda line: key in heading_key(line)) if key else []
         if (is_node(page, child["title"])
                 or page == start and top and printed and printed[-1] < top[0]
                 or page == end and bottom and printed and printed[0] >= bottom[-1]):
