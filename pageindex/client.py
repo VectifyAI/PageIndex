@@ -409,7 +409,7 @@ class PageIndexClient:
             ``index_model`` covers this.
         summary_max_words (int, optional): Local flash mode only — the word
             cap each model-written node summary is asked to stay within;
-            short leaf nodes keep their own text. Defaults to 150.
+            a leaf node shorter than that keeps its own text. Defaults to 150.
         summary_concurrency (int, optional): Local flash mode only — cap on
             simultaneous indexing model calls per lane: the summaries, and
             expand up to its own ceiling of 32. The lanes overlap, so up to

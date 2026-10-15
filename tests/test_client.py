@@ -1315,6 +1315,28 @@ def test_summarize_tree_all_short_leaves_need_no_model(monkeypatch):
     assert out[0]["summary"] == "tiny"
 
 
+def test_a_leaf_keeps_its_raw_text_while_shorter_than_its_summary(monkeypatch):
+    """The raw-text cutoff is the summary's own length, so it moves with
+    max_words: a 150-token leaf stays raw under 150 words (200 tokens) and is
+    summarized under 80 (107), as expand's gate prices it."""
+    prompts = []
+
+    async def capture(model, prompt):
+        prompts.append(prompt)
+        return '{"summary": "short"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", capture)
+    text = "word " * 150
+    assert 107 < pageindex.utils.count_tokens(text) < 200
+
+    def leaf():
+        return [{"title": "A", "start_index": 1, "end_index": 1}]
+
+    out = asyncio.run(pageindex.utils.summarize_tree(leaf(), [(text, 150)]))
+    assert prompts == [] and out[0]["summary"] == text.strip()
+    out = asyncio.run(pageindex.utils.summarize_tree(leaf(), [(text, 150)], max_words=80))
+    assert len(prompts) == 1 and out[0]["summary"] == "short"
+
+
 def test_leaf_summaries_split_a_shared_page_at_the_heading(monkeypatch):
     """Two leaves sharing a page each read their own side of the next heading,
     and between them every line is read."""
