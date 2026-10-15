@@ -17,7 +17,7 @@ from typing import Optional, Union
 # (re is used by the title-reject regex below)
 
 from .blocks import cluster_lines_into_blocks, BlockClusterContext
-from .classification import is_body_paragraph, detect_header_footer, HeaderFooterContext, mark_watermarks, mark_toc_and_boilerplate
+from .classification import is_body_paragraph, detect_header_footer, HeaderFooterContext, mark_watermarks, mark_toc_and_boilerplate, mark_build_steps
 from .labels import detect_captions, build_caption_regions, CaptionContext
 from .model import Rect, numbering_kind, block_text, deaccented_text, Block
 from .outline_assembly import (
@@ -162,6 +162,7 @@ def extract_toc(
     detect_header_footer(HeaderFooterContext(doc, 2))                              # FOOTER
     mark_watermarks(doc)
     mark_toc_and_boilerplate(doc)
+    mark_build_steps(doc)
 
     # ----- 6) Body-paragraph flagging (post-classification) -------------
     # Populates body-paragraph flags, page substantive-body flags,
@@ -172,7 +173,8 @@ def extract_toc(
             if block.type == 0:
                 block.is_body_paragraph = is_body_paragraph(doc.secondary_slot, page, block)
                 if block.is_body_paragraph:
-                    page.state_slot = True
+                    # Text repeated from the page before is no new body text
+                    page.state_slot = page.state_slot or block.repeat_of is None
                     # The empty style hash is significant for later page-level
                     # membership checks, so it must be retained.
                     page.style_slot.add(span_style_hash(block))

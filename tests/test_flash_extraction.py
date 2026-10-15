@@ -908,6 +908,53 @@ def test_numbering_continues_only_up_to_the_next_section(tmp_path):
     assert [node["title"] for node in extract_toc(str(pdf))["structure"]] == [*notes, "Exhibits"]
 
 
+def test_slide_built_up_step_by_step_is_one_section(tmp_path):
+    """A slide built up over pages repeats the page before and adds to it: a
+    heading it repeats continues its section, so each heading is one node, on
+    the page it first appears."""
+    from pageindex.flash.main import extract_toc
+
+    pre = [("bold", "Preprocessing Stage"), "\x95 Parse the document into pages and sections.",
+           "\x95 Build a tree of the sections with summaries.", ""]
+    query = [("bold", "Query Stage"), "\x95 Read the tree and pick the sections to open."]
+    more = ["\x95 Answer from the opened sections with citations."]
+    slides = ["Revenue Overview", "Operating Expenses", "Customer Growth", "Regional Performance",
+              "Engineering Metrics", "Risk Factors", "Outlook and Guidance", "Hiring Plan"]
+    pdf = tmp_path / "deck.pdf"
+    pdf.write_bytes(_layout_pdf([("Company Update", ["Quarterly review for the board"]),
+                                 ("How Search Works", pre), ("How Search Works", pre + query),
+                                 ("How Search Works", pre + query + more),
+                                 *[(title, [f"Detail {n} for {title.lower()} with a few more words of body text"
+                                            for n in range(1, 6)]) for title in slides]], landscape=True))
+    structure = extract_toc(str(pdf))["structure"]
+    assert [(node["title"], node["start_index"]) for node in structure] == [
+        ("How Search Works", 2), *[(title, page) for page, title in enumerate(slides, 5)]]
+    assert [(node["title"], node["start_index"]) for node in structure[0]["nodes"]] == [
+        ("Preprocessing Stage", 2), ("Query Stage", 3)]
+
+
+def test_body_paragraph_repeated_on_a_built_up_page_is_no_new_body_text(tmp_path, monkeypatch):
+    """A slide built up from the page before brings no new body text: the body
+    paragraph it repeats does not mark it as a page with body text, which the
+    title of the slide after it is checked against."""
+    import pageindex.flash.main as main_module
+
+    flags = []
+    detect = main_module.detect_title
+
+    def spy(doc):
+        flags.append([bool(page.state_slot) for page in doc.primary_slot])
+        return detect(doc)
+    monkeypatch.setattr(main_module, "detect_title", spy)
+
+    step = _body("search pipeline")
+    pdf = tmp_path / "deck.pdf"
+    pdf.write_bytes(_layout_pdf([("Search Pipeline", step), ("Search Pipeline", step + ["", "\x95 Answer with citations."]),
+                                 ("Results", _body("results"))], landscape=True))
+    main_module.extract_toc(str(pdf))
+    assert flags == [[True, False, True]]
+
+
 def test_toc_source_is_always_present(tmp_path):
     """The pure-detected path (no bookmark pass) labels its result too, so
     callers can rely on the key."""

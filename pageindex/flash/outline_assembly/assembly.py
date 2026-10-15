@@ -141,6 +141,14 @@ def build_heading_from_block(block: Block, page, anchor: Optional[Block] = None)
 # --------------------------------------------------------------------------- #
 
 
+def continues_heading(block: Block) -> bool:
+    """Whether a copy of ``block`` on the pages before, over which a slide is built up step by step, is a heading."""
+    copy = block.repeat_of
+    while copy is not None and not copy.used_as_heading:
+        copy = copy.repeat_of
+    return copy is not None
+
+
 def next_numbered_heading(doc, heading: HeadingCandidate) -> Optional[HeadingCandidate]:
     """The heading after single-level numbered heading ``heading``: the first later text block in its style that opens with the next number and the same separator."""
     from ..heading_detection import PageScanState, make_numbered_candidate, similar_style
@@ -240,6 +248,7 @@ def assemble_outline(doc, labeled: list[OutlineNode]) -> list[OutlineNode]:
         if cluster_anchor is not None:
             previous = state.auxiliary_slot
             push_heading_to_state(state, cluster_anchor.heading)
+            cluster_anchor.heading.group_slot.used_as_heading = True
             out.append(cluster_anchor)
             continue_numbering(doc, clusters, cluster_index, cluster_anchor.heading, previous, True)
         sub = extract_sub_headings(doc, state, cluster_anchor, cluster_candidates)
@@ -249,7 +258,7 @@ def assemble_outline(doc, labeled: list[OutlineNode]) -> list[OutlineNode]:
         sub_clique = find_keyword_clique(cluster_candidates) if cluster_candidates else None
         stack = HierarchyStack(sub_clique)
         for insertion_candidate in cluster_candidates:
-            if should_reject_heading(state, insertion_candidate):
+            if continues_heading(insertion_candidate.group_slot) or should_reject_heading(state, insertion_candidate):
                 continue
             previous = state.auxiliary_slot
             push_heading_to_state(state, insertion_candidate)

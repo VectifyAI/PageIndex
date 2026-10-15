@@ -63,6 +63,7 @@ from .keyword_tables import (
     TOC_TITLES_TRIE,
     DOT_LEADER_ROW_RE,
     _search_trie,
+    _normalize_text_key,
 )
 from .body_text import (
     is_body_paragraph,
@@ -323,6 +324,23 @@ def running_contents_links(doc) -> set[str]:
                 seen[0] += prose
                 seen[1] += 1
     return {title for title, (prose_pages, total) in pages.items() if 2 * prose_pages > total}
+
+
+def mark_build_steps(doc) -> None:
+    """A page on which all the words of the previous page's text blocks appear in order (a slide
+    built up step by step, or the same page printed again) continues that page: each block it
+    repeats gets ``repeat_of``, its copy on that page. Numbers (page numbers) are left out."""
+    content = [[block for block in page.output_slot if block.type == 0 and letter_count(block.char_stats) > 0]
+               for page in doc.primary_slot]
+    words = [[key for block in blocks for token in tokenize_block(block)
+              if token.type != 1 and (key := _normalize_text_key(token.str.lower()))]
+             for blocks in content]
+    for index in range(1, len(content)):
+        later = iter(words[index])
+        if words[index - 1] and all(word in later for word in words[index - 1]):
+            copies = {normalized_block_text(block): block for block in content[index - 1]}
+            for block in content[index]:
+                block.repeat_of = copies.get(normalized_block_text(block))
 
 
 def mark_toc_and_boilerplate(doc) -> None:
