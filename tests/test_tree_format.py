@@ -105,8 +105,9 @@ def test_expand_prices_a_level_with_the_intro_it_gets(monkeypatch):
 
     async def run():
         scheduler = utils.SummaryScheduler(tree, [(page, 0) for page in pages], model="m")
+        # no summaries to price, so the page rule alone decides
         await tree_optimize.optimize(tree, pages, lines, model="m", do_expand=True,
-                                     on_final=scheduler.mark_final)
+                                     on_final=scheduler.mark_final, summary_words=0)
         await scheduler.finish()
     asyncio.run(run())
 
@@ -159,6 +160,25 @@ def test_expand_asks_once_when_the_model_finds_no_subsections(monkeypatch):
     asyncio.run(tree_optimize.optimize(tree, pages, lines, model="m", do_expand=True))
 
     assert len(asked) == 1 and "nodes" not in tree[0]
+
+
+def test_expand_asks_again_after_a_broken_reply(monkeypatch):
+    pages = [(f"Part {p}\n" if p in (6, 11, 16) else "") + "body " * 250 for p in range(1, 21)]
+    lines = [[line for line in page.splitlines() if line.strip()] for page in pages]
+    tree = [{"title": "R", "start_index": 1, "end_index": 20, "node_id": "0000"}]
+    replies = ["The section has three parts.",
+               '{"subsections": [{"title": "Part 6", "page": 6}, {"title": "Part 11", "page": 11},'
+               ' {"title": "Part 16", "page": 16}]}']
+
+    async def complete(model, prompt):
+        return replies.pop(0)
+    monkeypatch.setattr(tree_optimize, "llm_acompletion", complete)
+
+    asyncio.run(tree_optimize.optimize(tree, pages, lines, model="m", do_expand=True))
+
+    assert not replies
+    assert shape(tree[0]["nodes"]) == [("R (intro)", 1, 5), ("Part 6", 6, 10),
+                                       ("Part 11", 11, 15), ("Part 16", 16, 20)]
 
 
 @pytest.mark.parametrize("headings, summary_words, splits", [

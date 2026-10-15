@@ -149,7 +149,11 @@ def extract_json(content):
 
 
 async def ask_model(model, prompt):
-    return extract_json(await llm_acompletion(model, prompt))
+    reply = await llm_acompletion(model, prompt)
+    try:
+        return extract_json(reply)
+    except ValueError:  # a broken reply; llm_acompletion only retries failed calls
+        return extract_json(await llm_acompletion(model, prompt))
 
 
 def load_pages(pdf_path):
