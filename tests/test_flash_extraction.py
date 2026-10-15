@@ -789,6 +789,24 @@ def test_running_contents_links_weigh_body_text(tmp_path, monkeypatch):
     assert found == [set()]
 
 
+def test_title_printed_again_with_its_opening_is_no_running_header(tmp_path):
+    """Two audit reports print the same title and the same opening sentence
+    two pages apart: the content repeats, not the page, so the title stays a
+    heading instead of being read as a running header."""
+    from pageindex.flash.main import extract_toc
+
+    report = "Report of Independent Auditors"
+    opening = "To the Shareholders and the Board of Directors of Skylark Inc."
+    titles = ["Overview", report, "Balance Sheet", report, "Income Statement", "Cash Flows", "Equity",
+              "Notes", "Revenue", "Leases", "Debt", "Taxes", "Segments", "Outlook", "Risks"]
+    bodies = {1: [opening, "", *_body("Opinion")], 3: [opening, "", *_body("Controls")]}
+    pdf = tmp_path / "filing.pdf"
+    pdf.write_bytes(_layout_pdf([("Annual Report", ["Fiscal year ended December 31, 2022"]),
+                                 *[(title, bodies.get(n, _body(title))) for n, title in enumerate(titles)]]))
+    result = extract_toc(str(pdf))
+    assert report in [node["title"] for node in result["structure"]]
+
+
 def test_toc_source_is_always_present(tmp_path):
     """The pure-detected path (no bookmark pass) labels its result too, so
     callers can rely on the key."""

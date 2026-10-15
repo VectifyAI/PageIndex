@@ -151,6 +151,24 @@ def walk_from_page_edge(ctx, blocks: list[Block], callback) -> None:
             block_index -= 1
 
 
+def repeats_into_body(ctx, page, block: Block, other_page, other: Block) -> bool:
+    """Whether the blocks from these two inward stay the same on both pages up to a body
+    paragraph: a section printed twice, not a running header or footer."""
+    step = 1 if ctx.primary_slot == 1 else -1
+    blocks = [item for item in page.output_slot if item.char_count() > 0]
+    others = [item for item in other_page.output_slot if item.char_count() > 0]
+    index = next(k for k, item in enumerate(blocks) if item is block)
+    other_index = next(k for k, item in enumerate(others) if item is other)
+    while 0 <= index < len(blocks) and 0 <= other_index < len(others):
+        if normalized_block_text(blocks[index]) != normalized_block_text(others[other_index]):
+            return False
+        if is_body_paragraph(ctx.secondary_slot.secondary_slot, page, blocks[index]):
+            return True
+        index += step
+        other_index += step
+    return False
+
+
 def find_cross_page_match(ctx, page, block: Block, text_key: str, ref: Block) -> Optional[Block]:
     """Find a matching block on a nearby page by exact normalized text, then by longest word/number pieces."""
     entries = ctx.auxiliary_slot.get(text_key) or []
@@ -176,6 +194,8 @@ def find_cross_page_match(ctx, page, block: Block, text_key: str, ref: Block) ->
                 or (entry_page_index == 1 and heading_score(entry_block) >= size + 0.5)
             ))
         ):
+            if repeats_into_body(ctx, page, block, ctx.secondary_slot.primary_slot[entry_page_index - 1], entry_block):
+                continue
             return entry_block
 
     if is_header_positioned(ctx, block, ref):
