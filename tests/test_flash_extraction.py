@@ -955,6 +955,39 @@ def test_body_paragraph_repeated_on_a_built_up_page_is_no_new_body_text(tmp_path
     assert flags == [[True, False, True]]
 
 
+def test_title_printed_again_on_the_next_slides_continues_its_section(tmp_path, monkeypatch):
+    """A slide title printed again with its opening on the next slides is one
+    section going on: each copy points at the copy on the page before it, as
+    on a slide built up step by step, so a copy that reaches assembly opens no
+    section. Here the copies are also section openers' nearby duplicates, so
+    the series stays one node either way; the links are what this pins."""
+    import pageindex.flash.main as main_module
+
+    links = []
+    detect = main_module.detect_title
+
+    def spy(doc):
+        page_of = {id(block): page.page_index for page in doc.primary_slot for block in page.output_slot}
+        links.extend((page_of[id(block)], page_of[id(block.repeat_of)])
+                     for page in doc.primary_slot for block in page.output_slot if block.repeat_of is not None)
+        return detect(doc)
+    monkeypatch.setattr(main_module, "detect_title", spy)
+
+    opening = _body("relational paradigm")
+    series = [("Why Relational Databases Last", opening + ["", f"\x95 Point {n} about {topic}."])
+              for n, topic in enumerate(["algebra", "independence", "optimizers"], 1)]
+    slides = [(title, _body(title)) for title in ["Revenue Overview", "Operating Expenses", "Customer Growth",
+              "Regional Performance", "Engineering Metrics", "Risk Factors", "Outlook and Guidance", "Hiring Plan",
+              "Product Roadmap", "Market Share", "Partnerships", "Security Review", "Board Questions", "Next Steps"]]
+    pdf = tmp_path / "deck.pdf"
+    pdf.write_bytes(_layout_pdf([("Company Update", ["Quarterly review for the board"]), *slides[:4], *series, *slides[4:]],
+                                landscape=True))
+    structure = main_module.extract_toc(str(pdf))["structure"]
+    assert links == [(7, 6), (8, 7)]
+    series_node = next(node for node in structure if node["title"] == "Why Relational Databases Last")
+    assert (series_node["start_index"], series_node["end_index"], series_node.get("nodes", [])) == (6, 8, [])
+
+
 def test_toc_source_is_always_present(tmp_path):
     """The pure-detected path (no bookmark pass) labels its result too, so
     callers can rely on the key."""

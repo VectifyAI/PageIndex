@@ -63,7 +63,7 @@ class Block(Bounded):
         self.is_body_paragraph: bool = False
         self.measure_slot: bool = False
         self.used_as_heading: bool = False
-        self.repeat_of: Optional[Block] = None   # copy on the previous page, when this page builds on it
+        self.repeat_of: Optional[Block] = None   # copy on the previous page that this block repeats
         self.state_slot: int = 0
         self.marker_slot: int = 0
         self.metric_slot: float = 0.0

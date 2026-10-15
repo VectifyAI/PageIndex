@@ -202,6 +202,8 @@ def find_cross_page_match(ctx, page, block: Block, text_key: str, ref: Block) ->
             ))
         ):
             if repeats_into_body(ctx, page, block, ctx.secondary_slot.primary_slot[entry_page_index - 1], entry_block):
+                if entry_page_index == page.page_index - 1:
+                    block.repeat_of = entry_block
                 continue
             return entry_block
 

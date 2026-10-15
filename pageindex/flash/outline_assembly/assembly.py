@@ -142,7 +142,7 @@ def build_heading_from_block(block: Block, page, anchor: Optional[Block] = None)
 
 
 def continues_heading(block: Block) -> bool:
-    """Whether a copy of ``block`` on the pages before, over which a slide is built up step by step, is a heading."""
+    """Whether a copy of ``block`` on the pages before, which it repeats page after page, is a heading."""
     copy = block.repeat_of
     while copy is not None and not copy.used_as_heading:
         copy = copy.repeat_of
