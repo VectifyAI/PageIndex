@@ -151,6 +151,13 @@ def walk_from_page_edge(ctx, blocks: list[Block], callback) -> None:
             block_index -= 1
 
 
+def block_after(ctx, page, block: Block) -> Optional[Block]:
+    """The next block with letters inward from ``block``: below a header, above a footer."""
+    blocks = page.output_slot if ctx.primary_slot == 1 else page.output_slot[::-1]
+    index = next(k for k, item in enumerate(blocks) if item is block)
+    return next((item for item in blocks[index + 1:] if letter_count(item.char_stats) > 0), None)
+
+
 def repeats_into_body(ctx, page, block: Block, other_page, other: Block) -> bool:
     """Whether the blocks from these two inward stay the same on both pages up to a body
     paragraph: a section printed twice, not a running header or footer."""
@@ -300,6 +307,7 @@ def bounded_edit_distance(text: str, other_text: str, candidate_item: float) -> 
 def detect_header_footer(ctx: HeaderFooterContext) -> None:
     """Run the three-pass header/footer detector."""
     # ----- Pass 1: per-page candidate collection -----------------------
+    links: list[tuple] = []   # (page, block) where the walk stopped at a contents link
     for page in ctx.secondary_slot.primary_slot:
         seen_style_keys: set[str] = set()
         page_numbers: set[int] = set()
@@ -369,6 +377,8 @@ def detect_header_footer(ctx: HeaderFooterContext) -> None:
                         detected_page_number = span_page_number(span)
                         if detected_page_number is not None:
                             page_numbers.add(detected_page_number)
+            if stop_after:
+                links.append((page, block))
             return stop_after
 
         walk_from_page_edge(ctx, page.output_slot, walk_cb)
@@ -454,6 +464,23 @@ def detect_header_footer(ctx: HeaderFooterContext) -> None:
                 continue
             block.type = ctx.primary_slot
             record_recurring_text(ctx.secondary_slot, deaccented_text(block))
+
+    # A block printed next to the contents link on most pages where the link is a
+    # running header, that also names the document on its first page, belongs to
+    # that running header: the company name under the link, as on a filing's cover.
+    # A section title printed there on each of its pages is no name from the cover.
+    followers = [block_after(ctx, page, link) for page, link in links if link.type == ctx.primary_slot]
+    if followers:
+        cover = "".join(normalized_block_text(block) for block in ctx.secondary_slot.primary_slot[0].output_slot)
+        counts: dict[str, int] = {}
+        for block in followers:
+            if block is not None:
+                counts[normalized_block_text(block)] = counts.get(normalized_block_text(block), 0) + 1
+        for block in followers:
+            if block is not None and block.type == 0:
+                text = normalized_block_text(block)
+                if 2 * counts[text] > len(followers) and text in cover:
+                    mark_header_footer(ctx, block)
 
     # ----- Pass 3: cutoff line + top-3 text-hash sweep -----------------
     if len(samples) < len(ctx.secondary_slot.primary_slot) / 20:

@@ -594,28 +594,31 @@ def test_flash_cli_rejects_oversized_flat_tree(monkeypatch, tmp_path):
 
 
 def _layout_pdf(pages, landscape=False, glyph_headings=False):
-    """Uncompressed PDF, per page a 20pt heading line then 11pt body lines:
-    ``pages`` is a list of ``(heading, [body line, ...])``, optionally with a
-    third item, a 9pt line printed above the heading. ``glyph_headings``
-    draws each heading glyph by glyph in 13pt Courier-Bold instead, as some
-    SEC filings do."""
+    """Uncompressed PDF, per page a 20pt heading line then
+    11pt body lines: ``pages`` is a list of ``(heading, [body line, ...])``,
+    optionally followed by lines printed one under another above the heading,
+    in 9pt. A line given as ``("bold", text)`` prints in 11pt Helvetica-Bold.
+    ``glyph_headings`` draws each heading glyph by glyph in 13pt Courier-Bold
+    instead, as some SEC filings do."""
     width, height = (792, 612) if landscape else (595, 842)
-    objs = {1: "<</Type/Catalog/Pages 2 0 R>>", 3: "<</Font<</F1 5 0 R>>>>",
+    objs = {1: "<</Type/Catalog/Pages 2 0 R>>", 3: "<</Font<</F1 5 0 R/F3 6 0 R>>>>",
             5: "<</Type/Font/Subtype/Type1/BaseFont/Helvetica"
-               "/Encoding/WinAnsiEncoding>>"}
+               "/Encoding/WinAnsiEncoding>>",
+            6: "<</Type/Font/Subtype/Type1/BaseFont/Helvetica-Bold/Encoding/WinAnsiEncoding>>"}
     if glyph_headings:
-        objs[3] = "<</Font<</F1 5 0 R/F2 4 0 R>>>>"
+        objs[3] = "<</Font<</F1 5 0 R/F2 4 0 R/F3 6 0 R>>>>"
         objs[4] = "<</Type/Font/Subtype/Type1/BaseFont/Courier-Bold/Encoding/WinAnsiEncoding>>"
-    kids, nxt = [], 6
+    kids, nxt = [], 7
     for heading, lines, *above in pages:
-        ops = [(9, height - 40, line) for line in above]
+        ops = [(9, height - 40 - 12 * n, line) for n, line in enumerate(above)]
         if not glyph_headings:
             ops.append((20, height - 80, heading))
         y = height - 120
         for line in lines:
             ops.append((11, y, line))
             y -= 16
-        stream = "".join(f"BT /F1 {size} Tf 72 {top} Td ({text}) Tj ET\n"
+        stream = "".join(f"BT /F3 11 Tf 72 {top} Td ({text[1]}) Tj ET\n" if isinstance(text, tuple)
+                         else f"BT /F1 {size} Tf 72 {top} Td ({text}) Tj ET\n"
                          for size, top, text in ops)
         if glyph_headings:
             # Courier advances 0.6 em, so 13pt glyphs sit 7.8pt apart
@@ -805,6 +808,42 @@ def test_title_printed_again_with_its_opening_is_no_running_header(tmp_path):
                                  *[(title, bodies.get(n, _body(title))) for n, title in enumerate(titles)]]))
     result = extract_toc(str(pdf))
     assert report in [node["title"] for node in result["structure"]]
+
+
+def test_company_name_under_the_contents_link_is_a_running_header(tmp_path):
+    """A company name printed under the running "Table of Contents" link on
+    most of its pages, the name the cover gives, belongs to that running
+    header, so it is no heading."""
+    from pageindex.flash.main import extract_toc
+
+    titles = ["Business", "Risk Factors", "Properties", "Legal Proceedings", "Market", "Selected Data",
+              "Discussion", "Market Risk", "Statements", "Controls", "Directors", "Compensation"]
+    company = ("bold", "SKYLARK HOLDINGS INC.")
+    pdf = tmp_path / "filing.pdf"
+    pdf.write_bytes(_layout_pdf([("Annual Report", ["SKYLARK HOLDINGS INC.", "Fiscal year ended December 31, 2022"],
+                                  "Table of Contents"),
+                                 *[(title, _body(title), "Table of Contents", company) for title in titles]]))
+    result = extract_toc(str(pdf))
+    assert [node["title"] for node in result["structure"]] == titles
+
+
+def test_section_title_under_the_contents_link_still_opens_its_section(tmp_path):
+    """A section title printed under the running "Table of Contents" link on
+    each of its pages, here more than half of them, still opens its section on
+    its first page: only its later copies belong to the running header."""
+    from pageindex.flash.main import extract_toc
+
+    link, notes_title = "Table of Contents", "NOTES TO CONSOLIDATED FINANCIAL STATEMENTS"
+    notes = [f"Note {n} - {name}" for n, name in enumerate(["Organization", "Accounting Policies", "Revenue", "Leases",
+             "Debt", "Income Taxes", "Equity", "Segments", "Commitments", "Subsequent Events"], 1)]
+    pdf = tmp_path / "quarterly.pdf"
+    pdf.write_bytes(_layout_pdf([("Quarterly Report", ["For the quarter ended June 30, 2023"], link),
+                                 ("Balance Sheets", _body("balance sheets"), link),
+                                 ("Statements of Operations", _body("operations"), link),
+                                 *[("", [("bold", note), *_body(note)], link, ("bold", notes_title)) for note in notes],
+                                 ("Controls and Procedures", _body("controls"), link)]))
+    section = next(node for node in extract_toc(str(pdf))["structure"] if node["title"] == notes_title)
+    assert [node["title"] for node in section["nodes"]] == notes
 
 
 def test_toc_source_is_always_present(tmp_path):
