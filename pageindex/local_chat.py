@@ -185,17 +185,6 @@ def _openai_model(protocol: str, model_name: str, backend=None):
     """The backend protocol driver — the seam tests replace with a fake."""
     if protocol == "responses":
         model_name = model_name.removeprefix("litellm/")
-        if "/" in model_name and not model_name.startswith("openai/"):
-            raise PageIndexAPIError(
-                f"protocol='responses' cannot drive '{model_name}': "
-                "provider-prefixed models route through LiteLLM, which speaks "
-                "chat.completions, not the Responses API. Use chat() without "
-                "protocol, or protocol='chat_completions' (or "
-                "protocol='messages' for Anthropic models), or point "
-                "OPENAI_BASE_URL at a "
-                "Responses-capable backend and use a bare or "
-                "'openai/'-prefixed model name."
-            )
         import openai
         model_name = model_name.removeprefix("openai/")
         try:
@@ -344,11 +333,12 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
     # and both OpenAI model classes pass extra_body through verbatim. OpenAI
     # destinations only — LiteLLM plants extra_body as a literal field in
     # other providers' request bodies, which Anthropic rejects as unknown.
-    openai_backend = _openai_protocol(model_name)
+    # The responses lane is the OpenAI SDK whatever the name says.
+    openai_backend = protocol == "responses" or _openai_protocol(model_name)
     # Chat-lane effort rides extra_args: LiteLLM takes it as its own
     # top-level kwarg on every supported openai-agents version, and the
     # channel admits values outside the OpenAI enum ("none").
-    extra_args = _cache_extra_args(model_name)
+    extra_args = _cache_extra_args(model_name) if protocol == "chat" else None
     if reasoning_effort:
         extra_args = {**(extra_args or {}),
                       "reasoning_effort": reasoning_effort}

@@ -391,10 +391,12 @@ class PageIndexClient:
             names route through LiteLLM and mean what LiteLLM says they
             mean; bare names are OpenAI-compatible shorthand, and
             ``openai/Qwen/...`` is the form for an OpenAI-compatible
-            server that itself serves slashed model ids (vLLM, TGI). The
-            Anthropic-native surfaces read the name by its routing
-            prefix instead — bare names are Anthropic's own — and treat
-            the untouched stock default as no choice. Defaults to the
+            server that itself serves slashed model ids (vLLM, TGI).
+            ``chat(protocol="responses")`` and the Anthropic-native
+            surfaces read the name by its routing prefix instead and
+            send the rest as written — bare names are OpenAI's and
+            Anthropic's own respectively — and the Anthropic-native ones
+            treat the untouched stock default as no choice. Defaults to the
             SDK default (strong); reads ``None`` on a cloud client where
             the managed chat answers.
         model (str, optional): Local mode only — one model for both roles:
@@ -1253,9 +1255,14 @@ class PageIndexClient:
                 clipped). One run serves one view. Protocol lanes: the
                 protocol's own event stream.
             model: Own-model chat only — backend model name (defaults
-                to ``chat_model``). ``protocol="messages"`` takes a Claude
-                model — a ``chat_model`` you set carries over; the stock
-                default is never sent.
+                to ``chat_model``). ``protocol="responses"`` /
+                ``"messages"`` send it as written after its routing
+                prefix (``openai/``, ``litellm/``; ``anthropic/``,
+                ``bedrock/``, …), so
+                a gateway's own ids work with ``backend``.
+                ``protocol="messages"`` takes a Claude model (or a
+                gateway's) — a ``chat_model`` you set carries over; the
+                stock default is never sent.
             reasoning_effort: Own-model chat only — how hard the model
                 thinks (``"low"`` / ``"medium"`` / ``"high"``; what a
                 backend accepts is its own). Each lane sends its native
@@ -1714,11 +1721,10 @@ class PageIndexClient:
 
         Requires a backend that supports the
         Responses API; backends that only speak chat.completions should use
-        ``chat(protocol="chat_completions")``. Provider-prefixed models
-        (``anthropic/…``) route through LiteLLM's chat.completions adapter
-        and are therefore refused here — use
-        ``chat(protocol="chat_completions")`` or ``chat(protocol="messages")``
-        for those.
+        ``chat(protocol="chat_completions")``. The model name is sent as
+        written (``litellm/`` and ``openai/`` prefixes strip) and the
+        backend judges it — a gateway's slashed ids such as
+        ``deepseek/deepseek-chat`` work as-is.
 
         Args:
             input: A user message string, or a list of Responses input items
