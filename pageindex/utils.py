@@ -875,9 +875,9 @@ async def generate_summaries_for_structure(structure, model=None):
 
 
 SUMMARY_CONCURRENCY = 64        # simultaneous summary model calls
-SUMMARY_RAW_TEXT_TOKENS = 200   # leaves under this reuse their raw text as the summary
 SUMMARY_INTRO_MAX_PAGES = 3     # cap on leading pages fed into a parent summary
 SUMMARY_MAX_WORDS = 150         # word cap the summary prompts ask for
+TOKENS_PER_WORD = 4 / 3
 SUMMARY_REASONING_EFFORT = "none"
 
 
@@ -1034,8 +1034,7 @@ class SummaryScheduler:
     calls leave the gate deepest first: depth counts the calls left on a
     node's path to the root, its own included."""
 
-    def __init__(self, structure, pdf_pages, model=None,
-                 small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
+    def __init__(self, structure, pdf_pages, model=None, small_node_tokens=None,
                  max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None,
                  max_words=None, split_shared_pages=False, reasoning_effort=None,
                  drop_refused_effort=False):
@@ -1045,9 +1044,10 @@ class SummaryScheduler:
         self._params = {"reasoning_effort": reasoning_effort} if reasoning_effort else {}
         self._drop_refused_effort = drop_refused_effort
         self._model = model
-        self._small_node_tokens = small_node_tokens
         self._max_intro_pages = max_intro_pages
         self._max_words = max_words or SUMMARY_MAX_WORDS
+        self._small_node_tokens = (TOKENS_PER_WORD * self._max_words
+                                   if small_node_tokens is None else small_node_tokens)
         self._gate = _PriorityGate(concurrency or SUMMARY_CONCURRENCY)
         self._asked = self._answered = False
         self._marks = {}     # id(node) -> future resolved once the node is final
@@ -1235,16 +1235,16 @@ class SummaryScheduler:
         return self.structure
 
 
-async def summarize_tree(structure, pdf_pages, model=None,
-                         small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
+async def summarize_tree(structure, pdf_pages, model=None, small_node_tokens=None,
                          max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None,
                          max_words=None, split_shared_pages=False,
                          reasoning_effort=None, drop_refused_effort=False):
     """Bottom-up summaries: leaves from their own pages, parents composed from
     child summaries plus the pages no child covers. A parent's summary describes
     its whole subtree (end_index union semantics). Nodes that already carry a
-    summary are left untouched; leaves under `small_node_tokens` use their raw
-    text as the summary without a model call; every prompt asks for at most
+    summary are left untouched; leaves under `small_node_tokens` (by default
+    the summary's own length, `max_words` in tokens) use their raw text as the
+    summary without a model call; every prompt asks for at most
     `max_words` words; with `split_shared_pages` a leaf reads only its side of
     a page it shares with the next or previous leaf (see leaf_own_text); a set
     `reasoning_effort` goes with every summary call, over the indexing

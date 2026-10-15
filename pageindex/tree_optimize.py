@@ -63,8 +63,9 @@ import sys
 import unicodedata
 from types import SimpleNamespace
 
-from .utils import (SUMMARY_MAX_WORDS, ConfigLoader, _is_unrecoverable, count_tokens,
-                    intro_title, is_intro, llm_acompletion, strip_internal_keys)
+from .utils import (SUMMARY_MAX_WORDS, TOKENS_PER_WORD, ConfigLoader, _is_unrecoverable,
+                    count_tokens, intro_title, is_intro, llm_acompletion,
+                    strip_internal_keys)
 
 TRIGGER_PAGES = 5        # only look ahead on nodes larger than this
 ROUTING_COST = 1         # R(v), in pages
@@ -73,7 +74,6 @@ PAGE_CHARS = 6000        # per-page text handed to the model
 TITLE_MAX_CHARS = 200    # a union title longer than this falls back to a page label
 EMPTY_RETRIES = 0
 ENTRY_TOKENS = 45        # a node's structure entry less its summary: title, id, pages
-TOKENS_PER_WORD = 1.3
 
 EXPAND_PROMPT = """You are splitting an over-long section of a PDF into its subsections.
 
