@@ -594,7 +594,7 @@ def test_flash_cli_rejects_oversized_flat_tree(monkeypatch, tmp_path):
 
 
 def _layout_pdf(pages, landscape=False, glyph_headings=False):
-    """Uncompressed PDF, per page a 20pt heading line then
+    """Uncompressed PDF, per page a 20pt heading line (none if empty) then
     11pt body lines: ``pages`` is a list of ``(heading, [body line, ...])``,
     optionally followed by lines printed one under another above the heading,
     in 9pt. A line given as ``("bold", text)`` prints in 11pt Helvetica-Bold.
@@ -611,7 +611,7 @@ def _layout_pdf(pages, landscape=False, glyph_headings=False):
     kids, nxt = [], 7
     for heading, lines, *above in pages:
         ops = [(9, height - 40 - 12 * n, line) for n, line in enumerate(above)]
-        if not glyph_headings:
+        if heading and not glyph_headings:
             ops.append((20, height - 80, heading))
         y = height - 120
         for line in lines:
@@ -844,6 +844,68 @@ def test_section_title_under_the_contents_link_still_opens_its_section(tmp_path)
                                  ("Controls and Procedures", _body("controls"), link)]))
     section = next(node for node in extract_toc(str(pdf))["structure"] if node["title"] == notes_title)
     assert [node["title"] for node in section["nodes"]] == notes
+
+
+@pytest.mark.parametrize("mid_page", [False, True])
+def test_numbered_headings_continue_past_19(tmp_path, mid_page):
+    """Notes numbered 20 and on continue the sequence of the same-style notes
+    before them, so they are numbered headings like notes 1 to 19, whether
+    the notes open their pages or follow text of the note before."""
+    from pageindex.flash.main import extract_toc
+
+    topics = ["Organization", "Policies", "Revenue", "Leases", "Debt", "Taxes", "Equity", "Segments", "Pensions",
+              "Goodwill", "Inventory", "Receivables", "Payables", "Derivatives", "Hedging", "Contingencies",
+              "Commitments", "Acquisitions", "Disposals", "Restructuring", "Subsequent Events", "Related Parties"]
+    notes = [f"{n}. {topic}" for n, topic in enumerate(topics, 1)]
+    pages = [("Annual Report", ["Fiscal year ended December 31, 2022"]), ("Notes to the Financial Statements", [])]
+    for start in range(0, len(notes), 3):
+        lines = [f"More of the note before, line {k}, with some body text in it to read." for k in (1, 2, 3)] + [""] if mid_page else []
+        for note in notes[start:start + 3]:
+            topic = note.split(". ", 1)[1].lower()
+            lines += [("bold", note), *[f"Line {k} of the note on {topic} with some body text in it." for k in range(1, 4)], ""]
+        pages.append(("", lines))
+    pdf = tmp_path / "notes.pdf"
+    pdf.write_bytes(_layout_pdf(pages))
+    result = extract_toc(str(pdf))
+    assert [node["title"] for node in result["structure"]] == notes
+
+
+def test_lone_19_pulls_in_no_20(tmp_path):
+    """Numbering continues past 19 only from a 19 that follows its 18 in the
+    outline: a lone 19, like the lower half of a year printed over two lines
+    on a timeline, pulls in no 20."""
+    from pageindex.flash.main import extract_toc
+
+    timeline = ["", ("bold", "19 Online GPU search"), *_body("GPU search"), "", ("bold", "20 Streaming index"), *_body("streaming")]
+    # Numbered appendix entries make the lone 19 a numbered heading
+    appendix = [line for entry in ("1 Methods", "2 Data", "3 Glossary") for line in (("bold", entry), *_body(entry), "")]
+    pdf = tmp_path / "report.pdf"
+    pdf.write_bytes(_layout_pdf([("Product Report", ["Prepared for the board, October 2022"]),
+                                 ("Market Overview", _body("market")), ("Search Engines", _body("search engines")),
+                                 ("Vector Search", _body("vector search") + timeline), ("Customers", _body("customers")),
+                                 ("Appendix", appendix)]))
+    vector_search = next(node for node in extract_toc(str(pdf))["structure"] if node["title"] == "Vector Search")
+    assert [node["title"] for node in vector_search["nodes"]] == ["19 Online GPU search"]
+
+
+def test_numbering_continues_only_up_to_the_next_section(tmp_path):
+    """Notes that end at 19 pull in no "20." from a later section: the next
+    number continues the sequence only before the section opening after it."""
+    from pageindex.flash.main import extract_toc
+
+    topics = ["Organization", "Policies", "Revenue", "Leases", "Debt", "Taxes", "Equity", "Segments", "Pensions",
+              "Goodwill", "Inventory", "Receivables", "Payables", "Derivatives", "Hedging", "Contingencies",
+              "Commitments", "Acquisitions", "Disposals"]
+    notes = [f"{n}. {topic}" for n, topic in enumerate(topics, 1)]
+    pages = [("Annual Report", ["Fiscal year ended December 31, 2022"]), ("Notes to the Financial Statements", [])]
+    for start in range(0, len(notes), 3):
+        pages.append(("", [line for note in notes[start:start + 3] for line in (
+            ("bold", note), *[f"Line {k} of the note on {note.lower()} with some body text in it." for k in (1, 2, 3)], "")]))
+    exhibits = [("bold", "20. Form of Indemnification Agreement"), *_body("exhibit"), "",
+                ("bold", "21. Subsidiaries of the Registrant"), *_body("subsidiaries")]
+    pdf = tmp_path / "notes.pdf"
+    pdf.write_bytes(_layout_pdf([*pages, ("Exhibits", exhibits)]))
+    assert [node["title"] for node in extract_toc(str(pdf))["structure"]] == [*notes, "Exhibits"]
 
 
 def test_toc_source_is_always_present(tmp_path):
