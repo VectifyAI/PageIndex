@@ -1255,7 +1255,8 @@ class PageIndexClient:
             model: Own-model chat only — backend model name (defaults
                 to ``chat_model``). ``protocol="responses"`` /
                 ``"messages"`` send it as written after its routing
-                prefix (``openai/``; ``anthropic/``, ``bedrock/``, …), so
+                prefix (``openai/``, ``litellm/``; ``anthropic/``,
+                ``bedrock/``, …), so
                 a gateway's own ids work with ``backend``.
                 ``protocol="messages"`` takes a Claude model (or a
                 gateway's) — a ``chat_model`` you set carries over; the
