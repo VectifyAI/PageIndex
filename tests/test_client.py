@@ -3489,7 +3489,8 @@ def test_flash_summaries_send_the_reasoning_effort_and_expand_does_not(tmp_path,
             ("gpt-5-mini", "full", None, None, None),
             ("o4-mini", "full", "high", None, "high"),
             ("openrouter/openai/gpt-5.1", "full", None, None, "none"),
-            ("gpt-9-preview", "full", None, None, "none")):
+            ("gpt-9-preview", "full", None, None, "none"),
+            ("gpt-9-preview", "full", None, {"thinking": {"type": "enabled"}}, None)):
         sent.clear()
         token = pageindex.utils._llm_backend.set(backend)
         try:

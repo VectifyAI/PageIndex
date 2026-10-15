@@ -883,10 +883,11 @@ SUMMARY_REASONING_EFFORT = "none"
 
 def default_summary_reasoning_effort(model):
     """SUMMARY_REASONING_EFFORT unless the indexing backend sets a
-    reasoning_effort or LiteLLM lists the model as refusing it, else None.
+    reasoning_effort or thinking or LiteLLM lists the model as refusing
+    it, else None.
     Where LiteLLM says nothing (openrouter/..., models it has not caught up
     with) the summaries send it and drop it if the server refuses it."""
-    if "reasoning_effort" in (_llm_backend.get() or {}):
+    if {"reasoning_effort", "thinking"} & (_llm_backend.get() or {}).keys():
         return None
     import litellm
     try:
