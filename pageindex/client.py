@@ -416,7 +416,9 @@ class PageIndexClient:
             the reasoning effort sent with each node-summary call, over any
             in ``index_backend`` (``"none"``, ``"low"``, ``"high"``, ...; a
             model without the setting drops it). Defaults to ``"none"``
-            where LiteLLM lists the model as accepting it, else nothing.
+            unless LiteLLM lists the model as refusing it, and stops
+            sending it once a prompt the server refused with it (HTTP
+            400) goes through without it.
             Expand keeps the model's own default. A
             ``mode="standard"`` submit refuses any of the summary knobs.
         use_embedded_toc (bool, optional): Local mode only — whether flash

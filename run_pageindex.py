@@ -36,7 +36,7 @@ if __name__ == "__main__":
     parser.add_argument('--summary-concurrency', type=int, default=None,
                       help=f'Cap on simultaneous indexing model calls per lane (flash mode; default {SUMMARY_CONCURRENCY}, expand tops out at {EXPAND_CONCURRENCY})')
     parser.add_argument('--summary-reasoning-effort', type=str, default=None,
-                      help=f'Reasoning effort sent with each node-summary call; a model without the setting drops it (flash mode; default {SUMMARY_REASONING_EFFORT} where the model accepts it)')
+                      help=f'Reasoning effort sent with each node-summary call; a model without the setting drops it (flash mode; default {SUMMARY_REASONING_EFFORT} unless LiteLLM lists the model as refusing it, no longer sent once a prompt the server refused with it (HTTP 400) goes through without it)')
 
     parser.add_argument('--toc-check-pages', type=int, default=None,
                       help='Number of pages to check for table of contents (PDF only)')
