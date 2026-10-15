@@ -3486,8 +3486,10 @@ def test_flash_summaries_send_the_reasoning_effort_and_expand_does_not(tmp_path,
             ("gpt-5.1", False, None, None, "none"),
             ("gpt-5.1", "full", None, None, "none"),
             ("gpt-5.1", "full", None, {"reasoning_effort": "high"}, None),
-            ("o4-mini", "full", None, None, None),
-            ("o4-mini", "full", "high", None, "high")):
+            ("gpt-5-mini", "full", None, None, None),
+            ("o4-mini", "full", "high", None, "high"),
+            ("openrouter/openai/gpt-5.1", "full", None, None, "none"),
+            ("gpt-9-preview", "full", None, None, "none")):
         sent.clear()
         token = pageindex.utils._llm_backend.set(backend)
         try:
@@ -3503,6 +3505,64 @@ def test_flash_summaries_send_the_reasoning_effort_and_expand_does_not(tmp_path,
     monkeypatch.setattr(pageindex.utils, "default_summary_reasoning_effort",
                         lambda model: pytest.fail("looked up with summaries off"))
     flash_api.page_index_flash(str(pdf), summary=False, optimize=False)
+
+
+def test_flash_summaries_drop_a_default_effort_the_server_refuses(tmp_path, monkeypatch):
+    """The default effort is dropped once a prompt refused with it (400)
+    goes through without it, calls refused after the drop included; a
+    prompt refused either way keeps it; another refusal or a chosen effort
+    is never resent without it."""
+    from conftest import build_pdf
+    import copy
+    import pageindex.flash.api as flash_api
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, _ = _expand_fixture()
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: {
+        "structure": copy.deepcopy(tree), "page_texts": list(pages)})
+
+    class Refused(Exception):
+        def __init__(self, status_code):
+            super().__init__("unsupported value")
+            self.status_code = status_code
+    sent = []
+
+    def run(optimize, refuse, effort=None, concurrency=1, status=400):
+        sent.clear()
+
+        async def server(model, prompt, **params):
+            if prompt.startswith("You are splitting"):
+                return '{"subsections": []}'
+            sent.append(params.get("reasoning_effort"))
+            if refuse(params):
+                await asyncio.sleep(0.001 * len(sent))   # later refusals land after the drop
+                raise Refused(status)
+            return '{"summary": "ok"}'
+        monkeypatch.setattr(pageindex.utils, "llm_acompletion", server)
+        monkeypatch.setattr(tree_optimize, "llm_acompletion", server)
+        return flash_api.page_index_flash(
+            str(pdf), summary_model="gpt-9-preview", optimize=optimize,
+            summary_concurrency=concurrency, summary_reasoning_effort=effort)
+
+    def summaries(nodes):
+        return [s for n in nodes for s in [n.get("summary"), *summaries(n.get("nodes") or [])]]
+
+    for optimize in (False, "full"):
+        run(optimize, lambda params: "reasoning_effort" in params)
+        assert len(sent) > 3 and sent[:2] == ["none", None] and set(sent[2:]) == {None}
+        run(optimize, lambda params: len(sent) <= 2)
+        assert len(sent) > 3 and sent[:2] == ["none", None] and set(sent[2:]) == {"none"}
+        answered = summaries(run(optimize, lambda params: False, concurrency=4)["structure"])
+        dropped = run(optimize, lambda params: "reasoning_effort" in params, concurrency=4)
+        assert sent.count("none") > 1 and summaries(dropped["structure"]) == answered
+        with pytest.raises(Refused):
+            run(optimize, lambda params: True, status=401)
+        assert None not in sent
+        with pytest.raises(RuntimeError, match="Summary generation failed"):
+            run(optimize, lambda params: "reasoning_effort" in params, effort="high")
+        assert set(sent) == {"high"}
 
 
 def test_summary_max_words_reaches_the_local_indexer():

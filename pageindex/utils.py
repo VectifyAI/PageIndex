@@ -882,18 +882,20 @@ SUMMARY_REASONING_EFFORT = "none"
 
 
 def default_summary_reasoning_effort(model):
-    """SUMMARY_REASONING_EFFORT where LiteLLM lists the model as accepting it
-    and the indexing backend sets no reasoning_effort, else None."""
+    """SUMMARY_REASONING_EFFORT unless the indexing backend sets a
+    reasoning_effort or LiteLLM lists the model as refusing it, else None.
+    Where LiteLLM says nothing (openrouter/..., models it has not caught up
+    with) the summaries send it and drop it if the server refuses it."""
     if "reasoning_effort" in (_llm_backend.get() or {}):
         return None
     import litellm
     try:
         info = litellm.get_model_info(_litellm_model(model))
     except Exception:
-        return None
-    if info.get(f"supports_{SUMMARY_REASONING_EFFORT}_reasoning_effort"):
         return SUMMARY_REASONING_EFFORT
-    return None
+    if info.get(f"supports_{SUMMARY_REASONING_EFFORT}_reasoning_effort") is False:
+        return None
+    return SUMMARY_REASONING_EFFORT
 
 
 class _PriorityGate:
@@ -1034,11 +1036,13 @@ class SummaryScheduler:
     def __init__(self, structure, pdf_pages, model=None,
                  small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
                  max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None,
-                 max_words=None, split_shared_pages=False, reasoning_effort=None):
+                 max_words=None, split_shared_pages=False, reasoning_effort=None,
+                 drop_refused_effort=False):
         self.structure = structure
         self._pdf_pages = pdf_pages
         self._split_shared_pages = split_shared_pages
         self._params = {"reasoning_effort": reasoning_effort} if reasoning_effort else {}
+        self._drop_refused_effort = drop_refused_effort
         self._model = model
         self._small_node_tokens = small_node_tokens
         self._max_intro_pages = max_intro_pages
@@ -1086,9 +1090,22 @@ class SummaryScheduler:
     async def _ask(self, prompt, prio):
         self._asked = True
         async with self._gate.slot(prio):
-            reply = await llm_acompletion(self._model, prompt, **self._params)
+            reply = await self._complete(prompt)
         if parse_summary(reply):
             self._answered = True
+        return reply
+
+    async def _complete(self, prompt):
+        params = self._params
+        try:
+            return await llm_acompletion(self._model, prompt, **params)
+        except Exception as e:
+            if not (params and self._drop_refused_effort
+                    and getattr(e, "status_code", None) == 400):
+                raise
+        # the effort is to blame only if the prompt goes through without it
+        reply = await llm_acompletion(self._model, prompt)
+        self._params = {}
         return reply
 
     def _leaf_text(self, node):
@@ -1221,7 +1238,7 @@ async def summarize_tree(structure, pdf_pages, model=None,
                          small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
                          max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None,
                          max_words=None, split_shared_pages=False,
-                         reasoning_effort=None):
+                         reasoning_effort=None, drop_refused_effort=False):
     """Bottom-up summaries: leaves from their own pages, parents composed from
     child summaries plus the pages no child covers. A parent's summary describes
     its whole subtree (end_index union semantics). Nodes that already carry a
@@ -1230,15 +1247,18 @@ async def summarize_tree(structure, pdf_pages, model=None,
     `max_words` words; with `split_shared_pages` a leaf reads only its side of
     a page it shares with the next or previous leaf (see leaf_own_text); a set
     `reasoning_effort` goes with every summary call, over the indexing
-    backend's. Model calls run deepest node first, both in starting order and
-    in leaving the queue: depth counts the calls left on a node's path to the
-    root, its own included."""
+    backend's, and with `drop_refused_effort` the calls stop sending it once
+    a prompt the server refused with it goes through without it. Model calls
+    run deepest node first, both in starting order and in leaving the queue:
+    depth counts the calls left on a node's path to the root, its own
+    included."""
     scheduler = SummaryScheduler(structure, pdf_pages, model=model,
                                  small_node_tokens=small_node_tokens,
                                  max_intro_pages=max_intro_pages,
                                  concurrency=concurrency, max_words=max_words,
                                  split_shared_pages=split_shared_pages,
-                                 reasoning_effort=reasoning_effort)
+                                 reasoning_effort=reasoning_effort,
+                                 drop_refused_effort=drop_refused_effort)
     scheduler.mark_final(list(_subtree(structure)))
     return await scheduler.finish()
 
