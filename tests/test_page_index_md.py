@@ -4,6 +4,24 @@ from pageindex.page_index_md import extract_nodes_from_markdown
 
 
 class ExtractNodesFromMarkdownTest(unittest.TestCase):
+    def test_fenced_examples_do_not_become_document_headings(self):
+        cases = [
+            "~~~python\n# example\n**also code**\n~~~",
+            "````markdown\n```python\n# example\n```\n````",
+            "```python\n~~~\n# example\n~~~\n```",
+            "```python\n``` not a closing fence\n# example\n```",
+        ]
+        for code in cases:
+            with self.subTest(code=code):
+                text = "# Before\n" + code + "\n## After"
+                nodes, lines = extract_nodes_from_markdown(text)
+                self.assertEqual([n["node_title"] for n in nodes], ["Before", "After"])
+                self.assertEqual(nodes[-1]["line_num"], len(lines))
+
+    def test_unclosed_tilde_fence_hides_remaining_headings(self):
+        nodes, _ = extract_nodes_from_markdown("# Before\n~~~\n## Example")
+        self.assertEqual([n["node_title"] for n in nodes], ["Before"])
+
     def test_skips_bold_heading_with_only_whitespace(self):
         nodes, _ = extract_nodes_from_markdown("**   **\n**Valid heading**")
 
