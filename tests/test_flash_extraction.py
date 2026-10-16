@@ -812,34 +812,38 @@ def test_title_printed_again_with_its_opening_is_no_running_header(tmp_path):
     assert report in [node["title"] for node in result["structure"]]
 
 
-def test_company_name_under_the_contents_link_is_a_running_header(tmp_path):
+@pytest.mark.parametrize("cover", [["SKYLARK HOLDINGS INC.", "Fiscal year ended December 31, 2022"],
+                                   ["Fiscal year ended December 31, 2022",
+                                    "SKYLARK HOLDINGS INC. (Exact name of registrant as specified in its charter)"]])
+def test_company_name_under_the_contents_link_is_a_running_header(tmp_path, cover):
     """A company name printed under the running "Table of Contents" link on
-    most of its pages, the name the cover gives, belongs to that running
-    header, so it is no heading."""
+    most of its pages, the name the cover gives, on a line of its own or
+    within one, belongs to that running header, so it is no heading."""
     from pageindex.flash.main import extract_toc
 
     titles = ["Business", "Risk Factors", "Properties", "Legal Proceedings", "Market", "Selected Data",
               "Discussion", "Market Risk", "Statements", "Controls", "Directors", "Compensation"]
     company = ("bold", "SKYLARK HOLDINGS INC.")
     pdf = tmp_path / "filing.pdf"
-    pdf.write_bytes(_layout_pdf([("Annual Report", ["SKYLARK HOLDINGS INC.", "Fiscal year ended December 31, 2022"],
-                                  "Table of Contents"),
+    pdf.write_bytes(_layout_pdf([("Annual Report", cover, "Table of Contents"),
                                  *[(title, _body(title), "Table of Contents", company) for title in titles]]))
     result = extract_toc(str(pdf))
     assert [node["title"] for node in result["structure"]] == titles
 
 
-def test_section_title_under_the_contents_link_still_opens_its_section(tmp_path):
+@pytest.mark.parametrize("cover", [[], ["The footnotes to consolidated financial statements are part of this report."]])
+def test_section_title_under_the_contents_link_still_opens_its_section(tmp_path, cover):
     """A section title printed under the running "Table of Contents" link on
     each of its pages, here more than half of them, still opens its section on
-    its first page: only its later copies belong to the running header."""
+    its first page, also when the cover holds its letters but not its words:
+    only its later copies belong to the running header."""
     from pageindex.flash.main import extract_toc
 
     link, notes_title = "Table of Contents", "NOTES TO CONSOLIDATED FINANCIAL STATEMENTS"
     notes = [f"Note {n} - {name}" for n, name in enumerate(["Organization", "Accounting Policies", "Revenue", "Leases",
              "Debt", "Income Taxes", "Equity", "Segments", "Commitments", "Subsequent Events"], 1)]
     pdf = tmp_path / "quarterly.pdf"
-    pdf.write_bytes(_layout_pdf([("Quarterly Report", ["For the quarter ended June 30, 2023"], link),
+    pdf.write_bytes(_layout_pdf([("Quarterly Report", ["For the quarter ended June 30, 2023", *cover], link),
                                  ("Balance Sheets", _body("balance sheets"), link),
                                  ("Statements of Operations", _body("operations"), link),
                                  *[("", [("bold", note), *_body(note)], link, ("bold", notes_title)) for note in notes],

@@ -66,6 +66,7 @@ from .keyword_tables import (
     CHART_KEYWORDS_TRIE,
     TOC_TITLES_TRIE,
     _search_trie,
+    _normalize_text_key,
 )
 from .body_text import (
     record_recurring_text,
@@ -156,6 +157,11 @@ def block_after(ctx, page, block: Block) -> Optional[Block]:
     blocks = page.output_slot if ctx.primary_slot == 1 else page.output_slot[::-1]
     index = next(k for k, item in enumerate(blocks) if item is block)
     return next((item for item in blocks[index + 1:] if letter_count(item.char_stats) > 0), None)
+
+
+def block_words(block: Block) -> str:
+    """``normalized_block_text`` with a space between tokens, to match text word by word."""
+    return " ".join(_normalize_text_key(token.str.lower()) for token in tokenize_block(block))
 
 
 def repeats_into_body(ctx, page, block: Block, other_page, other: Block) -> bool:
@@ -473,7 +479,7 @@ def detect_header_footer(ctx: HeaderFooterContext) -> None:
     # A section title printed there on each of its pages is no name from the cover.
     followers = [block_after(ctx, page, link) for page, link in links if link.type == ctx.primary_slot]
     if followers:
-        cover = "".join(normalized_block_text(block) for block in ctx.secondary_slot.primary_slot[0].output_slot)
+        cover = f" {' '.join(block_words(block) for block in ctx.secondary_slot.primary_slot[0].output_slot)} "
         counts: dict[str, int] = {}
         for block in followers:
             if block is not None:
@@ -481,7 +487,7 @@ def detect_header_footer(ctx: HeaderFooterContext) -> None:
         for block in followers:
             if block is not None and block.type == 0:
                 text = normalized_block_text(block)
-                if 2 * counts[text] > len(followers) and text in cover:
+                if 2 * counts[text] > len(followers) and f" {block_words(block)} " in cover:
                     mark_header_footer(ctx, block)
 
     # ----- Pass 3: cutoff line + top-3 text-hash sweep -----------------
