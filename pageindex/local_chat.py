@@ -11,7 +11,7 @@ import queue
 import threading
 import time
 import uuid
-from typing import Any, Iterator, Mapping, Optional, Union
+from typing import Any, Callable, Iterator, Mapping, Optional, Union
 
 from .agent_tools import _base_instructions, targeting_block
 from .chat_stream import ChatStream
@@ -88,6 +88,99 @@ def _split_chat_messages(messages) -> "tuple[list[str], list[dict]]":
 def _run_sync(coro):
     from .utils import run_off_loop
     return run_off_loop(asyncio.run, coro)
+
+
+
+class StreamIterator(Iterator[Any]):
+    """Sync iterator wrapper that preserves full Iterator compatibility while
+    exposing execution outcome and measurement metadata.
+
+    Lifecycle and Teardown Semantics:
+        - ``execution_outcome``: ``"in_progress"`` while streaming or suspended;
+          ``"completed"`` on normal exhaustion; ``"failed"`` on exception;
+          ``"cancelled"`` when explicitly closed before completion.
+        - Closing an already completed or failed stream preserves its terminal
+          outcome without overwriting it.
+        - Supported local cleanup is executed via ``close()`` (or on garbage collection);
+          in-flight remote backend requests cannot be aborted mid-turn. Remote execution
+          may continue until the current turn finishes, but subsequent turns and tools
+          will not run. Usage never delivered by the provider cannot be recovered or fabricated.
+        - Properties ``measurements``, ``measurement_status``, and ``usage`` reflect
+          the latest collected state and remain accessible after stream closure or exhaustion.
+    """
+
+    def __init__(
+        self,
+        iterable: Any,
+        *,
+        on_close: Optional[Callable[[], None]] = None,
+        measurements: Optional[list[dict[str, Any]]] = None,
+        get_status: Optional[Callable[[], str]] = None,
+        get_usage: Optional[Callable[[], Optional[dict[str, Any]]]] = None,
+    ) -> None:
+        self._it = iter(iterable)
+        self._on_close = on_close
+        self._measurements = measurements if measurements is not None else []
+        self._get_status = get_status
+        self._get_usage = get_usage
+        self._outcome = "in_progress"
+
+    def __iter__(self) -> "StreamIterator":
+        return self
+
+    def __next__(self) -> Any:
+        if self._outcome == "completed":
+            raise StopIteration
+        if self._outcome == "cancelled":
+            raise StopIteration
+        try:
+            return next(self._it)
+        except StopIteration:
+            if self._outcome == "in_progress":
+                self._outcome = "completed"
+            raise
+        except BaseException as exc:
+            if not isinstance(exc, (GeneratorExit, StopIteration)):
+                self._outcome = "failed"
+            raise
+
+    def close(self) -> None:
+        if self._outcome == "in_progress":
+            self._outcome = "cancelled"
+        close_fn = getattr(self._it, "close", None)
+        if close_fn is not None:
+            try:
+                close_fn()
+            except Exception:
+                pass
+        if self._on_close is not None:
+            try:
+                self._on_close()
+            except Exception:
+                pass
+
+    def __del__(self) -> None:
+        self.close()
+
+    @property
+    def execution_outcome(self) -> str:
+        return self._outcome
+
+    @property
+    def measurements(self) -> list[dict[str, Any]]:
+        return list(self._measurements)
+
+    @property
+    def measurement_status(self) -> str:
+        if self._get_status is not None:
+            return self._get_status()
+        return _aggregate_measurement_status(self._measurements)
+
+    @property
+    def usage(self) -> Optional[dict[str, Any]]:
+        if self._get_usage is not None:
+            return self._get_usage()
+        return None
 
 
 _SENTINEL = object()
@@ -419,7 +512,57 @@ def _conversation_cache_key(model_name: str, instructions: str, doc_id,
     return "pageindex-" + hashlib.sha256(seed.encode()).hexdigest()[:16]
 
 
-def _model_backend_error(exc, lane: str, client=None) -> PageIndexAPIError:
+def _attach_error_measurements(
+    err: PageIndexAPIError,
+    lane: str,
+    measurements: Optional[list[dict[str, Any]]],
+) -> None:
+    if measurements is not None:
+        copied = []
+        for m in measurements:
+            if isinstance(m, dict):
+                item = dict(m)
+                if isinstance(item.get("usage"), dict):
+                    u_dict = dict(item["usage"])
+                    for k, v in list(u_dict.items()):
+                        if isinstance(v, dict):
+                            u_dict[k] = dict(v)
+                    item["usage"] = u_dict
+                copied.append(item)
+            else:
+                copied.append(m)
+        err.measurements = copied
+        err.measurement_status = _aggregate_measurement_status(copied)
+        if lane in ("chat", "chat_completions"):
+            err.usage = _openai_usage(copied)
+        elif lane == "responses":
+            err.usage = _responses_usage(copied)
+        elif lane == "messages":
+            last_usage = (
+                copied[-1].get("usage")
+                if (copied and isinstance(copied[-1], dict))
+                else {}
+            )
+            err.usage = (
+                _anthropic_usage(copied, last_usage or {})
+                if copied
+                else None
+            )
+        else:
+            err.usage = None
+    else:
+        if getattr(err, "measurements", None) is None:
+            err.measurements = []
+        if getattr(err, "measurement_status", None) is None:
+            err.measurement_status = "unknown"
+        if getattr(err, "usage", None) is None:
+            err.usage = None
+    err.execution_outcome = "failed"
+
+
+def _model_backend_error(
+    exc, lane: str, client=None, measurements: Optional[list[dict[str, Any]]] = None
+) -> PageIndexAPIError:
     """Wrap a provider failure; the sol-class refusal (chatcmpl rejects
     function tools while reasoning is on) gets its documented exits
     appended, since the fix is a different route, not a retry. The exits
@@ -452,22 +595,30 @@ def _model_backend_error(exc, lane: str, client=None) -> PageIndexAPIError:
             ", or drop the chat model configuration to use the managed "
             "cloud chat." if lane == "chat" else "."
         )
-    return PageIndexAPIError(message,
-                             status_code=getattr(exc, "status_code", None))
+    err = PageIndexAPIError(message,
+                            status_code=getattr(exc, "status_code", None))
+    _attach_error_measurements(err, lane, measurements)
+    return err
 
 
-def _translate_run_error(exc, max_turns, lane, client=None) -> PageIndexAPIError:
+def _translate_run_error(
+    exc, max_turns, lane, client=None, measurements: Optional[list[dict[str, Any]]] = None
+) -> PageIndexAPIError:
     """The uncaught-run ladder every agent door shares."""
     from agents.exceptions import AgentsException, MaxTurnsExceeded
     if isinstance(exc, MaxTurnsExceeded):
-        return _wrap_max_turns(max_turns)
-    if isinstance(exc, AgentsException):
+        err = _wrap_max_turns(max_turns)
+    elif isinstance(exc, AgentsException):
         cause = _pageindex_cause(exc)
         if cause is not None:
             # a tool failure the invoker re-raised, wrapped on its way out
-            return PageIndexAPIError(str(cause), status_code=cause.status_code)
-        return PageIndexAPIError(f"The agent backend failed: {exc}")
-    return _model_backend_error(exc, lane, client)
+            err = PageIndexAPIError(str(cause), status_code=cause.status_code)
+        else:
+            err = PageIndexAPIError(f"The agent backend failed: {exc}")
+    else:
+        err = _model_backend_error(exc, lane, client, measurements=measurements)
+    _attach_error_measurements(err, lane, measurements)
+    return err
 
 
 def _run_kwargs(max_turns) -> dict:
@@ -479,7 +630,151 @@ def _run_kwargs(max_turns) -> dict:
     return kwargs
 
 
-def _record_response_status(agent, recorded: dict) -> None:
+def _dump_usage(usage: Any) -> Optional[dict[str, Any]]:
+    if usage is None:
+        return None
+
+    def _to_json_compatible(val: Any) -> Any:
+        if val is None or isinstance(val, (int, float, str, bool)):
+            return val
+        if hasattr(val, "model_dump"):
+            try:
+                dumped = val.model_dump(mode="json")
+            except TypeError:
+                dumped = val.model_dump()
+            return _to_json_compatible(dumped)
+        if dataclasses.is_dataclass(val) and not isinstance(val, type):
+            if getattr(val, "requests", None) == 0 and not getattr(val, "request_usage_entries", None):
+                return None
+            return _to_json_compatible(dataclasses.asdict(val))
+        if hasattr(val, "dict") and callable(val.dict):
+            return _to_json_compatible(val.dict())
+        if hasattr(val, "__dict__"):
+            return _to_json_compatible(vars(val))
+        if isinstance(val, dict):
+            return {str(k): _to_json_compatible(v) for k, v in val.items()}
+        if isinstance(val, (list, tuple, set)):
+            return [_to_json_compatible(v) for v in val]
+        return val
+
+    res = _to_json_compatible(usage)
+    return res if isinstance(res, dict) else None
+
+
+def _extract_call_id(response: Any) -> Optional[str]:
+    if response is None:
+        return None
+    call_id = getattr(response, "id", None) or getattr(response, "response_id", None)
+    if call_id:
+        return str(call_id)
+    if isinstance(response, dict):
+        call_id = response.get("id") or response.get("response_id")
+        if call_id:
+            return str(call_id)
+    output = getattr(response, "output", None)
+    if output and isinstance(output, list):
+        for item in output:
+            prov = getattr(item, "provider_data", None)
+            if isinstance(prov, dict) and prov.get("response_id"):
+                return str(prov["response_id"])
+    return None
+
+
+
+def _call_measurement_status(usage: Any) -> str:
+    """Per-call measurement completeness status ('complete', 'partial', or 'unknown').
+
+    - 'complete': both required base counters (input/prompt and output/completion)
+      are reported as non-negative integers (>= 0). Explicit 0 is a valid measurement
+      and distinct from absent usage.
+    - 'partial': exactly one required base counter is reported.
+    - 'unknown': neither required base counter is reported.
+    Missing optional cache, reasoning, or lifetime details do not downgrade completeness.
+    """
+    dumped = _dump_usage(usage)
+    if dumped is None:
+        return "unknown"
+    in_val = dumped.get("input_tokens")
+    if in_val is None:
+        in_val = dumped.get("prompt_tokens")
+    out_val = dumped.get("output_tokens")
+    if out_val is None:
+        out_val = dumped.get("completion_tokens")
+    has_in = isinstance(in_val, int) and not isinstance(in_val, bool) and in_val >= 0
+    has_out = isinstance(out_val, int) and not isinstance(out_val, bool) and out_val >= 0
+    if has_in and has_out:
+        return "complete"
+    if has_in or has_out:
+        return "partial"
+    return "unknown"
+
+
+def _aggregate_measurement_status(raw_responses: Any) -> str:
+    """Aggregate measurement completeness across contributing calls.
+
+    - 'complete': at least one contributing call exists and every call is 'complete'.
+    - 'partial': at least one contributing call is known, but not all calls are 'complete'.
+    - 'unknown': no contributing calls exist or every contributing call is 'unknown'.
+    An aggregate cannot be labeled 'complete' if any contributing call lacks required base measurements.
+    """
+    if not raw_responses:
+        return "unknown"
+    statuses = []
+    for r in raw_responses:
+        u = getattr(r, "usage", None) if not isinstance(r, dict) else r.get("usage")
+        statuses.append(_call_measurement_status(u))
+    if not statuses:
+        return "unknown"
+    if all(s == "complete" for s in statuses):
+        return "complete"
+    if all(s == "unknown" for s in statuses):
+        return "unknown"
+    return "partial"
+
+
+def _emit_measurement(
+    on_measurement: Optional[Callable[[dict[str, Any]], None]],
+    seen: Any,
+    call_id: Optional[str],
+    turn_index: int,
+    model: Optional[str],
+    backend: str,
+    usage: Any,
+    collected_measurements: Optional[list[dict[str, Any]]] = None,
+) -> None:
+    """Emit an individual model-call measurement record upon turn completion.
+
+    Invoked immediately upon normal completion of each model call / turn.
+    Retains distinct call identity (call_id, turn_index, model, backend),
+    dumped usage, and per-call completeness status.
+    """
+    if turn_index in seen:
+        return
+    seen.add(turn_index)
+    payload = {
+        "call_id": call_id,
+        "turn_index": turn_index,
+        "model": model,
+        "backend": backend,
+        "usage": _dump_usage(usage),
+        "status": _call_measurement_status(usage),
+    }
+    if collected_measurements is not None:
+        collected_measurements.append(payload)
+    if on_measurement is not None:
+        on_measurement(payload)
+
+
+def _record_response_status(
+    agent,
+    recorded: dict,
+    on_measurement: Optional[Callable[[dict[str, Any]], None]] = None,
+    seen: Optional[Any] = None,
+    turn_counter: Optional[list[int]] = None,
+    reported_model: Optional[str] = None,
+    backend: str = "responses",
+    collected_measurements: Optional[list[dict[str, Any]]] = None,
+) -> None:
     """Capture each turn's terminal Response status at the transport client:
     openai-agents' non-streaming path discards Response.status, so a final
     turn truncated at the output cap would otherwise report as a clean
@@ -491,26 +786,55 @@ def _record_response_status(agent, recorded: dict) -> None:
     if create is None:
         return
 
+    if seen is None:
+        seen = set()
+    if turn_counter is None:
+        turn_counter = [0]
+
     async def recording_create(*args, **kwargs):
         response = await create(*args, **kwargs)
-        if getattr(response, "status", None):
-            recorded["status"] = response.status
-            for field in ("incomplete_details", "error"):
+        if response is not None:
+            if getattr(response, "status", None):
+                recorded["status"] = response.status
+                for field in ("incomplete_details", "error"):
+                    value = getattr(response, field, None)
+                    recorded[field] = (value.model_dump(mode="json")
+                                       if hasattr(value, "model_dump") else value)
+            # The backend's echo of what it actually ran with.
+            for field in ("tool_choice", "parallel_tool_calls"):
                 value = getattr(response, field, None)
-                recorded[field] = (value.model_dump(mode="json")
-                                   if hasattr(value, "model_dump") else value)
-        # The backend's echo of what it actually ran with.
-        for field in ("tool_choice", "parallel_tool_calls"):
-            value = getattr(response, field, None)
-            if value is not None:
-                recorded[field] = (value.model_dump(mode="json")
-                                   if hasattr(value, "model_dump") else value)
+                if value is not None:
+                    recorded[field] = (value.model_dump(mode="json")
+                                       if hasattr(value, "model_dump") else value)
+            turn_idx = turn_counter[0]
+            turn_counter[0] += 1
+            call_id = _extract_call_id(response)
+            resp_model = getattr(response, "model", None) or reported_model
+            usage = getattr(response, "usage", None)
+            _emit_measurement(
+                on_measurement, seen,
+                call_id=call_id,
+                turn_index=turn_idx,
+                model=resp_model,
+                backend=backend,
+                usage=usage,
+                collected_measurements=collected_measurements,
+            )
         return response
 
     responses.create = recording_create
 
 
-def _record_chat_finish(agent, recorded: dict) -> None:
+def _record_chat_finish(
+    agent,
+    recorded: dict,
+    on_measurement: Optional[Callable[[dict[str, Any]], None]] = None,
+    seen: Optional[Any] = None,
+    turn_counter: Optional[list[int]] = None,
+    reported_model: Optional[str] = None,
+    backend: str = "chat_completions",
+    collected_measurements: Optional[list[dict[str, Any]]] = None,
+) -> None:
     """Capture each turn's native finish_reason from the raw LiteLLM
     response: openai-agents' ModelResponse drops it, so a truncated or
     content-filtered final turn would otherwise report as a clean "stop".
@@ -522,6 +846,11 @@ def _record_chat_finish(agent, recorded: dict) -> None:
     if fetch is None:
         return
 
+    if seen is None:
+        seen = set()
+    if turn_counter is None:
+        turn_counter = [0]
+
     def note(item) -> None:
         choices = getattr(item, "choices", None)
         finish = getattr(choices[0], "finish_reason", None) if choices else None
@@ -532,16 +861,59 @@ def _record_chat_finish(agent, recorded: dict) -> None:
         """Iteration passthrough that notes each chunk; everything else
         (aclose/close/...) delegates to the provider stream itself."""
 
-        def __init__(self, inner):
+        def __init__(self, inner, turn_counter: list[int], seen: Any,
+                     call_id: Optional[str] = None, initial_model: Optional[str] = None,
+                     collected_measurements: Optional[list[dict[str, Any]]] = None):
             self._inner = inner
+            self._turn_counter = turn_counter
+            self._seen = seen
+            self._call_id = call_id
+            self._model = initial_model
+            self._usage = None
+            self._completed = False
+            self._collected_measurements = collected_measurements
 
         def __aiter__(self):
             return self
 
         async def __anext__(self):
-            chunk = await self._inner.__anext__()
+            try:
+                chunk = await self._inner.__anext__()
+            except StopAsyncIteration:
+                if not self._completed:
+                    self._completed = True
+                    turn_idx = self._turn_counter[0]
+                    self._turn_counter[0] += 1
+                    _emit_measurement(
+                        on_measurement, self._seen,
+                        call_id=self._call_id,
+                        turn_index=turn_idx,
+                        model=self._model or reported_model,
+                        backend=backend,
+                        usage=self._usage,
+                        collected_measurements=self._collected_measurements,
+                    )
+                raise
             note(chunk)
+            chunk_id = _extract_call_id(chunk)
+            if chunk_id:
+                self._call_id = chunk_id
+            if getattr(chunk, "model", None):
+                self._model = chunk.model
+            chunk_usage = getattr(chunk, "usage", None)
+            if chunk_usage is not None:
+                self._usage = chunk_usage
             return chunk
+
+        async def aclose(self):
+            aclose_fn = getattr(self._inner, "aclose", None)
+            if aclose_fn is not None:
+                await aclose_fn()
+
+        def close(self):
+            close_fn = getattr(self._inner, "close", None)
+            if close_fn is not None:
+                close_fn()
 
         def __getattr__(self, name):
             return getattr(self._inner, name)
@@ -550,8 +922,22 @@ def _record_chat_finish(agent, recorded: dict) -> None:
         result = await fetch(*args, **kwargs)
         if isinstance(result, tuple):
             response, stream = result
-            return response, _Tee(stream)
+            call_id = _extract_call_id(response)
+            resp_model = getattr(response, "model", None)
+            return response, _Tee(stream, turn_counter, seen, call_id, resp_model,
+                                  collected_measurements=collected_measurements)
         note(result)
+        turn_idx = turn_counter[0]
+        turn_counter[0] += 1
+        _emit_measurement(
+            on_measurement, seen,
+            call_id=_extract_call_id(result),
+            turn_index=turn_idx,
+            model=getattr(result, "model", None) or reported_model,
+            backend=backend,
+            usage=getattr(result, "usage", None),
+            collected_measurements=collected_measurements,
+        )
         return result
 
     model._fetch_response = recording_fetch
@@ -588,40 +974,108 @@ def _wrap_max_turns(max_turns) -> PageIndexAPIError:
     )
 
 
-def _usage_sums(raw_responses) -> "tuple[int, int, int, int, int]":
-    prompt = completion = cached = cache_write = reasoning = 0
-    for r in raw_responses:
-        if r.usage is None:
+def _usage_sums(
+    raw_responses,
+) -> "Optional[tuple[int, int, Optional[int], Optional[int], Optional[int]]]":
+    has_usage = False
+    prompt = 0
+    completion = 0
+    cached: Optional[int] = None
+    cache_write: Optional[int] = None
+    reasoning: Optional[int] = None
+    for r in raw_responses or ():
+        usage = getattr(r, "usage", None) if not isinstance(r, dict) else r.get("usage")
+        if usage is None:
             continue
-        prompt += r.usage.input_tokens or 0
-        completion += r.usage.output_tokens or 0
-        details = getattr(r.usage, "input_tokens_details", None)
-        cached += getattr(details, "cached_tokens", 0) or 0
-        cache_write += getattr(details, "cache_write_tokens", 0) or 0
-        details = getattr(r.usage, "output_tokens_details", None)
-        reasoning += getattr(details, "reasoning_tokens", 0) or 0
+        if getattr(usage, "requests", None) == 0 and not getattr(usage, "request_usage_entries", None):
+            continue
+        has_usage = True
+        if isinstance(usage, dict):
+            prompt += usage.get("input_tokens") or usage.get("prompt_tokens") or 0
+            completion += usage.get("output_tokens") or usage.get("completion_tokens") or 0
+            in_details = usage.get("input_tokens_details") or usage.get("prompt_tokens_details")
+            if in_details and isinstance(in_details, dict):
+                c = in_details.get("cached_tokens")
+                if isinstance(c, int) and not isinstance(c, bool):
+                    cached = c if cached is None else cached + c
+                cw = in_details.get("cache_write_tokens")
+                if isinstance(cw, int) and not isinstance(cw, bool):
+                    cache_write = cw if cache_write is None else cache_write + cw
+            out_details = usage.get("output_tokens_details") or usage.get("completion_tokens_details")
+            if out_details and isinstance(out_details, dict):
+                rt = out_details.get("reasoning_tokens")
+                if isinstance(rt, int) and not isinstance(rt, bool):
+                    reasoning = rt if reasoning is None else reasoning + rt
+        else:
+            prompt += getattr(usage, "input_tokens", None) or getattr(usage, "prompt_tokens", 0) or 0
+            completion += getattr(usage, "output_tokens", None) or getattr(usage, "completion_tokens", 0) or 0
+            details = getattr(usage, "input_tokens_details", None) or getattr(usage, "prompt_tokens_details", None)
+            if details is not None:
+                c = details.get("cached_tokens") if isinstance(details, dict) else getattr(details, "cached_tokens", None)
+                if isinstance(c, int) and not isinstance(c, bool):
+                    cached = c if cached is None else cached + c
+                cw = details.get("cache_write_tokens") if isinstance(details, dict) else getattr(details, "cache_write_tokens", None)
+                if isinstance(cw, int) and not isinstance(cw, bool):
+                    cache_write = cw if cache_write is None else cache_write + cw
+            details = getattr(usage, "output_tokens_details", None) or getattr(usage, "completion_tokens_details", None)
+            if details is not None:
+                rt = details.get("reasoning_tokens") if isinstance(details, dict) else getattr(details, "reasoning_tokens", None)
+                if isinstance(rt, int) and not isinstance(rt, bool):
+                    reasoning = rt if reasoning is None else reasoning + rt
+    if not has_usage:
+        return None
     return prompt, completion, cached, cache_write, reasoning
 
 
-def _openai_usage(raw_responses) -> dict:
+def _openai_usage(raw_responses) -> Optional[dict]:
     """Cross-turn sums, chat.completions dialect."""
-    prompt, completion, cached, _, reasoning = _usage_sums(raw_responses)
-    return {"prompt_tokens": prompt, "completion_tokens": completion,
-            "total_tokens": prompt + completion,
-            "prompt_tokens_details": {"cached_tokens": cached},
-            "completion_tokens_details": {"reasoning_tokens": reasoning}}
+    sums = _usage_sums(raw_responses)
+    if sums is None:
+        return None
+    prompt, completion, cached, cache_write, reasoning = sums
+    prompt_details = None
+    if cached is not None or cache_write is not None:
+        prompt_details = {}
+        if cached is not None:
+            prompt_details["cached_tokens"] = cached
+        if cache_write is not None:
+            prompt_details["cache_write_tokens"] = cache_write
+    completion_details = (
+        {"reasoning_tokens": reasoning} if reasoning is not None else None
+    )
+    return {
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": prompt + completion,
+        "prompt_tokens_details": prompt_details,
+        "completion_tokens_details": completion_details,
+    }
 
 
-def _responses_usage(raw_responses) -> dict:
+def _responses_usage(raw_responses) -> Optional[dict]:
     """Cross-turn sums, Responses dialect."""
-    prompt, completion, cached, cache_write, reasoning = (
-        _usage_sums(raw_responses))
-    return {"input_tokens": prompt,
-            "input_tokens_details": {"cached_tokens": cached,
-                                     "cache_write_tokens": cache_write},
-            "output_tokens": completion,
-            "output_tokens_details": {"reasoning_tokens": reasoning},
-            "total_tokens": prompt + completion}
+    sums = _usage_sums(raw_responses)
+    if sums is None:
+        return None
+    prompt, completion, cached, cache_write, reasoning = sums
+    input_details = None
+    if cached is not None or cache_write is not None:
+        input_details = {}
+        if cached is not None:
+            input_details["cached_tokens"] = cached
+        if cache_write is not None:
+            input_details["cache_write_tokens"] = cache_write
+    output_details = (
+        {"reasoning_tokens": reasoning} if reasoning is not None else None
+    )
+    return {
+        "input_tokens": prompt,
+        "input_tokens_details": input_details,
+        "output_tokens": completion,
+        "output_tokens_details": output_details,
+        "total_tokens": prompt + completion,
+    }
+
 
 
 def _chat_agent(client, messages, doc_id, model, temperature=None,
@@ -708,7 +1162,11 @@ def _process_options(show_process) -> dict:
     return options
 
 
-async def _chat_events_agen(client, agent, items, run_kwargs):
+async def _chat_events_agen(client, agent, items, run_kwargs,
+                            on_measurement: Optional[Callable[[dict[str, Any]], None]] = None,
+                            seen: Optional[set] = None,
+                            reported_model: Optional[str] = None,
+                            collected_measurements: Optional[list[dict[str, Any]]] = None):
     """The chat stream's primitive: the run as typed event dicts —
     thinking/answer deltas, each tool call (arguments parsed when JSON)
     and its full result. Both ChatStream views are built on it."""
@@ -756,10 +1214,22 @@ async def _chat_events_agen(client, agent, items, run_kwargs):
         completed = True
     except (MaxTurnsExceeded, AgentsException, openai.OpenAIError) as exc:
         raise _translate_run_error(exc, run_kwargs.get("max_turns"),
-                                   "chat", client) from exc
+                                   "chat", client,
+                                   measurements=collected_measurements) from exc
     finally:
         if not completed and hasattr(streamed, "cancel"):
             streamed.cancel()  # abandoned/failed: stop the agent task
+        if completed and hasattr(streamed, "raw_responses"):
+            for idx, r in enumerate(streamed.raw_responses):
+                _emit_measurement(
+                    on_measurement, seen if seen is not None else set(),
+                    call_id=_extract_call_id(r),
+                    turn_index=idx,
+                    model=getattr(r, "model", None) or reported_model,
+                    backend="chat_completions",
+                    usage=getattr(r, "usage", None),
+                    collected_measurements=collected_measurements,
+                )
         await _aclose_backend(agent)
 
 
@@ -888,7 +1358,7 @@ def run_cloud_chat_stream(chunks,
     options = (None if show_process is False
                else _process_options(show_process))
     return ChatStream(
-        text=lambda: _weave(_cloud_chunk_events(chunks), options),
+        text=lambda: StreamIterator(_weave(_cloud_chunk_events(chunks), options)),
         events=("chat events are produced by the in-process agent, "
                 "which the managed chat endpoint does not serve — "
                 "construct the client with chat_model=... (or a chat= "
@@ -900,6 +1370,7 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
                     show_process: Union[bool, Mapping[str, Any]] = False,
                     max_turns=None, backend=None, extra_headers=None,
                     extra_body=None, folder_id=None,
+                    on_measurement: Optional[Callable[[dict[str, Any]], None]] = None,
                     ) -> ChatStream:
     """chat(stream=True): validation and the agent build run here, eagerly;
     the run itself starts when the returned stream's chosen view is first
@@ -920,12 +1391,39 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
                                   extra_headers=extra_headers,
                                   folder_id=folder_id)
     run_kwargs = _run_kwargs(max_turns)
+    reported_model = _reported_model(model or client.chat_model)
+    recorded: dict = {}
+    seen = set()
+    turn_counter = [0]
+    collected_measurements: list[dict[str, Any]] = []
+    _record_chat_finish(agent, recorded, on_measurement=on_measurement,
+                        seen=seen, turn_counter=turn_counter,
+                        reported_model=reported_model,
+                        backend="chat_completions",
+                        collected_measurements=collected_measurements)
 
     def events():
-        return _stream_sync(
-            lambda: _chat_events_agen(client, agent, items, run_kwargs))
+        raw = _stream_sync(
+            lambda: _chat_events_agen(client, agent, items, run_kwargs,
+                                      on_measurement=on_measurement,
+                                      seen=seen,
+                                      reported_model=reported_model,
+                                      collected_measurements=collected_measurements))
+        return StreamIterator(raw,
+                              measurements=collected_measurements,
+                              get_status=lambda: _aggregate_measurement_status(collected_measurements),
+                              get_usage=lambda: _openai_usage(collected_measurements))
 
-    return ChatStream(text=lambda: _weave(events(), options), events=events)
+    def text():
+        ev = events()
+        w = _weave(ev, options)
+        return StreamIterator(w,
+                              on_close=ev.close,
+                              measurements=collected_measurements,
+                              get_status=lambda: _aggregate_measurement_status(collected_measurements),
+                              get_usage=lambda: _openai_usage(collected_measurements))
+
+    return ChatStream(text=text, events=events)
 
 
 def run_chat_completions(client, messages, stream: bool = False,
@@ -941,7 +1439,13 @@ def run_chat_completions(client, messages, stream: bool = False,
                          extra_headers: Optional[dict] = None,
                          backend: Optional[dict] = None,
                          folder_id: Optional[str] = None,
+                         on_measurement: Optional[Callable[[dict[str, Any]], None]] = None,
                          ) -> Union[dict, Iterator[str], Iterator[dict]]:
+    """Execute chat_completions across agent turns with per-turn measurement tracking.
+
+    Returns the completed response dictionary (with usage, measurement_status, and
+    execution_outcome="completed") or a StreamIterator yielding text or chunk events.
+    """
     if enable_citations:
         raise PageIndexAPIError(
             "enable_citations needs the managed chat endpoint — "
@@ -957,7 +1461,14 @@ def run_chat_completions(client, messages, stream: bool = False,
         extra_headers=extra_headers, folder_id=folder_id)
     reported_model = _reported_model(model_name)
     recorded: dict = {}
-    _record_chat_finish(agent, recorded)
+    seen = set()
+    turn_counter = [0]
+    collected_measurements: list[dict[str, Any]] = []
+    _record_chat_finish(agent, recorded, on_measurement=on_measurement,
+                        seen=seen, turn_counter=turn_counter,
+                        reported_model=reported_model,
+                        backend="chat_completions",
+                        collected_measurements=collected_measurements)
     run_kwargs = _run_kwargs(max_turns)
     import openai
     from agents import Runner
@@ -968,7 +1479,20 @@ def run_chat_completions(client, messages, stream: bool = False,
                 Runner.run(agent, input=items, **run_kwargs)))
         except (MaxTurnsExceeded, AgentsException,
                 openai.OpenAIError) as exc:
-            raise _translate_run_error(exc, max_turns, "chat", client) from exc
+            raise _translate_run_error(exc, max_turns, "chat", client,
+                                       measurements=collected_measurements) from exc
+        finally:
+            if "result" in locals() and hasattr(result, "raw_responses"):
+                for idx, r in enumerate(result.raw_responses):
+                    _emit_measurement(
+                        on_measurement, seen,
+                        call_id=_extract_call_id(r),
+                        turn_index=idx,
+                        model=getattr(r, "model", None) or reported_model,
+                        backend="chat_completions",
+                        usage=getattr(r, "usage", None),
+                        collected_measurements=collected_measurements,
+                    )
         return {
             "id": f"chatcmpl-{uuid.uuid4().hex}",
             "object": "chat.completion",
@@ -981,6 +1505,8 @@ def run_chat_completions(client, messages, stream: bool = False,
                 "finish_reason": recorded.get("finish_reason") or "stop",
             }],
             "usage": _openai_usage(result.raw_responses),
+            "measurement_status": _aggregate_measurement_status(result.raw_responses),
+            "execution_outcome": "completed",
         }
 
     chat_id = f"chatcmpl-{uuid.uuid4().hex}"
@@ -1009,25 +1535,53 @@ def run_chat_completions(client, messages, stream: bool = False,
             completed = True
         except (MaxTurnsExceeded, AgentsException,
                 openai.OpenAIError) as exc:
-            raise _translate_run_error(exc, max_turns, "chat", client) from exc
+            raise _translate_run_error(exc, max_turns, "chat", client,
+                                       measurements=collected_measurements) from exc
         finally:
             if not completed and hasattr(streamed, "cancel"):
                 streamed.cancel()  # abandoned/failed: stop the agent task
+            if completed and hasattr(streamed, "raw_responses"):
+                for idx, r in enumerate(streamed.raw_responses):
+                    _emit_measurement(
+                        on_measurement, seen,
+                        call_id=_extract_call_id(r),
+                        turn_index=idx,
+                        model=getattr(r, "model", None) or reported_model,
+                        backend="chat_completions",
+                        usage=getattr(r, "usage", None),
+                        collected_measurements=collected_measurements,
+                    )
             await _aclose_backend(agent)
         yield chunk({}, finish=recorded.get("finish_reason") or "stop")
         yield {
             "id": chat_id, "object": "chat.completion.chunk",
             "created": created, "model": reported_model, "choices": [],
             "usage": _openai_usage(streamed.raw_responses),
+            "measurement_status": _aggregate_measurement_status(streamed.raw_responses),
+            "execution_outcome": "completed",
         }
 
+    raw_stream = _stream_sync(agen)
+    def _status():
+        return _aggregate_measurement_status(collected_measurements)
+    def _usage():
+        return _openai_usage(collected_measurements)
+
     if stream_metadata:
-        return _stream_sync(agen)
-    return (piece["choices"][0]["delta"]["content"]
-            for piece in _stream_sync(agen)
-            if piece.get("choices")
-            and "content" in piece["choices"][0]["delta"]
-            and piece["choices"][0]["delta"]["content"])
+        return StreamIterator(raw_stream,
+                              measurements=collected_measurements,
+                              get_status=_status,
+                              get_usage=_usage)
+    text_stream = (piece["choices"][0]["delta"]["content"]
+                   for piece in raw_stream
+                   if piece.get("choices")
+                   and "content" in piece["choices"][0]["delta"]
+                   and piece["choices"][0]["delta"]["content"])
+    return StreamIterator(text_stream,
+                          on_close=raw_stream.close if hasattr(raw_stream, "close") else None,
+                          measurements=collected_measurements,
+                          get_status=_status,
+                          get_usage=_usage)
 
 
 def run_responses(client, input, model: Optional[str] = None,
@@ -1042,7 +1596,13 @@ def run_responses(client, input, model: Optional[str] = None,
                   extra_headers: Optional[dict] = None,
                   backend: Optional[dict] = None,
                   folder_id: Optional[str] = None,
+                  on_measurement: Optional[Callable[[dict[str, Any]], None]] = None,
                   ) -> Union[dict, Iterator[dict]]:
+    """Execute responses API run with per-turn measurement tracking and transcript items.
+
+    Returns the completed response dictionary (with items, usage, measurement_status, and
+    execution_outcome="completed") or a StreamIterator yielding stream event dicts.
+    """
     _require_openai_agents("chat(protocol='responses')")
     _validate_max_turns(max_turns)
     if isinstance(input, str) and input.strip():
@@ -1052,7 +1612,7 @@ def run_responses(client, input, model: Optional[str] = None,
         items = list(input)
     else:
         raise PageIndexAPIError("messages must be a non-empty string or list "
-                                "of item dicts.")
+                               "of item dicts.")
     scope = client._local_doc_scope(doc_id)
     block = targeting_block(client, doc_id, folder_id)
     conversation = items
@@ -1071,7 +1631,11 @@ def run_responses(client, input, model: Optional[str] = None,
                           backend=_merged_backend(client, backend),
                           extra_headers=extra_headers)
     run_kwargs = _run_kwargs(max_turns)
+    reported_model = _reported_model(model_name)
     recorded: dict = {}
+    seen = set()
+    turn_counter = [0]
+    collected_measurements: list[dict[str, Any]] = []
     import openai
     from agents import Runner
     from agents.exceptions import AgentsException, MaxTurnsExceeded
@@ -1085,12 +1649,14 @@ def run_responses(client, input, model: Optional[str] = None,
             "id": response_id,
             "object": "response",
             "created_at": created_at,
-            "model": _reported_model(model_name),
+            "model": reported_model,
             "status": recorded.get("status") or "completed",
             "output": [item for item in transcript
                        if item.get("type") != "function_call_output"],
             "items": transcript,
             "usage": _responses_usage(raw_responses),
+            "measurement_status": _aggregate_measurement_status(raw_responses),
+            "execution_outcome": "completed",
             "instructions": managed,
             "tools": [{"type": "function", "name": tool.name,
                        "description": tool.description,
@@ -1111,7 +1677,11 @@ def run_responses(client, input, model: Optional[str] = None,
         }
 
     if not stream:
-        _record_response_status(agent, recorded)
+        _record_response_status(agent, recorded, on_measurement=on_measurement,
+                                seen=seen, turn_counter=turn_counter,
+                                reported_model=reported_model,
+                                backend="responses",
+                                collected_measurements=collected_measurements)
         try:
             result = _run_sync(_run_closing(agent,
                 Runner.run(agent, input=[dict(item) for item in items],
@@ -1119,7 +1689,20 @@ def run_responses(client, input, model: Optional[str] = None,
         except (MaxTurnsExceeded, AgentsException,
                 openai.OpenAIError) as exc:
             raise _translate_run_error(exc, max_turns,
-                                       "responses", client) from exc
+                                       "responses", client,
+                                       measurements=collected_measurements) from exc
+        finally:
+            if "result" in locals() and hasattr(result, "raw_responses"):
+                for idx, r in enumerate(result.raw_responses):
+                    _emit_measurement(
+                        on_measurement, seen,
+                        call_id=_extract_call_id(r),
+                        turn_index=idx,
+                        model=getattr(r, "model", None) or reported_model,
+                        backend="responses",
+                        usage=getattr(r, "usage", None),
+                        collected_measurements=collected_measurements,
+                    )
         transcript = result.to_input_list()[len(items):]
         return envelope(transcript, result.raw_responses)
 
@@ -1170,6 +1753,17 @@ def run_responses(client, input, model: Optional[str] = None,
                                 if state.get(field) is not None:
                                     recorded[field] = state[field]
                             output_offset += len(state.get("output") or [])
+                            turn_idx = turn_counter[0]
+                            turn_counter[0] += 1
+                            _emit_measurement(
+                                on_measurement, seen,
+                                call_id=_extract_call_id(state),
+                                turn_index=turn_idx,
+                                model=state.get("model") or reported_model,
+                                backend="responses",
+                                usage=state.get("usage"),
+                                collected_measurements=collected_measurements,
+                            )
                         continue
                     if isinstance(data.get("output_index"), int):
                         data["output_index"] += output_offset
@@ -1183,14 +1777,27 @@ def run_responses(client, input, model: Optional[str] = None,
             if (isinstance(exc, MaxTurnsExceeded)
                     or recorded.get("status") not in ("failed", "incomplete")):
                 raise _translate_run_error(exc, max_turns,
-                                           "responses", client) from exc
+                                           "responses", client,
+                                           measurements=collected_measurements) from exc
             completed = True
         except openai.OpenAIError as exc:
             raise _translate_run_error(exc, max_turns,
-                                       "responses", client) from exc
+                                       "responses", client,
+                                       measurements=collected_measurements) from exc
         finally:
             if not completed and hasattr(streamed, "cancel"):
                 streamed.cancel()  # abandoned/failed: stop the agent task
+            if completed and hasattr(streamed, "raw_responses"):
+                for idx, r in enumerate(streamed.raw_responses):
+                    _emit_measurement(
+                        on_measurement, seen,
+                        call_id=_extract_call_id(r),
+                        turn_index=idx,
+                        model=getattr(r, "model", None) or reported_model,
+                        backend="responses",
+                        usage=getattr(r, "usage", None),
+                        collected_measurements=collected_measurements,
+                    )
             await _aclose_backend(agent)
         transcript = streamed.to_input_list()[len(items):]
         sequence += 1
@@ -1201,7 +1808,16 @@ def run_responses(client, input, model: Optional[str] = None,
         yield {"type": terminal, "sequence_number": sequence,
                "response": envelope(transcript, streamed.raw_responses)}
 
-    return _stream_sync(agen)
+    raw_stream = _stream_sync(agen)
+    def _status():
+        return _aggregate_measurement_status(collected_measurements)
+    def _usage():
+        return _responses_usage(collected_measurements)
+
+    return StreamIterator(raw_stream,
+                          measurements=collected_measurements,
+                          get_status=_status,
+                          get_usage=_usage)
 
 
 # ── Anthropic engine (messages) ──
@@ -1329,10 +1945,53 @@ def _anthropic_usage(turns, final_usage: dict) -> dict:
     totals = dict(final_usage)
     for field in ("input_tokens", "output_tokens",
                   "cache_creation_input_tokens", "cache_read_input_tokens"):
-        values = [getattr(turn.usage, field, None) for turn in turns]
-        counted = [value for value in values if isinstance(value, int)]
-        if counted:
-            totals[field] = sum(counted)
+        values = []
+        for turn in turns:
+            usage = getattr(turn, "usage", None) if not isinstance(turn, dict) else turn.get("usage")
+            if usage is not None:
+                val = usage.get(field) if isinstance(usage, dict) else getattr(usage, field, None)
+                if isinstance(val, int) and not isinstance(val, bool):
+                    values.append(val)
+        if values:
+            totals[field] = sum(values)
+
+    # Multi-turn cache_creation breakdown (ephemeral_5m, ephemeral_1h)
+    e5m_vals = []
+    e1h_vals = []
+    for turn in turns:
+        usage = getattr(turn, "usage", None) if not isinstance(turn, dict) else turn.get("usage")
+        if usage is not None:
+            cc = usage.get("cache_creation") if isinstance(usage, dict) else getattr(usage, "cache_creation", None)
+            if cc is not None:
+                v5m = cc.get("ephemeral_5m_input_tokens") if isinstance(cc, dict) else getattr(cc, "ephemeral_5m_input_tokens", None)
+                if isinstance(v5m, int) and not isinstance(v5m, bool):
+                    e5m_vals.append(v5m)
+                v1h = cc.get("ephemeral_1h_input_tokens") if isinstance(cc, dict) else getattr(cc, "ephemeral_1h_input_tokens", None)
+                if isinstance(v1h, int) and not isinstance(v1h, bool):
+                    e1h_vals.append(v1h)
+    if e5m_vals or e1h_vals:
+        cc_base = totals.get("cache_creation")
+        cc_dict = dict(cc_base) if isinstance(cc_base, dict) else {}
+        cc_dict["ephemeral_5m_input_tokens"] = sum(e5m_vals)
+        cc_dict["ephemeral_1h_input_tokens"] = sum(e1h_vals)
+        totals["cache_creation"] = cc_dict
+
+    # Multi-turn output_tokens_details.thinking_tokens
+    thinking_vals = []
+    for turn in turns:
+        usage = getattr(turn, "usage", None) if not isinstance(turn, dict) else turn.get("usage")
+        if usage is not None:
+            otd = usage.get("output_tokens_details") if isinstance(usage, dict) else getattr(usage, "output_tokens_details", None)
+            if otd is not None:
+                tt = otd.get("thinking_tokens") if isinstance(otd, dict) else getattr(otd, "thinking_tokens", None)
+                if isinstance(tt, int) and not isinstance(tt, bool):
+                    thinking_vals.append(tt)
+    if thinking_vals:
+        otd_base = totals.get("output_tokens_details")
+        otd_dict = dict(otd_base) if isinstance(otd_base, dict) else {}
+        otd_dict["thinking_tokens"] = sum(thinking_vals)
+        totals["output_tokens_details"] = otd_dict
+
     return totals
 
 
@@ -1363,13 +2022,22 @@ def run_messages(client, messages, model: str, route: str,
                  extra_headers: Optional[dict] = None,
                  backend: Optional[dict] = None,
                  folder_id: Optional[str] = None,
+                 on_measurement: Optional[Callable[[dict[str, Any]], None]] = None,
                  ) -> Union[dict, Iterator[Any]]:
+    """Execute Messages API multi-turn agent with per-turn measurement tracking.
+
+    Returns the completed response envelope (with messages, aggregated usage,
+    measurement_status, and execution_outcome="completed") or a StreamIterator
+    yielding Anthropic event objects.
+    """
     from .integrations.anthropic_sdk import build_anthropic_tools
 
     _require_anthropic()
     import anthropic
     _validate_max_turns(max_turns)
     _refuse_skeleton(extra_body)
+    seen = set()
+    collected_measurements: list[dict[str, Any]] = []
     if isinstance(messages, str) and messages.strip():
         messages = [{"role": "user", "content": messages}]
     if (not isinstance(messages, list) or not messages
@@ -1459,21 +2127,67 @@ def run_messages(client, messages, model: str, route: str,
     if stream:
         def events() -> Iterator[Any]:
             try:
-                for turn_stream in runner:
+                for turn_index, turn_stream in enumerate(runner):
                     for event in turn_stream:
                         yield event
+                    final_msg = None
+                    try:
+                        final_msg = turn_stream.get_final_message()
+                    except Exception:
+                        final_msg = None
+                    _emit_measurement(
+                        on_measurement, seen,
+                        call_id=_extract_call_id(final_msg) if final_msg is not None else None,
+                        turn_index=turn_index,
+                        model=(getattr(final_msg, "model", None) if final_msg is not None else None) or model,
+                        backend="messages",
+                        usage=getattr(final_msg, "usage", None) if final_msg is not None else None,
+                        collected_measurements=collected_measurements,
+                    )
             except anthropic.AnthropicError as exc:
-                raise _model_backend_error(exc, "messages", client) from exc
+                raise _model_backend_error(exc, "messages", client,
+                                           measurements=collected_measurements) from exc
             finally:
                 # runs on exhaustion and abandonment (GeneratorExit) alike
                 if owns_transport:
                     backend_client.close()
-        return events()
 
+        ev = events()
+        def _status():
+            return _aggregate_measurement_status(collected_measurements)
+        def _usage():
+            last_usage = (
+                collected_measurements[-1].get("usage")
+                if (collected_measurements and isinstance(collected_measurements[-1], dict))
+                else {}
+            )
+            return (
+                _anthropic_usage(collected_measurements, last_usage or {})
+                if collected_measurements
+                else None
+            )
+
+        return StreamIterator(ev,
+                              measurements=collected_measurements,
+                              get_status=_status,
+                              get_usage=_usage)
+
+    turns = []
     try:
-        turns = list(runner)
+        for turn_index, turn in enumerate(runner):
+            turns.append(turn)
+            _emit_measurement(
+                on_measurement, seen,
+                call_id=_extract_call_id(turn),
+                turn_index=turn_index,
+                model=getattr(turn, "model", None) or model,
+                backend="messages",
+                usage=getattr(turn, "usage", None),
+                collected_measurements=collected_measurements,
+            )
     except anthropic.AnthropicError as exc:
-        raise _model_backend_error(exc, "messages", client) from exc
+        raise _model_backend_error(exc, "messages", client,
+                                   measurements=collected_measurements) from exc
     finally:
         # safe here: the params read-back below does no HTTP
         if owns_transport:
@@ -1503,6 +2217,8 @@ def run_messages(client, messages, model: str, route: str,
     envelope = final.model_dump(mode="json")
     envelope["content"] = [_dump_block(item) for item in final.content]
     envelope["usage"] = _anthropic_usage(turns, envelope.get("usage") or {})
+    envelope["measurement_status"] = _aggregate_measurement_status(turns)
+    envelope["execution_outcome"] = "completed"
     # The full turn sequence (assistant tool_use + user tool_result + final),
     # valid for verbatim append to the caller's history. The runner appends
     # a turn to its params only when it executed tools from it, and which

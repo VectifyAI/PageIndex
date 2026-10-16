@@ -106,14 +106,56 @@ class FakeModel(Model):
                            tools, output_schema, handoffs, tracing,
                            **kwargs):
         from agents.items import ModelResponse
+        from agents.usage import Usage
         self._record(system_instructions, input)
+        turn_idx = len(self.inputs) - 1
+        fetch = getattr(self, "_fetch_response", None)
+        if fetch is not None:
+            await fetch(system_instructions, input, stream=False, **kwargs)
         # Mimic the real model's transport hop when a test attaches one, so
         # the transport-level status recorder sees each turn.
         transport = getattr(getattr(self, "_client", None), "responses", None)
         if transport is not None:
             await transport.create()
-        return ModelResponse(output=self.turns.pop(0), usage=_usage(),
-                             response_id=None)
+        turn_usages = getattr(self, "turn_usages", None)
+        if turn_usages is not None and turn_idx < len(turn_usages):
+            u = turn_usages[turn_idx]
+            if u is None:
+                usage = Usage(requests=0)
+            elif isinstance(u, dict):
+                in_tok = u.get("input_tokens") if u.get("input_tokens") is not None else u.get("prompt_tokens", 10)
+                out_tok = u.get("output_tokens") if u.get("output_tokens") is not None else u.get("completion_tokens", 5)
+                kw = {}
+                in_det = u.get("input_tokens_details") or u.get("prompt_tokens_details")
+                if in_det is not None and isinstance(in_det, dict):
+                    kw["input_tokens_details"] = {
+                        "cached_tokens": in_det.get("cached_tokens", 0),
+                        "cache_write_tokens": in_det.get("cache_write_tokens", 0),
+                    }
+                out_det = u.get("output_tokens_details") or u.get("completion_tokens_details")
+                if out_det is not None and isinstance(out_det, dict):
+                    kw["output_tokens_details"] = {
+                        "reasoning_tokens": out_det.get("reasoning_tokens", 0),
+                    }
+                usage = Usage(requests=1, input_tokens=in_tok, output_tokens=out_tok,
+                              total_tokens=in_tok + out_tok, **kw)
+            elif isinstance(u, (tuple, list)):
+                in_tok, out_tok = u[0], u[1]
+                usage = Usage(requests=1, input_tokens=in_tok, output_tokens=out_tok,
+                              total_tokens=in_tok + out_tok)
+            elif isinstance(u, Usage):
+                usage = u
+            else:
+                in_tok = getattr(u, "input_tokens", 10)
+                out_tok = getattr(u, "output_tokens", 5)
+                usage = Usage(requests=1, input_tokens=in_tok, output_tokens=out_tok,
+                              total_tokens=in_tok + out_tok)
+        else:
+            usage = _usage()
+        turn_ids = getattr(self, "turn_ids", None)
+        resp_id = turn_ids[turn_idx] if turn_ids and turn_idx < len(turn_ids) else None
+        return ModelResponse(output=self.turns.pop(0), usage=usage,
+                             response_id=resp_id)
 
     async def stream_response(self, system_instructions, input,
                               model_settings, tools, output_schema, handoffs,
@@ -128,6 +170,14 @@ class FakeModel(Model):
             while True:  # released only by task cancellation
                 await aio.sleep(0.01)
         self._record(system_instructions, input)
+        turn_idx = len(self.inputs) - 1
+        fetch = getattr(self, "_fetch_response", None)
+        if fetch is not None:
+            raw_res = await fetch(system_instructions, input, stream=True, **kwargs)
+            if isinstance(raw_res, tuple):
+                _, tee_stream = raw_res
+                async for _ in tee_stream:
+                    pass
         output = self.turns.pop(0)
         sequence = 0
         for index, piece in enumerate(getattr(self, "thinking_pieces", ())):
@@ -170,18 +220,57 @@ class FakeModel(Model):
         if getattr(self, "no_terminal", False):
             return  # backend died mid-stream: no terminal event
         sequence += 1
-        yield ResponseCompletedEvent(
-            type="response.completed", sequence_number=sequence,
-            response=Response(
-                id="resp_fake", created_at=0.0, model="fake",
-                object="response", output=output, parallel_tool_calls=False,
-                tool_choice="auto", tools=[],
-                usage=ResponseUsage(
-                    input_tokens=10, output_tokens=5, total_tokens=15,
+        turn_ids = getattr(self, "turn_ids", None)
+        resp_id = turn_ids[turn_idx] if turn_ids and turn_idx < len(turn_ids) else "resp_fake"
+        turn_usages = getattr(self, "turn_usages", None)
+        resp_usage = None
+        if turn_usages is not None and turn_idx < len(turn_usages):
+            u = turn_usages[turn_idx]
+            if u is None:
+                resp_usage = None
+            elif isinstance(u, dict):
+                in_tok = u.get("input_tokens") if u.get("input_tokens") is not None else u.get("prompt_tokens", 10)
+                out_tok = u.get("output_tokens") if u.get("output_tokens") is not None else u.get("completion_tokens", 5)
+                resp_usage = ResponseUsage(
+                    input_tokens=in_tok, output_tokens=out_tok, total_tokens=in_tok + out_tok,
+                    input_tokens_details=InputTokensDetails(
+                        cached_tokens=u.get("cached_tokens", 0), cache_write_tokens=u.get("cache_write_tokens", 0)),
+                    output_tokens_details=OutputTokensDetails(
+                        reasoning_tokens=u.get("reasoning_tokens", 0)))
+            elif isinstance(u, (tuple, list)):
+                in_tok, out_tok = u[0], u[1]
+                resp_usage = ResponseUsage(
+                    input_tokens=in_tok, output_tokens=out_tok, total_tokens=in_tok + out_tok,
                     input_tokens_details=InputTokensDetails(
                         cached_tokens=0, cache_write_tokens=0),
                     output_tokens_details=OutputTokensDetails(
-                        reasoning_tokens=0))))
+                        reasoning_tokens=0))
+            elif isinstance(u, ResponseUsage):
+                resp_usage = u
+            else:
+                in_tok = getattr(u, "input_tokens", 10)
+                out_tok = getattr(u, "output_tokens", 5)
+                resp_usage = ResponseUsage(
+                    input_tokens=in_tok, output_tokens=out_tok, total_tokens=in_tok + out_tok,
+                    input_tokens_details=InputTokensDetails(
+                        cached_tokens=0, cache_write_tokens=0),
+                    output_tokens_details=OutputTokensDetails(
+                        reasoning_tokens=0))
+        else:
+            in_tok, out_tok = 10, 5
+            resp_usage = ResponseUsage(
+                input_tokens=in_tok, output_tokens=out_tok, total_tokens=in_tok + out_tok,
+                input_tokens_details=InputTokensDetails(
+                    cached_tokens=0, cache_write_tokens=0),
+                output_tokens_details=OutputTokensDetails(
+                    reasoning_tokens=0))
+        yield ResponseCompletedEvent(
+            type="response.completed", sequence_number=sequence,
+            response=Response(
+                id=resp_id, created_at=0.0, model="fake",
+                object="response", output=output, parallel_tool_calls=False,
+                tool_choice="auto", tools=[],
+                usage=resp_usage))
 
 
 @pytest.fixture
@@ -222,7 +311,7 @@ def test_chat_completions_end_to_end(client, store_path, fake_model):
     assert result["choices"][0]["finish_reason"] == "stop"
     assert result["usage"] == {"prompt_tokens": 20, "completion_tokens": 10,
                                "total_tokens": 30,
-                               "prompt_tokens_details": {"cached_tokens": 0},
+                               "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
                                "completion_tokens_details":
                                    {"reasoning_tokens": 0}}
     assert fake_model.state["protocols"][0][0] == "chat"
@@ -1154,12 +1243,12 @@ needs_anthropic = pytest.mark.skipif(not _HAS_ANTHROPIC,
                                      reason="anthropic not installed")
 
 
-def _anthropic_message(content, stop_reason):
+def _anthropic_message(content, stop_reason, msg_id="msg_fake", usage=None):
     return {
-        "id": "msg_fake", "type": "message", "role": "assistant",
+        "id": msg_id, "type": "message", "role": "assistant",
         "model": "claude-test", "content": content,
         "stop_reason": stop_reason, "stop_sequence": None,
-        "usage": {"input_tokens": 10, "output_tokens": 5},
+        "usage": usage if usage is not None else {"input_tokens": 10, "output_tokens": 5},
     }
 
 
@@ -1201,11 +1290,14 @@ def fake_anthropic(monkeypatch):
         def handler(request):
             state["calls"].append(json.loads(request.content))
             body = responses[len(state["calls"]) - 1]
+            if isinstance(body, tuple):
+                code, data = body
+                return anthropic_httpx.Response(code, json=data, request=request)
             if isinstance(body, str):  # pre-rendered SSE
                 return anthropic_httpx.Response(
-                    200, content=body.encode(),
+                    200, content=body.encode(), request=request,
                     headers={"content-type": "text/event-stream"})
-            return anthropic_httpx.Response(200, json=body)
+            return anthropic_httpx.Response(200, json=body, request=request)
 
         fake = anthropic.Anthropic(
             api_key="test",
@@ -4293,3 +4385,1945 @@ def test_managed_instructions_drop_blank_system_texts(store_path):
     client = PageIndexLocalClient(storage_path=store_path)
     assert (local_chat._managed_instructions(client, ["", "  ", "X"])
             == local_chat._managed_instructions(client, ["X"]))
+
+
+# ── on_measurement callback tests (Issue #557 Milestone 1) ──
+
+@needs_agents
+def test_on_measurement_chat_completions_non_streaming(client, store_path, fake_model):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    measurements = []
+    result = client.chat_completions(
+        [{"role": "user", "content": "What status?"}],
+        doc_id="pi-a",
+        on_measurement=measurements.append,
+    )
+    assert result["choices"][0]["message"]["content"] == "The answer"
+    assert len(measurements) == 2
+    for idx, m in enumerate(measurements):
+        assert m["turn_index"] == idx
+        assert m["backend"] == "chat_completions"
+        assert m["model"] is not None
+        assert isinstance(m["usage"], dict)
+        assert m["usage"]["input_tokens"] == 10
+        assert m["usage"]["output_tokens"] == 5
+
+
+@needs_agents
+def test_on_measurement_chat_completions_streaming(client, store_path, fake_model):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    measurements = []
+    chunks = list(client.chat_completions(
+        [{"role": "user", "content": "What status?"}],
+        doc_id="pi-a",
+        stream=True,
+        stream_metadata=True,
+        on_measurement=measurements.append,
+    ))
+    assert len(chunks) > 2
+    assert len(measurements) == 2
+    for idx, m in enumerate(measurements):
+        assert m["turn_index"] == idx
+        assert m["backend"] == "chat_completions"
+        assert m["model"] is not None
+        assert isinstance(m["usage"], dict)
+
+
+@needs_agents
+def test_on_measurement_responses_non_streaming(client, store_path, fake_model):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    measurements = []
+    result = client._responses("What status?", doc_id="pi-a", on_measurement=measurements.append)
+    assert result["status"] == "completed"
+    assert len(measurements) == 2
+    for idx, m in enumerate(measurements):
+        assert m["turn_index"] == idx
+        assert m["backend"] == "responses"
+        assert m["model"] is not None
+        assert isinstance(m["usage"], dict)
+
+
+@needs_agents
+def test_on_measurement_responses_streaming(client, store_path, fake_model):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    measurements = []
+    events = list(client._responses("What status?", doc_id="pi-a", stream=True, on_measurement=measurements.append))
+    assert len(events) >= 2
+    assert len(measurements) == 2
+    for idx, m in enumerate(measurements):
+        assert m["turn_index"] == idx
+        assert m["backend"] == "responses"
+        assert m["call_id"] == "resp_fake"
+        assert m["model"] == "fake"
+        assert isinstance(m["usage"], dict)
+        assert m["usage"]["input_tokens"] == 10
+        assert m["usage"]["output_tokens"] == 5
+
+
+@needs_anthropic
+def test_on_measurement_messages_non_streaming(client, store_path, fake_anthropic):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_anthropic([
+        _anthropic_message(
+            [{"type": "tool_use", "id": "tu_1", "name": "get_document",
+              "input": {"doc_name": "report.pdf"}}], "tool_use"),
+        _anthropic_message([{"type": "text", "text": "The answer"}],
+                           "end_turn"),
+    ])
+    measurements = []
+    result = client._messages("What status?", model="claude-test", doc_id="pi-a", on_measurement=measurements.append)
+    assert result["role"] == "assistant"
+    assert len(measurements) == 2
+    for idx, m in enumerate(measurements):
+        assert m["turn_index"] == idx
+        assert m["backend"] == "messages"
+        assert m["call_id"] == "msg_fake"
+        assert m["model"] == "claude-test"
+        assert isinstance(m["usage"], dict)
+        assert m["usage"]["input_tokens"] == 10
+        assert m["usage"]["output_tokens"] == 5
+
+
+@needs_anthropic
+def test_on_measurement_messages_streaming(client, store_path, fake_anthropic):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_anthropic([
+        _anthropic_sse(_anthropic_message(
+            [{"type": "tool_use", "id": "tu_1", "name": "get_document",
+              "input": {"doc_name": "report.pdf"}}], "tool_use")),
+        _anthropic_sse(_anthropic_message(
+            [{"type": "text", "text": "The answer"}], "end_turn")),
+    ])
+    measurements = []
+    events = list(client._messages("What status?", model="claude-test", doc_id="pi-a", stream=True, on_measurement=measurements.append))
+    assert len(events) > 10
+    assert len(measurements) == 2
+    for idx, m in enumerate(measurements):
+        assert m["turn_index"] == idx
+        assert m["backend"] == "messages"
+        assert m["call_id"] == "msg_fake"
+        assert m["model"] == "claude-test"
+        assert isinstance(m["usage"], dict)
+        assert m["usage"]["input_tokens"] == 10
+        assert m["usage"]["output_tokens"] == 5
+
+
+@needs_agents
+def test_on_measurement_default_answer_lane(client, store_path, fake_model):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    # Non-streaming chat() returns str
+    fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    measurements_sync = []
+    res = client.chat("What status?", doc_id="pi-a", on_measurement=measurements_sync.append)
+    assert isinstance(res, str)
+    assert res == "The answer"
+    assert len(measurements_sync) == 2
+
+    # Streaming chat() returns ChatStream
+    fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    measurements_stream = []
+    stream = client.chat("What status?", doc_id="pi-a", stream=True, on_measurement=measurements_stream.append)
+    assert isinstance(stream, local_chat.ChatStream)
+    assert len(measurements_stream) == 0  # not yet consumed
+    text = "".join(stream)
+    assert "The answer" in text
+    assert len(measurements_stream) == 2
+
+
+@needs_agents
+def test_on_measurement_backward_compatibility(client, store_path, fake_model):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    # Omitted callback produces unchanged results and aggregate usage
+    res = client.chat_completions("What status?", doc_id="pi-a")
+    assert res["choices"][0]["message"]["content"] == "The answer"
+    assert res["usage"]["total_tokens"] == 30
+    assert "choices" in res
+
+
+@needs_agents
+def test_on_measurement_chat_completions_streaming_early_close(client, store_path, fake_model):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_msg_item("The answer")],
+    ])
+    fake.block_from = 1  # turn 1 hangs until cancelled
+    measurements = []
+    stream = client.chat_completions(
+        [{"role": "user", "content": "What status?"}],
+        doc_id="pi-a",
+        stream=True,
+        stream_metadata=True,
+        on_measurement=measurements.append,
+    )
+    first_chunk = next(stream)
+    assert first_chunk is not None
+    stream.close()
+    assert len(measurements) == 0
+
+
+def test_on_measurement_chat_tee_normal_vs_early_close():
+    measurements = []
+    agent = type("Agent", (), {})()
+    model = type("Model", (), {})()
+    agent.model = model
+
+    class MockChunk:
+        def __init__(self, content="", id=None, usage=None):
+            self.id = id
+            self.usage = usage
+            self.choices = [type("Choice", (), {"finish_reason": "stop" if usage else None})()]
+
+    class MockStream:
+        def __init__(self, chunks):
+            self.chunks = list(chunks)
+            self.closed = False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if not self.chunks:
+                raise StopAsyncIteration
+            return self.chunks.pop(0)
+
+        async def aclose(self):
+            self.closed = True
+
+    chunks_with_usage = [
+        MockChunk("hello", id="chunk_1"),
+        MockChunk(" world", id="chunk_2", usage={"input_tokens": 10, "output_tokens": 5}),
+        MockChunk("", id="chunk_3"),
+    ]
+
+    async def run_test():
+        async def fetch(*args, **kwargs):
+            init_resp = MockChunk(id="initial_call_id")
+            return init_resp, MockStream(chunks_with_usage)
+
+        model._fetch_response = fetch
+        recorded = {}
+        seen = set()
+        turn_counter = [0]
+        local_chat._record_chat_finish(
+            agent, recorded,
+            on_measurement=measurements.append,
+            seen=seen,
+            turn_counter=turn_counter,
+            backend="chat_completions",
+        )
+
+        resp, tee = await model._fetch_response()
+        c1 = await tee.__anext__()
+        assert c1.id == "chunk_1"
+        c2 = await tee.__anext__()
+        assert c2.usage is not None
+        # Must not emit merely upon receiving a usage-bearing chunk
+        assert len(measurements) == 0
+        # aclose() must not emit on early close
+        await tee.aclose()
+        assert len(measurements) == 0
+
+        # Normal completion to StopAsyncIteration emits exactly once
+        chunks_complete = [
+            MockChunk("hello", id="complete_call_id", usage={"input_tokens": 20, "output_tokens": 10}),
+        ]
+        async def fetch_complete(*args, **kwargs):
+            return MockChunk(id="complete_call_id"), MockStream(chunks_complete)
+
+        model._fetch_response = fetch_complete
+        recorded2 = {}
+        seen2 = set()
+        turn_counter2 = [0]
+        local_chat._record_chat_finish(
+            agent, recorded2,
+            on_measurement=measurements.append,
+            seen=seen2,
+            turn_counter=turn_counter2,
+            backend="chat_completions",
+        )
+        resp2, tee2 = await model._fetch_response()
+        await tee2.__anext__()
+        assert len(measurements) == 0
+        with pytest.raises(StopAsyncIteration):
+            await tee2.__anext__()
+        assert len(measurements) == 1
+        assert measurements[0]["call_id"] == "complete_call_id"
+        assert measurements[0]["turn_index"] == 0
+        assert measurements[0]["usage"]["input_tokens"] == 20
+
+        # Normal completion without a usage-bearing chunk emits usage=None
+        chunks_no_usage = [
+            MockChunk("hello", id="no_usage_call_id"),
+        ]
+        async def fetch_no_usage(*args, **kwargs):
+            return MockChunk(id="no_usage_call_id"), MockStream(chunks_no_usage)
+
+        model._fetch_response = fetch_no_usage
+        recorded3 = {}
+        seen3 = set()
+        turn_counter3 = [0]
+        local_chat._record_chat_finish(
+            agent, recorded3,
+            on_measurement=measurements.append,
+            seen=seen3,
+            turn_counter=turn_counter3,
+            backend="chat_completions",
+        )
+        resp3, tee3 = await model._fetch_response()
+        await tee3.__anext__()
+        with pytest.raises(StopAsyncIteration):
+            await tee3.__anext__()
+        assert len(measurements) == 2
+        assert measurements[1]["call_id"] == "no_usage_call_id"
+        assert measurements[1]["turn_index"] == 0
+        assert measurements[1]["usage"] is None
+
+    asyncio.run(run_test())
+
+
+def test_on_measurement_fetch_retry_consistency():
+    measurements = []
+    agent = type("Agent", (), {})()
+    model = type("Model", (), {})()
+    agent.model = model
+
+    attempts = 0
+
+    class MockResult:
+        def __init__(self, call_id, usage):
+            self.id = call_id
+            self.usage = usage
+            self.choices = [type("Choice", (), {"finish_reason": "stop"})()]
+
+    async def fetch(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("transient connection failure")
+        return MockResult("call_retry_succ", {"input_tokens": 15, "output_tokens": 8})
+
+    async def run_test():
+        model._fetch_response = fetch
+        recorded = {}
+        seen = set()
+        turn_counter = [0]
+        local_chat._record_chat_finish(
+            agent, recorded,
+            on_measurement=measurements.append,
+            seen=seen,
+            turn_counter=turn_counter,
+            backend="chat_completions",
+        )
+
+        with pytest.raises(RuntimeError):
+            await model._fetch_response()
+        assert turn_counter[0] == 0
+        assert len(measurements) == 0
+
+        res = await model._fetch_response()
+        assert res.id == "call_retry_succ"
+        assert turn_counter[0] == 1
+        assert len(measurements) == 1
+        assert measurements[0]["call_id"] == "call_retry_succ"
+        assert measurements[0]["turn_index"] == 0
+        assert measurements[0]["usage"]["input_tokens"] == 15
+
+        # Fallback simulation
+        result_container = type("Result", (), {"raw_responses": [res]})()
+        for idx, r in enumerate(result_container.raw_responses):
+            local_chat._emit_measurement(
+                measurements.append, seen,
+                call_id=local_chat._extract_call_id(r),
+                turn_index=idx,
+                model="test-model",
+                backend="chat_completions",
+                usage=r.usage,
+            )
+
+        assert len(measurements) == 1
+
+    asyncio.run(run_test())
+
+
+@needs_anthropic
+def test_on_measurement_multi_turn_distinct_ids_and_usages_messages(client, store_path, fake_anthropic):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_anthropic([
+        _anthropic_message(
+            [{"type": "tool_use", "id": "tu_1", "name": "get_document",
+              "input": {"doc_name": "report.pdf"}}],
+            "tool_use",
+            msg_id="msg_turn_0",
+            usage={"input_tokens": 15, "output_tokens": 7},
+        ),
+        _anthropic_message(
+            [{"type": "text", "text": "The answer"}],
+            "end_turn",
+            msg_id="msg_turn_1",
+            usage={"input_tokens": 30, "output_tokens": 14},
+        ),
+    ])
+    measurements = []
+    result = client._messages("What status?", model="claude-test", doc_id="pi-a", on_measurement=measurements.append)
+    assert result["role"] == "assistant"
+    assert len(measurements) == 2
+    assert measurements[0]["turn_index"] == 0
+    assert measurements[0]["call_id"] == "msg_turn_0"
+    assert measurements[0]["usage"]["input_tokens"] == 15
+    assert measurements[0]["usage"]["output_tokens"] == 7
+
+    assert measurements[1]["turn_index"] == 1
+    assert measurements[1]["call_id"] == "msg_turn_1"
+    assert measurements[1]["usage"]["input_tokens"] == 30
+    assert measurements[1]["usage"]["output_tokens"] == 14
+
+
+@needs_anthropic
+def test_on_measurement_multi_turn_distinct_ids_and_usages_messages_streaming(client, store_path, fake_anthropic):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_anthropic([
+        _anthropic_sse(_anthropic_message(
+            [{"type": "tool_use", "id": "tu_1", "name": "get_document",
+              "input": {"doc_name": "report.pdf"}}],
+            "tool_use",
+            msg_id="msg_stream_turn_0",
+            usage={"input_tokens": 12, "output_tokens": 6},
+        )),
+        _anthropic_sse(_anthropic_message(
+            [{"type": "text", "text": "The answer"}],
+            "end_turn",
+            msg_id="msg_stream_turn_1",
+            usage={"input_tokens": 28, "output_tokens": 18},
+        )),
+    ])
+    measurements = []
+    events = list(client._messages("What status?", model="claude-test", doc_id="pi-a", stream=True, on_measurement=measurements.append))
+    assert len(events) > 10
+    assert len(measurements) == 2
+    assert measurements[0]["turn_index"] == 0
+    assert measurements[0]["call_id"] == "msg_stream_turn_0"
+    assert measurements[0]["usage"]["input_tokens"] == 12
+    assert measurements[0]["usage"]["output_tokens"] == 6
+
+    assert measurements[1]["turn_index"] == 1
+    assert measurements[1]["call_id"] == "msg_stream_turn_1"
+    assert measurements[1]["usage"]["input_tokens"] == 28
+    assert measurements[1]["usage"]["output_tokens"] == 18
+
+
+@needs_anthropic
+def test_on_measurement_messages_streaming_callback_exception_propagates(client, store_path, fake_anthropic):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_anthropic([
+        _anthropic_sse(_anthropic_message(
+            [{"type": "text", "text": "The answer"}],
+            "end_turn",
+            msg_id="msg_err_test",
+        )),
+    ])
+
+    def failing_callback(payload):
+        raise ValueError("callback execution failed intentionally")
+
+    events = client._messages("What status?", model="claude-test", doc_id="pi-a", stream=True, on_measurement=failing_callback)
+    with pytest.raises(ValueError, match="callback execution failed intentionally"):
+        list(events)
+
+    fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "The answer"}], "end_turn"),
+    ])
+    with pytest.raises(ValueError, match="callback execution failed intentionally"):
+        client._messages("What status?", model="claude-test", doc_id="pi-a", on_measurement=failing_callback)
+
+
+@needs_anthropic
+def test_on_measurement_messages_streaming_final_message_error_handled(client, store_path, fake_anthropic, monkeypatch):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_anthropic([
+        _anthropic_sse(_anthropic_message(
+            [{"type": "text", "text": "The answer"}],
+            "end_turn",
+        )),
+    ])
+    measurements = []
+
+    from anthropic.lib.streaming import BetaMessageStream
+    orig_get_final = BetaMessageStream.get_final_message
+    def broken_get_final_message(self):
+        import inspect
+        if "local_chat" in inspect.currentframe().f_back.f_code.co_filename:
+            raise RuntimeError("final message retrieval failed")
+        return orig_get_final(self)
+
+
+    monkeypatch.setattr(BetaMessageStream, "get_final_message", broken_get_final_message)
+
+    events = list(client._messages("What status?", model="claude-test", doc_id="pi-a", stream=True, on_measurement=measurements.append))
+    assert len(events) > 0
+    assert len(measurements) == 1
+    assert measurements[0]["turn_index"] == 0
+    assert measurements[0]["backend"] == "messages"
+    assert measurements[0]["call_id"] is None
+    assert measurements[0]["usage"] is None
+    assert measurements[0]["model"] == "claude-test"
+
+
+@needs_agents
+def test_on_measurement_multi_turn_distinct_ids_and_usages_chat_completions(client, store_path, fake_model):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    call_ids = ["chat_cmpl_turn_0", "chat_cmpl_turn_1"]
+    usages = [
+        {"input_tokens": 12, "output_tokens": 6},
+        {"input_tokens": 28, "output_tokens": 14},
+    ]
+    fake.turn_ids = call_ids
+    fake.turn_usages = usages
+    turn_fetch_count = 0
+
+    async def mock_fetch(*args, **kwargs):
+        nonlocal turn_fetch_count
+        idx = turn_fetch_count
+        turn_fetch_count += 1
+        return types.SimpleNamespace(
+            id=call_ids[idx],
+            usage=usages[idx],
+            model="test-chat-model",
+            choices=[types.SimpleNamespace(finish_reason="stop")],
+        )
+
+    fake._fetch_response = mock_fetch
+
+    measurements = []
+    result = client.chat_completions(
+        [{"role": "user", "content": "What status?"}],
+        doc_id="pi-a",
+        on_measurement=measurements.append,
+    )
+    assert result["choices"][0]["message"]["content"] == "The answer"
+    assert len(measurements) == 2
+
+    assert measurements[0]["turn_index"] == 0
+    assert measurements[0]["call_id"] == "chat_cmpl_turn_0"
+    assert measurements[0]["model"] == "test-chat-model"
+    assert measurements[0]["backend"] == "chat_completions"
+    assert measurements[0]["usage"]["input_tokens"] == 12
+    assert measurements[0]["usage"]["output_tokens"] == 6
+
+    assert measurements[1]["turn_index"] == 1
+    assert measurements[1]["call_id"] == "chat_cmpl_turn_1"
+    assert measurements[1]["model"] == "test-chat-model"
+    assert measurements[1]["backend"] == "chat_completions"
+    assert measurements[1]["usage"]["input_tokens"] == 28
+    assert measurements[1]["usage"]["output_tokens"] == 14
+
+    # Assert individual call usage, not cumulative totals
+    assert measurements[0]["usage"]["input_tokens"] != measurements[1]["usage"]["input_tokens"]
+    assert measurements[1]["usage"]["input_tokens"] != (12 + 28)
+
+
+@needs_agents
+def test_on_measurement_multi_turn_distinct_ids_and_usages_chat_completions_streaming(client, store_path, fake_model):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    call_ids = ["chat_stream_turn_0", "chat_stream_turn_1"]
+    usages = [
+        {"input_tokens": 14, "output_tokens": 7},
+        {"input_tokens": 30, "output_tokens": 15},
+    ]
+    fake.turn_ids = call_ids
+    fake.turn_usages = usages
+
+    class MockChunk:
+        def __init__(self, content="", call_id=None, usage=None, model="test-chat-model"):
+            self.id = call_id
+            self.usage = usage
+            self.model = model
+            self.choices = [types.SimpleNamespace(finish_reason="stop" if usage else None)]
+
+    class MockStream:
+        def __init__(self, chunks):
+            self.chunks = list(chunks)
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if not self.chunks:
+                raise StopAsyncIteration
+            return self.chunks.pop(0)
+
+    turn_fetch_count = 0
+
+    async def mock_fetch(*args, **kwargs):
+        nonlocal turn_fetch_count
+        idx = turn_fetch_count
+        turn_fetch_count += 1
+        cid = call_ids[idx]
+        u = usages[idx]
+        chunks = [
+            MockChunk(content="chunk", call_id=cid),
+            MockChunk(content="", call_id=cid, usage=u),
+        ]
+        return MockChunk(call_id=cid), MockStream(chunks)
+
+    fake._fetch_response = mock_fetch
+
+    measurements = []
+    chunks = []
+    stream = client.chat_completions(
+        [{"role": "user", "content": "What status?"}],
+        doc_id="pi-a",
+        stream=True,
+        stream_metadata=True,
+        on_measurement=measurements.append,
+    )
+    measurements_before_stream_end = None
+    for chunk in stream:
+        chunks.append(chunk)
+        if chunk.get("choices") and chunk["choices"][0].get("delta", {}).get("content") and measurements_before_stream_end is None:
+            measurements_before_stream_end = list(measurements)
+
+    assert len(chunks) > 2
+    # Verify completion-time emission: both turns emitted during stream processing before finally fallback
+    assert measurements_before_stream_end is not None
+    assert len(measurements_before_stream_end) == 2
+
+    # Exactly two records emitted, no duplicates from raw-responses fallback
+    assert len(measurements) == 2
+
+    assert measurements[0]["turn_index"] == 0
+    assert measurements[0]["call_id"] == "chat_stream_turn_0"
+    assert measurements[0]["model"] == "test-chat-model"
+    assert measurements[0]["backend"] == "chat_completions"
+    assert measurements[0]["usage"]["input_tokens"] == 14
+    assert measurements[0]["usage"]["output_tokens"] == 7
+
+    assert measurements[1]["turn_index"] == 1
+    assert measurements[1]["call_id"] == "chat_stream_turn_1"
+    assert measurements[1]["model"] == "test-chat-model"
+    assert measurements[1]["backend"] == "chat_completions"
+    assert measurements[1]["usage"]["input_tokens"] == 30
+    assert measurements[1]["usage"]["output_tokens"] == 15
+
+    # Individual call usage, not cumulative
+    assert measurements[0]["usage"]["input_tokens"] != measurements[1]["usage"]["input_tokens"]
+    assert measurements[1]["usage"]["input_tokens"] != (14 + 30)
+
+
+@needs_agents
+def test_on_measurement_multi_turn_distinct_ids_and_usages_responses(client, store_path, fake_model):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    call_ids = ["resp_call_turn_0", "resp_call_turn_1"]
+    usages = [
+        {"input_tokens": 16, "output_tokens": 8},
+        {"input_tokens": 32, "output_tokens": 16},
+    ]
+    fake.turn_ids = call_ids
+    fake.turn_usages = usages
+
+    turn_create_count = 0
+
+    async def mock_create(*args, **kwargs):
+        nonlocal turn_create_count
+        idx = turn_create_count
+        turn_create_count += 1
+        return types.SimpleNamespace(
+            id=call_ids[idx],
+            usage=usages[idx],
+            model="gpt-4o",
+            status="completed",
+        )
+
+    fake._client = types.SimpleNamespace(
+        responses=types.SimpleNamespace(create=mock_create)
+    )
+
+    measurements = []
+    result = client._responses("What status?", doc_id="pi-a", on_measurement=measurements.append)
+    assert result["status"] == "completed"
+    assert len(measurements) == 2
+
+    assert measurements[0]["turn_index"] == 0
+    assert measurements[0]["call_id"] == "resp_call_turn_0"
+    assert measurements[0]["model"] == "gpt-4o"
+    assert measurements[0]["backend"] == "responses"
+    assert measurements[0]["usage"]["input_tokens"] == 16
+    assert measurements[0]["usage"]["output_tokens"] == 8
+
+    assert measurements[1]["turn_index"] == 1
+    assert measurements[1]["call_id"] == "resp_call_turn_1"
+    assert measurements[1]["model"] == "gpt-4o"
+    assert measurements[1]["backend"] == "responses"
+    assert measurements[1]["usage"]["input_tokens"] == 32
+    assert measurements[1]["usage"]["output_tokens"] == 16
+
+    # Individual call usage, not cumulative
+    assert measurements[0]["usage"]["input_tokens"] != measurements[1]["usage"]["input_tokens"]
+    assert measurements[1]["usage"]["input_tokens"] != (16 + 32)
+
+
+@needs_agents
+def test_on_measurement_multi_turn_distinct_ids_and_usages_responses_streaming(client, store_path, fake_model):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    call_ids = ["resp_stream_turn_0", "resp_stream_turn_1"]
+    usages = [
+        {"input_tokens": 18, "output_tokens": 9},
+        {"input_tokens": 36, "output_tokens": 18},
+    ]
+    fake.turn_ids = call_ids
+    fake.turn_usages = usages
+
+    measurements = []
+    events_stream = client._responses("What status?", doc_id="pi-a", stream=True, on_measurement=measurements.append)
+
+    events = []
+    measurements_before_stream_end = None
+    for event in events_stream:
+        events.append(event)
+        # Verify completion-time emission: turns emitted before stream finishes and before finally fallback
+        if event.get("type") == "response.output_text.delta" and measurements_before_stream_end is None:
+            measurements_before_stream_end = list(measurements)
+
+    assert len(events) >= 2
+    # Verify completion-time emission: both turns emitted during stream processing
+    assert measurements_before_stream_end is not None
+    assert len(measurements_before_stream_end) == 2
+
+    # Exactly 2 emitted records, no duplication from raw_responses fallback
+    assert len(measurements) == 2
+
+    assert measurements[0]["turn_index"] == 0
+    assert measurements[0]["call_id"] == "resp_stream_turn_0"
+    assert measurements[0]["model"] == "fake"
+    assert measurements[0]["backend"] == "responses"
+    assert measurements[0]["usage"]["input_tokens"] == 18
+    assert measurements[0]["usage"]["output_tokens"] == 9
+
+    assert measurements[1]["turn_index"] == 1
+    assert measurements[1]["call_id"] == "resp_stream_turn_1"
+    assert measurements[1]["model"] == "fake"
+    assert measurements[1]["backend"] == "responses"
+    assert measurements[1]["usage"]["input_tokens"] == 36
+    assert measurements[1]["usage"]["output_tokens"] == 18
+
+    # Individual call usage, not cumulative
+    assert measurements[0]["usage"]["input_tokens"] != measurements[1]["usage"]["input_tokens"]
+    assert measurements[1]["usage"]["input_tokens"] != (18 + 36)
+
+
+def test_usage_helper_openai_missing_returns_none():
+    """When all responses have missing usage, _openai_usage returns None."""
+    responses = [
+        types.SimpleNamespace(usage=None),
+        types.SimpleNamespace(usage=None),
+    ]
+    assert local_chat._openai_usage(responses) is None
+
+
+def test_usage_helper_openai_explicit_zero_returns_zero_dict():
+    """When usage is explicitly reported with 0 token counts, _openai_usage returns a zero-valued dict."""
+    zero_usage = types.SimpleNamespace(
+        input_tokens=0,
+        output_tokens=0,
+        input_tokens_details=types.SimpleNamespace(cached_tokens=0, cache_write_tokens=0),
+        output_tokens_details=types.SimpleNamespace(reasoning_tokens=0),
+    )
+    responses = [types.SimpleNamespace(usage=zero_usage)]
+    res = local_chat._openai_usage(responses)
+    assert res is not None
+    assert res["prompt_tokens"] == 0
+    assert res["completion_tokens"] == 0
+    assert res["total_tokens"] == 0
+    assert res["prompt_tokens_details"] == {"cached_tokens": 0, "cache_write_tokens": 0}
+    assert res["completion_tokens_details"] == {"reasoning_tokens": 0}
+
+
+def test_usage_helper_responses_missing_returns_none():
+    """When all responses have missing usage, _responses_usage returns None."""
+    responses = [
+        types.SimpleNamespace(usage=None),
+        types.SimpleNamespace(usage=None),
+    ]
+    assert local_chat._responses_usage(responses) is None
+
+
+def test_usage_helper_responses_explicit_zero_returns_zero_dict():
+    """When usage is explicitly reported with 0 token counts, _responses_usage returns a zero-valued dict."""
+    zero_usage = types.SimpleNamespace(
+        input_tokens=0,
+        output_tokens=0,
+        input_tokens_details=types.SimpleNamespace(cached_tokens=0, cache_write_tokens=0),
+        output_tokens_details=types.SimpleNamespace(reasoning_tokens=0),
+    )
+    responses = [types.SimpleNamespace(usage=zero_usage)]
+    res = local_chat._responses_usage(responses)
+    assert res is not None
+    assert res["input_tokens"] == 0
+    assert res["output_tokens"] == 0
+    assert res["total_tokens"] == 0
+    assert res["input_tokens_details"] == {"cached_tokens": 0, "cache_write_tokens": 0}
+    assert res["output_tokens_details"] == {"reasoning_tokens": 0}
+
+
+def test_usage_helper_mixed_inputs_sums_known_usage():
+    """When some responses have usage and others have usage=None, known usage is summed correctly."""
+    turn_0 = types.SimpleNamespace(usage=types.SimpleNamespace(
+        input_tokens=15,
+        output_tokens=7,
+        input_tokens_details=types.SimpleNamespace(cached_tokens=3, cache_write_tokens=1),
+        output_tokens_details=types.SimpleNamespace(reasoning_tokens=2),
+    ))
+    turn_1 = types.SimpleNamespace(usage=None)
+    turn_2 = types.SimpleNamespace(usage=types.SimpleNamespace(
+        input_tokens=20,
+        output_tokens=10,
+        input_tokens_details=types.SimpleNamespace(cached_tokens=5, cache_write_tokens=2),
+        output_tokens_details=types.SimpleNamespace(reasoning_tokens=4),
+    ))
+    responses = [turn_0, turn_1, turn_2]
+
+    openai_res = local_chat._openai_usage(responses)
+    assert openai_res is not None
+    assert openai_res["prompt_tokens"] == 35
+    assert openai_res["completion_tokens"] == 17
+    assert openai_res["total_tokens"] == 52
+    assert openai_res["prompt_tokens_details"]["cached_tokens"] == 8
+    assert openai_res["prompt_tokens_details"]["cache_write_tokens"] == 3
+    assert openai_res["completion_tokens_details"]["reasoning_tokens"] == 6
+
+    resp_res = local_chat._responses_usage(responses)
+    assert resp_res is not None
+    assert resp_res["input_tokens"] == 35
+    assert resp_res["output_tokens"] == 17
+    assert resp_res["total_tokens"] == 52
+    assert resp_res["input_tokens_details"]["cached_tokens"] == 8
+    assert resp_res["input_tokens_details"]["cache_write_tokens"] == 3
+    assert resp_res["output_tokens_details"]["reasoning_tokens"] == 6
+
+
+def test_usage_helper_empty_input_returns_none():
+    """Empty input contains no usage data; by design both helpers return None rather than fabricating zeros."""
+    assert local_chat._usage_sums([]) is None
+    assert local_chat._usage_sums(None) is None
+    assert local_chat._openai_usage([]) is None
+    assert local_chat._openai_usage(None) is None
+    assert local_chat._responses_usage([]) is None
+    assert local_chat._responses_usage(None) is None
+
+
+def test_usage_details_chat_completions_missing_vs_explicit_zero():
+    """Missing vs explicit zero detail fields for Chat Completions."""
+    raw_missing = [types.SimpleNamespace(usage=types.SimpleNamespace(
+        prompt_tokens=10,
+        completion_tokens=5,
+        prompt_tokens_details=None,
+        completion_tokens_details=None,
+    ))]
+    res_missing = local_chat._openai_usage(raw_missing)
+    assert res_missing is not None
+    assert res_missing["prompt_tokens"] == 10
+    assert res_missing["completion_tokens"] == 5
+    assert res_missing["total_tokens"] == 15
+    assert res_missing["prompt_tokens_details"] is None
+    assert res_missing["completion_tokens_details"] is None
+
+    raw_zero = [types.SimpleNamespace(usage=types.SimpleNamespace(
+        prompt_tokens=10,
+        completion_tokens=5,
+        prompt_tokens_details=types.SimpleNamespace(cached_tokens=0, cache_write_tokens=0),
+        completion_tokens_details=types.SimpleNamespace(reasoning_tokens=0),
+    ))]
+    res_zero = local_chat._openai_usage(raw_zero)
+    assert res_zero is not None
+    assert res_zero["prompt_tokens_details"] == {"cached_tokens": 0, "cache_write_tokens": 0}
+    assert res_zero["completion_tokens_details"] == {"reasoning_tokens": 0}
+
+    raw_partial = [types.SimpleNamespace(usage=types.SimpleNamespace(
+        prompt_tokens=10,
+        completion_tokens=5,
+        prompt_tokens_details=types.SimpleNamespace(cached_tokens=0),
+        completion_tokens_details=None,
+    ))]
+    res_partial = local_chat._openai_usage(raw_partial)
+    assert res_partial is not None
+    assert res_partial["prompt_tokens_details"] == {"cached_tokens": 0}
+    assert "cache_write_tokens" not in res_partial["prompt_tokens_details"]
+    assert res_partial["completion_tokens_details"] is None
+
+
+def test_usage_details_responses_missing_vs_explicit_zero():
+    """Missing vs explicit zero detail fields for Responses."""
+    raw_missing = [types.SimpleNamespace(usage=types.SimpleNamespace(
+        input_tokens=12,
+        output_tokens=6,
+        input_tokens_details=None,
+        output_tokens_details=None,
+    ))]
+    res_missing = local_chat._responses_usage(raw_missing)
+    assert res_missing is not None
+    assert res_missing["input_tokens"] == 12
+    assert res_missing["output_tokens"] == 6
+    assert res_missing["total_tokens"] == 18
+    assert res_missing["input_tokens_details"] is None
+    assert res_missing["output_tokens_details"] is None
+
+    raw_zero = [types.SimpleNamespace(usage=types.SimpleNamespace(
+        input_tokens=12,
+        output_tokens=6,
+        input_tokens_details=types.SimpleNamespace(cached_tokens=0, cache_write_tokens=0),
+        output_tokens_details=types.SimpleNamespace(reasoning_tokens=0),
+    ))]
+    res_zero = local_chat._responses_usage(raw_zero)
+    assert res_zero is not None
+    assert res_zero["input_tokens_details"] == {"cached_tokens": 0, "cache_write_tokens": 0}
+    assert res_zero["output_tokens_details"] == {"reasoning_tokens": 0}
+
+    raw_partial = [types.SimpleNamespace(usage=types.SimpleNamespace(
+        input_tokens=12,
+        output_tokens=6,
+        input_tokens_details=types.SimpleNamespace(cached_tokens=0),
+        output_tokens_details=None,
+    ))]
+    res_partial = local_chat._responses_usage(raw_partial)
+    assert res_partial is not None
+    assert res_partial["input_tokens_details"] == {"cached_tokens": 0}
+    assert "cache_write_tokens" not in res_partial["input_tokens_details"]
+    assert res_partial["output_tokens_details"] is None
+
+
+def test_usage_details_chat_completions_preserves_cache_write():
+    """Preservation of Chat Completions cache-write quantities in prompt_tokens_details."""
+    turn_1 = types.SimpleNamespace(usage=types.SimpleNamespace(
+        prompt_tokens=10,
+        completion_tokens=5,
+        prompt_tokens_details=types.SimpleNamespace(cached_tokens=3, cache_write_tokens=7),
+        completion_tokens_details=None,
+    ))
+    turn_2 = types.SimpleNamespace(usage=types.SimpleNamespace(
+        prompt_tokens=20,
+        completion_tokens=8,
+        prompt_tokens_details=types.SimpleNamespace(cached_tokens=5, cache_write_tokens=11),
+        completion_tokens_details=None,
+    ))
+    res = local_chat._openai_usage([turn_1, turn_2])
+    assert res is not None
+    assert res["prompt_tokens_details"] == {"cached_tokens": 8, "cache_write_tokens": 18}
+
+    turn_no_write = types.SimpleNamespace(usage=types.SimpleNamespace(
+        prompt_tokens=15,
+        completion_tokens=4,
+        prompt_tokens_details=types.SimpleNamespace(cached_tokens=6),
+        completion_tokens_details=None,
+    ))
+    res_no_write = local_chat._openai_usage([turn_no_write])
+    assert res_no_write is not None
+    assert res_no_write["prompt_tokens_details"] == {"cached_tokens": 6}
+    assert "cache_write_tokens" not in res_no_write["prompt_tokens_details"]
+
+
+def test_usage_details_anthropic_multi_turn_lifetime_and_thinking():
+    """Multi-turn Anthropic cache lifetime and thinking-token aggregation."""
+    turn_1 = types.SimpleNamespace(usage=types.SimpleNamespace(
+        input_tokens=100,
+        output_tokens=25,
+        cache_creation_input_tokens=60,
+        cache_read_input_tokens=20,
+        cache_creation=types.SimpleNamespace(
+            ephemeral_5m_input_tokens=40,
+            ephemeral_1h_input_tokens=20,
+        ),
+        output_tokens_details=types.SimpleNamespace(
+            thinking_tokens=15,
+        ),
+    ))
+    turn_2 = types.SimpleNamespace(usage=types.SimpleNamespace(
+        input_tokens=50,
+        output_tokens=35,
+        cache_creation_input_tokens=30,
+        cache_read_input_tokens=80,
+        cache_creation=types.SimpleNamespace(
+            ephemeral_5m_input_tokens=20,
+            ephemeral_1h_input_tokens=10,
+        ),
+        output_tokens_details=types.SimpleNamespace(
+            thinking_tokens=25,
+        ),
+    ))
+    final_usage = {
+        "input_tokens": 50,
+        "output_tokens": 35,
+        "cache_creation_input_tokens": 30,
+        "cache_read_input_tokens": 80,
+        "cache_creation": {
+            "ephemeral_5m_input_tokens": 20,
+            "ephemeral_1h_input_tokens": 10,
+        },
+        "output_tokens_details": {
+            "thinking_tokens": 25,
+        },
+        "service_tier": "standard",
+    }
+    aggregated = local_chat._anthropic_usage([turn_1, turn_2], final_usage)
+    assert aggregated["input_tokens"] == 150
+    assert aggregated["output_tokens"] == 60
+    assert aggregated["cache_creation_input_tokens"] == 90
+    assert aggregated["cache_read_input_tokens"] == 100
+    assert aggregated["cache_creation"] == {
+        "ephemeral_5m_input_tokens": 60,
+        "ephemeral_1h_input_tokens": 30,
+    }
+    assert aggregated["output_tokens_details"] == {
+        "thinking_tokens": 40,
+    }
+    assert aggregated["service_tier"] == "standard"
+
+    turn_plain = types.SimpleNamespace(usage=types.SimpleNamespace(
+        input_tokens=10,
+        output_tokens=5,
+        cache_creation_input_tokens=0,
+        cache_read_input_tokens=0,
+        cache_creation=None,
+        output_tokens_details=None,
+    ))
+    plain_final = {
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+    }
+    res_plain = local_chat._anthropic_usage([turn_plain], plain_final)
+    assert "cache_creation" not in res_plain
+    assert "output_tokens_details" not in res_plain
+
+
+def test_usage_inclusion_semantics_compatibility():
+    """Inclusion-semantics compatibility checks for OpenAI/Responses and Anthropic."""
+    p_tot = 120
+    c_read = 30
+    c_write = 20
+    out_tot = 60
+    reasoning = 25
+    raw_openai = types.SimpleNamespace(usage=types.SimpleNamespace(
+        prompt_tokens=p_tot,
+        completion_tokens=out_tot,
+        prompt_tokens_details=types.SimpleNamespace(cached_tokens=c_read, cache_write_tokens=c_write),
+        completion_tokens_details=types.SimpleNamespace(reasoning_tokens=reasoning),
+    ))
+    res_openai = local_chat._openai_usage([raw_openai])
+    assert res_openai["total_tokens"] == p_tot + out_tot
+    assert res_openai["prompt_tokens_details"]["cached_tokens"] == c_read
+    assert res_openai["prompt_tokens_details"]["cache_write_tokens"] == c_write
+    assert res_openai["completion_tokens_details"]["reasoning_tokens"] == reasoning
+    assert res_openai["total_tokens"] < (p_tot + out_tot + c_read + c_write + reasoning)
+
+    raw_responses = types.SimpleNamespace(usage=types.SimpleNamespace(
+        input_tokens=p_tot,
+        output_tokens=out_tot,
+        input_tokens_details=types.SimpleNamespace(cached_tokens=c_read, cache_write_tokens=c_write),
+        output_tokens_details=types.SimpleNamespace(reasoning_tokens=reasoning),
+    ))
+    res_resp = local_chat._responses_usage([raw_responses])
+    assert res_resp["total_tokens"] == p_tot + out_tot
+    assert res_resp["input_tokens_details"]["cached_tokens"] == c_read
+    assert res_resp["input_tokens_details"]["cache_write_tokens"] == c_write
+    assert res_resp["output_tokens_details"]["reasoning_tokens"] == reasoning
+
+    uncached = 70
+    c_read_ant = 100
+    c_create_ant = 50
+    e5m = 35
+    e1h = 15
+    out_ant = 40
+    thinking = 20
+    ant_turn = types.SimpleNamespace(usage=types.SimpleNamespace(
+        input_tokens=uncached,
+        output_tokens=out_ant,
+        cache_read_input_tokens=c_read_ant,
+        cache_creation_input_tokens=c_create_ant,
+        cache_creation=types.SimpleNamespace(
+            ephemeral_5m_input_tokens=e5m,
+            ephemeral_1h_input_tokens=e1h,
+        ),
+        output_tokens_details=types.SimpleNamespace(
+            thinking_tokens=thinking,
+        ),
+    ))
+    ant_res = local_chat._anthropic_usage([ant_turn], {})
+    assert ant_res["input_tokens"] == uncached
+    assert ant_res["cache_read_input_tokens"] == c_read_ant
+    assert ant_res["cache_creation_input_tokens"] == c_create_ant
+    assert ant_res["cache_creation"]["ephemeral_5m_input_tokens"] + ant_res["cache_creation"]["ephemeral_1h_input_tokens"] == ant_res["cache_creation_input_tokens"]
+    assert ant_res["input_tokens"] + ant_res["cache_read_input_tokens"] + ant_res["cache_creation_input_tokens"] == uncached + c_read_ant + c_create_ant
+    assert ant_res["output_tokens"] == out_ant
+    assert ant_res["output_tokens_details"]["thinking_tokens"] == thinking
+
+
+@needs_agents
+def test_on_measurement_preserves_raw_details(client, store_path, fake_model):
+    """A regression test confirming on_measurement continues to preserve raw native usage details."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_msg_item("The answer")],
+    ])
+    raw_usage = {
+        "input_tokens": 42,
+        "output_tokens": 21,
+        "prompt_tokens_details": {"cached_tokens": 14, "cache_write_tokens": 7},
+        "completion_tokens_details": {"reasoning_tokens": 9},
+    }
+    fake.turn_ids = ["chat_cmpl_raw_0"]
+    fake.turn_usages = [raw_usage]
+
+    async def mock_fetch(*args, **kwargs):
+        return types.SimpleNamespace(
+            id="chat_cmpl_raw_0",
+            usage=raw_usage,
+            model="test-chat-model",
+            choices=[types.SimpleNamespace(finish_reason="stop")],
+        )
+
+    fake._fetch_response = mock_fetch
+
+    measurements = []
+    result = client.chat_completions(
+        [{"role": "user", "content": "What status?"}],
+        doc_id="pi-a",
+        on_measurement=measurements.append,
+    )
+    assert result["choices"][0]["message"]["content"] == "The answer"
+    assert len(measurements) == 1
+    m = measurements[0]
+    assert m["call_id"] == "chat_cmpl_raw_0"
+    assert m["turn_index"] == 0
+    assert m["model"] == "test-chat-model"
+    assert m["backend"] == "chat_completions"
+    assert m["usage"]["input_tokens"] == 42
+    assert m["usage"]["output_tokens"] == 21
+    assert m["usage"]["prompt_tokens_details"] == {"cached_tokens": 14, "cache_write_tokens": 7}
+    assert m["usage"]["completion_tokens_details"] == {"reasoning_tokens": 9}
+    assert m["status"] == "complete"
+    assert result["measurement_status"] == "complete"
+
+
+def test_measurement_status_call_rules():
+    """Per-call classification: complete, partial, unknown, and detail independence."""
+    # Complete: both required base counters present as non-negative integers
+    assert local_chat._call_measurement_status({"input_tokens": 10, "output_tokens": 5}) == "complete"
+    assert local_chat._call_measurement_status({"prompt_tokens": 10, "completion_tokens": 5}) == "complete"
+
+    # Complete with explicit zero values
+    assert local_chat._call_measurement_status({"input_tokens": 0, "output_tokens": 0}) == "complete"
+    assert local_chat._call_measurement_status({"prompt_tokens": 0, "completion_tokens": 0}) == "complete"
+
+    # Missing optional details do NOT downgrade base completeness
+    assert local_chat._call_measurement_status({
+        "prompt_tokens": 10, "completion_tokens": 5,
+        "prompt_tokens_details": None, "completion_tokens_details": None
+    }) == "complete"
+    assert local_chat._call_measurement_status({
+        "input_tokens": 10, "output_tokens": 5,
+        "cache_creation_input_tokens": None, "cache_read_input_tokens": None
+    }) == "complete"
+
+    # Partial: exactly one required counter reported
+    assert local_chat._call_measurement_status({"input_tokens": 10}) == "partial"
+    assert local_chat._call_measurement_status({"output_tokens": 5}) == "partial"
+    assert local_chat._call_measurement_status({"prompt_tokens": 10}) == "partial"
+    assert local_chat._call_measurement_status({"completion_tokens": 5}) == "partial"
+    assert local_chat._call_measurement_status({"input_tokens": 0}) == "partial"
+
+    # Unknown: neither required counter reported (or usage is None)
+    assert local_chat._call_measurement_status(None) == "unknown"
+    assert local_chat._call_measurement_status({}) == "unknown"
+    assert local_chat._call_measurement_status({"prompt_tokens_details": {"cached_tokens": 5}}) == "unknown"
+
+
+def test_measurement_status_aggregate_rules():
+    """Aggregate classification: complete, partial, unknown, and mixed rules."""
+    # Complete: all contributing calls are complete
+    c1 = types.SimpleNamespace(usage={"input_tokens": 10, "output_tokens": 5})
+    c2 = types.SimpleNamespace(usage={"input_tokens": 20, "output_tokens": 10})
+    assert local_chat._aggregate_measurement_status([c1, c2]) == "complete"
+
+    # Complete with explicit zero values
+    z1 = types.SimpleNamespace(usage={"input_tokens": 0, "output_tokens": 0})
+    z2 = types.SimpleNamespace(usage={"prompt_tokens": 0, "completion_tokens": 0})
+    assert local_chat._aggregate_measurement_status([z1, z2]) == "complete"
+
+    # Complete with missing optional details
+    d1 = types.SimpleNamespace(usage={"input_tokens": 10, "output_tokens": 5, "prompt_tokens_details": None})
+    assert local_chat._aggregate_measurement_status([d1]) == "complete"
+
+    # Partial: mixed calls (some complete, some unknown)
+    u1 = types.SimpleNamespace(usage=None)
+    assert local_chat._aggregate_measurement_status([c1, u1]) == "partial"
+    assert local_chat._aggregate_measurement_status([c1, u1, c2]) == "partial"
+
+    # Partial: any contributing call is partial
+    p1 = types.SimpleNamespace(usage={"input_tokens": 10})
+    assert local_chat._aggregate_measurement_status([c1, p1]) == "partial"
+    assert local_chat._aggregate_measurement_status([p1]) == "partial"
+
+    # Unknown: all contributing calls are unknown
+    assert local_chat._aggregate_measurement_status([u1, types.SimpleNamespace(usage=None)]) == "unknown"
+
+    # Unknown: empty contributing set
+    assert local_chat._aggregate_measurement_status([]) == "unknown"
+    assert local_chat._aggregate_measurement_status(None) == "unknown"
+
+
+@needs_agents
+def test_measurement_status_chat_completions_non_streaming_and_streaming(client, store_path, fake_model):
+    """Chat completions envelope and streaming trailing chunk carry measurement_status."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_msg_item("The answer")],
+        [_msg_item("The answer")],
+    ])
+    fake.turn_ids = ["chatcmpl_status_0", "chatcmpl_status_1"]
+    fake.turn_usages = [
+        {"prompt_tokens": 25, "completion_tokens": 12},
+        {"prompt_tokens": 25, "completion_tokens": 12},
+    ]
+
+    # Non-streaming
+    measurements = []
+    result = client.chat_completions(
+        [{"role": "user", "content": "status check"}],
+        doc_id="pi-a",
+        on_measurement=measurements.append,
+    )
+    assert result["measurement_status"] == "complete"
+    assert result["usage"]["prompt_tokens"] == 25
+    assert result["usage"]["completion_tokens"] == 12
+    assert len(measurements) == 1
+    assert measurements[0]["status"] == "complete"
+
+    # Streaming (stream_metadata=True trailing chunk)
+    stream_measurements = []
+    chunks = list(client.chat_completions(
+        [{"role": "user", "content": "status check"}],
+        doc_id="pi-a",
+        stream=True,
+        stream_metadata=True,
+        on_measurement=stream_measurements.append,
+    ))
+    trailing = chunks[-1]
+    assert trailing["choices"] == []
+    assert trailing["measurement_status"] == "complete"
+    assert trailing["usage"]["prompt_tokens"] == 25
+    assert len(stream_measurements) == 1
+    assert stream_measurements[0]["status"] == "complete"
+
+
+@needs_agents
+def test_measurement_status_responses_non_streaming_and_streaming(client, store_path, fake_model):
+    """Responses envelope and streaming terminal event carry measurement_status."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_msg_item("The answer")],
+        [_msg_item("The answer")],
+    ])
+    fake.turn_ids = ["resp_status_0", "resp_status_1"]
+    fake.turn_usages = [
+        {"input_tokens": 30, "output_tokens": 15},
+        {"input_tokens": 30, "output_tokens": 15},
+    ]
+
+    # Non-streaming
+    measurements = []
+    result = client._responses(
+        "status check",
+        doc_id="pi-a",
+        on_measurement=measurements.append,
+    )
+    assert result["measurement_status"] == "complete"
+    assert result["usage"]["input_tokens"] == 30
+    assert result["usage"]["output_tokens"] == 15
+    assert len(measurements) == 1
+    assert measurements[0]["status"] == "complete"
+
+    # Streaming
+    stream_measurements = []
+    events = list(client._responses(
+        "status check",
+        doc_id="pi-a",
+        stream=True,
+        on_measurement=stream_measurements.append,
+    ))
+    terminal = events[-1]
+    assert terminal["type"] == "response.completed"
+    assert terminal["response"]["measurement_status"] == "complete"
+    assert terminal["response"]["usage"]["input_tokens"] == 30
+    assert len(stream_measurements) == 1
+    assert stream_measurements[0]["status"] == "complete"
+
+
+def test_measurement_status_messages_non_streaming():
+    """Anthropic messages non-streaming envelope carries measurement_status."""
+    turn_1 = types.SimpleNamespace(
+        usage=types.SimpleNamespace(input_tokens=100, output_tokens=50),
+        content=[{"type": "text", "text": "Hello"}],
+        model_dump=lambda mode="json": {"id": "msg_1", "role": "assistant", "content": []},
+    )
+    # Exercise _aggregate_measurement_status directly on turns sequence
+    assert local_chat._aggregate_measurement_status([turn_1]) == "complete"
+
+    turn_unknown = types.SimpleNamespace(
+        usage=None,
+        content=[{"type": "text", "text": "Hello"}],
+    )
+    assert local_chat._aggregate_measurement_status([turn_1, turn_unknown]) == "partial"
+    assert local_chat._aggregate_measurement_status([turn_unknown]) == "unknown"
+
+
+@needs_agents
+def test_measurement_status_partial_aggregate_not_labeled_complete(client, store_path, fake_model):
+    """An aggregate with contributing calls missing usage is marked partial, NOT complete."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    # Turn 0 has usage; Turn 1 has usage=None
+    call_ids = ["chatcmpl_part_0", "chatcmpl_part_1"]
+    usages = [
+        {"input_tokens": 18, "output_tokens": 9},
+        None,
+    ]
+    fake.turn_ids = call_ids
+    fake.turn_usages = usages
+    turn_fetch_count = 0
+
+    async def mock_fetch(*args, **kwargs):
+        nonlocal turn_fetch_count
+        idx = turn_fetch_count
+        turn_fetch_count += 1
+        return types.SimpleNamespace(
+            id=call_ids[idx],
+            usage=usages[idx],
+            model="test-chat-model",
+            choices=[types.SimpleNamespace(finish_reason="stop")],
+        )
+
+    fake._fetch_response = mock_fetch
+
+    measurements = []
+    result = client.chat_completions(
+        [{"role": "user", "content": "What status?"}],
+        doc_id="pi-a",
+        on_measurement=measurements.append,
+    )
+    assert len(measurements) == 2
+    assert measurements[0]["status"] == "complete"
+    assert measurements[0]["usage"]["input_tokens"] == 18
+    assert measurements[1]["status"] == "unknown"
+    assert measurements[1]["usage"] is None
+
+    # Aggregate must NOT be labeled complete
+    assert result["measurement_status"] == "partial"
+    assert result["measurement_status"] != "complete"
+    # Aggregate usage sums what was available
+    assert result["usage"]["prompt_tokens"] == 18
+    assert result["usage"]["completion_tokens"] == 9
+
+
+@needs_agents
+def test_measurement_status_all_unknown_aggregate(client, store_path, fake_model):
+    """When all contributing calls have unknown usage, aggregate is unknown and usage is None."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_msg_item("The answer")],
+    ])
+    fake.turn_ids = ["chatcmpl_none_0"]
+    fake.turn_usages = [None]
+
+    async def mock_fetch(*args, **kwargs):
+        return types.SimpleNamespace(
+            id="chatcmpl_none_0",
+            usage=None,
+            model="test-chat-model",
+            choices=[types.SimpleNamespace(finish_reason="stop")],
+        )
+
+    fake._fetch_response = mock_fetch
+
+    measurements = []
+    result = client.chat_completions(
+        [{"role": "user", "content": "What status?"}],
+        doc_id="pi-a",
+        on_measurement=measurements.append,
+    )
+    assert len(measurements) == 1
+    assert measurements[0]["status"] == "unknown"
+    assert measurements[0]["usage"] is None
+    assert result["measurement_status"] == "unknown"
+    assert result["usage"] is None
+
+
+def test_measurement_status_streaming_missing_final_usage_fallback():
+    """Streaming termination without final usage emits status=unknown and trailing chunk is unknown."""
+    class LocalMockChunk:
+        def __init__(self, content="", id=None, usage=None):
+            self.id = id
+            self.usage = usage
+            self.choices = [types.SimpleNamespace(finish_reason="stop" if usage else None)]
+
+    class LocalMockStream:
+        def __init__(self, chunks):
+            self.chunks = list(chunks)
+            self.closed = False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if not self.chunks:
+                raise StopAsyncIteration
+            return self.chunks.pop(0)
+
+        async def aclose(self):
+            self.closed = True
+
+    chunks_no_usage = [
+        LocalMockChunk("hello", id="stream_fallback_call_id"),
+    ]
+    model = types.SimpleNamespace()
+    agent = types.SimpleNamespace(model=model)
+
+    async def fetch_no_usage(*args, **kwargs):
+        return LocalMockChunk(id="stream_fallback_call_id"), LocalMockStream(chunks_no_usage)
+
+    model._fetch_response = fetch_no_usage
+    recorded = {}
+    seen = set()
+    turn_counter = [0]
+    measurements = []
+    local_chat._record_chat_finish(
+        agent, recorded,
+        on_measurement=measurements.append,
+        seen=seen,
+        turn_counter=turn_counter,
+        backend="chat_completions",
+    )
+
+    async def run_stream():
+        resp, tee = await model._fetch_response()
+        await tee.__anext__()
+        with pytest.raises(StopAsyncIteration):
+            await tee.__anext__()
+
+    asyncio.run(run_stream())
+    assert len(measurements) == 1
+    assert measurements[0]["status"] == "unknown"
+    assert measurements[0]["usage"] is None
+
+
+# ── Lifecycle & Execution Outcome Tests ──
+
+@needs_agents
+def test_lifecycle_multi_turn_success(client, store_path, fake_model):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    call_ids = ["chat_cmpl_life_0", "chat_cmpl_life_1"]
+    usages = [
+        {"input_tokens": 12, "output_tokens": 6},
+        {"input_tokens": 28, "output_tokens": 14},
+    ]
+    fake.turn_ids = call_ids
+    fake.turn_usages = usages
+    turn_fetch_count = 0
+
+    async def mock_fetch(*args, **kwargs):
+        nonlocal turn_fetch_count
+        idx = turn_fetch_count
+        turn_fetch_count += 1
+        return types.SimpleNamespace(
+            id=call_ids[idx],
+            usage=usages[idx],
+            model="test-chat-model",
+            choices=[types.SimpleNamespace(finish_reason="stop")],
+        )
+
+    fake._fetch_response = mock_fetch
+
+    # Non-streaming chat_completions
+    result = client.chat_completions(
+        [{"role": "user", "content": "What status?"}],
+        doc_id="pi-a",
+    )
+    assert result["execution_outcome"] == "completed"
+    assert result["measurement_status"] == "complete"
+    assert result["usage"]["prompt_tokens"] == 12 + 28
+    assert result["usage"]["completion_tokens"] == 6 + 14
+
+    # Streaming chat_completions with metadata (fresh turns)
+    fake_stream = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    fake_stream.turn_ids = call_ids
+    fake_stream.turn_usages = usages
+    turn_fetch_count = 0
+    fake_stream._fetch_response = mock_fetch
+
+    stream = client.chat_completions(
+        [{"role": "user", "content": "What status?"}],
+        doc_id="pi-a",
+        stream=True,
+        stream_metadata=True,
+    )
+    assert stream.execution_outcome == "in_progress"
+    chunks = list(stream)
+    assert stream.execution_outcome == "completed"
+    assert stream.measurement_status == "complete"
+    assert len(stream.measurements) == 2
+    trailing = chunks[-1]
+    assert trailing["execution_outcome"] == "completed"
+    assert trailing["measurement_status"] == "complete"
+    assert trailing["usage"]["prompt_tokens"] == 12 + 28
+
+    # Non-streaming responses (fresh turns)
+    fake_resp = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    fake_resp.turn_ids = ["resp_life_0", "resp_life_1"]
+    fake_resp.turn_usages = usages
+    resp_result = client._responses("What status?", doc_id="pi-a")
+    assert resp_result["execution_outcome"] == "completed"
+    assert resp_result["measurement_status"] == "complete"
+
+
+@needs_agents
+def test_lifecycle_missing_usage_one_turn(client, store_path, fake_model):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    call_ids = ["call_turn_0", "call_turn_1"]
+    usages = [
+        {"input_tokens": 15, "output_tokens": 5},
+        None,
+    ]
+    fake.turn_ids = call_ids
+    fake.turn_usages = usages
+    turn_fetch_count = 0
+
+    async def mock_fetch(*args, **kwargs):
+        nonlocal turn_fetch_count
+        idx = turn_fetch_count
+        turn_fetch_count += 1
+        return types.SimpleNamespace(
+            id=call_ids[idx],
+            usage=usages[idx],
+            model="test-chat-model",
+            choices=[types.SimpleNamespace(finish_reason="stop")],
+        )
+
+    fake._fetch_response = mock_fetch
+
+    measurements = []
+    result = client.chat_completions(
+        [{"role": "user", "content": "What status?"}],
+        doc_id="pi-a",
+        on_measurement=measurements.append,
+    )
+    assert result["execution_outcome"] == "completed"
+    assert result["measurement_status"] == "partial"
+    assert len(measurements) == 2
+    assert measurements[0]["status"] == "complete"
+    assert measurements[1]["status"] == "unknown"
+    assert measurements[1]["usage"] is None
+    # Aggregate only includes known usage from turn 0
+    assert result["usage"]["prompt_tokens"] == 15
+    assert result["usage"]["completion_tokens"] == 5
+
+
+@needs_agents
+def test_lifecycle_provider_failure_after_success(client, store_path, fake_model):
+    import openai
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    call_ids = ["call_fail_0", "call_fail_1"]
+    usages = [
+        {"input_tokens": 20, "output_tokens": 10},
+    ]
+    fake.turn_ids = call_ids
+    fake.turn_usages = usages
+    turn_fetch_count = 0
+
+    async def mock_fetch(*args, **kwargs):
+        nonlocal turn_fetch_count
+        idx = turn_fetch_count
+        turn_fetch_count += 1
+        if idx == 0:
+            return types.SimpleNamespace(
+                id=call_ids[0],
+                usage=usages[0],
+                model="test-chat-model",
+                choices=[types.SimpleNamespace(finish_reason="stop")],
+            )
+        raise openai.InternalServerError(
+            message="Provider 500 internal server error",
+            response=httpx.Response(500, request=httpx.Request("POST", "http://test")),
+            body=None,
+        )
+
+    fake._fetch_response = mock_fetch
+
+    measurements = []
+    with pytest.raises(PageIndexAPIError) as exc_info:
+        client.chat_completions(
+            [{"role": "user", "content": "What status?"}],
+            doc_id="pi-a",
+            on_measurement=measurements.append,
+        )
+
+    exc = exc_info.value
+    assert exc.execution_outcome == "failed"
+    assert exc.status_code == 500
+    # Earlier completed turn measurement is preserved in both callback and exception
+    assert len(measurements) == 1
+    assert exc.measurements is not None
+    assert len(exc.measurements) == 1
+    assert exc.measurements[0]["turn_index"] == 0
+    assert exc.measurements[0]["call_id"] == "call_fail_0"
+    assert exc.measurement_status == "complete"
+    assert exc.usage is not None
+    assert exc.usage["prompt_tokens"] == 20
+    assert exc.usage["completion_tokens"] == 10
+    # Exception chaining preserved
+    assert exc.__cause__ is not None
+    assert isinstance(exc.__cause__, openai.InternalServerError)
+
+
+@needs_anthropic
+def test_lifecycle_provider_failure_after_success_messages(client, store_path, fake_anthropic):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_anthropic([
+        _anthropic_message(
+            [{"type": "tool_use", "id": "tu_1", "name": "get_document",
+              "input": {"doc_name": "report.pdf"}}], "tool_use"),
+        (500, {"type": "error", "error": {"type": "api_error", "message": "Provider 500"}}),
+    ])
+    measurements = []
+    with pytest.raises(PageIndexAPIError) as exc_info:
+        client._messages(
+            [{"role": "user", "content": "What status?"}],
+            model="claude-test", max_tokens=100,
+            on_measurement=measurements.append,
+        )
+    exc = exc_info.value
+    assert exc.execution_outcome == "failed"
+    assert len(measurements) == 1
+    assert len(exc.measurements) == 1
+    assert exc.measurements[0]["turn_index"] == 0
+    assert exc.measurement_status == "complete"
+    assert exc.usage is not None
+    assert exc.usage["input_tokens"] == 10
+    assert exc.usage["output_tokens"] == 5
+    assert exc.__cause__ is not None
+
+
+@needs_agents
+def test_lifecycle_consumer_cancellation(client, store_path, fake_model):
+    seed_doc(store_path, "pi-a", "report.pdf")
+
+    # Case 1: StreamIterator early close
+    fake_model([[_msg_item("The answer 1")]])
+    stream = client.chat_completions("What status?", doc_id="pi-a", stream=True)
+    assert stream.execution_outcome == "in_progress"
+    first = next(stream)
+    assert first
+    assert stream.execution_outcome == "in_progress"
+    stream.close()
+    assert stream.execution_outcome == "cancelled"
+    with pytest.raises(StopIteration):
+        next(stream)
+
+    # Case 2: Full completion does not become cancelled
+    fake_model([[_msg_item("The answer 2")]])
+    stream2 = client.chat_completions("What status?", doc_id="pi-a", stream=True)
+    assert stream2.execution_outcome == "in_progress"
+    chunks = list(stream2)
+    assert len(chunks) > 0
+    assert stream2.execution_outcome == "completed"
+    stream2.close()
+    assert stream2.execution_outcome == "completed"
+
+    # Case 3: Answer lane ChatStream
+    fake_model([[_msg_item("The answer 3")]])
+    cs = client.chat("What status?", doc_id="pi-a", stream=True)
+    assert cs.execution_outcome == "in_progress"
+    text_chunk = next(cs)
+    assert text_chunk
+    assert cs.execution_outcome == "in_progress"
+    cs.close()
+    assert cs.execution_outcome == "cancelled"
+
+
+@needs_agents
+def test_lifecycle_cache_field_preservation(client, store_path, fake_model):
+    import openai
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    call_ids = ["cache_turn_0", "cache_turn_1"]
+    usages = [
+        {
+            "input_tokens": 100,
+            "output_tokens": 40,
+            "prompt_tokens_details": {"cached_tokens": 30, "cache_write_tokens": 15},
+            "completion_tokens_details": {"reasoning_tokens": 10},
+        },
+        {
+            "input_tokens": 60,
+            "output_tokens": 20,
+            "prompt_tokens_details": {"cached_tokens": 20, "cache_write_tokens": 0},
+            "completion_tokens_details": {"reasoning_tokens": 5},
+        },
+    ]
+    fake.turn_ids = call_ids
+    fake.turn_usages = usages
+    turn_fetch_count = 0
+
+    async def mock_fetch(*args, **kwargs):
+        nonlocal turn_fetch_count
+        idx = turn_fetch_count
+        turn_fetch_count += 1
+        return types.SimpleNamespace(
+            id=call_ids[idx],
+            usage=usages[idx],
+            model="test-chat-model",
+            choices=[types.SimpleNamespace(finish_reason="stop")],
+        )
+
+    fake._fetch_response = mock_fetch
+
+    # Success case preserves cache and reasoning fields
+    result = client.chat_completions(
+        [{"role": "user", "content": "What status?"}],
+        doc_id="pi-a",
+    )
+    assert result["execution_outcome"] == "completed"
+    assert result["usage"]["prompt_tokens"] == 160
+    assert result["usage"]["completion_tokens"] == 60
+    assert result["usage"]["prompt_tokens_details"]["cached_tokens"] == 50
+    assert result["usage"]["prompt_tokens_details"]["cache_write_tokens"] == 15
+    assert result["usage"]["completion_tokens_details"]["reasoning_tokens"] == 15
+
+    # Failure case after turn 0 preserves turn 0's cache details
+    fake_fail = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("The answer")],
+    ])
+    fake_fail.turn_ids = call_ids
+    fake_fail.turn_usages = usages
+    turn_fetch_count = 0
+
+    async def mock_fetch_fail(*args, **kwargs):
+        nonlocal turn_fetch_count
+        idx = turn_fetch_count
+        turn_fetch_count += 1
+        if idx == 0:
+            return types.SimpleNamespace(
+                id=call_ids[0],
+                usage=usages[0],
+                model="test-chat-model",
+                choices=[types.SimpleNamespace(finish_reason="stop")],
+            )
+        raise openai.InternalServerError(
+            message="Provider connection reset",
+            response=httpx.Response(502, request=httpx.Request("POST", "http://test")),
+            body=None,
+        )
+
+    fake_fail._fetch_response = mock_fetch_fail
+
+    with pytest.raises(PageIndexAPIError) as exc_info:
+        client.chat_completions(
+            [{"role": "user", "content": "What status?"}],
+            doc_id="pi-a",
+        )
+
+    exc = exc_info.value
+    assert exc.execution_outcome == "failed"
+    assert exc.status_code == 502
+    assert exc.usage is not None
+    assert exc.usage["prompt_tokens_details"]["cached_tokens"] == 30
+    assert exc.usage["prompt_tokens_details"]["cache_write_tokens"] == 15
+    assert exc.usage["completion_tokens_details"]["reasoning_tokens"] == 10
+
+
+def test_lifecycle_error_constructor_compatibility_and_immutability():
+    """PageIndexAPIError preserves constructor compatibility and does not retain caller-owned mutable references."""
+    # 1. Existing backward compatibility: message and status_code
+    e1 = PageIndexAPIError("test error", status_code=404)
+    assert str(e1) == "test error"
+    assert e1.status_code == 404
+    assert e1.measurements == []
+    assert e1.measurement_status == "unknown"
+    assert e1.usage is None
+    assert e1.execution_outcome == "failed"
+
+    # 2. Default measurement_status rules:
+    # 2a. measurements=None -> "unknown"
+    e_none = PageIndexAPIError("msg", measurements=None)
+    assert e_none.measurement_status == "unknown"
+    assert e_none.measurements == []
+
+    # 2b. measurements=[] -> "unknown"
+    e_empty = PageIndexAPIError("msg", measurements=[])
+    assert e_empty.measurement_status == "unknown"
+
+    # 2c. Complete derived status
+    e_comp = PageIndexAPIError("msg", measurements=[{"status": "complete"}])
+    assert e_comp.measurement_status == "complete"
+
+    # 2d. Partial derived status
+    e_part = PageIndexAPIError("msg", measurements=[
+        {"status": "complete"},
+        {"status": "unknown"},
+    ])
+    assert e_part.measurement_status == "partial"
+
+    # 2e. Explicit measurement_status overrides derivation
+    e_explicit = PageIndexAPIError("msg", measurements=[{"status": "complete"}],
+                                   measurement_status="custom_status")
+    assert e_explicit.measurement_status == "custom_status"
+
+    # 3. Immutability: caller mutating list or dicts after construction does not mutate error
+    caller_list = [
+        {"turn_index": 0, "status": "complete", "usage": {"prompt_tokens": 10, "completion_tokens": 5}}
+    ]
+    caller_usage = {"prompt_tokens": 10, "completion_tokens": 5}
+    e_mut = PageIndexAPIError("msg", measurements=caller_list, usage=caller_usage)
+
+    caller_list.append({"turn_index": 1, "status": "partial"})
+    caller_list[0]["usage"]["prompt_tokens"] = 999
+    caller_usage["prompt_tokens"] = 888
+
+    assert len(e_mut.measurements) == 1
+    assert e_mut.measurements[0]["usage"]["prompt_tokens"] == 10
+    assert e_mut.usage["prompt_tokens"] == 10
+
+
+def test_lifecycle_stream_close_safety_and_terminal_outcome():
+    """Streams safely handle close errors, do not overwrite terminal outcomes, and preserve metadata."""
+    # 1. ChatStream.close() does not mask exceptions when underlying view's close raises
+    class BrokenIterator:
+        def __init__(self):
+            self.closed = False
+            self.execution_outcome = "in_progress"
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            return "chunk"
+
+        def close(self):
+            self.closed = True
+            raise RuntimeError("underlying view close failed")
+
+    broken = BrokenIterator()
+    cs = local_chat.ChatStream(text=lambda: broken, events="not an agent")
+    assert cs.execution_outcome == "in_progress"
+    next(cs)
+    # close should not raise even though broken.close() raises
+    cs.close()
+    assert broken.closed is True
+    assert cs.execution_outcome == "cancelled"
+    with pytest.raises(StopIteration):
+        next(cs)
+
+    # 2. StreamIterator.close() does not mask exceptions and runs both cleanups
+    on_close_called = False
+
+    def on_close():
+        nonlocal on_close_called
+        on_close_called = True
+
+    it_broken = BrokenIterator()
+    si = local_chat.StreamIterator(it_broken, on_close=on_close, measurements=[{"turn_index": 0}])
+    assert si.execution_outcome == "in_progress"
+    assert len(si.measurements) == 1
+    si.close()
+    assert it_broken.closed is True
+    assert on_close_called is True
+    assert si.execution_outcome == "cancelled"
+    # measurements remain accessible after close
+    assert len(si.measurements) == 1
+    assert si.measurement_status == "unknown"
+
+    # 3. Closing an already completed or failed stream never overwrites outcome
+    # 3a. Completed StreamIterator
+    si_comp = local_chat.StreamIterator(iter(["a"]))
+    assert list(si_comp) == ["a"]
+    assert si_comp.execution_outcome == "completed"
+    si_comp.close()
+    assert si_comp.execution_outcome == "completed"
+
+    # 3b. Failed StreamIterator
+    def failing_gen():
+        yield "first"
+        raise ValueError("boom")
+
+    si_fail = local_chat.StreamIterator(failing_gen())
+    next(si_fail)
+    with pytest.raises(ValueError):
+        next(si_fail)
+    assert si_fail.execution_outcome == "failed"
+    si_fail.close()
+    assert si_fail.execution_outcome == "failed"
