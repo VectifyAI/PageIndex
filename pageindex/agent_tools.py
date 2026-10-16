@@ -33,7 +33,8 @@ from typing import Any, Callable, Optional
 
 import requests
 
-from .errors import PageIndexAPIError
+from . import deadline as _deadline
+from .errors import PageIndexAPIError, PageIndexTimeoutError
 from .mcp_bridge import render_prompt_text, render_text
 
 TOOL_RESPONSE_CHAR_LIMIT = 100_000
@@ -344,6 +345,7 @@ def _all_documents(client, stop_ids=None) -> list[dict[str, Any]]:
     offset = 0
     remaining = {str(one_id) for one_id in stop_ids} if stop_ids else None
     while True:
+        _deadline.check()
         page = client.list_documents(limit=100, offset=offset)
         batch = page.get("documents") or []
         documents.extend(batch)
@@ -1245,6 +1247,8 @@ def call_tool(client, name: str, arguments: dict[str, Any],
         return _dumps(payload), is_error
     try:
         payload, is_error = implementation(*bound.args, **bound.kwargs)
+    except PageIndexTimeoutError:
+        raise
     except Exception as exc:  # tool calls must never raise into the agent loop
         payload, is_error = _failure(
             f"{name} failed: {exc}", None,
@@ -1393,6 +1397,8 @@ def _bridge_invoker(bridge, name: str, schema: dict,
             _coerce_bool_args(schema, arguments)
             blocks, is_error = bridge.call_tool(name, arguments)
         except Exception as exc:
+            if isinstance(exc, PageIndexTimeoutError):
+                raise
             if isinstance(exc, PageIndexAPIError) and (
                     exc.status_code in (401, 403, 429)
                     or (exc.status_code or 0) >= 500
@@ -1543,8 +1549,10 @@ def _tool_specs(client, include_management: bool = False, doc_ids=None,
 
     def local_invoke(name: str) -> "Callable[[dict], tuple[list, bool]]":
         def invoke(arguments: dict) -> tuple[list, bool]:
+            _deadline.check()
             text, is_error = call_tool(client, name, arguments,
                                        doc_ids=doc_ids)
+            _deadline.check()
             return [{"type": "text", "text": text}], is_error
         return invoke
 
@@ -1705,8 +1713,11 @@ def doc_targeting_block(client, doc_id) -> Optional[str]:
     details = []
     missing = []
     for one_id in doc_ids:
+        _deadline.check()
         try:
             details.append(client.get_document(one_id))
+        except PageIndexTimeoutError:
+            raise
         except PageIndexAPIError as exc:
             # Batch only a definite not-found/denied (local raises carry no
             # status); a cloud transport failure (429/5xx) propagates raw.
@@ -1748,6 +1759,7 @@ def folder_targeting_block(client, folder_id) -> Optional[str]:
         raise PageIndexAPIError(
             "folder_id is cloud-only — folders are not supported in local "
             "mode. Create the client with an api_key to use folders.")
+    _deadline.check()
     folders = client.list_folders().get("folders") or []
     folder = next((f for f in folders if f.get("id") == folder_id), None)
     if folder is None:

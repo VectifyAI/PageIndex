@@ -105,6 +105,12 @@ print(answer)
 
 Configure other models, streaming, multi-document search, citations, and more.
 
+Own-model `chat(..., timeout=30)` shares one budget across setup, model turns,
+tools and retries, on every protocol, streamed or not. Expiry raises
+`PageIndexTimeoutError` (`code="deadline_exceeded"`) after local cleanup.
+Running synchronous tools can delay cleanup; dispatched remote work may still
+finish and be billed. See `chat()`'s docstring for stream and backend details.
+
 ### [Integrate PageIndex with your own agent →](https://docs.pageindex.ai/sdk/agents)
 
 Drop PageIndex tools into the OpenAI Agents SDK, the Claude Agent SDK, or any other framework.
