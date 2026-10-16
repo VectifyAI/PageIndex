@@ -1,6 +1,7 @@
 import unittest
+from unittest.mock import AsyncMock, patch
 
-from pageindex.page_index_md import extract_nodes_from_markdown
+from pageindex.page_index_md import extract_nodes_from_markdown, get_node_summary
 
 
 class ExtractNodesFromMarkdownTest(unittest.TestCase):
@@ -99,6 +100,32 @@ class MarkdownCliTest(unittest.TestCase):
                         if l.startswith("MODELS_SEEN="))
             self.assertEqual(json.loads(line[len("MODELS_SEEN="):]),
                              ["SUMMARY-SENTINEL"], res.stdout.decode())
+
+
+class GetNodeSummaryTest(unittest.IsolatedAsyncioTestCase):
+    async def test_below_threshold_uses_node_text_without_calling_llm(self):
+        node = {"text": "short section"}
+
+        with patch("pageindex.page_index_md.count_tokens", return_value=199), patch(
+            "pageindex.page_index_md.generate_node_summary", new_callable=AsyncMock
+        ) as generate_summary:
+            summary = await get_node_summary(node, summary_token_threshold=200)
+
+        self.assertEqual(summary, node["text"])
+        generate_summary.assert_not_awaited()
+
+    async def test_threshold_boundary_generates_a_summary(self):
+        node = {"text": "boundary section"}
+
+        with patch("pageindex.page_index_md.count_tokens", return_value=200), patch(
+            "pageindex.page_index_md.generate_node_summary",
+            new_callable=AsyncMock,
+            return_value="generated summary",
+        ) as generate_summary:
+            summary = await get_node_summary(node, summary_token_threshold=200)
+
+        self.assertEqual(summary, "generated summary")
+        generate_summary.assert_awaited_once_with(node, model=None)
 
 
 if __name__ == "__main__":
