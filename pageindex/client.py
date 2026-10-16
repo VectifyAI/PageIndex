@@ -1373,11 +1373,18 @@ class PageIndexClient:
               Responses: ``output`` plus an ``items``
               transcript and cross-turn ``usage``; Messages: the final
               message with a ``messages`` turn sequence and aggregated
-              ``usage``
+              ``usage``. Each ``usage`` also lists the run's model calls:
+              ``request_usage_entries`` on the OpenAI protocols, the
+              native ``iterations`` on Messages
             - protocol lane, stream=True: an iterator of the protocol's
               own stream events; Messages ends a finished run with one
-              ``{"type": "result", "usage": ...}`` event carrying the
-              aggregated ``usage``
+              ``{"type": "result", "usage": ..., "messages": ...}`` event
+              carrying the envelope's aggregated ``usage`` and
+              ``messages`` turn sequence
+
+        An own-model run that fails raises PageIndexAPIError with
+        ``usage``: what its finished model calls spent, in the protocol's
+        usage shape (Chat Completions on the answer lane).
         """
         if protocol not in (None, "chat_completions", "responses",
                             "messages"):
@@ -1850,8 +1857,8 @@ class PageIndexClient:
                 (its native event objects, including SDK-synthesized
                 convenience events), one message sequence per turn; a
                 finished run then ends with one ``type == "result"``
-                event whose ``usage`` is the non-stream envelope's
-                cross-turn aggregate.
+                event whose ``usage`` and ``messages`` are the non-stream
+                envelope's cross-turn aggregate and turn sequence.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call. Local
