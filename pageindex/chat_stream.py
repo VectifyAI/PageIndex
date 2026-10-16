@@ -1,7 +1,7 @@
 """chat(stream=True)'s return type: one run, one view — text or events."""
 from __future__ import annotations
 
-from typing import Any, Iterator, Optional
+from typing import Any, Callable, Iterator, Optional
 
 from .errors import PageIndexAPIError
 
@@ -12,12 +12,14 @@ class ChatStream:
     the typed process event dicts. One underlying run — consume exactly
     one view; call chat() again for the other."""
 
-    def __init__(self, text, events):
+    def __init__(self, text, events,
+                 on_close: Optional[Callable[[], None]] = None):
         self._text = text      # () -> Iterator[str]
         self._events = events  # () -> Iterator[dict], or the refusal text
         self._view: Optional[str] = None
         self._it: Any = None
         self._closed = False
+        self._on_close = on_close
 
     def _claim(self, view: str) -> None:
         if self._view is not None and self._view != view:
@@ -30,6 +32,8 @@ class ChatStream:
         return self
 
     def __next__(self) -> str:
+        if self._closed:
+            raise StopIteration
         self._claim("text")
         if self._it is None:
             if self._closed:
@@ -47,6 +51,8 @@ class ChatStream:
         not merely reading the attribute — claims the view, so debugger
         panes and getattr probing stay side-effect free."""
         def consume():
+            if self._closed:
+                return
             if isinstance(self._events, str):
                 raise PageIndexAPIError(self._events)
             self._claim("events")
@@ -63,7 +69,13 @@ class ChatStream:
         """Stop the run: closes the open view, and the stream is dead
         afterwards, like a closed generator (own-model chat: a run never
         consumed never starts)."""
+        if self._closed:
+            return
         self._closed = True
-        close = getattr(self._it, "close", None)
-        if close is not None:
-            close()
+        try:
+            close = getattr(self._it, "close", None)
+            if close is not None:
+                close()
+        finally:
+            if self._on_close is not None:
+                self._on_close()

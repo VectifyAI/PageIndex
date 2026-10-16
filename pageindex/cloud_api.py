@@ -9,6 +9,36 @@ from .errors import PageIndexAPIError
 from .naming import sanitize_filename, validate_folder_name
 
 
+class _ClosingChatIterator:
+    """Own the eagerly opened response, even before parsing starts."""
+
+    def __init__(self, iterator, response: requests.Response):
+        self._iterator = iterator
+        self._response = response
+        self._closed = False
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._closed:
+            raise StopIteration
+        try:
+            return next(self._iterator)
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._iterator.close()
+        finally:
+            self._response.close()
+
+
 def _enc(value: str) -> str:
     """URL-encode a path segment (ids may contain / ? # or spaces)."""
     return urllib.parse.quote(str(value), safe="")
@@ -333,9 +363,10 @@ class CloudAPI:
 
         if stream:
             if stream_metadata:
-                return self._stream_chat_response_raw(response)
+                iterator = self._stream_chat_response_raw(response)
             else:
-                return self._stream_chat_response(response)
+                iterator = self._stream_chat_response(response)
+            return _ClosingChatIterator(iterator, response)
         else:
             return response.json()
 
