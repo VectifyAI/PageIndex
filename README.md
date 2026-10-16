@@ -109,6 +109,9 @@ Configure other models, streaming, multi-document search, citations, and more.
 
 Drop PageIndex tools into the OpenAI Agents SDK, the Claude Agent SDK, or any other framework.
 
+For document research with current web sources, try the runnable
+[local PageIndex + Parallel Search MCP example](examples/parallel_search/README.md).
+
 
 # Benchmarks
 
