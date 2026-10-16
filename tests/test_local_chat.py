@@ -3,6 +3,7 @@ no LLM keys. Tool execution runs for real against a seeded local store."""
 import asyncio
 import inspect
 import json
+import os
 import sys
 import types
 
@@ -302,7 +303,7 @@ def test_chat_completions_missing_framework(client, monkeypatch):
 
 
 def test_cloud_guards(monkeypatch):
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     # empty is unset, as on the local lane — the managed chat serves it
     monkeypatch.setattr(cloud._api, "chat_completions",
                         lambda **kw: {"choices": [{"message": {"content": "ok"}}]})
@@ -476,7 +477,7 @@ def test_chat_reasoning_effort_reaches_the_engine(client, store_path,
 
 
 def test_chat_cloud_unwraps_envelope(monkeypatch):
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
 
     def fake_cc(**kwargs):
         assert kwargs["messages"] == [{"role": "user", "content": "q"}]
@@ -537,7 +538,7 @@ def _cloud_chunk(content=None, meta=None, choices=True):
 def _managed_cloud_with_tool_stream(monkeypatch):
     """A cloud client whose managed stream serves the live wire shape:
     block_metadata-tagged text, a tool call, and untagged tail chunks."""
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     seen = {}
 
     def fake_cc(**kwargs):
@@ -597,7 +598,7 @@ def test_chat_process_managed_open_block_never_leaks(monkeypatch):
     under an unexpected tag (or none) accumulate into the call instead
     of leaking into the show_process=False answer."""
     def cloud_with(tag):
-        cloud = PageIndexCloudClient(api_key="pi-test-key")
+        cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
         monkeypatch.setattr(cloud._api, "chat_completions", lambda **kw: iter([
             _cloud_chunk(None, {"type": "mcp_tool_use_start",
                                 "tool_name": "get_document"}),
@@ -619,7 +620,7 @@ def test_chat_process_managed_open_block_never_leaks(monkeypatch):
 def test_chat_process_managed_non_string_argument_chunk(monkeypatch):
     """A non-string delta.content inside a tool block degrades to a
     raw-string argument instead of killing the stream."""
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     monkeypatch.setattr(cloud._api, "chat_completions", lambda **kw: iter([
         _cloud_chunk(None, {"type": "mcp_tool_use_start",
                             "tool_name": "get_document"}),
@@ -753,7 +754,7 @@ def test_chat_stream_events_refusal_waits_for_consumption(monkeypatch):
     """On managed, .events read is inert — getattr(stream, 'events',
     None) must not explode — and the refusal raises on first
     consumption, leaving the text view usable."""
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     monkeypatch.setattr(cloud._api, "chat_completions",
                         lambda **kwargs: iter([_cloud_chunk("x")]))
     stream = cloud.chat("q", stream=True)
@@ -834,7 +835,7 @@ def test_chat_stream_closed_before_consumption_stays_dead(client, store_path,
 def test_chat_stream_managed_cloud(monkeypatch):
     """Old-wire chunks (no block_metadata) are answer text under any
     show_process; .events needs the in-process agent."""
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     monkeypatch.setattr(
         cloud._api, "chat_completions",
         lambda **kwargs: iter([_cloud_chunk("cloud "),
@@ -914,7 +915,7 @@ def test_chat_stream_drops_empty_deltas(client, store_path, fake_model):
 
 def test_chat_process_managed_validates_before_request(monkeypatch):
     """A bad show_process must choke before the billed request is sent."""
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     calls = []
     monkeypatch.setattr(cloud._api, "chat_completions",
                         lambda **kwargs: calls.append(kwargs) or iter(()))
@@ -1208,7 +1209,7 @@ def fake_anthropic(monkeypatch):
             return anthropic_httpx.Response(200, json=body)
 
         fake = anthropic.Anthropic(
-            api_key="test",
+            api_key=os.environ["ANTHROPIC_API_KEY"],
             http_client=anthropic_httpx.Client(
                 transport=anthropic_httpx.MockTransport(handler)))
         monkeypatch.setattr(local_chat, "_anthropic_client",
@@ -1403,7 +1404,7 @@ def test_enable_citations_rejected_before_framework_check(client, monkeypatch):
                                 enable_citations=True)
     # A cloud own-model client is told the real gate — managed vs own
     # chat — never "cloud-only": it is on the cloud.
-    cloud = PageIndexClient(api_key="pi-k", chat_model="m")
+    cloud = PageIndexClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"], chat_model="m")
     with pytest.raises(PageIndexAPIError) as err:
         cloud.chat_completions([{"role": "user", "content": "x"}],
                                enable_citations=True)
@@ -2094,7 +2095,7 @@ def test_messages_provider_errors_wrap_as_sdk_errors(client, store_path,
             "error": {"type": "rate_limit_error", "message": "slow down"}})
 
     fake = anthropic.Anthropic(
-        api_key="test", max_retries=0,
+        api_key=os.environ["PAGEINDEX_TEST_API_KEY"], max_retries=0,
         http_client=anthropic_httpx.Client(
             transport=anthropic_httpx.MockTransport(handler)))
     monkeypatch.setattr(local_chat, "_anthropic_client",
@@ -2723,7 +2724,7 @@ def test_messages_reuses_cached_client_across_runs(client, monkeypatch):
             200, json=_anthropic_message([{"type": "text", "text": "ok"}],
                                          "end_turn"))
     cached = anthropic.Anthropic(
-        api_key="test",
+        api_key=os.environ["PAGEINDEX_TEST_API_KEY"],
         http_client=anthropic_httpx.Client(
             transport=anthropic_httpx.MockTransport(handler)))
     monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS",
@@ -3101,7 +3102,7 @@ def bridge_client(monkeypatch):
     bridge = FakeBridge()
     monkeypatch.setattr(agent_tools, "_cloud_bridge",
                         lambda client, gated=True: bridge)
-    client = PageIndexClient(api_key="pi-k", chat_model="fake-model")
+    client = PageIndexClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"], chat_model="fake-model")
     return client, bridge
 
 
@@ -3244,7 +3245,7 @@ def test_folder_id_is_cloud_only(client):
 
 def test_bridge_gate_and_citations(monkeypatch):
     from pageindex import PageIndexClient
-    client = PageIndexClient(api_key="pi-k", chat_model="m")
+    client = PageIndexClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"], chat_model="m")
     with pytest.raises(PageIndexAPIError, match="drop the chat model"):
         client.chat_completions("x", enable_citations=True)
 
@@ -3270,7 +3271,7 @@ def test_bridge_auth_failure_error_teaches_architecture():
     provider key — that error is where the architecture gets spelled out,
     and only there: local clients and non-auth failures stay untouched."""
     from pageindex import PageIndexClient
-    bridge = PageIndexClient(api_key="pi-k", chat_model="m")
+    bridge = PageIndexClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"], chat_model="m")
     local = PageIndexLocalClient()
     exc = Exception("The api_key client option must be set")
     assert "your own provider credentials" in str(
@@ -3294,7 +3295,7 @@ def test_bridge_auth_note_managed_exit_is_chat_lane_only():
     credentials advice and drops the exit that would send the caller in
     a circle."""
     from pageindex import PageIndexClient
-    bridge = PageIndexClient(api_key="pi-k", chat_model="m")
+    bridge = PageIndexClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"], chat_model="m")
     denied = Exception("invalid x-api-key")
     denied.status_code = 401
     chat = str(local_chat._model_backend_error(denied, "chat", bridge))
@@ -3321,7 +3322,7 @@ def test_messages_auth_failure_teaches_architecture(bridge_client,
     def fresh_fake(backend=None, route="anthropic"):
         # per call: run_messages closes a per-call transport it owns
         return anthropic.Anthropic(
-            api_key="test",
+            api_key=os.environ["PAGEINDEX_TEST_API_KEY"],
             http_client=anthropic_httpx.Client(
                 transport=anthropic_httpx.MockTransport(handler)))
 
@@ -3652,7 +3653,7 @@ def test_chat_protocol_chat_completions_serves_managed_cloud(monkeypatch):
     chat.completions itself, so the lane opens without a chat model;
     the own-model knobs still refuse there."""
     from pageindex import PageIndexClient
-    cloud = PageIndexClient(api_key="pi-k")
+    cloud = PageIndexClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     seen = []
     monkeypatch.setattr(cloud._api, "chat_completions",
                         lambda **kw: seen.append(kw) or {"choices": []})
@@ -3678,7 +3679,7 @@ def test_chat_takes_only_messages_by_position():
     params = list(inspect.signature(PageIndexClient.chat).parameters.values())
     assert [p.name for p in params[:2]] == ["self", "messages"]
     assert {p.kind for p in params[2:]} == {inspect.Parameter.KEYWORD_ONLY}
-    cloud = PageIndexClient(api_key="pi-k")
+    cloud = PageIndexClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     with pytest.raises(TypeError, match="positional"):
         cloud.chat("q", True, "pi-1")
 
@@ -3917,7 +3918,7 @@ def test_chat_citations_on_protocol_lanes(bridge_client, monkeypatch):
 def test_chat_citations_managed(monkeypatch):
     """Managed chat: citations=True is the endpoint's enable_citations; a
     format name raises rather than silently meaning True."""
-    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     seen = []
     monkeypatch.setattr(
         cloud._api, "chat_completions",
@@ -4220,7 +4221,7 @@ def test_claude_agent_config_carries_client_instructions(store_path):
 
 def test_managed_chat_sends_one_leading_system_row(monkeypatch):
     """One system row first: the client's, the call's, then the history's."""
-    cloud = PageIndexCloudClient(api_key="pi-k", instructions="PERSONA")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"], instructions="PERSONA")
     seen = {}
     monkeypatch.setattr(cloud._api, "chat_completions",
                         lambda **kw: seen.update(kw) or {
@@ -4248,7 +4249,7 @@ def test_managed_chat_sends_one_leading_system_row(monkeypatch):
 
 def test_managed_fold_leaves_non_system_rows_to_the_endpoint(monkeypatch):
     """Only system rows fold; blank ones drop; the rest is not validated."""
-    cloud = PageIndexCloudClient(api_key="pi-k")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     seen = {}
     monkeypatch.setattr(cloud._api, "chat_completions",
                         lambda **kw: seen.update(kw) or {
@@ -4269,7 +4270,7 @@ def test_managed_fold_leaves_non_system_rows_to_the_endpoint(monkeypatch):
 
 def test_chat_history_takes_any_iterable(monkeypatch):
     """Tuples and generators ride both lanes; the call's instructions land."""
-    cloud = PageIndexCloudClient(api_key="pi-k")
+    cloud = PageIndexCloudClient(api_key=os.environ["PAGEINDEX_TEST_API_KEY"])
     seen = {}
     monkeypatch.setattr(cloud._api, "chat_completions",
                         lambda **kw: seen.update(kw) or {
