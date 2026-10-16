@@ -1323,17 +1323,33 @@ def _dump_message(message) -> dict:
     return message
 
 
-def _anthropic_usage(turns, final_usage: dict) -> dict:
-    """The final turn's native usage dict with the token counters replaced
-    by cross-turn sums (None-safe); all other native fields survive."""
-    totals = dict(final_usage)
-    for field in ("input_tokens", "output_tokens",
-                  "cache_creation_input_tokens", "cache_read_input_tokens"):
-        values = [getattr(turn.usage, field, None) for turn in turns]
-        counted = [value for value in values if isinstance(value, int)]
-        if counted:
-            totals[field] = sum(counted)
-    return totals
+def _anthropic_usage(dumps) -> dict:
+    """The turns' native usage dicts merged field by field (None-safe):
+    counts add up, nested count objects (cache_creation, server_tool_use,
+    output_tokens_details) key by key, the per-iteration breakdown lists
+    concatenate, and labels (service_tier, fallback_credit) keep the last
+    value a turn set."""
+    return {key: _merge_usage([dump.get(key) for dump in dumps])
+            for key in dumps[-1]}
+
+
+def _is_count(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _merge_usage(values):
+    present = [value for value in values if value is not None]
+    if all(map(_is_count, present)):
+        return sum(present) if present else None
+    if all(isinstance(value, list) for value in present):
+        return [item for value in present for item in value]
+    if all(isinstance(value, dict) and all(
+            item is None or _is_count(item) for item in value.values())
+           for value in present):
+        keys = dict.fromkeys(key for value in present for key in value)
+        return {key: _merge_usage([value.get(key) for value in present])
+                for key in keys}
+    return present[-1]
 
 
 def _default_max_tokens(thinking=None) -> int:
@@ -1457,10 +1473,18 @@ def run_messages(client, messages, model: str, route: str,
     runner.generate_tool_call_response = checked_tool_response
 
     if stream:
+        class Result(anthropic.BaseModel):
+            type: str
+            usage: dict
+
         def events() -> Iterator[Any]:
+            usages = []
             try:
                 for turn_stream in runner:
                     for event in turn_stream:
+                        if event.type == "message_stop":
+                            usages.append(
+                                event.message.usage.model_dump(mode="json"))
                         yield event
             except anthropic.AnthropicError as exc:
                 raise _model_backend_error(exc, "messages", client) from exc
@@ -1468,6 +1492,8 @@ def run_messages(client, messages, model: str, route: str,
                 # runs on exhaustion and abandonment (GeneratorExit) alike
                 if owns_transport:
                     backend_client.close()
+            if usages:
+                yield Result(type="result", usage=_anthropic_usage(usages))
         return events()
 
     try:
@@ -1502,7 +1528,8 @@ def run_messages(client, messages, model: str, route: str,
     final = turns[-1]
     envelope = final.model_dump(mode="json")
     envelope["content"] = [_dump_block(item) for item in final.content]
-    envelope["usage"] = _anthropic_usage(turns, envelope.get("usage") or {})
+    envelope["usage"] = _anthropic_usage(
+        [turn.usage.model_dump(mode="json") for turn in turns])
     # The full turn sequence (assistant tool_use + user tool_result + final),
     # valid for verbatim append to the caller's history. The runner appends
     # a turn to its params only when it executed tools from it, and which

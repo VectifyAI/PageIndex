@@ -792,6 +792,9 @@ class PageIndexClient:
             dict: {'doc_id': ..., 'name': ...}. 'name' is the stored document
                 name: a taken name gains a numeric suffix (name_1..name_99)
                 and a UserWarning is emitted. Older cloud servers omit 'name'.
+                Local also returns 'usage', the indexing model's tokens summed
+                over every call, in the Chat Completions usage shape
+                LiteLLM returns.
         """
         result = self._api.submit_document(
             file_path=file_path, mode=mode,
@@ -1372,7 +1375,9 @@ class PageIndexClient:
               message with a ``messages`` turn sequence and aggregated
               ``usage``
             - protocol lane, stream=True: an iterator of the protocol's
-              own stream events
+              own stream events; Messages ends a finished run with one
+              ``{"type": "result", "usage": ...}`` event carrying the
+              aggregated ``usage``
         """
         if protocol not in (None, "chat_completions", "responses",
                             "messages"):
@@ -1843,7 +1848,10 @@ class PageIndexClient:
                 requires max_tokens above the budget). Passed through.
             stream: Yield the Anthropic SDK's event stream across turns
                 (its native event objects, including SDK-synthesized
-                convenience events), one message sequence per turn.
+                convenience events), one message sequence per turn; a
+                finished run then ends with one ``type == "result"``
+                event whose ``usage`` is the non-stream envelope's
+                cross-turn aggregate.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call. Local

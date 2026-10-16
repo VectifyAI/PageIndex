@@ -1252,6 +1252,80 @@ def test_messages_end_to_end(client, store_path, fake_anthropic):
 
 
 @needs_anthropic
+def test_messages_usage_sums_every_count_across_turns():
+    from anthropic.types.beta import BetaUsage
+
+    def turn(usage):
+        return BetaUsage.model_validate(usage).model_dump(mode="json")
+
+    first = turn({
+        "input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 4,
+        "cache_creation": {"ephemeral_5m_input_tokens": 3,
+                           "ephemeral_1h_input_tokens": 0},
+        "output_tokens_details": {"thinking_tokens": 2},
+        "server_tool_use": {"web_search_requests": 1,
+                            "web_fetch_requests": 0},
+        "iterations": [{"type": "compaction", "input_tokens": 7,
+                        "output_tokens": 1, "cache_read_input_tokens": 0,
+                        "cache_creation_input_tokens": 0}],
+        "service_tier": "priority",
+        "fallback_credit": {"status": {"type": "not_applied",
+                                       "reason": "expired",
+                                       "remove_to_redeem": ["speed"]}}})
+    last = turn({
+        "input_tokens": 20, "output_tokens": 6,
+        "cache_creation": {"ephemeral_5m_input_tokens": 1,
+                           "ephemeral_1h_input_tokens": 2},
+        "output_tokens_details": {"thinking_tokens": 3},
+        "server_tool_use": {"web_search_requests": 2,
+                            "web_fetch_requests": 1},
+        "iterations": [{"type": "message", "model": "claude-test",
+                        "input_tokens": 20, "output_tokens": 6,
+                        "cache_read_input_tokens": 0,
+                        "cache_creation_input_tokens": 0}],
+        "service_tier": "standard",
+        "fallback_credit": {"status": {"type": "redeemed"}}})
+
+    usage = local_chat._anthropic_usage([first, last])
+    assert usage == {
+        **last,
+        "input_tokens": 30, "output_tokens": 11,
+        "cache_read_input_tokens": 4, "cache_creation_input_tokens": None,
+        "cache_creation": {"ephemeral_5m_input_tokens": 4,
+                           "ephemeral_1h_input_tokens": 2},
+        "output_tokens_details": {"thinking_tokens": 5},
+        "server_tool_use": {"web_search_requests": 3,
+                            "web_fetch_requests": 1},
+        "iterations": first["iterations"] + last["iterations"],
+    }
+    assert usage["service_tier"] == "standard"
+    assert usage["fallback_credit"] == {"status": {"type": "redeemed"}}
+
+
+@needs_anthropic
+def test_messages_stream_ends_with_the_run_usage(client, store_path,
+                                                 fake_anthropic):
+    seed_doc(store_path, "pi-a", "r.pdf")
+    replies = [_anthropic_message([
+        {"type": "tool_use", "id": tool_id, "name": "get_document",
+         "input": {"doc_name": "r.pdf"}}], "tool_use")
+        for tool_id in ("tu_1", "tu_2")]
+    replies.append(_anthropic_message([{"type": "text", "text": "Done"}],
+                                      "end_turn"))
+    fake_anthropic([_anthropic_sse(reply) for reply in replies])
+    question = [{"role": "user", "content": "q"}]
+    events = list(client._messages(question, model="claude-test",
+                                   max_tokens=100, stream=True))
+    assert [event.type for event in events].count("result") == 1
+    assert events[-1].to_dict()["type"] == "result"
+
+    fake_anthropic(replies)
+    result = client._messages(question, model="claude-test", max_tokens=100)
+    assert result["usage"]["input_tokens"] == 30
+    assert events[-1].usage == result["usage"]
+
+
+@needs_anthropic
 def test_messages_doc_block_and_system(client, store_path, fake_anthropic):
     """Doc block leads as a user message; system keeps the cached header."""
     doc_id = seed_doc(store_path, "pi-a", "report.pdf")
