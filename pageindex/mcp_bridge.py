@@ -20,6 +20,7 @@ from typing import Any, Optional
 import requests
 from requests.adapters import HTTPAdapter, Retry
 
+from . import deadline
 from ._version import sdk_version
 from .errors import PageIndexAPIError
 
@@ -28,10 +29,28 @@ _TIMEOUT = (10, 240)  # tools may wait server-side (wait_for_completion: 3 min)
 # Below the tool layer, so the model never plays retry loop. read=0: a read
 # timeout is a full wait the server may have acted on, never replayed.
 # Retry-After is ignored: a long one is a quota, not a blip.
-_RETRY = Retry(total=3, read=0, backoff_factor=1,
-               status_forcelist=(429, *range(500, 600)),
-               allowed_methods=None, raise_on_status=False,
-               respect_retry_after_header=False)
+class _DeadlineRetry(Retry):
+    """Retry that also yields to a chat run's deadline: no retry starts
+    once it is spent, and no backoff sleeps past it."""
+
+    def is_exhausted(self) -> bool:
+        return super().is_exhausted() or deadline.bound(1.0) <= 0
+
+    def get_backoff_time(self) -> float:
+        return deadline.bound(super().get_backoff_time())
+
+
+_RETRY = _DeadlineRetry(total=3, read=0, backoff_factor=1,
+                        status_forcelist=(429, *range(500, 600)),
+                        allowed_methods=None, raise_on_status=False,
+                        respect_retry_after_header=False)
+
+
+def _timeout() -> "tuple[float, float]":
+    """(connect, read) for one request, capped at a chat run's remaining
+    budget; refuses to send once the budget is spent."""
+    deadline.check()
+    return (deadline.bound(_TIMEOUT[0]), deadline.bound(_TIMEOUT[1]))
 
 
 def _parse_sse(text: str) -> list[dict]:
@@ -79,12 +98,16 @@ class McpBridge:
         if protocol_version:
             headers["MCP-Protocol-Version"] = protocol_version
         try:
-            return self._session.post(self._url, json=payload,
-                                      headers=headers, timeout=_TIMEOUT)
+            response = self._session.post(self._url, json=payload,
+                                          headers=headers, timeout=_timeout())
         except requests.RequestException as exc:
+            deadline.raise_if_expired(exc)
             raise PageIndexAPIError(
                 f"Could not reach the PageIndex MCP server: {exc}"
             ) from exc
+        if response.status_code in _RETRY.status_forcelist:
+            deadline.raise_if_expired()  # retries cut short by the deadline
+        return response
 
     def _extract_result(self, response: requests.Response, request_id: int) -> Any:
         content_type = response.headers.get("Content-Type", "")

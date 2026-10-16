@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING as _TYPE_CHECKING
 
 from .chat_stream import ChatStream
 from .client import PageIndexClient, PageIndexCloudClient, PageIndexLocalClient
-from .errors import PageIndexAPIError
+from .errors import PageIndexAPIError, PageIndexTimeoutError
 from .types import (ChatConfig, ChatProcessOptions, CloudIndexConfig,
                     IndexConfig, LocalIndexConfig)
 
@@ -16,7 +16,7 @@ if _TYPE_CHECKING:
 
 __all__ = [
     "PageIndexClient", "PageIndexCloudClient", "PageIndexLocalClient",
-    "PageIndexAPIError",
+    "PageIndexAPIError", "PageIndexTimeoutError",
     "IndexConfig", "CloudIndexConfig", "LocalIndexConfig", "ChatConfig",
     "ChatProcessOptions", "ChatStream",
     "page_index", "page_index_main", "page_index_flash",
@@ -29,10 +29,11 @@ _LAZY = {
     "optimize_tree": ".tree_optimize",
     "md_to_tree": ".page_index_md",
 }
-_SUBMODULES = {"agent_tools", "chat_stream", "client", "cloud_api", "errors",
-               "flash", "imaging", "integrations", "local_api", "local_chat",
-               "local_store", "mcp_bridge", "page_index_classic",
-               "page_index_md", "tree_optimize", "types", "utils"}
+_SUBMODULES = {"agent_tools", "chat_stream", "client", "cloud_api",
+               "deadline", "errors", "flash", "imaging", "integrations",
+               "local_api", "local_chat", "local_store", "mcp_bridge",
+               "page_index_classic", "page_index_md", "tree_optimize",
+               "types", "utils"}
 
 
 def __getattr__(name):

@@ -13,9 +13,10 @@ import time
 import uuid
 from typing import Any, Iterator, Mapping, Optional, Union
 
+from . import deadline as _deadline
 from .agent_tools import _base_instructions, targeting_block
 from .chat_stream import ChatStream
-from .errors import PageIndexAPIError, _pageindex_cause
+from .errors import PageIndexAPIError, PageIndexTimeoutError, _pageindex_cause
 
 CHAT_HEADER = (
     "You are PageIndex by Vectify AI, a document-focused assistant. "
@@ -98,8 +99,10 @@ def _stream_sync(agen_factory) -> Iterator[Any]:
 
     Closing the iterator cancels the run between items: the pump stops, and
     the async generator's cleanup cancels the underlying agent task, so no
-    further model turns or tool executions start. An in-flight backend
-    request cannot be aborted mid-turn.
+    further model turns or tool executions start. close() returns once
+    that teardown has finished; a tool already executing runs to its end
+    first. An in-flight backend request is abandoned, not recalled: the
+    provider may still complete (and bill) it.
     """
     items: "queue.Queue[Any]" = queue.Queue(maxsize=32)
     cancelled = threading.Event()
@@ -146,7 +149,8 @@ def _stream_sync(agen_factory) -> Iterator[Any]:
             return
         deliver(_SENTINEL)
 
-    threading.Thread(target=pump, daemon=True).start()
+    worker = threading.Thread(target=pump, daemon=True)
+    worker.start()
     try:
         while True:
             item = items.get()
@@ -157,6 +161,8 @@ def _stream_sync(agen_factory) -> Iterator[Any]:
             yield item
     finally:
         cancelled.set()
+        if worker is not threading.current_thread():
+            worker.join()  # teardown done before close() returns
 
 
 # ── OpenAI engine (chat_completions / responses) ──
@@ -463,6 +469,8 @@ def _translate_run_error(exc, max_turns, lane, client=None) -> PageIndexAPIError
         return _wrap_max_turns(max_turns)
     if isinstance(exc, AgentsException):
         cause = _pageindex_cause(exc)
+        if isinstance(cause, PageIndexTimeoutError):
+            return cause
         if cause is not None:
             # a tool failure the invoker re-raised, wrapped on its way out
             return PageIndexAPIError(str(cause), status_code=cause.status_code)
@@ -708,7 +716,7 @@ def _process_options(show_process) -> dict:
     return options
 
 
-async def _chat_events_agen(client, agent, items, run_kwargs):
+async def _chat_events_agen(client, agent, items, run_kwargs, deadline=None):
     """The chat stream's primitive: the run as typed event dicts —
     thinking/answer deltas, each tool call (arguments parsed when JSON)
     and its full result. Both ChatStream views are built on it."""
@@ -718,11 +726,13 @@ async def _chat_events_agen(client, agent, items, run_kwargs):
     from openai.types.responses import (
         ResponseReasoningSummaryTextDeltaEvent,
         ResponseReasoningTextDeltaEvent, ResponseTextDeltaEvent)
-    streamed = Runner.run_streamed(agent, input=items, **run_kwargs)
+    with _deadline.active(deadline):  # the run task inherits it
+        streamed = Runner.run_streamed(agent, input=items, **run_kwargs)
     completed = False
     names = {}  # call_id -> tool name, to label results
     try:
-        async for event in streamed.stream_events():
+        async for event in _deadline.iterate_within(
+                deadline, streamed.stream_events()):
             if event.type == "raw_response_event":
                 data = event.data
                 if isinstance(data, ResponseTextDeltaEvent):
@@ -899,7 +909,7 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
                     reasoning_effort=None,
                     show_process: Union[bool, Mapping[str, Any]] = False,
                     max_turns=None, backend=None, extra_headers=None,
-                    extra_body=None, folder_id=None,
+                    extra_body=None, folder_id=None, timeout=None,
                     ) -> ChatStream:
     """chat(stream=True): validation and the agent build run here, eagerly;
     the run itself starts when the returned stream's chosen view is first
@@ -914,16 +924,18 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
                 "messages must be a non-empty string or a list of "
                 "message dicts.")
         messages = [{"role": "user", "content": messages}]
-    agent, items, _ = _chat_agent(client, messages, doc_id, model,
-                                  reasoning_effort=reasoning_effort,
-                                  extra_body=extra_body, backend=backend,
-                                  extra_headers=extra_headers,
-                                  folder_id=folder_id)
+    deadline = _deadline.for_run(timeout)
+    with _deadline.active(deadline):  # setup's own lookups count too
+        agent, items, _ = _chat_agent(client, messages, doc_id, model,
+                                      reasoning_effort=reasoning_effort,
+                                      extra_body=extra_body, backend=backend,
+                                      extra_headers=extra_headers,
+                                      folder_id=folder_id)
     run_kwargs = _run_kwargs(max_turns)
 
     def events():
-        return _stream_sync(
-            lambda: _chat_events_agen(client, agent, items, run_kwargs))
+        return _stream_sync(lambda: _chat_events_agen(
+            client, agent, items, run_kwargs, deadline))
 
     return ChatStream(text=lambda: _weave(events(), options), events=events)
 
@@ -941,6 +953,7 @@ def run_chat_completions(client, messages, stream: bool = False,
                          extra_headers: Optional[dict] = None,
                          backend: Optional[dict] = None,
                          folder_id: Optional[str] = None,
+                         timeout: Optional[float] = None,
                          ) -> Union[dict, Iterator[str], Iterator[dict]]:
     if enable_citations:
         raise PageIndexAPIError(
@@ -950,11 +963,13 @@ def run_chat_completions(client, messages, stream: bool = False,
             + "cite with your own model via chat(citations=True).")
     _require_openai_agents("chat")
     _validate_max_turns(max_turns)
-    agent, items, model_name = _chat_agent(
-        client, messages, doc_id, model, temperature=temperature,
-        top_p=top_p, reasoning_effort=reasoning_effort,
-        extra_body=extra_body, max_tokens=max_tokens, backend=backend,
-        extra_headers=extra_headers, folder_id=folder_id)
+    deadline = _deadline.for_run(timeout)
+    with _deadline.active(deadline):  # setup's own lookups count too
+        agent, items, model_name = _chat_agent(
+            client, messages, doc_id, model, temperature=temperature,
+            top_p=top_p, reasoning_effort=reasoning_effort,
+            extra_body=extra_body, max_tokens=max_tokens, backend=backend,
+            extra_headers=extra_headers, folder_id=folder_id)
     reported_model = _reported_model(model_name)
     recorded: dict = {}
     _record_chat_finish(agent, recorded)
@@ -964,8 +979,8 @@ def run_chat_completions(client, messages, stream: bool = False,
     from agents.exceptions import AgentsException, MaxTurnsExceeded
     if not stream:
         try:
-            result = _run_sync(_run_closing(agent,
-                Runner.run(agent, input=items, **run_kwargs)))
+            result = _run_sync(_run_closing(agent, _deadline.run_within(
+                deadline, Runner.run(agent, input=items, **run_kwargs))))
         except (MaxTurnsExceeded, AgentsException,
                 openai.OpenAIError) as exc:
             raise _translate_run_error(exc, max_turns, "chat", client) from exc
@@ -996,13 +1011,15 @@ def run_chat_completions(client, messages, stream: bool = False,
 
     async def agen():
         from openai.types.responses import ResponseTextDeltaEvent
-        streamed = Runner.run_streamed(agent, input=items, **run_kwargs)
+        with _deadline.active(deadline):  # the run task inherits it
+            streamed = Runner.run_streamed(agent, input=items, **run_kwargs)
         completed = False
         # First yield inside the try: a consumer that stops on the opening
         # chunk must still tear the run down via the finally below.
         try:
             yield chunk({"role": "assistant", "content": ""})
-            async for event in streamed.stream_events():
+            async for event in _deadline.iterate_within(
+                    deadline, streamed.stream_events()):
                 if (event.type == "raw_response_event"
                         and isinstance(event.data, ResponseTextDeltaEvent)):
                     yield chunk({"content": event.data.delta})
@@ -1042,9 +1059,11 @@ def run_responses(client, input, model: Optional[str] = None,
                   extra_headers: Optional[dict] = None,
                   backend: Optional[dict] = None,
                   folder_id: Optional[str] = None,
+                  timeout: Optional[float] = None,
                   ) -> Union[dict, Iterator[dict]]:
     _require_openai_agents("chat(protocol='responses')")
     _validate_max_turns(max_turns)
+    deadline = _deadline.for_run(timeout)
     if isinstance(input, str) and input.strip():
         items = [{"role": "user", "content": input}]
     elif (isinstance(input, list) and input
@@ -1053,23 +1072,24 @@ def run_responses(client, input, model: Optional[str] = None,
     else:
         raise PageIndexAPIError("messages must be a non-empty string or list "
                                 "of item dicts.")
-    scope = client._local_doc_scope(doc_id)
-    block = targeting_block(client, doc_id, folder_id)
-    conversation = items
-    if block:
-        items = [{"role": "user", "content": block}] + items
-    extra = [instructions] if instructions else []
-    model_name = model or client.chat_model
-    managed = _managed_instructions(client, extra)
-    agent = _openai_agent(client, "responses", model_name, managed,
-                          temperature, top_p, doc_ids=scope,
-                          cache_key=_conversation_cache_key(
-                              model_name, managed, doc_id, conversation,
-                              folder_id),
-                          reasoning=reasoning, extra_body=extra_body,
-                          max_tokens=max_output_tokens,
-                          backend=_merged_backend(client, backend),
-                          extra_headers=extra_headers)
+    with _deadline.active(deadline):  # setup's own lookups count too
+        scope = client._local_doc_scope(doc_id)
+        block = targeting_block(client, doc_id, folder_id)
+        conversation = items
+        if block:
+            items = [{"role": "user", "content": block}] + items
+        extra = [instructions] if instructions else []
+        model_name = model or client.chat_model
+        managed = _managed_instructions(client, extra)
+        agent = _openai_agent(client, "responses", model_name, managed,
+                              temperature, top_p, doc_ids=scope,
+                              cache_key=_conversation_cache_key(
+                                  model_name, managed, doc_id, conversation,
+                                  folder_id),
+                              reasoning=reasoning, extra_body=extra_body,
+                              max_tokens=max_output_tokens,
+                              backend=_merged_backend(client, backend),
+                              extra_headers=extra_headers)
     run_kwargs = _run_kwargs(max_turns)
     recorded: dict = {}
     import openai
@@ -1113,9 +1133,10 @@ def run_responses(client, input, model: Optional[str] = None,
     if not stream:
         _record_response_status(agent, recorded)
         try:
-            result = _run_sync(_run_closing(agent,
-                Runner.run(agent, input=[dict(item) for item in items],
-                           **run_kwargs)))
+            run = Runner.run(agent, input=[dict(item) for item in items],
+                             **run_kwargs)
+            result = _run_sync(_run_closing(
+                agent, _deadline.run_within(deadline, run)))
         except (MaxTurnsExceeded, AgentsException,
                 openai.OpenAIError) as exc:
             raise _translate_run_error(exc, max_turns,
@@ -1128,9 +1149,9 @@ def run_responses(client, input, model: Optional[str] = None,
                  "response.incomplete", "response.queued"}
 
     async def agen():
-        streamed = Runner.run_streamed(agent,
-                                       input=[dict(item) for item in items],
-                                       **run_kwargs)
+        with _deadline.active(deadline):  # the run task inherits it
+            streamed = Runner.run_streamed(
+                agent, input=[dict(item) for item in items], **run_kwargs)
         sequence = 0
         # output_index addresses an item's position in the logical
         # response.output (the final envelope's list). Backend events
@@ -1140,7 +1161,8 @@ def run_responses(client, input, model: Optional[str] = None,
         completed = False
         opened = False
         try:
-            async for event in streamed.stream_events():
+            async for event in _deadline.iterate_within(
+                    deadline, streamed.stream_events()):
                 if event.type == "raw_response_event":
                     data = event.data.model_dump(exclude_unset=True)
                     if data.get("type") in lifecycle:
@@ -1351,6 +1373,18 @@ def _default_max_tokens(thinking=None) -> int:
 
 
 def run_messages(client, messages, model: str, route: str,
+                 timeout: Optional[float] = None, **options: Any,
+                 ) -> Union[dict, Iterator[Any]]:
+    """chat(protocol="messages") under its deadline: setup and a
+    non-streaming run execute inside it; a stream carries it into each
+    turn and tool step."""
+    deadline = _deadline.for_run(timeout)
+    with _deadline.active(deadline):
+        return _run_messages(client, messages, model, route,
+                             deadline=deadline, **options)
+
+
+def _run_messages(client, messages, model: str, route: str,
                  max_tokens: Optional[int] = None,
                  stream: bool = False, doc_id=None, system=None,
                  temperature: Optional[float] = None,
@@ -1363,6 +1397,7 @@ def run_messages(client, messages, model: str, route: str,
                  extra_headers: Optional[dict] = None,
                  backend: Optional[dict] = None,
                  folder_id: Optional[str] = None,
+                 deadline: Optional[_deadline.Deadline] = None,
                  ) -> Union[dict, Iterator[Any]]:
     from .integrations.anthropic_sdk import build_anthropic_tools
 
@@ -1409,8 +1444,19 @@ def run_messages(client, messages, model: str, route: str,
     owns_transport = ("http_client" not in (merged or {})
                       and backend_client
                       not in list(_ANTHROPIC_CLIENTS.values()))
+    # Under a deadline each request is timed to the budget left, and the
+    # SDK's own retries are off unless the caller set max_retries: a retry
+    # restarts the request clock past the deadline. The copy shares the
+    # transport, so closing backend_client still closes it.
+    runner_client = backend_client
+    timing: dict[str, Any] = {}
+    if deadline is not None:
+        copy = getattr(backend_client, "with_options", None)
+        if copy is not None and "max_retries" not in (merged or {}):
+            runner_client = copy(max_retries=0)
+        timing = {"timeout": deadline.remaining()}
     try:
-        if not hasattr(backend_client.beta.messages, "tool_runner"):
+        if not hasattr(runner_client.beta.messages, "tool_runner"):
             # An anthropic build predating this route's tool runner passes
             # _require_anthropic (its probes are older): name the gap here.
             raise PageIndexAPIError(
@@ -1420,7 +1466,7 @@ def run_messages(client, messages, model: str, route: str,
         if max_tokens is None:
             max_tokens = _default_max_tokens(
                 (extra_body or {}).get("thinking", thinking))
-        runner = backend_client.beta.messages.tool_runner(
+        runner = runner_client.beta.messages.tool_runner(
             max_tokens=max_tokens,
             messages=prepared,
             model=model,
@@ -1431,6 +1477,7 @@ def run_messages(client, messages, model: str, route: str,
             max_iterations=max_turns if max_turns is not None else 10,
             **passthrough,
             **cached,
+            **timing,
         )
     except BaseException:
         # A failure before the runner handoff must not strand the transport
@@ -1444,9 +1491,17 @@ def run_messages(client, messages, model: str, route: str,
     moved: list = []  # the block holding the bedrock breakpoint
 
     def checked_tool_response():
-        response = generate_tool_response()
+        # The tools see the deadline (a stream runs this outside the
+        # caller's scope); the next request gets the budget left.
+        with _deadline.active(deadline):
+            response = generate_tool_response()
         if failures:
             raise failures[0]
+        if response and deadline is not None:
+            deadline.check()  # no further model call past the deadline
+            if isinstance(getattr(runner, "_options", None), dict):
+                runner._options = {**runner._options,
+                                   "timeout": deadline.remaining()}
         if response and marks_fit and route == "bedrock":
             for block in moved:
                 block.pop("cache_control", None)
@@ -1461,8 +1516,13 @@ def run_messages(client, messages, model: str, route: str,
             try:
                 for turn_stream in runner:
                     for event in turn_stream:
+                        if deadline is not None and deadline.expired:
+                            turn_stream.close()  # stop reading the turn
+                            raise deadline.error()
                         yield event
             except anthropic.AnthropicError as exc:
+                if deadline is not None and deadline.expired:
+                    raise deadline.error() from exc
                 raise _model_backend_error(exc, "messages", client) from exc
             finally:
                 # runs on exhaustion and abandonment (GeneratorExit) alike
@@ -1473,6 +1533,8 @@ def run_messages(client, messages, model: str, route: str,
     try:
         turns = list(runner)
     except anthropic.AnthropicError as exc:
+        if deadline is not None and deadline.expired:
+            raise deadline.error() from exc
         raise _model_backend_error(exc, "messages", client) from exc
     finally:
         # safe here: the params read-back below does no HTTP

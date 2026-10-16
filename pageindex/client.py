@@ -10,6 +10,7 @@ from typing import (TYPE_CHECKING, Any, Callable, Iterator, Literal, Mapping,
                     Optional, Union, cast, overload)
 
 from .chat_stream import ChatStream
+from . import deadline as _deadline
 from .errors import PageIndexAPIError
 
 
@@ -140,6 +141,15 @@ def _yaml_names_chat(loader) -> bool:
     # "absent", exactly like the flat arguments (_resolve_models agrees).
     return any(loader._default_dict.get(key)
                for key in ("chat_model", "retrieve_model", "model"))
+
+
+def _managed_timeout_error() -> PageIndexAPIError:
+    # The managed endpoint runs the agent server-side: there is no local
+    # run to bound or cancel.
+    return PageIndexAPIError(
+        "timeout bounds own-model chat, whose agent runs in your process "
+        "— the managed chat endpoint runs it server-side. Construct the "
+        "client with chat_model=... (or a chat= model), or drop timeout.")
 
 
 def _needs_model(surface: str) -> PageIndexAPIError:
@@ -1054,6 +1064,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
+        timeout: Optional[float] = None,
     ) -> str: ...
 
     @overload
@@ -1074,6 +1085,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
+        timeout: Optional[float] = None,
     ) -> ChatStream: ...
 
     @overload
@@ -1094,6 +1106,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
+        timeout: Optional[float] = None,
     ) -> dict[str, Any]: ...
 
     @overload
@@ -1114,6 +1127,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
+        timeout: Optional[float] = None,
     ) -> Iterator[dict[str, Any]]: ...
 
     @overload
@@ -1134,6 +1148,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
+        timeout: Optional[float] = None,
     ) -> Iterator[Any]: ...
 
     @overload
@@ -1154,6 +1169,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
+        timeout: Optional[float] = None,
     ) -> Union[str, ChatStream]: ...
 
     @overload
@@ -1175,6 +1191,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
+        timeout: Optional[float] = None,
     ) -> Union[str, ChatStream, dict[str, Any], Iterator[Any]]: ...
 
     def chat(
@@ -1195,6 +1212,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
+        timeout: Optional[float] = None,
     ) -> Union[str, ChatStream, dict[str, Any], Iterator[Any]]:
         """
         Ask a question about your documents.
@@ -1355,6 +1373,22 @@ class PageIndexClient:
                 leading system row in ``messages``. ``stream`` / ``doc_id``
                 are refused too: each has its own argument. Credentials
                 belong in ``backend``, never here.
+            timeout: Own-model chat only — a deadline in seconds for the
+                whole run, counted from this call: setup and document
+                lookups, every model request and tool call, and retries.
+                At expiry no further model or tool call starts, the run
+                is cancelled and ``pageindex.PageIndexTimeoutError``
+                (``code == "deadline_exceeded"``) is raised once it has
+                been torn down — from chat() itself, or from the stream
+                where the expiry lands. In-flight requests are bounded
+                by the budget left: the OpenAI lanes cancel them, the
+                Messages lane times each request to it (its SDK retries
+                are off unless ``backend`` sets ``max_retries``), and
+                cloud tool requests cap their timeouts and retries to
+                it. A request already sent is abandoned, not recalled —
+                the provider may still complete and bill it — and a
+                local tool already executing finishes first. A stream's
+                clock runs from chat(), not from first consumption.
 
         Returns:
             - answer lane, stream=False: the answer string
@@ -1403,6 +1437,13 @@ class PageIndexClient:
                 "system blocks; the other lanes take a string.")
         from .local_chat import _refuse_skeleton
         _refuse_skeleton(extra_body)
+        _deadline.validate_timeout(timeout)
+        if timeout is not None and not self._local_chat:
+            raise _managed_timeout_error()
+        # The budget counts from here: this call's own lookups and the
+        # lane's whole run share it.
+        deadline = (_deadline.Deadline(timeout) if timeout is not None
+                    else None)
         if citations and citations is not True:
             raise PageIndexAPIError(
                 "citations must be True or False — for another format pass "
@@ -1411,7 +1452,8 @@ class PageIndexClient:
         enable_citations = False
         if citations:
             if self._local_chat:
-                text = self.citation_prompt()
+                with _deadline.active(deadline):
+                    text = self.citation_prompt()
                 if isinstance(instructions, list):
                     instructions = [{"type": "text", "text": text},
                                     *instructions]
@@ -1431,12 +1473,13 @@ class PageIndexClient:
                     body = {**given, "reasoning": {
                         "effort": reasoning_effort,
                         **given.get("reasoning", {})}}
-                return self._responses(
-                    messages, model=model, stream=stream, doc_id=doc_id,
-                    folder_id=folder_id,
-                    instructions=cast(Optional[str], instructions),
-                    max_turns=max_turns, extra_body=body,
-                    extra_headers=extra_headers, backend=backend)
+                with _deadline.active(deadline):
+                    return self._responses(
+                        messages, model=model, stream=stream, doc_id=doc_id,
+                        folder_id=folder_id,
+                        instructions=cast(Optional[str], instructions),
+                        max_turns=max_turns, extra_body=body,
+                        extra_headers=extra_headers, backend=backend)
             body = extra_body
             if reasoning_effort:
                 # Anthropic's own effort field, beside the caller's other
@@ -1445,11 +1488,12 @@ class PageIndexClient:
                 body = {**given, "output_config": {
                     "effort": reasoning_effort,
                     **given.get("output_config", {})}}
-            return self._messages(
-                messages, model=model, stream=stream, doc_id=doc_id,
-                folder_id=folder_id,
-                system=instructions, max_turns=max_turns, extra_body=body,
-                extra_headers=extra_headers, backend=backend)
+            with _deadline.active(deadline):
+                return self._messages(
+                    messages, model=model, stream=stream, doc_id=doc_id,
+                    folder_id=folder_id,
+                    system=instructions, max_turns=max_turns, extra_body=body,
+                    extra_headers=extra_headers, backend=backend)
         if instructions:
             if isinstance(messages, str):
                 if not messages.strip():
@@ -1462,24 +1506,25 @@ class PageIndexClient:
             messages = [{"role": "system", "content": instructions},
                         *messages]
         if protocol == "chat_completions":
-            return self.chat_completions(
-                messages, stream=stream, stream_metadata=True, doc_id=doc_id,
-                enable_citations=enable_citations, folder_id=folder_id,
-                model=model, max_turns=max_turns,
-                reasoning_effort=reasoning_effort, extra_body=extra_body,
-                extra_headers=extra_headers, backend=backend)
+            with _deadline.active(deadline):
+                return self.chat_completions(
+                    messages, stream=stream, stream_metadata=True,
+                    doc_id=doc_id, enable_citations=enable_citations,
+                    folder_id=folder_id, model=model, max_turns=max_turns,
+                    reasoning_effort=reasoning_effort, extra_body=extra_body,
+                    extra_headers=extra_headers, backend=backend)
         if stream:
             # the default means "on where available"
             resolved = True if show_process is None else show_process
             if self._local_chat:
                 from .local_chat import run_chat_stream
-                return run_chat_stream(self, messages, doc_id=doc_id,
-                                       folder_id=folder_id, model=model,
-                                       reasoning_effort=reasoning_effort,
-                                       show_process=resolved,
-                                       max_turns=max_turns, backend=backend,
-                                       extra_headers=extra_headers,
-                                       extra_body=extra_body)
+                with _deadline.active(deadline):
+                    return run_chat_stream(
+                        self, messages, doc_id=doc_id, folder_id=folder_id,
+                        model=model, reasoning_effort=reasoning_effort,
+                        show_process=resolved, max_turns=max_turns,
+                        backend=backend, extra_headers=extra_headers,
+                        extra_body=extra_body)
             from .local_chat import run_cloud_chat_stream
             chunks = self.chat_completions(messages, stream=True,
                                            stream_metadata=True,
@@ -1493,13 +1538,13 @@ class PageIndexClient:
                                            extra_body=extra_body)
             return run_cloud_chat_stream(
                 cast(Iterator[dict[str, Any]], chunks), resolved)
-        result = self.chat_completions(messages, doc_id=doc_id, model=model,
-                                       enable_citations=enable_citations,
-                                       folder_id=folder_id,
-                                       reasoning_effort=reasoning_effort,
-                                       max_turns=max_turns, backend=backend,
-                                       extra_headers=extra_headers,
-                                       extra_body=extra_body)
+        with _deadline.active(deadline):
+            result = self.chat_completions(
+                messages, doc_id=doc_id, model=model,
+                enable_citations=enable_citations, folder_id=folder_id,
+                reasoning_effort=reasoning_effort, max_turns=max_turns,
+                backend=backend, extra_headers=extra_headers,
+                extra_body=extra_body)
         envelope = cast(dict[str, Any], result)
         try:
             return envelope["choices"][0]["message"]["content"] or ""
@@ -1526,6 +1571,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         *,
         folder_id: Optional[str] = None,
+        timeout: Optional[float] = None,
     ) -> Union[dict[str, Any], Iterator[str], Iterator[dict[str, Any]]]:
         """
         Kept for existing code — new code calls ``chat()``. Everything
@@ -1622,6 +1668,8 @@ class PageIndexClient:
                 (per-call keys win). Keys are LiteLLM's own connection
                 params — ``api_key``, ``base_url``, ``api_version``,
                 ``aws_*``, … — passed through verbatim.
+            timeout: Own-model chat only — the whole-run deadline in
+                seconds, as ``chat(timeout=...)``.
 
         Returns:
             - stream=False: complete response dict ({'id', 'object', 'created',
@@ -1647,7 +1695,10 @@ class PageIndexClient:
                 max_turns=max_turns, top_p=top_p, max_tokens=max_tokens,
                 reasoning_effort=reasoning_effort, extra_body=extra_body,
                 extra_headers=extra_headers, backend=backend,
+                timeout=timeout,
             )
+        if timeout is not None:
+            raise _managed_timeout_error()
         if not getattr(self, "api_key", None):
             raise PageIndexAPIError(
                 "chat_model is empty — it configures nothing, and a local "
@@ -1703,6 +1754,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         *,
         folder_id: Optional[str] = None,
+        timeout: Optional[float] = None,
     ) -> Union[dict[str, Any], Iterator[dict[str, Any]]]:
         """
         The engine behind ``chat(protocol="responses")``: document QA over
@@ -1779,7 +1831,7 @@ class PageIndexClient:
             instructions=instructions, temperature=temperature, top_p=top_p,
             max_turns=max_turns, max_output_tokens=max_output_tokens,
             reasoning=reasoning, extra_body=extra_body,
-            extra_headers=extra_headers, backend=backend,
+            extra_headers=extra_headers, backend=backend, timeout=timeout,
         )
 
     def _messages(
@@ -1801,6 +1853,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         *,
         folder_id: Optional[str] = None,
+        timeout: Optional[float] = None,
     ) -> Union[dict[str, Any], Iterator[Any]]:
         """
         The engine behind ``chat(protocol="messages")``: document QA over
@@ -1888,7 +1941,7 @@ class PageIndexClient:
             temperature=temperature, top_p=top_p, top_k=top_k,
             stop_sequences=stop_sequences, max_turns=max_turns,
             thinking=thinking, extra_body=extra_body,
-            extra_headers=extra_headers, backend=backend,
+            extra_headers=extra_headers, backend=backend, timeout=timeout,
         )
 
     # ---------- DOCUMENT MANAGEMENT ----------
