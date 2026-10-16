@@ -62,6 +62,9 @@ Homepage = "https://pageindex.ai"
 Documentation = "https://docs.pageindex.ai"
 Issues = "https://github.com/VectifyAI/PageIndex/issues"
 
+[tool.poetry.scripts]
+pageindex-mcp = "pageindex.local_mcp_server:main"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"

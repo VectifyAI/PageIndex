@@ -109,6 +109,29 @@ Configure other models, streaming, multi-document search, citations, and more.
 
 Drop PageIndex tools into the OpenAI Agents SDK, the Claude Agent SDK, or any other framework.
 
+### Local MCP server
+
+Serve a local document store to Claude Desktop, Cursor, or any other MCP client over stdio:
+
+```bash
+pageindex-mcp --storage-path /absolute/path/to/index-store
+```
+
+`--storage-path` is the `storage_path` your documents were indexed into with `PageIndexLocalClient`. Serving needs no model API key: the MCP client's own model calls the tools. The tools are read-only by default (`browse_documents`, `get_document`, `get_document_structure`, `get_page_content`); add `--management` to enable `remove_document`.
+
+```json
+{
+  "mcpServers": {
+    "pageindex-local": {
+      "command": "/absolute/path/to/.venv/bin/pageindex-mcp",
+      "args": ["--storage-path", "/absolute/path/to/index-store"]
+    }
+  }
+}
+```
+
+Use absolute paths: desktop apps start the server without your shell's working directory or `PATH`.
+
 
 # Benchmarks
 
@@ -205,7 +228,7 @@ print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 | OCR & image understanding | — | ✓ |
 | [Metadata](https://docs.pageindex.ai/sdk/documents#metadata-cloud) | — | ✓ |
 | [Folders](https://docs.pageindex.ai/sdk/documents#folders-cloud) | — | ✓ |
-| [MCP server](https://docs.pageindex.ai/mcp) | — | ✓ |
+| [MCP server](https://docs.pageindex.ai/mcp) | [stdio](#local-mcp-server) | ✓ |
 
 ### More About PageIndex Cloud
 
