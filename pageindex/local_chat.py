@@ -14,7 +14,7 @@ import uuid
 from typing import Any, Iterator, Mapping, Optional, Union
 
 from .agent_tools import _base_instructions, targeting_block
-from .chat_stream import ChatStream
+from .chat_stream import ChatStream, MessagesStream
 from .errors import PageIndexAPIError, _pageindex_cause
 
 CHAT_HEADER = (
@@ -1323,16 +1323,28 @@ def _dump_message(message) -> dict:
     return message
 
 
-def _anthropic_usage(turns, final_usage: dict) -> dict:
-    """The final turn's native usage dict with the token counters replaced
-    by cross-turn sums (None-safe); all other native fields survive."""
-    totals = dict(final_usage)
-    for field in ("input_tokens", "output_tokens",
-                  "cache_creation_input_tokens", "cache_read_input_tokens"):
-        values = [getattr(turn.usage, field, None) for turn in turns]
-        counted = [value for value in values if isinstance(value, int)]
-        if counted:
-            totals[field] = sum(counted)
+_ANTHROPIC_TOKEN_FIELDS = ("input_tokens", "output_tokens",
+                          "cache_creation_input_tokens",
+                          "cache_read_input_tokens")
+
+
+def _anthropic_usage(turns) -> dict:
+    """Native token counters; an unavailable count stays unknown."""
+    usages = [getattr(turn, "usage", None) for turn in turns]
+    totals = (usages[-1].model_dump(mode="json", exclude_unset=True)
+              if usages and usages[-1] is not None else {})
+    for field in _ANTHROPIC_TOKEN_FIELDS:
+        values = [getattr(usage, field, None) for usage in usages]
+        totals[field] = (sum(values) if values and all(
+            isinstance(value, int) for value in values) else None)
+    if any(getattr(usage, "cache_creation", None) for usage in usages):
+        totals["cache_creation"] = {}
+        for field in ("ephemeral_5m_input_tokens",
+                      "ephemeral_1h_input_tokens"):
+            values = [getattr(getattr(usage, "cache_creation", None),
+                              field, None) for usage in usages]
+            totals["cache_creation"][field] = (sum(values) if all(
+                isinstance(value, int) for value in values) else None)
     return totals
 
 
@@ -1363,7 +1375,7 @@ def run_messages(client, messages, model: str, route: str,
                  extra_headers: Optional[dict] = None,
                  backend: Optional[dict] = None,
                  folder_id: Optional[str] = None,
-                 ) -> Union[dict, Iterator[Any]]:
+                 ) -> Union[dict, MessagesStream]:
     from .integrations.anthropic_sdk import build_anthropic_tools
 
     _require_anthropic()
@@ -1442,9 +1454,22 @@ def run_messages(client, messages, model: str, route: str,
     # ones skip them: check right after the runner's own tool step.
     generate_tool_response = runner.generate_tool_call_response
     moved: list = []  # the block holding the bedrock breakpoint
+    turns: list = []
+    tool_responses: dict = {}
+    continued_turn = None
+    uncertain_turn = None
+    partial_turn = None
+    result: dict = {}
+    message_id = f"msg_{uuid.uuid4().hex}"
 
     def checked_tool_response():
+        nonlocal uncertain_turn
+        index = len(turns) - 1
+        uncertain_turn = index
         response = generate_tool_response()
+        uncertain_turn = None
+        if response:
+            tool_responses[index] = response
         if failures:
             raise failures[0]
         if response and marks_fit and route == "bedrock":
@@ -1455,81 +1480,166 @@ def run_messages(client, messages, model: str, route: str,
         return response
 
     runner.generate_tool_call_response = checked_tool_response
+    append_messages = runner.append_messages
 
-    if stream:
-        def events() -> Iterator[Any]:
-            try:
-                for turn_stream in runner:
-                    for event in turn_stream:
-                        yield event
-            except anthropic.AnthropicError as exc:
-                raise _model_backend_error(exc, "messages", client) from exc
-            finally:
-                # runs on exhaustion and abandonment (GeneratorExit) alike
-                if owns_transport:
-                    backend_client.close()
-        return events()
+    def append_turn(*messages):
+        nonlocal continued_turn
+        append_messages(*messages)
+        continued_turn = len(turns) - 1
 
-    try:
-        turns = list(runner)
-    except anthropic.AnthropicError as exc:
-        raise _model_backend_error(exc, "messages", client) from exc
-    finally:
-        # safe here: the params read-back below does no HTTP
+    runner.append_messages = append_turn
+
+    def finish(status, error=None):
+        if result:
+            return
+        for block in moved:
+            block.pop("cache_control", None)
+        content, pending, messages, calls = [], [], [], []
+        for index, turn in enumerate(turns):
+            blocks = [_dump_block(block) for block in turn.content]
+            response = tool_responses.get(index)
+            outputs = ({b["tool_use_id"]: b for b in response["content"]}
+                       if response else {})
+            history = []
+            for block in blocks:
+                if block["type"] != "tool_use":
+                    content.append(block)
+                    history.append(block)
+                    continue
+                output = outputs.get(block["id"])
+                if output:
+                    state = "failed" if output.get("is_error") else "completed"
+                    history.append(block)
+                else:
+                    state = ("unknown" if index == uncertain_turn
+                             else "not_executed")
+                    pending.append(block)
+                calls.append({**block, "status": state, "result": output})
+            if history and index != partial_turn:
+                messages.append({"role": "assistant", "content": history})
+            if response:
+                messages.append(_dump_message(response))
+        final = turns[-1].model_dump(mode="json") if turns else {
+            "type": "message", "role": "assistant", "model": model,
+            "stop_reason": None, "stop_sequence": None}
+        reason = final.get("stop_reason")
+        if (status == "completed" and continued_turn == len(turns) - 1
+                and len(turns) >= (max_turns or 10)):
+            status = "max_turns"
+        usage = _anthropic_usage(turns)
+        counts = [usage[field] for field in _ANTHROPIC_TOKEN_FIELDS]
+        counts += list((usage.get("cache_creation") or {}).values())
+        measured = (status in ("completed", "max_turns")
+                    and all(value is not None for value in counts))
+        can_resume = uncertain_turn is None and not any(
+            turn.stop_reason == "compaction" for turn in turns)
+        final.update(id=message_id, content=content + pending, usage=usage,
+                     messages=messages, run={
+                         "status": status, "turns": len(turns),
+                         "model_stop_reason": reason, "tool_calls": calls,
+                         "usage_complete": measured,
+                         "can_resume": can_resume,
+                         "error": str(error) if error else None})
+        if status == "max_turns":
+            final["stop_reason"] = "pause_turn"
+        elif status in ("failed", "cancelled"):
+            final["stop_reason"] = None
+        result.update(final)
         if owns_transport:
             backend_client.close()
-    if not turns:
-        raise PageIndexAPIError("The model returned no response.")
-    for block in moved:
-        block.pop("cache_control", None)  # a request's breakpoint, not history
-    captured: dict = {}
 
-    def capture(params):
-        captured.update(params)
-        return params
+    def events():
+        nonlocal partial_turn
+        opened = False
+        next_index = 0
+        try:
+            for turn in runner:
+                if not stream:
+                    turns.append(turn)
+                    continue
+                indices = {}
+                complete = False
+                try:
+                    for event in turn:
+                        kind = event.type
+                        if kind == "message_stop":
+                            complete = True
+                            continue
+                        if kind == "message_start":
+                            if opened:
+                                continue
+                            opened = True
+                        elif kind == "content_block_start":
+                            if event.content_block.type == "tool_use":
+                                continue
+                            indices[event.index] = next_index
+                            next_index += 1
+                        elif kind in ("content_block_delta",
+                                      "content_block_stop"):
+                            if event.index not in indices:
+                                continue
+                        else:
+                            continue
+                        data = event.model_dump(mode="json",
+                                                exclude_unset=True)
+                        if kind == "message_start":
+                            data["message"]["id"] = message_id
+                            # The accumulator ignores null usage updates;
+                            # leave cache fields unset until totals are known.
+                            data["message"]["usage"] = {
+                                "input_tokens": 0, "output_tokens": 0}
+                        else:
+                            data["index"] = indices[event.index]
+                            if kind == "content_block_stop":
+                                data.pop("content_block", None)
+                        yield data
+                    if not complete:
+                        raise PageIndexAPIError(
+                            "Messages stream ended before message_stop.")
+                finally:
+                    try:
+                        snapshot = turn.current_message_snapshot.model_copy(
+                            deep=True)
+                    except AssertionError:
+                        pass  # the request failed before message_start
+                    else:
+                        if not complete:
+                            partial_turn = len(turns)
+                            if getattr(snapshot, "usage", None):
+                                snapshot.usage.output_tokens = None
+                        turns.append(snapshot)
+                    turn.close()
+            if not turns:
+                raise PageIndexAPIError("The model returned no response.")
+            finish("completed")
+            if stream:
+                for index, block in enumerate(result["content"][next_index:],
+                                               next_index):
+                    yield {"type": "content_block_start", "index": index,
+                           "content_block": block}
+                    yield {"type": "content_block_stop", "index": index}
+                fields = ("stop_reason", "stop_sequence",
+                          "stop_details", "container")
+                delta = {field: result[field] for field in fields
+                         if field in result}
+                yield {"type": "message_delta", "delta": delta,
+                       "usage": result["usage"]}
+                yield {"type": "message_stop", "result": result}
+        except GeneratorExit:
+            finish("cancelled")
+            raise
+        except BaseException as exc:
+            finish("failed", exc)
+            if isinstance(exc, anthropic.AnthropicError):
+                translated = _model_backend_error(exc, "messages", client)
+                translated.result = result
+                raise translated from exc
+            if isinstance(exc, PageIndexAPIError):
+                exc.result = result
+            raise
 
-    runner.set_messages_params(capture)
-    if not captured.get("messages"):
-        # The conversation is read back through a mutator; if a vendor
-        # change stops it delivering params, the envelope would silently
-        # lose the tool turns — fail loudly instead.
-        raise PageIndexAPIError(
-            "Could not read the conversation back from the anthropic tool "
-            "runner — the installed anthropic version is incompatible with "
-            "this pageindex release."
-        )
-    conversation = list(captured["messages"])
-    final = turns[-1]
-    envelope = final.model_dump(mode="json")
-    envelope["content"] = [_dump_block(item) for item in final.content]
-    envelope["usage"] = _anthropic_usage(turns, envelope.get("usage") or {})
-    # The full turn sequence (assistant tool_use + user tool_result + final),
-    # valid for verbatim append to the caller's history. The runner appends
-    # a turn to its params only when it executed tools from it, and which
-    # turns qualify is vendor policy that has changed across anthropic
-    # releases, so stop_reason alone cannot tell. Whether final's tool_use
-    # ids already sit in the history is the ground truth for "already
-    # appended".
-    new_messages = [_dump_message(message)
-                    for message in conversation[len(prepared):]]
-    final_blocks = [_dump_block(item) for item in final.content]
-    final_ids = {block.get("id") for block in final_blocks
-                 if block.get("type") == "tool_use"}
-    history_ids = {block.get("id")
-                   for message in new_messages
-                   if (message.get("role") == "assistant"
-                       and isinstance(message.get("content"), list))
-                   for block in message["content"]
-                   if (isinstance(block, dict)
-                       and block.get("type") == "tool_use")}
-    if not final_ids or not final_ids <= history_ids:
-        # Unexecuted tool_use blocks (refusal turns) have no tool_result,
-        # so they cannot enter an appendable history — strip them, as the
-        # SDK itself does when it rebuilds params around such a turn.
-        appendable = [block for block in final_blocks
-                      if block.get("type") != "tool_use"]
-        if appendable:
-            new_messages = new_messages + [
-                {"role": "assistant", "content": appendable}]
-    envelope["messages"] = new_messages
-    return envelope
+    if stream:
+        return MessagesStream(events(), result, finish)
+    for _ in events():
+        pass
+    return result

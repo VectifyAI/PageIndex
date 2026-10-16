@@ -9,7 +9,7 @@ import warnings
 from typing import (TYPE_CHECKING, Any, Callable, Iterator, Literal, Mapping,
                     Optional, Union, cast, overload)
 
-from .chat_stream import ChatStream
+from .chat_stream import ChatStream, MessagesStream
 from .errors import PageIndexAPIError
 
 
@@ -1134,7 +1134,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
-    ) -> Iterator[Any]: ...
+    ) -> MessagesStream: ...
 
     @overload
     def chat(
@@ -1175,7 +1175,8 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
-    ) -> Union[str, ChatStream, dict[str, Any], Iterator[Any]]: ...
+    ) -> Union[str, ChatStream, MessagesStream,
+               dict[str, Any], Iterator[Any]]: ...
 
     def chat(
         self,
@@ -1195,7 +1196,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
-    ) -> Union[str, ChatStream, dict[str, Any], Iterator[Any]]:
+    ) -> Union[str, ChatStream, MessagesStream, dict[str, Any], Iterator[Any]]:
         """
         Ask a question about your documents.
 
@@ -1326,8 +1327,8 @@ class PageIndexClient:
             max_turns: Own-model chat only — cap on agent turns per call
                 (default 10). The OpenAI lanes raise at the cap;
                 ``protocol="messages"`` returns the truncated run
-                (``stop_reason: "tool_use"``, its ``messages`` valid for
-                continuation).
+                (run.status "max_turns", stop_reason "pause_turn",
+                with executed tools retained in ``messages``).
             backend: Own-model chat only — connection overrides for this
                 call's backend, merged over the client's ``chat_backend``
                 (per-call keys win): LiteLLM's connection params on the
@@ -1801,7 +1802,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         *,
         folder_id: Optional[str] = None,
-    ) -> Union[dict[str, Any], Iterator[Any]]:
+    ) -> Union[dict[str, Any], MessagesStream]:
         """
         The engine behind ``chat(protocol="messages")``: document QA over
         the Anthropic Messages protocol, Claude-native.
@@ -1812,11 +1813,11 @@ class PageIndexClient:
         ``pageindex[anthropic]``); the model's routing prefix picks the
         transport — Anthropic directly by default (ANTHROPIC_API_KEY
         selects the backend), or that channel's own SDK client.
-        ``tool_use``/``tool_result`` round-trip is the
-        format's native behavior: the response is the
-        final message envelope with cross-turn aggregated ``usage`` plus a
-        ``messages`` field — the full new turn sequence, valid for verbatim
-        append to your history. The managed system prompt carries a
+        One call produces one logical message, with visible blocks from
+        all model turns and aggregated ``usage``. Executed client tools
+        live in the ``messages`` continuation transcript and ``run`` result.
+        Append ``messages`` to your history when ``run.can_resume`` is true.
+        The managed system prompt carries a
         ``cache_control`` breakpoint, and the request sets the top-level
         ``cache_control`` so each turn re-reads the growing conversation
         from cache — skipped when your own blocks already use the three
@@ -1841,9 +1842,11 @@ class PageIndexClient:
                 only a question, and rises to
                 budget_tokens + 8192 when ``thinking`` is enabled (the wire
                 requires max_tokens above the budget). Passed through.
-            stream: Yield the Anthropic SDK's event stream across turns
-                (its native event objects, including SDK-synthesized
-                convenience events), one message sequence per turn.
+            stream: Return a MessagesStream of JSON event dicts: one
+                message lifecycle, with content indices across turns.
+                The terminal message_stop carries ``result``, also
+                available via get_final_result() or the stream's result
+                property after failure or close.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call. Local
@@ -1856,9 +1859,9 @@ class PageIndexClient:
             system: Appended after the managed system blocks.
             temperature / top_p / top_k / stop_sequences: Passed through.
             max_turns: Cap on agent turns per call (default 10, like the
-                OpenAI surfaces). A truncated run reports
-                ``stop_reason: "tool_use"`` and its ``messages`` remain
-                valid for continuation.
+                OpenAI surfaces). Exhaustion reports run.status
+                "max_turns" and stop_reason "pause_turn". The transcript
+                includes tools already executed at the limit.
             thinking: Anthropic thinking configuration, forwarded verbatim
                 (e.g. ``{"type": "adaptive"}``) — the values and their
                 constraints are the backend's. Unset sends nothing.
@@ -1875,6 +1878,50 @@ class PageIndexClient:
                 ``base_url``, ``auth_token``, …; the cloud routes take
                 their own client's (``aws_region``, ``project_id``, …) —
                 and unknown keys raise.
+
+        Result:
+            ``content`` holds visible blocks across turns, followed by
+            unexecuted client tool calls. ``messages`` holds the new
+            assistant/tool-result turns to append to the original input;
+            incomplete model turns and unexecuted calls stay out of it.
+            Keep the model, instructions and document scope when resuming.
+
+            ``run.status`` is completed, max_turns, failed or cancelled.
+            ``run.turns`` counts observed messages, including a partial
+            final one; ``run.model_stop_reason`` retains its native reason.
+            Completed means the runner stopped: the message stop_reason
+            still distinguishes end_turn, max_tokens and refusal.
+            ``run.tool_calls`` records each call's id, name, input, status
+            (completed, failed, not_executed or unknown) and tool_result
+            in ``result``. ``run.can_resume`` is false after compaction or
+            uncertain tool execution. Compaction requires replacement
+            history; do not append these messages to the original input.
+            Reconcile uncertain tool calls before retrying.
+            ``run.error`` is the execution error text, or None.
+
+            ``usage`` sums final input/output/cache counters and any
+            cache-creation TTL buckets. Missing counts stay None; an
+            interrupted message's output count is unknown. Input tokens
+            exclude cache reads/writes. ``run.usage_complete`` requires
+            known counts and a completed or turn-limited run. After failure
+            or cancellation, counts cover only the observed messages.
+            Other native usage fields describe the final observed turn.
+
+            Stream events are JSON dicts, ready for SSE serialization.
+            The official Anthropic consumer assembles one native message;
+            message_stop.result also carries this full SDK result. Opening
+            usage starts at zero completed-turn tokens. Read result.usage
+            for unknown input totals and TTL buckets: native consumers
+            may retain the opening zero or omit delta-only TTL details.
+
+            Iteration raises on failure; stream.result and execution-time
+            PageIndexAPIError.result retain the failed result. Call close()
+            on the consuming thread when abandoning a stream. It releases
+            the response and stops local iterations, recording cancelled
+            unless already finalized. A stream closed before iteration
+            makes no model request. Dispatched external work may continue.
+            Breaking a loop does not close it. Setup errors have no result.
+            These result semantics apply to the Messages lane.
         """
         self._require_own_chat("chat(protocol='messages')")
         if not model and self._chat_model_stock:
