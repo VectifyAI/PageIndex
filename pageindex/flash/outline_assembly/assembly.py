@@ -150,14 +150,15 @@ def continues_heading(block: Block) -> bool:
 
 
 def next_numbered_heading(doc, heading: HeadingCandidate) -> Optional[HeadingCandidate]:
-    """The heading after single-level numbered heading ``heading``: the first later text block in its style that the
-    heading detectors read as the next number with the same separator, as a run-in heading or else whole."""
+    """The heading after single-level numbered heading ``heading``: the first later text block in its style, or
+    opening a page, that the heading detectors read as the next number with the same separator, as a run-in
+    heading or else whole."""
     from ..heading_detection import PageScanState, detect_heading_with_body, detect_numbered_heading, similar_style
     number = heading.numbering[0] + 1
     separator = [token.str for token in list(heading.secondary_slot)[1:]]
     for page in doc.primary_slot[heading.page.page_index - 1:]:
         for block in page.secondary_slot:
-            if block.type != 0 or (page is heading.page and block.reading_order_index <= heading.group_slot.reading_order_index):
+            if block.type not in (0, 7) or (page is heading.page and block.reading_order_index <= heading.group_slot.reading_order_index):
                 continue
             tokens = tokenize_block(block)
             first = first_token(tokens)

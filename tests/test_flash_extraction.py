@@ -876,6 +876,23 @@ def test_numbered_headings_continue_past_19(tmp_path, mid_page, figure):
     assert [node["title"] for node in result["structure"]] == notes
 
 
+def test_numbering_continues_from_a_note_opening_its_page(tmp_path):
+    """Note 20 opening its page after a page that holds only note 19, so a
+    section opener, still continues the sequence and brings in the notes after
+    it."""
+    from pageindex.flash.main import extract_toc
+
+    notes = [f"{n}. Topic {n}" for n in range(1, 24)]
+    groups = [notes[start:start + 3] for start in range(0, 18, 3)] + [notes[18:19], notes[19:22], notes[22:]]
+    pages = [("Annual Report", ["Fiscal year ended December 31, 2022"]), ("Notes to the Financial Statements", []),
+             *[("", [line for note in group for line in (
+                 ("bold", note), *[f"Line {k} of the note on {note.lower()} with some body text in it." for k in (1, 2, 3)], "")])
+               for group in groups]]
+    pdf = tmp_path / "notes.pdf"
+    pdf.write_bytes(_layout_pdf(pages))
+    assert [node["title"] for node in extract_toc(str(pdf))["structure"]] == notes
+
+
 def test_run_in_clause_numbering_continues_past_19(tmp_path):
     """Clauses numbered 20 and on whose bold title runs into the clause text
     are titled by that title alone, as clauses 1 to 19 are."""
