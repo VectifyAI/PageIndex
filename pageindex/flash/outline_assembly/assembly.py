@@ -10,7 +10,7 @@ from ..model import (
     reading_order_key, left_edge_key, _trim_unicode_ws, _round_half_up_to_int, Line, last_line_of, first_span_of, block_text, deaccented_text, letter_count, dominant_style_of, info_weight, dominant_font_size, is_upper_dominant, is_caps_heavy, alignment_code, Block,
 )
 from ..tokens import (
-    Token, TokenView, wrap_tokens, enumerate_tokens, last_token, trie_prefix_match, first_token, set_case_fold, TrieConfig, build_trie, tokenize_block, avg_char_width as avg_char_width_fn, trie_full_match, first_anchor_span, is_char_token, is_word_token,
+    Token, TokenView, wrap_tokens, enumerate_tokens, last_token, trie_prefix_match, first_token, set_case_fold, TrieConfig, build_trie, tokenize_block, avg_char_width as avg_char_width_fn, trie_full_match, first_anchor_span, is_char_token, is_word_token, token_numeric_value,
 )
 
 from .candidates import (
@@ -150,19 +150,24 @@ def continues_heading(block: Block) -> bool:
 
 
 def next_numbered_heading(doc, heading: HeadingCandidate) -> Optional[HeadingCandidate]:
-    """The heading after single-level numbered heading ``heading``: the first later text block in its style that opens with the next number and the same separator."""
-    from ..heading_detection import PageScanState, make_numbered_candidate, similar_style
+    """The heading after single-level numbered heading ``heading``: the first later text block in its style that the
+    heading detectors read as the next number with the same separator, as a run-in heading or else whole."""
+    from ..heading_detection import PageScanState, detect_heading_with_body, detect_numbered_heading, similar_style
     number = heading.numbering[0] + 1
-    prefix = [str(number), *(token.str for token in list(heading.secondary_slot)[1:])]
+    separator = [token.str for token in list(heading.secondary_slot)[1:]]
     for page in doc.primary_slot[heading.page.page_index - 1:]:
         for block in page.secondary_slot:
             if block.type != 0 or (page is heading.page and block.reading_order_index <= heading.group_slot.reading_order_index):
                 continue
-            if not similar_style(block, heading.group_slot):
-                continue
             tokens = tokenize_block(block)
-            if tokens.length > len(prefix) and [tokens.token_at(index).str for index in range(len(prefix))] == prefix:
-                return make_numbered_candidate(PageScanState(doc, page), block, [number], tokens.slice(0, len(prefix)), tokens.slice(len(prefix)))
+            first = first_token(tokens)
+            if first is None or token_numeric_value(first) != number or not similar_style(block, heading.group_slot):
+                continue
+            page_scan = PageScanState(doc, page)
+            for follower in (detect_heading_with_body(page_scan, block, number + 1),
+                             detect_numbered_heading(page_scan, block, tokens, number + 1)):
+                if follower is not None and follower.numbering == [number] and [token.str for token in list(follower.secondary_slot)[1:]] == separator:
+                    return follower
     return None
 
 

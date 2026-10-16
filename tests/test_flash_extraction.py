@@ -597,9 +597,10 @@ def _layout_pdf(pages, landscape=False, glyph_headings=False):
     """Uncompressed PDF, per page a 20pt heading line (none if empty) then
     11pt body lines: ``pages`` is a list of ``(heading, [body line, ...])``,
     optionally followed by lines printed one under another above the heading,
-    in 9pt. A line given as ``("bold", text)`` prints in 11pt Helvetica-Bold.
-    ``glyph_headings`` draws each heading glyph by glyph in 13pt Courier-Bold
-    instead, as some SEC filings do."""
+    in 9pt. A line given as ``("bold", text)`` prints in 11pt Helvetica-Bold,
+    and ``("bold", text, rest)`` goes on in regular type. ``glyph_headings``
+    draws each heading glyph by glyph in 13pt Courier-Bold instead, as some
+    SEC filings do."""
     width, height = (792, 612) if landscape else (595, 842)
     objs = {1: "<</Type/Catalog/Pages 2 0 R>>", 3: "<</Font<</F1 5 0 R/F3 6 0 R>>>>",
             5: "<</Type/Font/Subtype/Type1/BaseFont/Helvetica"
@@ -617,7 +618,8 @@ def _layout_pdf(pages, landscape=False, glyph_headings=False):
         for line in lines:
             ops.append((11, y, line))
             y -= 16
-        stream = "".join(f"BT /F3 11 Tf 72 {top} Td ({text[1]}) Tj ET\n" if isinstance(text, tuple)
+        stream = "".join(f"BT /F3 11 Tf 72 {top} Td ({text[1]}) Tj{''.join(f' /F1 11 Tf ({rest}) Tj' for rest in text[2:])} ET\n"
+                         if isinstance(text, tuple)
                          else f"BT /F1 {size} Tf 72 {top} Td ({text}) Tj ET\n"
                          for size, top, text in ops)
         if glyph_headings:
@@ -846,11 +848,13 @@ def test_section_title_under_the_contents_link_still_opens_its_section(tmp_path)
     assert [node["title"] for node in section["nodes"]] == notes
 
 
+@pytest.mark.parametrize("figure", ["", "20.5% Share of restructured debt"])
 @pytest.mark.parametrize("mid_page", [False, True])
-def test_numbered_headings_continue_past_19(tmp_path, mid_page):
+def test_numbered_headings_continue_past_19(tmp_path, mid_page, figure):
     """Notes numbered 20 and on continue the sequence of the same-style notes
     before them, so they are numbered headings like notes 1 to 19, whether
-    the notes open their pages or follow text of the note before."""
+    the notes open their pages or follow text of the note before. A bold
+    figure in note 19 that opens with "20." is no note 20."""
     from pageindex.flash.main import extract_toc
 
     topics = ["Organization", "Policies", "Revenue", "Leases", "Debt", "Taxes", "Equity", "Segments", "Pensions",
@@ -863,11 +867,33 @@ def test_numbered_headings_continue_past_19(tmp_path, mid_page):
         for note in notes[start:start + 3]:
             topic = note.split(". ", 1)[1].lower()
             lines += [("bold", note), *[f"Line {k} of the note on {topic} with some body text in it." for k in range(1, 4)], ""]
+            if figure and note.startswith("19."):
+                lines += [("bold", figure), ""]
         pages.append(("", lines))
     pdf = tmp_path / "notes.pdf"
     pdf.write_bytes(_layout_pdf(pages))
     result = extract_toc(str(pdf))
     assert [node["title"] for node in result["structure"]] == notes
+
+
+def test_run_in_clause_numbering_continues_past_19(tmp_path):
+    """Clauses numbered 20 and on whose bold title runs into the clause text
+    are titled by that title alone, as clauses 1 to 19 are."""
+    from pageindex.flash.main import extract_toc
+
+    clauses = [f"{n}. {name}." for n, name in enumerate([
+        "DEFINITIONS", "SERVICES", "TERM", "FEES", "PAYMENT", "TAXES", "WARRANTIES", "LIABILITY", "INDEMNITY",
+        "INSURANCE", "CONFIDENTIALITY", "DATA", "AUDIT", "PERSONNEL", "SUBCONTRACTING", "TERMINATION", "TRANSITION",
+        "FORCE MAJEURE", "GOVERNING LAW", "NOTICES", "ASSIGNMENT", "SEVERABILITY", "ENTIRE AGREEMENT"], 1)]
+    text = ["Each party shall comply with this clause. The parties agree that the provisions",
+            "of this clause apply to all services under this agreement and to any statement",
+            "of work entered into by the parties, unless the parties agree otherwise in writing."]
+    pages = [("Master Services Agreement", ["Between Skylark Holdings Inc. and its supplier"]),
+             *[("", [line for clause in clauses[start:start + 3] for line in (("bold", clause, " " + text[0]), *text[1:], "")])
+               for start in range(0, len(clauses), 3)]]
+    pdf = tmp_path / "agreement.pdf"
+    pdf.write_bytes(_layout_pdf(pages))
+    assert [node["title"] for node in extract_toc(str(pdf))["structure"]] == clauses
 
 
 def test_lone_19_pulls_in_no_20(tmp_path):

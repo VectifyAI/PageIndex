@@ -49,8 +49,8 @@ from .candidates import (
 )
 
 
-def detect_numbered_heading(page_scan: PageScanState, block: Block, tokens: TokenView) -> Optional[HeadingCandidate]:
-    """Identify "1.2.3" / "[1]" style numbered heading prefixes."""
+def detect_numbered_heading(page_scan: PageScanState, block: Block, tokens: TokenView, limit: int = 20) -> Optional[HeadingCandidate]:
+    """Identify "1.2.3" / "[1]" style numbered heading prefixes, numbers below ``limit``."""
     item_list: list[int] = []
     at_value = None
     for entry in enumerate_tokens(tokens):
@@ -60,7 +60,7 @@ def detect_numbered_heading(page_scan: PageScanState, block: Block, tokens: Toke
             if len(item_list) >= 4:
                 break
             val = token_numeric_value(token)
-            if math.isnan(val) or val <= 0 or val >= 20:
+            if math.isnan(val) or val <= 0 or val >= limit:
                 break
             if len(token.str) >= 3:
                 break
