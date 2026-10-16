@@ -38,7 +38,7 @@ class Block(Bounded):
     __slots__ = (
         "primary_slot", "char_stats", "alignment_slot", "weighted_ratio_tertiary", "previous_slot", "weighted_skew", "weighted_font_size", "weighted_ratio_primary", "weighted_ratio_secondary", "style_slot",
         "style_char_counts", "size_char_counts", "reading_order_index", "orig_index", "type", "isolated_centered", "is_body_paragraph", "measure_slot", "used_as_heading",
-        "state_slot", "marker_slot", "metric_slot",
+        "repeat_of", "state_slot", "marker_slot", "metric_slot",
         "dominant_style_cache", "dominant_size_cache", "token_text_cache", "deaccented_text_cache", "cache_slot", "tokens_cache",
     )
 
@@ -63,6 +63,7 @@ class Block(Bounded):
         self.is_body_paragraph: bool = False
         self.measure_slot: bool = False
         self.used_as_heading: bool = False
+        self.repeat_of: Optional[Block] = None   # copy on the previous page that this block repeats
         self.state_slot: int = 0
         self.marker_slot: int = 0
         self.metric_slot: float = 0.0
