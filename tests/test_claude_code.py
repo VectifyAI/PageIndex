@@ -79,6 +79,17 @@ def test_chat_refuses_what_the_cli_cannot_take(chat_client):
     for protocol in ("responses", "messages"):
         with pytest.raises(PageIndexAPIError, match="answer lane"):
             chat_client.chat("Q", protocol=protocol)
+    # an image or tool history: said outright, not sent off to the
+    # protocol lanes, which refuse claude-code/ too
+    image = [{"type": "text", "text": "What is this?"},
+             {"type": "image_url", "image_url": {"url": "data:image/png;base64,QUJD"}}]
+    for messages in ([{"role": "user", "content": image}],
+                     [{"role": "tool", "tool_call_id": "c", "content": "x"},
+                      {"role": "user", "content": "Q"}]):
+        with pytest.raises(PageIndexAPIError,
+                           match="claude-code/haiku takes text messages only") as err:
+            chat_client.chat(messages)
+        assert "use an API model with" in str(err.value)
 
 
 # ── indexing ──
@@ -208,6 +219,28 @@ def test_chat_stream_weaves_the_run(monkeypatch, chat_client):
     text = "".join(chat_client.chat("How long?", doc_id="pi-doc1", stream=True))
     assert text == ('[tool_call] get_document {"doc_name": "fruit.pdf"}\n'
                     "[tool_result] get_document: 1 page\n\nIt has 1 page.")
+
+
+@needs_claude
+def test_chat_stream_display_elides_image_payloads(monkeypatch, chat_client):
+    """A tool's image shows in the display minus its base64 payload (the
+    CLI hands it back as a Claude block); the event keeps it whole."""
+    image = {"type": "image", "source": {"type": "base64",
+                                         "media_type": "image/png",
+                                         "data": "A" * 8192}}
+    fake_cli(monkeypatch, init(),
+             AssistantMessage(content=[ToolUseBlock(
+                 id="t1", name="mcp__pageindex__get_document_image",
+                 input={"image_path": "fig.png"})], model="haiku"),
+             UserMessage(content=[ToolResultBlock(tool_use_id="t1",
+                                                  content=[image])]),
+             result("A chart."))
+    text = "".join(chat_client.chat("Show the figure", stream=True))
+    assert ('[tool_result] get_document_image: {"type": "image", "source": '
+            '{"type": "base64", "media_type": "image/png", "data": "..."}}') in text
+    assert "AAAA" not in text
+    events = list(chat_client.chat("Show the figure", stream=True).events)
+    assert events[1]["output"] == [image]
 
 
 @needs_claude

@@ -47,11 +47,15 @@ def _system_text(content: Any) -> str:
     )
 
 
-def _split_chat_messages(messages) -> "tuple[list[str], list[dict]]":
+def _split_chat_messages(messages, text_only: Optional[str] = None,
+                         ) -> "tuple[list[str], list[dict]]":
     """Validate the chat_completions surface's messages: system/developer
     content joins the managed instructions; user/assistant history passes
     through. Tool-history round-trips belong to chat(protocol="responses")
-    or chat(protocol="messages")."""
+    or chat(protocol="messages"). ``text_only`` names a model those lanes
+    cannot run (claude-code/): its errors say so instead of sending the
+    caller there."""
+    lanes = 'chat(protocol="responses") or chat(protocol="messages")'
     messages = list(messages)
     if not messages:
         raise PageIndexAPIError("messages must be a non-empty list.")
@@ -68,16 +72,20 @@ def _split_chat_messages(messages) -> "tuple[list[str], list[dict]]":
             content = message.get("content")
             if not isinstance(content, str):
                 raise PageIndexAPIError(
-                    "content must be a string on this lane; for "
-                    "structured items use chat(protocol=\"responses\") "
-                    "or chat(protocol=\"messages\")."
+                    f"{text_only} takes text messages only: content must be "
+                    "a string. For images or other structured items, use an "
+                    f"API model with {lanes}." if text_only else
+                    "content must be a string on this lane; for structured "
+                    f"items use {lanes}."
                 )
             history.append({"role": role, "content": content})
         else:
             raise PageIndexAPIError(
+                f"{text_only} takes text messages only: no {role!r} "
+                f"messages. For tool history, use an API model with {lanes}."
+                if text_only else
                 f"Unsupported role {role!r} on this lane. Tool history "
-                "round-trips belong to chat(protocol=\"responses\") or "
-                "chat(protocol=\"messages\")."
+                f"round-trips belong to {lanes}."
             )
     if not history:
         raise PageIndexAPIError("messages must contain a user or assistant "
@@ -651,8 +659,8 @@ def _chat_agent(client, messages, doc_id, model, temperature=None,
 
 def _output_text(output) -> str:
     """A tool result for the display: a string as it is, the framework's
-    structured items by their text, anything else as JSON with a data
-    URL's base64 payload elided."""
+    structured items by their text, anything else as JSON with an image's
+    base64 payload elided (a data URL, or a Claude block's source data)."""
     if isinstance(output, str):
         return output
     lines = []
@@ -664,6 +672,11 @@ def _output_text(output) -> str:
             head, _, _ = item["image_url"].partition(",")
             lines.append(json.dumps({**item, "image_url": head + ",..."},
                                     ensure_ascii=False))
+        elif (kind == "image" and isinstance(item.get("source"), dict)
+              and "data" in item["source"]):
+            lines.append(json.dumps(
+                {**item, "source": {**item["source"], "data": "..."}},
+                ensure_ascii=False))
         else:
             lines.append(json.dumps(item, ensure_ascii=False))
     return "\n".join(lines)
@@ -1586,7 +1599,7 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
     from contextlib import aclosing
     from .integrations.claude_agent_sdk import (
         claude_code_messages, claude_code_options, tool_server)
-    system_texts, history = _split_chat_messages(messages)
+    system_texts, history = _split_chat_messages(messages, text_only=model_name)
     scope = client._local_doc_scope(doc_id)
     block = targeting_block(client, doc_id, folder_id)
     blocks = [{"type": "text", "text": block}] if block else []
