@@ -39,12 +39,12 @@ def chat_client(tmp_path):
                                 chat_model="claude-code/haiku")
 
 
-def fake_cli(monkeypatch, *messages, account=None, during=None):
+def fake_cli(monkeypatch, *messages, account=None, models=None, during=None):
     """Replace the CLI session with one whose handshake reports
-    ``account`` as the login, that records what it is sent and replays
-    ``messages``; ``during`` runs as the turn starts (a tool call, a
-    delay). Returns the sessions: .prompt (None until sent), .options,
-    .closed."""
+    ``account`` as the login and ``models`` as the model list, that records
+    what it is sent and replays ``messages``; ``during`` runs as the turn
+    starts (a tool call, a delay). Returns the sessions: .prompt (None
+    until sent), .options, .closed."""
     sessions = []
 
     class Session:
@@ -59,7 +59,8 @@ def fake_cli(monkeypatch, *messages, account=None, during=None):
             self.closed = True
 
         async def get_server_info(self):
-            return {"account": {"apiProvider": "firstParty", **(account or {})}}
+            return {"account": {"apiProvider": "firstParty", **(account or {})},
+                    **({"models": models} if models else {})}
 
         async def query(self, prompt):
             self.prompt = (prompt if isinstance(prompt, str)
@@ -189,6 +190,50 @@ def test_a_login_off_the_subscription_is_refused_before_any_prompt(
         asyncio.run(llm_acompletion("claude-code/haiku", "P"))
     assert err.value.status_code == 403 and _is_unrecoverable(err.value)
     assert sessions[0].prompt is None and sessions[0].closed  # nothing billed
+
+
+@needs_claude
+def test_an_effort_claude_code_does_not_list_is_refused_before_any_prompt(monkeypatch):
+    models = [{"value": "haiku", "resolvedModel": "claude-haiku-5-5",
+               "supportedEffortLevels": ["low", "high"]},
+              {"value": "opus", "supportedEffortLevels": ["low", "max"]},
+              {"value": "tiny", "supportsEffort": False}]
+    sessions = fake_cli(monkeypatch, result("ok"), models=models)
+    # a typo, another vendor's level, a level the model lacks (also by its
+    # full id), a typo on a model the CLI doesn't list: the CLI would warn
+    # and run at its default effort
+    for model, effort, levels in (
+            ("haiku", "hgih", "low, high"), ("haiku", "minimal", "low, high"),
+            ("haiku", "max", "low, high"), ("claude-haiku-5-5", "max", "low, high"),
+            ("claude-sonnet-4-5", "hgih", "low, high, max")):
+        with pytest.raises(LLMRetriesExhausted,
+                           match=f"{model} takes reasoning_effort none, {levels}, not") as err:
+            asyncio.run(llm_acompletion(f"claude-code/{model}", "P", reasoning_effort=effort))
+        assert _is_unrecoverable(err.value)  # fatal, not one prompt's miss
+    assert all(s.prompt is None and s.closed for s in sessions)  # nothing billed
+    # no effort and "none" are never checked; an unlisted model takes any
+    # listed model's levels; a model without effort levels drops it
+    for model, effort in (("haiku", None), ("haiku", "none"),
+                          ("claude-haiku-5-5", "high"), ("claude-sonnet-4-5", "max"),
+                          ("tiny", "high")):
+        assert asyncio.run(llm_acompletion(f"claude-code/{model}", "P",
+                                           reasoning_effort=effort)) == "ok"
+    assert sessions[-1].options.effort == "high"
+
+
+@needs_claude
+def test_flash_checks_a_claude_code_summary_effort_before_expand_bills(
+        monkeypatch, sample_pdf):
+    from pageindex.flash.api import page_index_flash
+    sessions = fake_cli(monkeypatch, result("ok"), models=[
+        {"value": "haiku", "supportedEffortLevels": ["low", "high"]}])
+    with pytest.raises(PageIndexAPIError, match="haiku takes reasoning_effort none, low, high, not"):
+        page_index_flash(sample_pdf, summary_model="claude-code/haiku",
+                         summary_reasoning_effort="minimal")
+    (check,) = sessions  # the check alone: no expand or summary run
+    assert check.prompt is None and check.closed
+    asyncio.run(cc.claude_code_check("claude-code/haiku", "low"))
+    assert sessions[-1].prompt is None and sessions[-1].closed
 
 
 @needs_claude
