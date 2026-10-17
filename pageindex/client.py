@@ -380,7 +380,11 @@ class PageIndexClient:
             optional: the arguments themselves already carry the mode.
         index_model (str, optional): Local mode only — LLM used to index
             documents (structure and summaries). Defaults to the SDK
-            default (fast and cheap).
+            default (fast and cheap). ``claude-code/<model>`` (e.g.
+            ``claude-code/haiku``) indexes on your own Claude subscription
+            through Claude Code, flash mode only (``pip install
+            'pageindex[claude]'``; for your own use — a product serving
+            other people needs an API key).
         chat_model (str, optional): Your own model for the chat surfaces
             (``chat``, ``chat_completions``; a value you set also
             carries onto ``chat(protocol="messages")`` and the two
@@ -396,7 +400,11 @@ class PageIndexClient:
             surfaces read the name by its routing prefix instead and
             send the rest as written — bare names are OpenAI's and
             Anthropic's own respectively — and the Anthropic-native ones
-            treat the untouched stock default as no choice. Defaults to the
+            treat the untouched stock default as no choice.
+            ``claude-code/<model>`` runs the answer lane (and
+            ``protocol="chat_completions"``) on your own Claude
+            subscription through Claude Code, same terms as
+            ``index_model``'s. Defaults to the
             SDK default (strong); reads ``None`` on a cloud client where
             the managed chat answers.
         model (str, optional): Local mode only — one model for both roles:
@@ -1422,6 +1430,12 @@ class PageIndexClient:
                 enable_citations = True
         if protocol in ("responses", "messages"):
             self._require_own_chat(f"chat(protocol={protocol!r})")
+            from .integrations.claude_agent_sdk import is_claude_code
+            if is_claude_code(model or self.chat_model):
+                raise PageIndexAPIError(
+                    "claude-code/ models run the Claude Code CLI on the "
+                    f"answer lane — drop protocol={protocol!r}, which "
+                    "drives an API model over its own wire.")
             if protocol == "responses":
                 body = extra_body
                 if reasoning_effort:
