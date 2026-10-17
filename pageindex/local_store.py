@@ -5,11 +5,29 @@ import json
 import logging
 import os
 import shutil
+import threading
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+# In-process locks, one per storage directory, so threads of this process
+# serialize even across separate DocStore instances aimed at the same
+# directory — the OS lock below only excludes other processes.
+_process_locks: dict[str, threading.Lock] = {}
+_process_locks_guard = threading.Lock()
+
+
+def _process_lock_for(root: Path) -> threading.Lock:
+    key = os.path.abspath(str(root))
+    with _process_locks_guard:
+        lock = _process_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _process_locks[key] = lock
+        return lock
 
 
 def _write_json_atomic(path: Path, data) -> None:
@@ -95,21 +113,42 @@ class DocStore:
 
     @contextmanager
     def lock(self):
-        """Cross-process mutex for check-then-write sequences (name
-        uniquing before save). fcntl is absent on Windows, where the
-        pre-existing best-effort behavior stays."""
-        try:
-            import fcntl
-        except ImportError:
-            yield
-            return
+        """Cross-process mutex for check-then-write sequences (name uniquing
+        before save). POSIX uses ``fcntl.flock`` on a lock file; Windows has
+        no ``fcntl``, so it uses ``msvcrt.locking`` for the same cross-process
+        exclusion. An in-process lock keyed by storage directory additionally
+        serializes this process's threads, including separate ``DocStore``
+        instances pointed at the same directory. Not re-entrant.
+        """
         self._root.mkdir(parents=True, exist_ok=True)
-        with open(self._root / ".lock", "w") as handle:
-            fcntl.flock(handle, fcntl.LOCK_EX)
+        with _process_lock_for(self._root):
             try:
-                yield
-            finally:
-                fcntl.flock(handle, fcntl.LOCK_UN)
+                import fcntl
+            except ImportError:
+                pass
+            else:
+                with open(self._root / ".lock", "w") as handle:
+                    fcntl.flock(handle, fcntl.LOCK_EX)
+                    try:
+                        yield
+                    finally:
+                        fcntl.flock(handle, fcntl.LOCK_UN)
+                return
+            import msvcrt
+            lock_path = self._root / ".lock"
+            with open(lock_path, "a+b") as handle:
+                # msvcrt.locking() locks bytes of the file, so make sure a
+                # byte exists before locking it.
+                handle.seek(0)
+                if not handle.read(1):
+                    handle.write(b"\x00")
+                    handle.flush()
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+                try:
+                    yield
+                finally:
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
 
     # ── documents ──
     def save_document(self, doc_id: str, meta: dict, tree: list, pages: list) -> None:
