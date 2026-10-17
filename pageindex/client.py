@@ -380,7 +380,16 @@ class PageIndexClient:
             optional: the arguments themselves already carry the mode.
         index_model (str, optional): Local mode only — LLM used to index
             documents (structure and summaries). Defaults to the SDK
-            default (fast and cheap).
+            default (fast and cheap). ``claude-code/<model>`` (e.g.
+            ``claude-code/haiku``) indexes on your own Claude subscription
+            through Claude Code, flash mode only, with backend settings
+            not applying (``pip install 'pageindex[claude]'``; for your
+            own use — a product serving other people needs an API key).
+            There a reasoning effort must be a level Claude Code lists for
+            the model (one listing none drops it), checked before any
+            prompt goes out, and ``"none"``
+            turns thinking off only where the model allows it, the
+            model's default applying otherwise.
         chat_model (str, optional): Your own model for the chat surfaces
             (``chat``, ``chat_completions``; a value you set also
             carries onto ``chat(protocol="messages")`` and the two
@@ -396,7 +405,14 @@ class PageIndexClient:
             surfaces read the name by its routing prefix instead and
             send the rest as written — bare names are OpenAI's and
             Anthropic's own respectively — and the Anthropic-native ones
-            treat the untouched stock default as no choice. Defaults to the
+            treat the untouched stock default as no choice.
+            ``claude-code/<model>`` runs the answer lane (and
+            ``protocol="chat_completions"``) on your own Claude
+            subscription through Claude Code, same terms as
+            ``index_model``'s; ``claude_agent_config()`` carries it as the
+            bare alias for your own Claude Code login, while the other
+            protocol lanes and ``anthropic_runner_config()``, which drive
+            an API, refuse it. Defaults to the
             SDK default (strong); reads ``None`` on a cloud client where
             the managed chat answers.
         model (str, optional): Local mode only — one model for both roles:
@@ -1422,6 +1438,12 @@ class PageIndexClient:
                 enable_citations = True
         if protocol in ("responses", "messages"):
             self._require_own_chat(f"chat(protocol={protocol!r})")
+            from .integrations.claude_agent_sdk import is_claude_code
+            if is_claude_code(model or self.chat_model):
+                raise PageIndexAPIError(
+                    "claude-code/ models run the Claude Code CLI on the "
+                    f"answer lane — drop protocol={protocol!r}, which "
+                    "drives an API model over its own wire.")
             if protocol == "responses":
                 body = extra_body
                 if reasoning_effort:
@@ -2243,6 +2265,13 @@ class PageIndexClient:
             # A cleared chat_model ('' or None) configures nothing —
             # same refusal as the stock default, never a {'model': ''}.
             raise _needs_model("anthropic_runner_config()")
+        from .integrations.claude_agent_sdk import is_claude_code
+        if is_claude_code(model):
+            raise PageIndexAPIError(
+                "claude-code/ models run on Claude Code; "
+                "anthropic_runner_config() drives the Anthropic API — pass "
+                "an API model, or use claude_agent_config() for your Claude "
+                "Code login.")
         model, route = _claude_wire(model, "anthropic_runner_config()")
         return {
             "model": model,
@@ -2333,17 +2362,27 @@ class PageIndexClient:
                 to ``"1"`` — only that one: other switches in your
                 environment stay yours, weighed by the CLI's own rules.
                 ``anthropic/`` and bare spellings name a model, not a
-                channel, and leave ``env`` out. Unset: a ``chat_model``
+                channel, and leave ``env`` out. ``claude-code/`` keeps
+                your Claude Code login: the bare alias, with ``env``
+                blanking ``ANTHROPIC_API_KEY``, ``ANTHROPIC_AUTH_TOKEN``
+                and ``ANTHROPIC_BASE_URL``. Unset: a ``chat_model``
                 you set is forwarded as written; the stock default, like
                 a managed-chat client, leaves the SDK's own default in
                 place.
         """
         from .agent_tools import _base_instructions
+        from .integrations.claude_agent_sdk import (
+            CLAUDE_CODE_PREFIX, SUBSCRIPTION_ENV, is_claude_code)
         # The stock default is not a choice: leave the SDK's own model.
         if not model and not self._chat_model_stock:
             model = self.chat_model
         route = None
-        if model:
+        subscription = is_claude_code(model)
+        if subscription:
+            # already your Claude Code login: the bare alias, with no API
+            # key or base URL from the environment rerouting it
+            model = model.removeprefix(CLAUDE_CODE_PREFIX)
+        if model or subscription:
             model, route = _claude_wire(model, "claude_agent_config()")
         return {
             "system_prompt": _base_instructions(self, include_management),
@@ -2358,7 +2397,8 @@ class PageIndexClient:
             # over the inherited environment). Only the chosen switch:
             # the rest of the caller's environment is the caller's, and
             # how the CLI weighs its own switches is the CLI's business.
-            **({"env": {_ROUTE_ENV[route]: "1"}}
+            **({"env": dict(SUBSCRIPTION_ENV)} if subscription
+               else {"env": {_ROUTE_ENV[route]: "1"}}
                if route in _ROUTE_ENV else {}),
         }
 

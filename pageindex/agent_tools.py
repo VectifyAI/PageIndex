@@ -1517,13 +1517,16 @@ def _require_doc_selection(doc_ids) -> None:
 
 
 def _tool_specs(client, include_management: bool = False, doc_ids=None,
+                annotations: Optional[dict] = None,
                 ) -> "list[tuple[str, str, dict, Callable[[dict], tuple[list, bool]]]]":
     """(name, description, schema, invoke) per tool, for adapters that take
     the wire schema verbatim. ``invoke`` returns (content blocks, is_error):
     the MCP content as the server sent it, one text block from the local
     tools. Schemas are copies (frameworks keep the dict by reference).
     ``doc_ids`` is the local chat scope, already validated and dropped on
-    cloud by ``_local_doc_scope``."""
+    cloud by ``_local_doc_scope``. A dict passed as ``annotations``
+    receives each annotated tool's MCP annotations by name: the server's
+    on cloud, the contract's locally."""
     if getattr(client, "api_key", None):
         bridge = _cloud_bridge(client, gated=not include_management)
         tools_meta = bridge.list_tools()
@@ -1533,6 +1536,9 @@ def _tool_specs(client, include_management: bool = False, doc_ids=None,
                 "answer from the model's own knowledge, not the documents, "
                 "with nothing to signal it."
             )
+        if annotations is not None:
+            annotations.update({str(meta.get("name") or "tool"): meta["annotations"]
+                                for meta in tools_meta if meta.get("annotations")})
         return [(str(meta.get("name") or "tool"),
                  meta.get("description") or "",
                  copy.deepcopy(meta.get("inputSchema"))
@@ -1548,6 +1554,10 @@ def _tool_specs(client, include_management: bool = False, doc_ids=None,
             return [{"type": "text", "text": text}], is_error
         return invoke
 
+    if annotations is not None:
+        annotations.update({name: TOOL_CONTRACT[name]["annotations"]
+                            for name in tool_names(include_management)
+                            if TOOL_CONTRACT[name].get("annotations")})
     return [(name, _local_description(name), _local_schema(name),
              local_invoke(name))
             for name in tool_names(include_management)]
