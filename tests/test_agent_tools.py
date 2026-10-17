@@ -713,15 +713,18 @@ def _claude_session(server, *requests):
 
     async def run():
         bridge = SdkMcpBridge(server["name"], server["instance"])
+
+        async def handle(message):  # a silent server fails, never hangs
+            return await asyncio.wait_for(bridge.handle(message), 10)
         try:
-            replies = [await bridge.handle({
+            replies = [await handle({
                 "jsonrpc": "2.0", "id": 0, "method": "initialize",
                 "params": {"protocolVersion": "2025-06-18", "capabilities": {},
                            "clientInfo": {"name": "claude-code", "version": "2"}}})]
-            await bridge.handle({"jsonrpc": "2.0",
-                                 "method": "notifications/initialized"})
+            await handle({"jsonrpc": "2.0",
+                          "method": "notifications/initialized"})
             for request_id, (method, params) in enumerate(requests, 1):
-                replies.append(await bridge.handle({
+                replies.append(await handle({
                     "jsonrpc": "2.0", "id": request_id, "method": method,
                     "params": params}))
             return replies
@@ -737,20 +740,26 @@ def test_as_claude_mcp_cloud_relays_the_server_with_the_key_in_process(
     the server's own instead: its handshake and instructions, the
     endpoint's tool set and gate, a cloud session per CLI session."""
     pytest.importorskip("claude_agent_sdk")
+    from claude_agent_sdk import ClaudeAgentOptions
+    from claude_agent_sdk._internal.transport.subprocess_cli import (
+        SubprocessCLITransport)
     cloud, created = cloud_with_fake_bridge
     server = cloud.as_claude_mcp()
     assert server["type"] == "sdk" and server["name"] == "pageindex"
-    # what the CLI receives: the entry minus its in-process instance
-    cli_side = {key: value for key, value in server.items() if key != "instance"}
-    assert "pi-test-key" not in json.dumps(cli_side)
+    # the CLI's command line, as the SDK builds it
+    argv = SubprocessCLITransport("Q", ClaudeAgentOptions(
+        mcp_servers={"pageindex": server}, cli_path="claude"))._build_command()
+    assert "--mcp-config" in argv and "pi-test-key" not in " ".join(argv)
     assert not created  # nothing is fetched until a session starts
 
-    init, listed, called, refused = _claude_session(
+    init, listed, called, refused, broken, again = _claude_session(
         server, ("tools/list", {}),
         ("tools/call", {"name": "get_document",
                         "arguments": {"doc_name": "a.pdf"}}),
         ("tools/call", {"name": "remove_document",
-                        "arguments": {"doc_names": ["a.pdf"]}}))
+                        "arguments": {"doc_names": ["a.pdf"]}}),
+        ("tools/call", {"name": "garbled", "arguments": {}}),
+        ("tools/list", {}))
     bridge = created["bridge"]
     assert bridge.url == "https://api.pageindex.ai/mcp?tools=read"
     assert bridge.headers == {"Authorization": "Bearer pi-test-key"}
@@ -761,6 +770,9 @@ def test_as_claude_mcp_cloud_relays_the_server_with_the_key_in_process(
     assert tools[0]["annotations"]["readOnlyHint"] is True
     assert json.loads(called["result"]["content"][0]["text"])["tool"] == "get_document"
     assert "Tool not found" in refused["error"]["message"]
+    # an unexpected failure stays with its call; the session goes on
+    assert "garbled reply" in broken["error"]["message"]
+    assert again["result"] == listed["result"]
     assert bridge.calls == [("get_document", {"doc_name": "a.pdf"})]
 
     _, listed = _claude_session(cloud.as_claude_mcp(include_management=True),
@@ -784,6 +796,8 @@ def test_as_claude_mcp_cloud_needs_an_sdk_that_serves_the_relay(monkeypatch):
     for installed in ("0.2.139", None):
         with pytest.raises(PageIndexAPIError, match="claude-agent-sdk 0.2.140"):
             cloud.as_claude_mcp()
+    installed = "0.2.140"
+    assert cloud.as_claude_mcp()["type"] == "sdk"
 
 
 def test_as_claude_mcp_local_missing_dependency(client, monkeypatch):
@@ -1420,6 +1434,8 @@ class _FakeBridge:
                     "instructions": self.instructions()}
         if method == "tools/list":
             return {"tools": self.list_tools()}
+        if params["name"] == "garbled":
+            raise ValueError("garbled reply")
         if params["name"] not in {tool["name"] for tool in self.list_tools()}:
             raise PageIndexAPIError("MCP error -32602: Tool not found")
         content, is_error = self.call_tool(params["name"], params["arguments"])
@@ -1621,6 +1637,13 @@ def test_mcp_bridge_protocol(monkeypatch):
         RequestException=requests_mod.RequestException))
     bridge = McpBridge("https://api.pageindex.ai/mcp",
                        {"Authorization": "Bearer k"})
+
+    # as_claude_mcp's relay opens a fresh bridge with the CLI's own
+    # initialize, answered by the server's handshake
+    assert bridge.relay("initialize", {"protocolVersion": "2025-11-25"}) == {
+        "protocolVersion": "2025-06-18", "instructions": "SERVER GUIDANCE"}
+    assert [p["payload"]["method"] for p in posts] == [
+        "initialize", "notifications/initialized"]
 
     tools = bridge.list_tools()
     assert tools == [{"name": "t1", "description": "reads — never writes"}]

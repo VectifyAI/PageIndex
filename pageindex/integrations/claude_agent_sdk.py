@@ -81,7 +81,7 @@ def _cloud_relay(client, include_management: bool, server_name: str):
         raise PageIndexAPIError(
             "as_claude_mcp on cloud requires claude-agent-sdk 0.2.140 or "
             "newer — pip install -U claude-agent-sdk.")
-    import anyio
+    import anyio.to_thread
     import mcp.types
     from mcp.server.lowlevel import Server
     from ..mcp_bridge import McpBridge
@@ -96,13 +96,17 @@ def _cloud_relay(client, include_management: bool, server_name: str):
             bridge = McpBridge(url, headers)  # a cloud session per CLI session
 
             async def answer(request):
+                reply = {"jsonrpc": "2.0", "id": request.id}
                 try:
-                    reply = {"result": await asyncio.to_thread(
-                        bridge.relay, request.method, request.params) or {}}
-                except PageIndexAPIError as exc:  # JSON-RPC internal error
-                    reply = {"error": {"code": -32603, "message": str(exc)}}
-                await write_stream.send(_session_message(
-                    {"jsonrpc": "2.0", "id": request.id, **reply}))
+                    result = await anyio.to_thread.run_sync(
+                        bridge.relay, request.method, request.params,
+                        abandon_on_cancel=True)
+                    outgoing = _session_message({**reply, "result": result or {}})
+                except Exception as exc:  # one bad call must not end the session
+                    outgoing = _session_message({**reply, "error": {
+                        "code": -32603,  # JSON-RPC internal error
+                        "message": str(exc) or repr(exc)}})
+                await write_stream.send(outgoing)
 
             async with anyio.create_task_group() as tg:
                 async for item in read_stream:
