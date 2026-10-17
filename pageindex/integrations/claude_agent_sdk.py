@@ -190,8 +190,10 @@ def claude_code_options(model: str, reasoning_effort=None, **options):
     with no API key or base URL from the environment, and prompts sent
     verbatim (an ``@/path`` in document text would otherwise make the CLI
     read that local file into the prompt).
-    ``reasoning_effort`` "none" turns thinking off; another level is the
-    CLI's own effort (one it does not know, it warns about and ignores)."""
+    ``reasoning_effort`` "none" turns thinking off where the model allows
+    it (elsewhere the model's default applies); another level is the CLI's
+    effort, checked once connected against the levels Claude Code lists
+    for the model (a model listing none drops it)."""
     wire = model[len(CLAUDE_CODE_PREFIX):]
     if not wire:
         raise PageIndexAPIError(
@@ -243,16 +245,20 @@ def _run_error(result, kind, max_turns) -> PageIndexAPIError:
 
 
 async def claude_code_messages(prompt, options):
-    """The run's SDK messages, through its ResultMessage. The login is
-    checked before the prompt goes out, so refusing it bills nothing: one
-    signed in with an API key, or routed to another provider, is refused
-    (403). A failed run raises PageIndexAPIError with the HTTP status
-    (None when the CLI itself failed). The client disconnects inline
-    however the run ends, so no CLI process outlives its event loop."""
+    """The run's SDK messages, through its ResultMessage. The login and the
+    effort are checked before the prompt goes out, so refusing them bills
+    nothing: one signed in with an API key, or routed to another provider,
+    is refused (403). An effort outside the levels Claude Code lists for
+    the model, which it would otherwise ignore, is refused too; a model
+    listing none drops it. With no prompt only the checks run. A failed
+    run raises PageIndexAPIError with the HTTP status (None when the CLI
+    itself failed). The client disconnects inline however the run ends, so
+    no CLI process outlives its event loop."""
     from claude_agent_sdk import AssistantMessage, ClaudeSDKError, ResultMessage
     try:
         async with _claude_client(options) as client:
-            account = ((await client.get_server_info()) or {}).get("account") or {}
+            info = (await client.get_server_info()) or {}
+            account = info.get("account") or {}
             source = account.get("apiKeySource")
             provider = account.get("apiProvider")
             elsewhere = (f"signed in with an API key ({source})"
@@ -265,6 +271,21 @@ async def claude_code_messages(prompt, options):
                     f"Claude Code is {elsewhere}. Log in with your "
                     "subscription (`claude`, then /login), or use an API "
                     "model to bill that account.", status_code=403)
+            models = info.get("models") or []
+            if options.effort and models:
+                listed = [m for m in models
+                          if options.model in (m.get("value"), m.get("resolvedModel"))]
+                # a model the CLI doesn't list: any listed model's levels
+                levels = list(dict.fromkeys(
+                    level for m in listed or models
+                    for level in m.get("supportedEffortLevels") or []))
+                if levels and options.effort not in levels:
+                    # no status: a 400 would read as one prompt's miss in indexing
+                    raise PageIndexAPIError(
+                        f"claude-code/{options.model} takes reasoning_effort "
+                        f"{', '.join(['none', *levels])}, not {options.effort!r}.")
+            if prompt is None:
+                return
             await client.query(prompt)
             kind = None
             async for message in client.receive_response():
@@ -275,6 +296,14 @@ async def claude_code_messages(prompt, options):
                 yield message
     except ClaudeSDKError as exc:
         raise PageIndexAPIError(f"Claude Code failed: {exc}") from exc
+
+
+async def claude_code_check(model: str, reasoning_effort=None) -> None:
+    """A run's login and effort checks alone, in a session that sends no
+    prompt."""
+    async for _ in claude_code_messages(
+            None, claude_code_options(model, reasoning_effort, max_turns=1)):
+        pass
 
 
 async def claude_code_complete(model: str, prompt: str,
