@@ -19,7 +19,6 @@ import asyncio
 import os
 import re
 import tempfile
-import weakref
 from typing import Any, Optional
 
 from .._version import sdk_version
@@ -163,7 +162,7 @@ CLAUDE_CODE_PREFIX = "claude-code/"
 # One CLI process per call, ~150 MB each (measured): indexing's 64-wide
 # summary lane must not start 64 of them.
 CLAUDE_CODE_CONCURRENCY = 8
-_GATES: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+_GATES: dict = {}  # event loop -> [its cap, calls inside]
 
 # AssistantMessage.error kinds, for a CLI that reports no api_error_status.
 _ERROR_STATUS = {"authentication_failed": 401, "billing_error": 402,
@@ -214,6 +213,9 @@ def claude_code_options(model: str, reasoning_effort=None, **options):
         model=wire, tools=[], setting_sources=[], strict_mcp_config=True,
         verbatim_prompts=True, cwd=cwd,
         extra_args={"no-session-persistence": None},
+        # a tool result comes back as one stdout line: room for page images
+        # past the SDK's 1 MiB default
+        max_buffer_size=16 * 2**20,
         env={**SUBSCRIPTION_ENV,
              # no session-title model call per run
              "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
@@ -252,7 +254,7 @@ async def claude_code_messages(prompt, options):
     run raises PageIndexAPIError with the HTTP status (None when the CLI
     itself failed). The client disconnects inline however the run ends, so
     no CLI process outlives its event loop."""
-    from claude_agent_sdk import AssistantMessage, ClaudeSDKError, ResultMessage
+    from claude_agent_sdk import AssistantMessage, ResultMessage
     try:
         async with _claude_client(options) as client:
             info = (await client.get_server_info()) or {}
@@ -292,7 +294,9 @@ async def claude_code_messages(prompt, options):
                 elif isinstance(message, ResultMessage) and message.is_error:
                     raise _run_error(message, kind, options.max_turns)
                 yield message
-    except ClaudeSDKError as exc:
+    except PageIndexAPIError:
+        raise
+    except Exception as exc:  # the SDK raises bare Exceptions too (control timeouts)
         raise PageIndexAPIError(f"Claude Code failed: {exc}") from exc
 
 
@@ -310,14 +314,15 @@ async def claude_code_complete(model: str, prompt: str,
     Every failure is final — the CLI already retried what it could — and
     only a 400 stays per-prompt, for the indexing callers to absorb."""
     from ..utils import LLMRetriesExhausted
+    loop = asyncio.get_running_loop()
     # ponytail: one cap per event loop; submits on separate threads each get their own
-    gate = _GATES.setdefault(asyncio.get_running_loop(),
-                             asyncio.Semaphore(CLAUDE_CODE_CONCURRENCY))
+    entry = _GATES.setdefault(loop, [asyncio.Semaphore(CLAUDE_CODE_CONCURRENCY), 0])
+    entry[1] += 1
     reply = ""
     try:
         options = claude_code_options(model, reasoning_effort, max_turns=1)
         from claude_agent_sdk import ResultMessage
-        async with gate:
+        async with entry[0]:
             async for message in claude_code_messages(prompt, options):
                 if isinstance(message, ResultMessage):
                     reply = message.result or ""
@@ -326,4 +331,8 @@ async def claude_code_complete(model: str, prompt: str,
         # per-node miss and quietly leave fallback summaries
         raise LLMRetriesExhausted(
             str(exc), status_code=getattr(exc, "status_code", None)) from exc
+    finally:
+        entry[1] -= 1
+        if not entry[1]:  # the cap holds its loop: the last call out drops both
+            del _GATES[loop]
     return reply
