@@ -9,12 +9,19 @@ process); include_management picks the endpoint (the read-only
 ``?tools=read`` URL by default). Local clients get a server over the same
 tool contract, gated the same way at registration, its results passed
 through as the MCP content they are.
+
+Also the ``claude-code/`` route's transport: indexing and chat calls run
+as Claude Code CLI runs on the user's own Claude subscription login.
 """
 from __future__ import annotations
 
 import asyncio
+import os
 import re
-from typing import Any
+import tempfile
+import weakref
+from contextlib import aclosing
+from typing import Any, Optional
 
 from .._version import sdk_version
 from ..errors import PageIndexAPIError
@@ -29,19 +36,37 @@ def build_claude_mcp(client, include_management: bool = False, *,
                      server_name: str = "pageindex"):
     if getattr(client, "api_key", None):
         return _cloud_relay(client, include_management, server_name)
+    return tool_server(client, include_management, server_name=server_name)
 
+
+def tool_server(client, include_management: bool = False, *,
+                server_name: str = "pageindex", doc_ids=None,
+                failures: Optional[list] = None):
+    """The agent tools as an in-process server in either mode, on cloud
+    through the bridge: local as_claude_mcp()'s, and the claude-code/ chat
+    engine's, whose system prompt carries the guidance. ``failures``
+    records the invoker's re-raised failures (auth, limits, an unreachable
+    server) for the engine to fail the run on; the CLI then gets the call
+    back as an error."""
     try:
         from claude_agent_sdk import create_sdk_mcp_server, tool
     except ImportError as exc:
         raise PageIndexAPIError(
-            "as_claude_mcp in local mode requires the Claude Agent SDK — "
+            "The Claude Agent SDK is not installed — "
             "pip install claude-agent-sdk (or pip install 'pageindex[claude]')."
         ) from exc
-    from ..agent_tools import TOOL_CONTRACT, _tool_specs
+    from ..agent_tools import _tool_specs
 
     def make_handler(invoke):
         async def handler(arguments: dict[str, Any]) -> dict[str, Any]:
-            blocks, is_error = await asyncio.to_thread(invoke, arguments or {})
+            try:
+                blocks, is_error = await asyncio.to_thread(invoke, arguments or {})
+            except PageIndexAPIError as exc:
+                if failures is None:
+                    raise
+                failures.append(exc)
+                return {"content": [{"type": "text", "text": str(exc)}],
+                        "is_error": True}
             result: dict[str, Any] = {"content": blocks}
             if is_error:
                 result["is_error"] = True
@@ -54,14 +79,14 @@ def build_claude_mcp(client, include_management: bool = False, *,
         except ImportError:
             return {}
         return {"annotations": ToolAnnotations(
-            **(TOOL_CONTRACT[name].get("annotations") or {}),
-            maxResultSizeChars=MAX_RESULT_CHARS)}
+            **(hints.get(name) or {}), maxResultSizeChars=MAX_RESULT_CHARS)}
 
+    hints: dict = {}  # readOnlyHint lets the CLI run the read tools in parallel
+    specs = _tool_specs(client, include_management, doc_ids, annotations=hints)
     tools = [
         tool(name, description, schema,
              **tool_kwargs(name))(make_handler(invoke))
-        for name, description, schema, invoke
-        in _tool_specs(client, include_management)
+        for name, description, schema, invoke in specs
     ]
     return create_sdk_mcp_server(name=server_name, version=sdk_version(),
                                  tools=tools)
@@ -130,3 +155,139 @@ def _session_message(payload: dict):
     adapter = getattr(mcp.types, "jsonrpc_message_adapter", None)  # mcp 2.x
     return SessionMessage(adapter.validate_python(payload) if adapter
                           else mcp.types.JSONRPCMessage.model_validate(payload))
+
+
+# ── the claude-code/ route ──
+
+CLAUDE_CODE_PREFIX = "claude-code/"
+
+# One CLI process per call, ~150 MB each (measured): indexing's 64-wide
+# summary lane must not start 64 of them.
+CLAUDE_CODE_CONCURRENCY = 8
+_GATES: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+# AssistantMessage.error kinds, for a CLI that reports no api_error_status.
+_ERROR_STATUS = {"authentication_failed": 401, "billing_error": 402,
+                 "rate_limit": 429, "invalid_request": 400,
+                 "server_error": 500}
+
+
+def is_claude_code(model) -> bool:
+    return isinstance(model, str) and model.startswith(CLAUDE_CODE_PREFIX)
+
+
+def claude_code_options(model: str, reasoning_effort=None, **options):
+    """ClaudeAgentOptions for one run of ``claude-code/<id>``, isolated from
+    the user's Claude Code setup: no built-in tools, settings, CLAUDE.md,
+    hooks or account connectors, no session file, and the subscription
+    login, never an API key from the environment (a .env
+    ANTHROPIC_API_KEY would silently win over the login).
+    ``reasoning_effort`` "none" turns thinking off; another level is the
+    CLI's own effort (one it does not know, it warns about and ignores)."""
+    wire = model[len(CLAUDE_CODE_PREFIX):]
+    if not wire:
+        raise PageIndexAPIError(
+            f"{model!r} names the claude-code route but no model — e.g. "
+            "'claude-code/sonnet'.", status_code=404)
+    try:
+        from claude_agent_sdk import ClaudeAgentOptions
+    except ImportError as exc:
+        raise PageIndexAPIError(
+            "claude-code/ models run on the Claude Agent SDK — "
+            "pip install 'pageindex[claude]'.") from exc
+    if reasoning_effort == "none":
+        options["thinking"] = {"type": "disabled"}
+    elif reasoning_effort:
+        options["effort"] = reasoning_effort
+    # not a git repo, so the CLI adds no git status to the prompt
+    cwd = os.path.join(tempfile.gettempdir(), "pageindex-claude-code")
+    os.makedirs(cwd, exist_ok=True)
+    return ClaudeAgentOptions(
+        model=wire, tools=[], setting_sources=[], strict_mcp_config=True,
+        cwd=cwd, extra_args={"no-session-persistence": None},
+        env={"ANTHROPIC_API_KEY": "",
+             # no session-title model call per run
+             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+             # the advisor consults a stronger model: extra quota
+             "CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1"},
+        **options)
+
+
+def _claude_query(prompt, options):
+    """The CLI run — the seam tests replace with a fake message stream."""
+    from claude_agent_sdk import query
+    return query(prompt=prompt, options=options)
+
+
+def _run_error(result, kind, max_turns) -> PageIndexAPIError:
+    if result.subtype == "error_max_turns":
+        from ..local_chat import _wrap_max_turns
+        return _wrap_max_turns(max_turns)
+    status = result.api_error_status or _ERROR_STATUS.get(kind)
+    text = result.result or "; ".join(result.errors or []) or result.subtype
+    hint = {401: " Run `claude` once and log in with your Claude "
+                 "subscription.",
+            429: " Your Claude subscription's usage limit is reached; it "
+                 "resets on its own."}.get(status, "")
+    return PageIndexAPIError(f"Claude Code failed: {text.rstrip('.')}.{hint}",
+                             status_code=status)
+
+
+async def claude_code_messages(prompt, options):
+    """The run's SDK messages. A login billed to an API key is refused, and
+    a failed run raises PageIndexAPIError with the HTTP status (None when
+    the CLI itself failed)."""
+    from claude_agent_sdk import (AssistantMessage, ClaudeSDKError,
+                                  ResultMessage, SystemMessage)
+    kind = error = None
+    try:
+        async with aclosing(_claude_query(prompt, options)) as messages:
+            async for message in messages:
+                if isinstance(message, SystemMessage) and message.subtype == "init":
+                    source = message.data.get("apiKeySource")
+                    if source not in (None, "none"):
+                        raise PageIndexAPIError(
+                            "claude-code/ runs on your Claude subscription, "
+                            "but Claude Code is signed in with an API key "
+                            f"({source}). Log in with your subscription "
+                            "(`claude`, then /login), or use an anthropic/ "
+                            "model to bill the key.", status_code=403)
+                elif isinstance(message, AssistantMessage) and message.error:
+                    kind = message.error
+                elif isinstance(message, ResultMessage) and message.is_error:
+                    # read on: the CLI exits by itself and the SDK raises
+                    # after it — stopped early, the process outlives the loop
+                    error = _run_error(message, kind, options.max_turns)
+                    continue
+                yield message
+    except ClaudeSDKError as exc:
+        raise error or PageIndexAPIError(f"Claude Code failed: {exc}") from exc
+    if error:
+        raise error
+
+
+async def claude_code_complete(model: str, prompt: str,
+                               reasoning_effort=None) -> str:
+    """One indexing prompt on the claude-code/ route: no tools, one turn.
+    Every failure is final — the CLI already retried what it could — and
+    only a 400 stays per-prompt, for the indexing callers to absorb."""
+    from ..utils import LLMRetriesExhausted
+    # ponytail: one cap per event loop; submits on separate threads each get their own
+    gate = _GATES.setdefault(asyncio.get_running_loop(),
+                             asyncio.Semaphore(CLAUDE_CODE_CONCURRENCY))
+    reply = ""
+    try:
+        options = claude_code_options(model, reasoning_effort, max_turns=1)
+        from claude_agent_sdk import ResultMessage
+        async with gate:
+            # read to the end: the CLI exits on its own after the result,
+            # while one stopped early outlives an asyncio.run's loop
+            async for message in claude_code_messages(prompt, options):
+                if isinstance(message, ResultMessage):
+                    reply = message.result or ""
+    except Exception as exc:
+        # anything unmapped is final too: a bare error would read as a
+        # per-node miss and quietly leave fallback summaries
+        raise LLMRetriesExhausted(
+            str(exc), status_code=getattr(exc, "status_code", None)) from exc
+    return reply
