@@ -1240,6 +1240,13 @@ async def tree_parser(page_list, opt, doc=None, logger=None):
 
 
 def page_index_main(doc, opt=None, logger=None, page_list=None):
+    from .integrations.claude_agent_sdk import is_claude_code
+    if any(is_claude_code(getattr(opt, name, None))
+           for name in ("model", "summary_model")):
+        # it continues truncated replies through chat_history, which a
+        # Claude Code run cannot take: refused before any run is spent
+        raise ValueError("claude-code/ models index in flash mode only; "
+                         "standard mode needs an API model.")
     logger = logger or JsonLogger(doc)
 
     is_valid_pdf = (
