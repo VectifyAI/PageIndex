@@ -1634,6 +1634,8 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
         try:
             async with aclosing(claude_code_messages(prompt(), options)) as sdk:
                 async for message in sdk:
+                    if failures:  # stop at the failed tool, before any answer around it
+                        break
                     if isinstance(message, StreamEvent):
                         delta = message.event.get("delta") or {}
                         if delta.get("type") == "text_delta" and delta.get("text"):
@@ -1716,15 +1718,17 @@ def _claude_code_completions(run, model_name: str, stream: bool,
                 "usage": done["usage"]}
 
     async def agen():
+        from contextlib import aclosing
         yield chunk({"role": "assistant", "content": ""})
-        async for event in run(True):
-            if event["type"] == "answer":
-                yield chunk({"content": event["delta"]})
-            elif event["type"] == "done":
-                yield chunk({}, finish=event["finish_reason"])
-                yield {"id": chat_id, "object": "chat.completion.chunk",
-                       "created": created, "model": reported, "choices": [],
-                       "usage": event["usage"]}
+        async with aclosing(run(True)) as events:  # an abandoned stream closes the run
+            async for event in events:
+                if event["type"] == "answer":
+                    yield chunk({"content": event["delta"]})
+                elif event["type"] == "done":
+                    yield chunk({}, finish=event["finish_reason"])
+                    yield {"id": chat_id, "object": "chat.completion.chunk",
+                           "created": created, "model": reported, "choices": [],
+                           "usage": event["usage"]}
 
     if stream_metadata:
         return _stream_sync(agen)

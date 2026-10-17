@@ -56,6 +56,7 @@ def fake_cli(monkeypatch, *messages, account=None, models=None, during=None):
             return self
 
         async def __aexit__(self, *exc):
+            await asyncio.sleep(0)  # the real client awaits its transport's close
             self.closed = True
 
         async def get_server_info(self):
@@ -154,6 +155,7 @@ def test_index_call_runs_isolated_on_the_subscription(monkeypatch):
     assert all(opts.env[var] == "" for var in (
         "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"))
     assert "no-session-persistence" in opts.extra_args
+    assert opts.max_buffer_size > 2**20  # a page image's tool result is one line
     assert first.closed and second.closed
 
 
@@ -253,6 +255,7 @@ def test_index_calls_are_capped(monkeypatch):
                                       for _ in range(20)))
     assert asyncio.run(many()) == ["ok"] * 20
     assert peak == cc.CLAUDE_CODE_CONCURRENCY
+    assert cc._GATES == {}  # the cap goes with its last call, not kept per loop
 
 
 @needs_claude
@@ -332,15 +335,26 @@ def test_chat_completions_stream_chunks(monkeypatch, chat_client):
 
 
 @needs_claude
-def test_an_abandoned_stream_shuts_the_cli_down(monkeypatch, chat_client):
+@pytest.mark.parametrize("surface", ["chat", "chat_completions"])
+def test_an_abandoned_stream_shuts_the_cli_down(monkeypatch, chat_client, surface):
     sessions = fake_cli(monkeypatch, *[delta("x") for _ in range(100)],
                         result("x" * 100))
-    stream = chat_client.chat("Q", stream=True)
+    stream = getattr(chat_client, surface)("Q", stream=True)
     next(stream)
     stream.close()
     deadline = time.monotonic() + 5
     while not sessions[0].closed and time.monotonic() < deadline:
         time.sleep(0.02)
+    assert sessions[0].closed
+
+
+@needs_claude
+def test_a_bare_sdk_exception_reads_as_a_claude_code_failure(monkeypatch, chat_client):
+    async def timeout():  # the SDK raises a bare Exception for this one
+        raise Exception("Control request timeout: initialize")
+    sessions = fake_cli(monkeypatch, result("never"), during=timeout)
+    with pytest.raises(PageIndexAPIError, match="Claude Code failed: Control request timeout"):
+        chat_client.chat("Q")
     assert sessions[0].closed
 
 
@@ -406,8 +420,9 @@ def test_cloud_tool_limits_fail_the_chat(monkeypatch, end):
         reply = await tools["get_document"].handler({})
         assert reply["is_error"]
     fake_cli(monkeypatch,
-             result("I could not read the document.") if end == "answer"
-             else result(None, is_error=True, subtype="error_max_turns"),
+             *((delta("I could not "), delta("read it."), result("I could not read it."))
+               if end == "answer"
+               else (result(None, is_error=True, subtype="error_max_turns"),)),
              during=the_model_calls_the_tool)
 
     cloud = PageIndexCloudClient(api_key="pi-test-key",
@@ -415,6 +430,12 @@ def test_cloud_tool_limits_fail_the_chat(monkeypatch, end):
     with pytest.raises(PageIndexAPIError, match="Usage limit reached") as err:
         cloud.chat("Q")
     assert err.value.status_code == 402
+    # streamed too, the run stops at the failed tool: no answer around it
+    events = []
+    with pytest.raises(PageIndexAPIError, match="Usage limit reached"):
+        for event in cloud.chat("Q", stream=True).events:
+            events.append(event)
+    assert not [event for event in events if event["type"] == "answer"]
     # in process, not the relay: the server's annotations (readOnlyHint
     # keeps the read tools parallel) plus the inline cap past ~100k results
     assert tools["get_document"].annotations.model_dump(
