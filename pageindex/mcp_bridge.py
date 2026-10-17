@@ -1,7 +1,8 @@
 """Minimal MCP client (streamable HTTP) for the PageIndex cloud MCP server.
 
-Backs the cloud branches of ``client.agent_tools()`` and
-``client.agent_instructions()``: ``tools/list`` discovers the live tool set,
+Backs the cloud branches of ``client.agent_tools()``,
+``client.agent_instructions()`` and ``client.as_claude_mcp()`` (whose relay
+forwards the CLI's requests): ``tools/list`` discovers the live tool set,
 ``tools/call`` executes a tool, ``prompts/list`` / ``prompts/get`` fetch the
 server's prompts (e.g. ``cited_answer``), and the ``initialize`` handshake
 carries the server's agent instructions and capabilities. Synchronous,
@@ -61,6 +62,7 @@ class McpBridge:
         self._protocol_version: Optional[str] = None
         self._instructions: Optional[str] = None
         self._capabilities: dict[str, Any] = {}
+        self._handshake: dict[str, Any] = {}
         self._initialized = False
         self._lock = threading.RLock()
         self._next_id = 0
@@ -175,6 +177,7 @@ class McpBridge:
                     status_code=response.status_code,
                 )
             result = self._extract_result(response, request_id) or {}
+            self._handshake = result
             self._session_id = response.headers.get("Mcp-Session-Id")
             self._protocol_version = result.get("protocolVersion",
                                                 _PROTOCOL_VERSION)
@@ -258,6 +261,15 @@ class McpBridge:
         result = self._request("tools/call",
                                {"name": name, "arguments": arguments}) or {}
         return list(result.get("content") or []), bool(result.get("isError"))
+
+    def relay(self, method: str, params: Optional[dict] = None) -> Any:
+        """One request from another MCP client, answered as the server
+        would: ``initialize`` with the server's own handshake result, any
+        other request forwarded on this session."""
+        if method == "initialize":
+            self._ensure_initialized()
+            return self._handshake
+        return self._request(method, params)
 
 
 def render_text(blocks: list) -> str:

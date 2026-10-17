@@ -705,18 +705,85 @@ def test_as_openai_tools_cloud_object_params_survive(monkeypatch):
     assert tools[0].params_json_schema is not schema  # copied, not aliased
 
 
-def test_as_claude_mcp_cloud_needs_no_framework(monkeypatch):
-    monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
+def _claude_session(server, *requests):
+    """The server's replies to the handshake, then to each (method, params)
+    request, through the Claude Agent SDK's own bridge: the path the
+    Claude Code CLI's MCP messages take."""
+    from claude_agent_sdk._internal.sdk_mcp_bridge import SdkMcpBridge
+
+    async def run():
+        bridge = SdkMcpBridge(server["name"], server["instance"])
+        try:
+            replies = [await bridge.handle({
+                "jsonrpc": "2.0", "id": 0, "method": "initialize",
+                "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                           "clientInfo": {"name": "claude-code", "version": "2"}}})]
+            await bridge.handle({"jsonrpc": "2.0",
+                                 "method": "notifications/initialized"})
+            for request_id, (method, params) in enumerate(requests, 1):
+                replies.append(await bridge.handle({
+                    "jsonrpc": "2.0", "id": request_id, "method": method,
+                    "params": params}))
+            return replies
+        finally:
+            await bridge.aclose()
+    return asyncio.run(run())
+
+
+def test_as_claude_mcp_cloud_relays_the_server_with_the_key_in_process(
+        cloud_with_fake_bridge):
+    """A remote server config put the API key on the Claude Code CLI's
+    command line; the in-process relay answers the CLI's MCP session with
+    the server's own instead: its handshake and instructions, the
+    endpoint's tool set and gate, a cloud session per CLI session."""
+    pytest.importorskip("claude_agent_sdk")
+    cloud, created = cloud_with_fake_bridge
+    server = cloud.as_claude_mcp()
+    assert server["type"] == "sdk" and server["name"] == "pageindex"
+    # what the CLI receives: the entry minus its in-process instance
+    cli_side = {key: value for key, value in server.items() if key != "instance"}
+    assert "pi-test-key" not in json.dumps(cli_side)
+    assert not created  # nothing is fetched until a session starts
+
+    init, listed, called, refused = _claude_session(
+        server, ("tools/list", {}),
+        ("tools/call", {"name": "get_document",
+                        "arguments": {"doc_name": "a.pdf"}}),
+        ("tools/call", {"name": "remove_document",
+                        "arguments": {"doc_names": ["a.pdf"]}}))
+    bridge = created["bridge"]
+    assert bridge.url == "https://api.pageindex.ai/mcp?tools=read"
+    assert bridge.headers == {"Authorization": "Bearer pi-test-key"}
+    assert init["result"]["instructions"] == "SERVER GUIDANCE"
+    tools = listed["result"]["tools"]
+    assert [tool["name"] for tool in tools] == ["search_documents",
+                                                "get_document"]
+    assert tools[0]["annotations"]["readOnlyHint"] is True
+    assert json.loads(called["result"]["content"][0]["text"])["tool"] == "get_document"
+    assert "Tool not found" in refused["error"]["message"]
+    assert bridge.calls == [("get_document", {"doc_name": "a.pdf"})]
+
+    _, listed = _claude_session(cloud.as_claude_mcp(include_management=True),
+                                ("tools/list", {}))
+    assert created["bridge"].url == "https://api.pageindex.ai/mcp"
+    assert len(listed["result"]["tools"]) == 4
+
+
+def test_as_claude_mcp_cloud_needs_an_sdk_that_serves_the_relay(monkeypatch):
+    """Before 0.2.140 the SDK answered the CLI from a server's registered
+    handlers; the relay has none, so the agent would run without tools."""
+    import importlib.metadata
+
+    def version(name):
+        if installed is None:
+            raise importlib.metadata.PackageNotFoundError(name)
+        return installed
+
+    monkeypatch.setattr(importlib.metadata, "version", version)
     cloud = PageIndexCloudClient(api_key="pi-test-key")
-    # The URL is the gate: default → read-only endpoint, management opt-in
-    # → the full tool set.
-    assert cloud.as_claude_mcp() == {
-        "type": "http",
-        "url": "https://api.pageindex.ai/mcp?tools=read",
-        "headers": {"Authorization": "Bearer pi-test-key"},
-    }
-    assert (cloud.as_claude_mcp(include_management=True)["url"]
-            == "https://api.pageindex.ai/mcp")
+    for installed in ("0.2.139", None):
+        with pytest.raises(PageIndexAPIError, match="claude-agent-sdk 0.2.140"):
+            cloud.as_claude_mcp()
 
 
 def test_as_claude_mcp_local_missing_dependency(client, monkeypatch):
@@ -725,28 +792,38 @@ def test_as_claude_mcp_local_missing_dependency(client, monkeypatch):
         client.as_claude_mcp()
 
 
-def test_as_claude_mcp_local_when_installed(client):
+def test_as_claude_mcp_local_lifts_the_result_size_cap(client):
+    """Claude Code shows the model only a 2KB preview of an MCP result over
+    50,000 chars; PageIndex results run to ~100,000. The read tools stay
+    parallel (readOnlyHint)."""
     pytest.importorskip("claude_agent_sdk")
     server = client.as_claude_mcp()
-    assert server is not None
-    if isinstance(server, dict):
-        assert server.get("type") != "http"
+    assert server["type"] == "sdk"
+    _, listed = _claude_session(server, ("tools/list", {}))
+    tools = listed["result"]["tools"]
+    assert {tool["_meta"]["anthropic/maxResultSizeChars"]
+            for tool in tools} == {500_000}
+    assert all(tool["annotations"]["readOnlyHint"] for tool in tools)
 
 
 def test_claude_agent_config_is_sugar_over_the_explicit_form(
         cloud_with_fake_bridge):
-    cloud, _ = cloud_with_fake_bridge
+    pytest.importorskip("claude_agent_sdk")
+    cloud, created = cloud_with_fake_bridge
     config = cloud.claude_agent_config()
     assert config["system_prompt"] == "SERVER GUIDANCE"
     server = config["mcp_servers"]["pageindex"]
-    assert server["type"] == "http"
-    assert server["url"] == "https://api.pageindex.ai/mcp?tools=read"
-    # Pre-approval only: the URL is the gate.
+    assert server["type"] == "sdk" and server["name"] == "pageindex"
+    _claude_session(server)
+    assert created["bridge"].url == "https://api.pageindex.ai/mcp?tools=read"
+    # Pre-approval only: the relayed endpoint is the gate.
     assert config["allowed_tools"] == ["mcp__pageindex"]
     renamed = cloud.claude_agent_config(server_name="docs",
                                         include_management=True)
     assert set(renamed["mcp_servers"]) == {"docs"}
-    assert renamed["mcp_servers"]["docs"]["url"] == "https://api.pageindex.ai/mcp"
+    assert renamed["mcp_servers"]["docs"]["name"] == "docs"
+    _claude_session(renamed["mcp_servers"]["docs"])
+    assert created["bridge"].url == "https://api.pageindex.ai/mcp"
     assert renamed["allowed_tools"] == ["mcp__docs"]
 
 
@@ -763,6 +840,7 @@ def test_claude_agent_config_local(client):
 
 
 def test_claude_agent_config_forwards_a_claude_chat_model(cloud_with_fake_bridge):
+    pytest.importorskip("claude_agent_sdk")
     # chat_model says who answers; the Claude Agent SDK takes Anthropic's
     # own name, so LiteLLM's routing prefix is stripped.
     for name in ("anthropic/claude-sonnet-4-6", "claude-sonnet-4-6",
@@ -778,6 +856,7 @@ def test_claude_agent_config_forwards_a_claude_chat_model(cloud_with_fake_bridge
 
 def test_claude_agent_config_carries_any_chosen_chat_model(
         cloud_with_fake_bridge):
+    pytest.importorskip("claude_agent_sdk")
     # A model you set is sent as written — the destination judges the id.
     for name in ("gpt-4.1", "openrouter/anthropic/claude-sonnet-4-6"):
         cloud = PageIndexCloudClient(api_key="pi-test-key", chat_model=name)
@@ -795,6 +874,7 @@ def test_claude_agent_config_carries_any_chosen_chat_model(
 
 
 def test_claude_agent_config_managed_chat_sets_no_model(cloud_with_fake_bridge):
+    pytest.importorskip("claude_agent_sdk")
     cloud, _ = cloud_with_fake_bridge
     assert "model" not in cloud.claude_agent_config()
 
@@ -815,6 +895,7 @@ def test_claude_agent_config_route_prefix_sets_the_channel_switch(
     # "1", and nothing else: the rest of the caller's environment is the
     # caller's, and how the CLI weighs its own switches is the CLI's
     # business, not this SDK's.
+    pytest.importorskip("claude_agent_sdk")
     cloud, _ = cloud_with_fake_bridge
     for prefix, switch in (("bedrock", "CLAUDE_CODE_USE_BEDROCK"),
                            ("vertex_ai", "CLAUDE_CODE_USE_VERTEX"),
@@ -1331,6 +1412,19 @@ class _FakeBridge:
         return _text_block(json.dumps({"success": True, "tool": name,
                                        "args": arguments})), False
 
+    def relay(self, method, params=None):
+        if method == "initialize":
+            return {"protocolVersion": "2025-06-18",
+                    "capabilities": {"tools": {}},
+                    "serverInfo": {"name": "pageindex", "version": "1"},
+                    "instructions": self.instructions()}
+        if method == "tools/list":
+            return {"tools": self.list_tools()}
+        if params["name"] not in {tool["name"] for tool in self.list_tools()}:
+            raise PageIndexAPIError("MCP error -32602: Tool not found")
+        content, is_error = self.call_tool(params["name"], params["arguments"])
+        return {"content": content, "isError": is_error}
+
 
 @pytest.fixture
 def cloud_with_fake_bridge(monkeypatch):
@@ -1550,6 +1644,15 @@ def test_mcp_bridge_protocol(monkeypatch):
     reinit = [p for p in posts if p["payload"].get("method") == "initialize"][1]
     assert "MCP-Protocol-Version" not in reinit["headers"]
     assert "Mcp-Session-Id" not in reinit["headers"]
+
+    # as_claude_mcp's relay: another client's handshake is answered with
+    # the server's own; any other request is forwarded on this session.
+    posts_before = len(posts)
+    assert bridge.relay("initialize", {"protocolVersion": "2025-11-25"}) == {
+        "protocolVersion": "2025-06-18", "instructions": "SERVER GUIDANCE"}
+    assert len(posts) == posts_before
+    assert bridge.relay("tools/list", {})["tools"][0]["name"] == "t1"
+    assert posts[-1]["payload"]["method"] == "tools/list"
 
 
 def test_mcp_bridge_400_is_an_error_not_session_expiry(monkeypatch):
@@ -3094,6 +3197,7 @@ def test_config_yaml_chat_model_is_a_choice(store_path, monkeypatch,
     # config.yaml is the third way to name a chat model; a key set there
     # must read as chosen, exactly like the constructor spellings.
     pytest.importorskip("anthropic")
+    pytest.importorskip("claude_agent_sdk")
     import pageindex.utils
     real = pageindex.utils.ConfigLoader._load_yaml
 

@@ -1,31 +1,34 @@
 """Claude Agent SDK adapter: one value for the mcp_servers slot.
 
-Cloud clients get the remote PageIndex MCP config — the framework connects
-directly, and include_management picks the endpoint (the read-only
-``?tools=read`` URL by default); local clients get an in-process SDK MCP
-server over the same tool contract, gated the same way at registration,
-its results passed through as the MCP content they are.
+An in-process SDK MCP server in both modes. Cloud clients get a relay that
+answers the CLI's MCP session with the PageIndex MCP server's own (its
+handshake and instructions, tools, resources), fetched live over this
+SDK's MCP client, so the API key stays in this process (a remote server
+config would carry it on the CLI's command line, readable by any local
+process); include_management picks the endpoint (the read-only
+``?tools=read`` URL by default). Local clients get a server over the same
+tool contract, gated the same way at registration, its results passed
+through as the MCP content they are.
 """
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 
 from .._version import sdk_version
 from ..errors import PageIndexAPIError
 
+# Claude Code shows the model only a 2KB preview of an MCP result over
+# 50,000 chars; PageIndex results run to ~100,000. 500,000 is the CLI's
+# ceiling.
+MAX_RESULT_CHARS = 500_000
+
 
 def build_claude_mcp(client, include_management: bool = False, *,
                      server_name: str = "pageindex"):
     if getattr(client, "api_key", None):
-        # include_management picks the endpoint — the URL itself is the
-        # gate (?tools=read serves only readOnlyHint-annotated tools).
-        suffix = "" if include_management else "?tools=read"
-        return {
-            "type": "http",
-            "url": f"{client.BASE_URL}/mcp{suffix}",
-            "headers": {"Authorization": f"Bearer {client.api_key}"},
-        }
+        return _cloud_relay(client, include_management, server_name)
 
     try:
         from claude_agent_sdk import create_sdk_mcp_server, tool
@@ -46,14 +49,13 @@ def build_claude_mcp(client, include_management: bool = False, *,
         return handler
 
     def tool_kwargs(name: str) -> dict:
-        annotations = TOOL_CONTRACT[name].get("annotations")
-        if not annotations:
-            return {}
         try:
             from claude_agent_sdk import ToolAnnotations
         except ImportError:
             return {}
-        return {"annotations": ToolAnnotations(**annotations)}
+        return {"annotations": ToolAnnotations(
+            **(TOOL_CONTRACT[name].get("annotations") or {}),
+            maxResultSizeChars=MAX_RESULT_CHARS)}
 
     tools = [
         tool(name, description, schema,
@@ -63,3 +65,60 @@ def build_claude_mcp(client, include_management: bool = False, *,
     ]
     return create_sdk_mcp_server(name=server_name, version=sdk_version(),
                                  tools=tools)
+
+
+def _cloud_relay(client, include_management: bool, server_name: str):
+    from importlib.metadata import version
+    try:
+        release = tuple(int(n) for n in
+                        re.findall(r"\d+", version("claude-agent-sdk"))[:3])
+    except ImportError:  # not installed
+        release = ()
+    if release < (0, 2, 140):
+        # older releases answer the CLI from a server's registered
+        # handlers, and the relay has none: the agent would quietly run
+        # without the tools
+        raise PageIndexAPIError(
+            "as_claude_mcp on cloud requires claude-agent-sdk 0.2.140 or "
+            "newer — pip install -U claude-agent-sdk.")
+    import anyio
+    import mcp.types
+    from mcp.server.lowlevel import Server
+    from ..mcp_bridge import McpBridge
+
+    # include_management picks the endpoint — the URL itself is the gate
+    # (?tools=read serves only readOnlyHint-annotated tools).
+    url = f"{client.BASE_URL}/mcp" + ("" if include_management else "?tools=read")
+    headers = {"Authorization": f"Bearer {client.api_key}"}
+
+    class Relay(Server):
+        async def run(self, read_stream, write_stream, *args, **kwargs):
+            bridge = McpBridge(url, headers)  # a cloud session per CLI session
+
+            async def answer(request):
+                try:
+                    reply = {"result": await asyncio.to_thread(
+                        bridge.relay, request.method, request.params) or {}}
+                except PageIndexAPIError as exc:  # JSON-RPC internal error
+                    reply = {"error": {"code": -32603, "message": str(exc)}}
+                await write_stream.send(_session_message(
+                    {"jsonrpc": "2.0", "id": request.id, **reply}))
+
+            async with anyio.create_task_group() as tg:
+                async for item in read_stream:
+                    message = getattr(item, "message", None)
+                    message = getattr(message, "root", message)  # mcp 1.x wraps it
+                    # notifications stay here: the cloud session has its own
+                    if isinstance(message, mcp.types.JSONRPCRequest):
+                        tg.start_soon(answer, message)
+                tg.cancel_scope.cancel()
+
+    return {"type": "sdk", "name": server_name, "instance": Relay(server_name)}
+
+
+def _session_message(payload: dict):
+    import mcp.types
+    from mcp.shared.message import SessionMessage
+    adapter = getattr(mcp.types, "jsonrpc_message_adapter", None)  # mcp 2.x
+    return SessionMessage(adapter.validate_python(payload) if adapter
+                          else mcp.types.JSONRPCMessage.model_validate(payload))
