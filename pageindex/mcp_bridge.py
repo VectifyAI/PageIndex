@@ -116,7 +116,8 @@ class McpBridge:
         if "error" in reply:
             error = reply["error"] or {}
             raise PageIndexAPIError(
-                f"MCP error {error.get('code')}: {error.get('message')}"
+                f"MCP error {error.get('code')}: {error.get('message')}",
+                rpc_error=error,
             )
         return reply.get("result")
 

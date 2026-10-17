@@ -752,13 +752,14 @@ def test_as_claude_mcp_cloud_relays_the_server_with_the_key_in_process(
     assert "--mcp-config" in argv and "pi-test-key" not in " ".join(argv)
     assert not created  # nothing is fetched until a session starts
 
-    init, listed, called, refused, broken, again = _claude_session(
+    init, listed, called, refused, broken, missing, again = _claude_session(
         server, ("tools/list", {}),
         ("tools/call", {"name": "get_document",
                         "arguments": {"doc_name": "a.pdf"}}),
         ("tools/call", {"name": "remove_document",
                         "arguments": {"doc_names": ["a.pdf"]}}),
         ("tools/call", {"name": "garbled", "arguments": {}}),
+        ("resources/read", {"uri": "pageindex://gone"}),
         ("tools/list", {}))
     bridge = created["bridge"]
     assert bridge.url == "https://api.pageindex.ai/mcp?tools=read"
@@ -772,6 +773,10 @@ def test_as_claude_mcp_cloud_relays_the_server_with_the_key_in_process(
     assert "Tool not found" in refused["error"]["message"]
     # an unexpected failure stays with its call; the session goes on
     assert "garbled reply" in broken["error"]["message"]
+    # the server's own error reaches the CLI intact (Claude Code acts on
+    # -32002: the resource is gone, list again)
+    assert missing["error"] == {"code": -32002, "message": "Resource not found",
+                                "data": {"uri": "pageindex://gone"}}
     assert again["result"] == listed["result"]
     assert bridge.calls == [("get_document", {"doc_name": "a.pdf"})]
 
@@ -779,6 +784,52 @@ def test_as_claude_mcp_cloud_relays_the_server_with_the_key_in_process(
                                 ("tools/list", {}))
     assert created["bridge"].url == "https://api.pageindex.ai/mcp"
     assert len(listed["result"]["tools"]) == 4
+
+
+def test_as_claude_mcp_cloud_relay_runs_calls_side_by_side(
+        cloud_with_fake_bridge, monkeypatch):
+    """The CLI runs read tools in parallel: a quick call is answered while a
+    slow one runs, and the session closes at once with the slow one still
+    in flight."""
+    pytest.importorskip("claude_agent_sdk")
+    import threading
+    from claude_agent_sdk._internal.sdk_mcp_bridge import SdkMcpBridge
+    cloud, _ = cloud_with_fake_bridge
+    release = threading.Event()
+    quick = _FakeBridge.call_tool
+
+    def call_tool(self, name, arguments):
+        if name == "search_documents":
+            release.wait(10)
+        return quick(self, name, arguments)
+    monkeypatch.setattr(_FakeBridge, "call_tool", call_tool)
+    server = cloud.as_claude_mcp()
+
+    def call(request_id, name, arguments):
+        return {"jsonrpc": "2.0", "id": request_id, "method": "tools/call",
+                "params": {"name": name, "arguments": arguments}}
+
+    async def run():
+        bridge = SdkMcpBridge(server["name"], server["instance"])
+        try:
+            await asyncio.wait_for(bridge.handle({
+                "jsonrpc": "2.0", "id": 0, "method": "initialize",
+                "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                           "clientInfo": {"name": "claude-code", "version": "2"}}}), 10)
+            await bridge.handle({"jsonrpc": "2.0",
+                                 "method": "notifications/initialized"})
+            slow = asyncio.ensure_future(bridge.handle(
+                call(1, "search_documents", {"query": "q"})))
+            answered = await asyncio.wait_for(bridge.handle(
+                call(2, "get_document", {"doc_name": "a.pdf"})), 5)
+            assert answered["id"] == 2 and "result" in answered
+            assert not slow.done()
+            started = time.monotonic()
+            await asyncio.wait_for(bridge.aclose(), 5)
+            return time.monotonic() - started
+        finally:
+            release.set()
+    assert asyncio.run(run()) < 2
 
 
 def test_as_claude_mcp_cloud_needs_an_sdk_that_serves_the_relay(monkeypatch):
@@ -1434,6 +1485,11 @@ class _FakeBridge:
                     "instructions": self.instructions()}
         if method == "tools/list":
             return {"tools": self.list_tools()}
+        if method == "resources/read":  # the server's error, as McpBridge raises it
+            raise PageIndexAPIError(
+                "MCP error -32002: Resource not found",
+                rpc_error={"code": -32002, "message": "Resource not found",
+                           "data": {"uri": params["uri"]}})
         if params["name"] == "garbled":
             raise ValueError("garbled reply")
         if params["name"] not in {tool["name"] for tool in self.list_tools()}:
@@ -1628,6 +1684,10 @@ def test_mcp_bridge_protocol(monkeypatch):
             return _Resp(200, {"jsonrpc": "2.0", "id": rid, "result": {
                 "content": [{"type": "text", "text": "hello"},
                             {"type": "text", "text": "world"}]}})
+        if method == "resources/read":
+            return _Resp(200, {"jsonrpc": "2.0", "id": rid, "error": {
+                "code": -32002, "message": "Resource not found",
+                "data": {"uri": json["params"]["uri"]}}})
         raise AssertionError(f"unexpected method {method}")
 
     # Replace the module's own `requests` binding — patching the shared
@@ -1676,6 +1736,12 @@ def test_mcp_bridge_protocol(monkeypatch):
     assert len(posts) == posts_before
     assert bridge.relay("tools/list", {})["tools"][0]["name"] == "t1"
     assert posts[-1]["payload"]["method"] == "tools/list"
+    # a server error keeps its code and data, for the relay to hand on
+    with pytest.raises(PageIndexAPIError,
+                       match="MCP error -32002: Resource not found") as err:
+        bridge.relay("resources/read", {"uri": "pageindex://gone"})
+    assert err.value.rpc_error == {"code": -32002, "message": "Resource not found",
+                                   "data": {"uri": "pageindex://gone"}}
 
 
 def test_mcp_bridge_400_is_an_error_not_session_expiry(monkeypatch):

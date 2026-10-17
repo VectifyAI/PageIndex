@@ -103,9 +103,13 @@ def _cloud_relay(client, include_management: bool, server_name: str):
                         abandon_on_cancel=True)
                     outgoing = _session_message({**reply, "result": result or {}})
                 except Exception as exc:  # one bad call must not end the session
-                    outgoing = _session_message({**reply, "error": {
-                        "code": -32603,  # JSON-RPC internal error
-                        "message": str(exc) or repr(exc)}})
+                    # the server's own error, which Claude Code may act on
+                    error = getattr(exc, "rpc_error", None)
+                    if not (isinstance(error, dict) and isinstance(error.get("code"), int)
+                            and isinstance(error.get("message"), str)):
+                        error = {"code": -32603,  # JSON-RPC internal error
+                                 "message": str(exc) or repr(exc)}
+                    outgoing = _session_message({**reply, "error": error})
                 await write_stream.send(outgoing)
 
             async with anyio.create_task_group() as tg:
