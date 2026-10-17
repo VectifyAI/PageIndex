@@ -1,6 +1,8 @@
 """The claude-code/ route — indexing and chat as Claude Code CLI runs on the
-user's subscription — over a faked CLI run: no subprocess, no login."""
+user's subscription — over a faked CLI session: no subprocess, no login."""
 import asyncio
+import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,8 +15,8 @@ from pageindex.utils import (LLMRetriesExhausted, _is_unrecoverable,
 
 try:
     from claude_agent_sdk import (AssistantMessage, ResultMessage,
-                                  StreamEvent, SystemMessage, TextBlock,
-                                  ToolResultBlock, ToolUseBlock, UserMessage)
+                                  StreamEvent, TextBlock, ToolResultBlock,
+                                  ToolUseBlock, UserMessage)
     _HAS_CLAUDE = True
 except ImportError:
     _HAS_CLAUDE = False
@@ -37,22 +39,39 @@ def chat_client(tmp_path):
                                 chat_model="claude-code/haiku")
 
 
-def fake_cli(monkeypatch, *messages):
-    """Replace the CLI run: record each run's prompt and options, then
-    replay ``messages``."""
-    runs = []
+def fake_cli(monkeypatch, *messages, account=None, during=None):
+    """Replace the CLI session with one whose handshake reports
+    ``account`` as the login, that records what it is sent and replays
+    ``messages``; ``during`` runs as the turn starts (a tool call, a
+    delay). Returns the sessions: .prompt (None until sent), .options,
+    .closed."""
+    sessions = []
 
-    async def run(prompt, options):
-        sent = prompt if isinstance(prompt, str) else [m async for m in prompt]
-        runs.append((sent, options))
-        for message in messages:
-            yield message
-    monkeypatch.setattr(cc, "_claude_query", run)
-    return runs
+    class Session:
+        def __init__(self, options):
+            self.options, self.prompt, self.closed = options, None, False
+            sessions.append(self)
 
+        async def __aenter__(self):
+            return self
 
-def init(source="none"):
-    return SystemMessage(subtype="init", data={"apiKeySource": source})
+        async def __aexit__(self, *exc):
+            self.closed = True
+
+        async def get_server_info(self):
+            return {"account": {"apiProvider": "firstParty", **(account or {})}}
+
+        async def query(self, prompt):
+            self.prompt = (prompt if isinstance(prompt, str)
+                           else [m async for m in prompt])
+
+        async def receive_response(self):
+            if during:
+                await during()
+            for message in messages:
+                yield message
+    monkeypatch.setattr(cc, "_claude_client", Session)
+    return sessions
 
 
 def result(text="done", is_error=False, subtype="success", status=None,
@@ -62,6 +81,12 @@ def result(text="done", is_error=False, subtype="success", status=None,
                          result=text, usage=usage, api_error_status=status)
 
 
+def delta(text):
+    return StreamEvent(uuid="u", session_id="s", event={
+        "type": "content_block_delta", "index": 0,
+        "delta": {"type": "text_delta", "text": text}})
+
+
 # ── refusals: no CLI run needed ──
 
 def test_standard_mode_refuses_claude_code(tmp_path, sample_pdf):
@@ -69,6 +94,12 @@ def test_standard_mode_refuses_claude_code(tmp_path, sample_pdf):
                                   index_model="claude-code/haiku")
     with pytest.raises(PageIndexAPIError, match="flash mode only"):
         client.submit_document(sample_pdf, mode="standard")
+    # the classic entry itself, as run_pageindex.py --mode standard
+    # reaches it: refused before any run is spent
+    from pageindex.page_index_classic import page_index_main
+    with pytest.raises(ValueError, match="flash mode only"):
+        page_index_main(sample_pdf, SimpleNamespace(
+            model="gpt-4.1", summary_model="claude-code/haiku"))
 
 
 def test_chat_refuses_what_the_cli_cannot_take(chat_client):
@@ -90,38 +121,55 @@ def test_chat_refuses_what_the_cli_cannot_take(chat_client):
                            match="claude-code/haiku takes text messages only") as err:
             chat_client.chat(messages)
         assert "use an API model with" in str(err.value)
+    with pytest.raises(PageIndexAPIError, match="drives the Anthropic API"):
+        chat_client.anthropic_runner_config()
+
+
+@needs_claude
+def test_claude_agent_config_keeps_your_claude_code_login(chat_client):
+    config = chat_client.claude_agent_config()
+    assert config["model"] == "haiku"
+    assert config["env"] == {"ANTHROPIC_API_KEY": "", "ANTHROPIC_AUTH_TOKEN": "",
+                             "ANTHROPIC_BASE_URL": ""}
 
 
 # ── indexing ──
 
 @needs_claude
 def test_index_call_runs_isolated_on_the_subscription(monkeypatch):
-    runs = fake_cli(monkeypatch, init(), result('{"summary": "S"}'))
+    sessions = fake_cli(monkeypatch, result('{"summary": "S"}'))
     assert asyncio.run(llm_acompletion("claude-code/haiku", "P",
                                        reasoning_effort="none")) == '{"summary": "S"}'
     assert llm_completion("claude-code/haiku", "Q") == '{"summary": "S"}'
-    (prompt, opts), (prompt2, opts2) = runs
-    assert (prompt, prompt2) == ("P", "Q")
+    first, second = sessions
+    assert (first.prompt, second.prompt) == ("P", "Q")
+    opts = first.options
     assert opts.model == "haiku" and opts.tools == [] and opts.setting_sources == []
     assert opts.strict_mcp_config and opts.max_turns == 1 and not opts.mcp_servers
-    assert opts.thinking == {"type": "disabled"} and opts2.thinking is None
-    assert opts.env["ANTHROPIC_API_KEY"] == ""
+    assert opts.thinking == {"type": "disabled"} and second.options.thinking is None
+    # an @/path in document text must not make the CLI read that file
+    assert opts.verbatim_prompts
+    # a .env written for API models must not bill or reroute the run
+    assert all(opts.env[var] == "" for var in (
+        "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"))
     assert "no-session-persistence" in opts.extra_args
+    assert first.closed and second.closed
 
 
 @needs_claude
 @pytest.mark.parametrize("status,fatal", [(429, True), (500, True), (400, False)])
 def test_index_failures_are_final_except_a_400(monkeypatch, status, fatal):
-    fake_cli(monkeypatch, init(), result("boom", is_error=True, status=status))
+    sessions = fake_cli(monkeypatch, result("boom", is_error=True, status=status))
     with pytest.raises(LLMRetriesExhausted) as err:
         asyncio.run(llm_acompletion("claude-code/haiku", "P"))
     assert err.value.status_code == status
     assert _is_unrecoverable(err.value) is fatal
+    assert sessions[0].closed  # shut down inline, not left to the loop
 
 
 @needs_claude
 def test_missing_login_says_how_to_log_in(monkeypatch):
-    fake_cli(monkeypatch, init(),
+    fake_cli(monkeypatch,
              AssistantMessage(content=[TextBlock("Not logged in")], model="haiku",
                               error="authentication_failed"),
              result("Not logged in · Please run /login", is_error=True))
@@ -131,25 +179,29 @@ def test_missing_login_says_how_to_log_in(monkeypatch):
 
 
 @needs_claude
-def test_an_api_key_login_is_refused(monkeypatch):
-    fake_cli(monkeypatch, init("ANTHROPIC_API_KEY"), result("billed"))
-    with pytest.raises(LLMRetriesExhausted, match="API key") as err:
+@pytest.mark.parametrize("account,why", [
+    ({"apiKeySource": "ANTHROPIC_API_KEY"}, "API key"),
+    ({"apiProvider": "bedrock"}, "routed to bedrock")])
+def test_a_login_off_the_subscription_is_refused_before_any_prompt(
+        monkeypatch, account, why):
+    sessions = fake_cli(monkeypatch, result("billed"), account=account)
+    with pytest.raises(LLMRetriesExhausted, match=why) as err:
         asyncio.run(llm_acompletion("claude-code/haiku", "P"))
-    assert _is_unrecoverable(err.value)
+    assert err.value.status_code == 403 and _is_unrecoverable(err.value)
+    assert sessions[0].prompt is None and sessions[0].closed  # nothing billed
 
 
 @needs_claude
 def test_index_calls_are_capped(monkeypatch):
     live = peak = 0
 
-    async def run(prompt, options):
+    async def turn():
         nonlocal live, peak
         live += 1
         peak = max(peak, live)
         await asyncio.sleep(0.01)
         live -= 1
-        yield result("ok")
-    monkeypatch.setattr(cc, "_claude_query", run)
+    fake_cli(monkeypatch, result("ok"), during=turn)
 
     async def many():
         return await asyncio.gather(*(llm_acompletion("claude-code/haiku", "P")
@@ -160,12 +212,12 @@ def test_index_calls_are_capped(monkeypatch):
 
 @needs_claude
 def test_flash_indexing_on_claude_code(monkeypatch, tmp_path, sample_pdf):
-    runs = fake_cli(monkeypatch, init(), result("A two-page fruit memo."))
+    sessions = fake_cli(monkeypatch, result("A two-page fruit memo."))
     client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
                                   index_model="claude-code/haiku")
     doc = client.submit_document(sample_pdf)
     assert client.get_document(doc["doc_id"])["description"] == "A two-page fruit memo."
-    assert runs and all(opts.model == "haiku" for _, opts in runs)
+    assert sessions and all(s.options.model == "haiku" for s in sessions)
 
 
 # ── chat ──
@@ -174,18 +226,20 @@ def test_flash_indexing_on_claude_code(monkeypatch, tmp_path, sample_pdf):
 def test_chat_sends_one_message_with_a_block_per_turn(monkeypatch, chat_client):
     usage = {"input_tokens": 5, "cache_read_input_tokens": 100,
              "cache_creation_input_tokens": 20, "output_tokens": 7}
-    runs = fake_cli(monkeypatch, init(), result("A2", usage=usage))
+    sessions = fake_cli(monkeypatch, result("A2", usage=usage))
     history = [{"role": "user", "content": "Q1"},
                {"role": "assistant", "content": "A1"},
                {"role": "user", "content": "Q2"}]
     assert chat_client.chat(history, doc_id="pi-doc1") == "A2"
-    ((message,), opts), = runs
+    (session,) = sessions
+    (message,) = session.prompt
     blocks = message["message"]["content"]
     assert "fruit.pdf" in blocks[0]["text"]  # the doc targeting leads
     assert [b["text"] for b in blocks[1:]] == [
         '<turn role="user">\nQ1\n</turn>', '<turn role="assistant">\nA1\n</turn>',
         '<turn role="user">\nQ2\n</turn>']
     assert not any("cache_control" in b for b in blocks)
+    opts = session.options
     assert opts.system_prompt.startswith(CHAT_HEADER)
     assert "<turn> blocks" in opts.system_prompt
     assert list(opts.mcp_servers) == ["pageindex"]
@@ -200,12 +254,8 @@ def test_chat_sends_one_message_with_a_block_per_turn(monkeypatch, chat_client):
 
 @needs_claude
 def test_chat_stream_weaves_the_run(monkeypatch, chat_client):
-    def delta(text):
-        return StreamEvent(uuid="u", session_id="s", event={
-            "type": "content_block_delta", "index": 0,
-            "delta": {"type": "text_delta", "text": text}})
-    runs = fake_cli(
-        monkeypatch, init(),
+    sessions = fake_cli(
+        monkeypatch,
         AssistantMessage(content=[ToolUseBlock(
             id="t1", name="mcp__pageindex__get_document",
             input={"doc_name": "fruit.pdf"})], model="haiku"),
@@ -215,10 +265,38 @@ def test_chat_stream_weaves_the_run(monkeypatch, chat_client):
     events = list(chat_client.chat("How long?", doc_id="pi-doc1", stream=True).events)
     assert [e["type"] for e in events] == ["tool_call", "tool_result", "answer", "answer"]
     assert events[0]["name"] == events[1]["name"] == "get_document"
-    assert runs[0][1].include_partial_messages
+    assert sessions[0].options.include_partial_messages
     text = "".join(chat_client.chat("How long?", doc_id="pi-doc1", stream=True))
     assert text == ('[tool_call] get_document {"doc_name": "fruit.pdf"}\n'
                     "[tool_result] get_document: 1 page\n\nIt has 1 page.")
+
+
+@needs_claude
+def test_chat_completions_stream_chunks(monkeypatch, chat_client):
+    fake_cli(monkeypatch, delta("Hi "), delta("there."),
+             result("Hi there.", usage={"input_tokens": 3, "output_tokens": 2}))
+    chunks = list(chat_client.chat_completions("Q", stream=True,
+                                               stream_metadata=True))
+    assert chunks[0]["choices"][0]["delta"] == {"role": "assistant", "content": ""}
+    assert [c["choices"][0]["delta"]["content"] for c in chunks[1:3]] == [
+        "Hi ", "there."]
+    assert chunks[3]["choices"][0]["finish_reason"] == "stop"
+    assert chunks[4]["choices"] == [] and chunks[4]["usage"]["completion_tokens"] == 2
+    assert len(chunks) == 5
+    assert "".join(chat_client.chat_completions("Q", stream=True)) == "Hi there."
+
+
+@needs_claude
+def test_an_abandoned_stream_shuts_the_cli_down(monkeypatch, chat_client):
+    sessions = fake_cli(monkeypatch, *[delta("x") for _ in range(100)],
+                        result("x" * 100))
+    stream = chat_client.chat("Q", stream=True)
+    next(stream)
+    stream.close()
+    deadline = time.monotonic() + 5
+    while not sessions[0].closed and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert sessions[0].closed
 
 
 @needs_claude
@@ -228,7 +306,7 @@ def test_chat_stream_display_elides_image_payloads(monkeypatch, chat_client):
     image = {"type": "image", "source": {"type": "base64",
                                          "media_type": "image/png",
                                          "data": "A" * 8192}}
-    fake_cli(monkeypatch, init(),
+    fake_cli(monkeypatch,
              AssistantMessage(content=[ToolUseBlock(
                  id="t1", name="mcp__pageindex__get_document_image",
                  input={"image_path": "fig.png"})], model="haiku"),
@@ -244,9 +322,11 @@ def test_chat_stream_display_elides_image_payloads(monkeypatch, chat_client):
 
 
 @needs_claude
-def test_cloud_tool_limits_fail_the_chat(monkeypatch):
+@pytest.mark.parametrize("end", ["answer", "max_turns"])
+def test_cloud_tool_limits_fail_the_chat(monkeypatch, end):
     """A cloud tool's USAGE_LIMIT_REACHED (402) fails chat() as on the
-    bridge lanes, instead of reaching the model as text it answers around."""
+    bridge lanes, instead of reaching the model as text it answers around
+    — and stays the reported cause when the run then fails in the CLI."""
     import json
 
     import claude_agent_sdk
@@ -277,13 +357,13 @@ def test_cloud_tool_limits_fail_the_chat(monkeypatch):
         return {"type": "sdk", "name": kwargs["name"], "instance": None}
     monkeypatch.setattr(claude_agent_sdk, "create_sdk_mcp_server", server)
 
-    async def cli(prompt, options):
-        [m async for m in prompt]
-        reply = await tools["get_document"].handler({})  # the model's call
+    async def the_model_calls_the_tool():
+        reply = await tools["get_document"].handler({})
         assert reply["is_error"]
-        yield init()
-        yield result("I could not read the document.")
-    monkeypatch.setattr(cc, "_claude_query", cli)
+    fake_cli(monkeypatch,
+             result("I could not read the document.") if end == "answer"
+             else result(None, is_error=True, subtype="error_max_turns"),
+             during=the_model_calls_the_tool)
 
     cloud = PageIndexCloudClient(api_key="pi-test-key",
                                  chat_model="claude-code/haiku")
@@ -299,7 +379,6 @@ def test_cloud_tool_limits_fail_the_chat(monkeypatch):
 
 @needs_claude
 def test_chat_max_turns(monkeypatch, chat_client):
-    fake_cli(monkeypatch, init(),
-             result(None, is_error=True, subtype="error_max_turns"))
+    fake_cli(monkeypatch, result(None, is_error=True, subtype="error_max_turns"))
     with pytest.raises(PageIndexAPIError, match=r"max_turns \(3\)"):
         chat_client.chat("Q", max_turns=3)

@@ -115,13 +115,6 @@ class LocalAPI:
                 "Failed to submit document: summary_max_words, "
                 "summary_concurrency and summary_reasoning_effort are "
                 "flash-only; mode='standard' does not support them.")
-        from .integrations.claude_agent_sdk import is_claude_code
-        if mode == "standard" and (is_claude_code(self._model)
-                                   or is_claude_code(self._summary_model)):
-            raise PageIndexAPIError(
-                "Failed to submit document: claude-code/ models index in "
-                "flash mode only (the default); mode='standard' needs an "
-                "API model.")
         file_path = os.path.abspath(os.path.expanduser(str(file_path)))
         if not os.path.isfile(file_path):
             raise FileNotFoundError(f"No such file: {file_path}")

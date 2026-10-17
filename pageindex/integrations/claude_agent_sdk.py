@@ -20,7 +20,6 @@ import os
 import re
 import tempfile
 import weakref
-from contextlib import aclosing
 from typing import Any, Optional
 
 from .._version import sdk_version
@@ -172,6 +171,12 @@ _ERROR_STATUS = {"authentication_failed": 401, "billing_error": 402,
                  "server_error": 500}
 
 
+# A .env written for API models must not reroute a subscription run: an
+# API key would bill it, a base URL would receive its login.
+SUBSCRIPTION_ENV = {"ANTHROPIC_API_KEY": "", "ANTHROPIC_AUTH_TOKEN": "",
+                    "ANTHROPIC_BASE_URL": ""}
+
+
 def is_claude_code(model) -> bool:
     return isinstance(model, str) and model.startswith(CLAUDE_CODE_PREFIX)
 
@@ -179,9 +184,10 @@ def is_claude_code(model) -> bool:
 def claude_code_options(model: str, reasoning_effort=None, **options):
     """ClaudeAgentOptions for one run of ``claude-code/<id>``, isolated from
     the user's Claude Code setup: no built-in tools, settings, CLAUDE.md,
-    hooks or account connectors, no session file, and the subscription
-    login, never an API key from the environment (a .env
-    ANTHROPIC_API_KEY would silently win over the login).
+    hooks or account connectors, no session file, the subscription login
+    with no API key or base URL from the environment, and prompts sent
+    verbatim (an ``@/path`` in document text would otherwise make the CLI
+    read that local file into the prompt).
     ``reasoning_effort`` "none" turns thinking off; another level is the
     CLI's own effort (one it does not know, it warns about and ignores)."""
     wire = model[len(CLAUDE_CODE_PREFIX):]
@@ -204,8 +210,9 @@ def claude_code_options(model: str, reasoning_effort=None, **options):
     os.makedirs(cwd, exist_ok=True)
     return ClaudeAgentOptions(
         model=wire, tools=[], setting_sources=[], strict_mcp_config=True,
-        cwd=cwd, extra_args={"no-session-persistence": None},
-        env={"ANTHROPIC_API_KEY": "",
+        verbatim_prompts=True, cwd=cwd,
+        extra_args={"no-session-persistence": None},
+        env={**SUBSCRIPTION_ENV,
              # no session-title model call per run
              "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
              # the advisor consults a stronger model: extra quota
@@ -213,10 +220,10 @@ def claude_code_options(model: str, reasoning_effort=None, **options):
         **options)
 
 
-def _claude_query(prompt, options):
-    """The CLI run — the seam tests replace with a fake message stream."""
-    from claude_agent_sdk import query
-    return query(prompt=prompt, options=options)
+def _claude_client(options):
+    """The CLI session — the seam tests replace with a fake client."""
+    from claude_agent_sdk import ClaudeSDKClient
+    return ClaudeSDKClient(options=options)
 
 
 def _run_error(result, kind, max_turns) -> PageIndexAPIError:
@@ -234,36 +241,38 @@ def _run_error(result, kind, max_turns) -> PageIndexAPIError:
 
 
 async def claude_code_messages(prompt, options):
-    """The run's SDK messages. A login billed to an API key is refused, and
-    a failed run raises PageIndexAPIError with the HTTP status (None when
-    the CLI itself failed)."""
-    from claude_agent_sdk import (AssistantMessage, ClaudeSDKError,
-                                  ResultMessage, SystemMessage)
-    kind = error = None
+    """The run's SDK messages, through its ResultMessage. The login is
+    checked before the prompt goes out, so refusing it bills nothing: one
+    signed in with an API key, or routed to another provider, is refused
+    (403). A failed run raises PageIndexAPIError with the HTTP status
+    (None when the CLI itself failed). The client disconnects inline
+    however the run ends, so no CLI process outlives its event loop."""
+    from claude_agent_sdk import AssistantMessage, ClaudeSDKError, ResultMessage
     try:
-        async with aclosing(_claude_query(prompt, options)) as messages:
-            async for message in messages:
-                if isinstance(message, SystemMessage) and message.subtype == "init":
-                    source = message.data.get("apiKeySource")
-                    if source not in (None, "none"):
-                        raise PageIndexAPIError(
-                            "claude-code/ runs on your Claude subscription, "
-                            "but Claude Code is signed in with an API key "
-                            f"({source}). Log in with your subscription "
-                            "(`claude`, then /login), or use an anthropic/ "
-                            "model to bill the key.", status_code=403)
-                elif isinstance(message, AssistantMessage) and message.error:
+        async with _claude_client(options) as client:
+            account = ((await client.get_server_info()) or {}).get("account") or {}
+            source = account.get("apiKeySource")
+            provider = account.get("apiProvider")
+            elsewhere = (f"signed in with an API key ({source})"
+                         if source not in (None, "none") else
+                         f"routed to {provider}"
+                         if provider not in (None, "firstParty") else None)
+            if elsewhere:
+                raise PageIndexAPIError(
+                    "claude-code/ runs on your Claude subscription, but "
+                    f"Claude Code is {elsewhere}. Log in with your "
+                    "subscription (`claude`, then /login), or use an API "
+                    "model to bill that account.", status_code=403)
+            await client.query(prompt)
+            kind = None
+            async for message in client.receive_response():
+                if isinstance(message, AssistantMessage) and message.error:
                     kind = message.error
                 elif isinstance(message, ResultMessage) and message.is_error:
-                    # read on: the CLI exits by itself and the SDK raises
-                    # after it — stopped early, the process outlives the loop
-                    error = _run_error(message, kind, options.max_turns)
-                    continue
+                    raise _run_error(message, kind, options.max_turns)
                 yield message
     except ClaudeSDKError as exc:
-        raise error or PageIndexAPIError(f"Claude Code failed: {exc}") from exc
-    if error:
-        raise error
+        raise PageIndexAPIError(f"Claude Code failed: {exc}") from exc
 
 
 async def claude_code_complete(model: str, prompt: str,
@@ -280,8 +289,6 @@ async def claude_code_complete(model: str, prompt: str,
         options = claude_code_options(model, reasoning_effort, max_turns=1)
         from claude_agent_sdk import ResultMessage
         async with gate:
-            # read to the end: the CLI exits on its own after the result,
-            # while one stopped early outlives an asyncio.run's loop
             async for message in claude_code_messages(prompt, options):
                 if isinstance(message, ResultMessage):
                     reply = message.result or ""

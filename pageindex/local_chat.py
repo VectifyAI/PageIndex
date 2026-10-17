@@ -934,7 +934,9 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
                                max_turns=max_turns, partial=True,
                                extra_body=extra_body,
                                extra_headers=extra_headers,
-                               backend=_merged_backend(client, backend))
+                               # a configured chat_backend is for API
+                               # models; only one passed here is refused
+                               backend=backend)
 
         def claude_events():
             return _stream_sync(lambda: run(False))
@@ -986,7 +988,9 @@ def run_chat_completions(client, messages, stream: bool = False,
                                temperature=temperature, top_p=top_p,
                                max_tokens=max_tokens, extra_body=extra_body,
                                extra_headers=extra_headers,
-                               backend=_merged_backend(client, backend))
+                               # a configured chat_backend is for API
+                               # models; only one passed here is refused
+                               backend=backend)
         return _claude_code_completions(run, model or client.chat_model,
                                         stream, stream_metadata)
     _require_openai_agents("chat")
@@ -1627,37 +1631,42 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
                                       ToolUseBlock, UserMessage)
         names: dict = {}  # tool_use id -> tool name, to label results
         failures.clear()
-        async with aclosing(claude_code_messages(prompt(), options)) as sdk:
-            async for message in sdk:
-                if isinstance(message, StreamEvent):
-                    delta = message.event.get("delta") or {}
-                    if delta.get("type") == "text_delta" and delta.get("text"):
-                        yield {"type": "answer", "delta": delta["text"]}
-                    elif (delta.get("type") == "thinking_delta"
-                          and delta.get("thinking")):
-                        yield {"type": "thinking", "delta": delta["thinking"]}
-                elif isinstance(message, AssistantMessage):
-                    for item in message.content:
-                        if isinstance(item, ToolUseBlock):
-                            name = item.name.removeprefix("mcp__pageindex__")
-                            names[item.id] = name
-                            yield {"type": "tool_call", "call_id": item.id,
-                                   "name": name, "arguments": item.input}
-                elif (isinstance(message, UserMessage)
-                      and isinstance(message.content, list)):
-                    for item in message.content:
-                        if isinstance(item, ToolResultBlock):
-                            yield {"type": "tool_result",
-                                   "call_id": item.tool_use_id,
-                                   "name": names.get(item.tool_use_id, "tool"),
-                                   "output": item.content}
-                elif isinstance(message, ResultMessage) and done and not failures:
-                    yield {"type": "done", "answer": message.result or "",
-                           "usage": _claude_code_usage(message.usage),
-                           "finish_reason": ("length"
-                                             if message.stop_reason == "max_tokens"
-                                             else "stop")}
-        if failures:  # raised once the CLI has exited on its own
+        try:
+            async with aclosing(claude_code_messages(prompt(), options)) as sdk:
+                async for message in sdk:
+                    if isinstance(message, StreamEvent):
+                        delta = message.event.get("delta") or {}
+                        if delta.get("type") == "text_delta" and delta.get("text"):
+                            yield {"type": "answer", "delta": delta["text"]}
+                        elif (delta.get("type") == "thinking_delta"
+                              and delta.get("thinking")):
+                            yield {"type": "thinking", "delta": delta["thinking"]}
+                    elif isinstance(message, AssistantMessage):
+                        for item in message.content:
+                            if isinstance(item, ToolUseBlock):
+                                name = item.name.removeprefix("mcp__pageindex__")
+                                names[item.id] = name
+                                yield {"type": "tool_call", "call_id": item.id,
+                                       "name": name, "arguments": item.input}
+                    elif (isinstance(message, UserMessage)
+                          and isinstance(message.content, list)):
+                        for item in message.content:
+                            if isinstance(item, ToolResultBlock):
+                                yield {"type": "tool_result",
+                                       "call_id": item.tool_use_id,
+                                       "name": names.get(item.tool_use_id, "tool"),
+                                       "output": item.content}
+                    elif isinstance(message, ResultMessage) and done and not failures:
+                        yield {"type": "done", "answer": message.result or "",
+                               "usage": _claude_code_usage(message.usage),
+                               "finish_reason": ("length"
+                                                 if message.stop_reason == "max_tokens"
+                                                 else "stop")}
+        except PageIndexAPIError:
+            if failures:  # a tool failure (402, 429) is the cause to report
+                raise failures[0] from None
+            raise
+        if failures:  # raised after the run, once the CLI is closed
             raise failures[0]
     return run
 
