@@ -42,8 +42,9 @@ python-dotenv = ">=1.0.0"
 pyyaml = ">=6.0"
 Pillow = ">=9.0"
 # as_claude_mcp()'s cloud relay needs in-process servers served over mcp's
-# own transport (0.2.140); 0.2.160 stops closing stdin on them too early.
-claude-agent-sdk = { version = ">=0.2.160", optional = true }
+# own transport (0.2.140); 0.2.160 stops closing stdin on them too early;
+# 0.2.166 bundles a CLI that passes 4,096 chars of server instructions, not 2,048.
+claude-agent-sdk = { version = ">=0.2.166", optional = true }
 # Pre-0.122 lacks the Bedrock/Vertex tool runner; pre-0.108 executes a
 # refusal turn's tool_use blocks.
 anthropic = { version = ">=0.122.0", optional = true }
