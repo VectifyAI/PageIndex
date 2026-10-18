@@ -1433,22 +1433,12 @@ def _make_tool_function(name: str, description: str, schema: dict,
     if not params_usable:
         def inner(**kwargs: Any) -> str:
             return render_text(_invoke(kwargs)[0])
+        inner.__name__ = inner.__qualname__ = name or "tool"
     else:
         ordered = ([p for p in properties if p in required]
                    + [p for p in properties if p not in required])
-        rendered = ", ".join(
-            p if p in required else f"{p}={properties[p].get('default')!r}"
-            for p in ordered
-        )
-        args_literal = "{" + ", ".join(f"'{p}': {p}" for p in ordered) + "}"
-        namespace: dict[str, Any] = {"_invoke": _invoke,
-                                     "_render": render_text}
-        exec(f"def _synthesized({rendered}):\n"
-             f"    return _render(_invoke({args_literal})[0])", namespace)
-        inner = namespace["_synthesized"]
-        # binding TypeErrors quote __qualname__, not __name__
-        inner.__name__ = inner.__qualname__ = name or "tool"
         annotations: dict[str, Any] = {}
+        parameters: list[inspect.Parameter] = []
         for p in ordered:
             annotation = _annotation_for(properties[p])
             if p not in required and "default" not in properties[p]:
@@ -1456,7 +1446,33 @@ def _make_tool_function(name: str, description: str, schema: dict,
                 # schemas force the model to always send a value.
                 annotation = Optional[annotation]
             annotations[p] = annotation
+            default = (
+                inspect.Parameter.empty
+                if p in required
+                else properties[p].get("default", None)
+            )
+            parameters.append(
+                inspect.Parameter(
+                    name=p,
+                    kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    default=default,
+                    annotation=annotation,
+                )
+            )
         annotations["return"] = str
+        sig = inspect.Signature(parameters=parameters, return_annotation=str)
+
+        def inner(*args: Any, **kwargs: Any) -> str:
+            try:
+                bound = sig.bind(*args, **kwargs)
+            except TypeError as exc:
+                raise TypeError(f"{name or 'tool'}() {exc}") from None
+            bound.apply_defaults()
+            return render_text(_invoke(dict(bound.arguments))[0])
+
+        inner.__signature__ = sig
+        # binding TypeErrors quote __qualname__, not __name__
+        inner.__name__ = inner.__qualname__ = name or "tool"
         inner.__annotations__ = annotations
 
     def proxy(*args: Any, **kwargs: Any) -> str:
