@@ -17,12 +17,13 @@ import re
 from typing import Any
 
 from .._version import sdk_version
+from ..agent_tools import TOOL_RESPONSE_CHAR_LIMIT
 from ..errors import PageIndexAPIError
 
 # Claude Code shows the model only a 2KB preview of an MCP result over
-# 50,000 chars; PageIndex results run to ~100,000. 500,000 is the CLI's
-# ceiling.
-MAX_RESULT_CHARS = 500_000
+# 50,000 chars; PageIndex results run to about TOOL_RESPONSE_CHAR_LIMIT,
+# so twice it keeps them whole.
+MAX_RESULT_CHARS = TOOL_RESPONSE_CHAR_LIMIT * 2
 
 
 def build_claude_mcp(client, include_management: bool = False, *,

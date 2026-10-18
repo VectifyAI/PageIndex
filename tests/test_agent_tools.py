@@ -869,7 +869,7 @@ def test_as_claude_mcp_local_lifts_the_result_size_cap(client):
     _, listed = _claude_session(server, ("tools/list", {}))
     tools = listed["result"]["tools"]
     assert {tool["_meta"]["anthropic/maxResultSizeChars"]
-            for tool in tools} == {500_000}
+            for tool in tools} == {200_000}
     assert all(tool["annotations"]["readOnlyHint"] for tool in tools)
 
 
