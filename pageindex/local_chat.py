@@ -1810,14 +1810,11 @@ def _claude_code_usage(usage) -> dict:
     cache reads and writes, as LiteLLM counts Claude's."""
     usage = usage or {}
     cached = usage.get("cache_read_input_tokens") or 0
-    prompt = ((usage.get("input_tokens") or 0) + cached
-              + (usage.get("cache_creation_input_tokens") or 0))
-    completion = usage.get("output_tokens") or 0
+    cache_write = usage.get("cache_creation_input_tokens") or 0
+    prompt = (usage.get("input_tokens") or 0) + cached + cache_write
     thinking = (usage.get("output_tokens_details") or {}).get("thinking_tokens") or 0
-    return {"prompt_tokens": prompt, "completion_tokens": completion,
-            "total_tokens": prompt + completion,
-            "prompt_tokens_details": {"cached_tokens": cached},
-            "completion_tokens_details": {"reasoning_tokens": thinking}}
+    return _chat_shape(prompt, usage.get("output_tokens") or 0, cached,
+                       cache_write, thinking)
 
 
 def _claude_code_completions(run, model_name: str, stream: bool,
