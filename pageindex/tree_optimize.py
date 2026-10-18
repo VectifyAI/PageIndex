@@ -1040,6 +1040,30 @@ def report_costs(structure, routing, trigger):
     return rows, merges, triggers
 
 
+def _confine_output_path(raw_path, *, flag, allowed_dirs):
+    """Resolve a CLI-supplied output path, confining writes under allowed_dirs.
+
+    Relative paths resolve against the current working directory, exactly as
+    before. The fully-resolved path (symlinks and ``..`` normalized) must sit
+    inside one of ``allowed_dirs``; anything else raises ValueError. This stops
+    ``--out``/``--log`` from silently overwriting arbitrary user-writable files
+    (e.g. ``--out /etc/cron.daily/x.json``) after an operator typo or when the
+    invocation is copied from untrusted instructions. See issue #584.
+    """
+    candidate = os.path.expanduser(raw_path)
+    if not os.path.isabs(candidate):
+        candidate = os.path.join(os.getcwd(), candidate)
+    resolved = os.path.realpath(candidate)
+    bases = [os.path.realpath(d) for d in allowed_dirs]
+    if not any(resolved == base or resolved.startswith(base + os.sep)
+               for base in bases):
+        raise ValueError(
+            f"{flag}: refusing to write outside "
+            f"{', '.join(bases)}: {raw_path!r}"
+        )
+    return resolved
+
+
 async def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1081,6 +1105,20 @@ async def main():
     page_count = len(pages)
     out_path = args.out or re.sub(r"(\.json)?$", ".optimized.json",
                                   args.structure, count=1)
+    # Confine --out/--log writes: relative paths resolve under the CWD as
+    # before; absolute paths must stay under the CWD or the input structure's
+    # directory, so a typo can't silently clobber an arbitrary user-writable
+    # file (issue #584).
+    struct_dir = os.path.dirname(os.path.abspath(args.structure)) or os.getcwd()
+    try:
+        out_path = _confine_output_path(out_path, flag="--out",
+                                        allowed_dirs=[os.getcwd(), struct_dir])
+        log_path = (_confine_output_path(args.log, flag="--log",
+                                          allowed_dirs=[os.getcwd(), struct_dir])
+                    if args.log else None)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
 
     rows, merges, triggers = report_costs(structure, args.routing, args.trigger_pages)
     metrics = complexity(structure, page_count, routing=args.routing)
@@ -1137,8 +1175,8 @@ async def main():
                    "min_gain_ratio": args.min_gain_ratio, "model": model,
                    "before": result["before"], "after": result["after"],
                    "id_map": result["id_map"], "events": result["log"]},
-                  open(args.log, "w"), indent=2, ensure_ascii=False)
-        print(f"log:       {args.log}")
+                  open(log_path, "w"), indent=2, ensure_ascii=False)
+        print(f"log:       {log_path}")
     return 0
 
 
