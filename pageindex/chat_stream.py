@@ -1,4 +1,4 @@
-"""chat(stream=True)'s return type: one run, one view — text or events."""
+"""Synchronous chat streams and their public result views."""
 from __future__ import annotations
 
 from typing import Any, Iterator, Optional
@@ -67,3 +67,40 @@ class ChatStream:
         close = getattr(self._it, "close", None)
         if close is not None:
             close()
+
+
+class MessagesStream:
+    """One Messages stream and its final result, including after close.
+
+    Iteration yields JSON event dicts. ``result`` is None until the run
+    ends; ``get_final_result()`` consumes the remaining events. Failures
+    still raise from iteration, with the collected result retained.
+    Consume and close on the same thread.
+    """
+
+    def __init__(self, events, result, finish):
+        self._it = iter(events)
+        self._result = result
+        self._finish = finish
+
+    def __iter__(self) -> "MessagesStream":
+        return self
+
+    def __next__(self) -> dict:
+        return next(self._it)
+
+    @property
+    def result(self) -> Optional[dict]:
+        return self._result or None
+
+    def get_final_result(self) -> dict:
+        """Drain the stream and return the same result as message_stop."""
+        for _ in self:
+            pass
+        return self._result
+
+    def close(self) -> None:
+        try:
+            self._it.close()
+        finally:
+            self._finish("cancelled")
