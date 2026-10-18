@@ -2259,24 +2259,28 @@ class PageIndexClient:
     def as_claude_mcp(self, include_management: bool = False, *,
                       server_name: str = "pageindex"):
         """
-        ``mcp_servers`` entry for the Claude Agent SDK.
+        ``mcp_servers`` entry for the Claude Agent SDK: an in-process SDK
+        MCP server, in both modes (requires ``claude-agent-sdk``;
+        ``pip install 'pageindex[claude]'``).
 
-        Cloud: returns the remote PageIndex MCP config.
-        ``include_management`` picks the endpoint, so the URL itself is
-        the gate — the default connects to the read-only endpoint
-        (``/mcp?tools=read``: the server registers only read-only tools),
-        ``True`` connects to the full tool set. Local: returns an
-        in-process SDK MCP server exposing the agent tools, gated the
-        same way at registration (requires ``claude-agent-sdk``;
-        ``pip install 'pageindex[claude]'``). ``server_name`` names the
-        in-process server — match it to the key you register the entry
-        under (cloud entries carry no name).
+        Cloud: a relay to the PageIndex MCP server — its tools,
+        instructions and resources, fetched live for each session — that
+        keeps the API key off the Claude Code CLI's command line (where a
+        remote server config would carry it, readable by any local
+        process). ``include_management`` picks the endpoint: the
+        default relays the read-only one (``/mcp?tools=read``: the server
+        registers only read-only tools), ``True`` the full tool set.
+        Local: the agent tools over the local store, gated the same way at
+        registration. ``server_name`` names the server — match it to the
+        key you register the entry under.
 
         Cloud hosts that surface MCP server instructions receive the tool
         guidance natively — not the client's ``instructions``, which only
         ``system_prompt`` carries; passing both duplicates the guidance
         (harmless). ``system_prompt`` stays the recommended channel: it is
-        guaranteed delivery, and the only channel local mode has.
+        guaranteed delivery, whole (Claude Code hands the model at most
+        4,096 characters of a server's instructions), and the only channel
+        local mode has.
 
         Usage (or ``claude_agent_config()`` for the whole bundle in one
         call)::
