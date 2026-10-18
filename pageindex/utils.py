@@ -164,6 +164,12 @@ def _is_unrecoverable(exc: Exception) -> bool:
 
 
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
+    from .integrations.claude_agent_sdk import claude_code_complete, is_claude_code
+    if is_claude_code(model):
+        if chat_history or return_finish_reason:
+            raise ValueError("claude-code/ models index in flash mode only; "
+                             "standard mode needs an API model.")
+        return run_off_loop(asyncio.run, claude_code_complete(model, prompt))
     import litellm
     max_retries = 10
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
@@ -201,6 +207,9 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
 
 
 async def llm_acompletion(model, prompt, **params):
+    from .integrations.claude_agent_sdk import claude_code_complete, is_claude_code
+    if is_claude_code(model):
+        return await claude_code_complete(model, prompt, **params)
     import litellm
     max_retries = 10
     messages = [{"role": "user", "content": prompt}]

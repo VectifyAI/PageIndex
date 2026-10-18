@@ -47,11 +47,15 @@ def _system_text(content: Any) -> str:
     )
 
 
-def _split_chat_messages(messages) -> "tuple[list[str], list[dict]]":
+def _split_chat_messages(messages, text_only: Optional[str] = None,
+                         ) -> "tuple[list[str], list[dict]]":
     """Validate the chat_completions surface's messages: system/developer
     content joins the managed instructions; user/assistant history passes
     through. Tool-history round-trips belong to chat(protocol="responses")
-    or chat(protocol="messages")."""
+    or chat(protocol="messages"). ``text_only`` names a model those lanes
+    cannot run (claude-code/): its errors say so instead of sending the
+    caller there."""
+    lanes = 'chat(protocol="responses") or chat(protocol="messages")'
     messages = list(messages)
     if not messages:
         raise PageIndexAPIError("messages must be a non-empty list.")
@@ -68,16 +72,20 @@ def _split_chat_messages(messages) -> "tuple[list[str], list[dict]]":
             content = message.get("content")
             if not isinstance(content, str):
                 raise PageIndexAPIError(
-                    "content must be a string on this lane; for "
-                    "structured items use chat(protocol=\"responses\") "
-                    "or chat(protocol=\"messages\")."
+                    f"{text_only} takes text messages only: content must be "
+                    "a string. For images or other structured items, use an "
+                    f"API model with {lanes}." if text_only else
+                    "content must be a string on this lane; for structured "
+                    f"items use {lanes}."
                 )
             history.append({"role": role, "content": content})
         else:
             raise PageIndexAPIError(
+                f"{text_only} takes text messages only: no {role!r} "
+                f"messages. For tool history, use an API model with {lanes}."
+                if text_only else
                 f"Unsupported role {role!r} on this lane. Tool history "
-                "round-trips belong to chat(protocol=\"responses\") or "
-                "chat(protocol=\"messages\")."
+                f"round-trips belong to {lanes}."
             )
     if not history:
         raise PageIndexAPIError("messages must contain a user or assistant "
@@ -651,8 +659,8 @@ def _chat_agent(client, messages, doc_id, model, temperature=None,
 
 def _output_text(output) -> str:
     """A tool result for the display: a string as it is, the framework's
-    structured items by their text, anything else as JSON with a data
-    URL's base64 payload elided."""
+    structured items by their text, anything else as JSON with an image's
+    base64 payload elided (a data URL, or a Claude block's source data)."""
     if isinstance(output, str):
         return output
     lines = []
@@ -664,6 +672,11 @@ def _output_text(output) -> str:
             head, _, _ = item["image_url"].partition(",")
             lines.append(json.dumps({**item, "image_url": head + ",..."},
                                     ensure_ascii=False))
+        elif (kind == "image" and isinstance(item.get("source"), dict)
+              and "data" in item["source"]):
+            lines.append(json.dumps(
+                {**item, "source": {**item["source"], "data": "..."}},
+                ensure_ascii=False))
         else:
             lines.append(json.dumps(item, ensure_ascii=False))
     return "\n".join(lines)
@@ -906,7 +919,6 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
     consumed."""
     options = (None if show_process is False or show_process is None
                else _process_options(show_process))
-    _require_openai_agents("chat")
     _validate_max_turns(max_turns)
     if isinstance(messages, str):
         if not messages.strip():
@@ -914,6 +926,24 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
                 "messages must be a non-empty string or a list of "
                 "message dicts.")
         messages = [{"role": "user", "content": messages}]
+    from .integrations.claude_agent_sdk import is_claude_code
+    if is_claude_code(model or client.chat_model):
+        run = _claude_code_run(client, messages, model or client.chat_model,
+                               doc_id=doc_id, folder_id=folder_id,
+                               reasoning_effort=reasoning_effort,
+                               max_turns=max_turns, partial=True,
+                               extra_body=extra_body,
+                               extra_headers=extra_headers,
+                               # a configured chat_backend is for API
+                               # models; only one passed here is refused
+                               backend=backend)
+
+        def claude_events():
+            return _stream_sync(lambda: run(False))
+
+        return ChatStream(text=lambda: _weave(claude_events(), options),
+                          events=claude_events)
+    _require_openai_agents("chat")
     agent, items, _ = _chat_agent(client, messages, doc_id, model,
                                   reasoning_effort=reasoning_effort,
                                   extra_body=extra_body, backend=backend,
@@ -948,8 +978,22 @@ def run_chat_completions(client, messages, stream: bool = False,
             + ("drop the chat model configuration to use it, or "
                if getattr(client, "api_key", None) else "")
             + "cite with your own model via chat(citations=True).")
-    _require_openai_agents("chat")
     _validate_max_turns(max_turns)
+    from .integrations.claude_agent_sdk import is_claude_code
+    if is_claude_code(model or client.chat_model):
+        run = _claude_code_run(client, messages, model or client.chat_model,
+                               doc_id=doc_id, folder_id=folder_id,
+                               reasoning_effort=reasoning_effort,
+                               max_turns=max_turns, partial=stream,
+                               temperature=temperature, top_p=top_p,
+                               max_tokens=max_tokens, extra_body=extra_body,
+                               extra_headers=extra_headers,
+                               # a configured chat_backend is for API
+                               # models; only one passed here is refused
+                               backend=backend)
+        return _claude_code_completions(run, model or client.chat_model,
+                                        stream, stream_metadata)
+    _require_openai_agents("chat")
     agent, items, model_name = _chat_agent(
         client, messages, doc_id, model, temperature=temperature,
         top_p=top_p, reasoning_effort=reasoning_effort,
@@ -1533,3 +1577,176 @@ def run_messages(client, messages, model: str, route: str,
                 {"role": "assistant", "content": appendable}]
     envelope["messages"] = new_messages
     return envelope
+
+
+# ── Claude Agent SDK engine (claude-code/: the user's Claude subscription) ──
+
+_TURNS_NOTE = ("The conversation so far arrives as <turn> blocks in the user "
+               "message, oldest first. Answer the last user turn.")
+
+
+def _claude_code_run(client, messages, model_name: str, doc_id=None,
+                     folder_id=None, reasoning_effort=None, max_turns=None,
+                     partial: bool = False, **unsupported):
+    """The claude-code/ engine: one Claude Code CLI run per call. The
+    conversation goes in as ONE user message, a text block per turn: the
+    CLI caches the request up to its own trailing marker, so each call
+    reads the previous call's prefix (one growing block would not cache).
+    Validates eagerly; returns run(done) -> the run's typed events, ending
+    with {"type": "done", ...} (answer, usage, finish_reason) when done."""
+    given = sorted(name for name, value in unsupported.items()
+                   if value is not None)
+    if given:
+        raise PageIndexAPIError(
+            f"{model_name} runs the Claude Code CLI, which takes no "
+            f"{', '.join(given)} — drop them.")
+    from contextlib import aclosing
+    from .integrations.claude_agent_sdk import (
+        claude_code_messages, claude_code_options, tool_server)
+    system_texts, history = _split_chat_messages(messages, text_only=model_name)
+    scope = client._local_doc_scope(doc_id)
+    block = targeting_block(client, doc_id, folder_id)
+    blocks = [{"type": "text", "text": block}] if block else []
+    blocks += [{"type": "text", "text": f'<turn role="{m["role"]}">\n'
+                f'{m["content"].replace("</turn>", "</ turn>")}\n</turn>'}
+               for m in history]
+    # cloud tool failures (auth, limits): the run fails on them, as the
+    # bridge lanes do, instead of the model answering around them
+    failures: list = []
+    options = claude_code_options(
+        model_name, reasoning_effort,
+        system_prompt=_managed_instructions(client, [_TURNS_NOTE, *system_texts]),
+        mcp_servers={"pageindex": tool_server(client, doc_ids=scope,
+                                              failures=failures)},
+        allowed_tools=["mcp__pageindex"],
+        max_turns=max_turns if max_turns is not None else 10,
+        include_partial_messages=partial)
+
+    async def prompt():
+        yield {"type": "user", "message": {"role": "user", "content": blocks}}
+
+    async def run(done: bool):
+        from claude_agent_sdk import (AssistantMessage, ResultMessage,
+                                      StreamEvent, TextBlock, ToolResultBlock,
+                                      ToolUseBlock, UserMessage)
+        names: dict = {}  # tool_use id -> tool name, to label results
+        streamed = ""  # text deltas since the last text block
+        failures.clear()
+        try:
+            async with aclosing(claude_code_messages(prompt(), options)) as sdk:
+                async for message in sdk:
+                    if failures:  # stop at the failed tool, before any answer around it
+                        break
+                    if isinstance(message, StreamEvent):
+                        if message.event.get("type") == "message_start":
+                            streamed = ""  # a retried call streams afresh
+                        delta = message.event.get("delta") or {}
+                        if delta.get("type") == "text_delta" and delta.get("text"):
+                            streamed += delta["text"]
+                            yield {"type": "answer", "delta": delta["text"]}
+                        elif (delta.get("type") == "thinking_delta"
+                              and delta.get("thinking")):
+                            yield {"type": "thinking", "delta": delta["thinking"]}
+                    elif isinstance(message, AssistantMessage):
+                        text = "".join(item.text for item in message.content
+                                       if isinstance(item, TextBlock))
+                        if text:
+                            # the CLI's non-streaming fallback sends the text
+                            # whole, after whatever the failed stream got out
+                            rest = (text[len(streamed):] if text.startswith(streamed)
+                                    else "\n\n" + text)  # regenerated differently
+                            if rest:
+                                yield {"type": "answer", "delta": rest}
+                            streamed = ""
+                        for item in message.content:
+                            if isinstance(item, ToolUseBlock):
+                                name = item.name.removeprefix("mcp__pageindex__")
+                                names[item.id] = name
+                                yield {"type": "tool_call", "call_id": item.id,
+                                       "name": name, "arguments": item.input}
+                    elif (isinstance(message, UserMessage)
+                          and isinstance(message.content, list)):
+                        for item in message.content:
+                            if isinstance(item, ToolResultBlock):
+                                yield {"type": "tool_result",
+                                       "call_id": item.tool_use_id,
+                                       "name": names.get(item.tool_use_id, "tool"),
+                                       "output": item.content}
+                    elif isinstance(message, ResultMessage) and done and not failures:
+                        yield {"type": "done", "answer": message.result or "",
+                               "usage": _claude_code_usage(message.usage),
+                               "finish_reason": ("length"
+                                                 if message.stop_reason == "max_tokens"
+                                                 else "stop")}
+        except PageIndexAPIError:
+            if failures:  # a tool failure (402, 429) is the cause to report
+                raise failures[0] from None
+            raise
+        if failures:  # raised after the run, once the CLI is closed
+            raise failures[0]
+    return run
+
+
+def _claude_code_usage(usage) -> dict:
+    """The run's usage, chat.completions dialect: prompt tokens include the
+    cache reads and writes, as LiteLLM counts Claude's."""
+    usage = usage or {}
+    cached = usage.get("cache_read_input_tokens") or 0
+    prompt = ((usage.get("input_tokens") or 0) + cached
+              + (usage.get("cache_creation_input_tokens") or 0))
+    completion = usage.get("output_tokens") or 0
+    thinking = (usage.get("output_tokens_details") or {}).get("thinking_tokens") or 0
+    return {"prompt_tokens": prompt, "completion_tokens": completion,
+            "total_tokens": prompt + completion,
+            "prompt_tokens_details": {"cached_tokens": cached},
+            "completion_tokens_details": {"reasoning_tokens": thinking}}
+
+
+def _claude_code_completions(run, model_name: str, stream: bool,
+                             stream_metadata: bool):
+    """run_chat_completions' envelope and chunks over a claude-code/ run."""
+    chat_id = f"chatcmpl-{uuid.uuid4().hex}"
+    created = int(time.time())
+    reported = model_name.removeprefix("claude-code/")
+
+    def chunk(delta: dict, finish=None) -> dict:
+        return {"id": chat_id, "object": "chat.completion.chunk",
+                "created": created, "model": reported,
+                "choices": [{"index": 0, "delta": delta,
+                             "finish_reason": finish}]}
+
+    if not stream:
+        async def last():
+            done = None
+            async for event in run(True):
+                done = event
+            return done
+        done = _run_sync(last())
+        if not done:
+            raise PageIndexAPIError("The model returned no response.")
+        return {"id": chat_id, "object": "chat.completion",
+                "created": created, "model": reported,
+                "choices": [{"index": 0,
+                             "message": {"role": "assistant",
+                                         "content": done["answer"]},
+                             "finish_reason": done["finish_reason"]}],
+                "usage": done["usage"]}
+
+    async def agen():
+        from contextlib import aclosing
+        yield chunk({"role": "assistant", "content": ""})
+        async with aclosing(run(True)) as events:  # an abandoned stream closes the run
+            async for event in events:
+                if event["type"] == "answer":
+                    yield chunk({"content": event["delta"]})
+                elif event["type"] == "done":
+                    yield chunk({}, finish=event["finish_reason"])
+                    yield {"id": chat_id, "object": "chat.completion.chunk",
+                           "created": created, "model": reported, "choices": [],
+                           "usage": event["usage"]}
+
+    if stream_metadata:
+        return _stream_sync(agen)
+    return (piece["choices"][0]["delta"]["content"]
+            for piece in _stream_sync(agen)
+            if piece.get("choices") and piece["choices"][0]["delta"].get("content"))

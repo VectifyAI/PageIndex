@@ -239,6 +239,13 @@ def page_index_flash(pdf, summary=True, summary_model=None,
     defaulted = not effort
     if summary and structure and defaulted:
         effort = default_summary_reasoning_effort(summary_model)
+    from ..integrations.claude_agent_sdk import claude_code_check, is_claude_code
+    if summary and structure and not defaulted and effort != "none" \
+            and is_claude_code(summary_model):
+        # a summary call would first check the effort after expand has
+        # billed its prompts
+        import asyncio
+        asyncio.run(claude_code_check(summary_model, effort))
     # bookmark-only extractions carry no page_texts and scanned ones
     # only empty strings; expand needs text
     pages = result.pop("page_texts", None) or []
