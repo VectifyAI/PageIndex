@@ -3,9 +3,9 @@
 An in-process SDK MCP server in both modes. Cloud clients get a relay that
 answers the CLI's MCP session with the PageIndex MCP server's own (its
 handshake and instructions, tools, resources), fetched live over this
-SDK's MCP client, so the API key stays in this process (a remote server
-config would carry it on the CLI's command line, readable by any local
-process); include_management picks the endpoint (the read-only
+SDK's MCP client, so the API key stays off the CLI's command line (where
+a remote server config would carry it, readable by any local process);
+include_management picks the endpoint (the read-only
 ``?tools=read`` URL by default). Local clients get a server over the same
 tool contract, gated the same way at registration, its results passed
 through as the MCP content they are.
@@ -74,12 +74,13 @@ def _cloud_relay(client, include_management: bool, server_name: str):
                         re.findall(r"\d+", version("claude-agent-sdk"))[:3])
     except ImportError:  # not installed
         release = ()
-    if release < (0, 2, 140):
+    if release < (0, 2, 160):
         # older releases answer the CLI from a server's registered
-        # handlers, and the relay has none: the agent would quietly run
-        # without the tools
+        # handlers, which the relay lacks (before 0.2.140), or close the
+        # CLI's stdin at the first result (before 0.2.160): the agent
+        # would quietly run without the tools
         raise PageIndexAPIError(
-            "as_claude_mcp on cloud requires claude-agent-sdk 0.2.140 or "
+            "as_claude_mcp on cloud requires claude-agent-sdk 0.2.160 or "
             "newer — pip install -U claude-agent-sdk.")
     import anyio.to_thread
     import mcp.types

@@ -2265,9 +2265,9 @@ class PageIndexClient:
 
         Cloud: a relay to the PageIndex MCP server — its tools,
         instructions and resources, fetched live for each session — that
-        keeps the API key in this process (a remote server config would
-        carry it on the Claude Code CLI's command line, readable by any
-        local process). ``include_management`` picks the endpoint: the
+        keeps the API key off the Claude Code CLI's command line (where a
+        remote server config would carry it, readable by any local
+        process). ``include_management`` picks the endpoint: the
         default relays the read-only one (``/mcp?tools=read``: the server
         registers only read-only tools), ``True`` the full tool set.
         Local: the agent tools over the local store, gated the same way at

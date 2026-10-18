@@ -834,7 +834,9 @@ def test_as_claude_mcp_cloud_relay_runs_calls_side_by_side(
 
 def test_as_claude_mcp_cloud_needs_an_sdk_that_serves_the_relay(monkeypatch):
     """Before 0.2.140 the SDK answered the CLI from a server's registered
-    handlers; the relay has none, so the agent would run without tools."""
+    handlers, which the relay lacks; before 0.2.160 it closed the CLI's
+    stdin at the first result. Either way the agent would run without
+    tools."""
     import importlib.metadata
 
     def version(name):
@@ -844,10 +846,10 @@ def test_as_claude_mcp_cloud_needs_an_sdk_that_serves_the_relay(monkeypatch):
 
     monkeypatch.setattr(importlib.metadata, "version", version)
     cloud = PageIndexCloudClient(api_key="pi-test-key")
-    for installed in ("0.2.139", None):
-        with pytest.raises(PageIndexAPIError, match="claude-agent-sdk 0.2.140"):
+    for installed in ("0.2.159", None):
+        with pytest.raises(PageIndexAPIError, match="claude-agent-sdk 0.2.160"):
             cloud.as_claude_mcp()
-    installed = "0.2.140"
+    installed = "0.2.160"
     assert cloud.as_claude_mcp()["type"] == "sdk"
 
 
