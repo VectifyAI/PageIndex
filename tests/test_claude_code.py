@@ -374,7 +374,8 @@ def test_flash_indexing_on_claude_code(monkeypatch, tmp_path, sample_pdf):
     assert doc["usage"] == {
         "prompt_tokens": 125 * runs, "completion_tokens": 7 * runs,
         "total_tokens": 132 * runs,
-        "prompt_tokens_details": {"cached_tokens": 100 * runs, "cache_write_tokens": 0},
+        "prompt_tokens_details": {"cached_tokens": 100 * runs,
+                                  "cache_write_tokens": 20 * runs},
         "completion_tokens_details": {"reasoning_tokens": 4 * runs}}
 
 
@@ -407,9 +408,10 @@ def test_chat_sends_one_message_with_a_block_per_turn(monkeypatch, chat_client):
 
     envelope = chat_client.chat(history, doc_id="pi-doc1", protocol="chat_completions")
     assert envelope["model"] == "haiku"
-    assert envelope["usage"]["prompt_tokens"] == 125
-    assert envelope["usage"]["prompt_tokens_details"]["cached_tokens"] == 100
-    assert envelope["usage"]["completion_tokens_details"]["reasoning_tokens"] == 4
+    assert envelope["usage"] == {
+        "prompt_tokens": 125, "completion_tokens": 7, "total_tokens": 132,
+        "prompt_tokens_details": {"cached_tokens": 100, "cache_write_tokens": 20},
+        "completion_tokens_details": {"reasoning_tokens": 4}}
 
 
 @needs_claude
