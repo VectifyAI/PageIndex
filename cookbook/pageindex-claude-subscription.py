@@ -10,7 +10,7 @@ from pathlib import Path
 import requests
 from pageindex import PageIndexClient
 
-url = "https://arxiv.org/pdf/2610.14224"  # the Harness² paper
+url = "https://arxiv.org/pdf/2610.14224v1"  # the Harness² paper
 Path("harness2.pdf").write_bytes(requests.get(url).content)
 
 client = PageIndexClient(
