@@ -240,22 +240,16 @@ def _claude_client(options):
     return ClaudeSDKClient(options=options)
 
 
-_PROBE_REAPED = re.compile(
-    r"Unknown child process pid \d+, will report returncode 255")
-
-
 def _drop_probe_reaped(record) -> bool:
     """The SDK terminates its `claude -v` probe even after it has exited; on
     Python 3.12 and earlier that reaps the probe first, and asyncio's child
-    watcher logs this for an exit code nobody reads. Matched on the rendered
-    message: LiteLLM's redaction filter on the same logger may have
-    rendered it."""
+    watcher logs this for an exit code nobody reads. Matched on the ending
+    every child watcher's wording shares, which LiteLLM's redaction filter on
+    the same logger keeps when it renders the message first."""
     # ponytail: drops this one message process-wide, not only for the probe;
     # remove once the SDK stops terminating an exited probe
-    if not (isinstance(record.msg, str)
-            and record.msg.startswith("Unknown child process pid")):
-        return True  # rendering anything else could raise into the caller
-    return not _PROBE_REAPED.fullmatch(record.getMessage())
+    return not (isinstance(record.msg, str)
+                and record.msg.endswith("will report returncode 255"))
 
 
 def _run_error(result, kind, max_turns) -> PageIndexAPIError:

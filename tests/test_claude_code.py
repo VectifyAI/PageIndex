@@ -319,6 +319,9 @@ def assert_drops_only_the_probe_warning(log, caplog):
     caplog.clear()
     with caplog.at_level(logging.WARNING, logger="asyncio"):
         log.warning("Unknown child process pid %d, will report returncode 255", 42)
+        # Python 3.12's pidfd child watcher on Linux
+        log.warning("child process pid %d exit status already read: "
+                    " will report returncode 255", 44)
         # as LiteLLM's redaction filter on this logger leaves it: rendered
         log.warning("Unknown child process pid 43, will report returncode 255")
         log.warning("Executing %s took %.3f seconds", "<Task>", 0.2)
