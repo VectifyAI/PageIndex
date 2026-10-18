@@ -1627,9 +1627,10 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
 
     async def run(done: bool):
         from claude_agent_sdk import (AssistantMessage, ResultMessage,
-                                      StreamEvent, ToolResultBlock,
+                                      StreamEvent, TextBlock, ToolResultBlock,
                                       ToolUseBlock, UserMessage)
         names: dict = {}  # tool_use id -> tool name, to label results
+        streamed = ""  # text deltas since the last text block
         failures.clear()
         try:
             async with aclosing(claude_code_messages(prompt(), options)) as sdk:
@@ -1637,13 +1638,26 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
                     if failures:  # stop at the failed tool, before any answer around it
                         break
                     if isinstance(message, StreamEvent):
+                        if message.event.get("type") == "message_start":
+                            streamed = ""  # a retried call streams afresh
                         delta = message.event.get("delta") or {}
                         if delta.get("type") == "text_delta" and delta.get("text"):
+                            streamed += delta["text"]
                             yield {"type": "answer", "delta": delta["text"]}
                         elif (delta.get("type") == "thinking_delta"
                               and delta.get("thinking")):
                             yield {"type": "thinking", "delta": delta["thinking"]}
                     elif isinstance(message, AssistantMessage):
+                        text = "".join(item.text for item in message.content
+                                       if isinstance(item, TextBlock))
+                        if text:
+                            # the CLI's non-streaming fallback sends the text
+                            # whole, after whatever the failed stream got out
+                            rest = (text[len(streamed):] if text.startswith(streamed)
+                                    else "\n\n" + text)  # regenerated differently
+                            if rest:
+                                yield {"type": "answer", "delta": rest}
+                            streamed = ""
                         for item in message.content:
                             if isinstance(item, ToolUseBlock):
                                 name = item.name.removeprefix("mcp__pageindex__")
@@ -1681,10 +1695,11 @@ def _claude_code_usage(usage) -> dict:
     prompt = ((usage.get("input_tokens") or 0) + cached
               + (usage.get("cache_creation_input_tokens") or 0))
     completion = usage.get("output_tokens") or 0
+    thinking = (usage.get("output_tokens_details") or {}).get("thinking_tokens") or 0
     return {"prompt_tokens": prompt, "completion_tokens": completion,
             "total_tokens": prompt + completion,
             "prompt_tokens_details": {"cached_tokens": cached},
-            "completion_tokens_details": {"reasoning_tokens": 0}}
+            "completion_tokens_details": {"reasoning_tokens": thinking}}
 
 
 def _claude_code_completions(run, model_name: str, stream: bool,

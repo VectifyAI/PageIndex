@@ -15,8 +15,8 @@ from pageindex.utils import (LLMRetriesExhausted, _is_unrecoverable,
 
 try:
     from claude_agent_sdk import (AssistantMessage, ResultMessage,
-                                  StreamEvent, TextBlock, ToolResultBlock,
-                                  ToolUseBlock, UserMessage)
+                                  StreamEvent, TextBlock, ThinkingBlock,
+                                  ToolResultBlock, ToolUseBlock, UserMessage)
     _HAS_CLAUDE = True
 except ImportError:
     _HAS_CLAUDE = False
@@ -273,7 +273,8 @@ def test_flash_indexing_on_claude_code(monkeypatch, tmp_path, sample_pdf):
 @needs_claude
 def test_chat_sends_one_message_with_a_block_per_turn(monkeypatch, chat_client):
     usage = {"input_tokens": 5, "cache_read_input_tokens": 100,
-             "cache_creation_input_tokens": 20, "output_tokens": 7}
+             "cache_creation_input_tokens": 20, "output_tokens": 7,
+             "output_tokens_details": {"thinking_tokens": 4}}
     sessions = fake_cli(monkeypatch, result("A2", usage=usage))
     history = [{"role": "user", "content": "Q1"},
                {"role": "assistant", "content": "A1"},
@@ -298,6 +299,7 @@ def test_chat_sends_one_message_with_a_block_per_turn(monkeypatch, chat_client):
     assert envelope["model"] == "haiku"
     assert envelope["usage"]["prompt_tokens"] == 125
     assert envelope["usage"]["prompt_tokens_details"]["cached_tokens"] == 100
+    assert envelope["usage"]["completion_tokens_details"]["reasoning_tokens"] == 4
 
 
 @needs_claude
@@ -332,6 +334,30 @@ def test_chat_completions_stream_chunks(monkeypatch, chat_client):
     assert chunks[4]["choices"] == [] and chunks[4]["usage"]["completion_tokens"] == 2
     assert len(chunks) == 5
     assert "".join(chat_client.chat_completions("Q", stream=True)) == "Hi there."
+
+
+@needs_claude
+@pytest.mark.parametrize("streamed, shown", [
+    ([], "It has 1 page."),  # fallback, nothing streamed
+    (["It has "], "It has 1 page."),  # fallback after a cut stream
+    (["It was "], "It was \n\nIt has 1 page."),  # fallback regenerated differently
+    (["It has ", "1 page."], "It has 1 page."),  # streamed whole
+    # a retried stream
+    (["It has ", "START", "It has ", "1 page."], "It has It has 1 page."),
+])
+def test_a_stream_carries_text_the_cli_sent_whole(monkeypatch, chat_client,
+                                                  streamed, shown):
+    """The CLI's non-streaming fallback sends the text in its assistant
+    message alone, after whatever a failed stream got out: the stream still
+    carries the whole text, once."""
+    start = StreamEvent(uuid="u", session_id="s", event={"type": "message_start"})
+    fake_cli(monkeypatch,
+             *[start if text == "START" else delta(text) for text in streamed],
+             AssistantMessage(content=[ThinkingBlock("hmm", "sig")], model="haiku"),
+             AssistantMessage(content=[TextBlock("It has 1 page.")], model="haiku"),
+             result("It has 1 page."))
+    assert "".join(chat_client.chat("Q", stream=True, show_process=False)) == shown
+    assert "".join(chat_client.chat_completions("Q", stream=True)) == shown
 
 
 @needs_claude

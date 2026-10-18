@@ -1239,6 +1239,12 @@ class PageIndexClient:
         never inferred from the model name. Keep ``doc_id`` and
         ``protocol`` constant across a conversation's calls.
 
+        A ``claude-code/`` chat model runs Claude Code, not LiteLLM (see
+        the constructor's ``chat_model``): ``backend``, ``extra_headers``
+        and ``extra_body`` are refused, a configured ``chat_backend``
+        doesn't apply, and ``reasoning_effort`` must be a level Claude
+        Code lists for the model.
+
         Args:
             messages: A question string, or the conversation history —
                 role/content messages on every lane. With your own chat
@@ -1578,6 +1584,13 @@ class PageIndexClient:
         "content_filter" when the last turn was cut short. For
         the tool-use process and prompt-cache round-trip use
         ``chat(protocol="responses")`` or ``chat(protocol="messages")``.
+
+        A ``claude-code/`` chat model runs Claude Code, not LiteLLM (see
+        the constructor's ``chat_model``): ``temperature``, ``top_p``,
+        ``max_tokens``, ``extra_body``, ``extra_headers`` and ``backend``
+        are refused, a configured ``chat_backend`` doesn't apply, and
+        ``reasoning_effort`` must be a level Claude Code lists for the
+        model.
 
         Args:
             messages: Conversation messages with 'role' and 'content' keys,
