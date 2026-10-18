@@ -315,7 +315,7 @@ async def claude_code_complete(model: str, prompt: str,
     """One indexing prompt on the claude-code/ route: no tools, one turn.
     Every failure is final — the CLI already retried what it could — and
     only a 400 stays per-prompt, for the indexing callers to absorb."""
-    from ..utils import LLMRetriesExhausted
+    from ..utils import LLMRetriesExhausted, _add_usage_counts
     loop = asyncio.get_running_loop()
     # ponytail: one cap per event loop; submits on separate threads each get their own
     entry = _GATES.setdefault(loop, [asyncio.Semaphore(CLAUDE_CODE_CONCURRENCY), 0])
@@ -328,6 +328,8 @@ async def claude_code_complete(model: str, prompt: str,
             async for message in claude_code_messages(prompt, options):
                 if isinstance(message, ResultMessage):
                     reply = message.result or ""
+                    from ..local_chat import _claude_code_usage
+                    _add_usage_counts(_claude_code_usage(message.usage))
     except Exception as exc:
         # anything unmapped is final too: a bare error would read as a
         # per-node miss and quietly leave fallback summaries

@@ -57,6 +57,18 @@ def _add_usage(response) -> None:
     usage["completion_tokens_details"]["reasoning_tokens"] += reasoning or 0
 
 
+def _add_usage_counts(counts, usage=None) -> None:
+    """Add a chat-shape usage dict (a claude-code/ run's) to the tally."""
+    usage = _llm_usage.get() if usage is None else usage
+    if usage is None:
+        return
+    for key, value in counts.items():
+        if isinstance(value, dict):
+            _add_usage_counts(value, usage.setdefault(key, {}))
+        else:
+            usage[key] = usage.get(key, 0) + (value or 0)
+
+
 def _repair_litellm_types() -> None:
     """litellm 1.97.0's Message/Delta annotations carry nested forward refs
     Python 3.10 cannot resolve (BerriAI/litellm#36384), so every completion
