@@ -1,6 +1,8 @@
 """The claude-code/ route — indexing and chat as Claude Code CLI runs on the
 user's subscription — over a faked CLI session: no subprocess, no login."""
 import asyncio
+import logging
+import sys
 import time
 from types import SimpleNamespace
 
@@ -102,6 +104,55 @@ def test_standard_mode_refuses_claude_code(tmp_path, sample_pdf):
     with pytest.raises(ValueError, match="flash mode only"):
         page_index_main(sample_pdf, SimpleNamespace(
             model="gpt-4.1", summary_model="claude-code/haiku"))
+
+
+SDK_FIX = r"claude-agent-sdk 0\.2\.166 or newer — pip install -U 'pageindex\[claude\]'"
+
+
+def fake_sdk_version(monkeypatch, installed):
+    import importlib.metadata
+
+    def version(name):
+        if installed is None:
+            raise importlib.metadata.PackageNotFoundError(name)
+        return installed
+    monkeypatch.setattr(importlib.metadata, "version", version)
+    monkeypatch.setattr(cc, "_claude_client",
+                        lambda options: pytest.fail("the CLI would start"))
+
+
+@pytest.mark.parametrize("installed", ["0.1.53", "0.2.165", None])
+def test_indexing_names_an_old_or_missing_agent_sdk(
+        monkeypatch, tmp_path, sample_pdf, installed):
+    """Before 0.2.158 the route failed deep inside, on a TypeError about
+    verbatim_prompts; below 0.2.166 it is unverified."""
+    fake_sdk_version(monkeypatch, installed)
+    if installed is None:  # no module either
+        monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
+    client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
+                                  index_model="claude-code/haiku")
+    with pytest.raises(PageIndexAPIError, match=SDK_FIX):
+        client.submit_document(sample_pdf)
+
+
+def test_indexing_names_a_broken_agent_sdk(monkeypatch, tmp_path, sample_pdf):
+    """Its metadata passes the floor but the import fails."""
+    fake_sdk_version(monkeypatch, "0.2.168")
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
+    client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
+                                  index_model="claude-code/haiku")
+    with pytest.raises(PageIndexAPIError, match=r"pip install 'pageindex\[claude\]'"):
+        client.submit_document(sample_pdf)
+
+
+@needs_claude
+def test_chat_names_an_old_agent_sdk_and_takes_the_extras_floor(
+        monkeypatch, chat_client):
+    fake_sdk_version(monkeypatch, "0.2.165")
+    with pytest.raises(PageIndexAPIError, match=SDK_FIX):
+        chat_client.chat("Q")
+    fake_sdk_version(monkeypatch, "0.2.166")
+    assert cc.claude_code_options("claude-code/haiku").model == "haiku"
 
 
 def test_chat_refuses_what_the_cli_cannot_take(chat_client):
@@ -256,6 +307,54 @@ def test_index_calls_are_capped(monkeypatch):
     assert asyncio.run(many()) == ["ok"] * 20
     assert peak == cc.CLAUDE_CODE_CONCURRENCY
     assert cc._GATES == {}  # the cap goes with its last call, not kept per loop
+
+
+@pytest.fixture
+def asyncio_log():
+    """The asyncio logger without the probe filter an earlier test may have
+    left on it (a filter stays: it is process-wide)."""
+    log = logging.getLogger("asyncio")
+    log.removeFilter(cc._drop_probe_reaped)
+    return log
+
+
+def test_the_probe_filter_renders_no_other_record():
+    """It sees every asyncio record in the app: rendering one with bad
+    arguments would raise into the caller, where logging alone reports it."""
+    bad = logging.makeLogRecord({"name": "asyncio", "msg": "%s %s", "args": ("x",)})
+    assert cc._drop_probe_reaped(bad) is True
+
+
+def assert_drops_only_the_probe_warning(log, caplog):
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="asyncio"):
+        log.warning("Unknown child process pid %d, will report returncode 255", 42)
+        # Python 3.12's pidfd child watcher on Linux
+        log.warning("child process pid %d exit status already read: "
+                    " will report returncode 255", 44)
+        # as LiteLLM's redaction filter on this logger leaves it: rendered
+        log.warning("Unknown child process pid 43, will report returncode 255")
+        log.warning("Executing %s took %.3f seconds", "<Task>", 0.2)
+    # only that message: asyncio's other warnings still reach the user
+    assert [r.getMessage() for r in caplog.records] == [
+        "Executing <Task> took 0.200 seconds"]
+
+
+@needs_claude
+def test_a_run_drops_asyncio_noise_about_the_reaped_version_probe(
+        monkeypatch, caplog, asyncio_log):
+    fake_cli(monkeypatch, result("ok"))
+    assert asyncio.run(llm_acompletion("claude-code/haiku", "P")) == "ok"
+    assert_drops_only_the_probe_warning(asyncio_log, caplog)
+
+
+@needs_claude
+def test_as_claude_mcp_drops_it_for_the_apps_own_sessions(
+        chat_client, caplog, asyncio_log):
+    """An app running its own Agent SDK sessions reaps the same probe;
+    claude_agent_config() builds its server through as_claude_mcp()."""
+    chat_client.as_claude_mcp()
+    assert_drops_only_the_probe_warning(asyncio_log, caplog)
 
 
 @needs_claude

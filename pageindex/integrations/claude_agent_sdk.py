@@ -16,6 +16,7 @@ as Claude Code CLI runs on the user's own Claude subscription login.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import tempfile
@@ -33,6 +34,8 @@ MAX_RESULT_CHARS = TOOL_RESPONSE_CHAR_LIMIT * 2
 
 def build_claude_mcp(client, include_management: bool = False, *,
                      server_name: str = "pageindex"):
+    # the app's own Agent SDK sessions reap the same probe
+    logging.getLogger("asyncio").addFilter(_drop_probe_reaped)
     if getattr(client, "api_key", None):
         return _cloud_relay(client, include_management, server_name)
     return tool_server(client, include_management, server_name=server_name)
@@ -91,14 +94,18 @@ def tool_server(client, include_management: bool = False, *,
                                  tools=tools)
 
 
-def _cloud_relay(client, include_management: bool, server_name: str):
+def _sdk_release() -> tuple:
+    """The installed claude-agent-sdk's (major, minor, patch); () if none."""
     from importlib.metadata import version
     try:
-        release = tuple(int(n) for n in
-                        re.findall(r"\d+", version("claude-agent-sdk"))[:3])
+        return tuple(int(n) for n in
+                     re.findall(r"\d+", version("claude-agent-sdk"))[:3])
     except ImportError:  # not installed
-        release = ()
-    if release < (0, 2, 160):
+        return ()
+
+
+def _cloud_relay(client, include_management: bool, server_name: str):
+    if _sdk_release() < (0, 2, 160):
         # older releases answer the CLI from a server's registered
         # handlers, which the relay lacks (before 0.2.140), or close the
         # CLI's stdin at the first result (before 0.2.160): the agent
@@ -198,6 +205,12 @@ def claude_code_options(model: str, reasoning_effort=None, **options):
         raise PageIndexAPIError(
             f"{model!r} names the claude-code route but no model — e.g. "
             "'claude-code/sonnet'.", status_code=404)
+    if _sdk_release() < (0, 2, 166):
+        # the claude extra's floor, the oldest release the route is verified
+        # on; before 0.2.158 the options don't even take verbatim_prompts
+        raise PageIndexAPIError(
+            "claude-code/ models run on claude-agent-sdk 0.2.166 or newer — "
+            "pip install -U 'pageindex[claude]'.")
     try:
         from claude_agent_sdk import ClaudeAgentOptions
     except ImportError as exc:
@@ -232,6 +245,18 @@ def _claude_client(options):
     return ClaudeSDKClient(options=options)
 
 
+def _drop_probe_reaped(record) -> bool:
+    """The SDK terminates its `claude -v` probe even after it has exited; on
+    Python 3.12 and earlier that reaps the probe first, and asyncio's child
+    watcher logs this for an exit code nobody reads. Matched on the ending
+    every child watcher's wording shares, which LiteLLM's redaction filter on
+    the same logger keeps when it renders the message first."""
+    # ponytail: drops this one message process-wide, not only for the probe;
+    # remove once the SDK stops terminating an exited probe
+    return not (isinstance(record.msg, str)
+                and record.msg.endswith("will report returncode 255"))
+
+
 def _run_error(result, kind, max_turns) -> PageIndexAPIError:
     if result.subtype == "error_max_turns":
         from ..local_chat import _wrap_max_turns
@@ -257,6 +282,7 @@ async def claude_code_messages(prompt, options):
     itself failed). The client disconnects inline however the run ends, so
     no CLI process outlives its event loop."""
     from claude_agent_sdk import AssistantMessage, ResultMessage
+    logging.getLogger("asyncio").addFilter(_drop_probe_reaped)  # added once
     try:
         async with _claude_client(options) as client:
             info = (await client.get_server_info()) or {}
