@@ -308,6 +308,13 @@ def asyncio_log():
     return log
 
 
+def test_the_probe_filter_renders_no_other_record():
+    """It sees every asyncio record in the app: rendering one with bad
+    arguments would raise into the caller, where logging alone reports it."""
+    bad = logging.makeLogRecord({"name": "asyncio", "msg": "%s %s", "args": ("x",)})
+    assert cc._drop_probe_reaped(bad) is True
+
+
 def assert_drops_only_the_probe_warning(log, caplog):
     caplog.clear()
     with caplog.at_level(logging.WARNING, logger="asyncio"):

@@ -252,6 +252,9 @@ def _drop_probe_reaped(record) -> bool:
     rendered it."""
     # ponytail: drops this one message process-wide, not only for the probe;
     # remove once the SDK stops terminating an exited probe
+    if not (isinstance(record.msg, str)
+            and record.msg.startswith("Unknown child process pid")):
+        return True  # rendering anything else could raise into the caller
     return not _PROBE_REAPED.fullmatch(record.getMessage())
 
 
