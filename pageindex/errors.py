@@ -17,3 +17,16 @@ def _pageindex_cause(exc: BaseException | None) -> PageIndexAPIError | None:
             return exc
         exc = exc.__cause__
     return None
+
+
+class PageIndexTimeoutError(PageIndexAPIError):
+    """A chat run stopped at its whole-run ``timeout``. Raised once the
+    run is torn down: no further model or tool calls start after it.
+    ``code`` is always ``"deadline_exceeded"``; ``timeout`` is the
+    budget in seconds."""
+
+    code = "deadline_exceeded"
+
+    def __init__(self, *args: object, timeout: float | None = None) -> None:
+        super().__init__(*args)
+        self.timeout = timeout

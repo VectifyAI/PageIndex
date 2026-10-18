@@ -95,6 +95,13 @@ class FakeModel(Model):
         self.instructions = []
         self.deltas_emitted = 0
 
+    async def _slow(self):
+        """``turn_delay``: seconds each model turn takes."""
+        delay = getattr(self, "turn_delay", 0)
+        if delay:
+            import asyncio as aio
+            await aio.sleep(delay)
+
     def _record(self, system_instructions, input):
         self.instructions.append(system_instructions)
         items = input if isinstance(input, list) else [input]
@@ -106,6 +113,7 @@ class FakeModel(Model):
                            tools, output_schema, handoffs, tracing,
                            **kwargs):
         from agents.items import ModelResponse
+        await self._slow()
         self._record(system_instructions, input)
         # Mimic the real model's transport hop when a test attaches one, so
         # the transport-level status recorder sees each turn.
@@ -127,6 +135,7 @@ class FakeModel(Model):
         if block_from is not None and len(self.inputs) + 1 >= block_from:
             while True:  # released only by task cancellation
                 await aio.sleep(0.01)
+        await self._slow()
         self._record(system_instructions, input)
         output = self.turns.pop(0)
         sequence = 0
@@ -1195,12 +1204,24 @@ def _anthropic_sse(message):
 def fake_anthropic(monkeypatch):
     state = {"calls": []}
 
-    def install(responses):
+    def install(responses, delay=0.0):
         state["calls"].clear()
 
         def handler(request):
+            if delay:
+                import time
+                time.sleep(delay)  # a slow provider, per request
             state["calls"].append(json.loads(request.content))
             body = responses[len(state["calls"]) - 1]
+            if isinstance(body, int):  # a provider error status
+                return anthropic_httpx.Response(body, json={
+                    "type": "error", "error": {
+                        "type": "overloaded_error",
+                        "message": "backend refused"}})
+            if callable(body):  # an SSE body produced chunk by chunk
+                return anthropic_httpx.Response(
+                    200, content=body(),
+                    headers={"content-type": "text/event-stream"})
             if isinstance(body, str):  # pre-rendered SSE
                 return anthropic_httpx.Response(
                     200, content=body.encode(),
@@ -4293,3 +4314,234 @@ def test_managed_instructions_drop_blank_system_texts(store_path):
     client = PageIndexLocalClient(storage_path=store_path)
     assert (local_chat._managed_instructions(client, ["", "  ", "X"])
             == local_chat._managed_instructions(client, ["X"]))
+
+
+# ── whole-run deadline (chat(timeout=...)) ──
+# Deterministic slow doubles: each fake model turn or provider request
+# takes a fixed time, so a budget lands between known calls.
+
+from pageindex import PageIndexTimeoutError  # noqa: E402
+import pageindex.agent_tools as agent_tools  # noqa: E402
+import pageindex.deadline as deadline_mod  # noqa: E402
+
+
+def _tool_turns(store_path, tools=2):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    call = [_call_item("get_document", {"doc_name": "report.pdf"})]
+    return [call] * tools + [[_msg_item("The answer")]]
+
+
+def _consume(result):
+    return result if isinstance(result, (str, dict)) else list(result)
+
+
+def test_timeout_validation(client):
+    for bad in (0, -1, float("nan"), float("inf"), True, "5"):
+        with pytest.raises(PageIndexAPIError, match="positive number"):
+            client.chat("q", timeout=bad)
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    with pytest.raises(PageIndexAPIError, match="server-side"):
+        cloud.chat("q", timeout=5)
+    with pytest.raises(PageIndexAPIError, match="server-side"):
+        cloud.chat_completions("q", timeout=5)
+
+
+@needs_agents
+@pytest.mark.parametrize("protocol", [None, "chat_completions", "responses"])
+def test_timeout_generous_budget_changes_nothing(client, store_path,
+                                                 fake_model, protocol):
+    fake_model(_tool_turns(store_path, tools=1))
+    result = client.chat("q", protocol=protocol, timeout=30)
+    text = result if protocol is None else json.dumps(result)
+    assert "The answer" in text
+
+
+@needs_agents
+@pytest.mark.parametrize("protocol,stream", [
+    (None, False), (None, True),
+    ("chat_completions", False), ("chat_completions", True),
+    ("responses", False), ("responses", True)])
+def test_timeout_spans_turns_and_stops_further_calls(client, store_path,
+                                                     fake_model, protocol,
+                                                     stream):
+    """Three 0.15s turns under a 0.25s budget: the run is stopped before
+    turn 3, and nothing runs on afterwards. (The budget counts from
+    chat(), setup included, so where it lands among turns 1-2 depends on
+    the machine; that turn 3 never starts does not.)"""
+    import time
+    fake_model([[_msg_item("warm")]])
+    client.chat("q", protocol=protocol)  # one-off imports out of the clock
+    fake = fake_model(_tool_turns(store_path))
+    fake.turn_delay = 0.15
+    with pytest.raises(PageIndexTimeoutError) as caught:
+        _consume(client.chat("q", protocol=protocol, stream=stream,
+                             timeout=0.25))
+    assert caught.value.code == "deadline_exceeded"
+    assert caught.value.timeout == 0.25
+    assert isinstance(caught.value, PageIndexAPIError)
+    made = len(fake.inputs)
+    assert made < 3  # turn 3 never started
+    time.sleep(0.5)  # long enough for the remaining turns to have run
+    assert len(fake.inputs) == made  # the agent loop did not run on
+
+
+@needs_agents
+@pytest.mark.parametrize("stream", [False, True])
+def test_timeout_cuts_a_stalled_turn(client, store_path, fake_model, stream):
+    """A turn that never answers is cancelled at the deadline instead of
+    waiting out the provider's own timeouts."""
+    import time
+    fake = fake_model(_tool_turns(store_path, tools=1))
+    fake.turn_delay = 3600 if not stream else 0
+    if stream:
+        fake.block_from = 1
+    started = time.monotonic()
+    with pytest.raises(PageIndexTimeoutError):
+        _consume(client.chat("q", protocol="responses", stream=stream,
+                             timeout=0.2))
+    assert time.monotonic() - started < 2.0  # not the hour-long turn
+    assert fake.deltas_emitted == 0
+
+
+@needs_agents
+@pytest.mark.parametrize("stream", [False, True])
+def test_timeout_reaches_tool_threads(client, store_path, fake_model,
+                                      monkeypatch, stream):
+    """Tools run on worker threads; the deadline travels with them, and a
+    slow tool ends the run at expiry without a further model turn."""
+    import time
+    fake = fake_model(_tool_turns(store_path))
+    seen = []
+
+    def slow_tool(client, name, arguments, doc_ids=None):
+        seen.append(deadline_mod.current())
+        time.sleep(0.3)
+        return "{}", False
+
+    monkeypatch.setattr(agent_tools, "call_tool", slow_tool)
+    with pytest.raises(PageIndexTimeoutError):
+        _consume(client.chat("q", protocol="chat_completions",
+                             stream=stream, timeout=0.15))
+    assert len(seen) == 1 and seen[0] is not None
+    assert seen[0].seconds == 0.15
+    assert len(fake.inputs) == 1  # no model turn after the slow tool
+
+
+def test_tool_refuses_to_start_past_the_deadline(client, store_path):
+    """No local tool work starts once the run's budget is spent, and the
+    timeout escapes the tool layer instead of becoming model text."""
+    import time
+    seed_doc(store_path, "pi-a", "report.pdf")
+    (_, _, _, invoke), *_ = [spec for spec in agent_tools._tool_specs(client)
+                             if spec[0] == "get_document"]
+    spent = deadline_mod.Deadline(0.01)
+    time.sleep(0.02)
+    with deadline_mod.active(spent):
+        with pytest.raises(PageIndexTimeoutError):
+            invoke({"doc_name": "report.pdf"})
+    blocks, is_error = invoke({"doc_name": "report.pdf"})  # no deadline
+    assert not is_error
+
+
+def test_call_tool_lets_the_deadline_escape(client, monkeypatch):
+    def expires(*args, **kwargs):
+        raise deadline_mod.Deadline(1).error()
+
+    monkeypatch.setitem(agent_tools._IMPLEMENTATIONS, "get_document",
+                        expires)
+    with pytest.raises(PageIndexTimeoutError):
+        agent_tools.call_tool(client, "get_document", {"doc_name": "x"})
+
+
+def test_mcp_requests_bounded_by_the_deadline():
+    """Cloud tool requests cap their socket timeouts at the budget left,
+    send nothing once it is spent, and stop retrying at expiry."""
+    import time
+    import pageindex.mcp_bridge as mcp_bridge
+    assert mcp_bridge._timeout() == mcp_bridge._TIMEOUT  # no deadline
+    with deadline_mod.active(deadline_mod.Deadline(2.0)):
+        connect, read = mcp_bridge._timeout()
+        assert 0 < connect <= 2.0 and 0 < read <= 2.0
+        assert mcp_bridge._RETRY.get_backoff_time() <= 2.0
+        assert not mcp_bridge._RETRY.is_exhausted()
+    spent = deadline_mod.Deadline(0.01)
+    time.sleep(0.02)
+    with deadline_mod.active(spent):
+        with pytest.raises(PageIndexTimeoutError):
+            mcp_bridge._timeout()
+        assert mcp_bridge._RETRY.is_exhausted()
+        assert mcp_bridge._RETRY.new(total=2).is_exhausted()  # survives copy
+
+
+def test_mcp_bridge_failure_at_expiry_is_the_deadline(monkeypatch):
+    import time
+    import requests
+    from pageindex.mcp_bridge import McpBridge
+    bridge = McpBridge("https://mcp.test/mcp", {})
+
+    def post(*args, **kwargs):
+        time.sleep(0.05)
+        raise requests.ConnectionError("dropped")
+
+    monkeypatch.setattr(bridge._session, "post", post)
+    with deadline_mod.active(deadline_mod.Deadline(0.02)):
+        with pytest.raises(PageIndexTimeoutError):
+            bridge._post({"jsonrpc": "2.0", "id": 1, "method": "x"})
+    with pytest.raises(PageIndexAPIError, match="Could not reach") as caught:
+        bridge._post({"jsonrpc": "2.0", "id": 1, "method": "x"})
+    assert not isinstance(caught.value, PageIndexTimeoutError)
+
+
+@needs_anthropic
+def test_messages_timeout_spans_turns(client, store_path, fake_anthropic):
+    """Each provider request takes 0.15s; a 0.25s budget expires before
+    turn 3's request is sent."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    tool_turn = _anthropic_message(
+        [{"type": "tool_use", "id": "tu_1", "name": "get_document",
+          "input": {"doc_name": "report.pdf"}}], "tool_use")
+    calls = fake_anthropic([tool_turn, tool_turn,
+                            _anthropic_message([{"type": "text",
+                                                 "text": "done"}],
+                                               "end_turn")], delay=0.15)
+    with pytest.raises(PageIndexTimeoutError):
+        client.chat("q", protocol="messages", model="claude-test",
+                    timeout=0.25)
+    assert 1 <= len(calls) < 3
+
+
+@needs_anthropic
+def test_messages_timeout_turns_off_sdk_retries(client, fake_anthropic):
+    """Under a deadline a provider error is not retried by the SDK: each
+    retry would restart its request clock past the budget."""
+    calls = fake_anthropic([529, _anthropic_message(
+        [{"type": "text", "text": "ok"}], "end_turn")])
+    with pytest.raises(PageIndexAPIError, match="model backend failed"):
+        client.chat("q", protocol="messages", model="claude-test",
+                    timeout=30)
+    assert len(calls) == 1
+
+
+@needs_anthropic
+def test_messages_stream_timeout_mid_turn(client, fake_anthropic):
+    """A trickling stream is stopped at the deadline, mid-turn."""
+    import time
+    sse = _anthropic_sse(_anthropic_message(
+        [{"type": "text", "text": "The answer"}], "end_turn"))
+    events = [block + "\n\n" for block in sse.split("\n\n") if block]
+
+    def trickle():
+        for event in events:
+            time.sleep(0.08)
+            yield event.encode()
+
+    fake_anthropic([trickle])
+    started = time.monotonic()
+    seen = []
+    with pytest.raises(PageIndexTimeoutError):
+        for event in client.chat("q", protocol="messages",
+                                 model="claude-test", stream=True,
+                                 timeout=0.2):
+            seen.append(event.type)
+    assert time.monotonic() - started < 1.0
+    assert seen and "message_stop" not in seen
