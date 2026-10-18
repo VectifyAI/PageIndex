@@ -92,14 +92,18 @@ def tool_server(client, include_management: bool = False, *,
                                  tools=tools)
 
 
-def _cloud_relay(client, include_management: bool, server_name: str):
+def _sdk_release() -> tuple:
+    """The installed claude-agent-sdk's (major, minor, patch); () if none."""
     from importlib.metadata import version
     try:
-        release = tuple(int(n) for n in
-                        re.findall(r"\d+", version("claude-agent-sdk"))[:3])
+        return tuple(int(n) for n in
+                     re.findall(r"\d+", version("claude-agent-sdk"))[:3])
     except ImportError:  # not installed
-        release = ()
-    if release < (0, 2, 160):
+        return ()
+
+
+def _cloud_relay(client, include_management: bool, server_name: str):
+    if _sdk_release() < (0, 2, 160):
         # older releases answer the CLI from a server's registered
         # handlers, which the relay lacks (before 0.2.140), or close the
         # CLI's stdin at the first result (before 0.2.160): the agent
@@ -199,12 +203,13 @@ def claude_code_options(model: str, reasoning_effort=None, **options):
         raise PageIndexAPIError(
             f"{model!r} names the claude-code route but no model — e.g. "
             "'claude-code/sonnet'.", status_code=404)
-    try:
-        from claude_agent_sdk import ClaudeAgentOptions
-    except ImportError as exc:
+    if _sdk_release() < (0, 2, 166):
+        # the claude extra's floor, the oldest release the route is verified
+        # on; before 0.2.158 the options don't even take verbatim_prompts
         raise PageIndexAPIError(
-            "claude-code/ models run on the Claude Agent SDK — "
-            "pip install 'pageindex[claude]'.") from exc
+            "claude-code/ models run on claude-agent-sdk 0.2.166 or newer — "
+            "pip install -U 'pageindex[claude]'.")
+    from claude_agent_sdk import ClaudeAgentOptions
     if reasoning_effort == "none":
         options["thinking"] = {"type": "disabled"}
     elif reasoning_effort:

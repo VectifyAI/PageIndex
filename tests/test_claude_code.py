@@ -2,6 +2,7 @@
 user's subscription — over a faked CLI session: no subprocess, no login."""
 import asyncio
 import logging
+import sys
 import time
 from types import SimpleNamespace
 
@@ -103,6 +104,45 @@ def test_standard_mode_refuses_claude_code(tmp_path, sample_pdf):
     with pytest.raises(ValueError, match="flash mode only"):
         page_index_main(sample_pdf, SimpleNamespace(
             model="gpt-4.1", summary_model="claude-code/haiku"))
+
+
+SDK_FIX = r"claude-agent-sdk 0\.2\.166 or newer — pip install -U 'pageindex\[claude\]'"
+
+
+def fake_sdk_version(monkeypatch, installed):
+    import importlib.metadata
+
+    def version(name):
+        if installed is None:
+            raise importlib.metadata.PackageNotFoundError(name)
+        return installed
+    monkeypatch.setattr(importlib.metadata, "version", version)
+    monkeypatch.setattr(cc, "_claude_client",
+                        lambda options: pytest.fail("the CLI would start"))
+
+
+@pytest.mark.parametrize("installed", ["0.1.53", "0.2.165", None])
+def test_indexing_names_an_old_or_missing_agent_sdk(
+        monkeypatch, tmp_path, sample_pdf, installed):
+    """Before 0.2.158 the route failed deep inside, on a TypeError about
+    verbatim_prompts; below 0.2.166 it is unverified."""
+    fake_sdk_version(monkeypatch, installed)
+    if installed is None:  # no module either
+        monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
+    client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
+                                  index_model="claude-code/haiku")
+    with pytest.raises(PageIndexAPIError, match=SDK_FIX):
+        client.submit_document(sample_pdf)
+
+
+@needs_claude
+def test_chat_names_an_old_agent_sdk_and_takes_the_extras_floor(
+        monkeypatch, chat_client):
+    fake_sdk_version(monkeypatch, "0.2.165")
+    with pytest.raises(PageIndexAPIError, match=SDK_FIX):
+        chat_client.chat("Q")
+    fake_sdk_version(monkeypatch, "0.2.166")
+    assert cc.claude_code_options("claude-code/haiku").model == "haiku"
 
 
 def test_chat_refuses_what_the_cli_cannot_take(chat_client):
