@@ -135,6 +135,16 @@ def test_indexing_names_an_old_or_missing_agent_sdk(
         client.submit_document(sample_pdf)
 
 
+def test_indexing_names_a_broken_agent_sdk(monkeypatch, tmp_path, sample_pdf):
+    """Its metadata passes the floor but the import fails."""
+    fake_sdk_version(monkeypatch, "0.2.168")
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
+    client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
+                                  index_model="claude-code/haiku")
+    with pytest.raises(PageIndexAPIError, match=r"pip install 'pageindex\[claude\]'"):
+        client.submit_document(sample_pdf)
+
+
 @needs_claude
 def test_chat_names_an_old_agent_sdk_and_takes_the_extras_floor(
         monkeypatch, chat_client):

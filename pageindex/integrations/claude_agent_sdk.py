@@ -211,7 +211,12 @@ def claude_code_options(model: str, reasoning_effort=None, **options):
         raise PageIndexAPIError(
             "claude-code/ models run on claude-agent-sdk 0.2.166 or newer — "
             "pip install -U 'pageindex[claude]'.")
-    from claude_agent_sdk import ClaudeAgentOptions
+    try:
+        from claude_agent_sdk import ClaudeAgentOptions
+    except ImportError as exc:
+        raise PageIndexAPIError(
+            "claude-code/ models run on the Claude Agent SDK — "
+            "pip install 'pageindex[claude]'.") from exc
     if reasoning_effort == "none":
         options["thinking"] = {"type": "disabled"}
     elif reasoning_effort:
