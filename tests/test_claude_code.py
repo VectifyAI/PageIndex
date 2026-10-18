@@ -299,11 +299,17 @@ def test_index_calls_are_capped(monkeypatch):
     assert cc._GATES == {}  # the cap goes with its last call, not kept per loop
 
 
-@needs_claude
-def test_a_run_drops_asyncio_noise_about_the_reaped_version_probe(monkeypatch, caplog):
-    fake_cli(monkeypatch, result("ok"))
-    assert asyncio.run(llm_acompletion("claude-code/haiku", "P")) == "ok"
+@pytest.fixture
+def asyncio_log():
+    """The asyncio logger without the probe filter an earlier test may have
+    left on it (a filter stays: it is process-wide)."""
     log = logging.getLogger("asyncio")
+    log.removeFilter(cc._drop_probe_reaped)
+    return log
+
+
+def assert_drops_only_the_probe_warning(log, caplog):
+    caplog.clear()
     with caplog.at_level(logging.WARNING, logger="asyncio"):
         log.warning("Unknown child process pid %d, will report returncode 255", 42)
         # as LiteLLM's redaction filter on this logger leaves it: rendered
@@ -312,6 +318,23 @@ def test_a_run_drops_asyncio_noise_about_the_reaped_version_probe(monkeypatch, c
     # only that message: asyncio's other warnings still reach the user
     assert [r.getMessage() for r in caplog.records] == [
         "Executing <Task> took 0.200 seconds"]
+
+
+@needs_claude
+def test_a_run_drops_asyncio_noise_about_the_reaped_version_probe(
+        monkeypatch, caplog, asyncio_log):
+    fake_cli(monkeypatch, result("ok"))
+    assert asyncio.run(llm_acompletion("claude-code/haiku", "P")) == "ok"
+    assert_drops_only_the_probe_warning(asyncio_log, caplog)
+
+
+@needs_claude
+def test_as_claude_mcp_drops_it_for_the_apps_own_sessions(
+        chat_client, caplog, asyncio_log):
+    """An app running its own Agent SDK sessions reaps the same probe;
+    claude_agent_config() builds its server through as_claude_mcp()."""
+    chat_client.as_claude_mcp()
+    assert_drops_only_the_probe_warning(asyncio_log, caplog)
 
 
 @needs_claude

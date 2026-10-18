@@ -34,6 +34,8 @@ MAX_RESULT_CHARS = TOOL_RESPONSE_CHAR_LIMIT * 2
 
 def build_claude_mcp(client, include_management: bool = False, *,
                      server_name: str = "pageindex"):
+    # the app's own Agent SDK sessions reap the same probe
+    logging.getLogger("asyncio").addFilter(_drop_probe_reaped)
     if getattr(client, "api_key", None):
         return _cloud_relay(client, include_management, server_name)
     return tool_server(client, include_management, server_name=server_name)
@@ -244,9 +246,10 @@ _PROBE_REAPED = re.compile(
 
 def _drop_probe_reaped(record) -> bool:
     """The SDK terminates its `claude -v` probe even after it has exited; on
-    Python 3.11 that reaps the probe first, and asyncio's child watcher logs
-    this for an exit code nobody reads. Matched on the rendered message:
-    LiteLLM's redaction filter on the same logger may have rendered it."""
+    Python 3.12 and earlier that reaps the probe first, and asyncio's child
+    watcher logs this for an exit code nobody reads. Matched on the rendered
+    message: LiteLLM's redaction filter on the same logger may have
+    rendered it."""
     # ponytail: drops this one message process-wide, not only for the probe;
     # remove once the SDK stops terminating an exited probe
     return not _PROBE_REAPED.fullmatch(record.getMessage())
