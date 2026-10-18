@@ -360,12 +360,22 @@ def test_as_claude_mcp_drops_it_for_the_apps_own_sessions(
 
 @needs_claude
 def test_flash_indexing_on_claude_code(monkeypatch, tmp_path, sample_pdf):
-    sessions = fake_cli(monkeypatch, result("A two-page fruit memo."))
+    usage = {"input_tokens": 5, "cache_read_input_tokens": 100,
+             "cache_creation_input_tokens": 20, "output_tokens": 7,
+             "output_tokens_details": {"thinking_tokens": 4}}
+    sessions = fake_cli(monkeypatch, result("A two-page fruit memo.", usage=usage))
     client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
                                   index_model="claude-code/haiku")
     doc = client.submit_document(sample_pdf)
     assert client.get_document(doc["doc_id"])["description"] == "A two-page fruit memo."
     assert sessions and all(s.options.model == "haiku" for s in sessions)
+    # every run's usage reaches submit_document's tally, as LiteLLM calls' do
+    runs = len(sessions)
+    assert doc["usage"] == {
+        "prompt_tokens": 125 * runs, "completion_tokens": 7 * runs,
+        "total_tokens": 132 * runs,
+        "prompt_tokens_details": {"cached_tokens": 100 * runs, "cache_write_tokens": 0},
+        "completion_tokens_details": {"reasoning_tokens": 4 * runs}}
 
 
 # ── chat ──
