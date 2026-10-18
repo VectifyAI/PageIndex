@@ -1,6 +1,7 @@
 """The claude-code/ route — indexing and chat as Claude Code CLI runs on the
 user's subscription — over a faked CLI session: no subprocess, no login."""
 import asyncio
+import logging
 import time
 from types import SimpleNamespace
 
@@ -256,6 +257,21 @@ def test_index_calls_are_capped(monkeypatch):
     assert asyncio.run(many()) == ["ok"] * 20
     assert peak == cc.CLAUDE_CODE_CONCURRENCY
     assert cc._GATES == {}  # the cap goes with its last call, not kept per loop
+
+
+@needs_claude
+def test_a_run_drops_asyncio_noise_about_the_reaped_version_probe(monkeypatch, caplog):
+    fake_cli(monkeypatch, result("ok"))
+    assert asyncio.run(llm_acompletion("claude-code/haiku", "P")) == "ok"
+    log = logging.getLogger("asyncio")
+    with caplog.at_level(logging.WARNING, logger="asyncio"):
+        log.warning("Unknown child process pid %d, will report returncode 255", 42)
+        # as LiteLLM's redaction filter on this logger leaves it: rendered
+        log.warning("Unknown child process pid 43, will report returncode 255")
+        log.warning("Executing %s took %.3f seconds", "<Task>", 0.2)
+    # only that message: asyncio's other warnings still reach the user
+    assert [r.getMessage() for r in caplog.records] == [
+        "Executing <Task> took 0.200 seconds"]
 
 
 @needs_claude

@@ -16,6 +16,7 @@ as Claude Code CLI runs on the user's own Claude subscription login.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import tempfile
@@ -232,6 +233,20 @@ def _claude_client(options):
     return ClaudeSDKClient(options=options)
 
 
+_PROBE_REAPED = re.compile(
+    r"Unknown child process pid \d+, will report returncode 255")
+
+
+def _drop_probe_reaped(record) -> bool:
+    """The SDK terminates its `claude -v` probe even after it has exited; on
+    Python 3.11 that reaps the probe first, and asyncio's child watcher logs
+    this for an exit code nobody reads. Matched on the rendered message:
+    LiteLLM's redaction filter on the same logger may have rendered it."""
+    # ponytail: drops this one message process-wide, not only for the probe;
+    # remove once the SDK stops terminating an exited probe
+    return not _PROBE_REAPED.fullmatch(record.getMessage())
+
+
 def _run_error(result, kind, max_turns) -> PageIndexAPIError:
     if result.subtype == "error_max_turns":
         from ..local_chat import _wrap_max_turns
@@ -257,6 +272,7 @@ async def claude_code_messages(prompt, options):
     itself failed). The client disconnects inline however the run ends, so
     no CLI process outlives its event loop."""
     from claude_agent_sdk import AssistantMessage, ResultMessage
+    logging.getLogger("asyncio").addFilter(_drop_probe_reaped)  # added once
     try:
         async with _claude_client(options) as client:
             info = (await client.get_server_info()) or {}
