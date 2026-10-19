@@ -1396,7 +1396,8 @@ class PageIndexClient:
               transcript and cross-turn ``usage``; Messages: the final
               message with a ``messages`` turn sequence and aggregated
               ``usage``. Each ``usage`` also lists the run's model calls:
-              ``request_usage_entries`` on the OpenAI protocols, the
+              ``request_usage_entries`` on the OpenAI protocols (a
+              ``claude-code/`` model reports the run's total only), the
               native ``iterations`` on Messages
             - protocol lane, stream=True: an iterator of the protocol's
               own stream events; Messages ends a finished run with one
@@ -1406,7 +1407,9 @@ class PageIndexClient:
 
         An own-model run that fails raises PageIndexAPIError with
         ``usage``: what its finished model calls spent, in the protocol's
-        usage shape (Chat Completions on the answer lane).
+        usage shape (Chat Completions on the answer lane); ``None`` if a
+        ``claude-code/`` run fails on a tool call or ends before Claude
+        Code reports its usage.
         """
         if protocol not in (None, "chat_completions", "responses",
                             "messages"):

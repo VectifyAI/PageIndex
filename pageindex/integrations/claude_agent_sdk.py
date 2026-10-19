@@ -320,7 +320,9 @@ async def claude_code_messages(prompt, options):
                 if isinstance(message, AssistantMessage) and message.error:
                     kind = message.error
                 elif isinstance(message, ResultMessage) and message.is_error:
-                    raise _run_error(message, kind, options.max_turns)
+                    from ..local_chat import _claude_code_usage, _with_usage
+                    raise _with_usage(_run_error(message, kind, options.max_turns),
+                                      _claude_code_usage(message.usage))
                 yield message
     except PageIndexAPIError:
         raise
@@ -357,6 +359,7 @@ async def claude_code_complete(model: str, prompt: str,
                     from ..local_chat import _claude_code_usage
                     _add_usage_counts(_claude_code_usage(message.usage))
     except Exception as exc:
+        _add_usage_counts(getattr(exc, "usage", None) or {})
         # anything unmapped is final too: a bare error would read as a
         # per-node miss and quietly leave fallback summaries
         raise LLMRetriesExhausted(

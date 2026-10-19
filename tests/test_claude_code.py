@@ -379,6 +379,20 @@ def test_flash_indexing_on_claude_code(monkeypatch, tmp_path, sample_pdf):
         "completion_tokens_details": {"reasoning_tokens": 4 * runs}}
 
 
+@needs_claude
+def test_a_refused_index_call_still_counts_its_usage(monkeypatch, tmp_path,
+                                                      sample_pdf):
+    sessions = fake_cli(monkeypatch, result(
+        "refused", is_error=True, status=400,
+        usage={"input_tokens": 5, "output_tokens": 7}))
+    client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
+                                  index_model="claude-code/haiku")
+    doc = client.submit_document(sample_pdf)
+    assert sessions
+    assert doc["usage"]["prompt_tokens"] == 5 * len(sessions)
+    assert doc["usage"]["completion_tokens"] == 7 * len(sessions)
+
+
 # ── chat ──
 
 @needs_claude
@@ -583,6 +597,9 @@ def test_cloud_tool_limits_fail_the_chat(monkeypatch, end):
 
 @needs_claude
 def test_chat_max_turns(monkeypatch, chat_client):
-    fake_cli(monkeypatch, result(None, is_error=True, subtype="error_max_turns"))
-    with pytest.raises(PageIndexAPIError, match=r"max_turns \(3\)"):
+    fake_cli(monkeypatch, result(None, is_error=True, subtype="error_max_turns",
+                                 usage={"input_tokens": 5, "output_tokens": 7}))
+    with pytest.raises(PageIndexAPIError, match=r"max_turns \(3\)") as err:
         chat_client.chat("Q", max_turns=3)
+    usage = err.value.usage
+    assert usage is not None and usage["completion_tokens"] == 7
