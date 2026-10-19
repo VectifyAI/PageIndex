@@ -1448,7 +1448,7 @@ def test_responses_envelope_fields_and_cache_group(client, store_path,
     fake_model([[_msg_item("ok")]])
     result = client._responses("q")
     names = {tool["name"] for tool in result["tools"]}
-    assert names == {"browse_documents", "get_document",
+    assert names == {"browse_documents", "find_pages", "get_document",
                      "get_document_structure", "get_page_content"}
     assert all(tool["type"] == "function" for tool in result["tools"])
     assert result["instructions"].startswith(CHAT_HEADER)
