@@ -1344,7 +1344,7 @@ def test_messages_usage_sums_every_count_across_turns():
         "fallback_credit": {"status": {"type": "not_applied",
                                        "reason": "expired",
                                        "remove_to_redeem": ["speed"]}},
-        "undeclared_count": 7,
+        "undeclared_count": 7, "cost": 0.25,
         "undeclared_usage": {"requests": 1, "by_tool": {"runs": 2}}})
     last = turn({
         "input_tokens": 20, "output_tokens": 6,
@@ -1358,7 +1358,7 @@ def test_messages_usage_sums_every_count_across_turns():
                         "cache_read_input_tokens": 0,
                         "cache_creation_input_tokens": 0}],
         "service_tier": "standard",
-        "fallback_credit": {"status": {"type": "redeemed"}},
+        "fallback_credit": {"status": {"type": "redeemed"}}, "cost": 0.5,
         "undeclared_usage": {"requests": 1, "by_tool": {"runs": 3}}})
 
     usage = local_chat._anthropic_usage([(first, "claude-test"),
@@ -1373,7 +1373,7 @@ def test_messages_usage_sums_every_count_across_turns():
         "server_tool_use": {"web_search_requests": 3,
                             "web_fetch_requests": 1},
         "iterations": first["iterations"] + last["iterations"],
-        "undeclared_count": 7,
+        "undeclared_count": 7, "cost": 0.75,
         "undeclared_usage": {"requests": 2, "by_tool": {"runs": 5}},
     }
     assert usage["service_tier"] == "standard"
@@ -1405,6 +1405,36 @@ def test_messages_stream_ends_with_the_run_usage(client, store_path,
     assert [m["role"] for m in events[-1].messages] == [
         "assistant", "user", "assistant", "user", "assistant"]
     assert events[-1].messages == result["messages"]
+
+
+@needs_anthropic
+def test_messages_stream_cut_mid_message_raises(client, store_path,
+                                                fake_anthropic):
+    seed_doc(store_path, "pi-a", "r.pdf")
+    tool_turn = _anthropic_message([
+        {"type": "tool_use", "id": "tu_1", "name": "get_document",
+         "input": {"doc_name": "r.pdf"}}], "tool_use")
+    answer = _anthropic_message([{"type": "text", "text": "Done"}], "end_turn")
+    cut = _anthropic_sse(answer).rsplit("event: message_delta", 1)[0]
+    fake_anthropic([_anthropic_sse(tool_turn), cut])
+    events = []
+    with pytest.raises(PageIndexAPIError, match="ended before") as err:
+        for event in client._messages("q", model="claude-test",
+                                      max_tokens=100, stream=True):
+            events.append(event)
+    assert "result" not in [event.type for event in events]
+    usage = err.value.usage
+    assert usage is not None
+    assert usage["input_tokens"] == 10 and len(usage["iterations"]) == 1
+
+    # Only message_stop missing: the message itself is complete.
+    unstopped = _anthropic_sse(answer).rsplit("event: message_stop", 1)[0]
+    fake_anthropic([_anthropic_sse(tool_turn), unstopped])
+    events = list(client._messages("q", model="claude-test", max_tokens=100,
+                                   stream=True))
+    assert events[-1].type == "result"
+    assert events[-1].usage["input_tokens"] == 20
+    assert events[-1].messages[-1]["content"][0]["text"] == "Done"
 
 
 @needs_agents

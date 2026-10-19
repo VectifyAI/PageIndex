@@ -1451,7 +1451,7 @@ def _anthropic_usage(turns) -> dict:
 
 
 def _is_count(value) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _is_count_object(value) -> bool:
@@ -1662,14 +1662,18 @@ def run_messages(client, messages, model: str, route: str,
             try:
                 for turn_stream in runner:
                     for event in turn_stream:
-                        if event.type == "message_stop":
-                            turns.append(event.message)
                         yield event
+                    message = turn_stream.get_final_message()
+                    if message.stop_reason is None:
+                        raise PageIndexAPIError(
+                            "The model backend failed: the response stream "
+                            "ended before the message was complete.")
+                    turns.append(message)
             except anthropic.AnthropicError as exc:
                 raise _with_usage(
                     _model_backend_error(exc, "messages", client),
                     run_usage(turns)) from exc
-            except PageIndexAPIError as exc:  # a tool failure, re-raised
+            except PageIndexAPIError as exc:  # a tool failure or a cut stream
                 raise _with_usage(exc, run_usage(turns))
             finally:
                 # runs on exhaustion and abandonment (GeneratorExit) alike
