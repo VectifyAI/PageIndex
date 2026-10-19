@@ -3,6 +3,9 @@ Claude Code: usage is covered by your plan, and no API key is needed.
 
     pip install -U "pageindex[claude]"
 
+Log in with your Claude subscription: run `claude`, then /login (install
+Claude Code first if needed). Then:
+
     python pageindex-claude-subscription.py
 """
 from pathlib import Path

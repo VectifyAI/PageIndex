@@ -263,8 +263,8 @@ def _run_error(result, kind, max_turns) -> PageIndexAPIError:
         return _wrap_max_turns(max_turns)
     status = result.api_error_status or _ERROR_STATUS.get(kind)
     text = result.result or "; ".join(result.errors or []) or result.subtype
-    hint = {401: " Run `claude` once and log in with your Claude "
-                 "subscription.",
+    hint = {401: " Log in with your Claude subscription: run `claude`, then "
+                 "/login (install Claude Code first if needed).",
             429: " Your Claude subscription's usage limit is reached; it "
                  "resets on its own."}.get(status, "")
     return PageIndexAPIError(f"Claude Code failed: {text.rstrip('.')}.{hint}",
