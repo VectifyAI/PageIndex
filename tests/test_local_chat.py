@@ -1343,7 +1343,9 @@ def test_messages_usage_sums_every_count_across_turns():
         "service_tier": "priority",
         "fallback_credit": {"status": {"type": "not_applied",
                                        "reason": "expired",
-                                       "remove_to_redeem": ["speed"]}}})
+                                       "remove_to_redeem": ["speed"]}},
+        "undeclared_count": 7,
+        "undeclared_usage": {"requests": 1, "by_tool": {"runs": 2}}})
     last = turn({
         "input_tokens": 20, "output_tokens": 6,
         "cache_creation": {"ephemeral_5m_input_tokens": 1,
@@ -1356,7 +1358,8 @@ def test_messages_usage_sums_every_count_across_turns():
                         "cache_read_input_tokens": 0,
                         "cache_creation_input_tokens": 0}],
         "service_tier": "standard",
-        "fallback_credit": {"status": {"type": "redeemed"}}})
+        "fallback_credit": {"status": {"type": "redeemed"}},
+        "undeclared_usage": {"requests": 1, "by_tool": {"runs": 3}}})
 
     usage = local_chat._anthropic_usage([(first, "claude-test"),
                                          (last, "claude-test")])
@@ -1370,6 +1373,8 @@ def test_messages_usage_sums_every_count_across_turns():
         "server_tool_use": {"web_search_requests": 3,
                             "web_fetch_requests": 1},
         "iterations": first["iterations"] + last["iterations"],
+        "undeclared_count": 7,
+        "undeclared_usage": {"requests": 2, "by_tool": {"runs": 5}},
     }
     assert usage["service_tier"] == "standard"
     assert usage["fallback_credit"] == {"status": {"type": "redeemed"}}
@@ -1500,6 +1505,22 @@ def test_messages_failed_run_carries_the_usage_already_spent(
         list(result) if stream else result
     assert err.value.usage == {"input_tokens": 0, "output_tokens": 0,
                                "iterations": []}
+
+
+@needs_anthropic
+def test_messages_turn_without_usage_counts_nothing(client, store_path,
+                                                    fake_anthropic):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_anthropic([
+        _anthropic_message([{"type": "tool_use", "id": "tu_1",
+                             "name": "get_document",
+                             "input": {"doc_name": "report.pdf"}}],
+                           "tool_use"),
+        {**_anthropic_message([{"type": "text", "text": "ok"}], "end_turn"),
+         "usage": None}])
+    result = client._messages("q", model="claude-test", max_tokens=100)
+    assert result["usage"]["input_tokens"] == 10
+    assert len(result["usage"]["iterations"]) == 1
 
 
 def test_validation_error_has_no_usage(client):

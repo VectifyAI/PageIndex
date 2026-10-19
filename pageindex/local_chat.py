@@ -1445,12 +1445,19 @@ def _anthropic_usage(turns) -> dict:
         dumps.append(usage)
     if not dumps:
         return {"input_tokens": 0, "output_tokens": 0, "iterations": []}
+    keys = dict.fromkeys(key for dump in dumps for key in dump)
     return {key: _merge_usage([dump.get(key) for dump in dumps])
-            for key in dumps[-1]}
+            for key in keys}
 
 
 def _is_count(value) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_count_object(value) -> bool:
+    return isinstance(value, dict) and all(
+        item is None or _is_count(item) or _is_count_object(item)
+        for item in value.values())
 
 
 def _merge_usage(values):
@@ -1459,9 +1466,7 @@ def _merge_usage(values):
         return sum(present) if present else None
     if all(isinstance(value, list) for value in present):
         return [item for value in present for item in value]
-    if all(isinstance(value, dict) and all(
-            item is None or _is_count(item) for item in value.values())
-           for value in present):
+    if all(map(_is_count_object, present)):
         keys = dict.fromkeys(key for value in present for key in value)
         return {key: _merge_usage([value.get(key) for value in present])
                 for key in keys}
@@ -1590,7 +1595,8 @@ def run_messages(client, messages, model: str, route: str,
 
     def run_usage(turns) -> dict:
         return _anthropic_usage([(turn.usage.model_dump(mode="json"),
-                                  turn.model) for turn in turns])
+                                  turn.model) for turn in turns
+                                 if turn.usage is not None])
 
     def transcript(turns) -> list:
         """The full turn sequence (assistant tool_use + user tool_result +
