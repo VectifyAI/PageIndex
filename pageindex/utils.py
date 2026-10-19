@@ -104,10 +104,12 @@ def run_off_loop(func, *args):
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return func(*args)
-    from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(func, *args).result()
+        pass  # called below, so its errors don't chain onto this one
+    else:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(func, *args).result()
+    return func(*args)
 
 
 def _litellm_model(model):

@@ -227,7 +227,8 @@ def test_missing_login_says_how_to_log_in(monkeypatch):
              AssistantMessage(content=[TextBlock("Not logged in")], model="haiku",
                               error="authentication_failed"),
              result("Not logged in · Please run /login", is_error=True))
-    with pytest.raises(LLMRetriesExhausted, match="log in") as err:
+    with pytest.raises(LLMRetriesExhausted,
+                       match="Log in with your Claude subscription") as err:
         asyncio.run(llm_acompletion("claude-code/haiku", "P"))
     assert err.value.status_code == 401
 

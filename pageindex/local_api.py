@@ -13,7 +13,7 @@ from typing import Any
 from .errors import PageIndexAPIError
 from .local_store import DocStore
 from .naming import sanitize_filename, truncate_filename
-from .utils import count_tokens, run_off_loop
+from .utils import LLMRetriesExhausted, count_tokens, run_off_loop
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +150,10 @@ class LocalAPI:
                 )
         except PageIndexAPIError:
             raise
+        except LLMRetriesExhausted as e:
+            # with a status its message names the cause; the chain stays on __context__
+            raise PageIndexAPIError(f"Failed to submit document: {e}") from (
+                None if e.status_code else e)
         except Exception as e:
             raise PageIndexAPIError(f"Failed to submit document: {e}") from e
         self._check_page_bounds(structure, len(page_texts))
