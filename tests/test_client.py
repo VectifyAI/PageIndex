@@ -908,6 +908,7 @@ def test_submit_shows_an_explained_llm_failure_alone(local_client, sample_pdf,
     ladder = err.value.__context__
     assert isinstance(ladder, pageindex.utils.LLMRetriesExhausted)
     assert err.value.__cause__ is (None if status else ladder)
+    assert err.value.__suppress_context__
     assert ladder.__context__ is None
 
 
