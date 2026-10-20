@@ -1118,8 +1118,8 @@ def test_responses_stream_passthrough(client, store_path, fake_model):
 
 
 def _cut_response():
-    """A billed response cut at the output cap: its reasoning, its text,
-    and a tool call it never finished."""
+    """A billed response cut at the output cap: its text, and a tool call
+    it never finished, each after its reasoning."""
     from openai.types.responses import Response, ResponseReasoningItem
     from openai.types.responses.response import IncompleteDetails
     from openai.types.responses.response_usage import (
@@ -1128,6 +1128,7 @@ def _cut_response():
         id="resp_cut", created_at=0.0, model="fake", object="response",
         output=[ResponseReasoningItem(id="rs_1", type="reasoning", summary=[]),
                 _msg_item("cut"),
+                ResponseReasoningItem(id="rs_2", type="reasoning", summary=[]),
                 _call_item("get_document", {"doc_n": 1}, "call_9")],
         parallel_tool_calls=False, tool_choice="auto", tools=[],
         status="incomplete",
@@ -1168,9 +1169,8 @@ def test_responses_stream_counts_a_call_cut_short(client, store_path,
     usage = final["response"]["usage"]
     assert (usage["input_tokens"], usage["output_tokens"]) == (50, 104)
     assert len(usage["request_usage_entries"]) == 2
-    assert [item["type"] for item in final["response"]["items"]] == [
-        "function_call", "function_call_output", "message"]
-    assert "id" not in final["response"]["items"][-1]  # its reasoning is left out
+    assert [item.get("id") for item in final["response"]["items"]] == [
+        "fc_1", None, "rs_1", "msg_1"]
     assert final["response"]["output"][-1]["content"][0]["text"] == "cut"
 
 
@@ -1197,10 +1197,11 @@ def test_responses_counts_a_call_cut_short(client, store_path, fake_model):
     usage = result["usage"]
     assert (usage["input_tokens"], usage["output_tokens"]) == (50, 104)
     assert len(usage["request_usage_entries"]) == 2
-    assert [item["type"] for item in result["items"]] == [
-        "function_call", "function_call_output", "message"]
-    assert "id" not in result["items"][-1]
+    assert [item.get("id") for item in result["items"]] == [
+        "fc_1", None, "rs_1", "msg_1"]
     assert result["output"][-1]["content"][0]["text"] == "cut"
+    from openai.types.responses import Response
+    Response.model_validate(result)  # still the official shape
 
 
 @needs_agents
@@ -4493,7 +4494,7 @@ def test_a_cut_response_runs_no_tools(bridge_client, fake_model):
     result = client._responses("q")
     assert ran == []
     assert result["status"] == "incomplete"
-    assert [item["type"] for item in result["items"]] == ["message"]
+    assert [item["type"] for item in result["items"]] == ["reasoning", "message"]
 
 
 @needs_agents

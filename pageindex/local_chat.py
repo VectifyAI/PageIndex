@@ -526,10 +526,14 @@ def _record_response_status(agent, recorded: dict) -> None:
 
 def _cut_text(output) -> list:
     """A cut-short response's messages, for the history: its partial tool
-    calls have no outputs to pair with. Ids are dropped, since an id ties a
-    message to the reasoning item left out, and the API refuses that."""
-    return [{key: value for key, value in item.items() if key != "id"}
-            for item in output or [] if item.get("type") == "message"]
+    calls have no outputs to pair with. Each message keeps the reasoning
+    item before it, as the API refuses a message without it; a dropped
+    call's reasoning goes with the call."""
+    output = output or []
+    return [item for item, after in zip(output, output[1:] + [{}])
+            if item.get("type") == "message"
+            or (item.get("type") == "reasoning"
+                and after.get("type") == "message")]
 
 
 def _record_chat_finish(agent, recorded: dict) -> None:
