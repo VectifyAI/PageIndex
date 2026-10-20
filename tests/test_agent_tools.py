@@ -2577,10 +2577,12 @@ def test_live_cloud_instructions_nonempty():
 _CLOUD_ONLY_MARKERS = (
     "get_folder_structure(", "search_documents", "get_document_image",
     "image_path", "folder_id", "recursive=", 'sort="relevance"',
+    "get_metadata_schema",
 )
 
-# The two lines no marker catches — they exist only because the sections
-# above do: the discovery heading and the escalation ladder's closer.
+# The lines no marker catches — they exist only because the sections above
+# do: the discovery heading, the escalation ladder's closer, and the
+# metadata-mode bullets.
 _CLOUD_ONLY_LINES = (
     "DOCUMENT DISCOVERY (three-step funnel):",
     '- "What do I have / list / recent / browse the X folder" '
@@ -2589,6 +2591,12 @@ _CLOUD_ONLY_LINES = (
     "document is not in the library. Do NOT fall back to general "
     "knowledge \u2014 if the user's question references their own "
     "documents, exhaust every discovery path first.",
+    "- Fallback: when the funnel and PERSISTENCE miss on a question that "
+    "narrows by a typed attribute (year, status, category, …). Browse "
+    "and keyword search match prose, not schema fields, so attribute "
+    "filters there silently return nothing.",
+    "- Direct: counts / averages / extremes / distributions, which browse "
+    "cannot answer.",
 )
 
 
@@ -2672,7 +2680,7 @@ def test_instructions_parity_detects_shared_drift(change):
         "edit": AGENT_INSTRUCTIONS.replace(shared, "- Never invoke a tool."),
         "edit_with_cloud_marker": AGENT_INSTRUCTIONS.replace(
             shared, "- Invoke tools without parameters, including folder tools."),
-        "truncation": "READING WORKFLOW:",
+        "truncation": AGENT_INSTRUCTIONS.split("\n\n")[0],
     }[change]
     with pytest.raises(AssertionError):
         _assert_instructions_local_parity(cloud)
@@ -2693,7 +2701,7 @@ def test_live_cloud_instructions_local_parity():
 def test_agent_instructions_default(client):
     text = client.agent_instructions()
     assert text == AGENT_INSTRUCTIONS
-    assert "READING WORKFLOW" in text
+    assert "PERSISTENCE" in text
     assert "browse_documents" in text
     assert "search_documents" not in text
     assert "get_folder_structure" not in text

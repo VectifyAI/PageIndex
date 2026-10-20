@@ -231,7 +231,7 @@ def test_chat_completions_end_to_end(client, store_path, fake_model):
     assert "report.pdf" in turn2 and "completed" in turn2
     # Managed instructions: header + the local agent guidance.
     assert fake.instructions[0].startswith(CHAT_HEADER)
-    assert "READING WORKFLOW" in fake.instructions[0]
+    assert "PERSISTENCE" in fake.instructions[0]
 
 
 @needs_agents
@@ -3120,7 +3120,7 @@ def test_bridge_chat_runs_engine_over_cloud_tools(bridge_client, fake_model):
     assert bridge.calls == [("get_document", {"doc_name": "r.pdf"})]
     assert fake.instructions[0].startswith(CHAT_HEADER)
     assert "CLOUD LIVE INSTRUCTIONS" in fake.instructions[0]
-    assert "READING WORKFLOW" not in fake.instructions[0]
+    assert "PERSISTENCE" not in fake.instructions[0]
     # The tool result made it back into turn 2.
     assert "cloud-doc" in json.dumps(fake.inputs[1])
 
@@ -3427,7 +3427,7 @@ def test_bridge_messages_lane_runs_cloud_tools(bridge_client, fake_anthropic):
     assert wire["tools"][0]["name"] == "get_document"
     system_text = json.dumps(wire["system"])
     assert "CLOUD LIVE INSTRUCTIONS" in system_text
-    assert "READING WORKFLOW" not in system_text
+    assert "PERSISTENCE" not in system_text
 
 
 @needs_agents
