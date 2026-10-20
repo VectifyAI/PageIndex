@@ -41,6 +41,28 @@ class ExtractNodeTextContentTest(unittest.TestCase):
 
     def test_no_preface_when_file_starts_with_a_heading(self):
         self.assertEqual(self._nodes("# Title\n\nBody.\n"), [("Title", 1, "# Title\n\nBody.")])
+class SetextHeadingTest(unittest.TestCase):
+    def _headings(self, markdown):
+        nodes, _ = extract_nodes_from_markdown(markdown)
+        return [(n["node_title"], n["line_num"], n["level"]) for n in nodes]
+
+    def test_setext_underlines_mark_headings(self):
+        self.assertEqual(
+            self._headings("Acme SDK\n========\n\nIntro.\n\nInstall\n-------\n\npip install acme\n"),
+            [("Acme SDK", 1, 1), ("Install", 6, 2)],
+        )
+
+    def test_multi_line_paragraph_is_one_heading(self):
+        self.assertEqual(self._headings("A long\ntitle\n===\n"), [("A long title", 1, 1)])
+
+    def test_dashes_that_are_not_setext_underlines(self):
+        markdown = (
+            "---\ntitle: Notes\n---\n\n"  # front matter
+            "Intro.\n\n---\n\n"             # thematic break after a blank line
+            "- item\n---\n\n"                # under a list item
+            "```\ncode\n---\n```\n"         # inside a code block
+        )
+        self.assertEqual(self._headings(markdown), [])
 
 
 class MarkdownCliTest(unittest.TestCase):
