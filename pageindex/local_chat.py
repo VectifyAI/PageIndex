@@ -682,8 +682,9 @@ def _with_usage(error: PageIndexAPIError, usage: dict) -> PageIndexAPIError:
     return error
 
 
-# the finish_reasons of an answer the model stopped short of finishing
-_CUT_SHORT = ("length", "content_filter")
+# the finish_reasons of an answer the model stopped short of finishing;
+# the managed endpoint reports Anthropic's names for them
+_CUT_SHORT = ("length", "content_filter", "max_tokens", "refusal")
 
 
 def _cut_short_error(finish_reason: str) -> PageIndexAPIError:

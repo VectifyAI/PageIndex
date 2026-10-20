@@ -604,27 +604,28 @@ def test_chat_process_managed_off_is_clean_answer(monkeypatch):
     assert "doc_name" not in plain
 
 
-def test_managed_chat_raises_on_an_unfinished_answer(monkeypatch):
+@pytest.mark.parametrize("finish", ["length", "max_tokens", "refusal"])
+def test_managed_chat_raises_on_an_unfinished_answer(monkeypatch, finish):
     """The managed answer lane holds an unfinished answer to the same
     rule: a stream raises after its text, a plain call carries the text
     on the error (no usage: it is not an own-model run)."""
     cloud = PageIndexCloudClient(api_key="pi-test-key")
     cut = _cloud_chunk(None)
-    cut["choices"][0]["finish_reason"] = "length"
+    cut["choices"][0]["finish_reason"] = finish
 
     def fake_cc(**kwargs):
         if kwargs.get("stream"):
             return iter([_cloud_chunk("The range was"), cut])
         return {"choices": [{"message": {"content": "The range was"},
-                             "finish_reason": "length"}]}
+                             "finish_reason": finish}]}
 
     monkeypatch.setattr(cloud._api, "chat_completions", fake_cc)
     text = []
-    with pytest.raises(PageIndexAPIError, match="length"):
+    with pytest.raises(PageIndexAPIError, match=finish):
         for piece in cloud.chat("q", stream=True):
             text.append(piece)
     assert "".join(text) == "The range was"
-    with pytest.raises(PageIndexAPIError, match="length") as info:
+    with pytest.raises(PageIndexAPIError, match=finish) as info:
         cloud.chat("q")
     assert info.value.partial_answer == "The range was"
     assert info.value.usage is None

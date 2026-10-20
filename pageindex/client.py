@@ -1412,7 +1412,8 @@ class PageIndexClient:
         Code reports its usage.
 
         An answer-lane reply the run reports unfinished (finish_reason
-        ``length`` or ``content_filter``) raises PageIndexAPIError instead of
+        ``length`` or ``content_filter``; on the managed endpoint
+        ``max_tokens`` or ``refusal``) raises PageIndexAPIError instead of
         passing as complete: a stream after the text it delivered, a
         non-streamed call with that text in ``partial_answer``. The protocol
         lanes mark it instead, as their wire does.
