@@ -153,7 +153,7 @@ def test_composite_font_widths_read_both_w_forms():
     """/W holds `c [w1 w2 ...]` and `c_first c_last w` entries, /DW covers
     the rest, and a range is bounded to two-byte codes."""
     from types import SimpleNamespace
-    from PyPDF2.generic import ArrayObject, DictionaryObject, NameObject, NumberObject
+    from pypdf.generic import ArrayObject, DictionaryObject, NameObject, NumberObject
     from pageindex.flash.parser_pdfium_charlevel.font_unicode import _font_widths
 
     def array(*items):

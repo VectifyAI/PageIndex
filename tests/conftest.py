@@ -11,7 +11,7 @@ def _llm_key(monkeypatch):
 def build_pdf(page_texts, font="<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"):
     """Build a minimal, uncompressed PDF (one line per page, a page's
     (x, y, size, text) lines, or a page's raw content stream as bytes, in
-    ``font``, Helvetica by default) whose text PyPDF2 can extract. Returns
+    ``font``, Helvetica by default) whose text pypdf can extract. Returns
     the PDF file bytes."""
     n = len(page_texts)
     objects = []
