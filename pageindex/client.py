@@ -1401,9 +1401,9 @@ class PageIndexClient:
               only), the native ``iterations`` on Messages
             - protocol lane, stream=True: an iterator of the protocol's
               own stream events; Messages ends a finished run with one
-              ``{"type": "result", "usage": ..., "messages": ...}`` event
-              carrying the envelope's aggregated ``usage`` and
-              ``messages`` turn sequence
+              ``type == "result"`` event (read ``event.usage``, not
+              ``event["usage"]``) carrying the envelope's aggregated
+              ``usage`` and ``messages`` turn sequence
 
         An own-model run that fails raises PageIndexAPIError with
         ``usage``: what its finished model calls spent, in the protocol's
