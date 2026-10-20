@@ -276,8 +276,15 @@ def test_chat_completions_validation(client, store_path, fake_model):
     with pytest.raises(PageIndexAPIError, match="managed chat endpoint"):
         client.chat_completions([{"role": "user", "content": "x"}],
                                 enable_citations=True)
-    with pytest.raises(PageIndexAPIError, match="chat\\(protocol="):
+    with pytest.raises(PageIndexAPIError, match="tool_call_id"):
         client.chat_completions([{"role": "tool", "content": "x"}])
+    with pytest.raises(PageIndexAPIError, match="needs content"):
+        client.chat_completions([{"role": "assistant", "content": None}])
+    with pytest.raises(PageIndexAPIError, match="Invalid assistant message"):
+        client.chat_completions([{"role": "assistant",
+                                  "tool_calls": [{"id": "c"}]}])
+    with pytest.raises(PageIndexAPIError, match="Unsupported role"):
+        client.chat_completions([{"role": "function", "content": "x"}])
     with pytest.raises(PageIndexAPIError, match="must be a string"):
         client.chat_completions([{"role": "user", "content": [1]}])
     with pytest.raises(PageIndexAPIError, match="non-empty"):
@@ -431,6 +438,120 @@ def test_cache_marker_reaches_the_anthropic_wire(client, store_path,
     # extra_body as a literal field, and Anthropic rejects unknown fields.
     assert "extra_body" not in json.dumps(captured["body"])
     assert result["choices"][0]["message"]["content"] == "ok"
+
+
+@needs_agents
+def test_chat_completions_messages_on_both_paths(client, store_path,
+                                                 fake_model):
+    """The run's new messages ride the envelope and the closing usage
+    chunk alike."""
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+
+    def run():
+        return [[_call_item("get_document", {"doc_name": "report.pdf"})],
+                [_msg_item("The answer")]]
+
+    fake_model(run())
+    envelope = client.chat_completions("q", doc_id=doc_id)
+    fake_model(run())
+    *_, closing = client.chat_completions("q", doc_id=doc_id, stream=True,
+                                          stream_metadata=True)
+    assert closing["messages"] == envelope["messages"]
+    assert [m["role"] for m in envelope["messages"]] == [
+        "assistant", "tool", "assistant"]
+    assert envelope["messages"][0]["tool_calls"][0]["id"] == "call_1"
+    assert envelope["messages"][-1] == {"role": "assistant",
+                                        "content": "The answer"}
+
+
+def _litellm_reply(content=None, tool_calls=None, **extra):
+    import litellm
+    return litellm.ModelResponse(
+        choices=[litellm.Choices(
+            finish_reason="tool_calls" if tool_calls else "stop",
+            message=litellm.Message(content=content, role="assistant",
+                                    tool_calls=tool_calls, **extra))],
+        usage=litellm.Usage(prompt_tokens=10, completion_tokens=5,
+                            total_tokens=15))
+
+
+_TWO_CALLS = [{"id": f"call_{n}", "type": "function",
+               "function": {"name": "get_document",
+                            "arguments": '{"doc_name": "report.pdf"}'}}
+              for n in (1, 2)]
+
+
+def _two_turns(store_path, monkeypatch, client, model, first_reply):
+    """Two calls through the real LitellmModel, the second appending the
+    first's ``messages``: the first envelope, and each request's messages
+    as LiteLLM received them."""
+    import litellm
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    sent = []
+    replies = [first_reply, _litellm_reply("A1"), _litellm_reply("A2")]
+
+    async def acompletion(**kwargs):
+        sent.append(json.loads(json.dumps(kwargs["messages"])))
+        return replies.pop(0)
+
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+    question = {"role": "user", "content": "q1"}
+    first = client.chat_completions([question], doc_id=doc_id, model=model)
+    client.chat_completions([question, *first["messages"],
+                             {"role": "user", "content": "q2"}],
+                            doc_id=doc_id, model=model)
+    return first, sent
+
+
+@needs_agents
+@pytest.mark.parametrize("model, extra", [
+    ("gpt-test", {}),
+    # LitellmModel re-pairs parallel calls with their results here
+    ("anthropic/claude-test", {}),
+    # replayed as reasoning_content beside the calls
+    ("deepseek/deepseek-chat", {"reasoning_content": "think"}),
+])
+def test_chat_completions_messages_resend_the_wire(client, store_path,
+                                                   monkeypatch, model, extra):
+    """Appending a call's messages opens the next call's first request
+    with the previous call's last one, unchanged: the provider's cached
+    prefix carries over."""
+    pytest.importorskip("litellm")
+    first, sent = _two_turns(store_path, monkeypatch, client, model,
+                             _litellm_reply(tool_calls=_TWO_CALLS, **extra))
+    assert [m["role"] for m in first["messages"]] == [
+        "assistant", "tool", "tool", "assistant"]
+    assert sent[2][:len(sent[1])] == sent[1]
+
+
+@needs_agents
+def test_chat_completions_messages_keep_gemini_signatures(client, store_path,
+                                                          monkeypatch):
+    """Gemini thought signatures ride messages back in Google's
+    extra_content. LitellmModel puts only the current turn's in LiteLLM's
+    own field, so an earlier turn's calls are where the next request
+    differs from the one that made them."""
+    pytest.importorskip("litellm")
+    signed = [{**call, "provider_specific_fields": {
+        "thought_signature": f"sig{n}"}}
+        for n, call in enumerate(_TWO_CALLS, 1)]
+    first, sent = _two_turns(store_path, monkeypatch, client,
+                             "gemini/gemini-test",
+                             _litellm_reply(tool_calls=signed))
+    assert [call["extra_content"]
+            for call in first["messages"][0]["tool_calls"]] == [
+        {"google": {"thought_signature": "sig1"}},
+        {"google": {"thought_signature": "sig2"}}]
+
+    def unsigned(messages):
+        return [{**m, "tool_calls": [
+            {k: v for k, v in call.items()
+             if k not in ("extra_content", "provider_specific_fields")}
+            for call in m["tool_calls"]]} if m.get("tool_calls") else m
+            for m in messages]
+
+    assert unsigned(sent[2][:len(sent[1])]) == unsigned(sent[1])
+    assert "sig1" in json.dumps(sent[2]) and "sig2" in json.dumps(sent[2])
 
 
 # ── chat (front door) ──

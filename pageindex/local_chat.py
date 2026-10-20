@@ -47,14 +47,36 @@ def _system_text(content: Any) -> str:
     )
 
 
+def _assistant_items(message) -> list:
+    """An assistant turn beyond plain text as the Agents SDK's items, by the
+    SDK's own converter for a model reply: the items its run held."""
+    from openai.types.chat import ChatCompletionMessage
+    from pydantic import ValidationError
+    from agents.models.chatcmpl_converter import Converter
+    try:
+        parsed = ChatCompletionMessage.model_validate(message)
+    except ValidationError as exc:
+        error = exc.errors()[0]
+        raise PageIndexAPIError(
+            f"Invalid assistant message: {error['msg']} at "
+            f"{'.'.join(map(str, error['loc']))}.") from exc
+    items = [item.model_dump(exclude_unset=True)
+             for item in Converter.message_to_output_items(parsed)]
+    if not items:
+        raise PageIndexAPIError(
+            "An assistant message needs content, a refusal or tool_calls.")
+    return items
+
+
 def _split_chat_messages(messages, text_only: Optional[str] = None,
                          ) -> "tuple[list[str], list[dict]]":
     """Validate the chat_completions surface's messages: system/developer
-    content joins the managed instructions; user/assistant history passes
-    through. Tool-history round-trips belong to chat(protocol="responses")
-    or chat(protocol="messages"). ``text_only`` names a model those lanes
-    cannot run (claude-code/): its errors say so instead of sending the
-    caller there."""
+    content joins the managed instructions; user/assistant text passes
+    through; assistant turns carrying more (tool calls, a refusal,
+    reasoning) and tool results become the Agents SDK's items, so a
+    returned ``messages`` transcript appends back verbatim. ``text_only``
+    names a model that takes text alone (claude-code/): its errors say so
+    and point to the lanes that take more."""
     lanes = 'chat(protocol="responses") or chat(protocol="messages")'
     messages = list(messages)
     if not messages:
@@ -68,6 +90,21 @@ def _split_chat_messages(messages, text_only: Optional[str] = None,
         role = message["role"]
         if role in ("system", "developer"):
             system_texts.append(_system_text(message.get("content")))
+        elif (role == "assistant" and not text_only
+              and (set(message) - {"role", "content"}
+                   or not isinstance(message.get("content"), str))):
+            history.extend(_assistant_items(message))
+        elif role == "tool" and not text_only:
+            call_id = message.get("tool_call_id")
+            output = message.get("content")
+            if (not isinstance(call_id, str)
+                    or not isinstance(output, (str, list))):
+                raise PageIndexAPIError(
+                    "A tool message needs a string tool_call_id and string "
+                    "or list content.")
+            # the SDK reads Chat Completions content parts as they are
+            history.append({"type": "function_call_output",
+                            "call_id": call_id, "output": output})
         elif role in ("user", "assistant"):
             content = message.get("content")
             if not isinstance(content, str):
@@ -83,9 +120,7 @@ def _split_chat_messages(messages, text_only: Optional[str] = None,
             raise PageIndexAPIError(
                 f"{text_only} takes text messages only: no {role!r} "
                 f"messages. For tool history, use an API model with {lanes}."
-                if text_only else
-                f"Unsupported role {role!r} on this lane. Tool history "
-                f"round-trips belong to {lanes}."
+                if text_only else f"Unsupported role {role!r} on this lane."
             )
     if not history:
         raise PageIndexAPIError("messages must contain a user or assistant "
@@ -738,6 +773,22 @@ def _chat_agent(client, messages, doc_id, model, temperature=None,
     return agent, items, model_name
 
 
+def _chat_transcript(agent, new_items) -> list:
+    """The run's new items as Chat Completions messages, converted as
+    LitellmModel converts each request (ahead of its per-provider fixups),
+    so a caller who appends them resends what the model saw."""
+    from agents.models.chatcmpl_converter import Converter
+    model, reasoning = agent.model, agent.model_settings.reasoning
+    return Converter.items_to_messages(
+        new_items, model=getattr(model, "model", None),
+        base_url=getattr(model, "base_url", None),
+        preserve_thinking_blocks=(reasoning is not None
+                                  and reasoning.effort is not None),
+        preserve_tool_output_all_content=True,
+        should_replay_reasoning_content=getattr(
+            model, "should_replay_reasoning_content", None))
+
+
 def _output_text(output) -> str:
     """A tool result for the display: a string as it is, the framework's
     structured items by their text, anything else as JSON with an image's
@@ -1124,6 +1175,8 @@ def run_chat_completions(client, messages, stream: bool = False,
                 "finish_reason": recorded.get("finish_reason") or "stop",
             }],
             "usage": _openai_usage(result.raw_responses),
+            "messages": _chat_transcript(
+                agent, result.to_input_list()[len(items):]),
         }
 
     chat_id = f"chatcmpl-{uuid.uuid4().hex}"
@@ -1166,6 +1219,8 @@ def run_chat_completions(client, messages, stream: bool = False,
             "id": chat_id, "object": "chat.completion.chunk",
             "created": created, "model": reported_model, "choices": [],
             "usage": _openai_usage(streamed.raw_responses),
+            "messages": _chat_transcript(
+                agent, streamed.to_input_list()[len(items):]),
         }
 
     if stream_metadata:

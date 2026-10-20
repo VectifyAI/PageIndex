@@ -1230,17 +1230,22 @@ class PageIndexClient:
         lane's own engine with its envelope kept — the Chat Completions
         response (``choices``/``usage``), or its chunk dicts when
         streaming; it is the one protocol the managed cloud chat serves
-        too. ``protocol="responses"`` / ``"messages"``: own-model chat
+        too. With an API chat model it adds ``messages`` (on the closing
+        usage chunk when streaming): the call's new Chat Completions
+        messages — assistant tool calls, tool results, the answer — to
+        append as they are, ``history += r["messages"]``.
+        ``protocol="responses"`` / ``"messages"``: own-model chat
         driven natively over the OpenAI Responses API or Anthropic's
         Messages API. Input and output are that protocol's own shapes —
         the history may carry its transcript (Responses items, or
         Messages content blocks with prior tool_use/tool_result
         round-trips), and the return is its response envelope, streaming
-        its native events. A round-tripped transcript continues the
-        agent's memory and the provider's cached prefix: follow-ups re-read
-        the run instead of redoing the tool work. The protocol is declared,
-        never inferred from the model name. Keep ``doc_id`` and
-        ``protocol`` constant across a conversation's calls.
+        its native events. A round-tripped transcript (``messages``,
+        ``items``) continues the agent's memory and the provider's cached
+        prefix: follow-ups re-read the run instead of redoing the tool
+        work. The protocol is declared, never inferred from the model
+        name. Keep ``doc_id`` and ``protocol`` constant across a
+        conversation's calls.
 
         A ``claude-code/`` chat model runs Claude Code, not LiteLLM (see
         the constructor's ``chat_model``): ``backend``, ``extra_headers``
@@ -1257,8 +1262,11 @@ class PageIndexClient:
                 the other protocol lanes pass rows to the wire as they
                 are (use ``instructions`` for persona there). Responses
                 and Messages also accept their native transcript items
-                or content blocks; own-model Chat Completions takes text
-                history only.
+                or content blocks; with an API chat model, the answer lane
+                and Chat Completions also take Chat Completions tool
+                history (assistant ``tool_calls``, ``tool`` rows), as
+                ``messages`` returns it. A ``claude-code/`` model takes
+                text only.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls. Local
                 documents: also enforced at the tool layer, not just
@@ -1391,7 +1399,8 @@ class PageIndexClient:
               ``{"type": "tool_call", "call_id", "name", "arguments"}``,
               ``{"type": "tool_result", "call_id", "name", "output"}``
             - protocol lane, stream=False: the protocol's response
-              envelope — Chat Completions: ``choices`` and ``usage``;
+              envelope — Chat Completions: ``choices`` and ``usage``,
+              plus ``messages`` from an API chat model;
               Responses: ``output`` plus an ``items``
               transcript and cross-turn ``usage``; Messages: the final
               message with a ``messages`` turn sequence and aggregated
@@ -1571,7 +1580,7 @@ class PageIndexClient:
 
     def chat_completions(
         self,
-        messages: Union[str, list[dict[str, str]]],
+        messages: Union[str, list[dict[str, Any]]],
         stream: bool = False,
         doc_id: Optional[Union[str, list[str]]] = None,
         temperature: Optional[float] = None,
@@ -1610,13 +1619,16 @@ class PageIndexClient:
         provider-prefixed names — ``anthropic/…``, ``bedrock/…`` — reach
         that provider, and LiteLLM-routed Claude models get the managed
         prompt prefix cache-marked automatically. The non-stream
-        response carries the final answer only; streaming yields the
+        response carries the final answer; streaming yields the
         agent's visible text as it is produced, including narration before
         tool calls. ``finish_reason`` carries the final turn's native
         finish reason — "stop", or the backend's "length" /
-        "content_filter" when the last turn was cut short. For
-        the tool-use process and prompt-cache round-trip use
-        ``chat(protocol="responses")`` or ``chat(protocol="messages")``.
+        "content_filter" when the last turn was cut short. An API chat
+        model's run also returns ``messages`` (on the closing usage chunk
+        with ``stream_metadata``): the call's new messages — assistant
+        tool calls, tool results, the answer — to append as they are, so
+        the next call resends what the model saw and re-reads the
+        provider's cached prefix instead of redoing the tool work.
 
         A ``claude-code/`` chat model runs Claude Code, not LiteLLM (see
         the constructor's ``chat_model``): ``temperature``, ``top_p``,
@@ -1631,9 +1643,11 @@ class PageIndexClient:
                 System/developer messages, wherever they sit, join the
                 managed system prompt after the client's ``instructions``
                 (the managed endpoint receives them as its one leading
-                system message); the history is text only: tool-role
-                turns are rejected on both engines, and message
-                fields beyond role/content are dropped.
+                system message). Own-model chat takes the rest as text,
+                dropping fields beyond role/content, plus, with an API
+                chat model, Chat Completions tool history (assistant
+                ``tool_calls``, ``tool`` rows) as ``messages`` returns
+                it; a ``claude-code/`` model takes text only.
             stream: Enable streaming responses.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
@@ -1693,9 +1707,10 @@ class PageIndexClient:
 
         Returns:
             - stream=False: complete response dict ({'id', 'object', 'created',
-              'choices', 'usage'})
+              'choices', 'usage'}, plus 'messages' from an API chat model)
             - stream=True, stream_metadata=False: iterator of text chunks
             - stream=True, stream_metadata=True: iterator of chunk dicts
+              (an API chat model's closing usage chunk carries 'messages')
         """
         if isinstance(messages, str):
             if not messages.strip():
