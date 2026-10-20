@@ -1769,6 +1769,10 @@ def run_messages(client, messages, model: str, route: str,
 _TURNS_NOTE = ("The conversation so far arrives as <turn> blocks in the user "
                "message, oldest first. Answer the last user turn.")
 
+# Claude's stop reasons for an unfinished answer, as LiteLLM maps them
+_CLAUDE_CUT: dict[Optional[str], str] = {"max_tokens": "length",
+                                          "refusal": "content_filter"}
+
 
 def _claude_code_run(client, messages, model_name: str, doc_id=None,
                      folder_id=None, reasoning_effort=None, max_turns=None,
@@ -1816,7 +1820,7 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
                                       ToolUseBlock, UserMessage)
         names: dict = {}  # tool_use id -> tool name, to label results
         streamed = ""  # text deltas since the last text block
-        cut = None  # a streamed run's usage, when its answer hit max_tokens
+        cut = None  # (finish_reason, usage) of a streamed run cut short
         failures.clear()
         try:
             async with aclosing(claude_code_messages(prompt(), options)) as sdk:
@@ -1861,12 +1865,12 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
                     elif isinstance(message, ResultMessage) and done and not failures:
                         yield {"type": "done", "answer": message.result or "",
                                "usage": _claude_code_usage(message.usage),
-                               "finish_reason": ("length"
-                                                 if message.stop_reason == "max_tokens"
-                                                 else "stop")}
+                               "finish_reason": _CLAUDE_CUT.get(
+                                   message.stop_reason, "stop")}
                     elif (isinstance(message, ResultMessage)
-                          and message.stop_reason == "max_tokens"):
-                        cut = _claude_code_usage(message.usage)
+                          and message.stop_reason in _CLAUDE_CUT):
+                        cut = (_CLAUDE_CUT[message.stop_reason],
+                               _claude_code_usage(message.usage))
         except PageIndexAPIError:
             if failures:  # a tool failure (402, 429) is the cause to report
                 raise failures[0] from None
@@ -1874,7 +1878,7 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
         if failures:  # raised after the run, once the CLI is closed
             raise failures[0]
         if cut is not None:
-            raise _with_usage(_cut_short_error("length"), cut)
+            raise _with_usage(_cut_short_error(cut[0]), cut[1])
     return run
 
 
