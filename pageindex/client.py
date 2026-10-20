@@ -1395,10 +1395,10 @@ class PageIndexClient:
               Responses: ``output`` plus an ``items``
               transcript and cross-turn ``usage``; Messages: the final
               message with a ``messages`` turn sequence and aggregated
-              ``usage``. Each ``usage`` also lists the run's model calls:
-              ``request_usage_entries`` on the OpenAI protocols (a
-              ``claude-code/`` model reports the run's total only), the
-              native ``iterations`` on Messages
+              ``usage``. Each own-model ``usage`` also lists the run's
+              model calls: ``request_usage_entries`` on the OpenAI
+              protocols (a ``claude-code/`` model reports the run's total
+              only), the native ``iterations`` on Messages
             - protocol lane, stream=True: an iterator of the protocol's
               own stream events; Messages ends a finished run with one
               ``{"type": "result", "usage": ..., "messages": ...}`` event

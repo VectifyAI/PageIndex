@@ -645,7 +645,8 @@ def _responses_usage(raw_responses) -> dict:
 def _usage_recorder():
     """Run hooks keeping every model response: a non-streamed run that
     raises has no result to read raw_responses from, and openai-agents
-    attaches its run data only to its own exceptions, not a provider's."""
+    attaches its run data only to its own exceptions, not a provider's;
+    a streamed run adds a turn to raw_responses only after its tools ran."""
     from agents import RunHooks
 
     class Recorder(RunHooks):
@@ -1679,9 +1680,8 @@ def run_messages(client, messages, model: str, route: str,
                 # runs on exhaustion and abandonment (GeneratorExit) alike
                 if owns_transport:
                     backend_client.close()
-            if turns:
-                yield Result(type="result", usage=run_usage(turns),
-                             messages=transcript(turns))
+            yield Result(type="result", usage=run_usage(turns),
+                         messages=transcript(turns))
         return events()
 
     turns: list = []
