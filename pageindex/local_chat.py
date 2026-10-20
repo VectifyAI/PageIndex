@@ -11,10 +11,10 @@ import queue
 import threading
 import time
 import uuid
-from typing import Any, Iterator, Mapping, Optional, Union
+from typing import Any, Generator, Iterator, Mapping, Optional, Union
 
 from .agent_tools import _base_instructions, targeting_block
-from .chat_stream import ChatStream
+from .chat_stream import ChatStream, MessagesStream
 from .errors import PageIndexAPIError, _pageindex_cause
 
 CHAT_HEADER = (
@@ -1559,7 +1559,7 @@ def run_messages(client, messages, model: str, route: str,
                  extra_headers: Optional[dict] = None,
                  backend: Optional[dict] = None,
                  folder_id: Optional[str] = None,
-                 ) -> Union[dict, Iterator[Any]]:
+                 ) -> Union[dict, MessagesStream]:
     from .integrations.anthropic_sdk import build_anthropic_tools
 
     _require_anthropic()
@@ -1712,11 +1712,10 @@ def run_messages(client, messages, model: str, route: str,
 
     if stream:
         class Result(anthropic.BaseModel):
-            type: str
             usage: dict
             messages: list
 
-        def events() -> Iterator[Any]:
+        def events() -> Generator[Any, None, Any]:
             turns: list = []  # each finished turn's message snapshot
             try:
                 for turn_stream in runner:
@@ -1738,9 +1737,8 @@ def run_messages(client, messages, model: str, route: str,
                 # runs on exhaustion and abandonment (GeneratorExit) alike
                 if owns_transport:
                     backend_client.close()
-            yield Result(type="result", usage=run_usage(turns),
-                         messages=transcript(turns))
-        return events()
+            return Result(usage=run_usage(turns), messages=transcript(turns))
+        return MessagesStream(events())
 
     turns: list = []
     try:

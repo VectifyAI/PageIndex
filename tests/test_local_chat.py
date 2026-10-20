@@ -1451,8 +1451,8 @@ def test_messages_usage_sums_every_count_across_turns():
 
 
 @needs_anthropic
-def test_messages_stream_ends_with_the_run_usage(client, store_path,
-                                                 fake_anthropic):
+def test_messages_stream_final_result_is_the_run_total(client, store_path,
+                                                       fake_anthropic):
     seed_doc(store_path, "pi-a", "r.pdf")
     replies = [_anthropic_message([
         {"type": "tool_use", "id": tool_id, "name": "get_document",
@@ -1462,19 +1462,28 @@ def test_messages_stream_ends_with_the_run_usage(client, store_path,
                                       "end_turn"))
     fake_anthropic([_anthropic_sse(reply) for reply in replies])
     question = [{"role": "user", "content": "q"}]
-    events = list(client._messages(question, model="claude-test",
-                                   max_tokens=100, stream=True))
-    assert [event.type for event in events].count("result") == 1
-    assert events[-1].to_dict()["type"] == "result"
+    stream = client._messages(question, model="claude-test", max_tokens=100,
+                              stream=True)
+    events = list(stream)
+    assert events[-1].type == "message_stop"
+    assert events[-1].message.content[0].text == "Done"
+    final = stream.get_final_result()
+
+    # Called mid-stream, it reads the rest of the run first.
+    fake_anthropic([_anthropic_sse(reply) for reply in replies])
+    early = client._messages(question, model="claude-test", max_tokens=100,
+                             stream=True)
+    next(early)
+    early_usage = early.get_final_result().usage
 
     fake_anthropic(replies)
     result = client._messages(question, model="claude-test", max_tokens=100)
     assert result["usage"]["input_tokens"] == 30
-    assert events[-1].usage == result["usage"]
+    assert final.usage == early_usage == result["usage"]
     # The same continuation transcript the non-stream envelope carries.
-    assert [m["role"] for m in events[-1].messages] == [
+    assert [m["role"] for m in final.messages] == [
         "assistant", "user", "assistant", "user", "assistant"]
-    assert events[-1].messages == result["messages"]
+    assert final.messages == result["messages"]
 
 
 @needs_anthropic
@@ -1487,24 +1496,23 @@ def test_messages_stream_cut_mid_message_raises(client, store_path,
     answer = _anthropic_message([{"type": "text", "text": "Done"}], "end_turn")
     cut = _anthropic_sse(answer).rsplit("event: message_delta", 1)[0]
     fake_anthropic([_anthropic_sse(tool_turn), cut])
-    events = []
+    stream = client._messages("q", model="claude-test", max_tokens=100,
+                              stream=True)
     with pytest.raises(PageIndexAPIError, match="ended before") as err:
-        for event in client._messages("q", model="claude-test",
-                                      max_tokens=100, stream=True):
-            events.append(event)
-    assert "result" not in [event.type for event in events]
+        stream.get_final_result()
     usage = err.value.usage
     assert usage is not None
     assert usage["input_tokens"] == 10 and len(usage["iterations"]) == 1
+    with pytest.raises(PageIndexAPIError, match="no final result"):
+        stream.get_final_result()
 
     # Only message_stop missing: the message itself is complete.
     unstopped = _anthropic_sse(answer).rsplit("event: message_stop", 1)[0]
     fake_anthropic([_anthropic_sse(tool_turn), unstopped])
-    events = list(client._messages("q", model="claude-test", max_tokens=100,
-                                   stream=True))
-    assert events[-1].type == "result"
-    assert events[-1].usage["input_tokens"] == 20
-    assert events[-1].messages[-1]["content"][0]["text"] == "Done"
+    final = client._messages("q", model="claude-test", max_tokens=100,
+                             stream=True).get_final_result()
+    assert final.usage["input_tokens"] == 20
+    assert final.messages[-1]["content"][0]["text"] == "Done"
 
 
 @needs_agents
