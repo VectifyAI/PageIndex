@@ -251,7 +251,7 @@ def _drop_probe_reaped(record) -> bool:
     watcher logs this for an exit code nobody reads. Matched on the ending
     every child watcher's wording shares, which LiteLLM's redaction filter on
     the same logger keeps when it renders the message first."""
-    # ponytail: drops this one message process-wide, not only for the probe;
+    # drops this one message process-wide, not only for the probe;
     # remove once the SDK stops terminating an exited probe
     return not (isinstance(record.msg, str)
                 and record.msg.endswith("will report returncode 255"))
@@ -345,7 +345,7 @@ async def claude_code_complete(model: str, prompt: str,
     only a 400 stays per-prompt, for the indexing callers to absorb."""
     from ..utils import LLMRetriesExhausted, _add_usage_counts
     loop = asyncio.get_running_loop()
-    # ponytail: one cap per event loop; submits on separate threads each get their own
+    # one cap per event loop; submits on separate threads each get their own
     entry = _GATES.setdefault(loop, [asyncio.Semaphore(CLAUDE_CODE_CONCURRENCY), 0])
     entry[1] += 1
     reply = ""

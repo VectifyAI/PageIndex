@@ -1426,7 +1426,7 @@ def _anthropic_client(backend, route):
         raise PageIndexAPIError(
             f"The Anthropic backend is not configured: {exc}") from exc
     if key is not None and len(_ANTHROPIC_CLIENTS) < 8:
-        # ponytail: cache capped at 8 backends; the tail constructs per call.
+        # cache capped at 8 backends; the tail constructs per call.
         # setdefault: never evict a client another thread may already hold.
         client = _ANTHROPIC_CLIENTS.setdefault(key, client)
     return client
