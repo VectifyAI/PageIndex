@@ -1118,15 +1118,16 @@ def test_responses_stream_passthrough(client, store_path, fake_model):
 
 
 def _cut_response():
-    """A billed response cut at the output cap: its text, and a tool call
-    it never finished."""
-    from openai.types.responses import Response
+    """A billed response cut at the output cap: its reasoning, its text,
+    and a tool call it never finished."""
+    from openai.types.responses import Response, ResponseReasoningItem
     from openai.types.responses.response import IncompleteDetails
     from openai.types.responses.response_usage import (
         InputTokensDetails, OutputTokensDetails, ResponseUsage)
     return Response(
         id="resp_cut", created_at=0.0, model="fake", object="response",
-        output=[_msg_item("cut"),
+        output=[ResponseReasoningItem(id="rs_1", type="reasoning", summary=[]),
+                _msg_item("cut"),
                 _call_item("get_document", {"doc_n": 1}, "call_9")],
         parallel_tool_calls=False, tool_choice="auto", tools=[],
         status="incomplete",
@@ -1169,6 +1170,7 @@ def test_responses_stream_counts_a_call_cut_short(client, store_path,
     assert len(usage["request_usage_entries"]) == 2
     assert [item["type"] for item in final["response"]["items"]] == [
         "function_call", "function_call_output", "message"]
+    assert "id" not in final["response"]["items"][-1]  # its reasoning is left out
     assert final["response"]["output"][-1]["content"][0]["text"] == "cut"
 
 
@@ -1197,6 +1199,7 @@ def test_responses_counts_a_call_cut_short(client, store_path, fake_model):
     assert len(usage["request_usage_entries"]) == 2
     assert [item["type"] for item in result["items"]] == [
         "function_call", "function_call_output", "message"]
+    assert "id" not in result["items"][-1]
     assert result["output"][-1]["content"][0]["text"] == "cut"
 
 
