@@ -1591,7 +1591,7 @@ def build_agent_tools(client, include_management: bool = False,
 # ── agent instructions ──
 
 _INSTRUCTIONS_HEADER = (
-    "PageIndex by Vectify AI hosts the user's long PDFs (research papers, "
+    "PageIndex by Vectify AI manages the user's long PDFs (research papers, "
     "financial reports, legal docs, textbooks, etc.)."
 )
 
