@@ -112,8 +112,10 @@ class FakeModel(Model):
         transport = getattr(getattr(self, "_client", None), "responses", None)
         if transport is not None:
             await transport.create()
-        return ModelResponse(output=self.turns.pop(0), usage=_usage(),
-                             response_id=None)
+        output = self.turns.pop(0)
+        if isinstance(output, BaseException):
+            raise output  # the backend fails this turn
+        return ModelResponse(output=output, usage=_usage(), response_id=None)
 
     async def stream_response(self, system_instructions, input,
                               model_settings, tools, output_schema, handoffs,
@@ -129,6 +131,8 @@ class FakeModel(Model):
                 await aio.sleep(0.01)
         self._record(system_instructions, input)
         output = self.turns.pop(0)
+        if isinstance(output, BaseException):
+            raise output  # the backend fails this turn
         sequence = 0
         for index, piece in enumerate(getattr(self, "thinking_pieces", ())):
             from openai.types.responses import (
@@ -220,11 +224,19 @@ def test_chat_completions_end_to_end(client, store_path, fake_model):
     assert result["choices"][0]["message"] == {"role": "assistant",
                                                "content": "The answer"}
     assert result["choices"][0]["finish_reason"] == "stop"
-    assert result["usage"] == {"prompt_tokens": 20, "completion_tokens": 10,
-                               "total_tokens": 30,
-                               "prompt_tokens_details": {"cached_tokens": 0},
-                               "completion_tokens_details":
-                                   {"reasoning_tokens": 0}}
+    call = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+            "prompt_tokens_details": {"cached_tokens": 0,
+                                      "cache_write_tokens": 0},
+            "completion_tokens_details": {"reasoning_tokens": 0}}
+    assert result["usage"] == {
+        "prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30,
+        "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+        "completion_tokens_details": {"reasoning_tokens": 0},
+        "request_usage_entries": [call, call]}
+    from openai.types import CompletionUsage
+    typed = CompletionUsage.model_validate(result["usage"])
+    assert typed.prompt_tokens_details is not None
+    assert typed.prompt_tokens_details.cache_write_tokens == 0
     assert fake_model.state["protocols"][0][0] == "chat"
     # The tool ran for real: turn 2's input carries its output.
     turn2 = json.dumps(fake.inputs[1])
@@ -592,6 +604,32 @@ def test_chat_process_managed_off_is_clean_answer(monkeypatch):
     assert "doc_name" not in plain
 
 
+def test_managed_chat_raises_on_an_unfinished_answer(monkeypatch):
+    """The managed answer lane holds an unfinished answer to the same
+    rule: a stream raises after its text, a plain call carries the text
+    on the error (no usage: it is not an own-model run)."""
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cut = _cloud_chunk(None)
+    cut["choices"][0]["finish_reason"] = "length"
+
+    def fake_cc(**kwargs):
+        if kwargs.get("stream"):
+            return iter([_cloud_chunk("The range was"), cut])
+        return {"choices": [{"message": {"content": "The range was"},
+                             "finish_reason": "length"}]}
+
+    monkeypatch.setattr(cloud._api, "chat_completions", fake_cc)
+    text = []
+    with pytest.raises(PageIndexAPIError, match="length"):
+        for piece in cloud.chat("q", stream=True):
+            text.append(piece)
+    assert "".join(text) == "The range was"
+    with pytest.raises(PageIndexAPIError, match="length") as info:
+        cloud.chat("q")
+    assert info.value.partial_answer == "The range was"
+    assert info.value.usage is None
+
+
 def test_chat_process_managed_open_block_never_leaks(monkeypatch):
     """Inside an open tool block nothing is answer text: argument chunks
     under an unexpected tag (or none) accumulate into the call instead
@@ -936,12 +974,19 @@ def test_responses_end_to_end(client, store_path, fake_model):
     assert result["id"].startswith("resp_")
     assert result["object"] == "response"
     assert result["status"] == "completed"
+    call = {"input_tokens": 10,
+            "input_tokens_details": {"cached_tokens": 0,
+                                     "cache_write_tokens": 0},
+            "output_tokens": 5,
+            "output_tokens_details": {"reasoning_tokens": 0},
+            "total_tokens": 15}
     assert result["usage"] == {
         "input_tokens": 20,
         "input_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
         "output_tokens": 10,
         "output_tokens_details": {"reasoning_tokens": 0},
-        "total_tokens": 30}
+        "total_tokens": 30,
+        "request_usage_entries": [call, call]}
     assert fake_model.state["protocols"][0][0] == "responses"
     assert [item.get("type", "message") for item in result["output"]] == [
         "function_call", "message"]
@@ -1070,6 +1115,93 @@ def test_responses_stream_passthrough(client, store_path, fake_model):
                   if event.get("type") == "response.output_text.delta"][-1]
     assert (final["output"][last_delta["output_index"]]
             .get("type", "message") == "message")
+
+
+def _cut_response():
+    """A billed response cut at the output cap: its text, and a tool call
+    it never finished, each after its reasoning."""
+    from openai.types.responses import Response, ResponseReasoningItem
+    from openai.types.responses.response import IncompleteDetails
+    from openai.types.responses.response_usage import (
+        InputTokensDetails, OutputTokensDetails, ResponseUsage)
+    return Response(
+        id="resp_cut", created_at=0.0, model="fake", object="response",
+        output=[ResponseReasoningItem(id="rs_1", type="reasoning", summary=[]),
+                _msg_item("cut"),
+                ResponseReasoningItem(id="rs_2", type="reasoning", summary=[]),
+                _call_item("get_document", {"doc_n": 1}, "call_9")],
+        parallel_tool_calls=False, tool_choice="auto", tools=[],
+        status="incomplete",
+        incomplete_details=IncompleteDetails(reason="max_output_tokens"),
+        usage=ResponseUsage(
+            input_tokens=40, output_tokens=99, total_tokens=139,
+            input_tokens_details=InputTokensDetails(
+                cached_tokens=0, cache_write_tokens=0),
+            output_tokens_details=OutputTokensDetails(reasoning_tokens=0)))
+
+
+@needs_agents
+def test_responses_stream_counts_a_call_cut_short(client, store_path,
+                                                  fake_model):
+    """openai-agents raises on response.incomplete before its hooks or
+    items see the call, yet that call was billed and its text streamed:
+    the terminal envelope counts it and keeps the text, but not a
+    half-written tool call, which has no output to pair with."""
+    from openai.types.responses import ResponseIncompleteEvent
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([[_call_item("get_document", {"doc_name": "report.pdf"})],
+                       [_msg_item("cut")]])
+    first_turn = fake.stream_response
+
+    async def stream_response(*args, **kwargs):
+        if not fake.inputs:
+            async for event in first_turn(*args, **kwargs):
+                yield event
+            return
+        fake._record(args[0], args[1])
+        yield ResponseIncompleteEvent(type="response.incomplete",
+                                      sequence_number=1,
+                                      response=_cut_response())
+
+    fake.stream_response = stream_response
+    final = list(client._responses("q", stream=True))[-1]
+    assert final["type"] == "response.incomplete"
+    usage = final["response"]["usage"]
+    assert (usage["input_tokens"], usage["output_tokens"]) == (50, 104)
+    assert len(usage["request_usage_entries"]) == 2
+    assert [item.get("id") for item in final["response"]["items"]] == [
+        "fc_1", None, "rs_1", "msg_1"]
+    assert final["response"]["output"][-1]["content"][0]["text"] == "cut"
+
+
+@needs_agents
+def test_responses_counts_a_call_cut_short(client, store_path, fake_model):
+    """The non-streamed twin: a response cut short ends the run once the
+    transport returned it, before openai-agents' hooks see it, and the
+    envelope keeps it, as above."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("never reached")]])
+    replies = [types.SimpleNamespace(status="completed",
+                                     incomplete_details=None, error=None),
+               _cut_response()]
+
+    async def create(*args, **kwargs):
+        return replies.pop(0)
+
+    fake._client = types.SimpleNamespace(
+        responses=types.SimpleNamespace(create=create))
+    result = client._responses("q")
+    assert result["status"] == "incomplete"
+    usage = result["usage"]
+    assert (usage["input_tokens"], usage["output_tokens"]) == (50, 104)
+    assert len(usage["request_usage_entries"]) == 2
+    assert [item.get("id") for item in result["items"]] == [
+        "fc_1", None, "rs_1", "msg_1"]
+    assert result["output"][-1]["content"][0]["text"] == "cut"
+    from openai.types.responses import Response
+    Response.model_validate(result)  # still the official shape
 
 
 @needs_agents
@@ -1201,6 +1333,8 @@ def fake_anthropic(monkeypatch):
         def handler(request):
             state["calls"].append(json.loads(request.content))
             body = responses[len(state["calls"]) - 1]
+            if isinstance(body, anthropic_httpx.Response):  # an error reply
+                return body
             if isinstance(body, str):  # pre-rendered SSE
                 return anthropic_httpx.Response(
                     200, content=body.encode(),
@@ -1234,6 +1368,14 @@ def test_messages_end_to_end(client, store_path, fake_anthropic):
     assert result["content"][0]["text"] == "The answer"
     assert result["usage"]["input_tokens"] == 20
     assert result["usage"]["output_tokens"] == 10
+    # Each turn is one sampling iteration of the API's own breakdown.
+    assert result["usage"]["iterations"] == 2 * [{
+        "type": "message", "model": "claude-test", "input_tokens": 10,
+        "output_tokens": 5, "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0, "cache_creation": None}]
+    from anthropic.types.beta import BetaMessageIterationUsage, BetaUsage
+    native = BetaUsage.model_validate(result["usage"]).iterations or []
+    assert all(isinstance(it, BetaMessageIterationUsage) for it in native)
     # Full new-turn sequence, valid for verbatim history append.
     roles = [message["role"] for message in result["messages"]]
     assert roles == ["assistant", "user", "assistant"]
@@ -1249,6 +1391,242 @@ def test_messages_end_to_end(client, store_path, fake_anthropic):
     # Native prefix continuation: request 2 extends request 1's messages.
     assert calls[1]["messages"][:len(calls[0]["messages"])] \
         == calls[0]["messages"]
+
+
+@needs_anthropic
+def test_messages_usage_sums_every_count_across_turns():
+    from anthropic.types.beta import BetaUsage
+
+    def turn(usage):
+        return BetaUsage.model_validate(usage).model_dump(mode="json")
+
+    first = turn({
+        "input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 4,
+        "cache_creation": {"ephemeral_5m_input_tokens": 3,
+                           "ephemeral_1h_input_tokens": 0},
+        "output_tokens_details": {"thinking_tokens": 2},
+        "server_tool_use": {"web_search_requests": 1,
+                            "web_fetch_requests": 0},
+        "iterations": [{"type": "compaction", "input_tokens": 7,
+                        "output_tokens": 1, "cache_read_input_tokens": 0,
+                        "cache_creation_input_tokens": 0}],
+        "service_tier": "priority",
+        "fallback_credit": {"status": {"type": "not_applied",
+                                       "reason": "expired",
+                                       "remove_to_redeem": ["speed"]}},
+        "undeclared_count": 7, "cost": 0.25,
+        "undeclared_usage": {"requests": 1, "by_tool": {"runs": 2}}})
+    last = turn({
+        "input_tokens": 20, "output_tokens": 6,
+        "cache_creation": {"ephemeral_5m_input_tokens": 1,
+                           "ephemeral_1h_input_tokens": 2},
+        "output_tokens_details": {"thinking_tokens": 3},
+        "server_tool_use": {"web_search_requests": 2,
+                            "web_fetch_requests": 1},
+        "iterations": [{"type": "message", "model": "claude-test",
+                        "input_tokens": 20, "output_tokens": 6,
+                        "cache_read_input_tokens": 0,
+                        "cache_creation_input_tokens": 0}],
+        "service_tier": "standard",
+        "fallback_credit": {"status": {"type": "redeemed"}}, "cost": 0.5,
+        "undeclared_usage": {"requests": 1, "by_tool": {"runs": 3}}})
+
+    usage = local_chat._anthropic_usage([(first, "claude-test"),
+                                         (last, "claude-test")])
+    assert usage == {
+        **last,
+        "input_tokens": 30, "output_tokens": 11,
+        "cache_read_input_tokens": 4, "cache_creation_input_tokens": None,
+        "cache_creation": {"ephemeral_5m_input_tokens": 4,
+                           "ephemeral_1h_input_tokens": 2},
+        "output_tokens_details": {"thinking_tokens": 5},
+        "server_tool_use": {"web_search_requests": 3,
+                            "web_fetch_requests": 1},
+        "iterations": first["iterations"] + last["iterations"],
+        "undeclared_count": 7, "cost": 0.75,
+        "undeclared_usage": {"requests": 2, "by_tool": {"runs": 5}},
+    }
+    assert usage["service_tier"] == "standard"
+    assert usage["fallback_credit"] == {"status": {"type": "redeemed"}}
+
+
+@needs_anthropic
+def test_messages_stream_ends_with_the_run_usage(client, store_path,
+                                                 fake_anthropic):
+    seed_doc(store_path, "pi-a", "r.pdf")
+    replies = [_anthropic_message([
+        {"type": "tool_use", "id": tool_id, "name": "get_document",
+         "input": {"doc_name": "r.pdf"}}], "tool_use")
+        for tool_id in ("tu_1", "tu_2")]
+    replies.append(_anthropic_message([{"type": "text", "text": "Done"}],
+                                      "end_turn"))
+    fake_anthropic([_anthropic_sse(reply) for reply in replies])
+    question = [{"role": "user", "content": "q"}]
+    events = list(client._messages(question, model="claude-test",
+                                   max_tokens=100, stream=True))
+    assert [event.type for event in events].count("result") == 1
+    assert events[-1].to_dict()["type"] == "result"
+
+    fake_anthropic(replies)
+    result = client._messages(question, model="claude-test", max_tokens=100)
+    assert result["usage"]["input_tokens"] == 30
+    assert events[-1].usage == result["usage"]
+    # The same continuation transcript the non-stream envelope carries.
+    assert [m["role"] for m in events[-1].messages] == [
+        "assistant", "user", "assistant", "user", "assistant"]
+    assert events[-1].messages == result["messages"]
+
+
+@needs_anthropic
+def test_messages_stream_cut_mid_message_raises(client, store_path,
+                                                fake_anthropic):
+    seed_doc(store_path, "pi-a", "r.pdf")
+    tool_turn = _anthropic_message([
+        {"type": "tool_use", "id": "tu_1", "name": "get_document",
+         "input": {"doc_name": "r.pdf"}}], "tool_use")
+    answer = _anthropic_message([{"type": "text", "text": "Done"}], "end_turn")
+    cut = _anthropic_sse(answer).rsplit("event: message_delta", 1)[0]
+    fake_anthropic([_anthropic_sse(tool_turn), cut])
+    events = []
+    with pytest.raises(PageIndexAPIError, match="ended before") as err:
+        for event in client._messages("q", model="claude-test",
+                                      max_tokens=100, stream=True):
+            events.append(event)
+    assert "result" not in [event.type for event in events]
+    usage = err.value.usage
+    assert usage is not None
+    assert usage["input_tokens"] == 10 and len(usage["iterations"]) == 1
+
+    # Only message_stop missing: the message itself is complete.
+    unstopped = _anthropic_sse(answer).rsplit("event: message_stop", 1)[0]
+    fake_anthropic([_anthropic_sse(tool_turn), unstopped])
+    events = list(client._messages("q", model="claude-test", max_tokens=100,
+                                   stream=True))
+    assert events[-1].type == "result"
+    assert events[-1].usage["input_tokens"] == 20
+    assert events[-1].messages[-1]["content"][0]["text"] == "Done"
+
+
+@needs_agents
+@pytest.mark.parametrize("run, key", [
+    (lambda c: c.chat_completions("q"), "prompt_tokens"),
+    (lambda c: list(c.chat_completions("q", stream=True)), "prompt_tokens"),
+    (lambda c: c.chat("q"), "prompt_tokens"),
+    (lambda c: list(c.chat("q", stream=True)), "prompt_tokens"),
+    (lambda c: c._responses("q"), "input_tokens"),
+    (lambda c: list(c._responses("q", stream=True)), "input_tokens"),
+])
+def test_failed_run_carries_the_usage_already_spent(client, store_path,
+                                                    fake_model, run, key):
+    """A provider error on turn 2: openai-agents attaches no run data to
+    it, yet turn 1 was billed and is reported."""
+    import openai
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([[_call_item("get_document", {"doc_name": "report.pdf"})],
+                openai.APIConnectionError(
+                    request=httpx.Request("POST", "https://backend"))])
+    with pytest.raises(PageIndexAPIError, match="model backend failed") as err:
+        run(client)
+    usage = err.value.usage
+    assert usage is not None
+    assert usage[key] == 10 and usage["total_tokens"] == 15
+    assert len(usage["request_usage_entries"]) == 1
+
+
+def test_run_usage_with_no_finished_call_is_zero():
+    assert local_chat._openai_usage([]) == {
+        "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+        "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+        "completion_tokens_details": {"reasoning_tokens": 0},
+        "request_usage_entries": []}
+    assert local_chat._responses_usage([])["request_usage_entries"] == []
+
+
+def test_run_usage_maps_each_count_to_its_field():
+    """Distinct non-zero counts, so a swapped column cannot pass."""
+    call = types.SimpleNamespace(usage=types.SimpleNamespace(
+        input_tokens=100, output_tokens=20,
+        input_tokens_details=types.SimpleNamespace(cached_tokens=7,
+                                                   cache_write_tokens=11),
+        output_tokens_details=types.SimpleNamespace(reasoning_tokens=3)))
+    chat = local_chat._openai_usage([call, call])
+    assert chat["request_usage_entries"][0] == {
+        "prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
+        "prompt_tokens_details": {"cached_tokens": 7, "cache_write_tokens": 11},
+        "completion_tokens_details": {"reasoning_tokens": 3}}
+    assert chat["prompt_tokens_details"] == {"cached_tokens": 14,
+                                             "cache_write_tokens": 22}
+    responses = local_chat._responses_usage([call])
+    assert responses["input_tokens_details"] == {"cached_tokens": 7,
+                                                 "cache_write_tokens": 11}
+    assert responses["output_tokens_details"] == {"reasoning_tokens": 3}
+
+
+@needs_agents
+def test_max_turns_error_carries_the_usage_already_spent(client, store_path,
+                                                         fake_model):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([[_call_item("get_document", {"doc_name": "report.pdf"})],
+                [_msg_item("too late")]])
+    with pytest.raises(PageIndexAPIError, match="max_turns") as err:
+        client.chat_completions("q", max_turns=1)
+    usage = err.value.usage
+    assert usage is not None
+    assert usage["prompt_tokens"] == 10
+    assert len(usage["request_usage_entries"]) == 1
+
+
+@needs_anthropic
+@pytest.mark.parametrize("stream", [False, True])
+def test_messages_failed_run_carries_the_usage_already_spent(
+        client, store_path, fake_anthropic, stream):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    tool_turn = _anthropic_message(
+        [{"type": "tool_use", "id": "tu_1", "name": "get_document",
+          "input": {"doc_name": "report.pdf"}}], "tool_use")
+    refused = anthropic_httpx.Response(400, json={
+        "type": "error",
+        "error": {"type": "invalid_request_error", "message": "no"}})
+    fake_anthropic([_anthropic_sse(tool_turn) if stream else tool_turn,
+                    refused])
+    with pytest.raises(PageIndexAPIError, match="model backend failed") as err:
+        result = client._messages("q", model="claude-test", max_tokens=100,
+                                  stream=stream)
+        list(result) if stream else result
+    usage = err.value.usage
+    assert usage is not None
+    assert usage["input_tokens"] == 10 and usage["output_tokens"] == 5
+    assert len(usage["iterations"]) == 1
+
+    fake_anthropic([refused])  # nothing finished before the failure
+    with pytest.raises(PageIndexAPIError) as err:
+        result = client._messages("q", model="claude-test", max_tokens=100,
+                                  stream=stream)
+        list(result) if stream else result
+    assert err.value.usage == {"input_tokens": 0, "output_tokens": 0,
+                               "iterations": []}
+
+
+@needs_anthropic
+def test_messages_turn_without_usage_counts_nothing(client, store_path,
+                                                    fake_anthropic):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_anthropic([
+        _anthropic_message([{"type": "tool_use", "id": "tu_1",
+                             "name": "get_document",
+                             "input": {"doc_name": "report.pdf"}}],
+                           "tool_use"),
+        {**_anthropic_message([{"type": "text", "text": "ok"}], "end_turn"),
+         "usage": None}])
+    result = client._messages("q", model="claude-test", max_tokens=100)
+    assert result["usage"]["input_tokens"] == 10
+    assert len(result["usage"]["iterations"]) == 1
+
+
+def test_validation_error_has_no_usage(client):
+    with pytest.raises(PageIndexAPIError) as err:
+        client.chat_completions("q", max_turns=0)
+    assert err.value.usage is None
 
 
 @needs_anthropic
@@ -1343,9 +1721,11 @@ def test_messages_raises_when_runner_params_unreadable(client, fake_anthropic,
     ])
     monkeypatch.setattr(BetaToolRunner, "set_messages_params",
                         lambda self, params: None)
-    with pytest.raises(PageIndexAPIError, match="anthropic version"):
+    with pytest.raises(PageIndexAPIError, match="anthropic version") as err:
         client._messages([{"role": "user", "content": "hi"}],
                         model="claude-test", max_tokens=100)
+    usage = err.value.usage  # the finished turn was still billed
+    assert usage is not None and usage["input_tokens"] == 10
 
 
 def test_messages_missing_framework(client, monkeypatch):
@@ -1756,7 +2136,8 @@ def test_malformed_tool_arguments_answer_the_model(client, store_path,
     assert result["choices"][0]["message"]["content"] == "The answer"
     outputs = [item["output"] for item in fake.inputs[1]
                if item.get("type") == "function_call_output"]
-    assert "Invalid JSON" in json.dumps(outputs[-1])
+    # the wording is the framework's; 0.24 hides the parse detail
+    assert outputs and outputs[-1]
 
 
 @needs_agents
@@ -1900,19 +2281,23 @@ def test_record_response_status_captures_last_status():
         def model_dump(self, mode=None):
             return dict(self._data)
 
+    reply = types.SimpleNamespace(
+        status="incomplete",
+        incomplete_details=_Dumpable({"reason": "max_output_tokens"}),
+        error=None)
+
     async def create(*args, **kwargs):
-        return types.SimpleNamespace(
-            status="incomplete",
-            incomplete_details=_Dumpable({"reason": "max_output_tokens"}),
-            error=None)
+        return reply
 
     agent = types.SimpleNamespace(model=types.SimpleNamespace(
         _client=types.SimpleNamespace(
             responses=types.SimpleNamespace(create=create))))
     recorded = {}
     local_chat._record_response_status(agent, recorded)
-    asyncio.run(agent.model._client.responses.create())
-    assert recorded == {"status": "incomplete",
+    from agents.exceptions import ModelBehaviorError
+    with pytest.raises(ModelBehaviorError):  # a cut response ends the run
+        asyncio.run(agent.model._client.responses.create())
+    assert recorded == {"response": reply, "status": "incomplete",
                         "incomplete_details": {"reason": "max_output_tokens"},
                         "error": None}
 
@@ -1926,10 +2311,7 @@ def test_responses_envelope_reports_backend_truncation(client, store_path,
     fake = fake_model([[_msg_item("cut off mid-answer")]])
 
     async def create(*args, **kwargs):
-        return types.SimpleNamespace(
-            status="incomplete",
-            incomplete_details={"reason": "max_output_tokens"},
-            error=None)
+        return _cut_response()
 
     fake._client = types.SimpleNamespace(
         responses=types.SimpleNamespace(create=create))
@@ -1937,6 +2319,46 @@ def test_responses_envelope_reports_backend_truncation(client, store_path,
     assert result["status"] == "incomplete"
     assert result["incomplete_details"] == {"reason": "max_output_tokens"}
     assert result["error"] is None
+
+
+@needs_agents
+def test_responses_cut_short_still_returns_the_envelope(store_path):
+    """openai-agents 0.22+ raises on a response cut short, before its hooks
+    or items see it; the run still ends in the envelope, as the stream
+    does, with the partial text and both billed calls. FakeModel skips the
+    transport fetch that raises, so the real model runs on a mock one."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    details = {"input_tokens_details": {"cached_tokens": 0},
+               "output_tokens_details": {"reasoning_tokens": 0}}
+    replies = [
+        {"id": "resp_1", "status": "completed",
+         "output": [_call_item("get_document",
+                               {"doc_name": "report.pdf"}).model_dump()],
+         "usage": {**details, "input_tokens": 10, "output_tokens": 5,
+                   "total_tokens": 15}},
+        {"id": "resp_2", "status": "incomplete",
+         "incomplete_details": {"reason": "max_output_tokens"},
+         "output": [_msg_item("The range was").model_dump()],
+         "usage": {**details, "input_tokens": 40, "output_tokens": 99,
+                   "total_tokens": 139}}]
+    common = {"object": "response", "created_at": 0, "model": "gpt-test",
+              "parallel_tool_calls": True, "tool_choice": "auto", "tools": []}
+    http = httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json={**common,
+                                                  **replies.pop(0)})))
+    client = PageIndexLocalClient(storage_path=store_path,
+                                  chat_model="openai/gpt-test")
+    envelope = client.chat("q", protocol="responses", backend={
+        "api_key": "sk-test", "base_url": "http://mock.invalid/v1",
+        "http_client": http})
+    asyncio.run(http.aclose())
+    assert envelope["status"] == "incomplete"
+    assert [item["type"] for item in envelope["items"]] == [
+        "function_call", "function_call_output", "message"]
+    assert envelope["output"][-1]["content"][0]["text"] == "The range was"
+    usage = envelope["usage"]
+    assert (usage["input_tokens"], usage["output_tokens"]) == (50, 104)
+    assert len(usage["request_usage_entries"]) == 2
 
 
 @needs_agents
@@ -2783,32 +3205,68 @@ def test_record_chat_finish_records_and_delegates():
         types.SimpleNamespace(model=types.SimpleNamespace()), {})
 
 
+class _CutModel(FakeModel):
+    """Scripted turns whose native finish_reason is `finish`, as the real
+    model's fetch shows it to the finish recorder."""
+
+    def __init__(self, turns, finish="length"):
+        super().__init__(turns)
+        self.finish = finish
+
+    async def _fetch_response(self, *args, **kwargs):
+        return types.SimpleNamespace(choices=[
+            types.SimpleNamespace(finish_reason=self.finish)])
+
+    async def get_response(self, *args, **kwargs):
+        await self._fetch_response()
+        return await super().get_response(*args, **kwargs)
+
+    async def stream_response(self, *args, **kwargs):
+        await self._fetch_response()
+        async for event in super().stream_response(*args, **kwargs):
+            yield event
+
+
 @needs_agents
 def test_chat_completions_reports_native_finish_reason(client, store_path,
                                                        monkeypatch):
     seed_doc(store_path, "pi-a", "report.pdf")
-
-    class TruncatingModel(FakeModel):
-        async def _fetch_response(self, *args, **kwargs):
-            return types.SimpleNamespace(choices=[
-                types.SimpleNamespace(finish_reason="length")])
-
-        async def get_response(self, *args, **kwargs):
-            await self._fetch_response()
-            return await super().get_response(*args, **kwargs)
-
-        async def stream_response(self, *args, **kwargs):
-            await self._fetch_response()
-            async for event in super().stream_response(*args, **kwargs):
-                yield event
-
-    fake = TruncatingModel([[_msg_item("cut ")], [_msg_item("cut ")]])
+    fake = _CutModel([[_msg_item("cut ")], [_msg_item("cut ")]])
     monkeypatch.setattr(local_chat, "_openai_model", lambda *a: fake)
     result = client.chat_completions("q")
     assert result["choices"][0]["finish_reason"] == "length"
     chunks = list(client.chat_completions("q", stream=True,
                                           stream_metadata=True))
     assert chunks[-2]["choices"][0]["finish_reason"] == "length"
+
+
+@needs_agents
+@pytest.mark.parametrize("finish", ["length", "content_filter"])
+def test_chat_raises_on_an_unfinished_answer(client, store_path, monkeypatch,
+                                             finish):
+    """A bare answer string cannot say it is unfinished, so chat() raises:
+    a stream after the text it delivered, a non-streamed call with that
+    text on the error; both with the run's usage."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+
+    def cut_model(*args):
+        model = _CutModel([[_msg_item("The range was")]], finish)
+        model.pieces = ("The range ", "was")  # the streamed deltas
+        return model
+
+    monkeypatch.setattr(local_chat, "_openai_model", cut_model)
+    with pytest.raises(PageIndexAPIError, match=finish) as info:
+        client.chat("q")
+    assert info.value.partial_answer == "The range was"
+    assert info.value.usage["completion_tokens"] == 5
+    text = []
+    with pytest.raises(PageIndexAPIError, match=finish) as info:
+        for piece in client.chat("q", stream=True, show_process=False):
+            text.append(piece)
+    assert "".join(text) == "The range was"
+    assert info.value.usage["completion_tokens"] == 5
+    with pytest.raises(PageIndexAPIError, match=finish):
+        list(client.chat("q", stream=True).events)
 
 
 @needs_agents
@@ -4017,6 +4475,52 @@ def test_bridge_chat_fails_fast_on_a_rate_limited_tool(bridge_client,
     assert len(fake.instructions) == 1
 
 
+@needs_agents
+def test_a_cut_response_runs_no_tools(bridge_client, fake_model):
+    """openai-agents before 0.22 would run a cut turn's tool calls on their
+    half-written arguments; the run ends at the cut instead, as the stream
+    does."""
+    client, bridge = bridge_client
+    ran = []
+    bridge.call_tool = lambda name, arguments: ran.append(name)
+    fake = fake_model([[_call_item("get_document", {"doc_name": "r.pdf"})],
+                       [_msg_item("never reached")]])
+
+    async def create(*args, **kwargs):
+        return _cut_response()
+
+    fake._client = types.SimpleNamespace(
+        responses=types.SimpleNamespace(create=create))
+    result = client._responses("q")
+    assert ran == []
+    assert result["status"] == "incomplete"
+    assert [item["type"] for item in result["items"]] == ["reasoning", "message"]
+
+
+@needs_agents
+@pytest.mark.parametrize("run, key", [
+    (lambda c: c.chat_completions("q"), "prompt_tokens"),
+    (lambda c: list(c.chat_completions("q", stream=True)), "prompt_tokens"),
+    (lambda c: c.chat("q"), "prompt_tokens"),
+    (lambda c: list(c.chat("q", stream=True)), "prompt_tokens"),
+    (lambda c: c._responses("q"), "input_tokens"),
+    (lambda c: list(c._responses("q", stream=True)), "input_tokens"),
+])
+def test_tool_failure_keeps_the_usage_of_its_turn(bridge_client, fake_model,
+                                                  run, key):
+    """openai-agents records a streamed turn only after its tools ran, so
+    the turn whose tool failed was missing from streamed usage."""
+    client, bridge = bridge_client
+    bridge.call_tool = _rate_limited
+    fake_model([[_call_item("get_document", {"doc_name": "r.pdf"})],
+                [_msg_item("never reached")]])
+    with pytest.raises(PageIndexAPIError, match="HTTP 429") as info:
+        run(client)
+    usage = info.value.usage
+    assert usage is not None and usage[key] == 10
+    assert len(usage["request_usage_entries"]) == 1
+
+
 @needs_anthropic
 def test_messages_fail_fast_is_quiet(bridge_client, fake_anthropic, caplog):
     """The runner's own tool-error logging never reports the failure the
@@ -4071,6 +4575,8 @@ def test_messages_fail_fast_on_a_rate_limited_tool(
         with pytest.raises(PageIndexAPIError, match="HTTP 429") as info:
             run()
         assert info.value.status_code == 429
+        usage = info.value.usage
+        assert usage is not None and usage["input_tokens"] == 10  # billed
         assert tool_calls == [("get_document", {"doc_name": "r.pdf"})]
     else:
         run()

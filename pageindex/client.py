@@ -808,6 +808,9 @@ class PageIndexClient:
             dict: {'doc_id': ..., 'name': ...}. 'name' is the stored document
                 name: a taken name gains a numeric suffix (name_1..name_99)
                 and a UserWarning is emitted. Older cloud servers omit 'name'.
+                Local also returns 'usage', the indexing model's tokens summed
+                over every call, in the Chat Completions usage shape
+                LiteLLM returns.
         """
         result = self._api.submit_document(
             file_path=file_path, mode=mode,
@@ -1392,9 +1395,27 @@ class PageIndexClient:
               Responses: ``output`` plus an ``items``
               transcript and cross-turn ``usage``; Messages: the final
               message with a ``messages`` turn sequence and aggregated
-              ``usage``
+              ``usage``. Each own-model ``usage`` also lists the run's
+              model calls: ``request_usage_entries`` on the OpenAI
+              protocols (a ``claude-code/`` model reports the run's total
+              only), the native ``iterations`` on Messages
             - protocol lane, stream=True: an iterator of the protocol's
-              own stream events
+              own stream events; Messages ends a finished run with one
+              ``type == "result"`` event (read ``event.usage``, not
+              ``event["usage"]``) carrying the envelope's aggregated
+              ``usage`` and ``messages`` turn sequence
+
+        An own-model run that fails raises PageIndexAPIError with
+        ``usage``: what its finished model calls spent, in the protocol's
+        usage shape (Chat Completions on the answer lane); ``None`` if a
+        ``claude-code/`` run fails on a tool call or ends before Claude
+        Code reports its usage.
+
+        An answer-lane reply the run reports unfinished (finish_reason
+        ``length`` or ``content_filter``) raises PageIndexAPIError instead of
+        passing as complete: a stream after the text it delivered, a
+        non-streamed call with that text in ``partial_answer``. The protocol
+        lanes mark it instead, as their wire does.
         """
         if protocol not in (None, "chat_completions", "responses",
                             "messages"):
@@ -1530,11 +1551,20 @@ class PageIndexClient:
                                        extra_body=extra_body)
         envelope = cast(dict[str, Any], result)
         try:
-            return envelope["choices"][0]["message"]["content"] or ""
+            choice = envelope["choices"][0]
+            answer = choice["message"]["content"] or ""
         except (KeyError, IndexError, TypeError) as exc:
             raise PageIndexAPIError(
                 "The chat response carries no answer: "
                 f"{str(envelope)[:200]}") from exc
+        from .local_chat import _CUT_SHORT, _cut_short_error
+        if choice.get("finish_reason") in _CUT_SHORT:
+            error = _cut_short_error(choice["finish_reason"])
+            error.partial_answer = answer
+            if self._local_chat:
+                error.usage = envelope.get("usage")
+            raise error
+        return answer
 
     def chat_completions(
         self,
@@ -1878,7 +1908,10 @@ class PageIndexClient:
                 requires max_tokens above the budget). Passed through.
             stream: Yield the Anthropic SDK's event stream across turns
                 (its native event objects, including SDK-synthesized
-                convenience events), one message sequence per turn.
+                convenience events), one message sequence per turn; a
+                finished run then ends with one ``type == "result"``
+                event whose ``usage`` and ``messages`` are the non-stream
+                envelope's cross-turn aggregate and turn sequence.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call. Local

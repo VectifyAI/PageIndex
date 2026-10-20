@@ -632,6 +632,47 @@ def test_flash_description_reads_only_the_top_level(local_client, tmp_path, monk
     assert "report summary" in prompts[0] and "alpha summary" not in prompts[0]
 
 
+def test_local_submit_reports_the_indexing_token_usage(local_client, tmp_path, monkeypatch):
+    """Every model call of one submit, async summaries and the sync
+    description alike, is summed into its own result's usage."""
+    import litellm
+    from types import SimpleNamespace
+    from conftest import build_pdf
+    pdf = tmp_path / "long.pdf"
+    pdf.write_bytes(build_pdf([[(72, 740 - 14 * i, 10, f"{fruit} line {i} " * 6) for i in range(45)]
+                               for fruit in ("apples", "bananas")]))
+    calls = {"async": 0, "sync": 0}
+
+    def reply(content):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=content),
+                                     finish_reason="stop")],
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=3,
+                                  prompt_tokens_details=SimpleNamespace(cached_tokens=4,
+                                                                        cache_write_tokens=1),
+                                  completion_tokens_details=SimpleNamespace(reasoning_tokens=2)))
+
+    async def acompletion(**kw):
+        calls["async"] += 1
+        return reply('{"summary": "s", "subsections": []}')
+
+    def completion(**kw):
+        calls["sync"] += 1
+        return reply("d")
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+    monkeypatch.setattr(litellm, "completion", completion)
+
+    for _ in range(2):
+        calls.update({"async": 0, "sync": 0})
+        usage = local_client.submit_document(str(pdf))["usage"]
+        n = calls["async"] + calls["sync"]
+        assert calls["async"] and calls["sync"] == 1
+        assert usage == {"prompt_tokens": 10 * n, "completion_tokens": 3 * n,
+                         "total_tokens": 13 * n,
+                         "prompt_tokens_details": {"cached_tokens": 4 * n, "cache_write_tokens": n},
+                         "completion_tokens_details": {"reasoning_tokens": 2 * n}}
+
+
 def test_unify_tree_edges():
     from pageindex.utils import unify_tree
     tree = [{"title": "A", "page_index": 3, "prefix_summary": "a",
@@ -2509,8 +2550,8 @@ def test_backend_scopes_the_index_lane(tmp_path, monkeypatch):
     api = LocalAPI(storage_path=str(tmp_path / "s"), model="m",
                    summary_model="s",
                    index_backend={"api_key": "ik", "api_base": "http://b"})
-    assert api._with_backend(_llm_backend.get) == {"api_key": "ik",
-                                                   "api_base": "http://b"}
+    assert api._with_backend(None, _llm_backend.get) == {"api_key": "ik",
+                                                         "api_base": "http://b"}
     assert _llm_backend.get() is None
 
     reply = SimpleNamespace(choices=[SimpleNamespace(
@@ -2524,7 +2565,7 @@ def test_backend_scopes_the_index_lane(tmp_path, monkeypatch):
                         ("gpt-4o", "openai/gpt-4o"),
                         ("my-finetune-v2", "openai/my-finetune-v2")):
         captured.clear()
-        api._with_backend(lambda: llm_completion(model, "p"))
+        api._with_backend(None, lambda: llm_completion(model, "p"))
         assert captured["model"] == wire
         assert captured["api_key"] == "ik"
         assert captured["api_base"] == "http://b"

@@ -360,12 +360,37 @@ def test_as_claude_mcp_drops_it_for_the_apps_own_sessions(
 
 @needs_claude
 def test_flash_indexing_on_claude_code(monkeypatch, tmp_path, sample_pdf):
-    sessions = fake_cli(monkeypatch, result("A two-page fruit memo."))
+    usage = {"input_tokens": 5, "cache_read_input_tokens": 100,
+             "cache_creation_input_tokens": 20, "output_tokens": 7,
+             "output_tokens_details": {"thinking_tokens": 4}}
+    sessions = fake_cli(monkeypatch, result("A two-page fruit memo.", usage=usage))
     client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
                                   index_model="claude-code/haiku")
     doc = client.submit_document(sample_pdf)
     assert client.get_document(doc["doc_id"])["description"] == "A two-page fruit memo."
     assert sessions and all(s.options.model == "haiku" for s in sessions)
+    # every run's usage reaches submit_document's tally, as LiteLLM calls' do
+    runs = len(sessions)
+    assert doc["usage"] == {
+        "prompt_tokens": 125 * runs, "completion_tokens": 7 * runs,
+        "total_tokens": 132 * runs,
+        "prompt_tokens_details": {"cached_tokens": 100 * runs,
+                                  "cache_write_tokens": 20 * runs},
+        "completion_tokens_details": {"reasoning_tokens": 4 * runs}}
+
+
+@needs_claude
+def test_a_refused_index_call_still_counts_its_usage(monkeypatch, tmp_path,
+                                                      sample_pdf):
+    sessions = fake_cli(monkeypatch, result(
+        "refused", is_error=True, status=400,
+        usage={"input_tokens": 5, "output_tokens": 7}))
+    client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
+                                  index_model="claude-code/haiku")
+    doc = client.submit_document(sample_pdf)
+    assert sessions
+    assert doc["usage"]["prompt_tokens"] == 5 * len(sessions)
+    assert doc["usage"]["completion_tokens"] == 7 * len(sessions)
 
 
 # ── chat ──
@@ -397,9 +422,10 @@ def test_chat_sends_one_message_with_a_block_per_turn(monkeypatch, chat_client):
 
     envelope = chat_client.chat(history, doc_id="pi-doc1", protocol="chat_completions")
     assert envelope["model"] == "haiku"
-    assert envelope["usage"]["prompt_tokens"] == 125
-    assert envelope["usage"]["prompt_tokens_details"]["cached_tokens"] == 100
-    assert envelope["usage"]["completion_tokens_details"]["reasoning_tokens"] == 4
+    assert envelope["usage"] == {
+        "prompt_tokens": 125, "completion_tokens": 7, "total_tokens": 132,
+        "prompt_tokens_details": {"cached_tokens": 100, "cache_write_tokens": 20},
+        "completion_tokens_details": {"reasoning_tokens": 4}}
 
 
 @needs_claude
@@ -419,6 +445,30 @@ def test_chat_stream_weaves_the_run(monkeypatch, chat_client):
     text = "".join(chat_client.chat("How long?", doc_id="pi-doc1", stream=True))
     assert text == ('[tool_call] get_document {"doc_name": "fruit.pdf"}\n'
                     "[tool_result] get_document: 1 page\n\nIt has 1 page.")
+
+
+@needs_claude
+def test_chat_raises_when_the_answer_hits_max_tokens(monkeypatch, chat_client):
+    """The answer lane never returns an unfinished answer: the stream raises
+    after its text, a plain call carries the text; the protocol lane marks
+    it with finish_reason "length" instead."""
+    cut = result("It has 1", usage={"input_tokens": 3, "output_tokens": 2})
+    cut.stop_reason = "max_tokens"
+    fake_cli(monkeypatch, delta("It has 1"), cut)
+    text = []
+    with pytest.raises(PageIndexAPIError, match="length") as info:
+        for piece in chat_client.chat("Q", stream=True):
+            text.append(piece)
+    assert "".join(text) == "It has 1"
+    assert info.value.usage["completion_tokens"] == 2
+    fake_cli(monkeypatch, cut)
+    with pytest.raises(PageIndexAPIError, match="length") as info:
+        chat_client.chat("Q")
+    assert info.value.partial_answer == "It has 1"
+    assert info.value.usage["completion_tokens"] == 2
+    fake_cli(monkeypatch, cut)
+    envelope = chat_client.chat("Q", protocol="chat_completions")
+    assert envelope["choices"][0]["finish_reason"] == "length"
 
 
 @needs_claude
@@ -571,6 +621,9 @@ def test_cloud_tool_limits_fail_the_chat(monkeypatch, end):
 
 @needs_claude
 def test_chat_max_turns(monkeypatch, chat_client):
-    fake_cli(monkeypatch, result(None, is_error=True, subtype="error_max_turns"))
-    with pytest.raises(PageIndexAPIError, match=r"max_turns \(3\)"):
+    fake_cli(monkeypatch, result(None, is_error=True, subtype="error_max_turns",
+                                 usage={"input_tokens": 5, "output_tokens": 7}))
+    with pytest.raises(PageIndexAPIError, match=r"max_turns \(3\)") as err:
         chat_client.chat("Q", max_turns=3)
+    usage = err.value.usage
+    assert usage is not None and usage["completion_tokens"] == 7
