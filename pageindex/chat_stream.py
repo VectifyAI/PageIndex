@@ -12,12 +12,13 @@ class ChatStream:
     the typed process event dicts. One underlying run — consume exactly
     one view; call chat() again for the other."""
 
-    def __init__(self, text, events):
+    def __init__(self, text, events, close=None):
         self._text = text      # () -> Iterator[str]
         self._events = events  # () -> Iterator[dict], or the refusal text
         self._view: Optional[str] = None
         self._it: Any = None
         self._closed = False
+        self._close = close
 
     def _claim(self, view: str) -> None:
         if self._view is not None and self._view != view:
@@ -67,3 +68,32 @@ class ChatStream:
         close = getattr(self._it, "close", None)
         if close is not None:
             close()
+        elif self._close is not None:
+            self._close()
+
+
+class _ClosingIterator:
+    """A stream whose eager setup is released even before its first item."""
+
+    def __init__(self, iterator, close):
+        self._iterator = iterator
+        self._close = close
+        self._started = False
+        self._closed = False
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._closed:
+            raise StopIteration
+        self._started = True
+        return next(self._iterator)
+
+    def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        self._iterator.close()
+        if not self._started:
+            self._close()

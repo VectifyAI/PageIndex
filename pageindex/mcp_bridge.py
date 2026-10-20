@@ -16,13 +16,16 @@ from __future__ import annotations
 
 import json
 import threading
+import time
+from contextlib import contextmanager
 from typing import Any, Optional
 
 import requests
 from requests.adapters import HTTPAdapter, Retry
 
+from . import deadline as _deadline
 from ._version import sdk_version
-from .errors import PageIndexAPIError
+from .errors import PageIndexAPIError, PageIndexTimeoutError
 
 _PROTOCOL_VERSION = "2025-06-18"
 _TIMEOUT = (10, 240)  # tools may wait server-side (wait_for_completion: 3 min)
@@ -67,6 +70,19 @@ class McpBridge:
         self._lock = threading.RLock()
         self._next_id = 0
 
+    @contextmanager
+    def _locked(self):
+        deadline = _deadline.current()
+        acquired = self._lock.acquire(
+            timeout=deadline.remaining() if deadline else -1)
+        if not acquired:
+            raise deadline.error()
+        try:
+            _deadline.check()
+            yield
+        finally:
+            self._lock.release()
+
     # ── JSON-RPC over streamable HTTP ──
 
     def _post(self, payload: dict, session_id: Optional[str] = None,
@@ -81,12 +97,35 @@ class McpBridge:
         if protocol_version:
             headers["MCP-Protocol-Version"] = protocol_version
         try:
+            if _deadline.current() is not None:
+                return self._post_with_deadline(payload, headers)
             return self._session.post(self._url, json=payload,
                                       headers=headers, timeout=_TIMEOUT)
         except requests.RequestException as exc:
             raise PageIndexAPIError(
                 f"Could not reach the PageIndex MCP server: {exc}"
             ) from exc
+
+    def _post_with_deadline(self, payload, headers):
+        deadline = _deadline.current()
+        retry = _RETRY
+        while True:
+            delay = retry.get_backoff_time()
+            if delay:
+                time.sleep(min(delay, deadline.remaining()))
+            deadline.remaining()
+            try:
+                response = _deadline.request(
+                    "POST", self._url, json=payload, headers=headers,
+                    timeout=_TIMEOUT)
+            except requests.ConnectionError:
+                if not retry.total:
+                    raise
+            else:
+                if (response.status_code not in _RETRY.status_forcelist
+                        or not retry.total):
+                    return response
+            retry = retry.increment(method="POST", url=self._url)
 
     def _extract_result(self, response: requests.Response, request_id: int) -> Any:
         content_type = response.headers.get("Content-Type", "")
@@ -124,7 +163,7 @@ class McpBridge:
     def _request(self, method: str, params: Optional[dict] = None,
                  _retry: bool = True) -> Any:
         self._ensure_initialized()
-        with self._lock:
+        with self._locked():
             self._next_id += 1
             request_id = self._next_id
             session_id = self._session_id
@@ -140,7 +179,7 @@ class McpBridge:
             # safe. 400 is an ordinary bad request — replaying one would
             # re-run side effects. Reset only if no other thread has already
             # re-initialized, then retry once on the fresh session.
-            with self._lock:
+            with self._locked():
                 if self._session_id == session_id:
                     self._initialized = False
                     self._session_id = None
@@ -155,7 +194,7 @@ class McpBridge:
         return self._extract_result(response, request_id)
 
     def _ensure_initialized(self) -> None:
-        with self._lock:
+        with self._locked():
             if self._initialized:
                 return
             self._next_id += 1
@@ -193,6 +232,8 @@ class McpBridge:
                 self._post({"jsonrpc": "2.0",
                             "method": "notifications/initialized"},
                            self._session_id, self._protocol_version)
+            except PageIndexTimeoutError:
+                raise
             except PageIndexAPIError:
                 pass  # advisory; a server that required it fails the next request
 

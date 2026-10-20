@@ -4,6 +4,7 @@ managed endpoint's chunk stream."""
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import dataclasses
 import hashlib
 import json
@@ -13,9 +14,10 @@ import time
 import uuid
 from typing import Any, Iterator, Mapping, Optional, Union
 
+from . import deadline as _deadline
 from .agent_tools import _base_instructions, targeting_block
-from .chat_stream import ChatStream
-from .errors import PageIndexAPIError, _pageindex_cause
+from .chat_stream import ChatStream, _ClosingIterator
+from .errors import PageIndexAPIError, PageIndexTimeoutError, _pageindex_cause
 
 CHAT_HEADER = (
     "You are PageIndex by Vectify AI, a document-focused assistant. "
@@ -95,45 +97,47 @@ def _split_chat_messages(messages, text_only: Optional[str] = None,
 
 def _run_sync(coro):
     from .utils import run_off_loop
-    return run_off_loop(asyncio.run, coro)
+    return run_off_loop(contextvars.copy_context().run, asyncio.run, coro)
 
 
-_SENTINEL = object()
-
-
-def _stream_sync(agen_factory) -> Iterator[Any]:
+def _stream_sync(agen_factory, close_unused=None) -> Iterator[Any]:
     """Drive an async generator from a background thread; yield synchronously.
 
-    Closing the iterator cancels the run between items: the pump stops, and
-    the async generator's cleanup cancels the underlying agent task, so no
-    further model turns or tool executions start. An in-flight backend
-    request cannot be aborted mid-turn.
+    close() waits for local teardown, including synchronous tools already
+    running. Cancellation cannot recall work dispatched to a remote server.
     """
+    deadline = _deadline.current()
     items: "queue.Queue[Any]" = queue.Queue(maxsize=32)
     cancelled = threading.Event()
+    done = threading.Event()
+    errors: list[BaseException] = []
 
-    def deliver(item) -> bool:
+    async def deliver(item) -> bool:
         while not cancelled.is_set():
             try:
-                items.put(item, timeout=0.1)
+                items.put_nowait(item)
                 return True
             except queue.Full:
-                continue
+                await asyncio.sleep(0.01)
         return False
 
     def pump():
         async def consume():
             agen = agen_factory()
+            started = False
 
             async def drain():
+                nonlocal started
+                started = True
                 async for item in agen:
-                    if not deliver(item):
+                    if not await deliver(item):
                         break
 
             # The watchdog lets cancellation land even while drain() is
             # awaiting the backend — a plain async-for would only notice
             # between items.
-            task = asyncio.ensure_future(drain())
+            task = asyncio.ensure_future(
+                deadline.run(drain()) if deadline else drain())
             try:
                 while not task.done():
                     if cancelled.is_set():
@@ -143,28 +147,45 @@ def _stream_sync(agen_factory) -> Iterator[Any]:
                 try:
                     await task
                 except asyncio.CancelledError:
-                    pass
+                    if not cancelled.is_set():
+                        raise
             finally:
                 await agen.aclose()
+                if not started and close_unused is not None:
+                    await close_unused()
 
         try:
-            asyncio.run(consume())
+            with _deadline.active(deadline):
+                asyncio.run(consume())
         except BaseException as exc:  # re-raised on the consumer thread
-            deliver(exc)
-            return
-        deliver(_SENTINEL)
+            errors.append(exc)
+        finally:
+            done.set()
 
-    threading.Thread(target=pump, daemon=True).start()
-    try:
-        while True:
-            item = items.get()
-            if item is _SENTINEL:
-                return
-            if isinstance(item, BaseException):
-                raise item
-            yield item
-    finally:
-        cancelled.set()
+    def iterate():
+        worker = threading.Thread(target=pump, daemon=True)
+        worker.start()
+        try:
+            while True:
+                if done.is_set() and items.empty():
+                    if errors:
+                        raise errors[0]
+                    return
+                try:
+                    item = items.get(timeout=0.05)
+                except queue.Empty:
+                    continue
+                yield item
+        finally:
+            cancelled.set()
+            worker.join()
+
+    def close():
+        if close_unused is not None:
+            with _deadline.active(None):
+                _run_sync(close_unused())
+
+    return _ClosingIterator(iterate(), close)
 
 
 # ── OpenAI engine (chat_completions / responses) ──
@@ -301,7 +322,7 @@ def _merged_backend(client, backend):
 
 _SKELETON_KEYS = frozenset({"system", "instructions", "input", "messages",
                             "tools"})
-_ARGUMENT_KEYS = frozenset({"stream", "doc_id"})
+_ARGUMENT_KEYS = frozenset({"stream", "doc_id", "timeout"})
 
 
 def _refuse_skeleton(extra_body) -> None:
@@ -390,13 +411,31 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
             **routed})
     except ValidationError as exc:
         raise PageIndexAPIError(f"Invalid model settings: {exc}") from exc
-    return Agent(
+    agent = Agent(
         name="PageIndex",
         instructions=instructions,
         tools=build_openai_tools(client, doc_ids=doc_ids),
         model=_openai_model(protocol, model_name, conn or None),
         model_settings=settings,
     )
+    deadline = _deadline.current()
+    if deadline is not None:
+        get_response = agent.model.get_response
+        stream_response = agent.model.stream_response
+
+        async def checked_response(*args, **kwargs):
+            deadline.remaining()
+            return await get_response(*args, **kwargs)
+
+        async def checked_stream(*args, **kwargs):
+            deadline.remaining()
+            async for event in stream_response(*args, **kwargs):
+                deadline.remaining()
+                yield event
+
+        agent.model.get_response = checked_response
+        agent.model.stream_response = checked_stream
+    return agent
 
 
 def _validate_max_turns(max_turns) -> None:
@@ -472,6 +511,8 @@ def _translate_run_error(exc, max_turns, lane, client=None) -> PageIndexAPIError
     if isinstance(exc, AgentsException):
         cause = _pageindex_cause(exc)
         if cause is not None:
+            if isinstance(cause, PageIndexTimeoutError):
+                return cause
             # a tool failure the invoker re-raised, wrapped on its way out
             return PageIndexAPIError(str(cause), status_code=cause.status_code)
         return PageIndexAPIError(f"The agent backend failed: {exc}")
@@ -582,8 +623,9 @@ async def _aclose_backend(agent) -> None:
 
 
 async def _run_closing(agent, coro):
+    deadline = _deadline.current()
     try:
-        return await coro
+        return await deadline.run(coro) if deadline else await coro
     finally:
         await _aclose_backend(agent)
 
@@ -951,11 +993,11 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
                                   folder_id=folder_id)
     run_kwargs = _run_kwargs(max_turns)
 
-    def events():
-        return _stream_sync(
-            lambda: _chat_events_agen(client, agent, items, run_kwargs))
-
-    return ChatStream(text=lambda: _weave(events(), options), events=events)
+    events = _stream_sync(
+        lambda: _chat_events_agen(client, agent, items, run_kwargs),
+        close_unused=lambda: _aclose_backend(agent))
+    return ChatStream(text=lambda: _weave(events, options),
+                      events=lambda: events, close=events.close)
 
 
 def run_chat_completions(client, messages, stream: bool = False,
@@ -1065,13 +1107,21 @@ def run_chat_completions(client, messages, stream: bool = False,
             "usage": _openai_usage(streamed.raw_responses),
         }
 
+    events = _stream_sync(agen, close_unused=lambda: _aclose_backend(agent))
     if stream_metadata:
-        return _stream_sync(agen)
-    return (piece["choices"][0]["delta"]["content"]
-            for piece in _stream_sync(agen)
-            if piece.get("choices")
-            and "content" in piece["choices"][0]["delta"]
-            and piece["choices"][0]["delta"]["content"])
+        return events
+
+    def text():
+        try:
+            for piece in events:
+                if piece.get("choices"):
+                    content = piece["choices"][0]["delta"].get("content")
+                    if content:
+                        yield content
+        finally:
+            events.close()
+
+    return _ClosingIterator(text(), events.close)
 
 
 def run_responses(client, input, model: Optional[str] = None,
@@ -1245,7 +1295,7 @@ def run_responses(client, input, model: Optional[str] = None,
         yield {"type": terminal, "sequence_number": sequence,
                "response": envelope(transcript, streamed.raw_responses)}
 
-    return _stream_sync(agen)
+    return _stream_sync(agen, close_unused=lambda: _aclose_backend(agent))
 
 
 # ── Anthropic engine (messages) ──
@@ -1283,8 +1333,10 @@ def _anthropic_client(backend, route):
     ``route`` (declared by the model's prefix) picks the SDK client
     class. One client per (route, backend): each construction pays
     ~45 ms of SSL-context build and a cold connection pool. A backend
-    whose values defeat hashing constructs per call, as before."""
+    whose values defeat hashing constructs per call, as before. Async
+    clients are per-run, owned by that run's event loop."""
     import anthropic
+    asynchronous = _deadline.current() is not None
     kwargs = _sdk_backend(backend)
     try:
         key = (route, tuple(sorted(
@@ -1293,9 +1345,12 @@ def _anthropic_client(backend, route):
         hash(key)
     except TypeError:
         key = None
+    if asynchronous:
+        key = None
     if key in _ANTHROPIC_CLIENTS:
         return _ANTHROPIC_CLIENTS[key]
-    cls = getattr(anthropic, _ROUTE_CLIENTS[route], None)
+    name = ("Async" if asynchronous else "") + _ROUTE_CLIENTS[route]
+    cls = getattr(anthropic, name, None)
     if cls is None:
         # A build predating this route's client class: same contract as
         # the tool-runner probe, one step earlier.
@@ -1410,6 +1465,7 @@ def run_messages(client, messages, model: str, route: str,
                  ) -> Union[dict, Iterator[Any]]:
     from .integrations.anthropic_sdk import build_anthropic_tools
 
+    deadline = _deadline.current()
     _require_anthropic()
     import anthropic
     _validate_max_turns(max_turns)
@@ -1443,7 +1499,8 @@ def run_messages(client, messages, model: str, route: str,
     # Tools before the transport: on a bridge client building them is
     # network I/O, and a failure there must not strand the client below.
     failures: list = []
-    tools = build_anthropic_tools(client, doc_ids=scope, failures=failures)
+    tools = build_anthropic_tools(client, doc_ids=scope, failures=failures,
+                                  asynchronous=deadline is not None)
     merged = _merged_backend(client, backend)
     backend_client = _anthropic_client(merged, route)
     # Close only a per-call construction: cached clients stay open for
@@ -1476,21 +1533,26 @@ def run_messages(client, messages, model: str, route: str,
             **passthrough,
             **cached,
         )
+        _deadline.check()
     except BaseException:
         # A failure before the runner handoff must not strand the transport
         # the branches below would have closed.
         if owns_transport:
-            backend_client.close()
+            if deadline:
+                with _deadline.active(None):
+                    _run_sync(backend_client.close())
+            else:
+                backend_client.close()
         raise
     # Older Anthropic versions also execute tools on max_tokens turns, newer
     # ones skip them: check right after the runner's own tool step.
     generate_tool_response = runner.generate_tool_call_response
     moved: list = []  # the block holding the bedrock breakpoint
 
-    def checked_tool_response():
-        response = generate_tool_response()
+    def checked_response(response):
         if failures:
             raise failures[0]
+        _deadline.check()
         if response and marks_fit and route == "bedrock":
             for block in moved:
                 block.pop("cache_control", None)
@@ -1498,9 +1560,46 @@ def run_messages(client, messages, model: str, route: str,
             moved[0]["cache_control"] = {"type": "ephemeral"}
         return response
 
-    runner.generate_tool_call_response = checked_tool_response
+    def checked_tool_response():
+        return checked_response(generate_tool_response())
 
-    if stream:
+    async def checked_async_tool_response():
+        _deadline.check()
+        return checked_response(await generate_tool_response())
+
+    runner.generate_tool_call_response = (
+        checked_async_tool_response if deadline else checked_tool_response)
+
+    if deadline:
+        async def async_events():
+            try:
+                deadline.remaining()
+                async for turn in runner:
+                    if stream:
+                        try:
+                            async for event in turn:
+                                deadline.remaining()
+                                yield event
+                        finally:
+                            await turn.close()
+                    else:
+                        yield turn
+                    deadline.remaining()
+            except anthropic.AnthropicError as exc:
+                deadline.remaining()
+                raise _model_backend_error(exc, "messages", client) from exc
+            finally:
+                if owns_transport:
+                    await backend_client.close()
+
+        events = _stream_sync(async_events,
+                              close_unused=(backend_client.close
+                                            if owns_transport else None))
+        if stream:
+            return events
+        turns = list(events)
+
+    elif stream:
         def events() -> Iterator[Any]:
             try:
                 for turn_stream in runner:
@@ -1514,14 +1613,15 @@ def run_messages(client, messages, model: str, route: str,
                     backend_client.close()
         return events()
 
-    try:
-        turns = list(runner)
-    except anthropic.AnthropicError as exc:
-        raise _model_backend_error(exc, "messages", client) from exc
-    finally:
-        # safe here: the params read-back below does no HTTP
-        if owns_transport:
-            backend_client.close()
+    else:
+        try:
+            turns = list(runner)
+        except anthropic.AnthropicError as exc:
+            raise _model_backend_error(exc, "messages", client) from exc
+        finally:
+            # safe here: the params read-back below does no HTTP
+            if owns_transport:
+                backend_client.close()
     if not turns:
         raise PageIndexAPIError("The model returned no response.")
     for block in moved:
