@@ -13,7 +13,7 @@ from typing import Any
 from .errors import PageIndexAPIError
 from .local_store import DocStore
 from .naming import sanitize_filename, truncate_filename
-from .utils import count_tokens, run_off_loop
+from .utils import LLMRetriesExhausted, count_tokens, run_off_loop
 
 logger = logging.getLogger(__name__)
 
@@ -42,26 +42,31 @@ class LocalAPI:
                  summary_max_words: int | None = None,
                  summary_concurrency: int | None = None,
                  use_embedded_toc: bool = True,
-                 optimize: str = "full"):
+                 optimize: str = "full",
+                 summary_reasoning_effort: str | None = None):
         self._store = DocStore(storage_path)
         self._model = model
         self._summary_model = summary_model
         self._index_backend = index_backend
         self._summary_max_words = summary_max_words
+        self._summary_reasoning_effort = summary_reasoning_effort
         self._summary_concurrency = summary_concurrency
         self._use_embedded_toc = use_embedded_toc
         self._optimize = optimize
         from .utils import ConfigLoader
         self._config_loader = ConfigLoader()
 
-    def _with_backend(self, func, *args):
-        """Scope the indexing lane's connection overrides around one
-        operation — runs inside whatever thread run_off_loop picked."""
-        from .utils import _llm_backend
+    def _with_backend(self, usage, func, *args):
+        """Scope the indexing lane's connection overrides and the `usage`
+        tally around one operation — runs inside whatever thread
+        run_off_loop picked."""
+        from .utils import _llm_backend, _llm_usage
         token = _llm_backend.set(self._index_backend)
+        usage_token = _llm_usage.set(usage)
         try:
             return func(*args)
         finally:
+            _llm_usage.reset(usage_token)
             _llm_backend.reset(token)
 
     # ── indexing ──
@@ -107,11 +112,12 @@ class LocalAPI:
         if mode is None:
             mode = "flash"
         if mode == "standard" and (self._summary_max_words is not None
-                                   or self._summary_concurrency is not None):
+                                   or self._summary_concurrency is not None
+                                   or self._summary_reasoning_effort is not None):
             raise PageIndexAPIError(
-                "Failed to submit document: summary_max_words and "
-                "summary_concurrency are flash-only; mode='standard' does not "
-                "support them.")
+                "Failed to submit document: summary_max_words, "
+                "summary_concurrency and summary_reasoning_effort are "
+                "flash-only; mode='standard' does not support them.")
         file_path = os.path.abspath(os.path.expanduser(str(file_path)))
         if not os.path.isfile(file_path):
             raise FileNotFoundError(f"No such file: {file_path}")
@@ -135,18 +141,26 @@ class LocalAPI:
             )
         self._unique_doc_name(doc_name)
 
+        usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+                 "prompt_tokens_details": {"cached_tokens": 0,
+                                           "cache_write_tokens": 0},
+                 "completion_tokens_details": {"reasoning_tokens": 0}}
         try:
             if mode == "flash":
                 structure, description = run_off_loop(
-                    self._with_backend, self._index_flash, file_path
+                    self._with_backend, usage, self._index_flash, file_path
                 )
             else:
                 structure, description = run_off_loop(
-                    self._with_backend, self._index_standard, file_path,
+                    self._with_backend, usage, self._index_standard, file_path,
                     page_texts
                 )
         except PageIndexAPIError:
             raise
+        except LLMRetriesExhausted as e:
+            # with a status its message names the cause; the chain stays on __context__
+            raise PageIndexAPIError(f"Failed to submit document: {e}") from (
+                None if e.status_code else e)
         except Exception as e:
             raise PageIndexAPIError(f"Failed to submit document: {e}") from e
         self._check_page_bounds(structure, len(page_texts))
@@ -171,7 +185,7 @@ class LocalAPI:
             }
             self._store.save_document(
                 doc_id, meta, remove_fields(structure, fields=["text"]), pages)
-        return {"doc_id": doc_id, "name": meta["name"]}
+        return {"doc_id": doc_id, "name": meta["name"], "usage": usage}
 
     def _unique_doc_name(self, name: str) -> str:
         """Mirror the cloud upload: a taken name gets _1.._99 appended,
@@ -223,7 +237,7 @@ class LocalAPI:
             "summary_model": self._summary_model,
             "if_add_node_id": "yes",
             "if_add_node_summary": "yes",
-            "if_add_node_text": "yes",
+            "if_add_node_text": "no",
             "if_add_doc_description": "yes",
         })
         result = page_index_main(file_path, opt, logger=logger, page_list=page_list)
@@ -245,6 +259,7 @@ class LocalAPI:
                                   optimize_model=self._summary_model,
                                   summary_concurrency=self._summary_concurrency,
                                   summary_max_words=self._summary_max_words,
+                                  summary_reasoning_effort=self._summary_reasoning_effort,
                                   use_embedded_toc=self._use_embedded_toc)
         structure = result.get("structure", [])
         reason = flash_rejection_reason(result)
@@ -252,7 +267,7 @@ class LocalAPI:
             raise PageIndexAPIError(f"Failed to submit document: {reason}")
         write_node_id(structure)
         description = generate_doc_description(
-            create_clean_structure_for_description(structure),
+            create_clean_structure_for_description(structure, top_level_only=True),
             model=self._summary_model,
         )
         return structure, description
@@ -260,6 +275,7 @@ class LocalAPI:
     # ── tree / ocr ──
 
     def _load_tree_with_text(self, doc_id: str, error_prefix: str) -> list:
+        """Each node's own text (see utils.own_pages)."""
         from .utils import add_node_text
         structure = self._require_data(
             self._store.get_tree(doc_id), error_prefix)
@@ -267,11 +283,6 @@ class LocalAPI:
         pdf_pages = [(p.get("markdown", ""), 0) for p in pages]
         add_node_text(structure, pdf_pages)
         return structure
-
-    def raw_tree(self, doc_id: str) -> list | None:
-        """Stored tree verbatim — keeps start_index/end_index, which
-        get_tree's cloud wire shape renames and drops."""
-        return self._store.get_tree(doc_id)
 
     def get_tree(self, doc_id: str, node_summary: bool = False,
                  include_text: bool = True) -> dict[str, Any]:
@@ -398,17 +409,15 @@ def _format_tree_node(node: dict, node_summary: bool) -> dict:
     out = {
         "title": node.get("title", ""),
         "node_id": node.get("node_id"),
-        "page_index": node.get("start_index"),
+        "start_index": node.get("start_index"),
+        "end_index": node.get("end_index"),
     }
     if node.get("key_items"):
         out["key_items"] = node["key_items"]
     if node_summary:
         summary = node.get("summary")
         if summary is not None:
-            if children:
-                out["prefix_summary"] = summary
-            else:
-                out["summary"] = summary
+            out["summary"] = summary
     if "text" in node:
         out["text"] = node["text"]
     if children:

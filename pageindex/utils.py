@@ -32,6 +32,42 @@ import re
 _llm_backend: contextvars.ContextVar = contextvars.ContextVar(
     "pageindex_llm_backend", default=None)
 
+# Same scope: the dict the token usage of every indexing model call is
+# summed into, which LocalAPI returns from submit_document.
+_llm_usage: contextvars.ContextVar = contextvars.ContextVar(
+    "pageindex_llm_usage", default=None)
+
+
+def _add_usage(response) -> None:
+    usage, counted = _llm_usage.get(), getattr(response, "usage", None)
+    if usage is None or counted is None:
+        return
+    prompt = getattr(counted, "prompt_tokens", 0) or 0
+    completion = getattr(counted, "completion_tokens", 0) or 0
+    details = getattr(counted, "prompt_tokens_details", None)
+    cached = getattr(details, "cached_tokens", 0)
+    cache_write = getattr(details, "cache_write_tokens", 0)
+    reasoning = getattr(getattr(counted, "completion_tokens_details", None),
+                        "reasoning_tokens", 0)
+    usage["prompt_tokens"] += prompt
+    usage["completion_tokens"] += completion
+    usage["total_tokens"] += prompt + completion
+    usage["prompt_tokens_details"]["cached_tokens"] += cached or 0
+    usage["prompt_tokens_details"]["cache_write_tokens"] += cache_write or 0
+    usage["completion_tokens_details"]["reasoning_tokens"] += reasoning or 0
+
+
+def _add_usage_counts(counts, usage=None) -> None:
+    """Add a chat-shape usage dict (a claude-code/ run's) to the tally."""
+    usage = _llm_usage.get() if usage is None else usage
+    if usage is None:
+        return
+    for key, value in counts.items():
+        if isinstance(value, dict):
+            _add_usage_counts(value, usage.setdefault(key, {}))
+        else:
+            usage[key] = usage.get(key, 0) + (value or 0)
+
 
 def _repair_litellm_types() -> None:
     """litellm 1.97.0's Message/Delta annotations carry nested forward refs
@@ -53,9 +89,9 @@ def _repair_litellm_types() -> None:
 def _mute_litellm_bridge_usage_warning() -> None:
     """litellm's chat→Responses bridge (e.g. OpenAI gpt-5.4+ with function
     tools) logs a chat-shaped usage dict inside a ResponseAPIUsage field
-    (litellm_logging._get_assembled_streaming_response, 1.97–1.98), and
-    pydantic reports it on every streamed turn. Hide exactly that message;
-    every other warning still surfaces."""
+    (litellm_logging._get_assembled_streaming_response, 1.97 through at
+    least 1.105), and pydantic reports it on every streamed turn. Hide
+    exactly that message; every other warning still surfaces."""
     import warnings
     warnings.filterwarnings(
         "ignore",
@@ -104,10 +140,12 @@ def run_off_loop(func, *args):
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return func(*args)
-    from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(func, *args).result()
+        pass  # called below, so its errors don't chain onto this one
+    else:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(func, *args).result()
+    return func(*args)
 
 
 def _litellm_model(model):
@@ -164,6 +202,12 @@ def _is_unrecoverable(exc: Exception) -> bool:
 
 
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
+    from .integrations.claude_agent_sdk import claude_code_complete, is_claude_code
+    if is_claude_code(model):
+        if chat_history or return_finish_reason:
+            raise ValueError("claude-code/ models index in flash mode only; "
+                             "standard mode needs an API model.")
+        return run_off_loop(asyncio.run, claude_code_complete(model, prompt))
     import litellm
     max_retries = 10
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
@@ -181,6 +225,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
                 "max_retries": 0,
                 **(backend or {}),
             })
+            _add_usage(response)
             content = response.choices[0].message.content
             if return_finish_reason:
                 finish_reason = "max_output_reached" if response.choices[0].finish_reason == "length" else "finished"
@@ -200,7 +245,10 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
                 ) from e
 
 
-async def llm_acompletion(model, prompt):
+async def llm_acompletion(model, prompt, **params):
+    from .integrations.claude_agent_sdk import claude_code_complete, is_claude_code
+    if is_claude_code(model):
+        return await claude_code_complete(model, prompt, **params)
     import litellm
     max_retries = 10
     messages = [{"role": "user", "content": prompt}]
@@ -216,7 +264,9 @@ async def llm_acompletion(model, prompt):
                 "drop_params": True,
                 "max_retries": 0,
                 **(backend or {}),
+                **params,
             })
+            _add_usage(response)
             return response.choices[0].message.content
         except Exception as e:
             if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
@@ -591,9 +641,9 @@ def post_processing(structure, end_physical_index):
         item['start_index'] = item.get('physical_index')
         if i < len(structure) - 1:
             if structure[i + 1].get('appear_start') == 'yes':
-                item['end_index'] = structure[i + 1]['physical_index']-1
+                item['end_index'] = max(item['start_index'], structure[i + 1]['physical_index']-1)
             else:
-                item['end_index'] = structure[i + 1]['physical_index']
+                item['end_index'] = max(item['start_index'], structure[i + 1]['physical_index'])
         else:
             item['end_index'] = end_physical_index
     tree = list_to_tree(structure)
@@ -708,8 +758,7 @@ def convert_page_to_int(data):
 
 def add_node_text(node, pdf_pages):
     if isinstance(node, dict):
-        start_page = node.get('start_index')
-        end_page = node.get('end_index')
+        start_page, end_page = own_pages(node)
         node['text'] = get_text_of_pdf_pages(pdf_pages, start_page, end_page)
         if 'nodes' in node:
             add_node_text(node['nodes'], pdf_pages)
@@ -721,8 +770,7 @@ def add_node_text(node, pdf_pages):
 
 def add_node_text_with_labels(node, pdf_pages):
     if isinstance(node, dict):
-        start_page = node.get('start_index')
-        end_page = node.get('end_index')
+        start_page, end_page = own_pages(node)
         node['text'] = get_text_of_pdf_pages_with_labels(pdf_pages, start_page, end_page)
         if 'nodes' in node:
             add_node_text_with_labels(node['nodes'], pdf_pages)
@@ -741,6 +789,120 @@ async def generate_node_summary(node, model=None):
     """
     response = await llm_acompletion(model, prompt)
     return response
+
+
+FALLBACK_SUMMARY_CHARS = 600
+
+
+def fallback_summary(node, text=""):
+    """The summary of a node the model left unsummarized, so no node goes
+    without one: a parent's subsection titles, a leaf's own text."""
+    children = node.get('nodes') or []
+    if children:
+        summary = "; ".join(child['title'] for child in children if child.get('title'))
+    else:
+        summary = " ".join(text.split())
+    return summary[:FALLBACK_SUMMARY_CHARS] or node.get('title') or ""
+
+
+INTRO_SUFFIX = " (intro)"
+
+
+def intro_title(title):
+    """The title of a parent's intro node; a split intro keeps its own."""
+    title = (title or "").strip()
+    if title and not title.endswith(INTRO_SUFFIX):
+        title += INTRO_SUFFIX
+    return title or "Intro"
+
+
+def is_intro(parent, child):
+    """Whether child is the intro node holding parent's opening pages."""
+    return (child.get('start_index') == parent.get('start_index')
+            and child.get('title') == intro_title(parent.get('title')))
+
+
+def own_pages(node):
+    """The first and last page of a node's own text. A parent's runs onto the
+    page its first child starts on, where that child's heading may sit mid-page;
+    it has none (end None) when its intro holds those pages."""
+    start, end = node.get('start_index'), node.get('end_index')
+    children = node.get('nodes') or []
+    if children:
+        first = children[0].get('start_index')
+        if is_intro(node, children[0]):
+            end = None
+        elif end is not None and first is not None:
+            end = min(end, first)
+    return start, end
+
+
+def _heading_offset(page_text, node):
+    """Where the one line opening with the node's heading, its section number
+    aside, starts in the page text. None when that cannot be told (no Latin
+    letter to match, not exactly one such line, or a same-page keeper, whose
+    title its summary call rewrites mid-run), so the page stays whole."""
+    if not node or node.get('_same_page'):
+        return None
+    from .tree_optimize import normalize
+    key = normalize(node.get('title'))
+    if not re.search("[a-z]", key):
+        return None
+    hits, offset = [], 0
+    for line in page_text.splitlines(keepends=True):
+        norm = normalize(line)
+        if any((n + " ").startswith(key + " ") for n in (norm, re.sub(r"^(\d+ )+", "", norm))):
+            hits.append(offset)
+        offset += len(line)
+    return hits[0] if len(hits) == 1 else None
+
+
+def leaf_own_text(structure, leaf, pdf_pages):
+    """A leaf's pages, less what the neighbouring leaf reads of a page they
+    share: the lines before the heading this leaf opens with, and the lines
+    from the next heading on. Both leaves split that page at the same line,
+    so every line still reaches one of them; a heading that cannot be placed
+    leaves the page whole on both sides."""
+    start, end = leaf.get('start_index'), leaf.get('end_index')
+    text = get_text_of_pdf_pages(pdf_pages, start, end)
+    nodes = list(_subtree(structure))
+    i = next((i for i, n in enumerate(nodes) if n is leaf), None)
+    if not isinstance(start, int) or not isinstance(end, int) or i is None:
+        return text
+    # the heading the leaf opens with: the topmost node it is the first leaf of
+    top = i
+    while top > 0 and (nodes[top - 1].get('nodes') or [None])[0] is nodes[top]:
+        top -= 1
+    head = (nodes[top] if top > 0 and nodes[top - 1].get('end_index') == start
+            and nodes[top].get('start_index') == start else None)
+    tail = nodes[i + 1] if i + 1 < len(nodes) else {}
+    next_leaf = tail
+    while next_leaf.get('nodes'):
+        next_leaf = next_leaf['nodes'][0]
+    tail = tail if tail.get('start_index') == end == next_leaf.get('start_index') else None
+
+    first, last = pdf_pages[start - 1][0], pdf_pages[end - 1][0]
+    cut_start = _heading_offset(first, head)
+    cut_end = _heading_offset(last, tail)
+    if start == end and cut_start is not None and cut_end is not None and cut_end <= cut_start:
+        cut_start = cut_end = None
+    if cut_start is None and cut_end is None:
+        return text
+    if start == end:
+        return first[cut_start or 0:cut_end]
+    return (first[cut_start or 0:] + get_text_of_pdf_pages(pdf_pages, start + 1, end - 1)
+            + last[:cut_end])
+
+
+def cover_subtree_ranges(structure):
+    """Widen every parent's range to cover its whole subtree."""
+    for node in structure if isinstance(structure, list) else [structure]:
+        children = node.get('nodes') or []
+        if children:
+            cover_subtree_ranges(children)
+            node['start_index'] = min([node['start_index']] + [c['start_index'] for c in children])
+            node['end_index'] = max([node['end_index']] + [c['end_index'] for c in children])
+    return structure
 
 
 async def generate_summaries_for_structure(structure, model=None):
@@ -762,9 +924,28 @@ async def generate_summaries_for_structure(structure, model=None):
 
 
 SUMMARY_CONCURRENCY = 64        # simultaneous summary model calls
-SUMMARY_RAW_TEXT_TOKENS = 200   # leaves under this reuse their raw text as the summary
 SUMMARY_INTRO_MAX_PAGES = 3     # cap on leading pages fed into a parent summary
 SUMMARY_MAX_WORDS = 150         # word cap the summary prompts ask for
+TOKENS_PER_WORD = 4 / 3
+SUMMARY_REASONING_EFFORT = "none"
+
+
+def default_summary_reasoning_effort(model):
+    """SUMMARY_REASONING_EFFORT unless the indexing backend sets a
+    reasoning_effort or thinking or LiteLLM lists the model as refusing
+    it, else None.
+    Where LiteLLM says nothing (openrouter/..., models it has not caught up
+    with) the summaries send it and drop it if the server refuses it."""
+    if {"reasoning_effort", "thinking"} & (_llm_backend.get() or {}).keys():
+        return None
+    import litellm
+    try:
+        info = litellm.get_model_info(_litellm_model(model))
+    except Exception:
+        return SUMMARY_REASONING_EFFORT
+    if info.get(f"supports_{SUMMARY_REASONING_EFFORT}_reasoning_effort") is False:
+        return None
+    return SUMMARY_REASONING_EFFORT
 
 
 class _PriorityGate:
@@ -902,16 +1083,20 @@ class SummaryScheduler:
     calls leave the gate deepest first: depth counts the calls left on a
     node's path to the root, its own included."""
 
-    def __init__(self, structure, pdf_pages, model=None,
-                 small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
+    def __init__(self, structure, pdf_pages, model=None, small_node_tokens=None,
                  max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None,
-                 max_words=None):
+                 max_words=None, split_shared_pages=False, reasoning_effort=None,
+                 drop_refused_effort=False):
         self.structure = structure
         self._pdf_pages = pdf_pages
+        self._split_shared_pages = split_shared_pages
+        self._params = {"reasoning_effort": reasoning_effort} if reasoning_effort else {}
+        self._drop_refused_effort = drop_refused_effort
         self._model = model
-        self._small_node_tokens = small_node_tokens
         self._max_intro_pages = max_intro_pages
         self._max_words = max_words or SUMMARY_MAX_WORDS
+        self._small_node_tokens = (TOKENS_PER_WORD * self._max_words
+                                   if small_node_tokens is None else small_node_tokens)
         self._gate = _PriorityGate(concurrency or SUMMARY_CONCURRENCY)
         self._asked = self._answered = False
         self._marks = {}     # id(node) -> future resolved once the node is final
@@ -955,13 +1140,31 @@ class SummaryScheduler:
     async def _ask(self, prompt, prio):
         self._asked = True
         async with self._gate.slot(prio):
-            reply = await llm_acompletion(self._model, prompt)
-        if reply:
+            reply = await self._complete(prompt)
+        if parse_summary(reply):
             self._answered = True
         return reply
 
+    async def _complete(self, prompt):
+        params = self._params
+        try:
+            return await llm_acompletion(self._model, prompt, **params)
+        except Exception as e:
+            if not (params and self._drop_refused_effort
+                    and getattr(e, "status_code", None) == 400):
+                raise
+        # the effort is to blame only if the prompt goes through without it
+        reply = await llm_acompletion(self._model, prompt)
+        self._params = {}
+        return reply
+
+    def _leaf_text(self, node):
+        if self._split_shared_pages:
+            return leaf_own_text(self.structure, node, self._pdf_pages)
+        return get_text_of_pdf_pages(self._pdf_pages, node['start_index'], node['end_index'])
+
     async def _leaf_summary(self, node, prio):
-        text = get_text_of_pdf_pages(self._pdf_pages, node['start_index'], node['end_index'])
+        text = self._leaf_text(node)
         if count_tokens(text, model=self._model) < self._small_node_tokens:
             return text.strip()
 
@@ -1040,6 +1243,8 @@ class SummaryScheduler:
             node['summary'] = ""
             if _is_unrecoverable(e):
                 raise
+        if not node['summary']:
+            node['summary'] = fallback_summary(node, "" if children else self._leaf_text(node))
 
     async def finish(self):
         """Wait for every summary; fails loud if the model never answered."""
@@ -1079,30 +1284,40 @@ class SummaryScheduler:
         return self.structure
 
 
-async def summarize_tree(structure, pdf_pages, model=None,
-                         small_node_tokens=SUMMARY_RAW_TEXT_TOKENS,
+async def summarize_tree(structure, pdf_pages, model=None, small_node_tokens=None,
                          max_intro_pages=SUMMARY_INTRO_MAX_PAGES, concurrency=None,
-                         max_words=None):
+                         max_words=None, split_shared_pages=False,
+                         reasoning_effort=None, drop_refused_effort=False):
     """Bottom-up summaries: leaves from their own pages, parents composed from
     child summaries plus the pages no child covers. A parent's summary describes
     its whole subtree (end_index union semantics). Nodes that already carry a
-    summary are left untouched; leaves under `small_node_tokens` use their raw
-    text as the summary without a model call; every prompt asks for at most
-    `max_words` words. Model calls run deepest node first, both in starting
-    order and in leaving the queue: depth counts the calls left on a node's
-    path to the root, its own included."""
+    summary are left untouched; leaves under `small_node_tokens` (by default
+    the summary's own length, `max_words` in tokens) use their raw text as the
+    summary without a model call; every prompt asks for at most
+    `max_words` words; with `split_shared_pages` a leaf reads only its side of
+    a page it shares with the next or previous leaf (see leaf_own_text); a set
+    `reasoning_effort` goes with every summary call, over the indexing
+    backend's, and with `drop_refused_effort` the calls stop sending it once
+    a prompt the server refused with it goes through without it. Model calls
+    run deepest node first, both in starting order and in leaving the queue:
+    depth counts the calls left on a node's path to the root, its own
+    included."""
     scheduler = SummaryScheduler(structure, pdf_pages, model=model,
                                  small_node_tokens=small_node_tokens,
                                  max_intro_pages=max_intro_pages,
-                                 concurrency=concurrency, max_words=max_words)
+                                 concurrency=concurrency, max_words=max_words,
+                                 split_shared_pages=split_shared_pages,
+                                 reasoning_effort=reasoning_effort,
+                                 drop_refused_effort=drop_refused_effort)
     scheduler.mark_final(list(_subtree(structure)))
     return await scheduler.finish()
 
 
-def create_clean_structure_for_description(structure):
+def create_clean_structure_for_description(structure, top_level_only=False):
     """
     Create a clean structure for document description generation,
-    excluding unnecessary fields like 'text'.
+    excluding unnecessary fields like 'text'. `top_level_only` drops the
+    children, for trees whose parent summaries already cover their subtrees.
     """
     if isinstance(structure, dict):
         clean_node = {}
@@ -1112,12 +1327,12 @@ def create_clean_structure_for_description(structure):
                 clean_node[key] = structure[key]
         
         # Recursively process child nodes
-        if 'nodes' in structure and structure['nodes']:
+        if 'nodes' in structure and structure['nodes'] and not top_level_only:
             clean_node['nodes'] = create_clean_structure_for_description(structure['nodes'])
-        
+
         return clean_node
     elif isinstance(structure, list):
-        return [create_clean_structure_for_description(item) for item in structure]
+        return [create_clean_structure_for_description(item, top_level_only) for item in structure]
     else:
         return structure
 
@@ -1194,8 +1409,8 @@ def page_level_thinning(structure, thinning_threshold_node_num=20, min_pages_for
     return structure
 
 
-DEFAULT_INDEX_MODEL = "gpt-5.6-luna"
-DEFAULT_CHAT_MODEL = "gpt-5.6-sol"
+DEFAULT_INDEX_MODEL = "gpt-6-luna"
+DEFAULT_CHAT_MODEL = "gpt-6-sol"
 
 # Each of the five names has shipped in a release; all stay accepted.
 _MODEL_KEYS = ("model", "summary_model", "retrieve_model",
@@ -1252,12 +1467,61 @@ class ConfigLoader:
         _resolve_models(merged)
         return config(**merged)
 
+_TREE_WIRE_KEYS = frozenset({"title", "node_id", "start_index", "end_index", "page_index",
+                             "summary", "prefix_summary", "text", "nodes"})
+
+
+def unify_tree(nodes, page_count=None):
+    """get_tree's nodes in the field names both modes return.
+
+    The structure is the index's own: nodes are neither added nor moved, so
+    every node keeps the summary written for its own pages start_index ..
+    end_index. A node's first page comes as start_index (local) or
+    page_index (cloud), and a parent's summary as summary or prefix_summary.
+    Without an end_index (an older server) a node ends on the page where the
+    next node in reading order starts, the last on page_count.
+    """
+    flat = list(_subtree(nodes))
+    starts = [node.get("start_index", node.get("page_index")) for node in flat]
+    ranges = {}
+    for i, node in enumerate(flat):
+        start, end = starts[i], node.get("end_index")
+        if end is None:
+            end = starts[i + 1] if i + 1 < len(flat) else page_count
+        if end is None or (start is not None and end < start):
+            end = start
+        ranges[id(node)] = (start, end)
+
+    def build(siblings):
+        out = []
+        for node in siblings:
+            unified = {"title": node.get("title", "")}
+            if "node_id" in node:
+                unified["node_id"] = node["node_id"]
+            unified["start_index"], unified["end_index"] = ranges[id(node)]
+            unified.update((key, value) for key, value in node.items()
+                           if key not in _TREE_WIRE_KEYS)
+            for key in ("summary", "prefix_summary"):
+                if key in node:
+                    unified["summary"] = node[key]
+            if "text" in node:
+                unified["text"] = node["text"]
+            if node.get("nodes"):
+                unified["nodes"] = build(node["nodes"])
+            out.append(unified)
+        return out
+
+    return build(nodes)
+
+
 def create_node_mapping(tree, include_page_ranges=False, max_page=None):
     """Map node_id to node; with include_page_ranges, to {"node", "start_index",
-    "end_index"} (end = next node's page_index, or max_page for the last node)."""
+    "end_index"}: the node's own range as get_tree returns it, or, for a tree
+    that carries page_index only, end = next node's page_index (max_page for
+    the last node)."""
     def get_all_nodes(tree):
         if isinstance(tree, dict):
-            return [tree] + [node for child in tree.get('nodes', []) for node in get_all_nodes(child)]
+            return [tree] + [node for child in tree.get('nodes') or [] for node in get_all_nodes(child)]
         elif isinstance(tree, list):
             return [node for item in tree for node in get_all_nodes(item)]
         return []
@@ -1268,13 +1532,51 @@ def create_node_mapping(tree, include_page_ranges=False, max_page=None):
     mapping = {}
     for i, node in enumerate(all_nodes):
         if node.get("node_id"):
-            end_page = all_nodes[i + 1].get("page_index") if i + 1 < len(all_nodes) else max_page
+            if "end_index" in node:
+                start_page, end_page = node["start_index"], node["end_index"]
+            else:
+                start_page = node["page_index"]
+                end_page = all_nodes[i + 1].get("page_index") if i + 1 < len(all_nodes) else max_page
             mapping[node["node_id"]] = {
                 "node": node,
-                "start_index": node["page_index"],
+                "start_index": start_page,
                 "end_index": end_page,
             }
     return mapping
+
+def _require_node_tree(tree):
+    if not (isinstance(tree, list) or (isinstance(tree, dict) and 'node_id' in tree)):
+        raise TypeError("tree must be a node list such as get_document_structure(doc_id) "
+                        "or get_tree(doc_id)['result'], not the whole get_tree response; "
+                        f"got {type(tree).__name__}")
+
+def get_node_path(tree, node_id):
+    """[top-level ancestor, ..., node] for node_id; [] if absent."""
+    _require_node_tree(tree)
+    if not isinstance(node_id, str):
+        raise TypeError(f"node_id must be a str like '0007', got {node_id!r}")
+    for node in [tree] if isinstance(tree, dict) else tree:
+        if node.get('node_id') == node_id:
+            return [node]
+        path = get_node_path(node.get('nodes') or [], node_id)
+        if path:
+            return [node] + path
+    return []
+
+def get_node(tree, node_id):
+    """The node with node_id, or None."""
+    path = get_node_path(tree, node_id)
+    return path[-1] if path else None
+
+def get_node_parent(tree, node_id):
+    """The parent of node_id; None for a top-level or absent node."""
+    path = get_node_path(tree, node_id)
+    return path[-2] if len(path) > 1 else None
+
+def get_node_map(tree):
+    """{node_id: node} for every node in tree."""
+    _require_node_tree(tree)
+    return create_node_mapping(tree)
 
 def print_tree(tree, exclude_fields=None, indent=0):
     """Outline view; passing exclude_fields gives the 0.2.8 pprint view."""

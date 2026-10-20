@@ -30,7 +30,7 @@
 <details open>
 <summary><h2>Updates</h2></summary>
 
-- [Aug '26] 🔥 [**PageIndex SDK**](#quickstart): `pip install -U pageindex` now ships **local mode**: index, retrieve, and chat entirely on your machine with your own LLM key, or point the same client at PageIndex Cloud with an API key.
+- [Aug '26] 🔥 [**PageIndex SDK**](#quickstart): **local** and **cloud** modes — one client to index, retrieve, and chat on your machine (with your own LLM API key) or on [PageIndex Cloud](https://developer.pageindex.ai/).
 - [Aug '26] ⚡ [**PageIndex Flash**](https://pageindex.ai/blog/pageindex-flash): fast tree index generation for text-based PDFs, now the default indexing method in PageIndex SDK local mode.
 - [Scale PageIndex to Millions of Documents](https://pageindex.ai/blog/pageindex-filesystem): *PageIndex File System* is a file-level tree indexing layer that lets PageIndex reason over an entire corpus, not just a single document.
 - [PageIndex App](https://app.pageindex.ai): a human-like document analysis agent for long professional documents.<!-- Also available via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer). -->
@@ -87,8 +87,8 @@ from pageindex import PageIndexClient
 os.environ["OPENAI_API_KEY"] = "your-openai-key"
 
 client = PageIndexClient(
-    index="gpt-5.6-luna",               # model to build the tree index
-    chat="gpt-5.6-sol",                 # model to search the tree
+    index="gpt-6-luna",                 # model to build the tree index
+    chat="gpt-6-sol",                   # model to search the tree
 )
 doc_id = client.submit_document("report.pdf")["doc_id"]
 
@@ -100,6 +100,8 @@ print(answer)
 
 - **`index=`: a basic model is sufficient.** The tree structure itself is extracted from the document layout without an LLM; the index model only summarizes and refines it, which a basic model does well.
 - **`chat=`: use the best model you can afford.** The chat model searches the tree to retrieve information. See [Query cost and accuracy](#query-cost-and-accuracy).
+
+**Have a Claude subscription?** PageIndex can use your subscription to call Claude models through Claude Code: usage is covered by your plan, no API key needed. Install with `pip install -U "pageindex[claude]"`, then prefix model names with `claude-code/`, e.g., `index="claude-code/haiku"`, `chat="claude-code/opus"` (see [example](https://github.com/VectifyAI/PageIndex/blob/main/cookbook/pageindex-claude-subscription.py)).
 
 ### [Use PageIndex through the SDK client →](https://docs.pageindex.ai/getting-started)
 
@@ -190,7 +192,7 @@ os.environ["OPENAI_API_KEY"] = "your-openai-key"
 
 client = PageIndexClient(
     index="cloud",                       # build and store the index in PageIndex Cloud
-    chat="gpt-5.6-sol",                  # use your preferred compatible model for chat
+    chat="gpt-6-sol",                    # use your preferred compatible model for chat
 )
 doc_id = client.submit_document("report.pdf", wait=True)["doc_id"]
 print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))

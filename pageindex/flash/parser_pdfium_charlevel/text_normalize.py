@@ -275,8 +275,10 @@ def _reverse_if_rtl(chars: str) -> str:
 
 
 def _read_end(mapping: dict, sign: int) -> float:
-    """The reading-direction FAR edge of a glyph (the edge facing the next char). PDFium reports the origin (ox) as the glyph's LEFT edge in both directions; the glyph extends RIGHT by glyph_w. So: * LTR (reading right): far edge = right edge = max(ox+glyph_w, ink right). * RTL (reading left): far edge = LEFT edge = ox (the origin itself). The next char's gap is then measured to its NEAR edge -- ox for LTR, ox+glyph_w for RTL -- in ``_read_gap`` below. (Earlier this added glyph_w on the RTL side too, which used the PREVIOUS glyph's width and injected spurious spaces.)"""
+    """The reading-direction FAR edge of a glyph (the edge facing the next char). PDFium reports the origin (ox) as the glyph's LEFT edge in both directions; the glyph extends RIGHT by glyph_w. So: * LTR (reading right): far edge = the pen end the font's width for the char's code gives (code_end), else right edge = max(ox+glyph_w, ink right): glyph_w is looked up by unicode and can land on another glyph's width. * RTL (reading left): far edge = LEFT edge = ox (the origin itself). The next char's gap is then measured to its NEAR edge -- ox for LTR, ox+glyph_w for RTL -- in ``_read_gap`` below. (Earlier this added glyph_w on the RTL side too, which used the PREVIOUS glyph's width and injected spurious spaces.)"""
     if sign > 0:
+        if "code_end" in mapping:
+            return mapping["code_end"]
         return max(mapping["ox"] + mapping["glyph_w"], mapping["right"])
     return mapping["ox"]
 

@@ -152,7 +152,7 @@ def _needs_model(surface: str) -> PageIndexAPIError:
 
 _LOCAL_INDEX_KEYS = ("model", "summary_model", "backend", "storage_path",
                      "summary_max_words", "summary_concurrency",
-                     "use_embedded_toc", "optimize")
+                     "summary_reasoning_effort", "use_embedded_toc", "optimize")
 
 # Near-synonyms of "cloud" that would otherwise parse as model names —
 # a silent wrong mode. They error, pointing at the real word.
@@ -178,7 +178,8 @@ def _env_cloud_key(spelling: str, inline: str = "api_key=...") -> str:
 _ARG_TYPES: "dict[str, tuple[type, ...]]" = {
     "model": (str,), "index_model": (str,), "summary_model": (str,),
     "chat_model": (str,), "retrieve_model": (str,), "summary_max_words": (int,),
-    "summary_concurrency": (int,), "use_embedded_toc": (bool,), "optimize": (str,),
+    "summary_concurrency": (int,), "summary_reasoning_effort": (str,),
+    "use_embedded_toc": (bool,), "optimize": (str,),
     "storage_path": (str, os.PathLike), "index_backend": (dict,),
     "chat_backend": (dict,)}
 
@@ -338,7 +339,7 @@ class PageIndexClient:
         client = PageIndexClient()                  # local docs + your model
         client = PageIndexClient(api_key="...")     # cloud docs + managed chat
         client = PageIndexClient(api_key="...",     # cloud docs + your model
-                                 chat_model="openai/gpt-5.2")
+                                 chat_model="openai/gpt-6-sol")
 
     ``index=`` / ``chat=`` are the grouped spelling of the same flat
     arguments — a string as shorthand, a dict for the full config; each
@@ -356,8 +357,9 @@ class PageIndexClient:
             environment), ``"local"``, a local index model name, or a
             dict: ``{"api_key": ...}`` for cloud, ``{"model",
             "summary_model", "backend", "storage_path",
-            "summary_max_words", "summary_concurrency", "use_embedded_toc",
-            "optimize"}`` for local. An
+            "summary_max_words", "summary_concurrency",
+            "summary_reasoning_effort", "use_embedded_toc", "optimize"}``
+            for local. An
             optional ``"mode"`` key (``"cloud"`` / ``"local"``) states
             the side and must agree with the other keys; ``{"mode":
             "cloud"}`` alone reads the key from the environment. Not
@@ -378,7 +380,16 @@ class PageIndexClient:
             optional: the arguments themselves already carry the mode.
         index_model (str, optional): Local mode only — LLM used to index
             documents (structure and summaries). Defaults to the SDK
-            default (fast and cheap).
+            default (fast and cheap). ``claude-code/<model>`` (e.g.
+            ``claude-code/haiku``) indexes on your own Claude subscription
+            through Claude Code, flash mode only, with backend settings
+            not applying (``pip install 'pageindex[claude]'``; for your
+            own use — a product serving other people needs an API key).
+            There a reasoning effort must be a level Claude Code lists for
+            the model (one listing none drops it), checked before any
+            prompt goes out, and ``"none"``
+            turns thinking off only where the model allows it, the
+            model's default applying otherwise.
         chat_model (str, optional): Your own model for the chat surfaces
             (``chat``, ``chat_completions``; a value you set also
             carries onto ``chat(protocol="messages")`` and the two
@@ -389,10 +400,19 @@ class PageIndexClient:
             names route through LiteLLM and mean what LiteLLM says they
             mean; bare names are OpenAI-compatible shorthand, and
             ``openai/Qwen/...`` is the form for an OpenAI-compatible
-            server that itself serves slashed model ids (vLLM, TGI). The
-            Anthropic-native surfaces read the name by its routing
-            prefix instead — bare names are Anthropic's own — and treat
-            the untouched stock default as no choice. Defaults to the
+            server that itself serves slashed model ids (vLLM, TGI).
+            ``chat(protocol="responses")`` and the Anthropic-native
+            surfaces read the name by its routing prefix instead and
+            send the rest as written — bare names are OpenAI's and
+            Anthropic's own respectively — and the Anthropic-native ones
+            treat the untouched stock default as no choice.
+            ``claude-code/<model>`` runs the answer lane (and
+            ``protocol="chat_completions"``) on your own Claude
+            subscription through Claude Code, same terms as
+            ``index_model``'s; ``claude_agent_config()`` carries it as the
+            bare alias for your own Claude Code login, while the other
+            protocol lanes and ``anthropic_runner_config()``, which drive
+            an API, refuse it. Defaults to the
             SDK default (strong); reads ``None`` on a cloud client where
             the managed chat answers.
         model (str, optional): Local mode only — one model for both roles:
@@ -405,12 +425,20 @@ class PageIndexClient:
             ``index_model`` covers this.
         summary_max_words (int, optional): Local flash mode only — the word
             cap each model-written node summary is asked to stay within;
-            short leaf nodes keep their own text. Defaults to 150.
+            a leaf node shorter than that keeps its own text. Defaults to 150.
         summary_concurrency (int, optional): Local flash mode only — cap on
             simultaneous indexing model calls per lane: the summaries, and
             expand up to its own ceiling of 32. The lanes overlap, so up to
-            cap + min(32, cap) calls run at once. Defaults to 64. A
-            ``mode="standard"`` submit refuses either summary knob.
+            cap + min(32, cap) calls run at once. Defaults to 64.
+        summary_reasoning_effort (str, optional): Local flash mode only —
+            the reasoning effort sent with each node-summary call, over any
+            in ``index_backend`` (``"none"``, ``"low"``, ``"high"``, ...; a
+            model without the setting drops it). Defaults to ``"none"``
+            unless LiteLLM lists the model as refusing it, and stops
+            sending it once a prompt the server refused with it (HTTP
+            400) goes through without it.
+            Expand keeps the model's own default. A
+            ``mode="standard"`` submit refuses any of the summary knobs.
         use_embedded_toc (bool, optional): Local mode only — whether flash
             indexing consumes the PDF's embedded bookmarks when they look
             trustworthy. Defaults to True.
@@ -467,6 +495,7 @@ class PageIndexClient:
         summary_model: Optional[str] = None,
         summary_max_words: Optional[int] = None,
         summary_concurrency: Optional[int] = None,
+        summary_reasoning_effort: Optional[str] = None,
         use_embedded_toc: Optional[bool] = None,
         optimize: Optional[str] = None,
         retrieve_model: Optional[str] = None,
@@ -496,6 +525,7 @@ class PageIndexClient:
              ("summary_model", summary_model),
              ("summary_max_words", summary_max_words),
              ("summary_concurrency", summary_concurrency),
+             ("summary_reasoning_effort", summary_reasoning_effort),
              ("use_embedded_toc", use_embedded_toc),
              ("optimize", optimize),
              ("index_backend", index_backend),
@@ -662,6 +692,7 @@ class PageIndexClient:
                 summary_concurrency=index_conf.get("summary_concurrency"),
                 use_embedded_toc=index_conf.get("use_embedded_toc", True),
                 optimize=index_conf.get("optimize", "full"),
+                summary_reasoning_effort=index_conf.get("summary_reasoning_effort"),
             )
             # LiteLLM's multi-second import would otherwise land on the
             # first chat call; failures resurface there with real context.
@@ -777,6 +808,9 @@ class PageIndexClient:
             dict: {'doc_id': ..., 'name': ...}. 'name' is the stored document
                 name: a taken name gains a numeric suffix (name_1..name_99)
                 and a UserWarning is emitted. Older cloud servers omit 'name'.
+                Local also returns 'usage', the indexing model's tokens summed
+                over every call, in the Chat Completions usage shape
+                LiteLLM returns.
         """
         result = self._api.submit_document(
             file_path=file_path, mode=mode,
@@ -949,14 +983,22 @@ class PageIndexClient:
 
         Returns:
             dict: {'doc_id', 'status', 'retrieval_ready', 'result', ...} where
-            result nodes are {'title', 'node_id', 'page_index', ('summary' /
-            'prefix_summary',) ('text',) 'nodes'}.
+            result nodes are {'title', 'node_id', 'start_index', 'end_index',
+            ('summary',) ('text',) 'nodes'} in both modes. Each node's summary
+            describes its own pages start_index..end_index; its text is the
+            part no child holds, though a parent's may share the page its
+            first child starts on.
         """
         tree = self._api.get_tree(doc_id=doc_id, node_summary=node_summary,
                                   include_text=include_text)
-        if not include_text and tree.get("result"):
-            from .utils import remove_fields
-            tree["result"] = remove_fields(tree["result"], fields=["text"])
+        if tree.get("result"):
+            from .utils import _subtree, remove_fields, unify_tree
+            page_count = None
+            if any("end_index" not in node for node in _subtree(tree["result"])):
+                page_count = self._api.get_document(doc_id).get("pageNum")
+            tree["result"] = unify_tree(tree["result"], page_count)
+            if not include_text:
+                tree["result"] = remove_fields(tree["result"], fields=["text"])
         return tree
 
     def get_document_structure(self, doc_id: str) -> list[dict[str, Any]]:
@@ -975,7 +1017,7 @@ class PageIndexClient:
         failures, timeouts) propagate.
         """
         try:
-            result = self.get_tree(doc_id)
+            result = self._api.get_tree(doc_id)
             return result.get("retrieval_ready", False)
         except PageIndexAPIError:
             return False
@@ -1200,6 +1242,12 @@ class PageIndexClient:
         never inferred from the model name. Keep ``doc_id`` and
         ``protocol`` constant across a conversation's calls.
 
+        A ``claude-code/`` chat model runs Claude Code, not LiteLLM (see
+        the constructor's ``chat_model``): ``backend``, ``extra_headers``
+        and ``extra_body`` are refused, a configured ``chat_backend``
+        doesn't apply, and ``reasoning_effort`` must be a level Claude
+        Code lists for the model.
+
         Args:
             messages: A question string, or the conversation history —
                 role/content messages on every lane. With your own chat
@@ -1232,9 +1280,14 @@ class PageIndexClient:
                 clipped). One run serves one view. Protocol lanes: the
                 protocol's own event stream.
             model: Own-model chat only — backend model name (defaults
-                to ``chat_model``). ``protocol="messages"`` takes a Claude
-                model — a ``chat_model`` you set carries over; the stock
-                default is never sent.
+                to ``chat_model``). ``protocol="responses"`` /
+                ``"messages"`` send it as written after its routing
+                prefix (``openai/``, ``litellm/``; ``anthropic/``,
+                ``bedrock/``, …), so
+                a gateway's own ids work with ``backend``.
+                ``protocol="messages"`` takes a Claude model (or a
+                gateway's) — a ``chat_model`` you set carries over; the
+                stock default is never sent.
             reasoning_effort: Own-model chat only — how hard the model
                 thinks (``"low"`` / ``"medium"`` / ``"high"``; what a
                 backend accepts is its own). Each lane sends its native
@@ -1342,9 +1395,27 @@ class PageIndexClient:
               Responses: ``output`` plus an ``items``
               transcript and cross-turn ``usage``; Messages: the final
               message with a ``messages`` turn sequence and aggregated
-              ``usage``
+              ``usage``. Each own-model ``usage`` also lists the run's
+              model calls: ``request_usage_entries`` on the OpenAI
+              protocols (a ``claude-code/`` model reports the run's total
+              only), the native ``iterations`` on Messages
             - protocol lane, stream=True: an iterator of the protocol's
-              own stream events
+              own stream events; Messages ends a finished run with one
+              ``type == "result"`` event (read ``event.usage``, not
+              ``event["usage"]``) carrying the envelope's aggregated
+              ``usage`` and ``messages`` turn sequence
+
+        An own-model run that fails raises PageIndexAPIError with
+        ``usage``: what its finished model calls spent, in the protocol's
+        usage shape (Chat Completions on the answer lane); ``None`` if a
+        ``claude-code/`` run fails on a tool call or ends before Claude
+        Code reports its usage.
+
+        An answer-lane reply the run reports unfinished (finish_reason
+        ``length`` or ``content_filter``) raises PageIndexAPIError instead of
+        passing as complete: a stream after the text it delivered, a
+        non-streamed call with that text in ``partial_answer``. The protocol
+        lanes mark it instead, as their wire does.
         """
         if protocol not in (None, "chat_completions", "responses",
                             "messages"):
@@ -1394,6 +1465,12 @@ class PageIndexClient:
                 enable_citations = True
         if protocol in ("responses", "messages"):
             self._require_own_chat(f"chat(protocol={protocol!r})")
+            from .integrations.claude_agent_sdk import is_claude_code
+            if is_claude_code(model or self.chat_model):
+                raise PageIndexAPIError(
+                    "claude-code/ models run the Claude Code CLI on the "
+                    f"answer lane — drop protocol={protocol!r}, which "
+                    "drives an API model over its own wire.")
             if protocol == "responses":
                 body = extra_body
                 if reasoning_effort:
@@ -1474,11 +1551,20 @@ class PageIndexClient:
                                        extra_body=extra_body)
         envelope = cast(dict[str, Any], result)
         try:
-            return envelope["choices"][0]["message"]["content"] or ""
+            choice = envelope["choices"][0]
+            answer = choice["message"]["content"] or ""
         except (KeyError, IndexError, TypeError) as exc:
             raise PageIndexAPIError(
                 "The chat response carries no answer: "
                 f"{str(envelope)[:200]}") from exc
+        from .local_chat import _CUT_SHORT, _cut_short_error
+        if choice.get("finish_reason") in _CUT_SHORT:
+            error = _cut_short_error(choice["finish_reason"])
+            error.partial_answer = answer
+            if self._local_chat:
+                error.usage = envelope.get("usage")
+            raise error
+        return answer
 
     def chat_completions(
         self,
@@ -1528,6 +1614,13 @@ class PageIndexClient:
         "content_filter" when the last turn was cut short. For
         the tool-use process and prompt-cache round-trip use
         ``chat(protocol="responses")`` or ``chat(protocol="messages")``.
+
+        A ``claude-code/`` chat model runs Claude Code, not LiteLLM (see
+        the constructor's ``chat_model``): ``temperature``, ``top_p``,
+        ``max_tokens``, ``extra_body``, ``extra_headers`` and ``backend``
+        are refused, a configured ``chat_backend`` doesn't apply, and
+        ``reasoning_effort`` must be a level Claude Code lists for the
+        model.
 
         Args:
             messages: Conversation messages with 'role' and 'content' keys,
@@ -1693,11 +1786,10 @@ class PageIndexClient:
 
         Requires a backend that supports the
         Responses API; backends that only speak chat.completions should use
-        ``chat(protocol="chat_completions")``. Provider-prefixed models
-        (``anthropic/…``) route through LiteLLM's chat.completions adapter
-        and are therefore refused here — use
-        ``chat(protocol="chat_completions")`` or ``chat(protocol="messages")``
-        for those.
+        ``chat(protocol="chat_completions")``. The model name is sent as
+        written (``litellm/`` and ``openai/`` prefixes strip) and the
+        backend judges it — a gateway's slashed ids such as
+        ``deepseek/deepseek-chat`` work as-is.
 
         Args:
             input: A user message string, or a list of Responses input items
@@ -1816,7 +1908,10 @@ class PageIndexClient:
                 requires max_tokens above the budget). Passed through.
             stream: Yield the Anthropic SDK's event stream across turns
                 (its native event objects, including SDK-synthesized
-                convenience events), one message sequence per turn.
+                convenience events), one message sequence per turn; a
+                finished run then ends with one ``type == "result"``
+                event whose ``usage`` and ``messages`` are the non-stream
+                envelope's cross-turn aggregate and turn sequence.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call. Local
@@ -2167,7 +2262,7 @@ class PageIndexClient:
         call — only your ``messages`` remain::
 
             runner = anthropic_client.beta.messages.tool_runner(
-                **client.anthropic_runner_config(model="claude-sonnet-4-5"),
+                **client.anthropic_runner_config(model="claude-sonnet-5-5"),
                 messages=[{"role": "user", "content": "..."}],
             )
 
@@ -2216,6 +2311,13 @@ class PageIndexClient:
             # A cleared chat_model ('' or None) configures nothing —
             # same refusal as the stock default, never a {'model': ''}.
             raise _needs_model("anthropic_runner_config()")
+        from .integrations.claude_agent_sdk import is_claude_code
+        if is_claude_code(model):
+            raise PageIndexAPIError(
+                "claude-code/ models run on Claude Code; "
+                "anthropic_runner_config() drives the Anthropic API — pass "
+                "an API model, or use claude_agent_config() for your Claude "
+                "Code login.")
         model, route = _claude_wire(model, "anthropic_runner_config()")
         return {
             "model": model,
@@ -2232,24 +2334,28 @@ class PageIndexClient:
     def as_claude_mcp(self, include_management: bool = False, *,
                       server_name: str = "pageindex"):
         """
-        ``mcp_servers`` entry for the Claude Agent SDK.
+        ``mcp_servers`` entry for the Claude Agent SDK: an in-process SDK
+        MCP server, in both modes (requires ``claude-agent-sdk``;
+        ``pip install 'pageindex[claude]'``).
 
-        Cloud: returns the remote PageIndex MCP config.
-        ``include_management`` picks the endpoint, so the URL itself is
-        the gate — the default connects to the read-only endpoint
-        (``/mcp?tools=read``: the server registers only read-only tools),
-        ``True`` connects to the full tool set. Local: returns an
-        in-process SDK MCP server exposing the agent tools, gated the
-        same way at registration (requires ``claude-agent-sdk``;
-        ``pip install 'pageindex[claude]'``). ``server_name`` names the
-        in-process server — match it to the key you register the entry
-        under (cloud entries carry no name).
+        Cloud: a relay to the PageIndex MCP server — its tools,
+        instructions and resources, fetched live for each session — that
+        keeps the API key off the Claude Code CLI's command line (where a
+        remote server config would carry it, readable by any local
+        process). ``include_management`` picks the endpoint: the
+        default relays the read-only one (``/mcp?tools=read``: the server
+        registers only read-only tools), ``True`` the full tool set.
+        Local: the agent tools over the local store, gated the same way at
+        registration. ``server_name`` names the server — match it to the
+        key you register the entry under.
 
         Cloud hosts that surface MCP server instructions receive the tool
         guidance natively — not the client's ``instructions``, which only
         ``system_prompt`` carries; passing both duplicates the guidance
         (harmless). ``system_prompt`` stays the recommended channel: it is
-        guaranteed delivery, and the only channel local mode has.
+        guaranteed delivery, whole (Claude Code hands the model at most
+        4,096 characters of a server's instructions), and the only channel
+        local mode has.
 
         Usage (or ``claude_agent_config()`` for the whole bundle in one
         call)::
@@ -2302,17 +2408,27 @@ class PageIndexClient:
                 to ``"1"`` — only that one: other switches in your
                 environment stay yours, weighed by the CLI's own rules.
                 ``anthropic/`` and bare spellings name a model, not a
-                channel, and leave ``env`` out. Unset: a ``chat_model``
+                channel, and leave ``env`` out. ``claude-code/`` keeps
+                your Claude Code login: the bare alias, with ``env``
+                blanking ``ANTHROPIC_API_KEY``, ``ANTHROPIC_AUTH_TOKEN``
+                and ``ANTHROPIC_BASE_URL``. Unset: a ``chat_model``
                 you set is forwarded as written; the stock default, like
                 a managed-chat client, leaves the SDK's own default in
                 place.
         """
         from .agent_tools import _base_instructions
+        from .integrations.claude_agent_sdk import (
+            CLAUDE_CODE_PREFIX, SUBSCRIPTION_ENV, is_claude_code)
         # The stock default is not a choice: leave the SDK's own model.
         if not model and not self._chat_model_stock:
             model = self.chat_model
         route = None
-        if model:
+        subscription = is_claude_code(model)
+        if subscription:
+            # already your Claude Code login: the bare alias, with no API
+            # key or base URL from the environment rerouting it
+            model = model.removeprefix(CLAUDE_CODE_PREFIX)
+        if model or subscription:
             model, route = _claude_wire(model, "claude_agent_config()")
         return {
             "system_prompt": _base_instructions(self, include_management),
@@ -2327,7 +2443,8 @@ class PageIndexClient:
             # over the inherited environment). Only the chosen switch:
             # the rest of the caller's environment is the caller's, and
             # how the CLI weighs its own switches is the CLI's business.
-            **({"env": {_ROUTE_ENV[route]: "1"}}
+            **({"env": dict(SUBSCRIPTION_ENV)} if subscription
+               else {"env": {_ROUTE_ENV[route]: "1"}}
                if route in _ROUTE_ENV else {}),
         }
 
@@ -2690,6 +2807,7 @@ class PageIndexLocalClient(PageIndexClient):
         summary_model: Optional[str] = None,
         summary_max_words: Optional[int] = None,
         summary_concurrency: Optional[int] = None,
+        summary_reasoning_effort: Optional[str] = None,
         use_embedded_toc: Optional[bool] = None,
         optimize: Optional[str] = None,
         retrieve_model: Optional[str] = None,
@@ -2703,6 +2821,7 @@ class PageIndexLocalClient(PageIndexClient):
                          model=model, summary_model=summary_model,
                          summary_max_words=summary_max_words,
                          summary_concurrency=summary_concurrency,
+                         summary_reasoning_effort=summary_reasoning_effort,
                          use_embedded_toc=use_embedded_toc, optimize=optimize,
                          retrieve_model=retrieve_model, storage_path=storage_path,
                          index_backend=index_backend, chat_backend=chat_backend,

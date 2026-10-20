@@ -71,7 +71,7 @@ def _anonymous_main():
     everything by module name and never need __main__. Depth-counted so
     overlapping windows restore the true originals, not a mid-window snapshot.
 
-    ponytail: window covers the whole map; a concurrent pool spawned from
+    The window covers the whole map; a concurrent pool spawned from
     another thread whose tasks live in __main__ would break during it."""
     global _window_depth, _window_saved
     main = sys.modules.get("__main__")

@@ -392,3 +392,45 @@ def _font_unicode_map(pdf_doc, xref: int) -> tuple[int, dict[int, str]] | None:
                     if codepoint != -1:
                         final[font] = _from_char_code(codepoint)  # amend overwrites
     return 1, final
+
+
+def _font_widths(pdf_doc, xref: int):
+    """Per-code advance at font size 1, read from the font dict by char code: simple fonts /FirstChar + /Widths else /MissingWidth, Identity-H composites /W else /DW (1000). ``None`` where the advance comes from elsewhere (no /Widths, other CMaps), and for Type 3: its exact widths split words ("Typ es") that the ink-box end keeps whole."""
+    def number(value, default):
+        try:
+            return float(value.get_object())
+        except Exception:
+            return default
+
+    font = pdf_doc._resolve_object(xref)
+    if font is None or not hasattr(font, "raw_get"):
+        return None
+    subtype = font.get("/Subtype")
+    if subtype == "/Type0":
+        if font.get("/Encoding") != "/Identity-H":
+            return None
+        descendant = font["/DescendantFonts"][0].get_object()
+        default = number(descendant["/DW"], 1000.0) if "/DW" in descendant else 1000.0
+        table: dict[int, float] = {}
+        entries = descendant["/W"] if "/W" in descendant else []
+        index = 0
+        while index + 1 < len(entries):
+            start = int(number(entries[index], 0))
+            second = entries[index + 1].get_object()
+            if isinstance(second, list):        # c [w1 w2 ...]
+                for offset, value in enumerate(second):
+                    table[start + offset] = number(value, default)
+                index += 2
+            else:                               # c_first c_last w
+                value = number(entries[index + 2], default) if index + 2 < len(entries) else default
+                for code in range(max(start, 0), min(int(number(second, start - 1)), 0xFFFF) + 1):
+                    table[code] = value
+                index += 3
+        return lambda code: table.get(code, default) * 0.001
+    if subtype == "/Type3" or "/Widths" not in font:
+        return None
+    first = int(number(font["/FirstChar"], 0)) if "/FirstChar" in font else 0
+    descriptor = font["/FontDescriptor"] if "/FontDescriptor" in font else None
+    missing = number(descriptor["/MissingWidth"], 0.0) if descriptor is not None and "/MissingWidth" in descriptor else 0.0
+    table = {first + offset: number(value, missing) for offset, value in enumerate(font["/Widths"])}
+    return lambda code: table.get(code, missing) * 0.001
