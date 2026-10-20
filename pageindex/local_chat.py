@@ -491,8 +491,9 @@ def _record_response_status(agent, recorded: dict) -> None:
     """Capture each turn's terminal Response and its status at the transport
     client: openai-agents' non-streaming path discards Response.status, so a
     final turn truncated at the output cap would otherwise report as a clean
-    completion, and from 0.22 it raises on that turn before anything else
-    keeps it. No-op for backends without an OpenAI responses resource
+    completion. A response cut short ends the run there, as from 0.22 and on
+    the stream: before 0.22 it ran the cut turn's half-written tool calls.
+    No-op for backends without an OpenAI responses resource
     (the streaming path records from lifecycle events instead)."""
     responses = getattr(getattr(getattr(agent, "model", None), "_client", None),
                         "responses", None)
@@ -502,7 +503,7 @@ def _record_response_status(agent, recorded: dict) -> None:
 
     async def recording_create(*args, **kwargs):
         response = await create(*args, **kwargs)
-        recorded.setdefault("responses", []).append(response)
+        recorded["response"] = response
         if getattr(response, "status", None):
             recorded["status"] = response.status
             for field in ("incomplete_details", "error"):
@@ -515,6 +516,9 @@ def _record_response_status(agent, recorded: dict) -> None:
             if value is not None:
                 recorded[field] = (value.model_dump(mode="json")
                                    if hasattr(value, "model_dump") else value)
+        if getattr(response, "status", None) in ("failed", "incomplete"):
+            from agents.exceptions import ModelBehaviorError
+            raise ModelBehaviorError(f"The response ended {response.status}.")
         return response
 
     responses.create = recording_create
@@ -1216,13 +1220,11 @@ def run_responses(client, input, model: Optional[str] = None,
         except (MaxTurnsExceeded, AgentsException,
                 openai.OpenAIError) as exc:
             run_data = getattr(exc, "run_data", None)
-            created = recorded.get("responses", [])
             if (run_data is not None
-                    and len(recorder.responses) < len(created)
                     and recorded.get("status") in ("failed", "incomplete")):
-                # openai-agents 0.22+ ends the run on a response cut short,
-                # as the stream does, before its hooks or items see it
-                cut = created[-1]
+                # the run ended on a response cut short, before openai-agents'
+                # hooks or items saw it
+                cut = recorded["response"]
                 transcript = [item.to_input_item()
                               for item in run_data.new_items]
                 transcript += _cut_text(

@@ -1148,15 +1148,13 @@ def test_responses_stream_counts_a_call_cut_short(client, store_path,
 
 @needs_agents
 def test_responses_counts_a_call_cut_short(client, store_path, fake_model):
-    """The non-streamed twin, on any openai-agents: from 0.22 the model
-    raises on a response cut short once the transport returned it, before
-    its hooks see it; the run still ends in the envelope, as above."""
-    from agents.exceptions import ModelBehaviorError
+    """The non-streamed twin: a response cut short ends the run once the
+    transport returned it, before openai-agents' hooks see it, and the
+    envelope keeps it, as above."""
     seed_doc(store_path, "pi-a", "report.pdf")
     fake = fake_model([
         [_call_item("get_document", {"doc_name": "report.pdf"})],
-        ModelBehaviorError("Responses stream ended with terminal event "
-                           "`response.incomplete`.")])
+        [_msg_item("never reached")]])
     replies = [types.SimpleNamespace(status="completed",
                                      incomplete_details=None, error=None),
                _cut_response()]
@@ -2266,8 +2264,10 @@ def test_record_response_status_captures_last_status():
             responses=types.SimpleNamespace(create=create))))
     recorded = {}
     local_chat._record_response_status(agent, recorded)
-    asyncio.run(agent.model._client.responses.create())
-    assert recorded == {"responses": [reply], "status": "incomplete",
+    from agents.exceptions import ModelBehaviorError
+    with pytest.raises(ModelBehaviorError):  # a cut response ends the run
+        asyncio.run(agent.model._client.responses.create())
+    assert recorded == {"response": reply, "status": "incomplete",
                         "incomplete_details": {"reason": "max_output_tokens"},
                         "error": None}
 
@@ -2281,10 +2281,7 @@ def test_responses_envelope_reports_backend_truncation(client, store_path,
     fake = fake_model([[_msg_item("cut off mid-answer")]])
 
     async def create(*args, **kwargs):
-        return types.SimpleNamespace(
-            status="incomplete",
-            incomplete_details={"reason": "max_output_tokens"},
-            error=None)
+        return _cut_response()
 
     fake._client = types.SimpleNamespace(
         responses=types.SimpleNamespace(create=create))
@@ -4413,23 +4410,25 @@ def test_bridge_chat_fails_fast_on_a_rate_limited_tool(bridge_client,
 
 
 @needs_agents
-def test_tool_failure_after_a_cut_response_still_fails_fast(bridge_client,
-                                                            fake_model):
-    """openai-agents before 0.22 runs a cut turn's tools; their failure is
-    no cut-short run, so it still ends the run with its status."""
+def test_a_cut_response_runs_no_tools(bridge_client, fake_model):
+    """openai-agents before 0.22 would run a cut turn's tool calls on their
+    half-written arguments; the run ends at the cut instead, as the stream
+    does."""
     client, bridge = bridge_client
-    bridge.call_tool = _rate_limited
+    ran = []
+    bridge.call_tool = lambda name, arguments: ran.append(name)
     fake = fake_model([[_call_item("get_document", {"doc_name": "r.pdf"})],
                        [_msg_item("never reached")]])
 
     async def create(*args, **kwargs):
-        return types.SimpleNamespace(status="incomplete",
-                                     incomplete_details=None, error=None)
+        return _cut_response()
 
     fake._client = types.SimpleNamespace(
         responses=types.SimpleNamespace(create=create))
-    with pytest.raises(PageIndexAPIError, match="HTTP 429"):
-        client._responses("q")
+    result = client._responses("q")
+    assert ran == []
+    assert result["status"] == "incomplete"
+    assert [item["type"] for item in result["items"]] == ["message"]
 
 
 @needs_agents
