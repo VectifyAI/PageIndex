@@ -1091,15 +1091,35 @@ def test_responses_stream_passthrough(client, store_path, fake_model):
             .get("type", "message") == "message")
 
 
-@needs_agents
-def test_responses_stream_counts_a_call_cut_short(client, store_path,
-                                                  fake_model):
-    """openai-agents raises on response.incomplete before its hooks see
-    the call, yet that call was billed: the terminal envelope counts it."""
-    from openai.types.responses import Response, ResponseIncompleteEvent
+def _cut_response():
+    """A billed response cut at the output cap: its text, and a tool call
+    it never finished."""
+    from openai.types.responses import Response
     from openai.types.responses.response import IncompleteDetails
     from openai.types.responses.response_usage import (
         InputTokensDetails, OutputTokensDetails, ResponseUsage)
+    return Response(
+        id="resp_cut", created_at=0.0, model="fake", object="response",
+        output=[_msg_item("cut"),
+                _call_item("get_document", {"doc_n": 1}, "call_9")],
+        parallel_tool_calls=False, tool_choice="auto", tools=[],
+        status="incomplete",
+        incomplete_details=IncompleteDetails(reason="max_output_tokens"),
+        usage=ResponseUsage(
+            input_tokens=40, output_tokens=99, total_tokens=139,
+            input_tokens_details=InputTokensDetails(
+                cached_tokens=0, cache_write_tokens=0),
+            output_tokens_details=OutputTokensDetails(reasoning_tokens=0)))
+
+
+@needs_agents
+def test_responses_stream_counts_a_call_cut_short(client, store_path,
+                                                  fake_model):
+    """openai-agents raises on response.incomplete before its hooks or
+    items see the call, yet that call was billed and its text streamed:
+    the terminal envelope counts it and keeps the text, but not a
+    half-written tool call, which has no output to pair with."""
+    from openai.types.responses import ResponseIncompleteEvent
     seed_doc(store_path, "pi-a", "report.pdf")
     fake = fake_model([[_call_item("get_document", {"doc_name": "report.pdf"})],
                        [_msg_item("cut")]])
@@ -1111,20 +1131,9 @@ def test_responses_stream_counts_a_call_cut_short(client, store_path,
                 yield event
             return
         fake._record(args[0], args[1])
-        yield ResponseIncompleteEvent(
-            type="response.incomplete", sequence_number=1,
-            response=Response(
-                id="resp_cut", created_at=0.0, model="fake",
-                object="response", output=[], parallel_tool_calls=False,
-                tool_choice="auto", tools=[], status="incomplete",
-                incomplete_details=IncompleteDetails(
-                    reason="max_output_tokens"),
-                usage=ResponseUsage(
-                    input_tokens=40, output_tokens=99, total_tokens=139,
-                    input_tokens_details=InputTokensDetails(
-                        cached_tokens=0, cache_write_tokens=0),
-                    output_tokens_details=OutputTokensDetails(
-                        reasoning_tokens=0))))
+        yield ResponseIncompleteEvent(type="response.incomplete",
+                                      sequence_number=1,
+                                      response=_cut_response())
 
     fake.stream_response = stream_response
     final = list(client._responses("q", stream=True))[-1]
@@ -1132,6 +1141,39 @@ def test_responses_stream_counts_a_call_cut_short(client, store_path,
     usage = final["response"]["usage"]
     assert (usage["input_tokens"], usage["output_tokens"]) == (50, 104)
     assert len(usage["request_usage_entries"]) == 2
+    assert [item["type"] for item in final["response"]["items"]] == [
+        "function_call", "function_call_output", "message"]
+    assert final["response"]["output"][-1]["content"][0]["text"] == "cut"
+
+
+@needs_agents
+def test_responses_counts_a_call_cut_short(client, store_path, fake_model):
+    """The non-streamed twin, on any openai-agents: from 0.22 the model
+    raises on a response cut short once the transport returned it, before
+    its hooks see it; the run still ends in the envelope, as above."""
+    from agents.exceptions import ModelBehaviorError
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        ModelBehaviorError("Responses stream ended with terminal event "
+                           "`response.incomplete`.")])
+    replies = [types.SimpleNamespace(status="completed",
+                                     incomplete_details=None, error=None),
+               _cut_response()]
+
+    async def create(*args, **kwargs):
+        return replies.pop(0)
+
+    fake._client = types.SimpleNamespace(
+        responses=types.SimpleNamespace(create=create))
+    result = client._responses("q")
+    assert result["status"] == "incomplete"
+    usage = result["usage"]
+    assert (usage["input_tokens"], usage["output_tokens"]) == (50, 104)
+    assert len(usage["request_usage_entries"]) == 2
+    assert [item["type"] for item in result["items"]] == [
+        "function_call", "function_call_output", "message"]
+    assert result["output"][-1]["content"][0]["text"] == "cut"
 
 
 @needs_agents
@@ -2066,7 +2108,8 @@ def test_malformed_tool_arguments_answer_the_model(client, store_path,
     assert result["choices"][0]["message"]["content"] == "The answer"
     outputs = [item["output"] for item in fake.inputs[1]
                if item.get("type") == "function_call_output"]
-    assert "Invalid JSON" in json.dumps(outputs[-1])
+    # the wording is the framework's; 0.24 hides the parse detail
+    assert outputs and outputs[-1]
 
 
 @needs_agents
@@ -2210,11 +2253,13 @@ def test_record_response_status_captures_last_status():
         def model_dump(self, mode=None):
             return dict(self._data)
 
+    reply = types.SimpleNamespace(
+        status="incomplete",
+        incomplete_details=_Dumpable({"reason": "max_output_tokens"}),
+        error=None)
+
     async def create(*args, **kwargs):
-        return types.SimpleNamespace(
-            status="incomplete",
-            incomplete_details=_Dumpable({"reason": "max_output_tokens"}),
-            error=None)
+        return reply
 
     agent = types.SimpleNamespace(model=types.SimpleNamespace(
         _client=types.SimpleNamespace(
@@ -2222,7 +2267,7 @@ def test_record_response_status_captures_last_status():
     recorded = {}
     local_chat._record_response_status(agent, recorded)
     asyncio.run(agent.model._client.responses.create())
-    assert recorded == {"status": "incomplete",
+    assert recorded == {"responses": [reply], "status": "incomplete",
                         "incomplete_details": {"reason": "max_output_tokens"},
                         "error": None}
 
@@ -2247,6 +2292,46 @@ def test_responses_envelope_reports_backend_truncation(client, store_path,
     assert result["status"] == "incomplete"
     assert result["incomplete_details"] == {"reason": "max_output_tokens"}
     assert result["error"] is None
+
+
+@needs_agents
+def test_responses_cut_short_still_returns_the_envelope(store_path):
+    """openai-agents 0.22+ raises on a response cut short, before its hooks
+    or items see it; the run still ends in the envelope, as the stream
+    does, with the partial text and both billed calls. FakeModel skips the
+    transport fetch that raises, so the real model runs on a mock one."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    details = {"input_tokens_details": {"cached_tokens": 0},
+               "output_tokens_details": {"reasoning_tokens": 0}}
+    replies = [
+        {"id": "resp_1", "status": "completed",
+         "output": [_call_item("get_document",
+                               {"doc_name": "report.pdf"}).model_dump()],
+         "usage": {**details, "input_tokens": 10, "output_tokens": 5,
+                   "total_tokens": 15}},
+        {"id": "resp_2", "status": "incomplete",
+         "incomplete_details": {"reason": "max_output_tokens"},
+         "output": [_msg_item("The range was").model_dump()],
+         "usage": {**details, "input_tokens": 40, "output_tokens": 99,
+                   "total_tokens": 139}}]
+    common = {"object": "response", "created_at": 0, "model": "gpt-test",
+              "parallel_tool_calls": True, "tool_choice": "auto", "tools": []}
+    http = httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json={**common,
+                                                  **replies.pop(0)})))
+    client = PageIndexLocalClient(storage_path=store_path,
+                                  chat_model="openai/gpt-test")
+    envelope = client.chat("q", protocol="responses", backend={
+        "api_key": "sk-test", "base_url": "http://mock.invalid/v1",
+        "http_client": http})
+    asyncio.run(http.aclose())
+    assert envelope["status"] == "incomplete"
+    assert [item["type"] for item in envelope["items"]] == [
+        "function_call", "function_call_output", "message"]
+    assert envelope["output"][-1]["content"][0]["text"] == "The range was"
+    usage = envelope["usage"]
+    assert (usage["input_tokens"], usage["output_tokens"]) == (50, 104)
+    assert len(usage["request_usage_entries"]) == 2
 
 
 @needs_agents
@@ -4325,6 +4410,26 @@ def test_bridge_chat_fails_fast_on_a_rate_limited_tool(bridge_client,
         client.chat_completions("What?")
     assert info.value.status_code == 429
     assert len(fake.instructions) == 1
+
+
+@needs_agents
+def test_tool_failure_after_a_cut_response_still_fails_fast(bridge_client,
+                                                            fake_model):
+    """openai-agents before 0.22 runs a cut turn's tools; their failure is
+    no cut-short run, so it still ends the run with its status."""
+    client, bridge = bridge_client
+    bridge.call_tool = _rate_limited
+    fake = fake_model([[_call_item("get_document", {"doc_name": "r.pdf"})],
+                       [_msg_item("never reached")]])
+
+    async def create(*args, **kwargs):
+        return types.SimpleNamespace(status="incomplete",
+                                     incomplete_details=None, error=None)
+
+    fake._client = types.SimpleNamespace(
+        responses=types.SimpleNamespace(create=create))
+    with pytest.raises(PageIndexAPIError, match="HTTP 429"):
+        client._responses("q")
 
 
 @needs_agents

@@ -488,10 +488,11 @@ def _run_kwargs(max_turns) -> dict:
 
 
 def _record_response_status(agent, recorded: dict) -> None:
-    """Capture each turn's terminal Response status at the transport client:
-    openai-agents' non-streaming path discards Response.status, so a final
-    turn truncated at the output cap would otherwise report as a clean
-    completion. No-op for backends without an OpenAI responses resource
+    """Capture each turn's terminal Response and its status at the transport
+    client: openai-agents' non-streaming path discards Response.status, so a
+    final turn truncated at the output cap would otherwise report as a clean
+    completion, and from 0.22 it raises on that turn before anything else
+    keeps it. No-op for backends without an OpenAI responses resource
     (the streaming path records from lifecycle events instead)."""
     responses = getattr(getattr(getattr(agent, "model", None), "_client", None),
                         "responses", None)
@@ -501,6 +502,7 @@ def _record_response_status(agent, recorded: dict) -> None:
 
     async def recording_create(*args, **kwargs):
         response = await create(*args, **kwargs)
+        recorded.setdefault("responses", []).append(response)
         if getattr(response, "status", None):
             recorded["status"] = response.status
             for field in ("incomplete_details", "error"):
@@ -516,6 +518,12 @@ def _record_response_status(agent, recorded: dict) -> None:
         return response
 
     responses.create = recording_create
+
+
+def _cut_text(output) -> list:
+    """A cut-short response's messages, for the history: its partial tool
+    calls have no outputs to pair with."""
+    return [item for item in output or [] if item.get("type") == "message"]
 
 
 def _record_chat_finish(agent, recorded: dict) -> None:
@@ -1207,6 +1215,19 @@ def run_responses(client, input, model: Optional[str] = None,
                            hooks=recorder, **run_kwargs)))
         except (MaxTurnsExceeded, AgentsException,
                 openai.OpenAIError) as exc:
+            run_data = getattr(exc, "run_data", None)
+            created = recorded.get("responses", [])
+            if (run_data is not None
+                    and len(recorder.responses) < len(created)
+                    and recorded.get("status") in ("failed", "incomplete")):
+                # openai-agents 0.22+ ends the run on a response cut short,
+                # as the stream does, before its hooks or items see it
+                cut = created[-1]
+                transcript = [item.to_input_item()
+                              for item in run_data.new_items]
+                transcript += _cut_text(
+                    cut.model_dump(exclude_unset=True)["output"])
+                return envelope(transcript, recorder.responses + [cut])
             raise _with_usage(
                 _translate_run_error(exc, max_turns, "responses", client),
                 _responses_usage(recorder.responses)) from exc
@@ -1229,6 +1250,8 @@ def run_responses(client, input, model: Optional[str] = None,
         # carry per-turn indexes that restart at 0 each turn, so they are
         # re-based by the count of items already committed by prior turns.
         output_offset = 0
+        cut_text: list = []
+        dropped: list = []
         completed = False
         opened = False
         try:
@@ -1262,6 +1285,8 @@ def run_responses(client, input, model: Optional[str] = None,
                                 if state.get(field) is not None:
                                     recorded[field] = state[field]
                             output_offset += len(state.get("output") or [])
+                            if data["type"] != "response.completed":
+                                cut_text = _cut_text(state.get("output"))
                             cut = getattr(getattr(event.data, "response",
                                                   None), "usage", None)
                             if data["type"] != "response.completed" and cut:
@@ -1284,6 +1309,8 @@ def run_responses(client, input, model: Optional[str] = None,
                 raise _with_usage(
                     _translate_run_error(exc, max_turns, "responses", client),
                     _responses_usage(recorder.responses)) from exc
+            # it raised before adding the cut turn to its items
+            dropped = cut_text
             completed = True
         except openai.OpenAIError as exc:
             raise _with_usage(
@@ -1293,7 +1320,7 @@ def run_responses(client, input, model: Optional[str] = None,
             if not completed and hasattr(streamed, "cancel"):
                 streamed.cancel()  # abandoned/failed: stop the agent task
             await _aclose_backend(agent)
-        transcript = streamed.to_input_list()[len(items):]
+        transcript = streamed.to_input_list()[len(items):] + dropped
         sequence += 1
         status = recorded.get("status") or "completed"
         terminal = {"incomplete": "response.incomplete",
