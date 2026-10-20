@@ -1410,6 +1410,12 @@ class PageIndexClient:
         usage shape (Chat Completions on the answer lane); ``None`` if a
         ``claude-code/`` run fails on a tool call or ends before Claude
         Code reports its usage.
+
+        An answer-lane reply the run reports unfinished (finish_reason
+        ``length`` or ``content_filter``) raises PageIndexAPIError instead of
+        passing as complete: a stream after the text it delivered, a
+        non-streamed call with that text in ``partial_answer``. The protocol
+        lanes mark it instead, as their wire does.
         """
         if protocol not in (None, "chat_completions", "responses",
                             "messages"):
@@ -1545,11 +1551,20 @@ class PageIndexClient:
                                        extra_body=extra_body)
         envelope = cast(dict[str, Any], result)
         try:
-            return envelope["choices"][0]["message"]["content"] or ""
+            choice = envelope["choices"][0]
+            answer = choice["message"]["content"] or ""
         except (KeyError, IndexError, TypeError) as exc:
             raise PageIndexAPIError(
                 "The chat response carries no answer: "
                 f"{str(envelope)[:200]}") from exc
+        from .local_chat import _CUT_SHORT, _cut_short_error
+        if choice.get("finish_reason") in _CUT_SHORT:
+            error = _cut_short_error(choice["finish_reason"])
+            error.partial_answer = answer
+            if self._local_chat:
+                error.usage = envelope.get("usage")
+            raise error
+        return answer
 
     def chat_completions(
         self,

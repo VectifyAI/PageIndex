@@ -448,6 +448,30 @@ def test_chat_stream_weaves_the_run(monkeypatch, chat_client):
 
 
 @needs_claude
+def test_chat_raises_when_the_answer_hits_max_tokens(monkeypatch, chat_client):
+    """The answer lane never returns an unfinished answer: the stream raises
+    after its text, a plain call carries the text; the protocol lane marks
+    it with finish_reason "length" instead."""
+    cut = result("It has 1", usage={"input_tokens": 3, "output_tokens": 2})
+    cut.stop_reason = "max_tokens"
+    fake_cli(monkeypatch, delta("It has 1"), cut)
+    text = []
+    with pytest.raises(PageIndexAPIError, match="length") as info:
+        for piece in chat_client.chat("Q", stream=True):
+            text.append(piece)
+    assert "".join(text) == "It has 1"
+    assert info.value.usage["completion_tokens"] == 2
+    fake_cli(monkeypatch, cut)
+    with pytest.raises(PageIndexAPIError, match="length") as info:
+        chat_client.chat("Q")
+    assert info.value.partial_answer == "It has 1"
+    assert info.value.usage["completion_tokens"] == 2
+    fake_cli(monkeypatch, cut)
+    envelope = chat_client.chat("Q", protocol="chat_completions")
+    assert envelope["choices"][0]["finish_reason"] == "length"
+
+
+@needs_claude
 def test_chat_completions_stream_chunks(monkeypatch, chat_client):
     fake_cli(monkeypatch, delta("Hi "), delta("there."),
              result("Hi there.", usage={"input_tokens": 3, "output_tokens": 2}))

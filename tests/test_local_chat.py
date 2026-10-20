@@ -604,6 +604,32 @@ def test_chat_process_managed_off_is_clean_answer(monkeypatch):
     assert "doc_name" not in plain
 
 
+def test_managed_chat_raises_on_an_unfinished_answer(monkeypatch):
+    """The managed answer lane holds an unfinished answer to the same
+    rule: a stream raises after its text, a plain call carries the text
+    on the error (no usage: it is not an own-model run)."""
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cut = _cloud_chunk(None)
+    cut["choices"][0]["finish_reason"] = "length"
+
+    def fake_cc(**kwargs):
+        if kwargs.get("stream"):
+            return iter([_cloud_chunk("The range was"), cut])
+        return {"choices": [{"message": {"content": "The range was"},
+                             "finish_reason": "length"}]}
+
+    monkeypatch.setattr(cloud._api, "chat_completions", fake_cc)
+    text = []
+    with pytest.raises(PageIndexAPIError, match="length"):
+        for piece in cloud.chat("q", stream=True):
+            text.append(piece)
+    assert "".join(text) == "The range was"
+    with pytest.raises(PageIndexAPIError, match="length") as info:
+        cloud.chat("q")
+    assert info.value.partial_answer == "The range was"
+    assert info.value.usage is None
+
+
 def test_chat_process_managed_open_block_never_leaks(monkeypatch):
     """Inside an open tool block nothing is answer text: argument chunks
     under an unexpected tag (or none) accumulate into the call instead
@@ -3175,32 +3201,68 @@ def test_record_chat_finish_records_and_delegates():
         types.SimpleNamespace(model=types.SimpleNamespace()), {})
 
 
+class _CutModel(FakeModel):
+    """Scripted turns whose native finish_reason is `finish`, as the real
+    model's fetch shows it to the finish recorder."""
+
+    def __init__(self, turns, finish="length"):
+        super().__init__(turns)
+        self.finish = finish
+
+    async def _fetch_response(self, *args, **kwargs):
+        return types.SimpleNamespace(choices=[
+            types.SimpleNamespace(finish_reason=self.finish)])
+
+    async def get_response(self, *args, **kwargs):
+        await self._fetch_response()
+        return await super().get_response(*args, **kwargs)
+
+    async def stream_response(self, *args, **kwargs):
+        await self._fetch_response()
+        async for event in super().stream_response(*args, **kwargs):
+            yield event
+
+
 @needs_agents
 def test_chat_completions_reports_native_finish_reason(client, store_path,
                                                        monkeypatch):
     seed_doc(store_path, "pi-a", "report.pdf")
-
-    class TruncatingModel(FakeModel):
-        async def _fetch_response(self, *args, **kwargs):
-            return types.SimpleNamespace(choices=[
-                types.SimpleNamespace(finish_reason="length")])
-
-        async def get_response(self, *args, **kwargs):
-            await self._fetch_response()
-            return await super().get_response(*args, **kwargs)
-
-        async def stream_response(self, *args, **kwargs):
-            await self._fetch_response()
-            async for event in super().stream_response(*args, **kwargs):
-                yield event
-
-    fake = TruncatingModel([[_msg_item("cut ")], [_msg_item("cut ")]])
+    fake = _CutModel([[_msg_item("cut ")], [_msg_item("cut ")]])
     monkeypatch.setattr(local_chat, "_openai_model", lambda *a: fake)
     result = client.chat_completions("q")
     assert result["choices"][0]["finish_reason"] == "length"
     chunks = list(client.chat_completions("q", stream=True,
                                           stream_metadata=True))
     assert chunks[-2]["choices"][0]["finish_reason"] == "length"
+
+
+@needs_agents
+@pytest.mark.parametrize("finish", ["length", "content_filter"])
+def test_chat_raises_on_an_unfinished_answer(client, store_path, monkeypatch,
+                                             finish):
+    """A bare answer string cannot say it is unfinished, so chat() raises:
+    a stream after the text it delivered, a non-streamed call with that
+    text on the error; both with the run's usage."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+
+    def cut_model(*args):
+        model = _CutModel([[_msg_item("The range was")]], finish)
+        model.pieces = ("The range ", "was")  # the streamed deltas
+        return model
+
+    monkeypatch.setattr(local_chat, "_openai_model", cut_model)
+    with pytest.raises(PageIndexAPIError, match=finish) as info:
+        client.chat("q")
+    assert info.value.partial_answer == "The range was"
+    assert info.value.usage["completion_tokens"] == 5
+    text = []
+    with pytest.raises(PageIndexAPIError, match=finish) as info:
+        for piece in client.chat("q", stream=True, show_process=False):
+            text.append(piece)
+    assert "".join(text) == "The range was"
+    assert info.value.usage["completion_tokens"] == 5
+    with pytest.raises(PageIndexAPIError, match=finish):
+        list(client.chat("q", stream=True).events)
 
 
 @needs_agents

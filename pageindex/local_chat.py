@@ -676,6 +676,19 @@ def _with_usage(error: PageIndexAPIError, usage: dict) -> PageIndexAPIError:
     return error
 
 
+# the finish_reasons of an answer the model stopped short of finishing
+_CUT_SHORT = ("length", "content_filter")
+
+
+def _cut_short_error(finish_reason: str) -> PageIndexAPIError:
+    """chat()'s answer is a bare string with nowhere to mark it unfinished,
+    so a cut-short one raises rather than pass as complete."""
+    return PageIndexAPIError(
+        f"The model stopped before finishing its answer (finish_reason "
+        f"{finish_reason!r}). protocol=\"chat_completions\" returns such "
+        "an answer marked by its finish_reason.")
+
+
 def _chat_agent(client, messages, doc_id, model, temperature=None,
                 top_p=None, reasoning_effort=None, extra_body=None,
                 max_tokens=None, backend=None, extra_headers=None,
@@ -776,6 +789,8 @@ async def _chat_events_agen(client, agent, items, run_kwargs):
         ResponseReasoningSummaryTextDeltaEvent,
         ResponseReasoningTextDeltaEvent, ResponseTextDeltaEvent)
     recorder = _usage_recorder()
+    recorded: dict = {}
+    _record_chat_finish(agent, recorded)
     streamed = Runner.run_streamed(agent, input=items, hooks=recorder,
                                    **run_kwargs)
     completed = False
@@ -822,6 +837,9 @@ async def _chat_events_agen(client, agent, items, run_kwargs):
         if not completed and hasattr(streamed, "cancel"):
             streamed.cancel()  # abandoned/failed: stop the agent task
         await _aclose_backend(agent)
+    if recorded.get("finish_reason") in _CUT_SHORT:
+        raise _with_usage(_cut_short_error(recorded["finish_reason"]),
+                          _openai_usage(recorder.responses))
 
 
 def _weave(events, options) -> Iterator[str]:
@@ -901,6 +919,7 @@ def _cloud_chunk_events(chunks) -> Iterator[dict]:
     thinking and no tool results. Outside a tool block, chunks without
     block_metadata (an older server) are answer text."""
     tool = None  # [name, argument pieces] while inside a tool_use block
+    finish = None
     try:
         for chunk in chunks:
             if not isinstance(chunk, dict):
@@ -911,6 +930,8 @@ def _cloud_chunk_events(chunks) -> Iterator[dict]:
                 tool = [meta.get("tool_name") or "tool", []]
                 continue
             choices = chunk.get("choices") or []
+            if choices and choices[0].get("finish_reason"):
+                finish = choices[0]["finish_reason"]
             delta = (choices[0].get("delta") or {}) if choices else {}
             content = delta.get("content")
             if kind == "tool_use_stop":
@@ -933,6 +954,8 @@ def _cloud_chunk_events(chunks) -> Iterator[dict]:
                 continue
             if content:
                 yield {"type": "answer", "delta": content}
+        if finish in _CUT_SHORT:
+            raise _cut_short_error(finish)
     finally:
         close = getattr(chunks, "close", None)
         if close is not None:
@@ -1788,6 +1811,7 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
                                       ToolUseBlock, UserMessage)
         names: dict = {}  # tool_use id -> tool name, to label results
         streamed = ""  # text deltas since the last text block
+        cut = None  # a streamed run's usage, when its answer hit max_tokens
         failures.clear()
         try:
             async with aclosing(claude_code_messages(prompt(), options)) as sdk:
@@ -1835,12 +1859,17 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
                                "finish_reason": ("length"
                                                  if message.stop_reason == "max_tokens"
                                                  else "stop")}
+                    elif (isinstance(message, ResultMessage)
+                          and message.stop_reason == "max_tokens"):
+                        cut = _claude_code_usage(message.usage)
         except PageIndexAPIError:
             if failures:  # a tool failure (402, 429) is the cause to report
                 raise failures[0] from None
             raise
         if failures:  # raised after the run, once the CLI is closed
             raise failures[0]
+        if cut is not None:
+            raise _with_usage(_cut_short_error("length"), cut)
     return run
 
 
