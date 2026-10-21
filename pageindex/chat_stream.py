@@ -38,13 +38,19 @@ class ChatObject(dict[str, Any]):
 
 def _yaml_as_dict() -> None:
     """yaml writes a ChatObject as the dict it is: safe_dump refuses a
-    dict subclass, and dump would tag it as a Python object."""
-    import yaml
-    for name in ("SafeDumper", "Dumper", "CSafeDumper", "CDumper"):
-        dumper = getattr(yaml, name, None)
-        if dumper is not None:
-            dumper.add_multi_representer(ChatObject,
-                                         yaml.SafeDumper.represent_dict)
+    dict subclass, and dump would tag it as a Python object. The rule goes
+    on SafeRepresenter and on every subclass already holding its own table
+    (Representer, a caller's dumper that registered something); the rest
+    inherit it, and keep inheriting what others register later."""
+    from yaml.representer import SafeRepresenter
+    pending: list = [SafeRepresenter]
+    while pending:
+        representer = pending.pop()
+        if (representer is SafeRepresenter
+                or "yaml_multi_representers" in vars(representer)):
+            representer.add_multi_representer(
+                ChatObject, SafeRepresenter.represent_dict)
+        pending.extend(representer.__subclasses__())
 
 
 class ChatStream:
