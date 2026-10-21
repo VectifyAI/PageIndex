@@ -515,7 +515,8 @@ def _two_turns(store_path, monkeypatch, client, model, first_reply,
 @needs_agents
 @pytest.mark.parametrize("model, extra, settings", [
     ("gpt-test", {}, {}),
-    # streamed turns are rebuilt by agents' own stream handler
+    # streamed turns are rebuilt by agents' own stream handler; OpenAI
+    # streams open with an empty content delta
     ("gpt-test", {"content": ""}, {"stream": True, "stream_metadata": True}),
     ("anthropic/claude-test", {"reasoning_content": "hmm", "thinking_blocks": [
         {"type": "thinking", "thinking": "hmm", "signature": "SIG1"}]},
