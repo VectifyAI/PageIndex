@@ -167,13 +167,14 @@ def test_chat_refuses_what_the_cli_cannot_take(chat_client):
     # protocol lanes, which refuse claude-code/ too
     image = [{"type": "text", "text": "What is this?"},
              {"type": "image_url", "image_url": {"url": "data:image/png;base64,QUJD"}}]
-    for messages in ([{"role": "user", "content": image}],
-                     [{"role": "tool", "tool_call_id": "c", "content": "x"},
-                      {"role": "user", "content": "Q"}]):
+    for messages, hint in (
+            ([{"role": "user", "content": image}], "use an API model with"),
+            ([{"role": "tool", "tool_call_id": "c", "content": "x"},
+              {"role": "user", "content": "Q"}], "use an API chat model.")):
         with pytest.raises(PageIndexAPIError,
                            match="claude-code/haiku takes text messages only") as err:
             chat_client.chat(messages)
-        assert "use an API model with" in str(err.value)
+        assert hint in str(err.value)
     with pytest.raises(PageIndexAPIError, match="drives the Anthropic API"):
         chat_client.anthropic_runner_config()
 

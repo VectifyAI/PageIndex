@@ -280,6 +280,9 @@ def test_chat_completions_validation(client, store_path, fake_model):
         client.chat_completions([{"role": "tool", "content": "x"}])
     with pytest.raises(PageIndexAPIError, match="needs content"):
         client.chat_completions([{"role": "assistant", "content": None}])
+    with pytest.raises(PageIndexAPIError, match="needs content"):
+        client.chat_completions([{"role": "assistant", "content": None,
+                                  "reasoning_content": "x"}])
     with pytest.raises(PageIndexAPIError, match="Invalid assistant message"):
         client.chat_completions([{"role": "assistant",
                                   "tool_calls": [{"id": "c"}]}])
@@ -481,7 +484,8 @@ _TWO_CALLS = [{"id": f"call_{n}", "type": "function",
               for n in (1, 2)]
 
 
-def _two_turns(store_path, monkeypatch, client, model, first_reply):
+def _two_turns(store_path, monkeypatch, client, model, first_reply,
+               **settings):
     """Two calls through the real LitellmModel, the second appending the
     first's ``messages``: the first envelope, and each request's messages
     as LiteLLM received them."""
@@ -496,29 +500,35 @@ def _two_turns(store_path, monkeypatch, client, model, first_reply):
 
     monkeypatch.setattr(litellm, "acompletion", acompletion)
     question = {"role": "user", "content": "q1"}
-    first = client.chat_completions([question], doc_id=doc_id, model=model)
+    first = client.chat_completions([question], doc_id=doc_id, model=model,
+                                    **settings)
     client.chat_completions([question, *first["messages"],
                              {"role": "user", "content": "q2"}],
-                            doc_id=doc_id, model=model)
+                            doc_id=doc_id, model=model, **settings)
     return first, sent
 
 
 @needs_agents
-@pytest.mark.parametrize("model, extra", [
-    ("gpt-test", {}),
+@pytest.mark.parametrize("model, extra, settings", [
+    ("gpt-test", {}, {}),
     # LitellmModel re-pairs parallel calls with their results here
-    ("anthropic/claude-test", {}),
+    ("anthropic/claude-test", {}, {}),
+    ("anthropic/claude-test", {"thinking_blocks": [
+        {"type": "thinking", "thinking": "hmm", "signature": "SIG1"}]},
+     {"extra_body": {"reasoning": {"effort": "high"}}}),
     # replayed as reasoning_content beside the calls
-    ("deepseek/deepseek-chat", {"reasoning_content": "think"}),
+    ("deepseek/deepseek-chat", {"reasoning_content": "think"}, {}),
 ])
 def test_chat_completions_messages_resend_the_wire(client, store_path,
-                                                   monkeypatch, model, extra):
+                                                   monkeypatch, model, extra,
+                                                   settings):
     """Appending a call's messages opens the next call's first request
     with the previous call's last one, unchanged: the provider's cached
     prefix carries over."""
     pytest.importorskip("litellm")
     first, sent = _two_turns(store_path, monkeypatch, client, model,
-                             _litellm_reply(tool_calls=_TWO_CALLS, **extra))
+                             _litellm_reply(tool_calls=_TWO_CALLS, **extra),
+                             **settings)
     assert [m["role"] for m in first["messages"]] == [
         "assistant", "tool", "tool", "assistant"]
     assert sent[2][:len(sent[1])] == sent[1]
@@ -528,30 +538,20 @@ def test_chat_completions_messages_resend_the_wire(client, store_path,
 def test_chat_completions_messages_keep_gemini_signatures(client, store_path,
                                                           monkeypatch):
     """Gemini thought signatures ride messages back in Google's
-    extra_content. LitellmModel puts only the current turn's in LiteLLM's
-    own field, so an earlier turn's calls are where the next request
-    differs from the one that made them."""
+    extra_content and reach LiteLLM's own field on every turn, so the next
+    request opens with the previous one unchanged."""
     pytest.importorskip("litellm")
-    signed = [{**call, "provider_specific_fields": {
-        "thought_signature": f"sig{n}"}}
-        for n, call in enumerate(_TWO_CALLS, 1)]
+    signed = [{**_TWO_CALLS[0], "provider_specific_fields": {
+        "thought_signature": "sig1"}}, _TWO_CALLS[1]]
     first, sent = _two_turns(store_path, monkeypatch, client,
                              "gemini/gemini-test",
                              _litellm_reply(tool_calls=signed))
-    assert [call["extra_content"]
-            for call in first["messages"][0]["tool_calls"]] == [
-        {"google": {"thought_signature": "sig1"}},
-        {"google": {"thought_signature": "sig2"}}]
-
-    def unsigned(messages):
-        return [{**m, "tool_calls": [
-            {k: v for k, v in call.items()
-             if k not in ("extra_content", "provider_specific_fields")}
-            for call in m["tool_calls"]]} if m.get("tool_calls") else m
-            for m in messages]
-
-    assert unsigned(sent[2][:len(sent[1])]) == unsigned(sent[1])
-    assert "sig1" in json.dumps(sent[2]) and "sig2" in json.dumps(sent[2])
+    assert first["messages"][0]["tool_calls"][0]["extra_content"] == {
+        "google": {"thought_signature": "sig1"}}
+    assert sent[2][:len(sent[1])] == sent[1]
+    calls = next(m["tool_calls"] for m in sent[2] if m.get("tool_calls"))
+    assert calls[0]["provider_specific_fields"] == {
+        "thought_signature": "sig1"}
 
 
 # ── chat (front door) ──
@@ -584,6 +584,18 @@ def test_chat_multi_turn_history(client, store_path, fake_model):
     ]
     assert client.chat(history) == "Chapter 4 covers pears"
     assert fake.inputs[0][-3:] == history
+
+
+@needs_agents
+@pytest.mark.parametrize("extra", [{"refusal": None},
+                                   {"reasoning_content": "think"}])
+def test_chat_empty_answer_row_stays_text(client, store_path, fake_model,
+                                          extra):
+    fake = fake_model([[_msg_item("ok")]])
+    empty = {"role": "assistant", "content": ""}
+    client.chat([{"role": "user", "content": "q1"}, {**empty, **extra},
+                 {"role": "user", "content": "q2"}])
+    assert fake.inputs[0][-2] == empty
 
 
 @needs_agents

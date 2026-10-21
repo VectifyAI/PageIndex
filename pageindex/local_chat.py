@@ -62,10 +62,12 @@ def _assistant_items(message) -> list:
             f"{'.'.join(map(str, error['loc']))}.") from exc
     items = [item.model_dump(exclude_unset=True)
              for item in Converter.message_to_output_items(parsed)]
-    if not items:
-        raise PageIndexAPIError(
-            "An assistant message needs content, a refusal or tool_calls.")
-    return items
+    if any(item.get("type") != "reasoning" for item in items):
+        return items
+    if isinstance(message.get("content"), str):
+        return [{"role": "assistant", "content": message["content"]}]
+    raise PageIndexAPIError(
+        "An assistant message needs content, a refusal or tool_calls.")
 
 
 def _split_chat_messages(messages, text_only: Optional[str] = None,
@@ -76,7 +78,7 @@ def _split_chat_messages(messages, text_only: Optional[str] = None,
     reasoning) and tool results become the Agents SDK's items, so a
     returned ``messages`` transcript appends back verbatim. ``text_only``
     names a model that takes text alone (claude-code/): its errors say so
-    and point to the lanes that take more."""
+    and point to what takes more."""
     lanes = 'chat(protocol="responses") or chat(protocol="messages")'
     messages = list(messages)
     if not messages:
@@ -119,7 +121,7 @@ def _split_chat_messages(messages, text_only: Optional[str] = None,
         else:
             raise PageIndexAPIError(
                 f"{text_only} takes text messages only: no {role!r} "
-                f"messages. For tool history, use an API model with {lanes}."
+                "messages. For tool history, use an API chat model."
                 if text_only else f"Unsupported role {role!r} on this lane."
             )
     if not history:
@@ -770,6 +772,14 @@ def _chat_agent(client, messages, doc_id, model, temperature=None,
                           extra_body=extra_body, max_tokens=max_tokens,
                           backend=_merged_backend(client, backend),
                           extra_headers=extra_headers)
+    name = "_convert_gemini_extra_content_to_provider_specific_fields"
+    convert = getattr(agent.model, name, None)
+    if convert is not None:
+        def every_turn(converted):
+            # with no user message, LitellmModel converts every turn's calls
+            convert([m for m in converted if m.get("role") != "user"])
+            return converted
+        setattr(agent.model, name, every_turn)
     return agent, items, model_name
 
 
