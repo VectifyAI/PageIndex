@@ -519,7 +519,9 @@ def test_chat_completions_stream_chunks(monkeypatch, chat_client):
     (["It was "], "It was \n\nIt has 1 page."),  # fallback regenerated differently
     (["It has ", "1 page."], "It has 1 page."),  # streamed whole
     # a retried stream
-    (["It has ", "START", "It has ", "1 page."], "It has It has 1 page."),
+    (["It has ", "START", "It has ", "1 page."], "It has 1 page."),
+    (["It has 1 ", "START", "It has "], "It has 1 page."),  # cut sooner, then fallback
+    (["It was ", "START", "It has ", "1 page."], "It was \n\nIt has 1 page."),
 ])
 def test_a_stream_carries_text_the_cli_sent_whole(monkeypatch, chat_client,
                                                   streamed, shown):

@@ -1820,7 +1820,8 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
                                       ToolUseBlock, UserMessage)
         names: dict = {}  # tool_use id -> tool name, to label results
         answer = ""  # the text since the last tool call
-        streamed = ""  # text deltas since the last text block
+        sent = ""  # answer text out since the last text block
+        streamed = ""  # this model call's text deltas
         cut = None  # (finish_reason, usage) of a streamed run cut short
         failures.clear()
         try:
@@ -1834,7 +1835,12 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
                         delta = message.event.get("delta") or {}
                         if delta.get("type") == "text_delta" and delta.get("text"):
                             streamed += delta["text"]
-                            yield {"type": "answer", "delta": delta["text"]}
+                            if not sent.startswith(streamed):  # else a retry's replay
+                                rest = (streamed[len(sent):]
+                                        if streamed.startswith(sent)
+                                        else "\n\n" + streamed)
+                                sent = streamed
+                                yield {"type": "answer", "delta": rest}
                         elif (delta.get("type") == "thinking_delta"
                               and delta.get("thinking")):
                             yield {"type": "thinking", "delta": delta["thinking"]}
@@ -1845,11 +1851,11 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
                             answer += text
                             # the CLI's non-streaming fallback sends the text
                             # whole, after whatever the failed stream got out
-                            rest = (text[len(streamed):] if text.startswith(streamed)
+                            rest = (text[len(sent):] if text.startswith(sent)
                                     else "\n\n" + text)  # regenerated differently
                             if rest:
                                 yield {"type": "answer", "delta": rest}
-                            streamed = ""
+                            sent = streamed = ""
                         for item in message.content:
                             if isinstance(item, ToolUseBlock):
                                 answer = ""
