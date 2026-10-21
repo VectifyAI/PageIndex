@@ -1443,15 +1443,15 @@ def run_responses(client, input, model: Optional[str] = None,
                                 data["response"]["created_at"] = created_at
                             sequence += 1
                             data["sequence_number"] = sequence
+                            # as the official stream: in_progress follows,
+                            # with its own copy taken before created is
+                            # handed out, so an edit to one stays in it
+                            progress = {**copy.deepcopy(data),
+                                        "sequence_number": sequence + 1,
+                                        "type": "response.in_progress"}
                             yield _ResponsesEvent(data)
-                            # as the official stream: in_progress follows
                             sequence += 1
-                            # its own copy: an edit to one event's snapshot
-                            # stays in that event
-                            yield _ResponsesEvent({
-                                **copy.deepcopy(data),
-                                "sequence_number": sequence,
-                                "type": "response.in_progress"})
+                            yield _ResponsesEvent(progress)
                             continue
                         if data["type"] in ("response.completed",
                                             "response.incomplete",

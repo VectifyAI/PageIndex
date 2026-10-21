@@ -1356,6 +1356,40 @@ def test_responses_counts_a_call_cut_short(client, store_path, fake_model):
     Response.model_validate(result)  # still the official shape
 
 
+def _same_thread(agen_factory):
+    """_stream_sync without its pump thread: the generator advances only
+    when the caller asks for the next event, so the caller's edits between
+    events land at a known point."""
+    loop = asyncio.new_event_loop()
+    agen = agen_factory()
+    try:
+        while True:
+            try:
+                yield loop.run_until_complete(agen.__anext__())
+            except StopAsyncIteration:
+                return
+    finally:
+        loop.run_until_complete(agen.aclose())
+        loop.close()
+
+
+@needs_agents
+def test_responses_in_progress_owns_its_snapshot_before_created_is_read(
+        client, store_path, fake_model, monkeypatch):
+    """in_progress copies the opening snapshot before created is handed
+    out: an edit to created the moment it arrives stays out of it."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([[_msg_item("The answer")]]).emit_created = True
+    monkeypatch.setattr(local_chat, "_stream_sync", _same_thread)
+    events = client._responses("q", stream=True)
+    created = next(events)
+    created["response"]["status"] = "edited"
+    progress = next(events)
+    assert progress["type"] == "response.in_progress"
+    assert progress["response"]["status"] != "edited"
+    list(events)
+
+
 @needs_agents
 def test_responses_stream_opens_with_created(client, store_path, fake_model):
     """N per-turn openings collapse to one response.created, not zero —

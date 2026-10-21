@@ -99,19 +99,27 @@ def test_import_pageindex_is_lazy():
 
 
 def test_yaml_writes_a_chat_object_as_a_mapping_through_any_dumper():
-    """local_chat registers the rule when it loads: a caller's dumpers made
-    earlier, with or without a table of their own, write a ChatObject as a
-    plain mapping, and still inherit what others register afterwards."""
+    """local_chat registers the rule when it loads: through any dumper, a
+    caller's made earlier included, a ChatObject writes exactly as the
+    plain dict with its contents, the dumper's own dict rule applied; no
+    class gains a table, so later registrations still reach every one."""
     probe = (
         "import enum, yaml\n"
+        "from yaml.representer import SafeRepresenter\n"
         "class Early(yaml.SafeDumper): pass\n"
         "class EarlyOwn(yaml.SafeDumper): pass\n"
         "EarlyOwn.add_multi_representer(frozenset, lambda d, x: d.represent_list(sorted(x)))\n"
+        "class Mine(yaml.SafeDumper): pass\n"
+        "Mine.add_representer(dict, lambda d, x: d.represent_mapping('!mine', x))\n"
         "import pageindex.local_chat as lc\n"
-        "obj = lc._ChatCompletion({'id': 'c', 'choices': []})\n"
-        "dumpers = [yaml.SafeDumper, yaml.Dumper, Early, EarlyOwn]\n"
-        "assert all(yaml.safe_load(yaml.dump(obj, Dumper=d)) == obj for d in dumpers)\n"
+        "obj = lc._ChatCompletion({'z': 1, 'a': lc._ChatCompletion({'k': 2})})\n"
+        "plain = {'z': 1, 'a': {'k': 2}}\n"
+        "dumpers = [yaml.SafeDumper, yaml.Dumper, Early, EarlyOwn, Mine]\n"
+        "assert all(yaml.dump(obj, Dumper=d, sort_keys=False)\n"
+        "           == yaml.dump(plain, Dumper=d, sort_keys=False) for d in dumpers)\n"
+        "assert yaml.dump(obj, Dumper=Mine).startswith('!mine')\n"
         "assert 'yaml_multi_representers' not in vars(Early)\n"
+        "assert 'yaml_multi_representers' not in vars(SafeRepresenter)\n"
         "class Color(enum.Enum): RED = 1\n"
         "yaml.SafeDumper.add_multi_representer(Color, lambda d, x: d.represent_str(x.name))\n"
         "print(yaml.dump(Color.RED, Dumper=Early).split()[0])\n"

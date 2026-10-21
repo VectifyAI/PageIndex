@@ -36,20 +36,23 @@ class ChatObject(dict[str, Any]):
         super().__setattr__(name, value)
 
 
+def _as_plain_dict(dumper: Any, data: ChatObject) -> Any:
+    return dumper.represent_data(dict(data))
+
+
 def _yaml_as_dict() -> None:
-    """yaml writes a ChatObject as the dict it is: safe_dump refuses a
-    dict subclass, and dump would tag it as a Python object. The rule goes
-    on SafeRepresenter and on every subclass already holding its own table
-    (Representer, a caller's dumper that registered something); the rest
-    inherit it, and keep inheriting what others register later."""
-    from yaml.representer import SafeRepresenter
-    pending: list = [SafeRepresenter]
+    """yaml writes a ChatObject exactly as the plain dict it is, through
+    the dumper's own dict rule (safe_dump refuses a dict subclass, and dump
+    would tag it as a Python object). The rule goes on every representer
+    class that already holds its own table, BaseRepresenter, Representer
+    or a caller's dumper that registered something; the rest inherit it
+    and keep inheriting what others register later."""
+    from yaml.representer import BaseRepresenter
+    pending: list = [BaseRepresenter]
     while pending:
         representer = pending.pop()
-        if (representer is SafeRepresenter
-                or "yaml_multi_representers" in vars(representer)):
-            representer.add_multi_representer(
-                ChatObject, SafeRepresenter.represent_dict)
+        if "yaml_multi_representers" in vars(representer):
+            representer.add_multi_representer(ChatObject, _as_plain_dict)
         pending.extend(representer.__subclasses__())
 
 
