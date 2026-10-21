@@ -1,0 +1,69 @@
+[tool.poetry]
+name = "pageindex"
+version = "0.2.10"
+description = "Python SDK for PageIndex — reasoning-based, vectorless document retrieval, cloud and local"
+readme = "README.md"
+license = "MIT"
+authors = ["Ray <ray@vectify.ai>"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+keywords = ["rag", "document", "retrieval", "llm", "pageindex", "vectorless"]
+packages = [{ include = "pageindex" }]
+include = [
+    { path = "pageindex/config.yaml", format = ["sdist", "wheel"] },
+    { path = "pageindex/flash/data/*.json", format = ["sdist", "wheel"] },
+]
+exclude = ["pageindex/flash/assets"]
+
+[tool.poetry.dependencies]
+python = ">=3.10"
+requests = ">=2.28.0"
+# MCP retries use Retry(allowed_methods=...), added in urllib3 1.26.
+urllib3 = ">=1.26"
+openai = ">=1.70.0"
+# Older releases crash on current openai before the request is sent.
+openai-agents = ">=0.18.1"
+mcp = ">=1.19.0,<3"
+litellm = ">=1.105.1,<1.106"
+PyPDF2 = ">=3.0.0"
+pypdfium2 = ">=5"
+sortedcontainers = ">=2.4.0"
+regex = ">=2024.0.0"
+python-dotenv = ">=1.0.0"
+pyyaml = ">=6.0"
+Pillow = ">=9.0"
+# as_claude_mcp()'s cloud relay needs in-process servers served over mcp's
+# own transport (0.2.140); 0.2.160 stops closing stdin on them too early;
+# 0.2.166 bundles a CLI that passes 4,096 chars of server instructions, not 2,048.
+claude-agent-sdk = { version = ">=0.2.166", optional = true }
+# Pre-0.122 lacks the Bedrock/Vertex tool runner; pre-0.108 executes a
+# refusal turn's tool_use blocks.
+anthropic = { version = ">=0.122.0", optional = true }
+
+[tool.poetry.extras]
+claude = ["claude-agent-sdk"]
+# Empty on purpose: keeps pip install "pageindex[openai]" valid.
+openai = []
+anthropic = ["anthropic"]
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7.0"
+
+[tool.poetry.urls]
+Repository = "https://github.com/VectifyAI/PageIndex"
+Homepage = "https://pageindex.ai"
+Documentation = "https://docs.pageindex.ai"
+Issues = "https://github.com/VectifyAI/PageIndex/issues"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

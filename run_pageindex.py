@@ -3,22 +3,40 @@ import os
 import json
 from pageindex import *
 from pageindex.page_index_md import md_to_tree
-from pageindex.utils import ConfigLoader
+from pageindex.utils import (ConfigLoader, SUMMARY_CONCURRENCY, SUMMARY_MAX_WORDS,
+                             SUMMARY_REASONING_EFFORT)
+from pageindex.tree_optimize import EXPAND_CONCURRENCY
 
 if __name__ == "__main__":
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Process PDF or Markdown document and generate structure')
     parser.add_argument('--pdf_path', type=str, help='Path to the PDF file')
     parser.add_argument('--md_path', type=str, help='Path to the Markdown file')
-    parser.add_argument('--flash', action='store_true', help='Use PageIndex Flash (with --pdf_path)')
-    parser.add_argument('--optimize', nargs='?', const='full', choices=['full', 'merge'],
+    parser.add_argument('--mode', choices=['flash', 'standard'], default='flash',
+                      help='Processing mode (default: flash)')
+    parser.add_argument('--flash', action='store_true', default=False,
+                      help=argparse.SUPPRESS)
+    parser.add_argument('--embedded-toc', action=argparse.BooleanOptionalAction, default=None,
+                      help='Use the PDF\'s embedded bookmarks when trustworthy (default: on in flash mode)')
+    parser.add_argument('--summary', action=argparse.BooleanOptionalAction, default=None,
+                      help='Generate node summaries with an LLM (default: on in flash mode)')
+    parser.add_argument('--optimize', nargs='?', const='full', choices=['full', 'merge', 'off'],
                       default=None,
-                      help='Refine the tree for search cost: a deterministic merge, then an '
-                           'LLM expansion pass; pass `merge` to run the merge alone (PDF only)')
+                      help='Refine the tree for search cost (default: full in flash mode). '
+                           '`merge` for deterministic merge only; `off` to disable')
 
-    parser.add_argument('--model', type=str, default=None, help='Model to use (overrides config.yaml)')
+    parser.add_argument('--index-model', type=str, default=None,
+                      help='Model used to index the document (overrides config.yaml)')
+    parser.add_argument('--model', type=str, default=None,
+                      help='(legacy) Same as --index-model')
     parser.add_argument('--summary-model', type=str, default=None,
-                      help='Model for node summaries (defaults to --model, then config.yaml)')
+                      help='Model for node summaries (falls back to config.yaml summary_model, then --index-model, then --model)')
+    parser.add_argument('--summary-max-words', type=int, default=None,
+                      help=f'Word cap for each model-written node summary; a leaf node shorter than that keeps its own text (flash mode; default {SUMMARY_MAX_WORDS})')
+    parser.add_argument('--summary-concurrency', type=int, default=None,
+                      help=f'Cap on simultaneous indexing model calls per lane (flash mode; default {SUMMARY_CONCURRENCY}, expand tops out at {EXPAND_CONCURRENCY})')
+    parser.add_argument('--summary-reasoning-effort', type=str, default=None,
+                      help=f'Reasoning effort sent with each node-summary call; a model without the setting drops it (flash mode; default {SUMMARY_REASONING_EFFORT} unless LiteLLM lists the model as refusing it, no longer sent once a prompt the server refused with it (HTTP 400) goes through without it)')
 
     parser.add_argument('--toc-check-pages', type=int, default=None,
                       help='Number of pages to check for table of contents (PDF only)')
@@ -44,14 +62,34 @@ if __name__ == "__main__":
     parser.add_argument('--summary-token-threshold', type=int, default=200,
                       help='Token threshold for generating summaries (markdown only)')
     args = parser.parse_args()
-    
+    if args.flash:
+        args.mode = 'flash'
+
     # Validate that exactly one file type is specified
     if not args.pdf_path and not args.md_path:
         raise ValueError("Either --pdf_path or --md_path must be specified")
     if args.pdf_path and args.md_path:
         raise ValueError("Only one of --pdf_path or --md_path can be specified")
-    if args.optimize and not (args.pdf_path and args.flash):
-        raise ValueError("--optimize requires --flash with --pdf_path")
+    for flag, value in (('--optimize', args.optimize),
+                        ('--embedded-toc', args.embedded_toc),
+                        ('--summary', args.summary),
+                        ('--summary-max-words', args.summary_max_words),
+                        ('--summary-concurrency', args.summary_concurrency),
+                        ('--summary-reasoning-effort', args.summary_reasoning_effort)):
+        if value is not None and not (args.pdf_path and args.mode == 'flash'):
+            raise ValueError(f"{flag} requires Flash mode with --pdf_path")
+    if args.optimize is None:
+        args.optimize = 'full' if args.mode == 'flash' else 'off'
+    if args.pdf_path and args.mode == 'flash':
+        for flag, value in (('--toc-check-pages', args.toc_check_pages),
+                            ('--max-pages-per-node', args.max_pages_per_node),
+                            ('--max-tokens-per-node', args.max_tokens_per_node),
+                            ('--if-add-node-id', args.if_add_node_id),
+                            ('--if-add-node-summary', args.if_add_node_summary),
+                            ('--if-add-doc-description', args.if_add_doc_description),
+                            ('--if-add-node-text', args.if_add_node_text)):
+            if value is not None:
+                raise ValueError(f"{flag} is not supported in flash mode; use --mode standard")
 
     if args.pdf_path:
         # Validate PDF file
@@ -60,21 +98,30 @@ if __name__ == "__main__":
         if not os.path.isfile(args.pdf_path):
             raise ValueError(f"PDF file not found: {args.pdf_path}")
             
-        if args.flash:
+        if args.mode == 'flash':
             from pageindex.flash import page_index_flash
-            if args.optimize == 'full':
-                from pageindex.tree_optimize import default_model
-                from pageindex.utils import _is_openai_model
-                expand_model = args.model or default_model()
-                if _is_openai_model(expand_model) and not os.getenv("OPENAI_API_KEY"):
-                    raise SystemExit(f"OPENAI_API_KEY is not set (expand model: {expand_model}).")
+            from pageindex.flash.api import flash_rejection_reason
+            summary_model = ConfigLoader().load({k: v for k, v in {
+                'summary_model': args.summary_model,
+                'index_model': args.index_model,
+                'model': args.model,
+            }.items() if v is not None}).summary_model
+            will_summarize = args.summary if args.summary is not None else True
             toc_with_page_number = page_index_flash(
                 args.pdf_path,
-                optimize=args.optimize is not None,
-                optimize_expand=args.optimize == 'full',
-                optimize_model=args.model,
-                summary_model=args.summary_model or args.model,
+                optimize=args.optimize if args.optimize != 'off' else False,
+                optimize_model=summary_model,
+                summary_model=summary_model,
+                use_embedded_toc=args.embedded_toc if args.embedded_toc is not None else True,
+                summary=will_summarize,
+                summary_max_words=args.summary_max_words,
+                summary_concurrency=args.summary_concurrency,
+                summary_reasoning_effort=args.summary_reasoning_effort,
             )
+            reason = flash_rejection_reason(toc_with_page_number,
+                                            standard_hint="--mode standard")
+            if reason:
+                raise ValueError(reason)
             if 'optimize' in toc_with_page_number:
                 o = toc_with_page_number['optimize']
                 print(f"Optimize: merges={o['merges']} expands={o['expands']}, "
@@ -84,7 +131,9 @@ if __name__ == "__main__":
         else:
             # Process PDF file
             user_opt = {
+                'index_model': args.index_model,
                 'model': args.model,
+                'summary_model': args.summary_model,
                 'toc_check_page_num': args.toc_check_pages,
                 'max_page_num_each_node': args.max_pages_per_node,
                 'max_token_num_each_node': args.max_tokens_per_node,
@@ -100,7 +149,7 @@ if __name__ == "__main__":
 
         # Save results
         pdf_name = os.path.splitext(os.path.basename(args.pdf_path))[0]
-        suffix = '_structure_flash' if args.flash else '_structure'
+        suffix = '_structure'
         output_dir = './results'
         output_file = f'{output_dir}/{pdf_name}{suffix}.json'
         os.makedirs(output_dir, exist_ok=True)
@@ -129,26 +178,28 @@ if __name__ == "__main__":
         
         # Create options dict with user args
         user_opt = {
+            'index_model': args.index_model,
             'model': args.model,
-            'if_add_node_summary': args.if_add_node_summary,
-            'if_add_doc_description': args.if_add_doc_description,
-            'if_add_node_text': args.if_add_node_text,
-            'if_add_node_id': args.if_add_node_id
+            'summary_model': args.summary_model,
         }
         
         # Load config with defaults from config.yaml
-        opt = config_loader.load(user_opt)
+        opt = config_loader.load({k: v for k, v in user_opt.items() if v is not None})
         
+        # if_add_* pass through as given (absent = off, as before this CLI
+        # used config.yaml): the PDF defaults there must not switch on LLM
+        # passes the markdown CLI never ran.
         toc_with_page_number = asyncio.run(md_to_tree(
             md_path=args.md_path,
             if_thinning=args.if_thinning.lower() == 'yes',
             min_token_threshold=args.thinning_threshold,
-            if_add_node_summary=opt.if_add_node_summary,
+            if_add_node_summary=args.if_add_node_summary,
             summary_token_threshold=args.summary_token_threshold,
             model=opt.model,
-            if_add_doc_description=opt.if_add_doc_description,
-            if_add_node_text=opt.if_add_node_text,
-            if_add_node_id=opt.if_add_node_id
+            summary_model=opt.summary_model,
+            if_add_doc_description=args.if_add_doc_description,
+            if_add_node_text=args.if_add_node_text,
+            if_add_node_id=args.if_add_node_id
         ))
         
         print('Parsing done, saving to file...')

@@ -11,7 +11,9 @@ an LLM.
 ```python
 from pageindex.flash import page_index_flash
 
-tree = page_index_flash("paper.pdf")
+tree = page_index_flash("paper.pdf")                                 # optimized tree + summaries
+tree = page_index_flash("paper.pdf", summary=False, optimize=False)  # raw tree only, no LLM
+tree = page_index_flash("paper.pdf", optimize="merge")               # deterministic merge, no LLM expand
 ```
 
 Takes a file path or an `io.BytesIO` stream and returns the tree as a dict.
@@ -20,11 +22,11 @@ Summaries are on by default and need an LLM API key.
 ### Command line
 
 ```bash
-python3 run_pageindex.py --pdf_path document.pdf --flash
-python3 run_pageindex.py --pdf_path document.pdf --flash --optimize  # refined tree for retrieval
+python3 run_pageindex.py --mode flash --pdf_path document.pdf                             # optimized tree + summaries
+python3 run_pageindex.py --mode flash --pdf_path document.pdf --no-summary --optimize off # raw tree only, no LLM
 ```
 
-Writes the tree to `results/<name>_structure_flash.json`.
+Writes the tree to `results/<name>_structure.json`.
 
 ## Output
 
@@ -38,13 +40,25 @@ Writes the tree to `results/<name>_structure_flash.json`.
             "node_id": str,       # 4-digit, zero-padded
             "start_index": int,   # 1-based, inclusive
             "end_index": int,
-            "summary": str,
+            "summary": str,       # summary=True only
             "key_items": [str],   # optimize only: titles of subsections merged away
-            "nodes": [...],
+            "nodes": [...],       # entries with children only
         }
     ],
+    "toc_source": str,  # "detected" | "bookmarks" | "hybrid" | "pages" | "unreadable"
 }
 ```
+
+`toc_source` says where the structure came from: `"detected"` from the layout,
+`"bookmarks"` from the embedded outline, `"hybrid"` when bookmarks frame the
+detected sections. `"pages"` means the layout yielded no hierarchy, so every
+page became one node titled `Page N`; past `FLAT_TREE_MAX_NODES` (10) pages that
+flat tree comes back without summaries or optimization, and the local client and
+CLI refuse it. `"unreadable"` means no page carries text and `structure` is
+empty.
+
+Every page is in some node: a hierarchy that starts after page 1 is preceded by
+a `Preface` node covering the pages before it, as in standard mode.
 
 ## Benchmark
 

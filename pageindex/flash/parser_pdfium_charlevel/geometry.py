@@ -6,6 +6,8 @@ import ctypes
 import math
 import pypdfium2.raw as pdfium_c
 
+_get_font_name = getattr(pdfium_c, "FPDFFont_GetBaseFontName", None) or pdfium_c.FPDFFont_GetFontName
+
 
 def _obj_rotation(value: float, other_item: float, candidate_item: float, reference_item: float) -> int:
     """Classify a text-object matrix as upright, cardinal rotation, or oblique. Near-cardinal matrices snap to the cardinal bucket; genuinely oblique matrices use the baseline remerge path."""
@@ -128,7 +130,7 @@ def _collect_text_objs(page, text_page) -> list[dict]:
         # Snap back to the shortest decimal so knife-edge font-size comparisons
         # match the content-stream value.
         fs_eff = float(f"{fs_eff:.6g}")
-        name = pdfium_c.FPDFFont_GetFontName(font, font_name_buffer, 256)
+        name = _get_font_name(font, font_name_buffer, 256)
         font_name = (
             bytes(font_name_buffer[:name]).decode("latin-1", errors="replace").rstrip("\x00")
             if name > 1 else ""

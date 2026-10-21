@@ -295,7 +295,6 @@ class DocCandidateCollector:
 
 def filter_page_candidates(doc_collector: DocCandidateCollector, page, page_candidates: list[HeadingCandidate]) -> None:
     """Per-page candidate filter for noisy pages, title overlap, page headers, and numbering continuity."""
-    from ..outline_assembly import is_script_compatible
     from ..model import intervals_overlap, is_caps_heavy
     from ..stats import column_index_of
 
@@ -349,9 +348,6 @@ def filter_page_candidates(doc_collector: DocCandidateCollector, page, page_cand
     for index in range(count):
         active_candidate = page_candidates[index]
         next_item = page_candidates[index + 1] if index + 1 < count else None
-
-        if is_script_compatible(doc_collector.previous_slot.secondary_slot.tertiary_slot, active_candidate):
-            continue
 
         if not doc_collector.auxiliary_slot and active_candidate.type != 11:
             bottom = active_candidate.group_slot.top_edge()
@@ -428,7 +424,7 @@ def build_doc_heading_candidates(doc, labeled: Optional[list] = None) -> list[He
 
 def find_section_openers(doc, start_page_idx: int) -> list:
     """Find the first valid heading on each page, then clique-filter the result."""
-    from ..outline_assembly import is_script_compatible, has_conflict_in_context, OutlineContext, OutlineNode
+    from ..outline_assembly import has_conflict_in_context, OutlineContext, OutlineNode
 
     item_list: list[HeadingCandidate] = []
     index = start_page_idx
@@ -450,7 +446,7 @@ def find_section_openers(doc, start_page_idx: int) -> list:
                     break
                 if block.line_count() > 2:
                     break
-        if current_candidate is not None and not is_script_compatible(doc.secondary_slot.tertiary_slot, current_candidate):
+        if current_candidate is not None:
             item_list.append(current_candidate)
         index += 1
 

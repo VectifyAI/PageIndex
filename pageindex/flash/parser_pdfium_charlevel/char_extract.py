@@ -56,10 +56,23 @@ def _extract_raw_chars(page, text_page) -> tuple[list[dict], list[dict]]:
     name_cache: dict[bytes, str] = {}
     raw_chars: list[dict] = []
     last_obj: dict | None = None
+    skip_next = False
     for index_value in range(count_item):
+        if skip_next:
+            skip_next = False
+            continue
         codepoint = get_unicode(text_page, index_value)
         if codepoint < 0:
             continue
+        # PDFium returns astral characters (U+10000+) as two UTF-16 surrogate
+        # code units in consecutive textpage slots. Reassemble before chr().
+        if 0xD800 <= codepoint <= 0xDBFF and index_value + 1 < count_item:
+            low = get_unicode(text_page, index_value + 1)
+            if 0xDC00 <= low <= 0xDFFF:
+                codepoint = ((codepoint & 0x3FF) << 10) + (low & 0x3FF) + 0x10000
+                skip_next = True
+        if 0xD800 <= codepoint <= 0xDFFF:
+            codepoint = 0xFFFD  # unpaired surrogate: not utf-8 encodable
         # u == 0 (PDFium found no unicode for the glyph) is KEPT as '\x00':
         # text extraction emits the raw charcode for unmapped codes, so its items
         # really contain chr(0) for extension-font pieces at code 0, and the
@@ -68,9 +81,9 @@ def _extract_raw_chars(page, text_page) -> tuple[list[dict], list[dict]]:
         ch_str = chr(codepoint)
         is_ws = js_is_ws(codepoint)
         # FPDFText_IsGenerated returns a c_int: 1 generated, 0 real, -1 error.
-        # Only a POSITIVE 1 may mark a char generated -- the -1 has to read the
-        # same way here as it does in the page-mode unicode walk, or the two
-        # char sets disagree and that walk desyncs.
+        # Only a POSITIVE 1 may mark a char generated. This is the package's
+        # only read: the page-mode unicode walk consumes this flag rather
+        # than re-reading PDFium.
         is_gen = is_generated(text_page, index_value) == 1
         # PDFium inserts is_generated chars as layout placeholders for
         # Td/Tm jumps with no literal content-stream char (typically
@@ -242,6 +255,7 @@ def _apply_type3_sizes(raw_chars: list[dict], size_by_font: dict) -> None:
 def _finalize_chars(raw_chars: list[dict]) -> list[dict]:
     """Second pass: compute glyph_w per char and emit the merged-ready dicts. The right glyph width definition depends on how PDFium reports the font's metrics: (a) Normal Type 1 fonts (fs_raw >= 1.5, scale.a ~= 1): FPDFFont_GetGlyphWidth(font, code, fs_raw) returns the advance in page units. Use as-is x matrix.a. (b) Scaled-matrix Type 3 (fs_raw < 1.5 but matrix scale >= 1.5, e.g. vector-heavy page's a scaled Type-3 subset with scale=36.49): GetGlyphWidth at fs_raw=0.19 gives font-natural-unit width; x matrix scale recovers page units. (c) Identity-matrix Type 3 (fs_raw < 1.5, matrix.a ~= 1, e.g. identity-matrix Type-3 sample an identity-matrix Type-3 font): GetGlyphWidth's output is wrong by an unknown FontMatrix factor (PDFium doesn't fold this for these fonts). Fall back to neighbor-step fallback (next_char.ox - this_char.ox within same obj). """
     out: list[dict] = []
+    code_ends: dict[tuple[int, int], float] = {}
     for key_value, candidate_item in enumerate(raw_chars):
         if candidate_item.get("drop"):
             # Folded into the previous char by _apply_font_unicode (PDFium's
@@ -322,6 +336,13 @@ def _finalize_chars(raw_chars: list[dict]) -> list[dict]:
             reference_item["v_pen_y"] = pen_y
             # pen y after this glyph's advance (text extraction previous glyph transform[5])
             reference_item["v_after"] = min(candidate_item["cell_top"], candidate_item["cell_bot"])
+        elif "code_w" in candidate_item:
+            # The pen end the font's width for this char's code gives; chars
+            # consuming one code (a decomposed ligature) share the first one's.
+            key = candidate_item["code_key"]
+            if key not in code_ends:
+                code_ends[key] = candidate_item["ox"] + candidate_item["code_w"] * obj["fs_raw"] * obj["scale_x"]
+            reference_item["code_end"] = code_ends[key]
         out.append(reference_item)
     return out
 

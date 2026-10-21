@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 from typing import Any, Callable, Optional
 from ..model import (
     style_key, left_aligned, right_aligned, center_aligned, x_aligned, rect_union,
@@ -9,13 +10,14 @@ from ..model import (
     reading_order_key, left_edge_key, _trim_unicode_ws, _round_half_up_to_int, Line, last_line_of, first_span_of, block_text, deaccented_text, letter_count, dominant_style_of, info_weight, dominant_font_size, is_upper_dominant, is_caps_heavy, alignment_code, Block,
 )
 from ..tokens import (
-    Token, TokenView, wrap_tokens, enumerate_tokens, last_token, trie_prefix_match, first_token, set_case_fold, TrieConfig, build_trie, tokenize_block, avg_char_width as avg_char_width_fn, trie_full_match, first_anchor_span, is_char_token, is_word_token,
+    Token, TokenView, wrap_tokens, enumerate_tokens, last_token, trie_prefix_match, first_token, set_case_fold, TrieConfig, build_trie, tokenize_block, avg_char_width as avg_char_width_fn, trie_full_match, first_anchor_span, is_char_token, is_word_token, token_numeric_value,
 )
 
 from .candidates import (
     HeadingCandidate,
     OutlineNode,
     heading_order_key,
+    compare_heading_order,
 )
 from .style_context import (
     OutlineState,
@@ -62,20 +64,6 @@ def compute_max_heading_gap(outline_nodes: list[OutlineNode], other_number: int)
 def has_table_or_prominent(outline_nodes: list[OutlineNode]) -> bool:
     """Return True if any heading is a table-like or prominent entry."""
     return any(secondary_item.heading.type == 5 or secondary_item.heading.is_prominent for secondary_item in outline_nodes)
-
-
-def is_landscape_or_empty(doc) -> bool:
-    """Return True for mostly-landscape or near-empty documents with little outline text."""
-    if doc.secondary_slot.secondary_slot >= 1e3:
-        return False
-    secondary_item = 0
-    candidate_item = 0.0
-    for page in doc.primary_slot:
-        if page.bounds.bbox_width() > page.bounds.bbox_height() and page.primary_slot.secondary_slot < 1e3:
-            secondary_item += 1
-            candidate_item += page.primary_slot.secondary_slot
-    count_item = len(doc.primary_slot)
-    return secondary_item >= 0.9 * count_item or (secondary_item >= 0.7 * count_item and candidate_item >= 0.5 * doc.secondary_slot.state_slot)
 
 
 # --------------------------------------------------------------------------- #
@@ -153,6 +141,74 @@ def build_heading_from_block(block: Block, page, anchor: Optional[Block] = None)
 # --------------------------------------------------------------------------- #
 
 
+def continues_heading(block: Block) -> bool:
+    """Whether a copy of ``block`` on the pages before, which it repeats page after page, is a heading."""
+    copy = block.repeat_of
+    while copy is not None and not copy.used_as_heading:
+        copy = copy.repeat_of
+    return copy is not None
+
+
+def next_numbered_heading(doc, heading: HeadingCandidate) -> Optional[HeadingCandidate]:
+    """The heading after single-level numbered heading ``heading``: the first later text block in its style, or
+    opening a page, that the heading detectors read as the next number with the same separator, as a run-in
+    heading or else whole."""
+    from ..heading_detection import PageScanState, detect_heading_with_body, detect_numbered_heading, similar_style
+    number = heading.numbering[0] + 1
+    separator = [token.str for token in list(heading.secondary_slot)[1:]]
+    for page in doc.primary_slot[heading.page.page_index - 1:]:
+        for block in page.secondary_slot:
+            if block.type not in (0, 7) or (page is heading.page and block.reading_order_index <= heading.group_slot.reading_order_index):
+                continue
+            tokens = tokenize_block(block)
+            first = first_token(tokens)
+            if first is None or token_numeric_value(first) != number or not similar_style(block, heading.group_slot):
+                continue
+            page_scan = PageScanState(doc, page)
+            for follower in (detect_heading_with_body(page_scan, block, number + 1),
+                             detect_numbered_heading(page_scan, block, tokens, number + 1)):
+                if follower is not None and follower.numbering == [number] and [token.str for token in list(follower.secondary_slot)[1:]] == separator:
+                    return follower
+    return None
+
+
+def continue_numbering(doc, clusters: list[dict], start: int, heading: HeadingCandidate,
+                       previous: Optional[HeadingCandidate], as_anchor: bool) -> None:
+    """The numbered-heading detector reads no number from 20 on, so an accepted single-level heading from 19 on whose
+    ``previous`` single-level heading is numbered one less brings in the heading after it, in the same role: a cluster
+    anchor, or a candidate of the cluster that covers it. A cluster anchor with a new title in between ends the
+    sequence (past a new section, a same-style "20." belongs to something else); one that repeats an earlier anchor's
+    title, a running title printed on the pages of the sequence, does not."""
+    if heading.type != 1 or len(heading.numbering) != 1 or heading.numbering[0] < 19:
+        return
+    if previous is None or previous.numbering != [heading.numbering[0] - 1]:
+        return
+    follower = next_numbered_heading(doc, heading)
+    if follower is None:
+        return
+    seen = {deaccented_text(cluster["labeled_anchor"].heading.group_slot)
+            for cluster in clusters[:start + 1] if cluster["labeled_anchor"] is not None}
+    index = start
+    while index + 1 < len(clusters) and compare_heading_order(clusters[index + 1]["labeled_anchor"].heading, follower) <= 0:
+        index += 1
+        block = clusters[index]["labeled_anchor"].heading.group_slot
+        if block is not follower.group_slot and deaccented_text(block) not in seen:
+            return
+    anchor, candidates = clusters[index]["labeled_anchor"], clusters[index]["cluster_candidates"]
+    if anchor is not None and anchor.heading.group_slot is follower.group_slot:
+        anchor.heading = follower
+        return
+    position = bisect.bisect_left(candidates, heading_order_key(follower), key=heading_order_key)
+    same_block = position < len(candidates) and candidates[position].group_slot is follower.group_slot
+    if as_anchor:
+        clusters.insert(index + 1, {"labeled_anchor": OutlineNode(follower), "cluster_candidates": candidates[position + same_block:]})
+        del candidates[position:]
+    elif same_block:
+        candidates[position] = follower
+    else:
+        candidates.insert(position, follower)
+
+
 def assemble_outline(doc, labeled: list[OutlineNode]) -> list[OutlineNode]:
     """Produce the outline tree as a list of outline nodes. Arguments: ``doc`` is the document state; ``labeled`` is the list of outline nodes wrapping labeled headings. Output is a list of root outline nodes. Each node contains child nodes recursively. """
     # ----- Stage 1: collect general headings.
@@ -192,12 +248,15 @@ def assemble_outline(doc, labeled: list[OutlineNode]) -> list[OutlineNode]:
         return []
 
     out: list[OutlineNode] = []
-    for cluster in clusters:
+    for cluster_index, cluster in enumerate(clusters):
         cluster_anchor = cluster.get("labeled_anchor")
         cluster_candidates = cluster.get("cluster_candidates", [])
         if cluster_anchor is not None:
+            previous = state.auxiliary_slot
             push_heading_to_state(state, cluster_anchor.heading)
+            cluster_anchor.heading.group_slot.used_as_heading = True
             out.append(cluster_anchor)
+            continue_numbering(doc, clusters, cluster_index, cluster_anchor.heading, previous, True)
         sub = extract_sub_headings(doc, state, cluster_anchor, cluster_candidates)
         target = cluster_anchor.child_nodes if cluster_anchor is not None else out
         target.extend(sub)
@@ -205,8 +264,9 @@ def assemble_outline(doc, labeled: list[OutlineNode]) -> list[OutlineNode]:
         sub_clique = find_keyword_clique(cluster_candidates) if cluster_candidates else None
         stack = HierarchyStack(sub_clique)
         for insertion_candidate in cluster_candidates:
-            if should_reject_heading(state, insertion_candidate):
+            if continues_heading(insertion_candidate.group_slot) or should_reject_heading(state, insertion_candidate):
                 continue
+            previous = state.auxiliary_slot
             push_heading_to_state(state, insertion_candidate)
             insertion_candidate.group_slot.used_as_heading = True
             stack_outline_node = OutlineNode(insertion_candidate)
@@ -218,6 +278,7 @@ def assemble_outline(doc, labeled: list[OutlineNode]) -> list[OutlineNode]:
             else:
                 out.append(stack_outline_node)
             stack.push(stack_outline_node)
+            continue_numbering(doc, clusters, cluster_index, insertion_candidate, previous, False)
     return out
 
 

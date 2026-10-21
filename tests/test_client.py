@@ -1,0 +1,3801 @@
+"""SDK surface tests: PageIndexClient in local and cloud mode."""
+import asyncio
+import importlib
+import inspect
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import types
+from pathlib import Path
+
+import pytest
+
+import pageindex.flash
+import pageindex.utils
+from pageindex import PageIndexClient, PageIndexAPIError
+
+page_index_module = importlib.import_module("pageindex.page_index_classic")
+
+
+STRUCTURE = [
+    {
+        "title": "Root Section", "node_id": "0000",
+        "start_index": 1, "end_index": 2,
+        "summary": "root summary", "text": "root text",
+        "nodes": [
+            {"title": "Child Section", "node_id": "0001",
+             "start_index": 2, "end_index": 2,
+             "summary": "child summary", "text": "child text"},
+        ],
+    },
+]
+
+
+@pytest.fixture
+def local_client(tmp_path):
+    return PageIndexClient(storage_path=str(tmp_path / "store"))
+
+
+@pytest.fixture
+def indexed_doc(local_client, sample_pdf, monkeypatch):
+    """A document indexed through a stubbed standard pipeline."""
+    def fake_page_index_main(doc, opt=None, logger=None, page_list=None):
+        assert opt.if_add_node_summary == "yes"
+        assert opt.if_add_node_text == "no"
+        assert logger is not None
+        assert page_list is not None
+        assert all(isinstance(t, tuple) and len(t) == 2 for t in page_list)
+        return {"doc_name": "sample.pdf",
+                "doc_description": "A test document.",
+                "structure": json.loads(json.dumps(STRUCTURE))}
+    monkeypatch.setattr(page_index_module, "page_index_main", fake_page_index_main)
+    return local_client.submit_document(sample_pdf, mode="standard")["doc_id"]
+
+
+# ── constructor ──
+
+def test_empty_api_key_raises():
+    with pytest.raises(PageIndexAPIError, match="empty string"):
+        PageIndexClient(api_key="")
+
+
+def test_cloud_rejects_local_args():
+    with pytest.raises(PageIndexAPIError, match="model, storage_path"):
+        PageIndexClient(api_key="k", model="m", storage_path="/tmp/x")
+
+
+def test_local_client_does_not_touch_disk(tmp_path):
+    storage = tmp_path / "store"
+    PageIndexClient(storage_path=str(storage))
+    assert not storage.exists()
+
+
+def test_retrieve_model_stays_as_configured(tmp_path):
+    """The public attribute keeps the caller's spelling — ``litellm/`` is
+    Agents SDK routing grammar, applied at the config door
+    (openai_agent_config), never baked into ``chat_model``: handed to the
+    Anthropic SDK or a raw request, the prefixed form is a 404."""
+    def resolved(retrieve_model):
+        return PageIndexClient(retrieve_model=retrieve_model,
+                               storage_path=str(tmp_path / "s")).retrieve_model
+
+    for as_configured in ("anthropic/claude-sonnet-4-6", "gpt-4o",
+                          "openai/gpt-4o",
+                          "litellm/anthropic/claude-sonnet-4-6"):
+        assert resolved(as_configured) == as_configured
+
+
+def test_model_resolution_covers_every_generation(tmp_path):
+    """New names win over old, specific over general, ``model`` sets every
+    role, and the built-in defaults close each chain. One row per released
+    surface: 0.2.8 (model only), 0.3.0.dev (model + retrieve_model),
+    0.2.10.dev (all three legacy names), the current pair, plus the
+    umbrella and mixed forms."""
+    from pageindex.utils import DEFAULT_CHAT_MODEL, DEFAULT_INDEX_MODEL
+    cases = [
+        ({}, DEFAULT_INDEX_MODEL, DEFAULT_INDEX_MODEL, DEFAULT_CHAT_MODEL),
+        ({"model": "m"}, "m", "m", "m"),
+        ({"model": "m", "retrieve_model": "r"}, "m", "m", "r"),
+        ({"model": "m", "summary_model": "s", "retrieve_model": "r"},
+         "m", "s", "r"),
+        ({"index_model": "i", "chat_model": "c"}, "i", "i", "c"),
+        ({"model": "m", "index_model": "i"}, "i", "i", "m"),
+        ({"summary_model": "s"},
+         DEFAULT_INDEX_MODEL, "s", DEFAULT_CHAT_MODEL),
+    ]
+    for kwargs, index, summary, chat in cases:
+        client = PageIndexClient(storage_path=str(tmp_path / "s"), **kwargs)
+        assert (client.index_model, client.model) == (index, index), kwargs
+        assert client.summary_model == summary, kwargs
+        assert client.chat_model == chat, kwargs
+        assert client.retrieve_model == client.chat_model, kwargs
+
+
+def test_explicit_mode_clients(tmp_path, monkeypatch):
+    from pageindex import PageIndexCloudClient, PageIndexLocalClient
+
+    monkeypatch.delenv("PAGEINDEX_API_KEY", raising=False)
+    for bad_key in (None, ""):
+        with pytest.raises(PageIndexAPIError, match="requires a PageIndex API key"):
+            PageIndexCloudClient(bad_key)
+    cloud = PageIndexCloudClient("k")
+    assert cloud.api_key == "k" and isinstance(cloud, PageIndexClient)
+    # The class name says cloud, so the env key may fill the value —
+    # the shortest env-key cloud construction. Explicit "" still raises.
+    monkeypatch.setenv("PAGEINDEX_API_KEY", "pi-env")
+    assert PageIndexCloudClient().api_key == "pi-env"
+    assert PageIndexCloudClient("k").api_key == "k"
+    with pytest.raises(PageIndexAPIError, match="requires a PageIndex API key"):
+        PageIndexCloudClient("")
+
+    local = PageIndexLocalClient(model="m", storage_path=str(tmp_path / "s"))
+    assert local.model == "m" and isinstance(local, PageIndexClient)
+    with pytest.raises(TypeError):
+        PageIndexLocalClient("k")
+
+
+# ── constructor matrix: two sides, one spelling each ──
+
+
+def test_bridge_cloud_docs_own_model():
+    """chat-side arguments on a cloud client select own-model chat."""
+    from pageindex.utils import DEFAULT_CHAT_MODEL
+    client = PageIndexClient(api_key="pi-k", chat_model="openai/m")
+    assert client.api_key == "pi-k" and client._local_chat
+    assert client.chat_model == "openai/m" and client.chat_backend is None
+    assert not PageIndexClient(api_key="pi-k")._local_chat
+    # Only the backend given: the chat model falls back to the default.
+    partial = PageIndexClient(api_key="pi-k", chat_backend={"api_key": "x"})
+    assert partial._local_chat and partial.chat_model == DEFAULT_CHAT_MODEL
+    # The pinned classes carry the flag too.
+    from pageindex import PageIndexCloudClient, PageIndexLocalClient
+    assert not PageIndexCloudClient("k")._local_chat
+    assert PageIndexLocalClient()._local_chat
+    # The pinned classes pin only the index side: the chat side stays
+    # free, same vocabulary as PageIndexClient.
+    pinned = PageIndexCloudClient("k", chat_model="openai/m")
+    assert pinned._local_chat and pinned.chat_model == "openai/m"
+    assert PageIndexCloudClient("k", chat={"model": "m"}).chat_model == "m"
+    assert PageIndexLocalClient(chat={"model": "m"}).chat_model == "m"
+    assert not PageIndexCloudClient("k", chat="pageindex-cloud")._local_chat
+
+
+def test_local_pinned_class_takes_index_slot(tmp_path, monkeypatch):
+    """The local pinned class takes the grouped spelling of the index
+    vocabulary it already takes flat; a cloud index= is refused in the
+    class's name, never a cloud client."""
+    from pageindex import PageIndexLocalClient
+    client = PageIndexLocalClient(
+        index={"model": "i", "storage_path": str(tmp_path / "a")})
+    assert client.index_model == "i"
+    assert client.storage_path == str(tmp_path / "a")
+    assert PageIndexLocalClient(index="i").index_model == "i"
+    # The mode= disagreement fires before any environment read.
+    monkeypatch.setattr("pageindex.client._env_cloud_key", lambda *a: (
+        pytest.fail("environment read before the mode cross-check")))
+    for cloud in ("cloud", "pageindex-cloud", {"api_key": "k"},
+                  {"mode": "cloud"}):
+        with pytest.raises(PageIndexAPIError,
+                           match="PageIndexLocalClient pins local documents"):
+            PageIndexLocalClient(index=cloud)
+
+
+def test_cloud_pinned_class_takes_index_slot(monkeypatch):
+    """The cloud pinned class takes index= for the key; a local index= is
+    refused in the class's name, never a local client."""
+    from pageindex import PageIndexCloudClient
+    assert PageIndexCloudClient(index={"api_key": "k"}).api_key == "k"
+    monkeypatch.setenv("PAGEINDEX_API_KEY", "pi-env")
+    assert PageIndexCloudClient(index="cloud").api_key == "pi-env"
+    for local in ("local", "i-model", {"model": "m"}, {"storage_path": "/x"}):
+        with pytest.raises(PageIndexAPIError,
+                           match="PageIndexCloudClient pins cloud documents"):
+            PageIndexCloudClient(index=local)
+    with pytest.raises(PageIndexAPIError, match="two spellings"):
+        PageIndexCloudClient("k", index={"api_key": "k"})
+    monkeypatch.delenv("PAGEINDEX_API_KEY")
+    with pytest.raises(PageIndexAPIError, match='index="cloud" reads'):
+        PageIndexCloudClient(index="cloud")
+
+
+def test_pinned_class_errors_name_a_reachable_exit():
+    """The pinned classes have no mode= (and Local no api_key=): their
+    refusals name the class and an exit that class can take, never a
+    remedy that only PageIndexClient accepts. An explicit mode="local"
+    is named the same way — the exit has to drop it."""
+    from pageindex import PageIndexCloudClient, PageIndexLocalClient
+    with pytest.raises(PageIndexAPIError) as err:
+        PageIndexLocalClient(chat="cloud")
+    message = str(err.value)
+    assert "PageIndexLocalClient pins local documents" in message
+    assert 'index="cloud"' not in message and "mode=" not in message
+    # The exits it names construct.
+    assert not PageIndexCloudClient("k", chat="cloud")._local_chat
+    assert not PageIndexClient(api_key="k", chat="cloud")._local_chat
+    assert PageIndexLocalClient(chat="m")._local_chat
+    with pytest.raises(PageIndexAPIError, match='and drop mode="local"'):
+        PageIndexClient(mode="local", chat="cloud")
+    with pytest.raises(PageIndexAPIError) as err:
+        PageIndexClient(chat="cloud")
+    assert "mode=" not in str(err.value)
+
+
+def test_mode_words_normalize_like_the_label(monkeypatch):
+    monkeypatch.setenv("PAGEINDEX_API_KEY", "pi-env")
+    assert PageIndexClient(mode=" Cloud ").api_key == "pi-env"
+    assert not hasattr(PageIndexClient(index={"mode": "LOCAL"}), "api_key")
+    assert not PageIndexClient(api_key="k", chat={"mode": "Cloud"})._local_chat
+
+
+def test_cloud_index_args_still_rejected():
+    with pytest.raises(PageIndexAPIError, match="index_model"):
+        PageIndexClient(api_key="k", index_model="m")
+    # ``model`` claims both sides, so the index side rejects it — the
+    # error points at the chat-side spelling that stays available.
+    with pytest.raises(PageIndexAPIError, match="stay yours"):
+        PageIndexClient(api_key="k", model="m")
+
+
+def test_index_slot_spellings(tmp_path, monkeypatch):
+    client = PageIndexClient(index="i-model")
+    assert client.index_model == "i-model" and client._local_chat
+    assert not hasattr(client, "api_key")
+
+    full = PageIndexClient(index={"model": "i", "summary_model": "s",
+                                  "backend": {"api_key": "b"},
+                                  "storage_path": str(tmp_path / "s")})
+    assert (full.index_model, full.summary_model) == ("i", "s")
+    assert full.storage_path == str(tmp_path / "s")
+
+    inline = PageIndexClient(index={"api_key": "pi-k"})
+    assert inline.api_key == "pi-k" and not inline._local_chat
+
+    monkeypatch.setenv("PAGEINDEX_API_KEY", "pi-env")
+    assert PageIndexClient(index="pageindex-cloud").api_key == "pi-env"
+    # An inline key wins over the environment (env is never consulted).
+    assert PageIndexClient(index={"api_key": "pi-x"}).api_key == "pi-x"
+    monkeypatch.delenv("PAGEINDEX_API_KEY")
+    with pytest.raises(PageIndexAPIError, match="PAGEINDEX_API_KEY"):
+        PageIndexClient(index="pageindex-cloud")
+
+
+def test_chat_slot_spellings():
+    assert PageIndexClient(chat="openai/m").chat_model == "openai/m"
+    full = PageIndexClient(chat={"model": "m", "backend": {"base_url": "u"}})
+    assert (full.chat_model, full.chat_backend) == ("m", {"base_url": "u"})
+
+    bridge = PageIndexClient(index={"api_key": "k"}, chat="openai/m")
+    assert bridge._local_chat and bridge.api_key == "k"
+    managed = PageIndexClient(index={"api_key": "k"}, chat="pageindex-cloud")
+    assert not managed._local_chat
+    # The impossible cell: local documents cannot feed the managed chat.
+    with pytest.raises(PageIndexAPIError, match="cannot read the local store"):
+        PageIndexClient(chat="pageindex-cloud")
+
+
+def test_slot_flat_equivalence(tmp_path):
+    """The slots are the grouped spelling of the flat arguments — same
+    names, same resolution."""
+    flat = PageIndexClient(index_model="i", chat_model="c",
+                           chat_backend={"k": 1},
+                           storage_path=str(tmp_path / "a"))
+    slot = PageIndexClient(
+        index={"model": "i", "storage_path": str(tmp_path / "a")},
+        chat={"model": "c", "backend": {"k": 1}})
+    for attr in ("model", "index_model", "summary_model", "chat_model",
+                 "chat_backend", "storage_path", "_local_chat"):
+        assert getattr(flat, attr) == getattr(slot, attr), attr
+
+
+def test_slots_take_any_mapping():
+    """The slots are typed Mapping so the exported TypedDicts pass a
+    checker; the resolvers must accept what the annotation admits — and
+    read-only proxies prove they never mutate the caller's mapping."""
+    client = PageIndexClient(index=types.MappingProxyType({"api_key": "pi-k"}),
+                             chat=types.MappingProxyType({"model": "m"}))
+    assert (client.api_key, client.chat_model) == ("pi-k", "m")
+
+
+def test_same_side_double_spelling_rejected():
+    for kwargs in ({"api_key": "k", "index": {"api_key": "k"}},
+                   {"index": "m", "index_model": "m"},
+                   {"index": "m", "storage_path": "/x"},
+                   {"chat": "m", "chat_model": "m"}):
+        with pytest.raises(PageIndexAPIError, match="two spellings"):
+            PageIndexClient(**kwargs)
+    # Mixing tiers across sides is fine — the rule is per side.
+    assert PageIndexClient(api_key="k", chat={"model": "m"})._local_chat
+
+
+def test_slot_validation_errors(monkeypatch):
+    for bad, msg in [({}, "empty dict"),
+                     ({"api_key": "k", "model": "m"}, "mixes cloud and local"),
+                     ({"nope": 1}, "Unknown index keys"),
+                     ({"api_key": ""}, "non-empty string")]:
+        with pytest.raises(PageIndexAPIError, match=msg):
+            PageIndexClient(index=bad)
+    for bad, msg in [({}, "empty dict"), ({"nope": 1}, "Unknown chat keys")]:
+        with pytest.raises(PageIndexAPIError, match=msg):
+            PageIndexClient(chat=bad)
+    with pytest.raises(PageIndexAPIError, match="string or a dict"):
+        PageIndexClient(index=5)
+    with pytest.raises(PageIndexAPIError, match="string or a dict"):
+        PageIndexClient(chat=5)
+    with pytest.raises(PageIndexAPIError, match="empty string"):
+        PageIndexClient(index="  ")
+    with pytest.raises(PageIndexAPIError, match="empty string"):
+        PageIndexClient(chat=" ")
+    # Case/whitespace variants of the label never fall through to a
+    # silent model name.
+    monkeypatch.setenv("PAGEINDEX_API_KEY", "pi-env")
+    assert PageIndexClient(index=" Pageindex-Cloud ").api_key == "pi-env"
+    assert not PageIndexClient(index={"api_key": "k"},
+                               chat="PAGEINDEX-CLOUD")._local_chat
+    # Bare mode words are the label's short form; near-synonyms point at
+    # the real word instead of parsing as model names.
+    assert PageIndexClient(index=" Cloud ").api_key == "pi-env"
+    assert not hasattr(PageIndexClient(index="local"), "api_key")
+    assert not PageIndexClient(api_key="k", chat="cloud")._local_chat
+    assert PageIndexClient(api_key="k", chat="local")._local_chat
+    for word in ("Hosted", " managed "):
+        with pytest.raises(PageIndexAPIError, match="not a mode word"):
+            PageIndexClient(index=word)
+        with pytest.raises(PageIndexAPIError, match="not a mode word"):
+            PageIndexClient(chat=word)
+
+
+def test_bare_client_ignores_env_key(monkeypatch):
+    """PAGEINDEX_API_KEY never moves the documents on its own — only code
+    that explicitly says cloud reads it."""
+    monkeypatch.setenv("PAGEINDEX_API_KEY", "pi-env")
+    client = PageIndexClient()
+    assert not hasattr(client, "api_key") and client._local_chat
+
+
+def test_env_key_reads_load_dotenv():
+    """The SDK's .env support is pageindex.utils' import-time
+    load_dotenv(); every spelling that reads PAGEINDEX_API_KEY must
+    trigger it, or a key in .env is visible only when something else
+    imported utils first. The sentinel finder stands in for the .env
+    file: importing pageindex.utils makes the key appear."""
+    probe = "\n".join([
+        "import importlib.abc, os, sys",
+        "class Sentinel(importlib.abc.MetaPathFinder):",
+        "    def find_spec(self, name, path=None, target=None):",
+        "        if name == 'pageindex.utils':",
+        "            os.environ.setdefault('PAGEINDEX_API_KEY', 'pi-dotenv')",
+        "        return None",
+        "sys.meta_path.insert(0, Sentinel())",
+        "import pageindex",
+        "from pageindex import PageIndexClient, PageIndexCloudClient",
+        "for build in (lambda: PageIndexClient(index='pageindex-cloud'),",
+        "              lambda: PageIndexClient(mode='cloud'),",
+        "              lambda: PageIndexClient(index={'mode': 'cloud'}),",
+        "              lambda: PageIndexCloudClient()):",
+        "    sys.modules.pop('pageindex.utils', None)",
+        "    pageindex.__dict__.pop('utils', None)",
+        "    os.environ.pop('PAGEINDEX_API_KEY', None)",
+        "    assert build().api_key == 'pi-dotenv', build",
+        "print('ok')",
+    ])
+    out = subprocess.run([sys.executable, "-c", probe],
+                         capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "ok"
+
+
+def test_env_key_found_from_cwd(tmp_path):
+    """A pip-installed SDK lives in site-packages; the user's .env lives
+    at their project root. A bare load_dotenv() searches upward from
+    utils.py, so it found a checkout's .env and never an installed
+    user's. A script file, not -c: dotenv treats a file-less __main__ as
+    interactive and searches from the cwd regardless."""
+    (tmp_path / ".env").write_text("PAGEINDEX_API_KEY=pi-dotenv-cwd\n")
+    (tmp_path / "app.py").write_text(
+        "from pageindex import PageIndexCloudClient\n"
+        "print('ok' if PageIndexCloudClient().api_key == 'pi-dotenv-cwd'\n"
+        "      else 'other')\n")
+    env = {**os.environ, "PYTHONPATH": str(Path(__file__).parent.parent)}
+    env.pop("PAGEINDEX_API_KEY", None)
+    out = subprocess.run([sys.executable, "app.py"], cwd=tmp_path, env=env,
+                         capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "ok"
+
+
+def test_env_not_loaded_from_install_dir(tmp_path, tmp_path_factory):
+    """The cwd search finding nothing must end the search: find_dotenv
+    returns '' then, and `or None` handed load_dotenv its own upward walk
+    from utils.py — the install-dir leak the cwd search replaced. A
+    symlinked package puts utils.py under a tree whose root holds a .env;
+    the cwd tree holds none."""
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "pageindex").symlink_to(Path(__file__).parent.parent / "pageindex")
+    (tmp_path / ".env").write_text("PAGEINDEX_API_KEY=pi-leaked\n")
+    cwd = tmp_path_factory.mktemp("elsewhere")
+    (cwd / "app.py").write_text(
+        "from pageindex import PageIndexCloudClient, PageIndexAPIError\n"
+        "try:\n"
+        "    print(PageIndexCloudClient().api_key)\n"
+        "except PageIndexAPIError:\n"
+        "    print('unset')\n")
+    env = {**os.environ, "PYTHONPATH": str(site)}
+    env.pop("PAGEINDEX_API_KEY", None)
+    out = subprocess.run([sys.executable, "app.py"], cwd=cwd, env=env,
+                         capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() != "pi-leaked", out.stdout
+
+
+def test_empty_values_refused_never_silent():
+    """An empty value configures nothing — pre-fix, an empty chat-side
+    value on a cloud client silently selected own-model chat on the
+    default model."""
+    for kwargs in ({"chat_model": ""}, {"chat_model": " "},
+                   {"retrieve_model": ""},
+                   {"chat_backend": {}}, {"model": ""},
+                   {"index_model": ""}, {"index_backend": {}},
+                   {"storage_path": ""}):
+        with pytest.raises(PageIndexAPIError, match="configures nothing"):
+            PageIndexClient(**kwargs)
+        if next(iter(kwargs)) in ("chat_model", "retrieve_model",
+                                  "chat_backend"):
+            with pytest.raises(PageIndexAPIError, match="configures nothing"):
+                PageIndexClient(api_key="pi-k", **kwargs)
+    with pytest.raises(PageIndexAPIError, match="configures nothing"):
+        PageIndexClient(api_key="pi-k", chat={"model": ""})
+    with pytest.raises(PageIndexAPIError, match="configures nothing"):
+        PageIndexClient(api_key="pi-k", chat={"model": " "})
+    with pytest.raises(PageIndexAPIError, match="configures nothing"):
+        PageIndexClient(chat={"backend": {}})
+    # None-valued slot keys mean "absent", exactly like the flat args —
+    # a slot left with nothing real is the empty-dict error.
+    with pytest.raises(PageIndexAPIError, match="empty dict"):
+        PageIndexClient(api_key="pi-k", chat={"model": None})
+    with pytest.raises(PageIndexAPIError, match="empty dict"):
+        PageIndexClient(index={"model": None})
+
+
+def test_model_umbrella_names_split_for_slots(tmp_path):
+    """model= sets both roles, so no slot can absorb it — the error
+    teaches a rewrite that works: the model inside the slot, the flat
+    role name for the other side."""
+    for kwargs in ({"model": "m", "chat": {"backend": {"base_url": "u"}}},
+                   {"model": "m", "index": {"storage_path": "/x"}},
+                   {"model": "m", "chat": "c"}):
+        with pytest.raises(PageIndexAPIError,
+                           match="name the model inside the slot"):
+            PageIndexClient(**kwargs)
+    # Following the remedy constructs a working client.
+    client = PageIndexClient(
+        index={"model": "m", "storage_path": str(tmp_path)}, chat_model="m")
+    assert client.index_model == client.chat_model == "m"
+    client = PageIndexClient(
+        index_model="m", chat={"model": "m", "backend": {"base_url": "u"}})
+    assert client.index_model == client.chat_model == "m"
+
+
+def test_post_construction_chat_model_switches_whole_client():
+    """chat_model is documented as assignable; the mode must follow the
+    attribute, never a stale construction-time snapshot."""
+    client = PageIndexClient(api_key="pi-k")
+    assert not client._local_chat
+    client.chat_model = "openai/m"
+    assert client._local_chat
+    legacy = PageIndexClient(api_key="pi-k")
+    legacy.retrieve_model = "m2"  # the 0.2.9 write path
+    assert legacy._local_chat and legacy.chat_model == "m2"
+
+
+def test_keyless_cloud_hint_matches_the_spelling(monkeypatch):
+    """Following the error's own remedy must construct a working client
+    — the index= spellings cannot combine with flat api_key=."""
+    monkeypatch.delenv("PAGEINDEX_API_KEY", raising=False)
+    with pytest.raises(PageIndexAPIError) as err:
+        PageIndexClient(index="pageindex-cloud")
+    assert 'index={"api_key": ...}' in str(err.value)
+    with pytest.raises(PageIndexAPIError) as err:
+        PageIndexClient(index={"mode": "cloud"})
+    assert 'index={"api_key": ...}' in str(err.value)
+    with pytest.raises(PageIndexAPIError) as err:
+        PageIndexClient(mode="cloud")
+    assert "(api_key=...)" in str(err.value)
+    assert PageIndexClient(mode="cloud", api_key="pi-k").api_key == "pi-k"
+
+
+def test_argument_type_errors_are_pageindex_errors():
+    for kwargs, msg in (({"index": {"storage_path": 5}},
+                         r'index\["storage_path"\] must be a str'),
+                        ({"chat": {"backend": "x"}},
+                         r'chat\["backend"\] must be a dict'),
+                        ({"chat_backend": "x"}, "chat_backend must be a dict"),
+                        ({"chat_model": 5}, "chat_model must be a str"),
+                        ({"index_backend": ["x"]},
+                         "index_backend must be a dict")):
+        with pytest.raises(PageIndexAPIError, match=msg):
+            PageIndexClient(**kwargs)
+
+
+def test_strings_are_stripped_in_every_spelling():
+    for client in (PageIndexClient(index=" i-model ", chat=" openai/m "),
+                   PageIndexClient(index={"model": " i-model "},
+                                   chat={"model": " openai/m "}),
+                   PageIndexClient(index_model=" i-model ",
+                                   chat_model=" openai/m ")):
+        assert client.index_model == "i-model"
+        assert client.chat_model == "openai/m"
+
+
+def test_managed_chat_client_reads_none_not_attribute_error():
+    """The docstring advertises client.chat_model on every client; a
+    managed-chat client answers None (the endpoint picks its own model)."""
+    client = PageIndexClient(api_key="pi-k")
+    assert client.chat_model is None
+    assert client.retrieve_model is None
+    assert client.chat_backend is None
+    assert not client._local_chat
+    client.chat_model = "openai/m"  # and the switch still flips
+    assert client._local_chat
+
+
+# ── local: indexing and reading ──
+
+def test_submit_and_get_tree(local_client, indexed_doc, tmp_path, monkeypatch):
+    tree = local_client.get_tree(indexed_doc, node_summary=True)
+    assert tree["status"] == "completed"
+    assert tree["retrieval_ready"] is True
+    root = tree["result"][0]
+    assert (root["start_index"], root["end_index"]) == (1, 2)
+    assert "page_index" not in root and "prefix_summary" not in root
+    assert root["summary"] == "root summary"
+    assert "Hello page one" in root["text"]
+    child, = root["nodes"]
+    assert (child["start_index"], child["end_index"]) == (2, 2)
+    assert child["summary"] == "child summary"
+    assert child["text"] == "Second page about bananas"
+
+    no_summary = local_client.get_tree(indexed_doc)["result"][0]
+    assert all("summary" not in node for node in [no_summary, *no_summary["nodes"]])
+
+
+def test_get_tree_include_text_false(local_client, indexed_doc):
+    tree = local_client.get_tree(indexed_doc, include_text=False)
+    root = tree["result"][0]
+    assert all("text" not in node for node in [root, *root["nodes"]])
+    assert (root["start_index"], root["end_index"]) == (1, 2)
+
+    with_text = local_client.get_tree(indexed_doc)["result"][0]
+    assert "text" in with_text
+
+
+def test_get_document_structure(local_client, indexed_doc):
+    result = local_client.get_document_structure(indexed_doc)
+    assert isinstance(result, list)
+    root = result[0]
+    assert all("text" not in node for node in [root, *root["nodes"]])
+    assert (root["start_index"], root["end_index"]) == (1, 2)
+    assert [node.get("summary") for node in [root, *root["nodes"]]] == [
+        "root summary", "child summary"]
+
+
+@pytest.mark.parametrize("mode", ["flash", "standard"])
+def test_get_tree_keeps_each_index_self_consistent(local_client, tmp_path,
+                                                   monkeypatch, mode):
+    """get_tree adds and moves no node: every node keeps the summary written
+    for its own range, a flash parent's range covering its subtree and a
+    standard parent's ending where its first child starts."""
+    from conftest import build_pdf
+    pdf = tmp_path / "report.pdf"
+    pdf.write_bytes(build_pdf(["Opening words", "Alpha body", "Beta body"]))
+    structure = [{"title": "Report", "node_id": "0000", "start_index": 1,
+                  "end_index": 3 if mode == "flash" else 2, "summary": "report",
+                  "nodes": [{"title": "Alpha", "node_id": "0001", "start_index": 2,
+                             "end_index": 2, "summary": "alpha"},
+                            {"title": "Beta", "node_id": "0002", "start_index": 3,
+                             "end_index": 3, "summary": "beta"}]}]
+    result = {"doc_name": "report.pdf", "doc_description": "d", "structure": structure}
+    monkeypatch.setattr(pageindex.flash, "page_index_flash", lambda pdf, **kw: result)
+    monkeypatch.setattr(page_index_module, "page_index_main", lambda *a, **kw: result)
+    monkeypatch.setattr(pageindex.utils, "llm_completion", lambda model, prompt, **kw: "d")
+    doc_id = local_client.submit_document(str(pdf), mode=mode)["doc_id"]
+
+    root = local_client.get_tree(doc_id, node_summary=True)["result"][0]
+    assert [(node["title"], node["start_index"], node["end_index"], node["summary"])
+            for node in [root, *root["nodes"]]] == [
+        ("Report", 1, 3 if mode == "flash" else 2, "report"),
+        ("Alpha", 2, 2, "alpha"), ("Beta", 3, 3, "beta")]
+    # the parent's text runs onto its first child's page, where that heading may sit mid-page
+    assert "Alpha body" in root["text"] and "Beta body" not in root["text"]
+
+
+def test_flash_description_reads_only_the_top_level(local_client, tmp_path, monkeypatch):
+    """A parent's summary already covers its subtree, so the description
+    prompt carries the top level alone."""
+    from conftest import build_pdf
+    pdf = tmp_path / "report.pdf"
+    pdf.write_bytes(build_pdf(["Alpha body", "Beta body"]))
+    structure = [{"title": "Report", "start_index": 1, "end_index": 2,
+                  "summary": "report summary",
+                  "nodes": [{"title": "Alpha", "start_index": 1, "end_index": 2,
+                             "summary": "alpha summary"}]}]
+    monkeypatch.setattr(pageindex.flash, "page_index_flash",
+                        lambda pdf, **kw: {"structure": structure})
+    prompts = []
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda model, prompt, **kw: prompts.append(prompt) or "d")
+    local_client.submit_document(str(pdf), mode="flash")
+    assert len(prompts) == 1
+    assert "report summary" in prompts[0] and "alpha summary" not in prompts[0]
+
+
+def test_local_submit_reports_the_indexing_token_usage(local_client, tmp_path, monkeypatch):
+    """Every model call of one submit, async summaries and the sync
+    description alike, is summed into its own result's usage."""
+    import litellm
+    from types import SimpleNamespace
+    from conftest import build_pdf
+    pdf = tmp_path / "long.pdf"
+    pdf.write_bytes(build_pdf([[(72, 740 - 14 * i, 10, f"{fruit} line {i} " * 6) for i in range(45)]
+                               for fruit in ("apples", "bananas")]))
+    calls = {"async": 0, "sync": 0}
+
+    def reply(content):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=content),
+                                     finish_reason="stop")],
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=3,
+                                  prompt_tokens_details=SimpleNamespace(cached_tokens=4,
+                                                                        cache_write_tokens=1),
+                                  completion_tokens_details=SimpleNamespace(reasoning_tokens=2)))
+
+    async def acompletion(**kw):
+        calls["async"] += 1
+        return reply('{"summary": "s", "subsections": []}')
+
+    def completion(**kw):
+        calls["sync"] += 1
+        return reply("d")
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+    monkeypatch.setattr(litellm, "completion", completion)
+
+    for _ in range(2):
+        calls.update({"async": 0, "sync": 0})
+        usage = local_client.submit_document(str(pdf))["usage"]
+        n = calls["async"] + calls["sync"]
+        assert calls["async"] and calls["sync"] == 1
+        assert usage == {"prompt_tokens": 10 * n, "completion_tokens": 3 * n,
+                         "total_tokens": 13 * n,
+                         "prompt_tokens_details": {"cached_tokens": 4 * n, "cache_write_tokens": n},
+                         "completion_tokens_details": {"reasoning_tokens": 2 * n}}
+
+
+def test_unify_tree_edges():
+    from pageindex.utils import unify_tree
+    tree = [{"title": "A", "page_index": 3, "prefix_summary": "a",
+             "nodes": [{"title": "A.1", "page_index": 5, "summary": "a1"},
+                       {"title": "A.2", "page_index": 7, "prefix_summary": "a2",
+                        "nodes": [{"title": "A.2.1", "page_index": 8}]}]}]
+    once = unify_tree(tree, 9)
+    # without end_index each node ends where the next one in reading order
+    # starts: a parent's range is its own opening, as its summary describes
+    assert once == [
+        {"title": "A", "start_index": 3, "end_index": 5, "summary": "a", "nodes": [
+            {"title": "A.1", "start_index": 5, "end_index": 7, "summary": "a1"},
+            {"title": "A.2", "start_index": 7, "end_index": 8, "summary": "a2", "nodes": [
+                {"title": "A.2.1", "start_index": 8, "end_index": 9}]}]}]
+    assert unify_tree(once, 9) == once
+    # a node with no page (a hand-edited store) passes through without raising
+    assert unify_tree([{"title": "B", "start_index": None}], None) == [
+        {"title": "B", "start_index": None, "end_index": None}]
+
+
+def test_create_node_mapping_reads_get_tree_ranges():
+    from pageindex.utils import create_node_mapping
+    tree = [{"title": "A", "node_id": "0000", "start_index": 1, "end_index": 9,
+             "nodes": [{"title": "B", "node_id": "0001", "start_index": 4, "end_index": 9}]}]
+    mapping = create_node_mapping(tree, include_page_ranges=True, max_page=12)
+    assert [(m["start_index"], m["end_index"]) for m in mapping.values()] == [(1, 9), (4, 9)]
+    legacy = [{"title": "A", "node_id": "0000", "page_index": 1,
+               "nodes": [{"title": "B", "node_id": "0001", "page_index": 4}]}]
+    mapping = create_node_mapping(legacy, include_page_ranges=True, max_page=12)
+    assert [(m["start_index"], m["end_index"]) for m in mapping.values()] == [(1, 4), (4, 12)]
+
+
+def test_get_page_content(local_client, indexed_doc):
+    pages = local_client.get_page_content(indexed_doc, "1")
+    assert len(pages) == 1
+    assert pages[0]["page_index"] == 1
+    assert "Hello page one" in pages[0]["markdown"]
+
+    pages = local_client.get_page_content(indexed_doc, "1-2")
+    assert len(pages) == 2
+
+    pages = local_client.get_page_content(indexed_doc, "2,1")
+    assert [p["page_index"] for p in pages] == [1, 2]
+
+    assert local_client.get_page_content(indexed_doc, "99") == []
+
+    with pytest.raises(PageIndexAPIError):
+        local_client.get_page_content(indexed_doc, "abc")
+
+
+def test_get_page_content_span_bomb_rejected(local_client, indexed_doc):
+    """An absurd range must be rejected arithmetically, not expanded into
+    a billion integers in the caller's process (the tool layer already
+    refused; the public client method did not)."""
+    with pytest.raises(PageIndexAPIError, match="spans more than 10000"):
+        local_client.get_page_content(indexed_doc, "1-1000001")
+    # At the bound itself the spec still parses.
+    assert local_client.get_page_content(indexed_doc, "5-10004") == []
+
+
+def test_local_get_citations(local_client, indexed_doc):
+    """Local page content has no blocks: page citations resolve to the
+    document id, get_block names the cloud-only exit, and a block citation
+    keeps its entry without a bbox."""
+    answer = 'Apples <cite doc="sample.pdf" page="1"/> and none <cite doc="other.pdf" page="2"/>.'
+    assert local_client.get_citations(answer) == [
+        {"document": "sample.pdf", "doc_id": indexed_doc, "page": 1},
+        {"document": "other.pdf", "doc_id": None, "page": 2},
+    ]
+    with pytest.raises(PageIndexAPIError, match="get_block is cloud-only"):
+        local_client.get_block(indexed_doc, "p1_text_1")
+    assert local_client.get_citations(
+        '<cite doc="sample.pdf" page="1" block="p1_text_1"/>') == [
+        {"document": "sample.pdf", "doc_id": indexed_doc, "page": 1,
+         "block_id": "p1_text_1"}]
+
+
+def test_local_resolve_citations(local_client, indexed_doc):
+    """resolve_citations rewrites tags and enriches entries on local docs."""
+    answer = 'Apples <cite doc="sample.pdf" page="1"/> and none <cite doc="other.pdf" page="2"/>.'
+    assert local_client.resolve_citations(answer) == {
+        "answer": "Apples [[1]](#pageindex-citation-01) and none "
+                  "[[2]](#pageindex-citation-02).",
+        "citations": [
+            {"anchor": "pageindex-citation-01", "index": 1,
+             "document": "sample.pdf", "doc_id": indexed_doc, "page": 1},
+            {"anchor": "pageindex-citation-02", "index": 2,
+             "document": "other.pdf", "doc_id": None, "page": 2},
+        ],
+    }
+
+
+def test_local_paths_and_images(local_client, indexed_doc):
+    """Local documents have no folders and no stored images: a document's
+    path is its name, and the folder and image lookups refuse."""
+    assert local_client.get_document_path(indexed_doc) == "sample.pdf"
+    for call in (lambda: local_client.get_folder_path("f-1"),
+                 lambda: local_client.get_folder_id("Research"),
+                 lambda: local_client.get_page_image(indexed_doc, 1),
+                 lambda: local_client.get_document_image(indexed_doc, "img-0.jpeg")):
+        with pytest.raises(PageIndexAPIError, match="is cloud-only"):
+            call()
+
+
+def test_submit_does_not_create_cwd_logs(local_client, sample_pdf, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    def fake_page_index_main(doc, opt=None, logger=None, page_list=None):
+        logger.info({"probe": True})
+        return {"doc_name": "sample.pdf", "doc_description": None,
+                "structure": json.loads(json.dumps(STRUCTURE))}
+    monkeypatch.setattr(page_index_module, "page_index_main", fake_page_index_main)
+    local_client.submit_document(sample_pdf, mode="standard")
+    assert not (tmp_path / "logs").exists()
+
+
+def test_submit_duplicate_name_gets_suffix(local_client, sample_pdf, monkeypatch):
+    """Mirror the cloud upload: a second submit of the same file name is
+    stored as name_1, not as a same-name duplicate."""
+    def fake_page_index_main(doc, opt=None, logger=None, page_list=None):
+        return {"doc_name": "sample.pdf", "doc_description": "d",
+                "structure": json.loads(json.dumps(STRUCTURE))}
+    monkeypatch.setattr(page_index_module, "page_index_main", fake_page_index_main)
+    first = local_client.submit_document(sample_pdf, mode="standard")
+    assert first["name"] == "sample.pdf"
+    with pytest.warns(UserWarning, match='stored as "sample_1.pdf"'):
+        second = local_client.submit_document(sample_pdf, mode="standard")
+    assert second["name"] == "sample_1.pdf"
+    names = {d["id"]: d["name"]
+             for d in local_client.list_documents()["documents"]}
+    assert names[first["doc_id"]] == "sample.pdf"
+    assert names[second["doc_id"]] == "sample_1.pdf"
+
+
+def test_submit_duplicate_name_exhaustion(local_client, monkeypatch):
+    api = local_client._api
+    metas = ([{"name": "x.pdf"}]
+             + [{"name": f"x_{num}.pdf"} for num in range(1, 100)])
+    monkeypatch.setattr(api._store, "list_metas", lambda: metas)
+    with pytest.raises(PageIndexAPIError, match="Too many files"):
+        api._unique_doc_name("x.pdf")
+
+
+def test_submit_name_exhaustion_rejects_before_indexing(
+    local_client, sample_pdf, monkeypatch,
+):
+    api = local_client._api
+    metas = ([{"name": "sample.pdf"}]
+             + [{"name": f"sample_{num}.pdf"} for num in range(1, 100)])
+    monkeypatch.setattr(api._store, "list_metas", lambda: metas)
+    monkeypatch.setattr(
+        page_index_module, "page_index_main",
+        lambda *args, **kwargs: pytest.fail(
+            "indexer ran despite name exhaustion"),
+    )
+    with pytest.raises(PageIndexAPIError, match="Too many files"):
+        local_client.submit_document(sample_pdf, mode="standard")
+
+
+def test_submit_flash(local_client, sample_pdf, monkeypatch):
+    calls = {}
+    def fake_flash(pdf, summary=True, summary_model=None, **kwargs):
+        calls["summary"] = summary
+        calls["summary_model"] = summary_model
+        calls["optimize"] = kwargs.get("optimize")
+        calls["optimize_model"] = kwargs.get("optimize_model")
+        return {"doc_name": "sample.pdf",
+                "structure": [{"title": "Flash Root", "start_index": 1,
+                               "end_index": 2, "summary": "s", "nodes": []}]}
+    monkeypatch.setattr(pageindex.flash, "page_index_flash", fake_flash)
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda model, prompt, **kw: "Flash description.")
+    doc_id = local_client.submit_document(sample_pdf, mode="flash")["doc_id"]
+    assert calls == {"summary": True, "summary_model": local_client.summary_model,
+                     "optimize": "full",
+                     "optimize_model": local_client.summary_model}
+    root = local_client.get_tree(doc_id)["result"][0]
+    assert root["node_id"] == "0000"
+    assert "Hello page one" in root["text"]
+    assert local_client.get_document(doc_id)["description"] == "Flash description."
+
+
+def test_submit_defaults_to_flash(local_client, sample_pdf, monkeypatch):
+    monkeypatch.setattr(
+        pageindex.flash, "page_index_flash",
+        lambda pdf, **kwargs: {
+            "doc_name": "sample.pdf",
+            "structure": [{"title": "Flash Root", "start_index": 1,
+                           "end_index": 2, "summary": "s", "nodes": []}]})
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda model, prompt, **kw: "Flash description.")
+    doc_id = local_client.submit_document(sample_pdf)["doc_id"]
+    assert local_client._api._store.get_meta(doc_id)["mode"] == "flash"
+
+
+def test_submit_rejects_structure_beyond_stored_pages(local_client, sample_pdf,
+                                                      monkeypatch):
+    """A tree spanning pages the store lacks fails submit instead of saving a doc whose reads IndexError."""
+    monkeypatch.setattr(
+        pageindex.flash, "page_index_flash",
+        lambda pdf, **kwargs: {
+            "doc_name": "sample.pdf",
+            "structure": [{"title": "Root", "start_index": 1,
+                           "end_index": 3, "summary": "s", "nodes": []}]})
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda model, prompt, **kw: "d.")
+    with pytest.raises(PageIndexAPIError, match="pages 1-3 outside"):
+        local_client.submit_document(sample_pdf)
+    assert local_client._api._store.list_metas() == []
+
+
+def test_submit_survives_pypdf2_lone_surrogates(local_client, sample_pdf,
+                                                monkeypatch):
+    """PyPDF2 decodes broken ToUnicode with surrogatepass; the store gets U+FFFD, not a utf-8-fatal str."""
+    import PyPDF2
+    monkeypatch.setattr(PyPDF2.PageObject, "extract_text",
+                        lambda self: "\ud83dello broken")
+    monkeypatch.setattr(
+        pageindex.flash, "page_index_flash",
+        lambda p, **kwargs: {
+            "structure": [{"title": "T", "start_index": 1,
+                           "end_index": 1, "summary": "s", "nodes": []}]})
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda model, prompt, **kw: "d.")
+    doc_id = local_client.submit_document(sample_pdf)["doc_id"]
+    markdown = local_client.get_ocr(doc_id)["result"][0]["markdown"]
+    assert "\ud83d" not in markdown
+    assert markdown.startswith("�ello")
+
+
+def test_page_index_flash_rejects_unknown_optimize():
+    from pageindex.flash import page_index_flash
+    with pytest.raises(ValueError, match="optimize must be"):
+        page_index_flash("never-opened.pdf", optimize="off")
+
+
+def test_llm_completion_refuses_unknown_provider(monkeypatch):
+    """A first segment LiteLLM does not know (a HuggingFace repo id like
+    Qwen/...) is refused with the openai/ escape before the retry loop,
+    instead of burning it on per-call 400s."""
+    import litellm
+    monkeypatch.setattr(litellm, "completion",
+                        lambda **kw: pytest.fail("reached the wire"))
+    with pytest.raises(Exception, match="not a LiteLLM provider"):
+        pageindex.utils.llm_completion("Qwen/my-model", "probe")
+
+
+def test_submit_missing_llm_key_fails_loud(local_client, sample_pdf, monkeypatch):
+    import litellm  # first import may load a .env; delenv after it
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr("pageindex.utils.time.sleep", lambda s: None)
+    def first_llm_call(*args, **kwargs):
+        return pageindex.utils.llm_completion("gpt-4o", "probe")
+    monkeypatch.setattr(page_index_module, "page_index_main", first_llm_call)
+    monkeypatch.setattr(pageindex.flash, "page_index_flash", first_llm_call)
+    for kwargs in ({"mode": "standard"}, {"mode": "flash"}):
+        with pytest.raises(PageIndexAPIError, match="OPENAI_API_KEY"):
+            local_client.submit_document(sample_pdf, **kwargs)
+    assert local_client.list_documents()["total"] == 0
+
+
+@pytest.mark.parametrize("status", [401, None])
+def test_submit_shows_an_explained_llm_failure_alone(local_client, sample_pdf,
+                                                     monkeypatch, status):
+    """An exhausted ladder with a status (a claude-code/ login included)
+    names its cause, so the traceback shows the submit error alone; one
+    without, such as a bug the ladder retried, keeps its chain. Neither
+    carries run_off_loop's no-running-loop RuntimeError."""
+    def fail(pdf, **kwargs):
+        raise pageindex.utils.LLMRetriesExhausted("LLM call failed",
+                                                  status_code=status)
+    monkeypatch.setattr(pageindex.flash, "page_index_flash", fail)
+    with pytest.raises(PageIndexAPIError, match="LLM call failed") as err:
+        local_client.submit_document(sample_pdf)
+    ladder = err.value.__context__
+    assert isinstance(ladder, pageindex.utils.LLMRetriesExhausted)
+    assert err.value.__cause__ is (None if status else ladder)
+    assert err.value.__suppress_context__
+    assert ladder.__context__ is None
+
+
+def test_submit_rejections(local_client, sample_pdf, tmp_path):
+    with pytest.raises(FileNotFoundError):
+        local_client.submit_document(str(tmp_path / "missing.pdf"))
+    (tmp_path / "notes.txt").write_text("hi")
+    with pytest.raises(PageIndexAPIError, match="only PDF"):
+        local_client.submit_document(str(tmp_path / "notes.txt"))
+    with pytest.raises(PageIndexAPIError, match="unknown local processing mode"):
+        local_client.submit_document(sample_pdf, mode="mcp")
+    with pytest.raises(PageIndexAPIError, match="folders"):
+        local_client.submit_document(sample_pdf, folder_id="f1")
+    with pytest.raises(PageIndexAPIError, match="beta_headers"):
+        local_client.submit_document(sample_pdf, beta_headers=["block_reference"])
+
+
+def test_write_json_atomic_replaces_lone_surrogates(tmp_path):
+    """A lone surrogate (an os.fsdecode'd path in metadata, an LLM-written
+    \\ud83d escape) must not crash the store's writer after a whole
+    indexing run — it lands as the encoder's replacement character."""
+    from pageindex.local_store import _read_json, _write_json_atomic
+
+    path = tmp_path / "doc.json"
+    _write_json_atomic(path, {"src": "bad-\udcff-path"})
+    assert _read_json(path)["src"] == "bad-?-path"
+
+
+def test_corrupt_pdf_raises_api_error(local_client, tmp_path):
+    bad = tmp_path / "bad.pdf"
+    bad.write_bytes(b"%PDF-1.4 garbage with no xref or trailer")
+    with pytest.raises(PageIndexAPIError, match="could not read PDF"):
+        local_client.submit_document(str(bad))
+
+
+def test_encrypted_pdf_raises_api_error(local_client, sample_pdf, tmp_path):
+    from PyPDF2 import PdfReader, PdfWriter
+
+    writer = PdfWriter()
+    for page in PdfReader(sample_pdf).pages:
+        writer.add_page(page)
+    writer.encrypt("secret")
+    enc = tmp_path / "enc.pdf"
+    with open(enc, "wb") as f:
+        writer.write(f)
+    with pytest.raises(PageIndexAPIError, match="could not read PDF"):
+        local_client.submit_document(str(enc))
+
+
+def test_submit_explicit_standard_mode(local_client, sample_pdf, monkeypatch):
+    calls = []
+
+    def fake_page_index_main(doc, opt=None, logger=None, page_list=None):
+        calls.append(doc)
+        return {
+            "doc_name": "sample.pdf",
+            "doc_description": "A test document.",
+            "structure": json.loads(json.dumps(STRUCTURE)),
+        }
+
+    monkeypatch.setattr(page_index_module, "page_index_main", fake_page_index_main)
+    doc_id = local_client.submit_document(sample_pdf, mode="standard")["doc_id"]
+
+    assert calls == [sample_pdf]
+    assert local_client._api._store.get_meta(doc_id)["mode"] == "standard"
+
+
+@pytest.mark.parametrize("mode", ["standard", "flash"])
+def test_submit_from_running_event_loop(
+    local_client, sample_pdf, monkeypatch, mode
+):
+    def fake_index(*args):
+        asyncio.run(asyncio.sleep(0))
+        return json.loads(json.dumps(STRUCTURE)), "A test document."
+
+    monkeypatch.setattr(local_client._api, f"_index_{mode}", fake_index)
+
+    async def submit():
+        return local_client.submit_document(sample_pdf, mode=mode)
+
+    doc_id = asyncio.run(submit())["doc_id"]
+    assert local_client.get_document(doc_id)["status"] == "completed"
+
+
+def test_submit_with_metadata(local_client, sample_pdf, monkeypatch):
+    monkeypatch.setattr(
+        page_index_module, "page_index_main",
+        lambda doc, opt=None, logger=None, page_list=None: {
+            "doc_name": "sample.pdf", "doc_description": None,
+            "structure": json.loads(json.dumps(STRUCTURE))})
+    tags = {"project": "alpha", "year": 2026}
+    doc_id = local_client.submit_document(sample_pdf, mode="standard", metadata=tags)["doc_id"]
+    assert local_client.get_tree(doc_id)["metadata"] == tags
+    assert local_client.get_ocr(doc_id)["metadata"] == tags
+    assert local_client.list_documents()["documents"][0]["metadata"] == tags
+    assert local_client.get_document(doc_id)["metadata"] == tags
+
+
+def test_submit_metadata_validation(local_client, sample_pdf, monkeypatch):
+    indexed = []
+    monkeypatch.setattr(page_index_module, "page_index_main",
+                        lambda *args, **kwargs: indexed.append(1))
+    with pytest.raises(PageIndexAPIError, match="metadata must be a dict"):
+        local_client.submit_document(sample_pdf, metadata=["not", "a", "dict"])
+    with pytest.raises(PageIndexAPIError, match="valid JSON"):
+        local_client.submit_document(sample_pdf, metadata={"x": object()})
+    assert indexed == []
+
+
+def test_blank_pdf_rejected(local_client, tmp_path):
+    from conftest import build_pdf
+    blank = tmp_path / "blank.pdf"
+    blank.write_bytes(build_pdf(["", ""]))
+    with pytest.raises(PageIndexAPIError, match="All pages are blank"):
+        local_client.submit_document(str(blank))
+
+
+def test_get_ocr(local_client, indexed_doc):
+    page = local_client.get_ocr(indexed_doc)
+    assert page["result"][0] == {"page_index": 1,
+                                 "markdown": "Hello page one about apples"}
+    raw = local_client.get_ocr(indexed_doc, format="raw")
+    assert raw["result"] == ("Hello page one about apples\n\n"
+                             "Second page about bananas")
+    node = local_client.get_ocr(indexed_doc, format="node")
+    assert node["result"] == [
+        {"title": "Root Section", "level": 1, "page_index": 1,
+         "text": "Hello page one about applesSecond page about bananas"},
+        {"title": "Child Section", "level": 2, "page_index": 2,
+         "text": "Second page about bananas"},
+    ]
+    with pytest.raises(ValueError):
+        local_client.get_ocr(indexed_doc, format="bogus")
+
+
+def test_document_management(local_client, indexed_doc):
+    assert indexed_doc.startswith("pi-")
+    doc = local_client.get_document(indexed_doc)
+    assert doc["id"] == indexed_doc
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3}000)?",
+                        doc["createdAt"])
+    assert doc["name"] == "sample.pdf"
+    assert doc["description"] == "A test document."
+    assert doc["status"] == "completed"
+    assert doc["pageNum"] == 2
+    assert doc["folderId"] is None
+
+    listing = local_client.list_documents()
+    assert listing["total"] == 1
+    assert listing["limit"] == 50 and listing["offset"] == 0
+    assert listing["documents"][0]["id"] == indexed_doc
+    assert listing["documents"][0]["path"] is None
+
+    assert local_client.is_retrieval_ready(indexed_doc) is True
+
+    assert local_client.delete_document(indexed_doc) == {
+        "message": "Document deleted successfully."}
+    with pytest.raises(PageIndexAPIError, match="Document not found"):
+        local_client.delete_document(indexed_doc)
+    assert local_client.is_retrieval_ready(indexed_doc) is False
+
+
+def test_manifest_write_through_and_self_heal(local_client, indexed_doc, tmp_path):
+    manifest_path = tmp_path / "store" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["docs"][indexed_doc]["name"] == "sample.pdf"
+
+    # corrupt cache → listings rebuild it from the doc.json files
+    manifest_path.write_text("{broken")
+    assert local_client.list_documents()["total"] == 1
+    assert indexed_doc in json.loads(manifest_path.read_text())["docs"]
+
+    # missing cache → same
+    manifest_path.unlink()
+    assert local_client.list_documents()["total"] == 1
+
+    # doc dir removed behind the store's back → healed, not served stale
+    shutil.rmtree(tmp_path / "store" / "docs" / indexed_doc)
+    assert local_client.list_documents()["total"] == 0
+
+    local_client_meta = json.loads(manifest_path.read_text())
+    assert local_client_meta == {"docs": {}}
+
+
+@pytest.mark.parametrize("bad_entry", ["corrupt-entry", {"id": "wrong"}])
+def test_manifest_invalid_entry_self_heals(
+    local_client, indexed_doc, tmp_path, bad_entry
+):
+    manifest_path = tmp_path / "store" / "manifest.json"
+    manifest_path.write_text(json.dumps({"docs": {indexed_doc: bad_entry}}))
+
+    listing = local_client.list_documents()
+
+    assert listing["total"] == 1
+    assert listing["documents"][0]["id"] == indexed_doc
+    healed = json.loads(manifest_path.read_text())
+    assert healed["docs"][indexed_doc]["name"] == "sample.pdf"
+
+
+def test_manifest_updated_on_delete(local_client, indexed_doc, tmp_path):
+    local_client.delete_document(indexed_doc)
+    manifest = json.loads((tmp_path / "store" / "manifest.json").read_text())
+    assert manifest == {"docs": {}}
+
+
+def test_manifest_picks_up_external_doc(local_client, indexed_doc, tmp_path):
+    # a doc whose manifest update was lost (e.g. concurrent writer) still lists
+    docs_dir = tmp_path / "store" / "docs"
+    external_id = "11111111-1111-4111-8111-111111111111"
+    shutil.copytree(docs_dir / indexed_doc, docs_dir / external_id)
+    meta_path = docs_dir / external_id / "doc.json"
+    meta = json.loads(meta_path.read_text())
+    meta["id"] = external_id
+    meta_path.write_text(json.dumps(meta))
+
+    ids = {d["id"] for d in local_client.list_documents()["documents"]}
+    assert ids == {indexed_doc, external_id}
+
+
+def test_manifest_ignores_incomplete_dir(local_client, indexed_doc, tmp_path):
+    (tmp_path / "store" / "docs" / "crashed-save").mkdir()
+    listing = local_client.list_documents()
+    assert listing["total"] == 1
+    assert listing["documents"][0]["id"] == indexed_doc
+
+
+def test_torn_delete_never_lists_ghost(local_client, indexed_doc, tmp_path):
+    # crash mid-delete: doc.json gone, dir and manifest entry remain
+    doc_dir = tmp_path / "store" / "docs" / indexed_doc
+    (doc_dir / "doc.json").unlink()
+
+    assert local_client.list_documents()["total"] == 0
+    manifest = json.loads((tmp_path / "store" / "manifest.json").read_text())
+    assert manifest == {"docs": {}}
+    with pytest.raises(PageIndexAPIError):
+        local_client.get_document(indexed_doc)
+    with pytest.raises(PageIndexAPIError, match="Document not found"):
+        local_client.delete_document(indexed_doc)
+    assert not doc_dir.exists()
+
+
+def test_corrupt_doc_json_is_contained(local_client, indexed_doc, sample_pdf, tmp_path):
+    with pytest.warns(UserWarning):  # same-name resubmit → stored as sample_1.pdf
+        second = local_client.submit_document(sample_pdf, mode="standard")["doc_id"]
+    (tmp_path / "store" / "docs" / indexed_doc / "doc.json").write_text("{truncated")
+
+    # manifest still holds a good copy of the meta — served consistently
+    assert local_client.get_document(indexed_doc)["id"] == indexed_doc
+    assert local_client.list_documents()["total"] == 2
+
+    # without the manifest copy, the doc is treated as absent, not a crash
+    (tmp_path / "store" / "manifest.json").unlink()
+    listing = local_client.list_documents()
+    assert listing["total"] == 1
+    assert listing["documents"][0]["id"] == second
+    with pytest.raises(PageIndexAPIError):
+        local_client.get_document(indexed_doc)
+    assert local_client.is_retrieval_ready(indexed_doc) is False
+
+
+def test_invalid_utf8_is_contained(local_client, indexed_doc, tmp_path):
+    doc_json = tmp_path / "store" / "docs" / indexed_doc / "doc.json"
+    doc_json.write_bytes(b'{"id": "\xff\xfe broken')
+
+    # the manifest copy keeps serving, consistently across list and get
+    assert local_client.get_document(indexed_doc)["id"] == indexed_doc
+    assert local_client.list_documents()["total"] == 1
+
+    # even with the manifest corrupted the same way: no crash, self-heals
+    (tmp_path / "store" / "manifest.json").write_bytes(b"\xff\xfe")
+    assert local_client.list_documents()["total"] == 0
+    with pytest.raises(PageIndexAPIError):
+        local_client.get_document(indexed_doc)
+
+
+def test_corrupt_data_files_fail_loud(local_client, indexed_doc, tmp_path):
+    doc_dir = tmp_path / "store" / "docs" / indexed_doc
+    (doc_dir / "tree.json").write_bytes(b"\xff\xfe")
+    with pytest.raises(PageIndexAPIError, match="unreadable"):
+        local_client.get_tree(indexed_doc)
+    assert local_client.is_retrieval_ready(indexed_doc) is False
+
+    (doc_dir / "pages.json").write_text("{broken")
+    with pytest.raises(PageIndexAPIError, match="unreadable"):
+        local_client.get_ocr(indexed_doc)
+
+    # the metadata itself is intact, so listings stay honest
+    assert local_client.list_documents()["total"] == 1
+
+
+def test_get_tree_fails_loud_on_broken_pages(local_client, indexed_doc, tmp_path):
+    doc_dir = tmp_path / "store" / "docs" / indexed_doc
+    (doc_dir / "pages.json").write_text("{broken")
+    with pytest.raises(PageIndexAPIError, match="unreadable"):
+        local_client.get_tree(indexed_doc)
+
+
+def test_get_tree_fails_loud_on_empty_pages(local_client, indexed_doc, tmp_path):
+    doc_dir = tmp_path / "store" / "docs" / indexed_doc
+    (doc_dir / "pages.json").write_text("[]")
+    with pytest.raises(PageIndexAPIError, match="no page content"):
+        local_client.get_tree(indexed_doc)
+
+
+def test_data_file_as_directory_fails_loud(local_client, indexed_doc, tmp_path):
+    tree_path = tmp_path / "store" / "docs" / indexed_doc / "tree.json"
+    tree_path.unlink()
+    tree_path.mkdir()
+    with pytest.raises(PageIndexAPIError, match="unreadable"):
+        local_client.get_tree(indexed_doc)
+
+
+def test_list_documents_skips_unsafe_directory_names(
+    local_client, indexed_doc, tmp_path
+):
+    bad_dir = tmp_path / "store" / "docs" / "bad\\name"
+    bad_dir.mkdir()
+    (bad_dir / "doc.json").write_text("{}")
+    listing = local_client.list_documents()
+    assert [d["id"] for d in listing["documents"]] == [indexed_doc]
+
+
+def test_generate_doc_description_propagates_failures(monkeypatch):
+    """No swallow: a dead model fails the run instead of storing ''."""
+    def raiser(exc):
+        def _f(*args, **kwargs):
+            raise exc
+        return _f
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        raiser(RuntimeError("retries exhausted")))
+    with pytest.raises(RuntimeError):
+        pageindex.utils.generate_doc_description([])
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        raiser(ValueError("provider rejected the model")))
+    with pytest.raises(ValueError):
+        pageindex.utils.generate_doc_description([])
+
+
+def test_generate_summaries_all_failed_raises(monkeypatch):
+    async def boom(model, prompt):
+        raise ValueError("bad key")
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", boom)
+    structure = [{"title": "A", "text": "t1",
+                  "nodes": [{"title": "B", "text": "t2"}]}]
+    with pytest.raises(RuntimeError, match="all nodes"):
+        asyncio.run(pageindex.utils.generate_summaries_for_structure(structure))
+
+
+def test_generate_summaries_partial_failure_absorbed(monkeypatch):
+    async def flaky(model, prompt):
+        if "t1" in prompt:
+            raise ValueError("transient")
+        return "ok"
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", flaky)
+    structure = [{"title": "A", "text": "t1",
+                  "nodes": [{"title": "B", "text": "t2"}]}]
+    result = asyncio.run(pageindex.utils.generate_summaries_for_structure(structure))
+    summaries = {n["title"]: n["summary"]
+                 for n in pageindex.utils.structure_to_list(result)}
+    assert summaries == {"A": "", "B": "ok"}
+
+
+def test_generate_summaries_unrecoverable_raises(monkeypatch):
+    """A per-node 401 must abort, not store a blank node as completed."""
+    class Denied(Exception):
+        status_code = 401
+
+    async def deny_t1(model, prompt):
+        if "t1" in prompt:
+            raise Denied("key rejected")
+        return "ok"
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", deny_t1)
+    structure = [{"title": "A", "text": "t1",
+                  "nodes": [{"title": "B", "text": "t2"}]}]
+    with pytest.raises(Denied):
+        asyncio.run(pageindex.utils.generate_summaries_for_structure(structure))
+
+
+def test_summarize_tree_child_unrecoverable_raises(monkeypatch):
+    """A 401 on a leaf must abort the run, not store a blank subtree as
+    completed: the child gather's exceptions are checked, not discarded."""
+    class Denied(Exception):
+        status_code = 401
+
+    async def deny_alpha(model, prompt):
+        if "alpha" in prompt:
+            raise Denied("key rejected")
+        return '{"points": [], "summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", deny_alpha)
+    pdf_pages = [("alpha " * 5, 5), ("beta " * 5, 5)]
+    structure = [{"title": "R", "start_index": 1, "end_index": 2,
+                  "nodes": [
+                      {"title": "A", "start_index": 1, "end_index": 1},
+                      {"title": "B", "start_index": 2, "end_index": 2}]}]
+    with pytest.raises(Denied):
+        asyncio.run(pageindex.utils.summarize_tree(
+            structure, pdf_pages, small_node_tokens=0))
+
+
+def test_summarize_tree_fails_loud_when_every_model_call_fails(monkeypatch):
+    """A failure foreign to the retry ladder (not LLMRetriesExhausted)
+    blanks per node; the asked-and-never-answered backstop must still fail
+    the run loud — a raw-text short leaf cannot vouch for it."""
+    async def exhausted(model, prompt):
+        raise RuntimeError("LLM call failed after 10 attempts")
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", exhausted)
+    pdf_pages = [("tiny", 1), ("beta " * 300, 300)]
+    structure = [{"title": "R", "start_index": 1, "end_index": 2,
+                  "nodes": [
+                      {"title": "A", "start_index": 1, "end_index": 1},
+                      {"title": "B", "start_index": 2, "end_index": 2}]}]
+    with pytest.raises(RuntimeError, match="every summary call failed"):
+        asyncio.run(pageindex.utils.summarize_tree(structure, pdf_pages))
+
+
+def test_summarize_tree_all_short_leaves_need_no_model(monkeypatch):
+    """A tree whose every node summarizes from raw text makes zero model
+    calls and must not be mistaken for a failed run."""
+    async def unexpected(model, prompt):
+        raise AssertionError("no model call expected")
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", unexpected)
+    structure = [{"title": "A", "start_index": 1, "end_index": 1}]
+    out = asyncio.run(pageindex.utils.summarize_tree(structure, [("tiny", 1)]))
+    assert out[0]["summary"] == "tiny"
+
+
+def test_a_leaf_keeps_its_raw_text_while_shorter_than_its_summary(monkeypatch):
+    """The raw-text cutoff is the summary's own length, so it moves with
+    max_words: a 150-token leaf stays raw under 150 words (200 tokens) and is
+    summarized under 80 (107), as expand's gate prices it."""
+    prompts = []
+
+    async def capture(model, prompt):
+        prompts.append(prompt)
+        return '{"summary": "short"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", capture)
+    text = "word " * 150
+    assert 107 < pageindex.utils.count_tokens(text) < 200
+
+    def leaf():
+        return [{"title": "A", "start_index": 1, "end_index": 1}]
+
+    out = asyncio.run(pageindex.utils.summarize_tree(leaf(), [(text, 150)]))
+    assert prompts == [] and out[0]["summary"] == text.strip()
+    out = asyncio.run(pageindex.utils.summarize_tree(leaf(), [(text, 150)], max_words=80))
+    assert len(prompts) == 1 and out[0]["summary"] == "short"
+
+
+def test_leaf_summaries_split_a_shared_page_at_the_heading(monkeypatch):
+    """Two leaves sharing a page each read their own side of the next heading,
+    and between them every line is read."""
+    prompts = []
+
+    async def fake(model, prompt):
+        prompts.append(prompt)
+        return '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", fake)
+    pages = ["Alpha\nfirst body\n", "first tail\nBeta\nsecond body\n", "second more\n"]
+    a = {"title": "Alpha", "start_index": 1, "end_index": 2}
+    b = {"title": "Beta", "start_index": 2, "end_index": 3}
+    pdf_pages = [(p, 0) for p in pages]
+    own = [pageindex.utils.leaf_own_text([a, b], n, pdf_pages) for n in (a, b)]
+    assert own == ["Alpha\nfirst body\nfirst tail\n", "Beta\nsecond body\nsecond more\n"]
+    asyncio.run(pageindex.utils.summarize_tree([a, b], pdf_pages, small_node_tokens=0,
+                                               split_shared_pages=True))
+    alpha, beta = sorted(prompts, key=lambda p: "Alpha" not in p)
+    assert "first tail" in alpha and "second body" not in alpha
+    assert "second body" in beta and "first tail" not in beta
+
+    prompts.clear()
+    a.pop("summary"), b.pop("summary")
+    asyncio.run(pageindex.utils.summarize_tree([a, b], pdf_pages, small_node_tokens=0))
+    assert all("first tail" in p and "second body" in p for p in prompts)
+
+    one_page = [{"title": t, "start_index": 1, "end_index": 1} for t in ("A x", "B x", "C x")]
+    page = [("A x\na\nB x\nb\nC x\nc\n", 0)]
+    assert [pageindex.utils.leaf_own_text(one_page, n, page) for n in one_page] == [
+        "A x\na\n", "B x\nb\n", "C x\nc\n"]
+
+    numbered = [("A x\na\n2.1 B x\nb\n", 0)]
+    assert pageindex.utils.leaf_own_text(one_page[:2], one_page[0], numbered) == "A x\na\n"
+
+
+@pytest.mark.parametrize("page2, title, same_page", [
+    ("alpha tail\nBeta body\nBeta\n", "Beta", False),
+    ("alpha tail\nno heading here\n", "Beta", False),
+    ("alpha tail\n第二章\nbody\n", "第二章", False),
+    ("alpha tail\nBeta\nbody\n", "Beta", True),
+])
+def test_leaf_keeps_a_shared_page_whole_when_the_heading_cannot_be_placed(page2, title,
+                                                                          same_page):
+    a = {"title": "Alpha", "start_index": 1, "end_index": 2}
+    b = {"title": title, "start_index": 2, "end_index": 2, "_same_page": same_page}
+    pdf_pages = [("Alpha\n", 0), (page2, 0)]
+    assert pageindex.utils.leaf_own_text([a, b], a, pdf_pages) == "Alpha\n" + page2
+    assert pageindex.utils.leaf_own_text([a, b], b, pdf_pages) == page2
+
+
+def test_first_child_opens_at_its_parents_heading():
+    """A parent's opening lines on its first child's page have no reader but
+    that child, so the child starts at the parent's heading."""
+    w = {"title": "Wrap", "start_index": 1, "end_index": 2}
+    c = {"title": "Child", "start_index": 2, "end_index": 2}
+    p = {"title": "Part", "start_index": 2, "end_index": 2, "nodes": [c]}
+    pdf_pages = [("Wrap\n", 0), ("last words\nPart\nopening words\nChild\nmore words\n", 0)]
+    assert pageindex.utils.leaf_own_text([w, p], w, pdf_pages) == "Wrap\nlast words\n"
+    assert pageindex.utils.leaf_own_text([w, p], c, pdf_pages) == (
+        "Part\nopening words\nChild\nmore words\n")
+
+
+def test_leaf_keeps_a_page_whose_rest_no_leaf_reads():
+    """The next heading sits on the leaf's last page, but the next leaf starts
+    a page later: the lines after the heading stay with this leaf."""
+    a = {"title": "Alpha", "start_index": 1, "end_index": 2}
+    p = {"title": "Part", "start_index": 2, "end_index": 3,
+         "nodes": [{"title": "Child", "start_index": 3, "end_index": 3}]}
+    pdf_pages = [("Alpha\n", 0), ("last words\nPart\nopening words\n", 0), ("Child\n", 0)]
+    assert pageindex.utils.leaf_own_text([a, p], a, pdf_pages) == (
+        "Alpha\nlast words\nPart\nopening words\n")
+
+
+def test_summarize_tree_starts_the_deepest_leaf_first(monkeypatch):
+    """Visited level by level, the shallow leaves A and D would take both
+    permits before the deep leaf C even reached the gate. C must start first:
+    the parents still owed above it are what the run ends on."""
+    started = []
+
+    async def fake(model, prompt):
+        started.append(next(w for w in ("alpha", "gamma", "delta", "Section Title")
+                            if w in prompt))
+        for _ in range(8):      # enough loop turns for every leaf to reach the gate
+            await asyncio.sleep(0)
+        return '{"points": [], "summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", fake)
+    pdf_pages = [("alpha " * 5, 5), ("gamma " * 5, 5), ("delta " * 5, 5)]
+    structure = [{"title": "R", "start_index": 1, "end_index": 3, "nodes": [
+        {"title": "A", "start_index": 1, "end_index": 1},
+        {"title": "B", "start_index": 2, "end_index": 2, "nodes": [
+            {"title": "C", "start_index": 2, "end_index": 2}]},
+        {"title": "D", "start_index": 3, "end_index": 3}]}]
+    asyncio.run(pageindex.utils.summarize_tree(
+        structure, pdf_pages, small_node_tokens=0, concurrency=2))
+    assert started.index("gamma") < started.index("alpha")
+    assert started.index("gamma") < started.index("delta")
+    assert started.count("Section Title") == 2
+
+
+def test_summarize_tree_admits_a_ready_parent_before_a_queued_shallow_leaf(monkeypatch):
+    """With one permit the leaf D is already queued when C's child finishes
+    and C becomes ready. C has two calls left above it, D one, so C goes
+    first even though D asked earlier."""
+    started = []
+
+    async def fake(model, prompt):
+        started.append(next(w for w in ("Section Title: C", "Section Title",
+                                        "alpha", "epsilon", "delta")
+                            if w in prompt))
+        for _ in range(8):
+            await asyncio.sleep(0)
+        return '{"points": [], "summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", fake)
+    pdf_pages = [("alpha " * 5, 5), ("epsilon " * 5, 5), ("delta " * 5, 5)]
+    structure = [{"title": "R", "start_index": 1, "end_index": 3, "nodes": [
+        {"title": "B", "start_index": 2, "end_index": 2, "nodes": [
+            {"title": "C", "start_index": 2, "end_index": 2, "nodes": [
+                {"title": "E", "start_index": 2, "end_index": 2}]}]},
+        {"title": "A", "start_index": 1, "end_index": 1},
+        {"title": "D", "start_index": 3, "end_index": 3}]}]
+    asyncio.run(pageindex.utils.summarize_tree(
+        structure, pdf_pages, small_node_tokens=0, concurrency=1))
+    assert started.index("Section Title: C") < started.index("delta")
+
+
+def test_summary_scheduler_starts_a_marked_node_without_waiting_for_the_rest(monkeypatch):
+    """A node marked final summarizes right away while its siblings are still
+    unmarked; marking it again, or marking its parent later, never repeats
+    its call: the parent composes the summary already written."""
+    calls = []
+
+    async def fake(model, prompt):
+        calls.append(prompt)
+        return '{"points": [], "summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", fake)
+    pdf_pages = [("alpha " * 5, 5), ("beta " * 5, 5)]
+    leaf = {"title": "A", "start_index": 1, "end_index": 1}
+    root = {"title": "R", "start_index": 1, "end_index": 2, "nodes": [
+        leaf, {"title": "B", "start_index": 2, "end_index": 2}]}
+
+    async def scenario():
+        scheduler = pageindex.utils.SummaryScheduler([root], pdf_pages, small_node_tokens=0)
+        scheduler.mark_final([leaf])
+        scheduler.mark_final([leaf])
+        for _ in range(3):
+            await asyncio.sleep(0)
+        assert len(calls) == 1 and "alpha" in calls[0]
+        scheduler.mark_final(list(pageindex.utils._subtree([root])))
+        return await scheduler.finish()
+    asyncio.run(scenario())
+    assert len(calls) == 3
+    assert [n["summary"] for n in (leaf, root["nodes"][1], root)] == ["ok"] * 3
+
+
+def test_finish_fails_loud_when_a_final_node_changes_afterwards(monkeypatch):
+    """mark_final is a promise: the node stays in the tree and keeps its
+    children. finish() verifies it, so a run that broke the promise fails
+    with a diagnosis instead of shipping a tree missing a summarized
+    subtree."""
+    async def fake(model, prompt):
+        return '{"points": [], "summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", fake)
+    pdf_pages = [("alpha " * 5, 5), ("beta " * 5, 5)]
+    leaf = {"title": "A", "start_index": 1, "end_index": 1}
+    root = {"title": "R", "start_index": 1, "end_index": 2, "nodes": [leaf]}
+
+    async def scenario():
+        scheduler = pageindex.utils.SummaryScheduler([root], pdf_pages, small_node_tokens=0)
+        scheduler.mark_final(list(pageindex.utils._subtree([root])))
+        root["nodes"] = []            # the promise, broken
+        await scheduler.finish()
+    with pytest.raises(RuntimeError, match="marked final"):
+        asyncio.run(asyncio.wait_for(scenario(), 5))
+
+
+def test_finish_fails_loud_instead_of_waiting_on_a_node_never_marked(monkeypatch):
+    """A tasked node whose mark never arrives would park finish() forever,
+    indistinguishable from a slow model. Marking a proper subset must be
+    named as the protocol breach it is."""
+    async def fake(model, prompt):
+        return '{"points": [], "summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", fake)
+    pdf_pages = [("alpha " * 5, 5), ("beta " * 5, 5)]
+    leaf = {"title": "A", "start_index": 1, "end_index": 1}
+    root = {"title": "R", "start_index": 1, "end_index": 2, "nodes": [leaf]}
+
+    async def scenario():
+        scheduler = pageindex.utils.SummaryScheduler([root], pdf_pages, small_node_tokens=0)
+        scheduler.mark_final([root])  # tasks the subtree, marks only the root
+        await scheduler.finish()
+    with pytest.raises(RuntimeError, match="marked final"):
+        asyncio.run(asyncio.wait_for(scenario(), 5))
+
+    async def root_scenario():
+        other = {"title": "B", "start_index": 2, "end_index": 2}
+        scheduler = pageindex.utils.SummaryScheduler([root, other], pdf_pages, small_node_tokens=0)
+        scheduler.mark_final([root, leaf])  # a root nobody marked: tasked by finish() itself
+        await scheduler.finish()
+    with pytest.raises(RuntimeError, match="marked final"):
+        asyncio.run(asyncio.wait_for(root_scenario(), 5))
+
+
+def test_priority_gate_passes_the_permit_on_when_its_taker_is_cancelled():
+    """A waiter cancelled after the permit was granted but before it ran
+    must hand the permit on, or the pool shrinks by one for good."""
+    async def scenario():
+        gate = pageindex.utils._PriorityGate(1)
+        await gate.acquire(1)
+        waiter = asyncio.create_task(gate.acquire(1))
+        await asyncio.sleep(0)          # queued
+        gate.release()                  # granted to `waiter`, not yet resumed
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+        await asyncio.wait_for(gate.acquire(1), 1)   # hangs on a leaked permit
+    asyncio.run(scenario())
+
+
+def test_summarize_tree_partial_exhaustion_fails_loud(monkeypatch):
+    """One lucky call must not vouch for a model that then went away: a
+    ladder-exhausted node raises instead of silently blanking."""
+    calls = {"n": 0}
+
+    async def flaky(model, prompt):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return '{"points": ["p"], "summary": "ok"}'
+        raise pageindex.utils.LLMRetriesExhausted(
+            "LLM completion failed after 10 retries", status_code=500)
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", flaky)
+    pdf_pages = [("alpha " * 300, 300), ("beta " * 300, 300)]
+    structure = [{"title": "A", "start_index": 1, "end_index": 1},
+                 {"title": "B", "start_index": 2, "end_index": 2}]
+    with pytest.raises(pageindex.utils.LLMRetriesExhausted):
+        asyncio.run(pageindex.utils.summarize_tree(structure, pdf_pages))
+
+
+def test_generate_summaries_partial_exhaustion_fails_loud(monkeypatch):
+    calls = {"n": 0}
+
+    async def flaky(model, prompt):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return "fine"
+        raise pageindex.utils.LLMRetriesExhausted(
+            "LLM completion failed after 10 retries", status_code=500)
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", flaky)
+    structure = [{"title": "A", "text": "t1",
+                  "nodes": [{"title": "B", "text": "t2"}]}]
+    with pytest.raises(pageindex.utils.LLMRetriesExhausted):
+        asyncio.run(
+            pageindex.utils.generate_summaries_for_structure(structure))
+
+
+def test_expand_exhausted_ladder_fails_loud(monkeypatch):
+    """Keyless/broken-model expand must kill the run, not degrade to
+    no_children after burning the retry ladder on every node."""
+    import pageindex.tree_optimize as tree_optimize
+
+    async def exhausted(model, prompt):
+        raise pageindex.utils.LLMRetriesExhausted(
+            "LLM completion failed after 10 retries", status_code=500)
+    monkeypatch.setattr(tree_optimize, "llm_acompletion", exhausted)
+    structure = [{"title": "T", "start_index": 1, "end_index": 8,
+                  "node_id": "0001", "nodes": []}]
+    pages = ["heading\nbody text"] * 8
+    lines = [["heading", "body text"]] * 8
+    with pytest.raises(pageindex.utils.LLMRetriesExhausted):
+        asyncio.run(tree_optimize.optimize(structure, pages, lines,
+                                           model="m", do_expand=True))
+
+
+def test_expand_absorbs_per_prompt_rejection(monkeypatch):
+    """A 400-exhausted node (context_length_exceeded) stays collapsed and
+    the run survives — the documented per-prompt absorption."""
+    import pageindex.tree_optimize as tree_optimize
+
+    async def rejected(model, prompt):
+        raise pageindex.utils.LLMRetriesExhausted(
+            "LLM completion failed after 10 retries", status_code=400)
+    monkeypatch.setattr(tree_optimize, "llm_acompletion", rejected)
+    structure = [{"title": "T", "start_index": 1, "end_index": 8,
+                  "node_id": "0001", "nodes": []}]
+    pages = ["heading\nbody text"] * 8
+    lines = [["heading", "body text"]] * 8
+    outcome = asyncio.run(tree_optimize.optimize(structure, pages, lines,
+                                                 model="m", do_expand=True))
+    assert outcome["expands"] == 0
+
+
+def test_llm_completion_backend_reaches_litellm(monkeypatch):
+    """No cache params of our own; backend keys reach litellm and win the merge."""
+    import litellm
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured.clear()
+        captured.update(kwargs)
+        message = types.SimpleNamespace(content="ok")
+        choice = types.SimpleNamespace(message=message, finish_reason="stop")
+        return types.SimpleNamespace(choices=[choice])
+    monkeypatch.setattr(litellm, "completion", fake_completion)
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    assert pageindex.utils.llm_completion("gpt-4o", "probe") == "ok"
+    assert "cache_control_injection_points" not in captured
+    token = pageindex.utils._llm_backend.set(
+        {"api_key": "x", "max_retries": 3})
+    try:
+        pageindex.utils.llm_completion("gpt-4o", "probe")
+    finally:
+        pageindex.utils._llm_backend.reset(token)
+    assert captured["api_key"] == "x"
+    assert captured["max_retries"] == 3
+
+
+def test_backend_overrides_reserved_kwargs_without_retry(monkeypatch):
+    """A backend key colliding with our own kwargs wins the merge instead
+    of raising TypeError through the retry ladder."""
+    import litellm
+    calls = {"n": 0}
+    captured = {}
+
+    def fake_completion(**kwargs):
+        calls["n"] += 1
+        captured.clear()
+        captured.update(kwargs)
+        message = types.SimpleNamespace(content="ok")
+        choice = types.SimpleNamespace(message=message, finish_reason="stop")
+        return types.SimpleNamespace(choices=[choice])
+    monkeypatch.setattr(litellm, "completion", fake_completion)
+    monkeypatch.setattr(pageindex.utils.time, "sleep", lambda s: None)
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    token = pageindex.utils._llm_backend.set({"drop_params": False})
+    try:
+        assert pageindex.utils.llm_completion("gpt-4o", "probe") == "ok"
+    finally:
+        pageindex.utils._llm_backend.reset(token)
+    assert captured["drop_params"] is False
+    assert calls["n"] == 1
+
+
+def test_delete_survives_marker_tamper(local_client, tmp_path):
+    tampered = tmp_path / "store" / "docs" / "tampered" / "doc.json"
+    tampered.mkdir(parents=True)
+    with pytest.raises(PageIndexAPIError, match="Document not found"):
+        local_client.delete_document("tampered")
+    assert not tampered.parent.exists()
+
+
+def test_list_documents_validation(local_client):
+    with pytest.raises(ValueError):
+        local_client.list_documents(limit=0)
+    with pytest.raises(ValueError):
+        local_client.list_documents(offset=-1)
+    with pytest.raises(PageIndexAPIError, match="folders"):
+        local_client.list_documents(folder_id="f1")
+    assert local_client.list_documents(recursive=True)["total"] == 0
+    assert local_client.list_documents(folder_id="root")["total"] == 0
+
+
+@pytest.mark.parametrize("limit", [101, 10000])
+def test_list_documents_large_page_local(local_client, monkeypatch, limit):
+    metas = [{"id": f"doc-{i:05d}", "name": f"{i}.pdf"}
+             for i in range(limit + 2)]
+    monkeypatch.setattr(local_client._api._store, "list_metas", lambda: metas)
+
+    listing = local_client.list_documents(limit=limit, offset=1)
+
+    assert len(listing["documents"]) == limit
+    assert listing["documents"][0]["id"] == "doc-00001"
+    assert listing["documents"][-1]["id"] == f"doc-{limit:05d}"
+    assert listing["total"] == limit + 2
+    assert listing["limit"] == limit and listing["offset"] == 1
+
+
+@pytest.mark.parametrize("limit", [101, 10000])
+def test_list_documents_large_page_cloud(cloud, limit):
+    client, calls, _ = cloud
+
+    client.list_documents(limit=limit, offset=1)
+
+    assert calls[-1]["params"] == {"limit": limit, "offset": 1}
+
+
+@pytest.mark.parametrize("limit", [0, 10001])
+def test_list_documents_limit_out_of_range_local(local_client, limit):
+    with pytest.raises(ValueError, match="limit must be between 1 and 10000"):
+        local_client.list_documents(limit=limit)
+
+
+@pytest.mark.parametrize("limit", [0, 10001])
+def test_list_documents_limit_out_of_range_cloud(cloud, limit):
+    client, calls, _ = cloud
+    with pytest.raises(ValueError, match="limit must be between 1 and 10000"):
+        client.list_documents(limit=limit)
+    assert calls == []
+
+
+def test_list_documents_recursive_wire(cloud):
+    """recursive reaches the query string only when asked for."""
+    client, calls, _ = cloud
+    client.list_documents(folder_id="f1")
+    assert "recursive" not in calls[-1]["params"]
+    client.list_documents(folder_id="f1", recursive=True)
+    assert "recursive" in calls[-1]["params"]
+
+
+def test_list_documents_recursive_false_string_wire(cloud):
+    client, calls, _ = cloud
+
+    client.list_documents(folder_id="f1", recursive="false")
+
+    assert calls[-1]["params"] == {"limit": 50, "offset": 0,
+                                  "folder_id": "f1", "recursive": "false"}
+
+
+def test_missing_document_errors(local_client):
+    with pytest.raises(PageIndexAPIError):
+        local_client.get_tree("nope")
+    with pytest.raises(PageIndexAPIError):
+        local_client.get_document("nope")
+    assert local_client.is_retrieval_ready("nope") is False
+
+
+def test_traversal_ids_are_contained(local_client, indexed_doc, tmp_path):
+    store_root = tmp_path / "store"
+    with pytest.raises(PageIndexAPIError):
+        local_client.get_document("../../etc")
+    with pytest.raises(PageIndexAPIError):
+        local_client.delete_document("..")
+    assert (store_root / "docs").exists()
+
+
+def test_folders_are_cloud_only(local_client):
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        local_client.create_folder("team")
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        local_client.list_folders()
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        local_client.folder_context("f")
+    assert local_client.folder_context("root") == ""  # the library itself
+
+
+# ── local: retrieval endpoints are cloud-only ──
+
+def test_retrieval_endpoints_cloud_only(local_client):
+    with pytest.raises(PageIndexAPIError, match=r"use chat\(\)"):
+        local_client.submit_query("any", "q")
+    with pytest.raises(PageIndexAPIError, match=r"use chat\(\)"):
+        local_client.get_retrieval("any")
+
+
+def test_chat_completions_local_needs_openai_agents(local_client, monkeypatch):
+    """Local chat is implemented (see test_local_chat.py); without
+    openai-agents installed it raises the actionable install error."""
+    import sys
+    monkeypatch.setitem(sys.modules, "agents", None)
+    with pytest.raises(PageIndexAPIError, match="pip install openai-agents"):
+        local_client.chat_completions(
+            messages=[{"role": "user", "content": "q"}])
+
+
+# ── cloud mode: request wiring ──
+
+class FakeResponse:
+    def __init__(self, payload=None, status_code=200, text="", content=b"{}",
+                 lines=None):
+        self._payload = payload if payload is not None else {}
+        self.status_code = status_code
+        self.text = text
+        self.content = content
+        self._lines = lines or []
+
+    def json(self):
+        return self._payload
+
+    def iter_lines(self):
+        return iter(self._lines)
+
+    def close(self):
+        pass
+
+
+def _patch_requests(monkeypatch, handler):
+    """Replace cloud_api's requests module with per-verb fakes."""
+    fake = types.SimpleNamespace(
+        post=lambda url, **kw: handler("POST", url, kw),
+        get=lambda url, **kw: handler("GET", url, kw),
+        delete=lambda url, **kw: handler("DELETE", url, kw),
+        Response=FakeResponse,
+    )
+    monkeypatch.setattr("pageindex.cloud_api.requests", fake)
+
+
+@pytest.fixture
+def cloud(monkeypatch):
+    client = PageIndexClient(api_key="secret")
+    calls = []
+    class Fake:
+        payload = {}
+    def handler(method, url, kw):
+        calls.append({"method": method, "url": url, **kw})
+        return FakeResponse(Fake.payload)
+    _patch_requests(monkeypatch, handler)
+    return client, calls, Fake
+
+
+def test_cloud_request_wiring(cloud, sample_pdf):
+    client, calls, fake = cloud
+
+    fake.payload = {"doc_id": "pi-1"}
+    assert client.submit_document(sample_pdf) == {"doc_id": "pi-1"}
+    assert calls[-1]["url"] == "https://api.pageindex.ai/doc/"
+    assert calls[-1]["headers"] == {"api_key": "secret"}
+    assert calls[-1]["data"] == {"if_retrieval": True}
+    assert "timeout" not in calls[-1]
+
+    client.submit_document(sample_pdf, metadata={"project": "alpha"})
+    assert calls[-1]["data"]["metadata"] == json.dumps({"project": "alpha"})
+
+    fake.payload = {"status": "processing", "retrieval_ready": False}
+    client.get_tree("pi-1", node_summary=True)
+    assert calls[-1]["url"].endswith("/doc/pi-1/?type=tree&summary=True&include_text=true")
+    assert calls[-1]["timeout"] == 30
+    assert client.is_retrieval_ready("pi-1") is False
+
+    client.get_ocr("pi/../1")
+    assert "/doc/pi%2F..%2F1/" in calls[-1]["url"]
+
+    client.BASE_URL = "https://staging.example"
+    client.api_key = "other"
+    client.get_document("pi-1")
+    assert calls[-1]["url"] == "https://staging.example/doc/pi-1/metadata/"
+    assert calls[-1]["headers"] == {"api_key": "other"}
+
+
+def test_cloud_get_tree_unified_shape(monkeypatch):
+    """An older server's tree wire (page_index only, a parent's
+    prefix_summary) leaves the SDK in local's field names: a node ends where
+    the next one in reading order starts, the last on the document's page
+    count, so a parent's range is the opening its summary describes."""
+    client = PageIndexClient(api_key="secret")
+    wire = {"doc_id": "pi-1", "status": "completed", "retrieval_ready": True,
+            "metadata": None, "features": {}, "result": [
+        {"title": "Ch 1", "node_id": "0000", "page_index": 2,
+         "prefix_summary": "opening", "text": "ch1 own", "nodes": [
+            {"title": "1.1", "node_id": "0001", "page_index": 4, "summary": "s11", "text": "t11"},
+            {"title": "1.2", "node_id": "0002", "page_index": 6, "summary": "s12", "text": "t12"}]},
+        {"title": "Ch 2", "node_id": "0003", "page_index": 9,
+         "prefix_summary": "same page", "text": "ch2 own", "nodes": [
+            {"title": "2.1", "node_id": "0004", "page_index": 9, "summary": "s21", "text": "t21"}]}]}
+    urls = []
+
+    def handler(method, url, kw):
+        urls.append(url)
+        return FakeResponse(wire if "type=tree" in url else {"pageNum": 12})
+    _patch_requests(monkeypatch, handler)
+
+    result = client.get_tree("pi-1", node_summary=True)["result"]
+    assert result == [
+        {"title": "Ch 1", "node_id": "0000", "start_index": 2, "end_index": 4,
+         "summary": "opening", "text": "ch1 own", "nodes": [
+            {"title": "1.1", "node_id": "0001", "start_index": 4, "end_index": 6,
+             "summary": "s11", "text": "t11"},
+            {"title": "1.2", "node_id": "0002", "start_index": 6, "end_index": 9,
+             "summary": "s12", "text": "t12"}]},
+        {"title": "Ch 2", "node_id": "0003", "start_index": 9, "end_index": 9,
+         "summary": "same page", "text": "ch2 own", "nodes": [
+            {"title": "2.1", "node_id": "0004", "start_index": 9, "end_index": 12,
+             "summary": "s21", "text": "t21"}]}]
+    assert list(result[0]) == ["title", "node_id", "start_index", "end_index",
+                               "summary", "text", "nodes"]
+    assert urls[-1] == "https://api.pageindex.ai/doc/pi-1/metadata/"
+
+
+def test_cloud_get_tree_takes_served_ranges(monkeypatch):
+    """A server that sends start_index/end_index has its ranges taken as
+    given, with no metadata request."""
+    client = PageIndexClient(api_key="secret")
+    wire = {"status": "completed", "retrieval_ready": True, "result": [
+        {"title": "Ch", "node_id": "0000", "page_index": 2, "start_index": 2,
+         "end_index": 3, "prefix_summary": "opening", "nodes": [
+            {"title": "S", "node_id": "0001", "page_index": 4, "start_index": 4,
+             "end_index": 8, "summary": "s"}]}]}
+    urls = []
+
+    def handler(method, url, kw):
+        urls.append(url)
+        return FakeResponse(wire)
+    _patch_requests(monkeypatch, handler)
+
+    assert client.get_tree("pi-1", node_summary=True)["result"] == [
+        {"title": "Ch", "node_id": "0000", "start_index": 2, "end_index": 3,
+         "summary": "opening", "nodes": [
+            {"title": "S", "node_id": "0001", "start_index": 4, "end_index": 8,
+             "summary": "s"}]}]
+    assert len(urls) == 1
+
+
+def test_cloud_error_and_empty_delete(cloud, monkeypatch):
+    client, calls, fake = cloud
+    _patch_requests(monkeypatch,
+                    lambda m, url, kw: FakeResponse(status_code=401, text="denied"))
+    with pytest.raises(PageIndexAPIError,
+                       match="Failed to get document metadata: denied"):
+        client.get_document("pi-1")
+
+    _patch_requests(monkeypatch, lambda m, url, kw: FakeResponse(content=b""))
+    assert client.delete_document("pi-1") == {}
+
+
+def test_cloud_errors_carry_status_code(cloud, monkeypatch, sample_pdf):
+    """Every non-200 raise carries the HTTP status, so callers can branch
+    on 429-vs-401 instead of parsing message text."""
+    client, calls, fake = cloud
+    _patch_requests(monkeypatch,
+                    lambda m, url, kw: FakeResponse(status_code=418, text="no"))
+    attempts = [
+        lambda: client.submit_document(sample_pdf),
+        lambda: client.get_ocr("pi-1"),
+        lambda: client.get_tree("pi-1"),
+        lambda: client.submit_query("pi-1", "q"),
+        lambda: client.get_retrieval("r-1"),
+        lambda: client.chat_completions(
+            messages=[{"role": "user", "content": "q"}]),
+        lambda: client.get_document("pi-1"),
+        lambda: client.get_block("pi-1", "p1_text_1"),
+        lambda: client.get_page_image("pi-1", 1),
+        lambda: client.get_document_image("pi-1", "img-0.jpeg"),
+        lambda: client.delete_document("pi-1"),
+        lambda: client.list_documents(),
+        lambda: client.create_folder("f"),
+        lambda: client.list_folders(),
+        lambda: client.folder_context("f"),
+    ]
+    for attempt in attempts:
+        with pytest.raises(PageIndexAPIError) as err:
+            attempt()
+        assert err.value.status_code == 418
+
+
+def test_parse_citations_mirrors_the_cloud_parser():
+    """Both tag formats PageIndex chat writes, in the cloud parser's terms:
+    old tags first, then <cite> tags (self-closing or paired, either
+    quote), block_id only when carried, page ranges to their first page,
+    page 0 and nameless tags dropped, names and block ids trimmed,
+    duplicates collapsed."""
+    from pageindex.client import _parse_citations
+    text = (
+        'A <cite doc="a.pdf" page="3" block="p3_text_5"/> B '
+        "<cite doc='b.pdf' page='1-2'>quoted</cite> "
+        '<cite doc="a.pdf" page="3" block="p3_text_5"/> '
+        '<cite doc="a.pdf" page="3" block=" p3_text_5 "/> '
+        '<cite doc="" page="1"/> <cite doc="a.pdf" page="0"/> '
+        '<cite doc="a.pdf" page="x"/> '
+        "<doc=c.pdf;page=7> <doc=c.pdf;page=7;block_id=p7_text_1> "
+        "<doc=c.pdf;page=7;block=p7_text_1 > "
+        "<doc= d.pdf ;page=2;block=p2_img_1>"
+    )
+    assert _parse_citations(text) == [
+        {"document": "c.pdf", "page": 7},
+        {"document": "c.pdf", "page": 7, "block_id": "p7_text_1"},
+        {"document": "d.pdf", "page": 2, "block_id": "p2_img_1"},
+        {"document": "a.pdf", "page": 3, "block_id": "p3_text_5"},
+        {"document": "b.pdf", "page": 1},
+    ]
+    assert _parse_citations("no tags, just [a.pdf, p. 3] prose") == []
+
+
+def test_parse_citations_scans_in_linear_time():
+    """An unterminated '<cite ' followed by whitespace, or a tag whose body
+    is one long word, is caller-supplied text; the scan must stay linear,
+    not backtrack for minutes."""
+    import time
+    from pageindex.client import _parse_citations
+    started = time.perf_counter()
+    assert _parse_citations("<cite " + " " * 2000) == []
+    assert _parse_citations(("<cite " + " " * 40) * 200) == []
+    assert _parse_citations("<cite " + "x" * 65536 + ">") == []
+    assert time.perf_counter() - started < 2
+
+
+def _library(docs):
+    """A cloud handler serving /docs/ (100 per page) and /doc/<id>/block/
+    lookups from {doc_id: (name, {block_id: block})}."""
+    def handler(method, url, kw):
+        if url.endswith("/docs/"):
+            offset = kw["params"]["offset"]
+            entries = [{"id": doc_id, "name": name}
+                       for doc_id, (name, _) in docs.items()]
+            return FakeResponse({"documents": entries[offset:offset + 100],
+                                 "total": len(entries), "limit": 100,
+                                 "offset": offset})
+        m = re.fullmatch(r".*/doc/([^/]+)/metadata/", url)
+        if m:
+            return FakeResponse({"id": m.group(1), "name": docs[m.group(1)][0]})
+        m = re.fullmatch(r".*/doc/([^/]+)/block/([^/]+)/", url)
+        block = docs[m.group(1)][1].get(m.group(2))
+        if block is None:
+            return FakeResponse(status_code=404, text="Block not found.")
+        return FakeResponse(block)
+    return handler
+
+
+def test_get_citations_cloud(cloud, monkeypatch):
+    """Names become ids from the library, block citations pick up the
+    block's fields, a block the document lacks keeps a bbox-less entry,
+    an unknown document keeps doc_id None."""
+    client, calls, fake = cloud
+    block = {"doc_id": "pi-a", "page": 3, "block_id": "p3_text_5",
+             "bbox": [163, 398, 842, 589], "block_type": "text",
+             "text": "Apples."}
+    _patch_requests(monkeypatch, _library({
+        "pi-a": ("a.pdf", {"p3_text_5": block}),
+        "pi-b": ("b.pdf", {}),
+    }))
+    answer = ('X <cite doc="a.pdf" page="3" block="p3_text_5"/> '
+              'Y <cite doc="a.pdf" page="9" block="p9_text_9"/> '
+              'Z <cite doc="b.pdf" page="2"/> W <cite doc="c.pdf" page="1"/>')
+    assert client.get_citations(answer) == [
+        {"document": "a.pdf", **block},
+        {"document": "a.pdf", "doc_id": "pi-a", "page": 9,
+         "block_id": "p9_text_9"},
+        {"document": "b.pdf", "doc_id": "pi-b", "page": 2},
+        {"document": "c.pdf", "doc_id": None, "page": 1},
+    ]
+    assert client.get_citations("no citations here") == []
+
+    # doc_id= skips the library listing: one metadata call per id.
+    library = _library({"pi-a": ("a.pdf", {"p3_text_5": block})})
+    def no_listing(method, url, kw):
+        assert not url.endswith("/docs/"), "doc_id= must not list the library"
+        return library(method, url, kw)
+    _patch_requests(monkeypatch, no_listing)
+    for scope in ("pi-a", ["pi-a", "pi-a"]):  # a repeated id is not a collision
+        assert client.get_citations(
+            '<cite doc="a.pdf" page="3" block="p3_text_5"/>', doc_id=scope,
+        ) == [{"document": "a.pdf", **block}]
+
+    for not_text in (None, ['<cite doc="a.pdf" page="1"/>']):
+        with pytest.raises(PageIndexAPIError, match="answer must be a str"):
+            client.get_citations(not_text)
+    with pytest.raises(PageIndexAPIError, match="doc_id must be a string or a list"):
+        client.get_citations(answer, doc_id=5)
+    with pytest.raises(PageIndexAPIError, match="doc_id is empty"):
+        client.get_citations(answer, doc_id=[])
+
+
+def test_get_citations_quotes_and_tag_edges(cloud, monkeypatch):
+    """A quoted name keeps its apostrophe, and neither field of a
+    managed-chat tag runs past the tag: an unterminated name and an
+    unterminated block both stop at the next tag instead of eating it."""
+    client, calls, fake = cloud
+    _patch_requests(monkeypatch, _library({"pi-m": ("Moody's Outlook.pdf", {}),
+                                           "pi-b": ("b.pdf", {})}))
+    answer = ("""Held <cite doc="Moody's Outlook.pdf" page="3"/> and overall """
+              "<doc=b.pdf> is long, but revenue rose <doc=b.pdf;page=7>.")
+    assert client.get_citations(answer) == [
+        {"document": "b.pdf", "doc_id": "pi-b", "page": 7},
+        {"document": "Moody's Outlook.pdf", "doc_id": "pi-m", "page": 3},
+    ]
+    # A block= that never closes must not swallow the citation after it.
+    assert client.get_citations(
+        '<doc=b.pdf;page=3;block=p3_text_5 <cite doc="b.pdf" page="9"/>'
+    ) == [{"document": "b.pdf", "doc_id": "pi-b", "page": 9}]
+
+
+def test_get_citations_lists_the_whole_library(cloud, monkeypatch):
+    client, calls, fake = cloud
+    seen_offsets = []
+    library = _library({f"pi-{i}": (f"{i}.pdf", {}) for i in range(150)})
+    def handler(method, url, kw):
+        if url.endswith("/docs/"):
+            seen_offsets.append(kw["params"]["offset"])
+        return library(method, url, kw)
+    _patch_requests(monkeypatch, handler)
+    assert client.get_citations('<cite doc="149.pdf" page="1"/>') == [
+        {"document": "149.pdf", "doc_id": "pi-149", "page": 1}]
+    assert seen_offsets == [0, 100]
+
+
+def test_get_citations_listing_survives_a_shifting_library(cloud, monkeypatch):
+    """A listing without 'total' ends on the empty page, a document
+    re-served after an upload shifted the window is still one document,
+    and an entry missing 'name' or 'id' is skipped, not a KeyError."""
+    client, calls, fake = cloud
+    def handler(method, url, kw):
+        assert url.endswith("/docs/")
+        offset = kw["params"]["offset"]
+        entries = [{"id": f"pi-{i}", "name": f"{i}.pdf"} for i in range(150)]
+        entries[7] = {"id": "pi-7"}
+        entries[8] = {"name": "8.pdf"}
+        if offset:
+            entries.insert(0, {"id": "pi-new", "name": "new.pdf"})
+        return FakeResponse({"documents": entries[offset:offset + 100]})
+    _patch_requests(monkeypatch, handler)
+    assert client.get_citations('<cite doc="99.pdf" page="1"/>') == [
+        {"document": "99.pdf", "doc_id": "pi-99", "page": 1}]
+
+
+def test_get_citations_refuses_a_shared_name(cloud, monkeypatch):
+    """Two documents under one cited name would silently pick a bbox from
+    the wrong one: raise, name both ids, point at doc_id=."""
+    client, calls, fake = cloud
+    _patch_requests(monkeypatch, _library({"pi-1": ("a.pdf", {}),
+                                           "pi-2": ("a.pdf", {})}))
+    with pytest.raises(PageIndexAPIError, match=r"pi-1, pi-2.*doc_id="):
+        client.get_citations('<cite doc="a.pdf" page="1"/>')
+    assert client.get_citations('<cite doc="a.pdf" page="1"/>',
+                                    doc_id=["pi-2"]) == [
+        {"document": "a.pdf", "doc_id": "pi-2", "page": 1}]
+
+
+def test_get_citations_keeps_blocks_it_cannot_read(cloud, monkeypatch):
+    """A denied block (403) keeps its bbox-less entry like a missing one;
+    a transport failure still propagates with its status."""
+    client, calls, fake = cloud
+    status = {"code": 403}
+    def handler(method, url, kw):
+        if "/block/" in url:
+            return FakeResponse(status_code=status["code"], text="boom")
+        return _library({"pi-a": ("a.pdf", {})})(method, url, kw)
+    _patch_requests(monkeypatch, handler)
+    answer = '<cite doc="a.pdf" page="1" block="p1_text_1"/>'
+    assert client.get_citations(answer) == [
+        {"document": "a.pdf", "doc_id": "pi-a", "page": 1, "block_id": "p1_text_1"}]
+    status["code"] = 500
+    with pytest.raises(PageIndexAPIError, match="Failed to get block: boom") as err:
+        client.get_citations(answer)
+    assert err.value.status_code == 500
+
+
+def test_resolve_citations_rewrites_tags(cloud, monkeypatch):
+    """Each tag becomes the numbered link of its get_citations() entry, a
+    repeated citation reuses its number, and entries lead with anchor and
+    index. A block cited under the wrong page still gets its link: the
+    entry carries the block's real page, the number follows the tag."""
+    client, calls, fake = cloud
+    block = {"doc_id": "pi-a", "page": 3, "block_id": "p3_text_5",
+             "bbox": [163, 398, 842, 589], "block_type": "text",
+             "text": "Apples."}
+    _patch_requests(monkeypatch, _library({
+        "pi-a": ("a.pdf", {"p3_text_5": block}),
+        "pi-b": ("b.pdf", {}),
+    }))
+    answer = ('X <cite doc="a.pdf" page="3" block="p3_text_5"/> '
+              'Y <cite doc="b.pdf" page="2"/> '
+              'Z <doc=a.pdf;page=3;block=p3_text_5> '
+              'W <cite doc="a.pdf" page="4" block="p3_text_5"/>')
+    result = client.resolve_citations(answer)
+    assert result["answer"] == (
+        "X [[1]](#pageindex-citation-01) Y [[2]](#pageindex-citation-02) "
+        "Z [[1]](#pageindex-citation-01) W [[3]](#pageindex-citation-03)")
+    assert result["citations"] == [
+        {"anchor": "pageindex-citation-01", "index": 1, "document": "a.pdf",
+         **block},
+        {"anchor": "pageindex-citation-02", "index": 2, "document": "b.pdf",
+         "doc_id": "pi-b", "page": 2},
+        {"anchor": "pageindex-citation-03", "index": 3, "document": "a.pdf",
+         **block},
+    ]
+    assert all(list(c)[:2] == ["anchor", "index"] for c in result["citations"])
+    paired = client.resolve_citations(
+        "P <cite doc='b.pdf' page='2'>quoted</cite> "
+        'Q <cite doc="b.pdf" page="2"></cite>.')
+    assert paired["answer"] == (
+        "P [[1]](#pageindex-citation-01)quoted "
+        "Q [[1]](#pageindex-citation-01).")
+    assert client.resolve_citations("no citations") == {
+        "answer": "no citations", "citations": []}
+
+
+def test_get_block_request_wiring(cloud):
+    client, calls, fake = cloud
+    fake.payload = {"doc_id": "pi/1", "page": 3, "block_id": "p3_text_5",
+                    "bbox": [1, 2, 3, 4], "block_type": "text"}
+    assert client.get_block("pi/1", "p3_text_5") == fake.payload
+    assert calls[-1]["url"] == "https://api.pageindex.ai/doc/pi%2F1/block/p3_text_5/"
+    assert calls[-1]["headers"] == {"api_key": "secret"}
+    assert calls[-1]["timeout"] == 30
+
+
+def test_image_url_request_wiring(cloud):
+    client, calls, fake = cloud
+    fake.payload = {"doc_id": "pi/1", "images": [
+        {"page": 3, "mime_type": "image/jpeg", "object_key": "k3",
+         "url": "https://signed/page-3.jpg", "expires_in": 3600}]}
+    assert client.get_page_image("pi/1", 3) == "https://signed/page-3.jpg"
+    assert calls[-1]["url"] == "https://api.pageindex.ai/doc/s3/pi%2F1/images"
+    assert calls[-1]["params"] == {"start": 3, "end": 3}
+    assert calls[-1]["headers"] == {"api_key": "secret"}
+    fake.payload["images"][0]["url"] = None
+    with pytest.raises(PageIndexAPIError, match="No image URL returned for page 3"):
+        client.get_page_image("pi/1", 3)
+
+    fake.payload = {"doc_id": "pi/1", "img_id": "img-7.jpeg",
+                    "url": "https://signed/img-7.jpeg", "expires_in": 3600}
+    assert client.get_document_image("pi/1", "img-7.jpeg") == "https://signed/img-7.jpeg"
+    assert calls[-1]["url"] == "https://api.pageindex.ai/doc/pi%2F1/image/img-7.jpeg/"
+    assert calls[-1]["headers"] == {"api_key": "secret"}
+    fake.payload = {}
+    with pytest.raises(PageIndexAPIError, match="No image URL returned for 'img-7.jpeg'"):
+        client.get_document_image("pi/1", "img-7.jpeg")
+
+
+def test_folder_and_document_paths(cloud, monkeypatch):
+    """Paths are folder names root first; get_folder_id reads one back, a
+    document outside the API's folders is just its name, a path two
+    folders share raises instead of picking one, and a parent cycle ends
+    the walk instead of hanging it."""
+    client, calls, fake = cloud
+    folders = [{"id": "f-r", "name": "Research", "parent_folder_id": None},
+               {"id": "f-p", "name": "Papers", "parent_folder_id": "f-r"}]
+    doc_folders = {"pi-root": None, "pi-nested": "f-p", "pi-library": "f-lib"}
+
+    def handler(method, url, kw):
+        if url.endswith("/folders/"):
+            return FakeResponse({"folders": folders, "total": len(folders)})
+        m = re.fullmatch(r".*/doc/([^/]+)/metadata/", url)
+        if m:
+            doc_id = m.group(1)
+            return FakeResponse({"id": doc_id, "name": f"{doc_id}.pdf",
+                                 "folderId": doc_folders[doc_id]})
+        if url.endswith("/docs/"):
+            name = kw.get("params", {}).get("name", "")
+            docs = [{"id": did, "name": f"{did}.pdf"}
+                    for did in doc_folders if f"{did}.pdf" == name]
+            return FakeResponse({"documents": docs})
+        return FakeResponse({})
+    _patch_requests(monkeypatch, handler)
+
+    assert client.get_folder_path("f-p") == "Research/Papers"
+    assert client.get_folder_id("Research/Papers") == "f-p"
+    assert client.get_folder_id("/Research/") == "f-r"
+    folders.append({"id": "legacy", "name": "/Research/", "parent_folder_id": None})
+    assert client.get_folder_id(client.get_folder_path("legacy")) == "legacy"
+    assert client.get_folder_id("Research") == "f-r"
+    assert client.get_document_path("pi-nested") == "Research/Papers/pi-nested.pdf"
+    assert client.get_document_path("pi-root") == "pi-root.pdf"
+    assert client.get_document_path("pi-library") == "pi-library.pdf"
+    assert client.get_document_id("Research/Papers/pi-nested.pdf") == "pi-nested"
+    assert client.get_document_id("pi-root.pdf") == "pi-root"
+    with pytest.raises(PageIndexAPIError, match="Folder 'f-none' not found"):
+        client.get_folder_path("f-none")
+    with pytest.raises(PageIndexAPIError, match="No folder at path 'Research/X'"):
+        client.get_folder_id("Research/X")
+    folders.append({"id": "f-x", "name": "Research/Papers", "parent_folder_id": None})
+    with pytest.raises(PageIndexAPIError, match=r"names 2 folders \(f-p, f-x\)"):
+        client.get_folder_id("Research/Papers")
+    folders[:] = [{"id": "a", "name": "A", "parent_folder_id": "b"},
+                  {"id": "b", "name": "B", "parent_folder_id": "a"}]
+    assert client.get_folder_path("a") == "B/A"
+
+
+def test_cloud_chat_stream_parsing(cloud, monkeypatch):
+    client, calls, fake = cloud
+    lines = [
+        b'data: {"choices": [{"delta": {"role": "assistant", "content": ""}}]}',
+        b'data: {"choices": [{"delta": {"content": "Hi"}}]}',
+        b"",
+        b'data: {"object": "chat.completion.citations", "citations": []}',
+        b'data: {"choices": [{"delta": {"content": " there"}}]}',
+        b"data: [DONE]",
+    ]
+    _patch_requests(monkeypatch, lambda m, url, kw: FakeResponse(lines=lines))
+    pieces = list(client.chat_completions(
+        messages=[{"role": "user", "content": "q"}], stream=True))
+    assert pieces == ["Hi", " there"]
+
+    chunks = list(client.chat_completions(
+        messages=[{"role": "user", "content": "q"}], stream=True,
+        stream_metadata=True))
+    assert {"object": "chat.completion.citations", "citations": []} in chunks
+
+
+def test_cloud_chat_stream_error_chunk_raises(cloud, monkeypatch):
+    """A server-side failure mid-stream arrives as a final {"error": ...}
+    chunk after the partial answer: every streaming surface raises on it
+    instead of ending as a short, seemingly complete answer."""
+    client, calls, fake = cloud
+    lines = [
+        b'data: {"choices": [{"delta": {"content": "Partial"}}]}',
+        b'data: {"error": {"message": "boom", "type": "internal_error"}}',
+    ]
+    _patch_requests(monkeypatch, lambda m, url, kw: FakeResponse(lines=lines))
+    for stream in (
+        lambda: client.chat_completions("q", stream=True),
+        lambda: client.chat_completions("q", stream=True,
+                                        stream_metadata=True),
+        lambda: client.chat("q", stream=True),
+    ):
+        it = stream()
+        first = next(it)  # the partial answer is still delivered
+        assert first in ("Partial",
+                         {"choices": [{"delta": {"content": "Partial"}}]})
+        with pytest.raises(PageIndexAPIError, match="boom"):
+            list(it)
+
+
+def test_cloud_chat_accepts_query_string(cloud):
+    client, calls, fake = cloud
+    fake.payload = {"choices": [{"message": {"content": "ok"}}]}
+    client.chat_completions("What status?")
+    assert calls[-1]["json"]["messages"] == [
+        {"role": "user", "content": "What status?"}]
+    with pytest.raises(PageIndexAPIError, match="non-empty string"):
+        client.chat_completions("   ")
+
+
+def test_cloud_chat_extra_body_merges_into_payload(cloud):
+    client, calls, fake = cloud
+    fake.payload = {"choices": [{"message": {"content": "ok"}}]}
+    client.chat("q", doc_id="pi-1",
+                extra_body={"temperature": 0.2, "enable_citations": True,
+                            "service_tier": "auto"})
+    assert calls[-1]["json"] == {
+        "messages": [{"role": "user", "content": "q"}], "stream": False,
+        "doc_id": "pi-1", "temperature": 0.2, "enable_citations": True,
+        "service_tier": "auto"}
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("extra_stream", [False, True])
+@pytest.mark.parametrize("method, options", [
+    ("chat", {}),
+    ("chat", {"protocol": "chat_completions"}),
+    ("chat_completions", {}),
+    ("chat_completions", {"stream_metadata": True}),
+])
+def test_cloud_chat_rejects_extra_body_stream_before_request(
+        cloud, stream, extra_stream, method, options):
+    client, calls, fake = cloud
+    fake.payload = {"choices": [{"message": {"content": "ok"}}]}
+    with pytest.raises(PageIndexAPIError,
+                       match=r"extra_body cannot carry stream.*stream="):
+        getattr(client, method)("q", stream=stream,
+                                extra_body={"stream": extra_stream},
+                                **options)
+    assert calls == []
+
+
+@pytest.mark.parametrize("bad", [["ab"], "messages", 5, [("a", 1)]])
+@pytest.mark.parametrize("method", ["chat", "chat_completions"])
+def test_cloud_chat_rejects_non_dict_extra_body_before_request(
+        cloud, bad, method):
+    client, calls, fake = cloud
+    fake.payload = {"choices": [{"message": {"content": "ok"}}]}
+    with pytest.raises(PageIndexAPIError, match="extra_body must be a dict"):
+        getattr(client, method)("q", extra_body=bad)
+    assert calls == []
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("extra_doc_id", [
+    None, "pi-1", "pi-other", ["pi-1", "pi-other"],
+])
+@pytest.mark.parametrize("method, options", [
+    ("chat", {}),
+    ("chat", {"protocol": "chat_completions"}),
+    ("chat_completions", {}),
+    ("chat_completions", {"stream_metadata": True}),
+])
+def test_cloud_chat_rejects_extra_body_doc_id_before_request(
+        cloud, stream, extra_doc_id, method, options):
+    client, calls, fake = cloud
+    fake.payload = {"choices": [{"message": {"content": "ok"}}]}
+    with pytest.raises(PageIndexAPIError,
+                       match=r"extra_body cannot carry doc_id.*doc_id="):
+        getattr(client, method)("q", doc_id="pi-1", stream=stream,
+                                extra_body={"doc_id": extra_doc_id},
+                                **options)
+    assert calls == []
+
+
+def test_cloud_chat_folder_id_rides_the_wire(cloud):
+    """The managed chat scopes folder_id server-side: it goes out as the
+    request's own field, with no folder lookup on this side."""
+    client, calls, fake = cloud
+    fake.payload = {"choices": [{"message": {"content": "ok"}}]}
+    assert client.chat("q", folder_id="f-1") == "ok"
+    assert calls[-1]["url"].endswith("/chat/completions/")
+    assert calls[-1]["json"]["folder_id"] == "f-1"
+    assert len(calls) == 1
+    client.chat_completions("q", folder_id="")
+    assert "folder_id" not in calls[-1]["json"]
+    client.chat("q", protocol="chat_completions", folder_id="f-1")
+    assert calls[-1]["json"]["folder_id"] == "f-1"
+
+
+def test_folder_id_is_keyword_only_on_every_chat_surface():
+    for method in (PageIndexClient.chat, PageIndexClient.chat_completions,
+                   PageIndexClient._responses, PageIndexClient._messages):
+        param = inspect.signature(method).parameters["folder_id"]
+        assert param.kind is inspect.Parameter.KEYWORD_ONLY, method.__name__
+
+
+def test_parse_pages_overlap_counts_union():
+    from pageindex.client import _parse_pages
+    pages = _parse_pages("1-5000,2000-9000")
+    assert len(pages) == 9000 and pages[0] == 1 and pages[-1] == 9000
+    with pytest.raises(PageIndexAPIError, match="spans more than"):
+        _parse_pages("1-10001")
+    # one parser with the tool layer now: page 0 is rejected, not passed
+    # on — surfaced as the documented SDK error type
+    with pytest.raises(PageIndexAPIError, match="positive"):
+        _parse_pages("0-3")
+
+
+def test_folder_context(cloud):
+    """Folder targeting renders as the managed chat renders folder_id: the
+    name, an id/name/description metadata row (empty description dropped),
+    and the discovery directive carrying the id."""
+    client, calls, fake = cloud
+    fake.payload = {"folders": [
+        {"id": "f-1", "name": "Research", "description": "",
+         "parent_folder_id": None, "file_count": 2, "children_count": 1},
+        {"id": "f-2", "name": "Q3", "description": "quarterly",
+         "parent_folder_id": "f-1", "file_count": 1, "children_count": 0},
+    ], "total": 2}
+    text = client.folder_context("f-2")
+    assert calls[-1]["url"] == "https://api.pageindex.ai/folders/"
+    assert text.startswith("The user has specified folder: Q3\n")
+    assert ('Folder metadata: {"id": "f-2", "name": "Q3", '
+            '"description": "quarterly"}\n') in text
+    assert 'browse_documents(folder_id="f-2", recursive=true)' in text
+    assert ('Folder metadata: {"id": "f-1", "name": "Research"}\n'
+            in client.folder_context("f-1"))
+    with pytest.raises(PageIndexAPIError, match="not found"):
+        client.folder_context("f-9")
+    with pytest.raises(PageIndexAPIError, match="must be a string"):
+        client.folder_context(["f-1"])
+    calls.clear()
+    assert client.folder_context("root") == ""
+    assert client.folder_context("") == ""
+    assert calls == []
+
+
+# ── backend: the indexing lane ──
+
+def test_backend_scopes_the_index_lane(tmp_path, monkeypatch):
+    """index_backend reaches the indexing lane's LiteLLM call kwargs
+    verbatim — bare and provider-prefixed models alike — scoped to the
+    operation, bypassing the env pre-check."""
+    pytest.importorskip("litellm")
+    import litellm
+    from types import SimpleNamespace
+    from pageindex.local_api import LocalAPI
+    from pageindex.utils import _llm_backend, llm_completion
+
+    api = LocalAPI(storage_path=str(tmp_path / "s"), model="m",
+                   summary_model="s",
+                   index_backend={"api_key": "ik", "api_base": "http://b"})
+    assert api._with_backend(None, _llm_backend.get) == {"api_key": "ik",
+                                                         "api_base": "http://b"}
+    assert _llm_backend.get() is None
+
+    reply = SimpleNamespace(choices=[SimpleNamespace(
+        message=SimpleNamespace(content="ok"), finish_reason="stop")])
+    captured = {}
+    monkeypatch.setattr(litellm, "completion",
+                        lambda **kw: (captured.update(kw), reply)[1])
+    monkeypatch.setattr(litellm, "validate_environment",
+                        lambda *a, **k: pytest.fail("env pre-check ran"))
+    for model, wire in (("anthropic/claude-x", "anthropic/claude-x"),
+                        ("gpt-4o", "openai/gpt-4o"),
+                        ("my-finetune-v2", "openai/my-finetune-v2")):
+        captured.clear()
+        api._with_backend(None, lambda: llm_completion(model, "p"))
+        assert captured["model"] == wire
+        assert captured["api_key"] == "ik"
+        assert captured["api_base"] == "http://b"
+
+
+def test_index_lane_makes_no_key_prejudgment(monkeypatch):
+    """Credentials are LiteLLM's call at completion time: keyless
+    environments reach the wire untouched for every provider shape."""
+    pytest.importorskip("litellm")
+    import litellm
+    from types import SimpleNamespace
+    from pageindex.utils import llm_completion
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    reply = SimpleNamespace(choices=[SimpleNamespace(
+        message=SimpleNamespace(content="ok"), finish_reason="stop")])
+    monkeypatch.setattr(litellm, "completion", lambda **kw: reply)
+    monkeypatch.setattr(litellm, "validate_environment",
+                        lambda *a, **k: pytest.fail("env pre-check ran"))
+    assert llm_completion("my-finetune-v2", "p") == "ok"
+    assert llm_completion("ollama/llama3", "p") == "ok"
+    assert llm_completion("bedrock/anthropic.claude-sonnet", "p") == "ok"
+
+
+def test_llm_completion_surfaces_litellms_credential_verdict(monkeypatch):
+    """LiteLLM's own missing-credentials error (a retryable-shaped 500)
+    rides the retry loop and lands verbatim in the terminal error."""
+    pytest.importorskip("litellm")
+    import litellm  # noqa: F401 — first import may load a .env; delenv after
+    from pageindex.utils import llm_completion
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr("pageindex.utils.time.sleep", lambda s: None)
+    with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
+        llm_completion("gpt-4o", "probe")
+
+    async def _nosleep(s):
+        pass
+
+    monkeypatch.setattr("pageindex.utils.asyncio.sleep", _nosleep)
+    with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
+        asyncio.run(pageindex.utils.llm_acompletion("gpt-4o", "probe"))
+
+
+def test_litellm_model_normalizes_without_key_prejudgment(monkeypatch):
+    """_litellm_model only normalizes and provider-checks — a keyless
+    environment changes nothing for any spelling."""
+    pytest.importorskip("litellm")
+    import litellm  # noqa: F401 — first import may load a .env; delenv after
+    from pageindex.utils import _litellm_model
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert _litellm_model("litellm/gpt-4o") == "openai/gpt-4o"
+    assert _litellm_model("gpt-4o") == "openai/gpt-4o"
+
+
+def test_custom_provider_map_passes_provider_precheck(monkeypatch):
+    """litellm appends custom_provider_map providers to provider_list only
+    at completion time, so the pre-check must consult the map itself."""
+    pytest.importorskip("litellm")
+    import litellm
+    from pageindex.utils import _litellm_model
+
+    monkeypatch.setattr(litellm, "custom_provider_map",
+                        [{"provider": "my-llm", "custom_handler": object()}])
+    assert _litellm_model("my-llm/model-a") == "my-llm/model-a"
+
+
+def test_index_backend_is_local_only_chat_backend_selects_own_model():
+    """index_backend has nothing to configure on cloud (the managed
+    pipeline indexes); chat_backend is a chat-side argument, so on a
+    cloud client it selects own-model chat like chat_model does."""
+    with pytest.raises(PageIndexAPIError, match="index_backend"):
+        PageIndexClient(api_key="pi-k", index_backend={"api_key": "x"})
+    client = PageIndexClient(api_key="pi-k", chat_backend={"api_key": "x"})
+    assert client._local_chat and client.chat_backend == {"api_key": "x"}
+
+
+def test_chat_wraps_answerless_cloud_reply(monkeypatch):
+    """A cloud reply without choices (filtered / malformed) surfaces as
+    the SDK's error, not a bare IndexError/KeyError."""
+    client = PageIndexClient(api_key="pi-k")
+    for reply in ({"id": "x", "object": "chat.completion", "choices": []},
+                  {"id": "x"}):
+        monkeypatch.setattr(client, "chat_completions",
+                            lambda *a, _r=reply, **k: _r)
+        with pytest.raises(PageIndexAPIError, match="carries no answer"):
+            client.chat("hi")
+
+
+def test_retrieve_model_assignment_still_works(local_client):
+    """0.2.9 allowed `client.retrieve_model = ...`; the legacy property
+    keeps the write path as an alias for chat_model."""
+    local_client.retrieve_model = "gpt-x"
+    assert local_client.chat_model == "gpt-x"
+    assert local_client.retrieve_model == "gpt-x"
+
+
+def test_concurrent_same_name_submits_store_unique_names(local_client,
+                                                         sample_pdf,
+                                                         monkeypatch):
+    """Name uniquing runs under the store lock at save time, so two
+    clients indexing the same filename concurrently cannot both store it
+    — a stored duplicate would shadow the older doc_id forever."""
+    import threading
+    import time as time_mod
+
+    def slow_flash(pdf, **kwargs):
+        time_mod.sleep(0.1)  # both threads index before either saves
+        return {"structure": [{"title": "T", "start_index": 1,
+                               "end_index": 2, "summary": "s", "nodes": []}]}
+
+    monkeypatch.setattr(pageindex.flash, "page_index_flash", slow_flash)
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda *a, **k: "d")
+    results = []
+    workers = [threading.Thread(
+        target=lambda: results.append(local_client.submit_document(sample_pdf)))
+        for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+    assert {r["name"] for r in results} == {"sample.pdf", "sample_1.pdf"}
+
+
+
+def test_format_tree_node_keeps_key_items():
+    """key_items from the merge optimization survive the get_tree formatter."""
+    from pageindex.local_api import _format_tree_node
+
+    node = {"title": "Chapter 1", "node_id": "0000", "start_index": 1,
+            "summary": "s",
+            "key_items": ["1.1 Alpha", "1.2 Beta", "1.3 Gamma"]}
+    out = _format_tree_node(node, node_summary=True)
+    assert out["key_items"] == ["1.1 Alpha", "1.2 Beta", "1.3 Gamma"]
+    assert "key_items" not in _format_tree_node(
+        {"title": "t", "node_id": "0001", "start_index": 1}, False)
+
+
+# ── retry-ladder and summary fail-loud edges (twelfth review) ──
+
+@pytest.mark.parametrize("reply", ["", '{"summary": ""}'])
+def test_summarize_tree_all_empty_replies_fail_loud(monkeypatch, reply):
+    """Empty-content replies (content filter, spent output cap) must not
+    vouch for the model: a raw-text short leaf cannot carry the run when
+    every model reply comes back blank."""
+    async def blank(model, prompt):
+        return reply
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", blank)
+    pdf_pages = [("tiny", 1), ("beta " * 300, 300)]
+    structure = [{"title": "R", "start_index": 1, "end_index": 2,
+                  "nodes": [
+                      {"title": "A", "start_index": 1, "end_index": 1},
+                      {"title": "B", "start_index": 2, "end_index": 2}]}]
+    with pytest.raises(RuntimeError, match="returned empty"):
+        asyncio.run(pageindex.utils.summarize_tree(structure, pdf_pages))
+
+
+def test_summarize_tree_partial_empty_reply_absorbed(monkeypatch):
+    """One blank reply among good ones is absorbed per node: the node falls
+    back to its own text, the run survives."""
+    async def flaky(model, prompt):
+        if "alpha" in prompt:
+            return ""
+        return '{"points": [], "summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", flaky)
+    pdf_pages = [("alpha " * 300, 300), ("beta " * 300, 300)]
+    structure = [{"title": "A", "start_index": 1, "end_index": 1},
+                 {"title": "B", "start_index": 2, "end_index": 2}]
+    out = asyncio.run(pageindex.utils.summarize_tree(structure, pdf_pages))
+    assert [n["summary"] for n in out] == [" ".join(["alpha"] * 300)[:600], "ok"]
+
+
+def test_generate_doc_description_absorbs_context_overflow(monkeypatch):
+    """A per-prompt 400 (the whole-tree prompt overran the context) keeps
+    the indexed document: empty description instead of a lost run. Anything
+    else keeps propagating (see the sibling no-swallow test)."""
+    class Rejected(Exception):
+        status_code = 400
+
+    def boom(model, prompt):
+        raise Rejected("context_length_exceeded")
+    monkeypatch.setattr(pageindex.utils, "llm_completion", boom)
+    assert pageindex.utils.generate_doc_description([]) == ""
+
+
+def test_llm_completion_400_skips_the_retry_ladder(monkeypatch):
+    """A 400 rejects this prompt permanently — retrying cannot shrink it:
+    one wire call, raised raw so consumers can absorb it per policy."""
+    pytest.importorskip("litellm")
+    import litellm
+
+    class Rejected(Exception):
+        status_code = 400
+
+    calls = {"n": 0}
+
+    def reject(**kw):
+        calls["n"] += 1
+        raise Rejected("context_length_exceeded")
+    monkeypatch.setattr(litellm, "completion", reject)
+    monkeypatch.setattr("pageindex.utils.time.sleep", lambda s: None)
+    with pytest.raises(Rejected):
+        pageindex.utils.llm_completion("gpt-4o", "p")
+    assert calls["n"] == 1
+
+
+def test_llm_acompletion_400_skips_the_retry_ladder(monkeypatch):
+    pytest.importorskip("litellm")
+    import litellm
+
+    class Rejected(Exception):
+        status_code = 400
+
+    calls = {"n": 0}
+
+    async def reject(**kw):
+        calls["n"] += 1
+        raise Rejected("context_length_exceeded")
+    monkeypatch.setattr(litellm, "acompletion", reject)
+
+    async def _nosleep(s):
+        pass
+    monkeypatch.setattr("pageindex.utils.asyncio.sleep", _nosleep)
+    with pytest.raises(Rejected):
+        asyncio.run(pageindex.utils.llm_acompletion("gpt-4o", "p"))
+    assert calls["n"] == 1
+
+
+def test_parse_pages_keeps_whitespace_tolerance():
+    """0.2.10 accepted whitespace around parts (int() tolerance); the SDK
+    surface keeps that while the tool layer stays on the strict pattern."""
+    from pageindex.client import _parse_pages
+    assert _parse_pages(" 1-3") == [1, 2, 3]
+    assert _parse_pages("5 - 7") == [5, 6, 7]
+    assert _parse_pages("3 ,8") == [3, 8]
+    assert _parse_pages("1-3\n") == [1, 2, 3]
+    assert _parse_pages("\t2") == [2]
+    with pytest.raises(PageIndexAPIError):
+        _parse_pages("1 2")
+
+
+def test_submit_scrubs_surrogates_from_the_stored_name(
+        local_client, sample_pdf, monkeypatch):
+    """The store scrubs at write time; scrubbing the basename at entry keeps
+    the returned name identical to the stored name and lets the rename
+    warning fire. (APFS refuses surrogate filenames, so the basename is
+    patched instead of the filesystem.)"""
+    import os
+
+    def fake_page_index_main(doc, opt=None, logger=None, page_list=None):
+        return {"doc_name": "x", "doc_description": "d",
+                "structure": json.loads(json.dumps(STRUCTURE))}
+    monkeypatch.setattr(page_index_module, "page_index_main",
+                        fake_page_index_main)
+    real = os.path.basename
+    monkeypatch.setattr(os.path, "basename",
+                        lambda p: "re\udcffport.pdf"
+                        if real(str(p)) == "sample.pdf" else real(p))
+    with pytest.warns(UserWarning, match="stored as"):
+        result = local_client.submit_document(sample_pdf, mode="standard")
+    assert result["name"] == "re\ufffdport.pdf"
+    docs = local_client.list_documents()["documents"]
+    assert [d["name"] for d in docs] == ["re\ufffdport.pdf"]
+
+
+def test_submit_rejects_nan_metadata(local_client):
+    """json.dumps' default (allow_nan=True) passes NaN/Infinity that no
+    strict JSON parser accepts; the gate must reject them before they reach
+    disk and every tool envelope."""
+    with pytest.raises(PageIndexAPIError, match="valid JSON"):
+        local_client.submit_document("/nonexistent.pdf",
+                                     metadata={"score": float("nan")})
+
+
+def test_submit_flash_empty_structure_points_to_standard(
+        local_client, sample_pdf, monkeypatch):
+    """The heading-less hard-fail names its way out: mode='standard'."""
+    monkeypatch.setattr(pageindex.flash, "page_index_flash",
+                        lambda pdf, **kwargs: {"structure": []})
+    with pytest.raises(PageIndexAPIError, match="mode='standard'"):
+        local_client.submit_document(sample_pdf)
+
+
+def test_expand_queries_nodes_concurrently(monkeypatch):
+    """Eligible frontier nodes are proposed concurrently, not one at a
+    time — and never wider than the cap: a burst tripping rate limits
+    would hit the fatal exhausted-retry path."""
+    import pageindex.tree_optimize as tree_optimize
+
+    inflight = {"now": 0, "peak": 0}
+
+    async def slow_empty(model, prompt):
+        inflight["now"] += 1
+        inflight["peak"] = max(inflight["peak"], inflight["now"])
+        await asyncio.sleep(0.01)
+        inflight["now"] -= 1
+        return ""
+    monkeypatch.setattr(tree_optimize, "llm_acompletion", slow_empty)
+    structure = [{"title": f"T{i}", "start_index": 1 + 6 * i,
+                  "end_index": 6 + 6 * i, "node_id": f"{i:04d}", "nodes": []}
+                 for i in range(40)]
+    pages = ["heading\nbody text"] * 240
+    lines = [["heading", "body text"]] * 240
+    asyncio.run(tree_optimize.optimize(structure, pages, lines, model="m",
+                                       do_expand=True))
+    assert inflight["peak"] > 1
+    assert inflight["peak"] <= 32
+
+
+def _expand_fixture():
+    """Twelve pages; X spans nine of them, so expand looks at it and, when
+    the model offers 'Sub One' (page 4) and 'Sub Two' (page 8), splits it
+    into two leaves under the trigger. Bodies are long enough that every
+    leaf summary needs the model."""
+    body = "body " * 250
+    pages = [body] * 12
+    pages[3] = "Sub One\n" + body
+    pages[7] = "Sub Two\n" + body
+    lines = [[l for l in p.splitlines() if l.strip()] for p in pages]
+    tree = [{"title": "R", "start_index": 1, "end_index": 12, "node_id": "0000", "nodes": [
+        {"title": "A", "start_index": 1, "end_index": 3, "node_id": "0001"},
+        {"title": "X", "start_index": 4, "end_index": 12, "node_id": "0002"}]}]
+    return tree, pages, lines
+
+
+def test_final_nodes_holds_back_only_undecided_expand_candidates():
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, _, _ = _expand_fixture()
+    titles = lambda nodes: sorted(n["title"] for n in nodes)
+    assert titles(tree_optimize.final_nodes(tree, 5, set())) == ["A", "R"]
+    assert titles(tree_optimize.final_nodes(tree, 5, {"0002"})) == ["A", "R", "X"]
+    assert titles(tree_optimize.final_nodes(tree, 9, set())) == ["A", "R", "X"]
+
+
+def test_optimize_reports_final_nodes_as_expand_decides(monkeypatch):
+    """Before the first expand call, everything expand cannot touch is
+    reported final; the candidate and what it grows are reported the moment
+    it is decided; the closing report covers the whole tree."""
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, lines = _expand_fixture()
+    reports, replied_after = [], []
+
+    async def propose(model, prompt):
+        await asyncio.sleep(0.01)
+        replied_after.append(len(reports))
+        return {"subsections": [{"title": "Sub One", "page": 4},
+                                {"title": "Sub Two", "page": 8}]}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+    asyncio.run(tree_optimize.optimize(
+        tree, pages, lines, model="m", do_expand=True,
+        on_final=lambda nodes: reports.append(sorted(n["title"] for n in nodes))))
+    before_reply = [t for report in reports[:replied_after[0]] for t in report]
+    assert "R" in before_reply and "A" in before_reply and "X" not in before_reply
+    decided = next(r for r in reports[replied_after[0]:] if "X" in r)
+    assert decided == ["Sub One", "Sub Two", "X"]
+    assert reports[-1] == ["A", "R", "Sub One", "Sub Two", "X"]
+
+
+def test_optimize_reports_a_candidate_kept_collapsed_once_decided(monkeypatch):
+    """A candidate the model finds nothing in is final the moment its retry
+    ladder ends, not at the end of the run."""
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, lines = _expand_fixture()
+    reports = []
+
+    async def nothing(model, prompt):
+        return {"subsections": []}
+    monkeypatch.setattr(tree_optimize, "ask_model", nothing)
+    asyncio.run(tree_optimize.optimize(
+        tree, pages, lines, model="m", do_expand=True,
+        on_final=lambda nodes: reports.append(sorted(n["title"] for n in nodes))))
+    assert ["X"] in reports[:-1]
+
+
+def test_optimize_reports_a_candidate_kept_collapsed_for_too_little_gain_once_decided(monkeypatch):
+    """The other way to stay collapsed: the model proposes a split that does
+    not pay for itself. That node is final right then too."""
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, lines = _expand_fixture()
+    reports = []
+
+    async def propose(model, prompt):
+        return {"subsections": [{"title": "Sub One", "page": 4}, {"title": "Sub Two", "page": 8}]}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+    outcome = asyncio.run(tree_optimize.optimize(
+        tree, pages, lines, model="m", do_expand=True, min_gain_ratio=0.99,
+        on_final=lambda nodes: reports.append(sorted(n["title"] for n in nodes))))
+    assert outcome["kept_collapsed"] == 1 and ["X"] in reports[:-1]
+
+
+def test_merge_fuses_the_same_page_frontier_it_creates_at_once():
+    """Collapsing F leaves it on exactly G's page; the two must fuse right
+    then, not one round later (with a single round they never would)."""
+    import pageindex.tree_optimize as tree_optimize
+
+    tree = [{"title": "R", "start_index": 1, "end_index": 6, "node_id": "0000", "nodes": [
+        {"title": "F", "start_index": 1, "end_index": 1, "node_id": "0001", "nodes": [
+            {"title": "f1", "start_index": 1, "end_index": 1, "node_id": "0002"}]},
+        {"title": "G", "start_index": 1, "end_index": 1, "node_id": "0003"},
+        {"title": "H", "start_index": 2, "end_index": 5, "node_id": "0004"}]}]
+    outcome = asyncio.run(tree_optimize.optimize(
+        tree, None, None, do_expand=False, max_rounds=1))
+    assert outcome["merges"] == 1 and outcome["same_page_merges"] == 1
+    kept = tree[0]["nodes"]
+    assert [n["title"] for n in kept][1:] == ["H"] and kept[0].get("_same_page")
+
+
+def test_expand_fuses_same_page_children_before_reporting_them(monkeypatch):
+    """Two proposed headings on one page become one node as soon as they
+    are attached, so the report never carries a duplicate."""
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, lines = _expand_fixture()
+    pages[3] = "Sub One\nSub Two\n" + pages[3]
+    pages[4] = "Sub Three\n" + pages[4]
+    pages[8] = "Sub Four\n" + pages[8]
+    lines = [[l for l in p.splitlines() if l.strip()] for p in pages]
+
+    async def propose(model, prompt):
+        return {"subsections": [{"title": "Sub One", "page": 4}, {"title": "Sub Two", "page": 4},
+                                {"title": "Sub Three", "page": 5}, {"title": "Sub Four", "page": 9}]}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+
+    async def summarize(model, prompt):
+        return '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", summarize)
+    reports = []
+
+    async def run():
+        # the real scheduler: mark_final snapshots each node's children and
+        # finish() rejects a later change, so settling before the fusion fails here
+        scheduler = pageindex.utils.SummaryScheduler(tree, [(p, 0) for p in pages], model="m")
+
+        def on_final(nodes):
+            reports.append([(n["title"], len(n.get("nodes") or [])) for n in nodes])
+            scheduler.mark_final(nodes)
+        outcome = await tree_optimize.optimize(tree, pages, lines, model="m", do_expand=True,
+                                               max_rounds=1, on_final=on_final)
+        await scheduler.finish()
+        return outcome
+    outcome = asyncio.run(run())
+    assert outcome["expands"] == 1 and outcome["same_page_merges"] == 1
+    assert [n["title"] for n in tree[0]["nodes"][1]["nodes"]][1:] == ["Sub Three", "Sub Four"]
+    assert all(children != 4 for report in reports for _, children in report)
+    # the round entry agrees with the run counters: the fusion happened this round
+    assert [e["same_page"] for e in outcome["log"] if e["op"] == "round"] == [True]
+
+
+def test_expand_keeps_same_page_children_when_merging_is_off(monkeypatch):
+    """do_merge=False turns off every merge, the fusion inside expand
+    included: a caller who disabled merging keeps every proposed node and
+    every document title."""
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, lines = _expand_fixture()
+    pages[3] = "Sub One\nSub Two\n" + pages[3]
+    pages[4] = "Sub Three\n" + pages[4]
+    pages[8] = "Sub Four\n" + pages[8]
+    lines = [[l for l in p.splitlines() if l.strip()] for p in pages]
+
+    async def propose(model, prompt):
+        return {"subsections": [{"title": "Sub One", "page": 4}, {"title": "Sub Two", "page": 4},
+                                {"title": "Sub Three", "page": 5}, {"title": "Sub Four", "page": 9}]}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+    outcome = asyncio.run(tree_optimize.optimize(
+        tree, pages, lines, model="m", do_expand=True, do_merge=False, max_rounds=1))
+    children = tree[0]["nodes"][1]["nodes"]
+    assert [n["title"] for n in children] == ["Sub One", "Sub Two", "Sub Three", "Sub Four"]
+    assert outcome["same_page_merges"] == 0
+    assert not any(n.get("_same_page") for n in children)
+
+
+def test_flash_summaries_start_while_expand_is_still_deciding(tmp_path, monkeypatch):
+    """With expand on, summaries run on the same loop: a leaf expand cannot
+    touch is already being summarized when the model answers about X. Every
+    node is summarized exactly once and the tree matches the merge+expand
+    pass run on its own."""
+    from conftest import build_pdf
+    import copy
+    import pageindex.flash.api as flash_api
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, _ = _expand_fixture()
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: {
+        "structure": copy.deepcopy(tree), "page_texts": list(pages)})
+    started, replied_after, models = [], [], []
+
+    async def propose(model, prompt):
+        models.append(("expand", model))
+        await asyncio.sleep(0.05)
+        replied_after.append(len(started))
+        return {"subsections": [{"title": "Sub One", "page": 4},
+                                {"title": "Sub Two", "page": 8}]}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+
+    async def summarize(model, prompt, **params):
+        models.append(("summary", model))
+        started.append(prompt)
+        await asyncio.sleep(0.01)
+        return '{"points": [], "summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", summarize)
+
+    result = flash_api.page_index_flash(str(pdf), summary_model="m", optimize_model="x")
+    assert replied_after[0] >= 1
+    assert result["optimize"]["expands"] == 1
+    nodes = list(pageindex.utils._subtree(result["structure"]))
+    assert [n["summary"] for n in nodes] == ["ok"] * 5 and len(started) == 5
+    assert set(models) == {("expand", "x"), ("summary", "m")}
+    shape = lambda nodes: [(n["title"], n["start_index"], n["end_index"],
+                            shape(n.get("nodes") or [])) for n in nodes]
+    alone = flash_api.page_index_flash(str(pdf), summary=False)
+    assert shape(result["structure"]) == shape(alone["structure"])
+
+
+def test_mode_declaration_top_level(monkeypatch):
+    """mode= states where documents live; always optional, always
+    checked, and mode="cloud" alone reads the env key."""
+    monkeypatch.setenv("PAGEINDEX_API_KEY", "pi-env")
+    assert PageIndexClient(mode="cloud").api_key == "pi-env"
+    assert not PageIndexClient(mode="cloud")._local_chat
+    bridge = PageIndexClient(mode="cloud", chat_model="openai/m")
+    assert bridge._local_chat and bridge.api_key == "pi-env"
+    agreed = PageIndexClient(api_key="pi-x", mode="cloud")
+    assert agreed.api_key == "pi-x"
+    local = PageIndexClient(mode="local")
+    assert local._local_chat and not hasattr(local, "api_key")
+
+    monkeypatch.delenv("PAGEINDEX_API_KEY")
+    with pytest.raises(PageIndexAPIError, match="PAGEINDEX_API_KEY"):
+        PageIndexClient(mode="cloud")
+    with pytest.raises(PageIndexAPIError, match="conflicts with api_key"):
+        PageIndexClient(api_key="k", mode="local")
+    with pytest.raises(PageIndexAPIError, match='"cloud" or "local"'):
+        PageIndexClient(mode="banana")
+
+    # mode= beside index= is the same cross-check: agreement passes,
+    # disagreement errors, and the vocabulary check still comes first.
+    assert PageIndexClient(mode="local", index="m").index_model == "m"
+    assert PageIndexClient(mode="cloud",
+                           index={"api_key": "pi-x"}).api_key == "pi-x"
+    with pytest.raises(PageIndexAPIError, match="disagrees with index="):
+        PageIndexClient(mode="cloud", index="m")
+    with pytest.raises(PageIndexAPIError, match="disagrees with index="):
+        PageIndexClient(mode="local", index={"api_key": "k"})
+    with pytest.raises(PageIndexAPIError, match='"cloud" or "local"'):
+        PageIndexClient(mode="banana", index="m")
+
+
+def test_mode_declaration_in_index_dict(monkeypatch):
+    monkeypatch.setenv("PAGEINDEX_API_KEY", "pi-env")
+    assert PageIndexClient(index={"mode": "cloud"}).api_key == "pi-env"
+    assert PageIndexClient(
+        index={"mode": "cloud", "api_key": "pi-x"}).api_key == "pi-x"
+    declared = PageIndexClient(index={"mode": "local", "model": "i"})
+    assert declared.index_model == "i"
+    assert not hasattr(PageIndexClient(index={"mode": "local"}), "api_key")
+
+    with pytest.raises(PageIndexAPIError, match='mode "cloud" but carries'):
+        PageIndexClient(index={"mode": "cloud", "model": "i"})
+    with pytest.raises(PageIndexAPIError, match='mode "local" but carries'):
+        PageIndexClient(index={"mode": "local", "api_key": "k"})
+    with pytest.raises(PageIndexAPIError, match='"cloud" or "local"'):
+        PageIndexClient(index={"mode": "hosted"})
+    # The key is "mode"; the pre-release "type" is just an unknown key.
+    with pytest.raises(PageIndexAPIError, match=r"Unknown index keys \(type\)"):
+        PageIndexClient(index={"type": "cloud"})
+
+
+def test_mode_declaration_in_chat_dict():
+    managed = PageIndexClient(api_key="pi-k", chat={"mode": "cloud"})
+    assert not managed._local_chat
+    # {"mode": "local"} alone declares own-model chat — default model.
+    from pageindex.utils import DEFAULT_CHAT_MODEL
+    own = PageIndexClient(api_key="pi-k", chat={"mode": "local"})
+    assert own._local_chat and own.chat_model == DEFAULT_CHAT_MODEL
+    declared = PageIndexClient(chat={"mode": "local", "model": "m"})
+    assert declared.chat_model == "m"
+
+    with pytest.raises(PageIndexAPIError, match='mode "cloud" but carries'):
+        PageIndexClient(api_key="pi-k", chat={"mode": "cloud", "model": "m"})
+    with pytest.raises(PageIndexAPIError, match="cannot read the local store"):
+        PageIndexClient(chat={"mode": "cloud"})
+    with pytest.raises(PageIndexAPIError, match=r"Unknown chat keys \(type\)"):
+        PageIndexClient(api_key="pi-k", chat={"type": "cloud"})
+
+
+def test_blank_chat_model_assignment_stays_managed():
+    """The constructor refuses chat_model="" as configuring nothing, so
+    the assignment path must agree — cfg.get("chat_model", "") otherwise
+    opens the bridge and hands LiteLLM a nameless model."""
+    client = PageIndexClient(api_key="pi-k")
+    for blank in ("", "   "):
+        client.chat_model = blank
+        assert not client._local_chat, repr(blank)
+    client.retrieve_model = ""
+    assert not client._local_chat
+
+
+def test_local_client_blank_chat_model_refuses_at_chat_door(local_client):
+    """A local client has no managed chat to fall back to: with chat_model
+    blanked, chat_completions() must refuse as a PageIndexAPIError, not
+    surface LocalAPI's missing chat_completions as an AttributeError."""
+    for blank in ("", "   ", None):
+        local_client.chat_model = blank
+        with pytest.raises(PageIndexAPIError, match="chat_model is empty"):
+            local_client.chat_completions("hi")
+        # the protocol and instructions knobs must not point a local
+        # client at the managed chat it does not have
+        with pytest.raises(PageIndexAPIError, match="chat_model is empty"):
+            local_client.chat("hi", protocol="responses")
+        with pytest.raises(PageIndexAPIError, match="chat_model is empty"):
+            local_client.chat("hi", instructions="brief")
+        with pytest.raises(PageIndexAPIError, match="chat_model is empty"):
+            local_client._responses("hi")
+        with pytest.raises(PageIndexAPIError, match="chat_model is empty"):
+            local_client._messages("hi", model="claude-x")
+
+
+def test_blank_chat_model_carries_no_model_into_agent_config():
+    """Same rule at the config door: a blank chat_model must not become
+    a model literally named "   " in the returned config."""
+    pytest.importorskip("agents")
+    client = PageIndexClient()
+    client.chat_model = "   "
+    assert "model" not in client.openai_agent_config()
+
+
+def test_retry_notice_logs_instead_of_stdout(monkeypatch, capsys, caplog):
+    """A retried completion must not write into the caller's stdout — that
+    channel belongs to answers and CLI output; the notice rides logging
+    beside the error it accompanies."""
+    litellm = pytest.importorskip("litellm")
+    from pageindex import utils
+    attempts = []
+
+    def flaky(**kwargs):
+        if not attempts:
+            attempts.append(1)
+            raise RuntimeError("boom")
+        message = types.SimpleNamespace(content="ok")
+        choice = types.SimpleNamespace(message=message, finish_reason="stop")
+        return types.SimpleNamespace(choices=[choice])
+
+    monkeypatch.setattr(litellm, "completion", flaky)
+    monkeypatch.setattr(utils.time, "sleep", lambda s: None)
+    assert utils.llm_completion("openai/gpt-x", "hi") == "ok"
+    assert capsys.readouterr().out == ""
+    assert any("Retrying" in r.getMessage() for r in caplog.records)
+
+
+def test_retry_notice_only_when_a_retry_follows(monkeypatch, caplog):
+    """The notice announces a retry; the terminal attempt raises instead."""
+    litellm = pytest.importorskip("litellm")
+    from pageindex import utils
+
+    def broken(**kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(litellm, "completion", broken)
+    monkeypatch.setattr(utils.time, "sleep", lambda s: None)
+    with pytest.raises(utils.LLMRetriesExhausted):
+        utils.llm_completion("openai/gpt-x", "hi")
+    assert sum("Retrying" in r.getMessage() for r in caplog.records) == 9
+
+
+# ── client-level instructions ──
+
+def test_instructions_stored_on_every_constructor(tmp_path):
+    from pageindex import PageIndexCloudClient, PageIndexLocalClient
+    store = str(tmp_path / "store")
+    assert PageIndexClient(storage_path=store,
+                           instructions=" persona ").instructions == "persona"
+    assert PageIndexLocalClient(storage_path=store,
+                                instructions="p").instructions == "p"
+    assert PageIndexCloudClient(api_key="pi-k",
+                                instructions="p").instructions == "p"
+    both = PageIndexClient(api_key="pi-k", chat="gpt-x", instructions="p")
+    assert (both.chat_model, both.instructions) == ("gpt-x", "p")
+    managed = PageIndexClient(api_key="pi-k", instructions="p")
+    assert managed.chat_model is None and managed.instructions == "p"
+    assert PageIndexClient(storage_path=store).instructions is None
+    assert PageIndexClient(storage_path=store,
+                           instructions="  ").instructions is None
+
+
+def test_instructions_must_be_a_string(tmp_path):
+    with pytest.raises(PageIndexAPIError, match="instructions must be a str"):
+        PageIndexClient(storage_path=str(tmp_path / "s"),
+                        instructions=[{"type": "text", "text": "x"}])
+
+
+def test_submit_flash_rejects_unreadable_text_layer(local_client, sample_pdf,
+                                                    monkeypatch):
+    monkeypatch.setattr(
+        pageindex.flash, "page_index_flash",
+        lambda pdf, **kwargs: {"doc_name": "sample.pdf", "structure": [],
+                               "toc_source": "unreadable"})
+    with pytest.raises(PageIndexAPIError, match="no text layer"):
+        local_client.submit_document(sample_pdf, mode="flash")
+
+
+def test_submit_flash_accepts_page_fallback(local_client, sample_pdf, monkeypatch):
+    """A small flat tree is a valid index."""
+    monkeypatch.setattr(
+        pageindex.flash, "page_index_flash",
+        lambda pdf, **kwargs: {
+            "doc_name": "sample.pdf", "toc_source": "pages",
+            "structure": [{"title": "Hello", "node_id": "0000",
+                           "start_index": 1, "end_index": 1},
+                          {"title": "World", "node_id": "0001",
+                           "start_index": 2, "end_index": 2}]})
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda model, prompt, **kw: "Flash description.")
+    doc_id = local_client.submit_document(sample_pdf, mode="flash")["doc_id"]
+    tree = local_client.get_tree(doc_id)["result"]
+    assert [node["title"] for node in tree] == ["Hello", "World"]
+
+
+def test_submit_flash_rejects_oversized_flat_tree(local_client, sample_pdf,
+                                                  monkeypatch):
+    from pageindex.flash.api import FLAT_TREE_MAX_NODES
+
+    nodes = [{"title": f"Page {n}", "start_index": 1, "end_index": 1, "nodes": []}
+             for n in range(FLAT_TREE_MAX_NODES + 1)]
+    monkeypatch.setattr(
+        pageindex.flash, "page_index_flash",
+        lambda pdf, **kwargs: {"doc_name": "sample.pdf", "toc_source": "pages",
+                               "structure": nodes})
+    with pytest.raises(PageIndexAPIError,
+                       match="no layout structure.*mode='standard'"):
+        local_client.submit_document(sample_pdf, mode="flash")
+
+
+@pytest.mark.parametrize("name", ["/Research/", "CON", "bad?name", "a\nb", "中" * 61])
+def test_cloud_folder_name_rejected_before_request(cloud, name):
+    client, calls, fake = cloud
+    before = len(calls)
+    with pytest.raises(PageIndexAPIError):
+        client.create_folder(name)
+    assert len(calls) == before
+
+
+def test_cloud_folder_uses_server_result(cloud):
+    client, calls, fake = cloud
+    fake.payload = {"folder": {"id": "f-1", "name": "Research 2026"}}
+    result = client.create_folder("  Ｒｅｓｅａｒｃｈ   ２０２６ ")
+    assert calls[-1]["json"]["name"] == "  Ｒｅｓｅａｒｃｈ   ２０２６ "
+    assert result["folder"]["name"] == "Research 2026"
+
+
+@pytest.mark.parametrize(("name", "expected"), [
+    ('Q"3.pdf', "Q_3.pdf"),
+    ("Q\r\n3.pdf", "Q__3.pdf"),
+    ("Q%223.pdf", "Q%223.pdf"),
+    ("Ｑ３？．ｐｄｆ", "Q3_.pdf"),
+    ("报告😀.pdf", "报告😀.pdf"),
+])
+def test_cloud_upload_normalizes_before_multipart_encoding(
+    tmp_path, monkeypatch, name, expected
+):
+    from email import policy
+    from email.parser import BytesParser
+
+    import requests
+
+    pdf = tmp_path / name
+    content = b"%PDF-test upload body"
+    pdf.write_bytes(content)
+    sent = []
+    server_result = {"doc_id": "pi-1", "name": "assigned_7.pdf"}
+
+    def send(_session, request, **kwargs):
+        sent.append(request)
+        message = BytesParser(policy=policy.default).parsebytes(
+            ("Content-Type: " + request.headers["Content-Type"]
+             + "\r\nMIME-Version: 1.0\r\n\r\n").encode() + request.body
+        )
+        file_part = next(part for part in message.iter_parts()
+                         if part.get_filename() is not None)
+        assert file_part.get_filename() == expected
+        assert file_part.get_payload(decode=True) == content
+        response = requests.Response()
+        response.status_code = 200
+        response._content = json.dumps(server_result).encode()
+        return response
+
+    monkeypatch.setattr(requests.Session, "send", send)
+    with pytest.warns(UserWarning, match="assigned_7.pdf"):
+        result = PageIndexClient(api_key="test").submit_document(str(pdf))
+    assert result == server_result
+    assert len(sent) == 1
+
+
+@pytest.mark.parametrize("name", ["Ｑ３？.pdf", "Ｑ３？．ｐｄｆ", "Ｑ３？.pdf. "])
+def test_local_upload_uses_shared_name_rules(
+    local_client, sample_pdf, tmp_path, monkeypatch, name
+):
+    pdf = tmp_path / name
+    pdf.write_bytes(Path(sample_pdf).read_bytes())
+    monkeypatch.setattr(page_index_module, "page_index_main", lambda *args, **kwargs: {
+        "doc_name": "ignored", "doc_description": None,
+        "structure": json.loads(json.dumps(STRUCTURE)),
+    })
+    with pytest.warns(UserWarning, match="stored as"):
+        result = local_client.submit_document(str(pdf), mode="standard")
+    assert result["name"] == "Q3_.pdf"
+    assert local_client.get_document(result["doc_id"])["name"] == result["name"]
+
+
+def test_local_collision_stays_within_byte_budget(local_client, monkeypatch):
+    contract = Path(__file__).parent / "fixtures/naming-v1.json"
+    case = json.loads(contract.read_text())["suffixes"][-1]
+    monkeypatch.setattr(
+        local_client._api._store, "list_metas", lambda: [{"name": case["name"]}]
+    )
+    assert local_client._api._unique_doc_name(case["name"]) == case["expected"]
+
+
+@pytest.mark.parametrize("name", ["报告．ｐｄｆ", "report.pdf. "])
+@pytest.mark.parametrize("mode", ["standard", "flash"])
+def test_indexers_accept_normalizable_extensions(
+    sample_pdf, tmp_path, monkeypatch, name, mode
+):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, Mock
+
+    pdf = tmp_path / name
+    pdf.write_bytes(Path(sample_pdf).read_bytes())
+    if mode == "flash":
+        result = pageindex.flash.page_index_flash(
+            str(pdf), summary=False, optimize=False
+        )
+    else:
+        monkeypatch.setattr(page_index_module, "tree_parser", AsyncMock(return_value=[
+            {"title": "Hello", "start_index": 1, "end_index": 2},
+        ]))
+        options = SimpleNamespace(
+            if_add_node_id="no", if_add_node_text="no", if_add_node_summary="no"
+        )
+        result = page_index_module.page_index_main(
+            str(pdf), options, logger=Mock(), page_list=[("one", 1), ("two", 1)],
+        )
+    assert result["structure"]
+
+
+def test_summary_prompts_cap_words_and_omit_points(monkeypatch):
+    """Both summary prompts ask for the summary alone, within the word cap.
+    The points list the model wrote first was parsed and thrown away, and
+    with it gone the summary swallows its content unless a cap holds it."""
+    prompts = []
+
+    async def capture(model, prompt):
+        prompts.append(prompt)
+        return '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", capture)
+    pdf_pages = [("alpha " * 5, 5), ("beta " * 5, 5)]
+
+    def tree():
+        return [{"title": "R", "start_index": 1, "end_index": 2,
+                 "nodes": [{"title": "A", "start_index": 1, "end_index": 1},
+                           {"title": "B", "start_index": 2, "end_index": 2}]}]
+
+    asyncio.run(pageindex.utils.summarize_tree(tree(), pdf_pages, small_node_tokens=0))
+    assert len(prompts) == 3
+    assert all("within 150 words" in p and '"points"' not in p for p in prompts)
+
+    prompts.clear()
+    asyncio.run(pageindex.utils.summarize_tree(tree(), pdf_pages, small_node_tokens=0,
+                                               max_words=80))
+    assert len(prompts) == 3 and all("within 80 words" in p for p in prompts)
+
+
+def test_page_index_flash_plumbs_summary_max_words(tmp_path, monkeypatch):
+    """summary_max_words reaches the prompts on both summary paths: the
+    plain one and the one overlapped with expand."""
+    from conftest import build_pdf
+    import copy
+    import pageindex.flash.api as flash_api
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, _ = _expand_fixture()
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: {
+        "structure": copy.deepcopy(tree), "page_texts": list(pages)})
+
+    async def propose(model, prompt):
+        return {"subsections": [{"title": "Sub One", "page": 4},
+                                {"title": "Sub Two", "page": 8}]}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+    prompts = []
+
+    async def capture(model, prompt, **params):
+        prompts.append(prompt)
+        return '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", capture)
+
+    for optimize in (False, "full"):
+        prompts.clear()
+        flash_api.page_index_flash(str(pdf), summary_model="m", optimize=optimize,
+                                   summary_max_words=80)
+        assert prompts and all("within 80 words" in p for p in prompts), optimize
+
+
+def test_page_index_flash_prices_expand_with_the_run_summary_length(tmp_path, monkeypatch):
+    from conftest import build_pdf
+    import copy
+    import pageindex.flash.api as flash_api
+    import pageindex.tree_optimize as tree_optimize
+    from pageindex.utils import SUMMARY_MAX_WORDS
+
+    tree, pages, _ = _expand_fixture()
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: {
+        "structure": copy.deepcopy(tree), "page_texts": list(pages)})
+
+    async def propose(model, prompt):
+        return {"subsections": []}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+
+    async def summarize(model, prompt, **params):
+        return '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", summarize)
+    seen, real = [], tree_optimize.optimize
+
+    async def spy(*a, **kw):
+        seen.append(kw.get("summary_words"))
+        return await real(*a, **kw)
+    monkeypatch.setattr(tree_optimize, "optimize", spy)
+
+    for kwargs, words in (({}, SUMMARY_MAX_WORDS), ({"summary_max_words": 80}, 80),
+                          ({"summary": False}, 0)):
+        seen.clear()
+        flash_api.page_index_flash(str(pdf), summary_model="m", optimize="full", **kwargs)
+        assert seen == [words], kwargs
+
+
+def test_page_index_flash_splits_shared_pages_on_both_summary_paths(tmp_path, monkeypatch):
+    from conftest import build_pdf
+    import copy
+    import pageindex.flash.api as flash_api
+    import pageindex.tree_optimize as tree_optimize
+
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    tree = [{"title": "Alpha", "start_index": 1, "end_index": 2},
+            {"title": "Beta", "start_index": 2, "end_index": 2}]
+    pages = ["Alpha\n" + "oakwood " * 300 + "\n",
+             "pinecone " * 300 + "\nBeta\n" + "elmtree " * 300 + "\n"]
+    monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: {
+        "structure": copy.deepcopy(tree), "page_texts": list(pages)})
+
+    async def propose(model, prompt):
+        return {"subsections": []}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+    prompts = []
+
+    async def capture(model, prompt, **params):
+        prompts.append(prompt)
+        return '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", capture)
+
+    for optimize in (False, "full"):
+        prompts.clear()
+        flash_api.page_index_flash(str(pdf), summary_model="m", optimize=optimize)
+        alpha, beta = sorted(prompts, key=lambda p: "Alpha" not in p)
+        assert "pinecone" in alpha and "elmtree" not in alpha, optimize
+        assert "elmtree" in beta and "pinecone" not in beta, optimize
+
+
+def test_flash_summaries_send_the_reasoning_effort_and_expand_does_not(tmp_path, monkeypatch):
+    from conftest import build_pdf
+    import copy
+    import pageindex.flash.api as flash_api
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, _ = _expand_fixture()
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: {
+        "structure": copy.deepcopy(tree), "page_texts": list(pages)})
+    sent = []
+
+    async def capture(model, prompt, **params):
+        expand = prompt.startswith("You are splitting")
+        sent.append(("expand" if expand else "summary", params))
+        return '{"subsections": []}' if expand else '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", capture)
+    monkeypatch.setattr(tree_optimize, "llm_acompletion", capture)
+
+    for model, optimize, effort, backend, expected in (
+            ("gpt-5.1", False, None, None, "none"),
+            ("gpt-5.1", "full", None, None, "none"),
+            ("gpt-5.1", "full", None, {"reasoning_effort": "high"}, None),
+            ("gpt-5-mini", "full", None, None, None),
+            ("o4-mini", "full", "high", None, "high"),
+            ("openrouter/openai/gpt-5.1", "full", None, None, "none"),
+            ("gpt-9-preview", "full", None, None, "none"),
+            ("gpt-9-preview", "full", None, {"thinking": {"type": "enabled"}}, None)):
+        sent.clear()
+        token = pageindex.utils._llm_backend.set(backend)
+        try:
+            flash_api.page_index_flash(str(pdf), summary_model=model, optimize=optimize,
+                                       summary_reasoning_effort=effort)
+        finally:
+            pageindex.utils._llm_backend.reset(token)
+        assert {p.get("reasoning_effort") for kind, p in sent if kind == "summary"} == {expected}
+        expands = [p for kind, p in sent if kind == "expand"]
+        assert bool(expands) == (optimize == "full")
+        assert all("reasoning_effort" not in p for p in expands)
+
+    monkeypatch.setattr(pageindex.utils, "default_summary_reasoning_effort",
+                        lambda model: pytest.fail("looked up with summaries off"))
+    flash_api.page_index_flash(str(pdf), summary=False, optimize=False)
+
+
+def test_flash_summaries_drop_a_default_effort_the_server_refuses(tmp_path, monkeypatch):
+    """The default effort is dropped once a prompt refused with it (400)
+    goes through without it, calls refused after the drop included; a
+    prompt refused either way keeps it; another refusal or a chosen effort
+    is never resent without it."""
+    from conftest import build_pdf
+    import copy
+    import pageindex.flash.api as flash_api
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, _ = _expand_fixture()
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: {
+        "structure": copy.deepcopy(tree), "page_texts": list(pages)})
+
+    class Refused(Exception):
+        def __init__(self, status_code):
+            super().__init__("unsupported value")
+            self.status_code = status_code
+    sent = []
+
+    def run(optimize, refuse, effort=None, concurrency=1, status=400):
+        sent.clear()
+
+        async def server(model, prompt, **params):
+            if prompt.startswith("You are splitting"):
+                return '{"subsections": []}'
+            sent.append(params.get("reasoning_effort"))
+            if refuse(params):
+                await asyncio.sleep(0.001 * len(sent))   # later refusals land after the drop
+                raise Refused(status)
+            return '{"summary": "ok"}'
+        monkeypatch.setattr(pageindex.utils, "llm_acompletion", server)
+        monkeypatch.setattr(tree_optimize, "llm_acompletion", server)
+        return flash_api.page_index_flash(
+            str(pdf), summary_model="gpt-9-preview", optimize=optimize,
+            summary_concurrency=concurrency, summary_reasoning_effort=effort)
+
+    def summaries(nodes):
+        return [s for n in nodes for s in [n.get("summary"), *summaries(n.get("nodes") or [])]]
+
+    for optimize in (False, "full"):
+        run(optimize, lambda params: "reasoning_effort" in params)
+        assert len(sent) > 3 and sent[:2] == ["none", None] and set(sent[2:]) == {None}
+        run(optimize, lambda params: len(sent) <= 2)
+        assert len(sent) > 3 and sent[:2] == ["none", None] and set(sent[2:]) == {"none"}
+        answered = summaries(run(optimize, lambda params: False, concurrency=4)["structure"])
+        dropped = run(optimize, lambda params: "reasoning_effort" in params, concurrency=4)
+        assert sent.count("none") > 1 and summaries(dropped["structure"]) == answered
+        with pytest.raises(Refused):
+            run(optimize, lambda params: True, status=401)
+        assert None not in sent
+        with pytest.raises(RuntimeError, match="Summary generation failed"):
+            run(optimize, lambda params: "reasoning_effort" in params, effort="high")
+        assert set(sent) == {"high"}
+
+
+def test_summary_max_words_reaches_the_local_indexer():
+    """index["summary_max_words"] and the flat argument both land on the
+    local indexer; a non-int refuses in the constructor like every slot."""
+    from pageindex import PageIndexLocalClient
+    assert PageIndexLocalClient(index={"summary_max_words": 80})._api._summary_max_words == 80
+    assert PageIndexLocalClient(summary_max_words=80)._api._summary_max_words == 80
+    assert PageIndexLocalClient()._api._summary_max_words is None
+    with pytest.raises(PageIndexAPIError, match=r'index\["summary_max_words"\] must be a'):
+        PageIndexLocalClient(index={"summary_max_words": "80"})
+
+
+def test_flash_knobs_reach_the_local_indexer(tmp_path, sample_pdf, monkeypatch):
+    """summary_concurrency, summary_max_words, use_embedded_toc and optimize
+    are settable on the client, flat or in the index slot, and land on
+    page_index_flash the way the CLI's flags do ("off" is no optimize pass
+    at all)."""
+    from pageindex import PageIndexLocalClient
+    captured = {}
+    monkeypatch.setattr(pageindex.flash, "page_index_flash",
+                        lambda p, **kw: captured.update(kw) or {
+                            "structure": [{"title": "T", "start_index": 1,
+                                           "end_index": 1, "summary": "s", "nodes": []}]})
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda model, prompt, **kw: "d.")
+    monkeypatch.chdir(tmp_path)  # the default .pageindex store lands here
+
+    def run(**kwargs):
+        captured.clear()
+        PageIndexLocalClient(**kwargs).submit_document(sample_pdf)
+        return (captured.get("summary_concurrency"), captured.get("summary_max_words"),
+                captured["use_embedded_toc"], captured["optimize"],
+                captured.get("summary_reasoning_effort"))
+
+    assert run(summary_concurrency=8, summary_max_words=80, use_embedded_toc=False,
+               optimize="merge", summary_reasoning_effort="low") == (
+        8, 80, False, "merge", "low")
+    assert run(index={"summary_concurrency": 8, "summary_max_words": 80,
+                      "use_embedded_toc": False, "optimize": "off",
+                      "summary_reasoning_effort": "low"}) == (8, 80, False, False, "low")
+    assert run() == (None, None, True, "full", None)
+    for kwargs, msg in (({"index": {"use_embedded_toc": "no"}},
+                         r'index\["use_embedded_toc"\] must be a bool'),
+                        ({"optimize": "sometimes"},
+                         r'optimize must be "full", "merge" or "off"'),
+                        ({"summary_reasoning_effort": 5}, "summary_reasoning_effort must be a str"),
+                        ({"summary_reasoning_effort": " "}, "summary_reasoning_effort is empty"),
+                        ({"summary_concurrency": "8"}, "summary_concurrency must be a"),
+                        ({"summary_concurrency": -1},
+                         "summary_concurrency must be a positive int"),
+                        ({"index": {"summary_max_words": -5}},
+                         r'index\["summary_max_words"\] must be a positive int')):
+        with pytest.raises(PageIndexAPIError, match=msg):
+            PageIndexLocalClient(**kwargs)
+
+
+def test_standard_mode_refuses_the_flash_summary_knobs(tmp_path, sample_pdf, monkeypatch):
+    """Standard indexing reads neither summary knob: a submit that would
+    silently drop the user's cap refuses instead."""
+    from pageindex import PageIndexLocalClient
+    import pageindex.page_index_classic as classic
+    monkeypatch.setattr(classic, "page_index_main", lambda *a, **kw: {
+        "structure": [{"title": "T", "start_index": 1, "end_index": 1, "nodes": []}]})
+    monkeypatch.chdir(tmp_path)
+    for name, value in (("summary_concurrency", 2), ("summary_max_words", 7),
+                        ("summary_reasoning_effort", "none")):
+        with pytest.raises(PageIndexAPIError, match="summary_reasoning_effort are flash-only"):
+            PageIndexLocalClient(**{name: value}).submit_document(sample_pdf, mode="standard")
+    PageIndexLocalClient().submit_document(sample_pdf, mode="standard")
+
+
+def test_page_index_flash_refuses_bad_summary_knobs():
+    """Only a positive int is a cap: NaN deadlocks the summary lane, a
+    fraction lifts expand's cap, a negative fails deep inside the run."""
+    import pageindex.flash.api as flash_api
+    for name, value in (("summary_concurrency", -1), ("summary_concurrency", 0),
+                        ("summary_concurrency", float("nan")),
+                        ("summary_concurrency", 2.5), ("summary_max_words", -5)):
+        with pytest.raises(ValueError, match=f"{name} must be a positive int"):
+            flash_api.page_index_flash("never-read.pdf", **{name: value})
+
+
+def test_summary_concurrency_caps_both_lanes_on_every_path(tmp_path, monkeypatch):
+    """A user who lowers summary_concurrency for a tight quota gets the whole
+    indexing lane lowered: the summaries and expand's own gate, whether they
+    overlap or run one after the other."""
+    from conftest import build_pdf
+    import pageindex.flash.api as flash_api
+    import pageindex.tree_optimize as tree_optimize
+
+    body = "body " * 250
+    pages = [body] * 30
+
+    def roots():
+        return [{"title": f"X{i}", "start_index": 1 + 10 * i, "end_index": 10 + 10 * i,
+                 "node_id": f"000{i}"} for i in range(3)]
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: {
+        "structure": roots(), "page_texts": list(pages)})
+    in_flight = {"expand": 0, "summary": 0}
+    peak = {"expand": 0, "summary": 0}
+    want = {}
+
+    async def track(lane):
+        in_flight[lane] += 1
+        peak[lane] = max(peak[lane], in_flight[lane])
+        await asyncio.sleep(0.02)
+        # Hold until the expected overlap is reached, so a slow runner that
+        # starts the calls far apart cannot read as a lower peak.
+        deadline = asyncio.get_running_loop().time() + 5
+        while peak[lane] < want[lane] and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0.005)
+        in_flight[lane] -= 1
+
+    async def propose(model, prompt):
+        await track("expand")
+        return {"subsections": []}
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+
+    async def summarize(model, prompt, **params):
+        await track("summary")
+        return '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", summarize)
+
+    def run(expected, **kwargs):
+        want.update(expand=expected[0], summary=expected[1])
+        peak.update(expand=0, summary=0)
+        flash_api.page_index_flash(str(pdf), summary_model="m", **kwargs)
+        assert (peak["expand"], peak["summary"]) == expected
+
+    run((1, 1), summary_concurrency=1)
+    run((3, 3))  # control: the three overlap
+    run((1, 0), summary=False, summary_concurrency=1)
+    run((3, 0), summary=False)
+    run((0, 1), optimize="merge", summary_concurrency=1)
+    run((0, 3), optimize="merge")
+
+
+def test_count_tokens_falls_back_to_the_default_tokenizer(monkeypatch):
+    import litellm
+
+    def token_counter(model=None, text=None, **_):
+        if model is not None:
+            raise TypeError("TextInputSequence must be str")  # HF tokenizer on a lone surrogate
+        return 7
+    monkeypatch.setattr(litellm, "token_counter", token_counter)
+    assert pageindex.utils.count_tokens("x", model="groq/llama-3.1-8b-instant") == 7
+
+    monkeypatch.setattr(litellm, "token_counter", lambda model=None, text=None, **_: 3 if model else 7)
+    assert pageindex.utils.count_tokens("x", model="m") == 3  # the model's own count wins when it works
