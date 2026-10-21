@@ -101,8 +101,9 @@ def test_import_pageindex_is_lazy():
 def test_yaml_writes_a_chat_object_as_a_mapping_through_any_dumper():
     """local_chat registers the rule when it loads: through any dumper, a
     caller's made earlier included, a ChatObject writes exactly as the
-    plain dict with its contents, the dumper's own dict rule applied and
-    an alias where it repeats; no class gains a table, so later
+    plain dict with its contents, the dumper's own dict rule applied (an
+    exact one, as every dumper but a bare BaseDumper's has, keeps the
+    alias where it repeats); no class gains a table, so later
     registrations still reach every one."""
     probe = (
         "import enum, yaml\n"
