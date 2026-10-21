@@ -563,3 +563,35 @@ class CloudAPI:
                 f"Failed to list folders: {response.text}",
                 status_code=response.status_code)
         return response.json()
+
+    def create_metadata_schema(
+        self,
+        folder_id: str,
+        fields: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Declare the metadata fields of a top-level folder (workspace).
+
+        Args:
+            folder_id (str): Top-level folder ID, or "root" for the account-level
+                schema used where a top-level folder declares none.
+            fields (dict): Field name to spec, e.g.
+                {"year": {"type": "number", "description": "Fiscal year"}};
+                type is "string", "number" or "boolean".
+
+        Returns:
+            dict: Created schema containing:
+                - folder_id (str): The folder ID, or "root"
+                - schema (dict): {"fields": ...} as stored
+        """
+        response = requests.put(
+            f"{self.BASE_URL}/folder/{_enc(folder_id)}/metadata/schema/",
+            headers=self._headers(),
+            json={"fields": fields},
+            timeout=30
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to create metadata schema: {response.text}",
+                status_code=response.status_code)
+        return response.json()

@@ -1837,6 +1837,8 @@ def test_folders_are_cloud_only(local_client):
     with pytest.raises(PageIndexAPIError, match="cloud-only"):
         local_client.list_folders()
     with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        local_client.create_metadata_schema("f", {"year": {"type": "number"}})
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
         local_client.folder_context("f")
     assert local_client.folder_context("root") == ""  # the library itself
 
@@ -1886,6 +1888,7 @@ def _patch_requests(monkeypatch, handler):
     fake = types.SimpleNamespace(
         post=lambda url, **kw: handler("POST", url, kw),
         get=lambda url, **kw: handler("GET", url, kw),
+        put=lambda url, **kw: handler("PUT", url, kw),
         delete=lambda url, **kw: handler("DELETE", url, kw),
         Response=FakeResponse,
     )
@@ -1926,6 +1929,14 @@ def test_cloud_request_wiring(cloud, sample_pdf):
 
     client.get_ocr("pi/../1")
     assert "/doc/pi%2F..%2F1/" in calls[-1]["url"]
+
+    fields = {"year": {"type": "number", "description": "Fiscal year"}}
+    fake.payload = {"folder_id": "f/1", "schema": {"fields": fields}}
+    assert client.create_metadata_schema("f/1", fields) == fake.payload
+    assert calls[-1]["method"] == "PUT"
+    assert calls[-1]["url"] == "https://api.pageindex.ai/folder/f%2F1/metadata/schema/"
+    assert calls[-1]["json"] == {"fields": fields}
+    assert calls[-1]["timeout"] == 30
 
     client.BASE_URL = "https://staging.example"
     client.api_key = "other"
@@ -2031,6 +2042,7 @@ def test_cloud_errors_carry_status_code(cloud, monkeypatch, sample_pdf):
         lambda: client.list_documents(),
         lambda: client.create_folder("f"),
         lambda: client.list_folders(),
+        lambda: client.create_metadata_schema("f", {}),
         lambda: client.folder_context("f"),
     ]
     for attempt in attempts:

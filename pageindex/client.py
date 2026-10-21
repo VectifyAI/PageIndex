@@ -2692,6 +2692,35 @@ class PageIndexClient:
             parent_folder_id=parent_folder_id,
         )
 
+    def create_metadata_schema(
+        self,
+        folder_id: str,
+        fields: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Declare the metadata fields of a top-level folder (workspace), or of
+        the account with ``folder_id="root"``. Subfolders share their
+        top-level folder's fields. Chat's metadata search filters, sorts and
+        counts documents by these fields. ``metadata`` on a document under
+        the folder may use only these fields, with their types (HTTP 400
+        otherwise); a document may leave any of them out. Documents uploaded
+        before the schema are not re-checked. Set once: a second call on the
+        same folder raises PageIndexAPIError (HTTP 409). Cloud-only: local
+        mode raises PageIndexAPIError.
+
+        Args:
+            folder_id (str): Top-level folder ID, or "root".
+            fields (dict): Field name to spec, e.g.
+                ``{"year": {"type": "number", "description": "Fiscal year"}}``;
+                type is "string", "number" or "boolean".
+        """
+        return self._require_cloud(
+            "create_metadata_schema is cloud-only — local mode has no "
+            "metadata schemas. Create the client with an api_key to use them."
+        ).create_metadata_schema(
+            folder_id=folder_id, fields=fields,
+        )
+
     # ---------- PATH HELPERS ----------
 
     def _folder_paths(self) -> dict[str, str]:
