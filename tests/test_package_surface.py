@@ -101,8 +101,9 @@ def test_import_pageindex_is_lazy():
 def test_yaml_writes_a_chat_object_as_a_mapping_through_any_dumper():
     """local_chat registers the rule when it loads: through any dumper, a
     caller's made earlier included, a ChatObject writes exactly as the
-    plain dict with its contents, the dumper's own dict rule applied; no
-    class gains a table, so later registrations still reach every one."""
+    plain dict with its contents, the dumper's own dict rule applied and
+    an alias where it repeats; no class gains a table, so later
+    registrations still reach every one."""
     probe = (
         "import enum, yaml\n"
         "from yaml.representer import SafeRepresenter\n"
@@ -115,8 +116,9 @@ def test_yaml_writes_a_chat_object_as_a_mapping_through_any_dumper():
         "obj = lc._ChatCompletion({'z': 1, 'a': lc._ChatCompletion({'k': 2})})\n"
         "plain = {'z': 1, 'a': {'k': 2}}\n"
         "dumpers = [yaml.SafeDumper, yaml.Dumper, Early, EarlyOwn, Mine]\n"
-        "assert all(yaml.dump(obj, Dumper=d, sort_keys=False)\n"
-        "           == yaml.dump(plain, Dumper=d, sort_keys=False) for d in dumpers)\n"
+        "assert all(yaml.dump([obj, obj], Dumper=d, sort_keys=False)\n"
+        "           == yaml.dump([plain, plain], Dumper=d, sort_keys=False)\n"
+        "           for d in dumpers)\n"
         "assert yaml.dump(obj, Dumper=Mine).startswith('!mine')\n"
         "assert 'yaml_multi_representers' not in vars(Early)\n"
         "assert 'yaml_multi_representers' not in vars(SafeRepresenter)\n"

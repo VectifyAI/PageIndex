@@ -1,6 +1,7 @@
 """Local chat surfaces: three protocols over fake backends — no network,
 no LLM keys. Tool execution runs for real against a seeded local store."""
 import asyncio
+import contextlib
 import copy
 import inspect
 import json
@@ -1381,13 +1382,14 @@ def test_responses_in_progress_owns_its_snapshot_before_created_is_read(
     seed_doc(store_path, "pi-a", "report.pdf")
     fake_model([[_msg_item("The answer")]]).emit_created = True
     monkeypatch.setattr(local_chat, "_stream_sync", _same_thread)
-    events = client._responses("q", stream=True)
-    created = next(events)
-    created["response"]["status"] = "edited"
-    progress = next(events)
-    assert progress["type"] == "response.in_progress"
-    assert progress["response"]["status"] != "edited"
-    list(events)
+    # closed on a failed assert too: left to gc, the open run deadlocks
+    with contextlib.closing(client._responses("q", stream=True)) as events:
+        created = next(events)
+        created["response"]["status"] = "edited"
+        progress = next(events)
+        assert progress["type"] == "response.in_progress"
+        assert progress["response"]["status"] != "edited"
+        list(events)
 
 
 @needs_agents
