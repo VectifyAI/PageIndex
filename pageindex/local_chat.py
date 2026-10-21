@@ -1541,7 +1541,8 @@ class _MessagesEvent(dict):
     whose attributes still read the object itself."""
 
     def __init__(self, event):
-        super().__init__(event.model_dump(mode="json"))
+        # the SDK's streamed Parsed* subclasses trip pydantic's union check
+        super().__init__(event.model_dump(mode="json", warnings=False))
         self._event = event
 
     def __getattr__(self, name):
@@ -1897,7 +1898,7 @@ def run_messages(client, messages, model: str, route: str,
 
     def envelope(turns):
         final = turns[-1]
-        message = _Message(final.model_dump(mode="json"))
+        message = _Message(final.model_dump(mode="json", warnings=False))
         message["content"] = [_dump_block(item) for item in final.content]
         message["usage"] = run_usage(turns)
         message["messages"] = transcript(turns)

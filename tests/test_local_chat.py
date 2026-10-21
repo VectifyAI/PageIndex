@@ -1847,7 +1847,7 @@ def test_messages_stream_final_message_is_the_non_stream_result(
     assert final["usage"] == early_usage == result["usage"]
     assert final.usage.input_tokens == 30
     assert final.stop_reason == result["stop_reason"] == "end_turn"
-    assert final["content"] == result["content"]
+    assert final == result
     # The same continuation transcript the non-stream envelope carries.
     assert [m["role"] for m in final.messages] == [
         "assistant", "user", "assistant", "user", "assistant"]
