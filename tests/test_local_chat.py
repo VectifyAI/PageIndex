@@ -4381,16 +4381,21 @@ def test_extra_body_refuses_skeleton_keys():
 
 def test_extra_body_refuses_non_dicts_and_argument_keys():
     """The same gate: a non-dict would be splatted into the payload as
-    fabricated fields; stream / doc_id select the SDK's parser and scope,
-    so they ride their own arguments on every lane."""
+    fabricated fields; a field with its own argument rides that argument
+    on every lane."""
     for bad in (["ab"], "messages", 5, [("a", 1)]):
         with pytest.raises(PageIndexAPIError,
                            match="extra_body must be a dict"):
             local_chat._refuse_skeleton(bad)
-    for key in ("stream", "doc_id"):
-        with pytest.raises(PageIndexAPIError,
-                           match=rf"extra_body cannot carry {key}: use {key}="):
+    for key, argument in (("stream", "stream="), ("doc_id", "doc_id="),
+                          ("model", "model="), ("api_key", "backend="),
+                          ("base_url", "backend=")):
+        with pytest.raises(PageIndexAPIError, match=(
+                rf"extra_body cannot carry {key}: use {argument} instead")):
             local_chat._refuse_skeleton({key: True})
+    with pytest.raises(PageIndexAPIError, match=(
+            r"cannot carry api_key, base_url: use backend= instead")):
+        local_chat._refuse_skeleton({"api_key": "k", "base_url": "u"})
     local_chat._refuse_skeleton(None)
     local_chat._refuse_skeleton({})
     local_chat._refuse_skeleton({"service_tier": "auto"})
