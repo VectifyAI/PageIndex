@@ -1412,8 +1412,14 @@ class PageIndexClient:
               own stream events; on Messages a ``MessagesStream``, whose
               ``get_final_result()`` reads the run to its end and returns
               the envelope's aggregated ``usage``, ``messages`` turn
-              sequence and ``stop_reason`` (read ``.usage``, not
-              ``["usage"]``)
+              sequence and ``stop_reason``
+
+            Own-model protocol envelopes, chunks and events are dicts
+            that also read by attribute as the official SDK's objects:
+            ``r.choices[0].message.content`` or
+            ``r["choices"][0]["message"]["content"]``. An official field
+            the dict lacks reads None by attribute; the managed endpoint's
+            stay plain dicts.
 
         An own-model run that fails raises PageIndexAPIError with
         ``usage``: what its finished model calls spent, in the protocol's
@@ -1711,6 +1717,8 @@ class PageIndexClient:
             - stream=True, stream_metadata=False: iterator of text chunks
             - stream=True, stream_metadata=True: iterator of chunk dicts
               (an API chat model's closing usage chunk carries 'messages')
+            Own-model dicts also read by attribute, as the openai SDK's
+            ChatCompletion / ChatCompletionChunk.
         """
         if isinstance(messages, str):
             if not messages.strip():
@@ -1925,9 +1933,9 @@ class PageIndexClient:
                 budget_tokens + 8192 when ``thinking`` is enabled (the wire
                 requires max_tokens above the budget). Passed through.
             stream: Return a ``MessagesStream`` of the Anthropic SDK's
-                event stream across turns (its native event objects,
-                including SDK-synthesized convenience events), one message
-                sequence per turn; its ``get_final_result()`` returns the
+                event stream across turns (its native events, including
+                SDK-synthesized convenience ones, as dicts that also read
+                as the SDK's objects), one message sequence per turn; its ``get_final_result()`` returns the
                 non-stream envelope's cross-turn ``usage``, ``messages``
                 turn sequence and ``stop_reason``.
             doc_id: Document ID or list of IDs to scope the conversation.

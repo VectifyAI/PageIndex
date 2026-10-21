@@ -1413,6 +1413,35 @@ def test_responses_items_reads_messages_with_a_warning(client, store_path,
 
 
 @needs_agents
+def test_openai_lanes_read_by_key_and_by_attribute(client, store_path,
+                                                   fake_model):
+    """Chat Completions and Responses envelopes, chunks and events are dicts
+    that also read as the official SDK objects: the same values both ways,
+    an official field the dict lacks reads None, any other name raises."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([[_msg_item("The answer")]] * 4)
+    r = client.chat_completions("q")
+    assert isinstance(r, dict) and json.loads(json.dumps(r)) == r
+    assert (r.choices[0].message.content
+            == r["choices"][0]["message"]["content"] == "The answer")
+    assert r.system_fingerprint is None
+    assert r.choices[0].message.refusal is None
+    assert r.messages == r["messages"]
+    with pytest.raises(AttributeError):
+        r.choicez
+    chunks = list(client.chat_completions("q", stream=True,
+                                          stream_metadata=True))
+    assert "".join(chunk.choices[0].delta.content or ""
+                   for chunk in chunks if chunk.choices) == "The answer"
+    assert chunks[-1].usage.total_tokens == chunks[-1]["usage"]["total_tokens"]
+    r = client._responses("q")
+    assert r.output_text == "The answer" and r.messages == r["messages"]
+    events = list(client._responses("q", stream=True))
+    assert [event.type for event in events] == [e["type"] for e in events]
+    assert events[-1].response.output_text == "The answer"
+
+
+@needs_agents
 def test_responses_stream_events_validate_as_official_events(
         client, store_path, fake_model):
     """Every stream event, terminal envelope included, parses with the
@@ -1862,6 +1891,35 @@ def test_messages_stream_passthrough(client, store_path, fake_anthropic):
                                   stream=True))
     types = [event.type for event in events]
     assert "content_block_delta" in types and "message_stop" in types
+
+
+@needs_anthropic
+def test_messages_reads_by_key_and_by_attribute(client, store_path,
+                                                fake_anthropic):
+    """The Messages envelope, each stream event and get_final_result() are
+    dicts that also read by attribute, as the Anthropic SDK's objects."""
+    reply = _anthropic_message([{"type": "text", "text": "Done"}], "end_turn")
+    question = [{"role": "user", "content": "q"}]
+    fake_anthropic([reply])
+    r = client._messages(question, model="claude-test", max_tokens=100)
+    assert isinstance(r, dict) and json.loads(json.dumps(r)) == r
+    assert r.content[0].text == r["content"][0]["text"] == "Done"
+    assert r.stop_reason == "end_turn" and r.messages == r["messages"]
+    with pytest.raises(AttributeError):
+        r.contentz
+    fake_anthropic([_anthropic_sse(reply)])
+    stream = client._messages(question, model="claude-test", max_tokens=100,
+                              stream=True)
+    events = list(stream)
+    assert all(isinstance(event, dict) for event in events)
+    assert [event.type for event in events] == [e["type"] for e in events]
+    assert (events[-1].message.content[0].text
+            == events[-1]["message"]["content"][0]["text"] == "Done")
+    final = stream.get_final_result()
+    assert final.usage is final["usage"]
+    assert final.stop_reason == final["stop_reason"] == "end_turn"
+    with pytest.raises(AttributeError):
+        final.usagez
 
 
 @needs_anthropic

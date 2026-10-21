@@ -519,6 +519,14 @@ def test_chat_completions_stream_chunks(monkeypatch, chat_client):
     assert chunks[4]["choices"] == [] and chunks[4]["usage"]["completion_tokens"] == 2
     assert len(chunks) == 5
     assert "".join(chat_client.chat_completions("Q", stream=True)) == "Hi there."
+    assert chunks[1].choices[0].delta.content == "Hi "
+    assert chunks[4].usage.completion_tokens == 2
+    fake_cli(monkeypatch,
+             AssistantMessage(content=[TextBlock(text="Hi there.")], model="haiku"),
+             result("Hi there.", usage={"input_tokens": 3, "output_tokens": 2}))
+    envelope = chat_client.chat_completions("Q")
+    assert envelope.choices[0].message.content == "Hi there."
+    assert envelope.usage.prompt_tokens == envelope["usage"]["prompt_tokens"]
 
 
 @needs_claude
