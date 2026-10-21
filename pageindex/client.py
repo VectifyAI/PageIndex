@@ -1416,8 +1416,9 @@ class PageIndexClient:
               what the non-stream call returns (``get_final_text()``: its
               text, raising when that message is unfinished)
 
-            Protocol envelopes, chunks and events are dicts that also read
-            by attribute as the official SDK reads the same JSON:
+            Protocol envelopes, chunks and events are ``ChatObject``: dicts
+            that also read by attribute as the official SDK reads the same
+            JSON:
             ``r.choices[0].message.content`` or
             ``r["choices"][0]["message"]["content"]``. An official field
             the dict lacks reads None by attribute; the attribute view is

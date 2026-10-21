@@ -1376,6 +1376,8 @@ def test_responses_stream_opens_with_created(client, store_path, fake_model):
     assert len(in_progress) == 1 and events[1] is in_progress[0]
     assert events[1]["sequence_number"] == 2
     assert events[1]["response"]["id"] == events[0]["response"]["id"]
+    events[1]["response"]["status"] = "edited"  # each event owns its snapshot
+    assert events[0]["response"]["status"] != "edited"
     terminal = events[-1]
     assert terminal["type"] == "response.completed"
     assert created[0]["response"]["id"] == terminal["response"]["id"]
@@ -1436,6 +1438,12 @@ def test_openai_lanes_read_by_key_and_by_attribute(client, store_path,
     # yaml writes it as the plain mapping it is, safe_dump included
     assert yaml.safe_load(yaml.safe_dump(r)) == r
     assert yaml.safe_load(yaml.dump(r)) == r
+    for name in ("CSafeDumper", "CDumper"):  # libyaml's, when built
+        if hasattr(yaml, name):
+            assert yaml.safe_load(yaml.dump(r, Dumper=getattr(yaml, name))) == r
+    bare = ChatObject({"a": 1})  # no official type behind it
+    assert bare["a"] == 1 and not hasattr(bare, "a")
+    assert getattr(bare, "a", None) is None
     assert (r.choices[0].message.content
             == r["choices"][0]["message"]["content"] == "The answer")
     assert r.system_fingerprint is None
@@ -1881,6 +1889,13 @@ def test_messages_stream_final_message_is_the_non_stream_result(
                          stream=True).get_final_text()
     assert err.value.partial_answer == "Do"
     assert err.value.usage["output_tokens"] == 5
+    # every text block joins (citations split an answer); a stop sequence
+    # is a finished answer
+    fake_anthropic([_anthropic_sse(_anthropic_message(
+        [{"type": "text", "text": "The "}, {"type": "text", "text": "answer"}],
+        "stop_sequence"))])
+    assert client._messages(question, model="claude-test", max_tokens=100,
+                            stream=True).get_final_text() == "The answer"
 
     fake_anthropic([_anthropic_sse(_anthropic_message([], "end_turn"))])
     with pytest.raises(PageIndexAPIError, match="no text block"):

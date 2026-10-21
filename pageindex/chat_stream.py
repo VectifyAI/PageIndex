@@ -20,7 +20,9 @@ class ChatObject(dict[str, Any]):
 
     @staticmethod
     def _parse(data: dict) -> Any:
-        raise NotImplementedError
+        # a bare ChatObject names no official type to read through
+        raise AttributeError("ChatObject reads attributes only as a lane's "
+                             "envelope, chunk or event")
 
     def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
@@ -120,7 +122,7 @@ class MessagesStream:
     def __iter__(self) -> "MessagesStream":
         return self
 
-    def __next__(self) -> Any:
+    def __next__(self) -> ChatObject:
         try:
             return next(self._events)
         except StopIteration as stop:
@@ -132,7 +134,7 @@ class MessagesStream:
         """Stop the run, like closing a generator."""
         self._events.close()
 
-    def get_final_message(self) -> Any:
+    def get_final_message(self) -> ChatObject:
         """Read the stream to its end (raising what iterating it would),
         then return the run's envelope as the non-stream call returns it:
         the final message, with ``usage`` aggregated across turns and the

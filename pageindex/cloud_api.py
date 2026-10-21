@@ -295,12 +295,12 @@ class CloudAPI:
             folder_id (Optional[str], optional): Folder ID to steer discovery toward one folder; "root" means the whole library.
 
         Returns:
-            Union[Dict[str, Any], Iterator[str], Iterator[Dict[str, Any]]]:
+            Union[ChatObject, Iterator[str], Iterator[ChatObject]]:
                 - If stream=False: Complete response dictionary
                 - If stream=True and stream_metadata=False: Iterator of text content chunks
                 - If stream=True and stream_metadata=True: Iterator of raw response chunks with metadata
-            The dicts also read by attribute, as the openai SDK's
-            ChatCompletion / ChatCompletionChunk.
+            Each ChatObject is the response dict, which also reads by
+            attribute as the openai SDK's ChatCompletion / ChatCompletionChunk.
         """
         payload = {
             "messages": messages,

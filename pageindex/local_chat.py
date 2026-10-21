@@ -4,6 +4,7 @@ managed endpoint's chunk stream."""
 from __future__ import annotations
 
 import asyncio
+import copy
 import dataclasses
 import hashlib
 import json
@@ -1445,8 +1446,11 @@ def run_responses(client, input, model: Optional[str] = None,
                             yield _ResponsesEvent(data)
                             # as the official stream: in_progress follows
                             sequence += 1
+                            # its own copy: an edit to one event's snapshot
+                            # stays in that event
                             yield _ResponsesEvent({
-                                **data, "sequence_number": sequence,
+                                **copy.deepcopy(data),
+                                "sequence_number": sequence,
                                 "type": "response.in_progress"})
                             continue
                         if data["type"] in ("response.completed",
