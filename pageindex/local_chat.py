@@ -1544,16 +1544,6 @@ class _MessagesEvent(dict):
         return getattr(self._event, name)
 
 
-class _RunResult(dict):
-    """``get_final_result()``'s totals, by key or by attribute."""
-
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name) from None
-
-
 def _require_anthropic() -> None:
     try:
         import anthropic  # noqa: F401
@@ -1899,6 +1889,14 @@ def run_messages(client, messages, model: str, route: str,
                     {"role": "assistant", "content": appendable}]
         return new_messages
 
+    def envelope(turns):
+        final = turns[-1]
+        message = _Message(final.model_dump(mode="json"))
+        message["content"] = [_dump_block(item) for item in final.content]
+        message["usage"] = run_usage(turns)
+        message["messages"] = transcript(turns)
+        return message
+
     if stream:
         def events() -> Generator[Any, None, Any]:
             turns: list = []  # each finished turn's message snapshot
@@ -1922,9 +1920,7 @@ def run_messages(client, messages, model: str, route: str,
                 # runs on exhaustion and abandonment (GeneratorExit) alike
                 if owns_transport:
                     backend_client.close()
-            return _RunResult(usage=run_usage(turns),
-                              messages=transcript(turns),
-                              stop_reason=turns[-1].stop_reason)
+            return envelope(turns)
         return MessagesStream(events())
 
     turns: list = []
@@ -1942,12 +1938,7 @@ def run_messages(client, messages, model: str, route: str,
             backend_client.close()
     if not turns:
         raise PageIndexAPIError("The model returned no response.")
-    final = turns[-1]
-    envelope = _Message(final.model_dump(mode="json"))
-    envelope["content"] = [_dump_block(item) for item in final.content]
-    envelope["usage"] = run_usage(turns)
-    envelope["messages"] = transcript(turns)
-    return envelope
+    return envelope(turns)
 
 
 # ── Claude Agent SDK engine (claude-code/: the user's Claude subscription) ──

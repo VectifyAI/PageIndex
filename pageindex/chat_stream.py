@@ -72,11 +72,11 @@ class ChatStream:
 
 class MessagesStream:
     """chat(protocol="messages", stream=True)'s stream: iterate it for the
-    Anthropic SDK's events, one message sequence per turn; read the run's
-    totals from ``get_final_result()``."""
+    Anthropic SDK's events, one message sequence per turn; then
+    ``get_final_message()`` returns what the non-stream call returns."""
 
     def __init__(self, events):
-        self._events = events  # a generator that returns the run's result
+        self._events = events  # a generator that returns the run's envelope
         self._result: Any = None
 
     def __iter__(self) -> "MessagesStream":
@@ -94,15 +94,27 @@ class MessagesStream:
         """Stop the run, like closing a generator."""
         self._events.close()
 
-    def get_final_result(self) -> Any:
+    def get_final_message(self) -> Any:
         """Read the stream to its end (raising what iterating it would),
-        then return the run's ``usage``, aggregated across turns, its
-        ``messages`` turn sequence and its final turn's ``stop_reason``,
-        by attribute or by key."""
+        then return the run's envelope as the non-stream call returns it:
+        the final message, with ``usage`` aggregated across turns and the
+        ``messages`` turn sequence."""
         for _ in self:
             pass
         if self._result is None:
             raise PageIndexAPIError(
-                "This stream has no final result: the run failed, or the "
+                "This stream has no final message: the run failed, or the "
                 "stream was closed before the run finished.")
         return self._result
+
+    def get_final_text(self) -> str:
+        """The final message's text blocks, joined; raises when it has none,
+        as the Anthropic SDK's does."""
+        message = self.get_final_message()
+        texts = [block["text"] for block in message["content"]
+                 if block.get("type") == "text"]
+        if not texts:
+            raise PageIndexAPIError(
+                "The final message has no text block; its content is in "
+                "get_final_message().content.")
+        return "".join(texts)

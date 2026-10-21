@@ -1412,9 +1412,9 @@ class PageIndexClient:
               only), the native ``iterations`` on Messages
             - protocol lane, stream=True: an iterator of the protocol's
               own stream events; on Messages a ``MessagesStream``, whose
-              ``get_final_result()`` reads the run to its end and returns
-              the envelope's aggregated ``usage``, ``messages`` turn
-              sequence and ``stop_reason``
+              ``get_final_message()`` reads the run to its end and returns
+              what the non-stream call returns (``get_final_text()``: its
+              text)
 
             Own-model protocol envelopes, chunks and events are dicts
             that also read by attribute as the official SDK's objects:
@@ -1939,9 +1939,9 @@ class PageIndexClient:
             stream: Return a ``MessagesStream`` of the Anthropic SDK's
                 event stream across turns (its native events, including
                 SDK-synthesized convenience ones, as dicts that also read
-                as the SDK's objects), one message sequence per turn; its ``get_final_result()`` returns the
-                non-stream envelope's cross-turn ``usage``, ``messages``
-                turn sequence and ``stop_reason``.
+                as the SDK's objects), one message sequence per turn; its
+                ``get_final_message()`` returns what the non-stream call
+                returns, and ``get_final_text()`` that message's text.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call. Local
