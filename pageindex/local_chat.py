@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-import functools
 import hashlib
 import json
 import queue
@@ -209,9 +208,11 @@ def _stream_sync(agen_factory) -> Iterator[Any]:
 
 class _Official(dict):
     """A protocol lane's envelope, chunk or event: a dict that also reads by
-    attribute as the official SDK type would, ``r.choices[0].message.content``
-    beside ``r["choices"][0]["message"]["content"]``. A field the type has
-    and the dict lacks reads None; any other name raises."""
+    attribute as the official SDK reads the same JSON off the wire (its
+    lenient construct_type), ``r.choices[0].message.content`` beside
+    ``r["choices"][0]["message"]["content"]``. A value or event type the SDK
+    doesn't know reads as sent, a field the type has and the dict lacks
+    reads None, any other name raises."""
 
     @staticmethod
     def _parse(data: dict) -> Any:
@@ -228,15 +229,17 @@ class _Official(dict):
 class _ChatCompletion(_Official):
     @staticmethod
     def _parse(data):
+        from openai._models import construct_type
         from openai.types.chat import ChatCompletion
-        return ChatCompletion.model_validate(data)
+        return construct_type(type_=ChatCompletion, value=data)
 
 
 class _ChatCompletionChunk(_Official):
     @staticmethod
     def _parse(data):
+        from openai._models import construct_type
         from openai.types.chat import ChatCompletionChunk
-        return ChatCompletionChunk.model_validate(data)
+        return construct_type(type_=ChatCompletionChunk, value=data)
 
 
 def _require_openai_agents(method: str) -> None:
@@ -1281,8 +1284,9 @@ class _ResponsesEnvelope(_Official):
 
     @staticmethod
     def _parse(data):
+        from openai._models import construct_type
         from openai.types.responses import Response
-        return Response.model_validate(data)
+        return construct_type(type_=Response, value=data)
 
     def _key(self, key):
         if key == "items":
@@ -1303,17 +1307,12 @@ class _ResponsesEnvelope(_Official):
         return dict.__contains__(self, self._key(key))
 
 
-@functools.cache
-def _responses_event_adapter():
-    from openai.types.responses import ResponseStreamEvent
-    from pydantic import TypeAdapter
-    return TypeAdapter(ResponseStreamEvent)
-
-
 class _ResponsesEvent(_Official):
     @staticmethod
     def _parse(data):
-        return _responses_event_adapter().validate_python(data)
+        from openai._models import construct_type
+        from openai.types.responses import ResponseStreamEvent
+        return construct_type(type_=ResponseStreamEvent, value=data)
 
 
 def run_responses(client, input, model: Optional[str] = None,
@@ -1532,8 +1531,9 @@ def run_responses(client, input, model: Optional[str] = None,
 class _Message(_Official):
     @staticmethod
     def _parse(data):
+        from anthropic._models import construct_type
         from anthropic.types.beta import BetaMessage
-        return BetaMessage.model_validate(data)
+        return construct_type(type_=BetaMessage, value=data)
 
 
 class _MessagesEvent(dict):

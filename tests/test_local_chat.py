@@ -1443,6 +1443,15 @@ def test_openai_lanes_read_by_key_and_by_attribute(client, store_path,
     events = list(client._responses("q", stream=True))
     assert [event.type for event in events] == [e["type"] for e in events]
     assert events[-1].response.output_text == "The answer"
+    # as the SDK reads the wire: a value it doesn't know reads as sent
+    odd = local_chat._ChatCompletion({"choices": [
+        {"index": 0, "finish_reason": "max_tokens",
+         "message": {"role": "assistant", "content": "cut"}}]})
+    assert odd.choices[0].finish_reason == "max_tokens"
+    assert odd.choices[0].message.content == "cut"
+    future = local_chat._ResponsesEvent({"type": "response.future_event",
+                                         "sequence_number": 1})
+    assert future.type == "response.future_event"
 
 
 @needs_agents
