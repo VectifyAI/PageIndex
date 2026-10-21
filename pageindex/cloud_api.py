@@ -564,8 +564,11 @@ class CloudAPI:
                 status_code=response.status_code)
         return response.json()
 
-    def create_metadata_schema(self, folder_id: str,
-                               fields: Dict[str, Any]) -> Dict[str, Any]:
+    def create_metadata_schema(
+        self,
+        folder_id: str,
+        fields: Dict[str, Any],
+    ) -> Dict[str, Any]:
         """
         Declare the metadata fields of a top-level folder (workspace).
 
@@ -577,7 +580,9 @@ class CloudAPI:
                 type is "string", "number" or "boolean".
 
         Returns:
-            dict: {"folder_id": str, "schema": {"fields": dict}}
+            dict: Created schema containing:
+                - folder_id (str): The folder ID, or "root"
+                - schema (dict): {"fields": ...} as stored
         """
         response = requests.put(
             f"{self.BASE_URL}/folder/{_enc(folder_id)}/metadata/schema/",
