@@ -11,6 +11,7 @@ import queue
 import threading
 import time
 import uuid
+import warnings
 from typing import Any, Generator, Iterator, Mapping, Optional, Union
 
 from .agent_tools import _base_instructions, targeting_block
@@ -341,8 +342,8 @@ _SKELETON_KEYS = frozenset({"system", "instructions", "input", "messages",
                             "tools"})
 _ARGUMENT_KEYS = {"stream": "stream=", "doc_id": "doc_id=",
                   "folder_id": "folder_id=", "model": "model=",
-                  "api_key": "backend=", "base_url": "backend=",
-                  "api_base": "backend="}
+                  **dict.fromkeys(("api_key", "base_url", "api_base"),
+                                  "backend= (API chat models only)")}
 
 
 def _refuse_skeleton(extra_body) -> None:
@@ -1242,6 +1243,30 @@ def run_chat_completions(client, messages, stream: bool = False,
     return _text_only(_stream_sync(agen))
 
 
+class _ResponsesEnvelope(dict):
+    """The Responses envelope. Its transcript was ``items`` before it became
+    ``messages``; the old key still reads it, with a DeprecationWarning, and
+    is never stored."""
+
+    def _key(self, key):
+        if key == "items":
+            warnings.warn(
+                'The Responses envelope\'s "items" is now "messages"; '
+                '"items" will be removed in a future release.',
+                DeprecationWarning, stacklevel=3)
+            return "messages"
+        return key
+
+    def __getitem__(self, key):
+        return dict.__getitem__(self, self._key(key))
+
+    def get(self, key, default=None):
+        return dict.get(self, self._key(key), default)
+
+    def __contains__(self, key):
+        return dict.__contains__(self, self._key(key))
+
+
 def run_responses(client, input, model: Optional[str] = None,
                   stream: bool = False, doc_id=None,
                   instructions: Optional[str] = None,
@@ -1293,7 +1318,7 @@ def run_responses(client, input, model: Optional[str] = None,
     given = extra_body or {}
 
     def envelope(transcript: list, raw_responses) -> dict:
-        return {
+        return _ResponsesEnvelope({
             "id": response_id,
             "object": "response",
             "created_at": created_at,
@@ -1320,7 +1345,7 @@ def run_responses(client, input, model: Optional[str] = None,
             "error": recorded.get("error"),
             "incomplete_details": recorded.get("incomplete_details"),
             "metadata": given.get("metadata"),
-        }
+        })
 
     if not stream:
         _record_response_status(agent, recorded)

@@ -1390,6 +1390,26 @@ def test_responses_envelope_validates_as_official_response(client, store_path,
     assert [item.type for item in parsed.output] == ["function_call",
                                                      "message"]
     assert parsed.model_dump()["messages"] == result["messages"]
+    assert "items" not in parsed.model_dump()
+
+
+@needs_agents
+def test_responses_items_reads_messages_with_a_warning(client, store_path,
+                                                       fake_model):
+    """The transcript's old name still reads, warned, on the envelope and the
+    stream's terminal one, and is never stored: keys and JSON carry it once."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([[_msg_item("The answer")], [_msg_item("The answer")]])
+    for result in (client._responses("q"),
+                   list(client._responses("q", stream=True))[-1]["response"]):
+        with pytest.warns(DeprecationWarning, match='"items" is now "messages"'):
+            assert result["items"] is result["messages"]
+        with pytest.warns(DeprecationWarning):
+            assert result.get("items") is result["messages"]
+        with pytest.warns(DeprecationWarning):
+            assert "items" in result
+        assert "items" not in list(result)
+        assert '"items"' not in json.dumps(result)
 
 
 @needs_agents
@@ -4398,15 +4418,16 @@ def test_extra_body_refuses_non_dicts_and_argument_keys():
         with pytest.raises(PageIndexAPIError,
                            match="extra_body must be a dict"):
             local_chat._refuse_skeleton(bad)
+    backend = r"backend= \(API chat models only\)"
     for key, argument in (("stream", "stream="), ("doc_id", "doc_id="),
                           ("folder_id", "folder_id="), ("model", "model="),
-                          ("api_key", "backend="), ("base_url", "backend="),
-                          ("api_base", "backend=")):
+                          ("api_key", backend), ("base_url", backend),
+                          ("api_base", backend)):
         with pytest.raises(PageIndexAPIError, match=(
                 rf"extra_body cannot carry {key}: use {argument} instead")):
             local_chat._refuse_skeleton({key: True})
     with pytest.raises(PageIndexAPIError, match=(
-            r"cannot carry api_key, base_url: use backend= instead")):
+            rf"cannot carry api_key, base_url: use {backend} instead")):
         local_chat._refuse_skeleton({"api_key": "k", "base_url": "u"})
     local_chat._refuse_skeleton(None)
     local_chat._refuse_skeleton({})
