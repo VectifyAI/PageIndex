@@ -1,5 +1,5 @@
 """chat()'s return types: the answer lane's ChatStream, the Messages
-protocol's MessagesStream, and the protocol lanes' dicts."""
+protocol's MessagesStream, and the protocol lanes' ChatObject."""
 from __future__ import annotations
 
 from typing import Any, Iterator, Optional
@@ -7,14 +7,16 @@ from typing import Any, Iterator, Optional
 from .errors import PageIndexAPIError
 
 
-class _Official(dict[str, Any]):
-    """A protocol lane's envelope, chunk or event: a dict that also reads by
-    attribute as the official SDK reads the same JSON off the wire (its
-    lenient construct_type), ``r.choices[0].message.content`` beside
-    ``r["choices"][0]["message"]["content"]``. A value or event type the SDK
-    doesn't know reads as sent, a field the type has and the dict lacks
-    reads None, any other name raises. The attribute view is read-only:
-    write through the keys."""
+class ChatObject(dict[str, Any]):
+    """What chat()'s protocol lanes return, envelopes, chunks and events
+    alike: the protocol's JSON as a dict, which also reads by attribute as
+    the official SDK reads that JSON (its lenient construct_type):
+    ``r.choices[0].message.content`` beside
+    ``r["choices"][0]["message"]["content"]``. A value or event type the
+    installed SDK doesn't know reads as sent, a field the type has and the
+    dict lacks reads None, and a name the official object lacks raises.
+    The attribute view is read-only: write through the keys. chat() returns
+    it; callers don't construct one."""
 
     @staticmethod
     def _parse(data: dict) -> Any:
@@ -30,6 +32,17 @@ class _Official(dict[str, Any]):
             raise AttributeError(
                 f"attributes are a read-only view; set [{name!r}] instead")
         super().__setattr__(name, value)
+
+
+def _yaml_as_dict() -> None:
+    """yaml writes a ChatObject as the dict it is: safe_dump refuses a
+    dict subclass, and dump would tag it as a Python object."""
+    import yaml
+    for name in ("SafeDumper", "Dumper", "CSafeDumper", "CDumper"):
+        dumper = getattr(yaml, name, None)
+        if dumper is not None:
+            dumper.add_multi_representer(ChatObject,
+                                         yaml.SafeDumper.represent_dict)
 
 
 class ChatStream:

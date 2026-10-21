@@ -1,7 +1,7 @@
 """PageIndex SDK."""
 from typing import TYPE_CHECKING as _TYPE_CHECKING
 
-from .chat_stream import ChatStream, MessagesStream
+from .chat_stream import ChatStream, MessagesStream, ChatObject
 from .client import PageIndexClient, PageIndexCloudClient, PageIndexLocalClient
 from .errors import PageIndexAPIError
 from .types import (ChatConfig, ChatProcessOptions, CloudIndexConfig,
@@ -18,7 +18,7 @@ __all__ = [
     "PageIndexClient", "PageIndexCloudClient", "PageIndexLocalClient",
     "PageIndexAPIError",
     "IndexConfig", "CloudIndexConfig", "LocalIndexConfig", "ChatConfig",
-    "ChatProcessOptions", "ChatStream", "MessagesStream",
+    "ChatProcessOptions", "ChatStream", "MessagesStream", "ChatObject",
     "page_index", "page_index_main", "page_index_flash",
     "optimize_tree", "md_to_tree", "highlight_region",
 ]

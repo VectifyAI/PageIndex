@@ -9,6 +9,8 @@ import sys
 import types
 import warnings
 
+import yaml
+
 import httpx  # via the hard `openai` dependency
 import pytest
 
@@ -19,7 +21,8 @@ except ImportError:  # older anthropic rides classic httpx
 
 import pageindex.local_chat as local_chat
 from pageindex import (PageIndexAPIError, PageIndexClient,
-                       PageIndexCloudClient, PageIndexLocalClient)
+                       PageIndexCloudClient, PageIndexLocalClient,
+                       ChatObject)
 from pageindex.local_chat import CHAT_HEADER
 from pageindex.local_store import DocStore
 
@@ -1429,6 +1432,10 @@ def test_openai_lanes_read_by_key_and_by_attribute(client, store_path,
     fake_model([[_msg_item("The answer")]] * 4)
     r = client.chat_completions("q")
     assert isinstance(r, dict) and json.loads(json.dumps(r)) == r
+    assert isinstance(r, ChatObject)
+    # yaml writes it as the plain mapping it is, safe_dump included
+    assert yaml.safe_load(yaml.safe_dump(r)) == r
+    assert yaml.safe_load(yaml.dump(r)) == r
     assert (r.choices[0].message.content
             == r["choices"][0]["message"]["content"] == "The answer")
     assert r.system_fingerprint is None
@@ -2114,6 +2121,10 @@ def test_messages_reads_by_key_and_by_attribute(client, store_path,
         assert clone.message.content[0].text == "Done"
     with pytest.raises(AttributeError, match="read-only"):
         events[-1].type = "other"
+    # the dict is the truth: an edit through the keys shows by attribute
+    delta = next(e for e in events if e["type"] == "content_block_delta")
+    delta["delta"]["text"] = "[redacted]"
+    assert delta.delta.text == "[redacted]"
     final = stream.get_final_message()
     assert final.usage.output_tokens == final["usage"]["output_tokens"]
     assert final.stop_reason == final["stop_reason"] == "end_turn"

@@ -15,8 +15,11 @@ import warnings
 from typing import Any, Generator, Iterator, Mapping, Optional, Union
 
 from .agent_tools import _base_instructions, targeting_block
-from .chat_stream import ChatStream, MessagesStream, _Official
+from .chat_stream import (ChatStream, MessagesStream, ChatObject,
+                          _yaml_as_dict)
 from .errors import PageIndexAPIError, _pageindex_cause
+
+_yaml_as_dict()  # every ChatObject subclass lives in this module
 
 CHAT_HEADER = (
     "You are PageIndex by Vectify AI, a document-focused assistant. "
@@ -208,7 +211,7 @@ def _stream_sync(agen_factory) -> Iterator[Any]:
 
 # ── OpenAI engine (chat_completions / responses) ──
 
-class _ChatCompletion(_Official):
+class _ChatCompletion(ChatObject):
     @staticmethod
     def _parse(data):
         from openai._models import construct_type
@@ -216,7 +219,7 @@ class _ChatCompletion(_Official):
         return construct_type(type_=ChatCompletion, value=data)
 
 
-class _ChatCompletionChunk(_Official):
+class _ChatCompletionChunk(ChatObject):
     @staticmethod
     def _parse(data):
         from openai._models import construct_type
@@ -1148,8 +1151,8 @@ def run_chat_completions(client, messages, stream: bool = False,
                          extra_headers: Optional[dict] = None,
                          backend: Optional[dict] = None,
                          folder_id: Optional[str] = None,
-                         ) -> Union[_Official, Iterator[str],
-                                    Iterator[_Official]]:
+                         ) -> Union[ChatObject, Iterator[str],
+                                    Iterator[ChatObject]]:
     if enable_citations:
         raise PageIndexAPIError(
             "enable_citations needs the managed chat endpoint — "
@@ -1260,7 +1263,7 @@ def run_chat_completions(client, messages, stream: bool = False,
     return _text_only(_stream_sync(agen))
 
 
-class _ResponsesEnvelope(_Official):
+class _ResponsesEnvelope(ChatObject):
     """The Responses envelope. Its transcript was ``items`` before it became
     ``messages``; the old key still reads it, with a DeprecationWarning, and
     is never stored."""
@@ -1290,7 +1293,7 @@ class _ResponsesEnvelope(_Official):
         return dict.__contains__(self, self._key(key))
 
 
-class _ResponsesEvent(_Official):
+class _ResponsesEvent(ChatObject):
     @staticmethod
     def _parse(data):
         from openai._models import construct_type
@@ -1310,7 +1313,7 @@ def run_responses(client, input, model: Optional[str] = None,
                   extra_headers: Optional[dict] = None,
                   backend: Optional[dict] = None,
                   folder_id: Optional[str] = None,
-                  ) -> Union[_Official, Iterator[_Official]]:
+                  ) -> Union[ChatObject, Iterator[ChatObject]]:
     _require_openai_agents("chat(protocol='responses')")
     _validate_max_turns(max_turns)
     if isinstance(input, str) and input.strip():
@@ -1510,7 +1513,7 @@ def run_responses(client, input, model: Optional[str] = None,
 
 # ── Anthropic engine (messages) ──
 
-class _Message(_Official):
+class _Message(ChatObject):
     @staticmethod
     def _parse(data):
         from anthropic._models import construct_type
@@ -1518,19 +1521,12 @@ class _Message(_Official):
         return construct_type(type_=BetaMessage, value=data)
 
 
-class _MessagesEvent(_Official):
-    """A Messages stream event: the Anthropic SDK's event object as a dict,
-    whose attributes still read the object itself."""
-
-    def __init__(self, event):
-        # the SDK's streamed Parsed* subclasses trip pydantic's union check
-        super().__init__(event.model_dump(mode="json", warnings=False))
-        self._event = event
-
-    def __getattr__(self, name: str) -> Any:
-        if name.startswith("_"):
-            raise AttributeError(name)
-        return getattr(self._event, name)
+class _MessagesEvent(ChatObject):
+    @staticmethod
+    def _parse(data):
+        from anthropic._models import construct_type
+        from anthropic.lib.streaming import ParsedBetaMessageStreamEvent
+        return construct_type(type_=ParsedBetaMessageStreamEvent, value=data)
 
 
 def _require_anthropic() -> None:
@@ -1727,7 +1723,7 @@ def run_messages(client, messages, model: str, route: str,
                  extra_headers: Optional[dict] = None,
                  backend: Optional[dict] = None,
                  folder_id: Optional[str] = None,
-                 ) -> Union[_Official, MessagesStream]:
+                 ) -> Union[ChatObject, MessagesStream]:
     from .integrations.anthropic_sdk import build_anthropic_tools
 
     _require_anthropic()
@@ -1892,7 +1888,10 @@ def run_messages(client, messages, model: str, route: str,
             try:
                 for turn_stream in runner:
                     for event in turn_stream:
-                        yield _MessagesEvent(event)
+                        # the SDK's streamed Parsed* subclasses trip
+                        # pydantic's union check
+                        yield _MessagesEvent(event.model_dump(
+                            mode="json", warnings=False))
                     message = turn_stream.get_final_message()
                     if message.stop_reason is None:
                         raise PageIndexAPIError(

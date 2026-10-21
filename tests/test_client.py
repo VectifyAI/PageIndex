@@ -2400,6 +2400,11 @@ def test_cloud_chat_envelope_reads_by_key_and_by_attribute(cloud):
     assert result == fake.payload and json.loads(json.dumps(result)) == result
     assert result.choices[0].message.content == "ok"
     assert result.model is None  # the endpoint sends none
+    import yaml  # a 0.2.x caller's yaml dump still writes a plain mapping
+    assert yaml.safe_load(yaml.safe_dump(result)) == fake.payload
+    assert yaml.safe_load(yaml.dump(result)) == fake.payload
+    fake.payload = ["not", "an", "object"]  # passes through as before
+    assert client.chat_completions("q") == ["not", "an", "object"]
 
 
 def test_cloud_chat_stream_error_chunk_raises(cloud, monkeypatch):

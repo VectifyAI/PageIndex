@@ -5,7 +5,7 @@ from typing import Optional, Dict, Any, List, Union, Iterator
 import json
 import urllib.parse
 
-from .chat_stream import _Official
+from .chat_stream import ChatObject
 from .errors import PageIndexAPIError
 from .naming import sanitize_filename, validate_folder_name
 
@@ -280,7 +280,7 @@ class CloudAPI:
         enable_citations: bool = False,
         extra_body: Optional[Dict[str, Any]] = None,
         folder_id: Optional[str] = None,
-    ) -> Union[_Official, Iterator[str], Iterator[_Official]]:
+    ) -> Union[ChatObject, Iterator[str], Iterator[ChatObject]]:
         """
         PageIndex Chat Completions. Optionally scoped to specific PageIndex documents.
 
@@ -342,9 +342,11 @@ class CloudAPI:
                 return _text_only(self._stream_chat_response_raw(response))
         else:
             from .local_chat import _ChatCompletion
-            return _ChatCompletion(response.json())
+            body = response.json()
+            # a body that isn't an object keeps reaching chat()'s own check
+            return _ChatCompletion(body) if isinstance(body, dict) else body
 
-    def _stream_chat_response_raw(self, response: requests.Response) -> Iterator[_Official]:
+    def _stream_chat_response_raw(self, response: requests.Response) -> Iterator[ChatObject]:
         """Streaming chat completion with full metadata, including citation events."""
         from .local_chat import _ChatCompletionChunk
         try:
