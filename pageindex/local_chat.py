@@ -1727,6 +1727,7 @@ def run_messages(client, messages, model: str, route: str,
         class Result(anthropic.BaseModel):
             usage: dict
             messages: list
+            stop_reason: Optional[str]
 
         def events() -> Generator[Any, None, Any]:
             turns: list = []  # each finished turn's message snapshot
@@ -1750,7 +1751,8 @@ def run_messages(client, messages, model: str, route: str,
                 # runs on exhaustion and abandonment (GeneratorExit) alike
                 if owns_transport:
                     backend_client.close()
-            return Result(usage=run_usage(turns), messages=transcript(turns))
+            return Result(usage=run_usage(turns), messages=transcript(turns),
+                          stop_reason=turns[-1].stop_reason)
         return MessagesStream(events())
 
     turns: list = []

@@ -1481,10 +1481,17 @@ def test_messages_stream_final_result_is_the_run_total(client, store_path,
     result = client._messages(question, model="claude-test", max_tokens=100)
     assert result["usage"]["input_tokens"] == 30
     assert final.usage == early_usage == result["usage"]
+    assert final.stop_reason == result["stop_reason"] == "end_turn"
     # The same continuation transcript the non-stream envelope carries.
     assert [m["role"] for m in final.messages] == [
         "assistant", "user", "assistant", "user", "assistant"]
     assert final.messages == result["messages"]
+
+    fake_anthropic([_anthropic_sse(_anthropic_message(
+        [{"type": "text", "text": "Do"}], "max_tokens"))])
+    cut = client._messages(question, model="claude-test", max_tokens=100,
+                           stream=True).get_final_result()
+    assert cut.stop_reason == "max_tokens"
 
 
 @needs_anthropic

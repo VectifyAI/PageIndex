@@ -1402,8 +1402,9 @@ class PageIndexClient:
             - protocol lane, stream=True: an iterator of the protocol's
               own stream events; on Messages a ``MessagesStream``, whose
               ``get_final_result()`` reads the run to its end and returns
-              the envelope's aggregated ``usage`` and ``messages`` turn
-              sequence (read ``.usage``, not ``["usage"]``)
+              the envelope's aggregated ``usage``, ``messages`` turn
+              sequence and ``stop_reason`` (read ``.usage``, not
+              ``["usage"]``)
 
         An own-model run that fails raises PageIndexAPIError with
         ``usage``: what its finished model calls spent, in the protocol's
@@ -1911,8 +1912,8 @@ class PageIndexClient:
                 event stream across turns (its native event objects,
                 including SDK-synthesized convenience events), one message
                 sequence per turn; its ``get_final_result()`` returns the
-                non-stream envelope's cross-turn ``usage`` and
-                ``messages`` turn sequence.
+                non-stream envelope's cross-turn ``usage``, ``messages``
+                turn sequence and ``stop_reason``.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call. Local

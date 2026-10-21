@@ -96,8 +96,9 @@ class MessagesStream:
 
     def get_final_result(self) -> Any:
         """Read the stream to its end (raising what iterating it would),
-        then return the run's ``usage``, aggregated across turns, and its
-        ``messages`` turn sequence, as attributes."""
+        then return the run's ``usage``, aggregated across turns, its
+        ``messages`` turn sequence and its final turn's ``stop_reason``,
+        as attributes."""
         for _ in self:
             pass
         if self._result is None:
