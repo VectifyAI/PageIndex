@@ -1858,6 +1858,14 @@ def test_messages_stream_final_message_is_the_non_stream_result(
     cut = client._messages(question, model="claude-test", max_tokens=100,
                            stream=True).get_final_message()
     assert cut.stop_reason == "max_tokens"
+    # a bare string can't mark the cut, so get_final_text() raises instead
+    fake_anthropic([_anthropic_sse(_anthropic_message(
+        [{"type": "text", "text": "Do"}], "max_tokens"))])
+    with pytest.raises(PageIndexAPIError, match="unfinished") as err:
+        client._messages(question, model="claude-test", max_tokens=100,
+                         stream=True).get_final_text()
+    assert err.value.partial_answer == "Do"
+    assert err.value.usage["output_tokens"] == 5
 
     fake_anthropic([_anthropic_sse(_anthropic_message([], "end_turn"))])
     with pytest.raises(PageIndexAPIError, match="no text block"):

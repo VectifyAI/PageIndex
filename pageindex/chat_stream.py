@@ -108,11 +108,21 @@ class MessagesStream:
         return self._result
 
     def get_final_text(self) -> str:
-        """The final message's text blocks, joined; raises when it has none,
-        as the Anthropic SDK's does."""
+        """The final message's text blocks, joined. A bare string has
+        nowhere to mark an answer cut short, so unless the message finished
+        (stop_reason ``end_turn`` or ``stop_sequence``) this raises, the cut
+        text in ``partial_answer``; it raises too when there is no text."""
         message = self.get_final_message()
         texts = [block["text"] for block in message["content"]
                  if block.get("type") == "text"]
+        stop = message.get("stop_reason")
+        if stop not in ("end_turn", "stop_sequence"):
+            error = PageIndexAPIError(
+                f"The final message is unfinished (stop_reason {stop!r}); "
+                "get_final_message() returns it as it is.")
+            error.partial_answer = "".join(texts)
+            error.usage = message.get("usage")
+            raise error
         if not texts:
             raise PageIndexAPIError(
                 "The final message has no text block; its content is in "

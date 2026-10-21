@@ -1414,14 +1414,14 @@ class PageIndexClient:
               own stream events; on Messages a ``MessagesStream``, whose
               ``get_final_message()`` reads the run to its end and returns
               what the non-stream call returns (``get_final_text()``: its
-              text)
+              text, raising when that message is unfinished)
 
-            Own-model protocol envelopes, chunks and events are dicts
-            that also read by attribute as the official SDK's objects:
+            Protocol envelopes, chunks and events are dicts that also read
+            by attribute as the official SDK reads the same JSON:
             ``r.choices[0].message.content`` or
             ``r["choices"][0]["message"]["content"]``. An official field
-            the dict lacks reads None by attribute; the managed endpoint's
-            stay plain dicts.
+            the dict lacks reads None by attribute; the attribute view is
+            read-only, so write through the keys.
 
         An own-model run that fails raises PageIndexAPIError with
         ``usage``: what its finished model calls spent, in the protocol's
@@ -1941,7 +1941,9 @@ class PageIndexClient:
                 SDK-synthesized convenience ones, as dicts that also read
                 as the SDK's objects), one message sequence per turn; its
                 ``get_final_message()`` returns what the non-stream call
-                returns, and ``get_final_text()`` that message's text.
+                returns, and ``get_final_text()`` that message's text
+                (raising on an unfinished one, the text in
+                ``partial_answer``).
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call. Local
