@@ -1257,8 +1257,9 @@ class PageIndexClient:
                 the other protocol lanes pass rows to the wire as they
                 are (use ``instructions`` for persona there). Responses
                 and Messages also accept their native transcript items
-                or content blocks; own-model Chat Completions takes text
-                history only.
+                or content blocks; own-model Chat Completions accepts text
+                and user image parts (image_url dicts or Anthropic image
+                blocks, normalized across OpenAI Agents and claude-code/).
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls. Local
                 documents: also enforced at the tool layer, not just
@@ -1571,7 +1572,7 @@ class PageIndexClient:
 
     def chat_completions(
         self,
-        messages: Union[str, list[dict[str, str]]],
+        messages: Union[str, list[dict[str, Any]]],
         stream: bool = False,
         doc_id: Optional[Union[str, list[str]]] = None,
         temperature: Optional[float] = None,
@@ -1631,7 +1632,8 @@ class PageIndexClient:
                 System/developer messages, wherever they sit, join the
                 managed system prompt after the client's ``instructions``
                 (the managed endpoint receives them as its one leading
-                system message); the history is text only: tool-role
+                system message); user messages accept text or image parts
+                (image_url dicts or Anthropic image blocks); tool-role
                 turns are rejected on both engines, and message
                 fields beyond role/content are dropped.
             stream: Enable streaming responses.
