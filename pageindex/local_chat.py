@@ -1458,6 +1458,12 @@ def run_responses(client, input, model: Optional[str] = None,
                             sequence += 1
                             data["sequence_number"] = sequence
                             yield _ResponsesEvent(data)
+                            # as the official stream: in_progress follows
+                            sequence += 1
+                            yield _ResponsesEvent({
+                                **data, "type": "response.in_progress",
+                                "sequence_number": sequence,
+                                "response": dict(data.get("response") or {})})
                             continue
                         if data["type"] in ("response.completed",
                                             "response.incomplete",

@@ -1366,6 +1366,10 @@ def test_responses_stream_opens_with_created(client, store_path, fake_model):
     created = [e for e in events if e["type"] == "response.created"]
     assert len(created) == 1 and events[0] is created[0]
     assert events[0]["sequence_number"] == 1
+    in_progress = [e for e in events if e["type"] == "response.in_progress"]
+    assert len(in_progress) == 1 and events[1] is in_progress[0]
+    assert events[1]["sequence_number"] == 2
+    assert events[1]["response"]["id"] == events[0]["response"]["id"]
     terminal = events[-1]
     assert terminal["type"] == "response.completed"
     assert created[0]["response"]["id"] == terminal["response"]["id"]
