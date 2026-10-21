@@ -487,30 +487,40 @@ _TWO_CALLS = [{"id": f"call_{n}", "type": "function",
 def _two_turns(store_path, monkeypatch, client, model, first_reply,
                **settings):
     """Two calls through the real LitellmModel, the second appending the
-    first's ``messages``: the first envelope, and each request's messages
-    as LiteLLM received them."""
+    first's ``messages``: the first envelope (or closing chunk), and each
+    request's messages as LiteLLM received them."""
     import litellm
+    from litellm.llms.base_llm.base_model_iterator import MockResponseIterator
     doc_id = seed_doc(store_path, "pi-a", "report.pdf")
     sent = []
     replies = [first_reply, _litellm_reply("A1"), _litellm_reply("A2")]
 
     async def acompletion(**kwargs):
         sent.append(json.loads(json.dumps(kwargs["messages"])))
-        return replies.pop(0)
+        reply = replies.pop(0)
+        return MockResponseIterator(reply) if kwargs.get("stream") else reply
+
+    def call(history):
+        out = client.chat_completions(history, doc_id=doc_id, model=model,
+                                      **settings)
+        return list(out)[-1] if settings.get("stream") else out
 
     monkeypatch.setattr(litellm, "acompletion", acompletion)
     question = {"role": "user", "content": "q1"}
-    first = client.chat_completions([question], doc_id=doc_id, model=model,
-                                    **settings)
-    client.chat_completions([question, *first["messages"],
-                             {"role": "user", "content": "q2"}],
-                            doc_id=doc_id, model=model, **settings)
+    first = call([question])
+    call([question, *first["messages"], {"role": "user", "content": "q2"}])
     return first, sent
 
 
 @needs_agents
 @pytest.mark.parametrize("model, extra, settings", [
     ("gpt-test", {}, {}),
+    # streamed turns are rebuilt by agents' own stream handler
+    ("gpt-test", {"content": ""}, {"stream": True, "stream_metadata": True}),
+    ("anthropic/claude-test", {"reasoning_content": "hmm", "thinking_blocks": [
+        {"type": "thinking", "thinking": "hmm", "signature": "SIG1"}]},
+     {"extra_body": {"reasoning": {"effort": "high"}}, "stream": True,
+      "stream_metadata": True}),
     # LitellmModel re-pairs parallel calls with their results here
     ("anthropic/claude-test", {}, {}),
     ("anthropic/claude-test", {"thinking_blocks": [
@@ -4388,8 +4398,9 @@ def test_extra_body_refuses_non_dicts_and_argument_keys():
                            match="extra_body must be a dict"):
             local_chat._refuse_skeleton(bad)
     for key, argument in (("stream", "stream="), ("doc_id", "doc_id="),
-                          ("model", "model="), ("api_key", "backend="),
-                          ("base_url", "backend=")):
+                          ("folder_id", "folder_id="), ("model", "model="),
+                          ("api_key", "backend="), ("base_url", "backend="),
+                          ("api_base", "backend=")):
         with pytest.raises(PageIndexAPIError, match=(
                 rf"extra_body cannot carry {key}: use {argument} instead")):
             local_chat._refuse_skeleton({key: True})

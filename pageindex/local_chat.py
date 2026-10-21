@@ -339,8 +339,10 @@ def _merged_backend(client, backend):
 
 _SKELETON_KEYS = frozenset({"system", "instructions", "input", "messages",
                             "tools"})
-_ARGUMENT_KEYS = {"stream": "stream=", "doc_id": "doc_id=", "model": "model=",
-                  "api_key": "backend=", "base_url": "backend="}
+_ARGUMENT_KEYS = {"stream": "stream=", "doc_id": "doc_id=",
+                  "folder_id": "folder_id=", "model": "model=",
+                  "api_key": "backend=", "base_url": "backend=",
+                  "api_base": "backend="}
 
 
 def _refuse_skeleton(extra_body) -> None:

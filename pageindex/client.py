@@ -1386,8 +1386,8 @@ class PageIndexClient:
                 ``instructions`` / ``input`` / ``messages`` / ``tools``
                 are refused); extend the prompt with ``instructions=`` or a
                 leading system row in ``messages``. ``stream`` / ``doc_id``
-                are refused too: each has its own argument. Credentials
-                belong in ``backend``, never here.
+                / ``folder_id`` are refused too: each has its own argument.
+                Credentials belong in ``backend``, never here.
 
         Returns:
             - answer lane, stream=False: the answer string
@@ -1692,8 +1692,8 @@ class PageIndexClient:
                 The managed prompt, conversation and tools are not
                 fields here (``system`` / ``instructions`` / ``input`` /
                 ``messages`` / ``tools`` are refused), nor are ``stream``
-                / ``doc_id``: each has its own argument. Credentials belong
-                in ``backend``, never here.
+                / ``doc_id`` / ``folder_id``: each has its own argument.
+                Credentials belong in ``backend``, never here.
             extra_headers: Own-model chat only — extra HTTP headers merged into
                 each backend request; caller headers win. One exception:
                 LiteLLM's anthropic adapter owns the ``anthropic-beta``

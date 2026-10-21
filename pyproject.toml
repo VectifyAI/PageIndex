@@ -30,7 +30,8 @@ requests = ">=2.28.0"
 # MCP retries use Retry(allowed_methods=...), added in urllib3 1.26.
 urllib3 = ">=1.26"
 openai = ">=1.70.0"
-# Older releases crash on current openai before the request is sent.
+# Older releases break resending streamed chat `messages`: a tool turn
+# loses its empty content (0.18.1), Claude thinking fails validation (<0.20).
 openai-agents = ">=0.20.0"
 mcp = ">=1.19.0,<3"
 litellm = ">=1.105.1,<1.106"
