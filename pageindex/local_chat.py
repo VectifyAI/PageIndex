@@ -1819,6 +1819,7 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
                                       StreamEvent, TextBlock, ToolResultBlock,
                                       ToolUseBlock, UserMessage)
         names: dict = {}  # tool_use id -> tool name, to label results
+        answer = ""  # the text since the last tool call
         streamed = ""  # text deltas since the last text block
         cut = None  # (finish_reason, usage) of a streamed run cut short
         failures.clear()
@@ -1841,6 +1842,7 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
                         text = "".join(item.text for item in message.content
                                        if isinstance(item, TextBlock))
                         if text:
+                            answer += text
                             # the CLI's non-streaming fallback sends the text
                             # whole, after whatever the failed stream got out
                             rest = (text[len(streamed):] if text.startswith(streamed)
@@ -1850,6 +1852,7 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
                             streamed = ""
                         for item in message.content:
                             if isinstance(item, ToolUseBlock):
+                                answer = ""
                                 name = item.name.removeprefix("mcp__pageindex__")
                                 names[item.id] = name
                                 yield {"type": "tool_call", "call_id": item.id,
@@ -1863,7 +1866,7 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
                                        "name": names.get(item.tool_use_id, "tool"),
                                        "output": item.content}
                     elif isinstance(message, ResultMessage) and done and not failures:
-                        yield {"type": "done", "answer": message.result or "",
+                        yield {"type": "done", "answer": answer,
                                "usage": _claude_code_usage(message.usage),
                                "finish_reason": _CLAUDE_CUT.get(
                                    message.stop_reason, "stop")}
