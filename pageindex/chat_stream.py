@@ -1,4 +1,5 @@
-"""chat(stream=True)'s return type: one run, one view — text or events."""
+"""chat(stream=True)'s return types: the answer lane's ChatStream and the
+Messages protocol's MessagesStream."""
 from __future__ import annotations
 
 from typing import Any, Iterator, Optional
@@ -67,3 +68,41 @@ class ChatStream:
         close = getattr(self._it, "close", None)
         if close is not None:
             close()
+
+
+class MessagesStream:
+    """chat(protocol="messages", stream=True)'s stream: iterate it for the
+    Anthropic SDK's events, one message sequence per turn; read the run's
+    totals from ``get_final_result()``."""
+
+    def __init__(self, events):
+        self._events = events  # a generator that returns the run's result
+        self._result: Any = None
+
+    def __iter__(self) -> "MessagesStream":
+        return self
+
+    def __next__(self) -> Any:
+        try:
+            return next(self._events)
+        except StopIteration as stop:
+            if stop.value is not None:
+                self._result = stop.value
+            raise
+
+    def close(self) -> None:
+        """Stop the run, like closing a generator."""
+        self._events.close()
+
+    def get_final_result(self) -> Any:
+        """Read the stream to its end (raising what iterating it would),
+        then return the run's ``usage``, aggregated across turns, its
+        ``messages`` turn sequence and its final turn's ``stop_reason``,
+        as attributes."""
+        for _ in self:
+            pass
+        if self._result is None:
+            raise PageIndexAPIError(
+                "This stream has no final result: the run failed, or the "
+                "stream was closed before the run finished.")
+        return self._result

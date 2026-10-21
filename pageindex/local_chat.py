@@ -11,10 +11,10 @@ import queue
 import threading
 import time
 import uuid
-from typing import Any, Iterator, Mapping, Optional, Union
+from typing import Any, Generator, Iterator, Mapping, Optional, Union
 
 from .agent_tools import _base_instructions, targeting_block
-from .chat_stream import ChatStream
+from .chat_stream import ChatStream, MessagesStream
 from .errors import PageIndexAPIError, _pageindex_cause
 
 CHAT_HEADER = (
@@ -682,8 +682,10 @@ def _with_usage(error: PageIndexAPIError, usage: dict) -> PageIndexAPIError:
     return error
 
 
-# the finish_reasons of an answer the model stopped short of finishing
-_CUT_SHORT = ("length", "content_filter")
+# the finish_reasons of an answer the model stopped short of finishing;
+# the managed endpoint reports Anthropic's names for them
+_CUT_SHORT = ("length", "content_filter", "max_tokens", "refusal",
+              "model_context_window_exceeded")
 
 
 def _cut_short_error(finish_reason: str) -> PageIndexAPIError:
@@ -693,6 +695,22 @@ def _cut_short_error(finish_reason: str) -> PageIndexAPIError:
         f"The model stopped before finishing its answer (finish_reason "
         f"{finish_reason!r}). protocol=\"chat_completions\" returns such "
         "an answer marked by its finish_reason.")
+
+
+def _text_only(chunks) -> Iterator[str]:
+    """chat_completions' text stream: the answer deltas, then a cut answer
+    raises, as chat(stream=True) does."""
+    finish, usage = None, {}
+    for piece in chunks:
+        usage = piece.get("usage") or usage
+        if piece.get("choices"):
+            choice = piece["choices"][0]
+            finish = choice.get("finish_reason") or finish
+            content = (choice.get("delta") or {}).get("content")
+            if content:
+                yield content
+    if finish in _CUT_SHORT:
+        raise _with_usage(_cut_short_error(finish), usage)
 
 
 def _chat_agent(client, messages, doc_id, model, temperature=None,
@@ -1152,11 +1170,7 @@ def run_chat_completions(client, messages, stream: bool = False,
 
     if stream_metadata:
         return _stream_sync(agen)
-    return (piece["choices"][0]["delta"]["content"]
-            for piece in _stream_sync(agen)
-            if piece.get("choices")
-            and "content" in piece["choices"][0]["delta"]
-            and piece["choices"][0]["delta"]["content"])
+    return _text_only(_stream_sync(agen))
 
 
 def run_responses(client, input, model: Optional[str] = None,
@@ -1559,7 +1573,7 @@ def run_messages(client, messages, model: str, route: str,
                  extra_headers: Optional[dict] = None,
                  backend: Optional[dict] = None,
                  folder_id: Optional[str] = None,
-                 ) -> Union[dict, Iterator[Any]]:
+                 ) -> Union[dict, MessagesStream]:
     from .integrations.anthropic_sdk import build_anthropic_tools
 
     _require_anthropic()
@@ -1712,11 +1726,11 @@ def run_messages(client, messages, model: str, route: str,
 
     if stream:
         class Result(anthropic.BaseModel):
-            type: str
             usage: dict
             messages: list
+            stop_reason: Optional[str]
 
-        def events() -> Iterator[Any]:
+        def events() -> Generator[Any, None, Any]:
             turns: list = []  # each finished turn's message snapshot
             try:
                 for turn_stream in runner:
@@ -1738,9 +1752,9 @@ def run_messages(client, messages, model: str, route: str,
                 # runs on exhaustion and abandonment (GeneratorExit) alike
                 if owns_transport:
                     backend_client.close()
-            yield Result(type="result", usage=run_usage(turns),
-                         messages=transcript(turns))
-        return events()
+            return Result(usage=run_usage(turns), messages=transcript(turns),
+                          stop_reason=turns[-1].stop_reason)
+        return MessagesStream(events())
 
     turns: list = []
     try:
@@ -1769,6 +1783,11 @@ def run_messages(client, messages, model: str, route: str,
 
 _TURNS_NOTE = ("The conversation so far arrives as <turn> blocks in the user "
                "message, oldest first. Answer the last user turn.")
+
+# Claude's stop reasons for an unfinished answer, as OpenAI finish_reasons
+_CLAUDE_CUT: dict[Optional[str], str] = {"max_tokens": "length",
+                                          "model_context_window_exceeded": "length",
+                                          "refusal": "content_filter"}
 
 
 def _claude_code_run(client, messages, model_name: str, doc_id=None,
@@ -1816,8 +1835,10 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
                                       StreamEvent, TextBlock, ToolResultBlock,
                                       ToolUseBlock, UserMessage)
         names: dict = {}  # tool_use id -> tool name, to label results
-        streamed = ""  # text deltas since the last text block
-        cut = None  # a streamed run's usage, when its answer hit max_tokens
+        answer = ""  # the text since the last tool call
+        sent = ""  # answer text out since the last text block
+        streamed = ""  # this model call's text deltas
+        cut = None  # (finish_reason, usage) of a streamed run cut short
         failures.clear()
         try:
             async with aclosing(claude_code_messages(prompt(), options)) as sdk:
@@ -1830,7 +1851,12 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
                         delta = message.event.get("delta") or {}
                         if delta.get("type") == "text_delta" and delta.get("text"):
                             streamed += delta["text"]
-                            yield {"type": "answer", "delta": delta["text"]}
+                            if not sent.startswith(streamed):  # else a retry's replay
+                                rest = (streamed[len(sent):]
+                                        if streamed.startswith(sent)
+                                        else "\n\n" + streamed)
+                                sent = streamed
+                                yield {"type": "answer", "delta": rest}
                         elif (delta.get("type") == "thinking_delta"
                               and delta.get("thinking")):
                             yield {"type": "thinking", "delta": delta["thinking"]}
@@ -1838,15 +1864,17 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
                         text = "".join(item.text for item in message.content
                                        if isinstance(item, TextBlock))
                         if text:
+                            answer += text
                             # the CLI's non-streaming fallback sends the text
                             # whole, after whatever the failed stream got out
-                            rest = (text[len(streamed):] if text.startswith(streamed)
+                            rest = (text[len(sent):] if text.startswith(sent)
                                     else "\n\n" + text)  # regenerated differently
                             if rest:
                                 yield {"type": "answer", "delta": rest}
-                            streamed = ""
+                            sent = streamed = ""
                         for item in message.content:
                             if isinstance(item, ToolUseBlock):
+                                answer = ""
                                 name = item.name.removeprefix("mcp__pageindex__")
                                 names[item.id] = name
                                 yield {"type": "tool_call", "call_id": item.id,
@@ -1860,14 +1888,14 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
                                        "name": names.get(item.tool_use_id, "tool"),
                                        "output": item.content}
                     elif isinstance(message, ResultMessage) and done and not failures:
-                        yield {"type": "done", "answer": message.result or "",
+                        yield {"type": "done", "answer": answer,
                                "usage": _claude_code_usage(message.usage),
-                               "finish_reason": ("length"
-                                                 if message.stop_reason == "max_tokens"
-                                                 else "stop")}
+                               "finish_reason": _CLAUDE_CUT.get(
+                                   message.stop_reason, "stop")}
                     elif (isinstance(message, ResultMessage)
-                          and message.stop_reason == "max_tokens"):
-                        cut = _claude_code_usage(message.usage)
+                          and message.stop_reason in _CLAUDE_CUT):
+                        cut = (_CLAUDE_CUT[message.stop_reason],
+                               _claude_code_usage(message.usage))
         except PageIndexAPIError:
             if failures:  # a tool failure (402, 429) is the cause to report
                 raise failures[0] from None
@@ -1875,7 +1903,7 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
         if failures:  # raised after the run, once the CLI is closed
             raise failures[0]
         if cut is not None:
-            raise _with_usage(_cut_short_error("length"), cut)
+            raise _with_usage(_cut_short_error(cut[0]), cut[1])
     return run
 
 
@@ -1936,6 +1964,4 @@ def _claude_code_completions(run, model_name: str, stream: bool,
 
     if stream_metadata:
         return _stream_sync(agen)
-    return (piece["choices"][0]["delta"]["content"]
-            for piece in _stream_sync(agen)
-            if piece.get("choices") and piece["choices"][0]["delta"].get("content"))
+    return _text_only(_stream_sync(agen))

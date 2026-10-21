@@ -9,7 +9,7 @@ import warnings
 from typing import (TYPE_CHECKING, Any, Callable, Iterator, Literal, Mapping,
                     Optional, Union, cast, overload)
 
-from .chat_stream import ChatStream
+from .chat_stream import ChatStream, MessagesStream
 from .errors import PageIndexAPIError
 
 
@@ -1153,7 +1153,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
-    ) -> Iterator[Any]: ...
+    ) -> MessagesStream: ...
 
     @overload
     def chat(
@@ -1400,10 +1400,11 @@ class PageIndexClient:
               protocols (a ``claude-code/`` model reports the run's total
               only), the native ``iterations`` on Messages
             - protocol lane, stream=True: an iterator of the protocol's
-              own stream events; Messages ends a finished run with one
-              ``type == "result"`` event (read ``event.usage``, not
-              ``event["usage"]``) carrying the envelope's aggregated
-              ``usage`` and ``messages`` turn sequence
+              own stream events; on Messages a ``MessagesStream``, whose
+              ``get_final_result()`` reads the run to its end and returns
+              the envelope's aggregated ``usage``, ``messages`` turn
+              sequence and ``stop_reason`` (read ``.usage``, not
+              ``["usage"]``)
 
         An own-model run that fails raises PageIndexAPIError with
         ``usage``: what its finished model calls spent, in the protocol's
@@ -1412,7 +1413,9 @@ class PageIndexClient:
         Code reports its usage.
 
         An answer-lane reply the run reports unfinished (finish_reason
-        ``length`` or ``content_filter``) raises PageIndexAPIError instead of
+        ``length`` or ``content_filter``; on the managed endpoint
+        ``max_tokens``, ``refusal`` or ``model_context_window_exceeded``)
+        raises PageIndexAPIError instead of
         passing as complete: a stream after the text it delivered, a
         non-streamed call with that text in ``partial_answer``. The protocol
         lanes mark it instead, as their wire does.
@@ -1866,7 +1869,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         *,
         folder_id: Optional[str] = None,
-    ) -> Union[dict[str, Any], Iterator[Any]]:
+    ) -> Union[dict[str, Any], MessagesStream]:
         """
         The engine behind ``chat(protocol="messages")``: document QA over
         the Anthropic Messages protocol, Claude-native.
@@ -1906,12 +1909,12 @@ class PageIndexClient:
                 only a question, and rises to
                 budget_tokens + 8192 when ``thinking`` is enabled (the wire
                 requires max_tokens above the budget). Passed through.
-            stream: Yield the Anthropic SDK's event stream across turns
-                (its native event objects, including SDK-synthesized
-                convenience events), one message sequence per turn; a
-                finished run then ends with one ``type == "result"``
-                event whose ``usage`` and ``messages`` are the non-stream
-                envelope's cross-turn aggregate and turn sequence.
+            stream: Return a ``MessagesStream`` of the Anthropic SDK's
+                event stream across turns (its native event objects,
+                including SDK-synthesized convenience events), one message
+                sequence per turn; its ``get_final_result()`` returns the
+                non-stream envelope's cross-turn ``usage``, ``messages``
+                turn sequence and ``stop_reason``.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call. Local
