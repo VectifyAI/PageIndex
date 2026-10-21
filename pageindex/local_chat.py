@@ -15,7 +15,7 @@ import warnings
 from typing import Any, Generator, Iterator, Mapping, Optional, Union
 
 from .agent_tools import _base_instructions, targeting_block
-from .chat_stream import ChatStream, MessagesStream
+from .chat_stream import ChatStream, MessagesStream, _Official
 from .errors import PageIndexAPIError, _pageindex_cause
 
 CHAT_HEADER = (
@@ -204,24 +204,6 @@ def _stream_sync(agen_factory) -> Iterator[Any]:
             yield item
     finally:
         cancelled.set()
-
-
-class _Official(dict):
-    """A protocol lane's envelope, chunk or event: a dict that also reads by
-    attribute as the official SDK reads the same JSON off the wire (its
-    lenient construct_type), ``r.choices[0].message.content`` beside
-    ``r["choices"][0]["message"]["content"]``. A value or event type the SDK
-    doesn't know reads as sent, a field the type has and the dict lacks
-    reads None, any other name raises."""
-
-    @staticmethod
-    def _parse(data: dict) -> Any:
-        raise NotImplementedError
-
-    def __getattr__(self, name):
-        if name.startswith("_"):
-            raise AttributeError(name)
-        return getattr(self._parse(dict(self)), name)
 
 
 # ── OpenAI engine (chat_completions / responses) ──
@@ -1166,7 +1148,8 @@ def run_chat_completions(client, messages, stream: bool = False,
                          extra_headers: Optional[dict] = None,
                          backend: Optional[dict] = None,
                          folder_id: Optional[str] = None,
-                         ) -> Union[dict, Iterator[str], Iterator[dict]]:
+                         ) -> Union[_Official, Iterator[str],
+                                    Iterator[_Official]]:
     if enable_citations:
         raise PageIndexAPIError(
             "enable_citations needs the managed chat endpoint — "
@@ -1327,7 +1310,7 @@ def run_responses(client, input, model: Optional[str] = None,
                   extra_headers: Optional[dict] = None,
                   backend: Optional[dict] = None,
                   folder_id: Optional[str] = None,
-                  ) -> Union[dict, Iterator[dict]]:
+                  ) -> Union[_Official, Iterator[_Official]]:
     _require_openai_agents("chat(protocol='responses')")
     _validate_max_turns(max_turns)
     if isinstance(input, str) and input.strip():
@@ -1365,7 +1348,7 @@ def run_responses(client, input, model: Optional[str] = None,
     created_at = int(time.time())
     given = extra_body or {}
 
-    def envelope(transcript: list, raw_responses) -> dict:
+    def envelope(transcript: list, raw_responses) -> _ResponsesEnvelope:
         return _ResponsesEnvelope({
             "id": response_id,
             "object": "response",
@@ -1459,11 +1442,9 @@ def run_responses(client, input, model: Optional[str] = None,
                             yield _ResponsesEvent(data)
                             # as the official stream: in_progress follows
                             sequence += 1
-                            progress = {**data, "sequence_number": sequence,
-                                        "type": "response.in_progress"}
-                            if data.get("response"):
-                                progress["response"] = dict(data["response"])
-                            yield _ResponsesEvent(progress)
+                            yield _ResponsesEvent({
+                                **data, "sequence_number": sequence,
+                                "type": "response.in_progress"})
                             continue
                         if data["type"] in ("response.completed",
                                             "response.incomplete",
@@ -1537,7 +1518,7 @@ class _Message(_Official):
         return construct_type(type_=BetaMessage, value=data)
 
 
-class _MessagesEvent(dict):
+class _MessagesEvent(_Official):
     """A Messages stream event: the Anthropic SDK's event object as a dict,
     whose attributes still read the object itself."""
 
@@ -1546,7 +1527,7 @@ class _MessagesEvent(dict):
         super().__init__(event.model_dump(mode="json", warnings=False))
         self._event = event
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
             raise AttributeError(name)
         return getattr(self._event, name)
@@ -1746,7 +1727,7 @@ def run_messages(client, messages, model: str, route: str,
                  extra_headers: Optional[dict] = None,
                  backend: Optional[dict] = None,
                  folder_id: Optional[str] = None,
-                 ) -> Union[dict, MessagesStream]:
+                 ) -> Union[_Official, MessagesStream]:
     from .integrations.anthropic_sdk import build_anthropic_tools
 
     _require_anthropic()

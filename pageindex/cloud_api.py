@@ -5,6 +5,7 @@ from typing import Optional, Dict, Any, List, Union, Iterator
 import json
 import urllib.parse
 
+from .chat_stream import _Official
 from .errors import PageIndexAPIError
 from .naming import sanitize_filename, validate_folder_name
 
@@ -279,7 +280,7 @@ class CloudAPI:
         enable_citations: bool = False,
         extra_body: Optional[Dict[str, Any]] = None,
         folder_id: Optional[str] = None,
-    ) -> Union[Dict[str, Any], Iterator[str], Iterator[Dict[str, Any]]]:
+    ) -> Union[_Official, Iterator[str], Iterator[_Official]]:
         """
         PageIndex Chat Completions. Optionally scoped to specific PageIndex documents.
 
@@ -298,6 +299,8 @@ class CloudAPI:
                 - If stream=False: Complete response dictionary
                 - If stream=True and stream_metadata=False: Iterator of text content chunks
                 - If stream=True and stream_metadata=True: Iterator of raw response chunks with metadata
+            The dicts also read by attribute, as the openai SDK's
+            ChatCompletion / ChatCompletionChunk.
         """
         payload = {
             "messages": messages,
@@ -338,10 +341,12 @@ class CloudAPI:
                 from .local_chat import _text_only
                 return _text_only(self._stream_chat_response_raw(response))
         else:
-            return response.json()
+            from .local_chat import _ChatCompletion
+            return _ChatCompletion(response.json())
 
-    def _stream_chat_response_raw(self, response: requests.Response) -> Iterator[Dict[str, Any]]:
+    def _stream_chat_response_raw(self, response: requests.Response) -> Iterator[_Official]:
         """Streaming chat completion with full metadata, including citation events."""
+        from .local_chat import _ChatCompletionChunk
         try:
             for line in response.iter_lines():
                 if line:
@@ -357,7 +362,7 @@ class CloudAPI:
                                 raise PageIndexAPIError(
                                     "Chat completion failed mid-stream: "
                                     f"{chunk['error']}")
-                            yield chunk
+                            yield _ChatCompletionChunk(chunk)
                         except json.JSONDecodeError:
                             continue
         finally:

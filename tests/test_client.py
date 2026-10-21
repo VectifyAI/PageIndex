@@ -2383,6 +2383,23 @@ def test_cloud_chat_stream_parsing(cloud, monkeypatch):
         messages=[{"role": "user", "content": "q"}], stream=True,
         stream_metadata=True))
     assert {"object": "chat.completion.citations", "citations": []} in chunks
+    # the managed endpoint's chunks read by attribute too, as the openai SDK
+    # reads that JSON: fields it doesn't send read None
+    assert chunks[1].choices[0].delta.content == "Hi"
+    assert chunks[2].citations == [] and chunks[2].choices is None
+    assert chunks[0].model is None
+
+
+def test_cloud_chat_envelope_reads_by_key_and_by_attribute(cloud):
+    client, calls, fake = cloud
+    fake.payload = {"id": "c", "object": "chat.completion", "created": 1,
+                    "choices": [{"index": 0, "finish_reason": "stop",
+                                 "message": {"role": "assistant",
+                                             "content": "ok"}}]}
+    result = client.chat_completions("q")
+    assert result == fake.payload and json.loads(json.dumps(result)) == result
+    assert result.choices[0].message.content == "ok"
+    assert result.model is None  # the endpoint sends none
 
 
 def test_cloud_chat_stream_error_chunk_raises(cloud, monkeypatch):

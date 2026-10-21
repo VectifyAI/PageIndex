@@ -1,10 +1,13 @@
 """Local chat surfaces: three protocols over fake backends — no network,
 no LLM keys. Tool execution runs for real against a seeded local store."""
 import asyncio
+import copy
 import inspect
 import json
+import pickle
 import sys
 import types
+import warnings
 
 import httpx  # via the hard `openai` dependency
 import pytest
@@ -1440,6 +1443,11 @@ def test_openai_lanes_read_by_key_and_by_attribute(client, store_path,
     assert chunks[-1].usage.total_tokens == chunks[-1]["usage"]["total_tokens"]
     r = client._responses("q")
     assert r.output_text == "The answer" and r.messages == r["messages"]
+    with pytest.raises(AttributeError, match="read-only"):
+        r.model = "other"  # would shadow r["model"], which stays the truth
+    for clone in (copy.copy(r), copy.deepcopy(r), pickle.loads(pickle.dumps(r))):
+        assert type(clone) is type(r) and clone == r
+        assert clone.output_text == "The answer"
     events = list(client._responses("q", stream=True))
     assert [event.type for event in events] == [e["type"] for e in events]
     assert events[-1].response.output_text == "The answer"
@@ -2100,6 +2108,12 @@ def test_messages_reads_by_key_and_by_attribute(client, store_path,
     assert [event.type for event in events] == [e["type"] for e in events]
     assert (events[-1].message.content[0].text
             == events[-1]["message"]["content"][0]["text"] == "Done")
+    for clone in (copy.deepcopy(events[-1]),
+                  pickle.loads(pickle.dumps(events[-1]))):
+        assert type(clone) is type(events[-1]) and clone == events[-1]
+        assert clone.message.content[0].text == "Done"
+    with pytest.raises(AttributeError, match="read-only"):
+        events[-1].type = "other"
     final = stream.get_final_message()
     assert final.usage.output_tokens == final["usage"]["output_tokens"]
     assert final.stop_reason == final["stop_reason"] == "end_turn"
@@ -2125,8 +2139,10 @@ def test_messages_conforms_to_the_official_sdk(client, store_path,
         client._messages("q", model="claude-test", max_tokens=100))
     assert envelope.content[0].type == "text"
     fake_anthropic([_anthropic_sse(turn) for turn in turns])
-    events = list(client._messages("q", model="claude-test", max_tokens=100,
-                                   stream=True))
+    with warnings.catch_warnings():  # the dict views dump the SDK's objects
+        warnings.filterwarnings("error", message="Pydantic serializer")
+        events = list(client._messages("q", model="claude-test",
+                                       max_tokens=100, stream=True))
     raw_types = {"message_start", "message_delta", "message_stop",
                  "content_block_start", "content_block_delta",
                  "content_block_stop"}

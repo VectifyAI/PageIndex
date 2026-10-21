@@ -9,7 +9,7 @@ import warnings
 from typing import (TYPE_CHECKING, Any, Callable, Iterator, Literal, Mapping,
                     Optional, Union, cast, overload)
 
-from .chat_stream import ChatStream, MessagesStream
+from .chat_stream import ChatStream, MessagesStream, _Official
 from .errors import PageIndexAPIError
 
 
@@ -1113,7 +1113,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
-    ) -> dict[str, Any]: ...
+    ) -> _Official: ...
 
     @overload
     def chat(
@@ -1133,7 +1133,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
-    ) -> Iterator[dict[str, Any]]: ...
+    ) -> Iterator[_Official]: ...
 
     @overload
     def chat(
@@ -1604,7 +1604,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         *,
         folder_id: Optional[str] = None,
-    ) -> Union[dict[str, Any], Iterator[str], Iterator[dict[str, Any]]]:
+    ) -> Union[_Official, Iterator[str], Iterator[_Official]]:
         """
         Kept for existing code — new code calls ``chat()``. Everything
         here is ``chat(protocol="chat_completions")``: the same engine
@@ -1721,7 +1721,7 @@ class PageIndexClient:
             - stream=True, stream_metadata=False: iterator of text chunks
             - stream=True, stream_metadata=True: iterator of chunk dicts
               (an API chat model's closing usage chunk carries 'messages')
-            Own-model dicts also read by attribute, as the openai SDK's
+            The dicts also read by attribute, as the openai SDK's
             ChatCompletion / ChatCompletionChunk.
         """
         if isinstance(messages, str):
@@ -1798,7 +1798,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         *,
         folder_id: Optional[str] = None,
-    ) -> Union[dict[str, Any], Iterator[dict[str, Any]]]:
+    ) -> Union[_Official, Iterator[_Official]]:
         """
         The engine behind ``chat(protocol="responses")``: document QA over
         the OpenAI Responses protocol.
@@ -1896,7 +1896,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         *,
         folder_id: Optional[str] = None,
-    ) -> Union[dict[str, Any], MessagesStream]:
+    ) -> Union[_Official, MessagesStream]:
         """
         The engine behind ``chat(protocol="messages")``: document QA over
         the Anthropic Messages protocol, Claude-native.
