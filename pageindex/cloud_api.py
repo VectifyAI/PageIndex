@@ -335,43 +335,10 @@ class CloudAPI:
             if stream_metadata:
                 return self._stream_chat_response_raw(response)
             else:
-                return self._stream_chat_response(response)
+                from .local_chat import _text_only
+                return _text_only(self._stream_chat_response_raw(response))
         else:
             return response.json()
-
-    def _stream_chat_response(self, response: requests.Response) -> Iterator[str]:
-        """
-        Parse streaming chat completion response.
-
-        Args:
-            response: Streaming HTTP response
-
-        Yields:
-            str: Content chunks from the streaming response
-        """
-        try:
-            for line in response.iter_lines():
-                if line:
-                    line = line.decode('utf-8')
-                    if line.startswith('data: '):
-                        data = line[6:]
-                        if data == '[DONE]':
-                            break
-
-                        try:
-                            chunk = json.loads(data)
-                            if chunk.get("error"):
-                                raise PageIndexAPIError(
-                                    "Chat completion failed mid-stream: "
-                                    f"{chunk['error']}")
-                            choices = chunk.get("choices") or [{}]
-                            content = choices[0].get("delta", {}).get("content", "")
-                            if content:
-                                yield content
-                        except json.JSONDecodeError:
-                            continue
-        finally:
-            response.close()
 
     def _stream_chat_response_raw(self, response: requests.Response) -> Iterator[Dict[str, Any]]:
         """Streaming chat completion with full metadata, including citation events."""

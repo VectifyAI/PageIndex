@@ -475,6 +475,9 @@ def test_chat_raises_when_the_answer_is_cut_short(monkeypatch, chat_client,
     fake_cli(monkeypatch, said, cut)
     envelope = chat_client.chat("Q", protocol="chat_completions")
     assert envelope["choices"][0]["finish_reason"] == finish_reason
+    fake_cli(monkeypatch, said, cut)
+    with pytest.raises(PageIndexAPIError, match=finish_reason):
+        list(chat_client.chat_completions("Q", stream=True))
 
 
 @needs_claude

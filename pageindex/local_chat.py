@@ -696,6 +696,22 @@ def _cut_short_error(finish_reason: str) -> PageIndexAPIError:
         "an answer marked by its finish_reason.")
 
 
+def _text_only(chunks) -> Iterator[str]:
+    """chat_completions' text stream: the answer deltas, then a cut answer
+    raises, as chat(stream=True) does."""
+    finish, usage = None, {}
+    for piece in chunks:
+        usage = piece.get("usage") or usage
+        if piece.get("choices"):
+            choice = piece["choices"][0]
+            finish = choice.get("finish_reason") or finish
+            content = (choice.get("delta") or {}).get("content")
+            if content:
+                yield content
+    if finish in _CUT_SHORT:
+        raise _with_usage(_cut_short_error(finish), usage)
+
+
 def _chat_agent(client, messages, doc_id, model, temperature=None,
                 top_p=None, reasoning_effort=None, extra_body=None,
                 max_tokens=None, backend=None, extra_headers=None,
@@ -1153,11 +1169,7 @@ def run_chat_completions(client, messages, stream: bool = False,
 
     if stream_metadata:
         return _stream_sync(agen)
-    return (piece["choices"][0]["delta"]["content"]
-            for piece in _stream_sync(agen)
-            if piece.get("choices")
-            and "content" in piece["choices"][0]["delta"]
-            and piece["choices"][0]["delta"]["content"])
+    return _text_only(_stream_sync(agen))
 
 
 def run_responses(client, input, model: Optional[str] = None,
@@ -1948,6 +1960,4 @@ def _claude_code_completions(run, model_name: str, stream: bool,
 
     if stream_metadata:
         return _stream_sync(agen)
-    return (piece["choices"][0]["delta"]["content"]
-            for piece in _stream_sync(agen)
-            if piece.get("choices") and piece["choices"][0]["delta"].get("content"))
+    return _text_only(_stream_sync(agen))

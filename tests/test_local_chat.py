@@ -3253,9 +3253,10 @@ def test_chat_completions_reports_native_finish_reason(client, store_path,
 @pytest.mark.parametrize("finish", ["length", "content_filter"])
 def test_chat_raises_on_an_unfinished_answer(client, store_path, monkeypatch,
                                              finish):
-    """A bare answer string cannot say it is unfinished, so chat() raises:
-    a stream after the text it delivered, a non-streamed call with that
-    text on the error; both with the run's usage."""
+    """A bare answer string cannot say it is unfinished, so chat() and
+    chat_completions' text stream raise: a stream after the text it
+    delivered, a non-streamed call with that text on the error; both with
+    the run's usage."""
     seed_doc(store_path, "pi-a", "report.pdf")
 
     def cut_model(*args):
@@ -3276,6 +3277,12 @@ def test_chat_raises_on_an_unfinished_answer(client, store_path, monkeypatch,
     assert info.value.usage["completion_tokens"] == 5
     with pytest.raises(PageIndexAPIError, match=finish):
         list(client.chat("q", stream=True).events)
+    text = []
+    with pytest.raises(PageIndexAPIError, match=finish) as info:
+        for piece in client.chat_completions("q", stream=True):
+            text.append(piece)
+    assert "".join(text) == "The range was"
+    assert info.value.usage["completion_tokens"] == 5
 
 
 @needs_agents

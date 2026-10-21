@@ -2397,6 +2397,26 @@ def test_cloud_chat_stream_error_chunk_raises(cloud, monkeypatch):
             list(it)
 
 
+@pytest.mark.parametrize("finish", ["max_tokens", "refusal"])
+def test_cloud_chat_text_stream_raises_on_a_cut_answer(cloud, monkeypatch, finish):
+    """The endpoint ends a cut or refused answer with that stop reason as
+    its finish_reason, then [DONE]."""
+    client, calls, fake = cloud
+    lines = [
+        b'data: {"choices": [{"delta": {"content": "Partial"}}]}',
+        ("data: " + json.dumps({"choices": [{"delta": {},
+                                             "finish_reason": finish}]})).encode(),
+        b"data: [DONE]",
+    ]
+    _patch_requests(monkeypatch, lambda m, url, kw: FakeResponse(lines=lines))
+    for stream in (lambda: client.chat_completions("q", stream=True),
+                   lambda: client.chat("q", stream=True)):
+        it = stream()
+        assert next(it) == "Partial"
+        with pytest.raises(PageIndexAPIError, match=finish):
+            list(it)
+
+
 def test_cloud_chat_accepts_query_string(cloud):
     client, calls, fake = cloud
     fake.payload = {"choices": [{"message": {"content": "ok"}}]}
