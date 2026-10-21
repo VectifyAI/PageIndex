@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import functools
 import hashlib
 import json
 import queue
@@ -206,7 +207,37 @@ def _stream_sync(agen_factory) -> Iterator[Any]:
         cancelled.set()
 
 
+class _Official(dict):
+    """A protocol lane's envelope, chunk or event: a dict that also reads by
+    attribute as the official SDK type would, ``r.choices[0].message.content``
+    beside ``r["choices"][0]["message"]["content"]``. A field the type has
+    and the dict lacks reads None; any other name raises."""
+
+    @staticmethod
+    def _parse(data: dict) -> Any:
+        raise NotImplementedError
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return getattr(self._parse(dict(self)), name)
+
+
 # ── OpenAI engine (chat_completions / responses) ──
+
+class _ChatCompletion(_Official):
+    @staticmethod
+    def _parse(data):
+        from openai.types.chat import ChatCompletion
+        return ChatCompletion.model_validate(data)
+
+
+class _ChatCompletionChunk(_Official):
+    @staticmethod
+    def _parse(data):
+        from openai.types.chat import ChatCompletionChunk
+        return ChatCompletionChunk.model_validate(data)
+
 
 def _require_openai_agents(method: str) -> None:
     try:
@@ -1178,7 +1209,7 @@ def run_chat_completions(client, messages, stream: bool = False,
             raise _with_usage(
                 _translate_run_error(exc, max_turns, "chat", client),
                 _openai_usage(recorder.responses)) from exc
-        return {
+        return _ChatCompletion({
             "id": f"chatcmpl-{uuid.uuid4().hex}",
             "object": "chat.completion",
             "created": int(time.time()),
@@ -1192,18 +1223,18 @@ def run_chat_completions(client, messages, stream: bool = False,
             "usage": _openai_usage(result.raw_responses),
             "messages": _chat_transcript(
                 agent, result.to_input_list()[len(items):]),
-        }
+        })
 
     chat_id = f"chatcmpl-{uuid.uuid4().hex}"
     created = int(time.time())
 
     def chunk(delta: dict, finish=None) -> dict:
-        return {
+        return _ChatCompletionChunk({
             "id": chat_id, "object": "chat.completion.chunk",
             "created": created, "model": reported_model,
             "choices": [{"index": 0, "delta": delta,
                          "finish_reason": finish}],
-        }
+        })
 
     async def agen():
         from openai.types.responses import ResponseTextDeltaEvent
@@ -1230,23 +1261,28 @@ def run_chat_completions(client, messages, stream: bool = False,
                 streamed.cancel()  # abandoned/failed: stop the agent task
             await _aclose_backend(agent)
         yield chunk({}, finish=recorded.get("finish_reason") or "stop")
-        yield {
+        yield _ChatCompletionChunk({
             "id": chat_id, "object": "chat.completion.chunk",
             "created": created, "model": reported_model, "choices": [],
             "usage": _openai_usage(streamed.raw_responses),
             "messages": _chat_transcript(
                 agent, streamed.to_input_list()[len(items):]),
-        }
+        })
 
     if stream_metadata:
         return _stream_sync(agen)
     return _text_only(_stream_sync(agen))
 
 
-class _ResponsesEnvelope(dict):
+class _ResponsesEnvelope(_Official):
     """The Responses envelope. Its transcript was ``items`` before it became
     ``messages``; the old key still reads it, with a DeprecationWarning, and
     is never stored."""
+
+    @staticmethod
+    def _parse(data):
+        from openai.types.responses import Response
+        return Response.model_validate(data)
 
     def _key(self, key):
         if key == "items":
@@ -1265,6 +1301,19 @@ class _ResponsesEnvelope(dict):
 
     def __contains__(self, key):
         return dict.__contains__(self, self._key(key))
+
+
+@functools.cache
+def _responses_event_adapter():
+    from openai.types.responses import ResponseStreamEvent
+    from pydantic import TypeAdapter
+    return TypeAdapter(ResponseStreamEvent)
+
+
+class _ResponsesEvent(_Official):
+    @staticmethod
+    def _parse(data):
+        return _responses_event_adapter().validate_python(data)
 
 
 def run_responses(client, input, model: Optional[str] = None,
@@ -1408,7 +1457,7 @@ def run_responses(client, input, model: Optional[str] = None,
                                 data["response"]["created_at"] = created_at
                             sequence += 1
                             data["sequence_number"] = sequence
-                            yield data
+                            yield _ResponsesEvent(data)
                             continue
                         if data["type"] in ("response.completed",
                                             "response.incomplete",
@@ -1438,7 +1487,7 @@ def run_responses(client, input, model: Optional[str] = None,
                         data["output_index"] += output_offset
                     sequence += 1
                     data["sequence_number"] = sequence
-                    yield data
+                    yield _ResponsesEvent(data)
             completed = True
         except AgentsException as exc:
             # a run the envelope already reports failed/incomplete is done —
@@ -1465,13 +1514,45 @@ def run_responses(client, input, model: Optional[str] = None,
         terminal = {"incomplete": "response.incomplete",
                     "failed": "response.failed"}.get(status,
                                                      "response.completed")
-        yield {"type": terminal, "sequence_number": sequence,
-               "response": envelope(transcript, recorder.responses)}
+        yield _ResponsesEvent({"type": terminal, "sequence_number": sequence,
+                               "response": envelope(transcript,
+                                                    recorder.responses)})
 
     return _stream_sync(agen)
 
 
 # ── Anthropic engine (messages) ──
+
+class _Message(_Official):
+    @staticmethod
+    def _parse(data):
+        from anthropic.types.beta import BetaMessage
+        return BetaMessage.model_validate(data)
+
+
+class _MessagesEvent(dict):
+    """A Messages stream event: the Anthropic SDK's event object as a dict,
+    whose attributes still read the object itself."""
+
+    def __init__(self, event):
+        super().__init__(event.model_dump(mode="json"))
+        self._event = event
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return getattr(self._event, name)
+
+
+class _RunResult(dict):
+    """``get_final_result()``'s totals, by key or by attribute."""
+
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name) from None
+
 
 def _require_anthropic() -> None:
     try:
@@ -1819,17 +1900,12 @@ def run_messages(client, messages, model: str, route: str,
         return new_messages
 
     if stream:
-        class Result(anthropic.BaseModel):
-            usage: dict
-            messages: list
-            stop_reason: Optional[str]
-
         def events() -> Generator[Any, None, Any]:
             turns: list = []  # each finished turn's message snapshot
             try:
                 for turn_stream in runner:
                     for event in turn_stream:
-                        yield event
+                        yield _MessagesEvent(event)
                     message = turn_stream.get_final_message()
                     if message.stop_reason is None:
                         raise PageIndexAPIError(
@@ -1846,8 +1922,9 @@ def run_messages(client, messages, model: str, route: str,
                 # runs on exhaustion and abandonment (GeneratorExit) alike
                 if owns_transport:
                     backend_client.close()
-            return Result(usage=run_usage(turns), messages=transcript(turns),
-                          stop_reason=turns[-1].stop_reason)
+            return _RunResult(usage=run_usage(turns),
+                              messages=transcript(turns),
+                              stop_reason=turns[-1].stop_reason)
         return MessagesStream(events())
 
     turns: list = []
@@ -1866,7 +1943,7 @@ def run_messages(client, messages, model: str, route: str,
     if not turns:
         raise PageIndexAPIError("The model returned no response.")
     final = turns[-1]
-    envelope = final.model_dump(mode="json")
+    envelope = _Message(final.model_dump(mode="json"))
     envelope["content"] = [_dump_block(item) for item in final.content]
     envelope["usage"] = run_usage(turns)
     envelope["messages"] = transcript(turns)
@@ -2021,10 +2098,11 @@ def _claude_code_completions(run, model_name: str, stream: bool,
     reported = model_name.removeprefix("claude-code/")
 
     def chunk(delta: dict, finish=None) -> dict:
-        return {"id": chat_id, "object": "chat.completion.chunk",
-                "created": created, "model": reported,
-                "choices": [{"index": 0, "delta": delta,
-                             "finish_reason": finish}]}
+        return _ChatCompletionChunk({
+            "id": chat_id, "object": "chat.completion.chunk",
+            "created": created, "model": reported,
+            "choices": [{"index": 0, "delta": delta,
+                         "finish_reason": finish}]})
 
     if not stream:
         async def last():
@@ -2035,13 +2113,14 @@ def _claude_code_completions(run, model_name: str, stream: bool,
         done = _run_sync(last())
         if not done:
             raise PageIndexAPIError("The model returned no response.")
-        return {"id": chat_id, "object": "chat.completion",
-                "created": created, "model": reported,
-                "choices": [{"index": 0,
-                             "message": {"role": "assistant",
-                                         "content": done["answer"]},
-                             "finish_reason": done["finish_reason"]}],
-                "usage": done["usage"]}
+        return _ChatCompletion({
+            "id": chat_id, "object": "chat.completion",
+            "created": created, "model": reported,
+            "choices": [{"index": 0,
+                         "message": {"role": "assistant",
+                                     "content": done["answer"]},
+                         "finish_reason": done["finish_reason"]}],
+            "usage": done["usage"]})
 
     async def agen():
         from contextlib import aclosing
@@ -2052,9 +2131,10 @@ def _claude_code_completions(run, model_name: str, stream: bool,
                     yield chunk({"content": event["delta"]})
                 elif event["type"] == "done":
                     yield chunk({}, finish=event["finish_reason"])
-                    yield {"id": chat_id, "object": "chat.completion.chunk",
-                           "created": created, "model": reported, "choices": [],
-                           "usage": event["usage"]}
+                    yield _ChatCompletionChunk({
+                        "id": chat_id, "object": "chat.completion.chunk",
+                        "created": created, "model": reported, "choices": [],
+                        "usage": event["usage"]})
 
     if stream_metadata:
         return _stream_sync(agen)

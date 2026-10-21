@@ -98,7 +98,7 @@ class MessagesStream:
         """Read the stream to its end (raising what iterating it would),
         then return the run's ``usage``, aggregated across turns, its
         ``messages`` turn sequence and its final turn's ``stop_reason``,
-        as attributes."""
+        by attribute or by key."""
         for _ in self:
             pass
         if self._result is None:
