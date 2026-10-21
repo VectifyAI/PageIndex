@@ -163,17 +163,21 @@ def test_chat_refuses_what_the_cli_cannot_take(chat_client):
     for protocol in ("responses", "messages"):
         with pytest.raises(PageIndexAPIError, match="answer lane"):
             chat_client.chat("Q", protocol=protocol)
-    # an image or tool history: said outright, not sent off to the
+    # tool history: said outright, not sent off to the
     # protocol lanes, which refuse claude-code/ too
-    image = [{"type": "text", "text": "What is this?"},
-             {"type": "image_url", "image_url": {"url": "data:image/png;base64,QUJD"}}]
-    for messages in ([{"role": "user", "content": image}],
-                     [{"role": "tool", "tool_call_id": "c", "content": "x"},
-                      {"role": "user", "content": "Q"}]):
-        with pytest.raises(PageIndexAPIError,
-                           match="claude-code/haiku takes text messages only") as err:
-            chat_client.chat(messages)
-        assert "use an API model with" in str(err.value)
+    with pytest.raises(PageIndexAPIError,
+                       match="claude-code/haiku takes text messages only") as err:
+        chat_client.chat([{"role": "tool", "tool_call_id": "c", "content": "x"},
+                          {"role": "user", "content": "Q"}])
+    assert "use an API model with" in str(err.value)
+
+    # https image URLs are refused on claude-code/
+    https_image = [{"type": "text", "text": "What is this?"},
+                   {"type": "image_url", "image_url": {"url": "https://example.com/a.png"}}]
+    with pytest.raises(PageIndexAPIError,
+                       match="claude-code/haiku takes base64 images") as err:
+        chat_client.chat([{"role": "user", "content": https_image}])
+    assert "for https image URLs, use an API model" in str(err.value)
     with pytest.raises(PageIndexAPIError, match="drives the Anthropic API"):
         chat_client.anthropic_runner_config()
 
@@ -426,6 +430,37 @@ def test_chat_sends_one_message_with_a_block_per_turn(monkeypatch, chat_client):
         "prompt_tokens": 125, "completion_tokens": 7, "total_tokens": 132,
         "prompt_tokens_details": {"cached_tokens": 100, "cache_write_tokens": 20},
         "completion_tokens_details": {"reasoning_tokens": 4}}
+
+
+@needs_claude
+def test_claude_code_chat_accepts_user_images(chat_client, monkeypatch):
+    sessions = fake_cli(monkeypatch, result("I see a diagram."))
+    # User message with data URL image_url
+    image_url_msg = [
+        {"type": "text", "text": "What is this?"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,QUJD"}},
+    ]
+    history = [
+        {"role": "user", "content": image_url_msg},
+        {"role": "assistant", "content": "A diagram."},
+        # User message with Anthropic image block
+        {"role": "user", "content": [
+            {"type": "text", "text": "And this?"},
+            {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "REVG"}},
+        ]},
+    ]
+    answer = chat_client.chat(history)
+    assert answer == "I see a diagram."
+    (session,) = sessions
+    (message,) = session.prompt
+    blocks = message["message"]["content"]
+    assert blocks == [
+        {"type": "text", "text": '<turn role="user">\nWhat is this?\n</turn>'},
+        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "QUJD"}},
+        {"type": "text", "text": '<turn role="assistant">\nA diagram.\n</turn>'},
+        {"type": "text", "text": '<turn role="user">\nAnd this?\n</turn>'},
+        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "REVG"}},
+    ]
 
 
 @needs_claude

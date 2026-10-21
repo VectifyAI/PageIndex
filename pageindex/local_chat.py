@@ -47,15 +47,148 @@ def _system_text(content: Any) -> str:
     )
 
 
-def _split_chat_messages(messages, text_only: Optional[str] = None,
+def _normalize_user_content_parts(
+    parts: list[Any],
+    engine: str = "openai",
+    model_name: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """Normalize user content parts into the engine's native shape:
+    - Text parts: {"type": "text", "text": "..."}
+    - Image parts:
+      - OpenAI Agents engine: Chat Completions {"type": "image_url", "image_url": {"url": ...}}
+      - claude-code/ engine: Anthropic {"type": "image", "source": {"type": "base64", ...}}
+    Refuses what the engine cannot accept (e.g. non-base64 image URLs on claude-code/).
+    """
+    lanes = 'chat(protocol="responses") or chat(protocol="messages")'
+    normalized: list[dict[str, Any]] = []
+    for part in parts:
+        if not isinstance(part, dict) or "type" not in part:
+            raise PageIndexAPIError(
+                f"content must be a string, or a list of parts where each part is a dict with a 'type'; got {part!r}."
+            )
+        part_type = part["type"]
+        if part_type == "text":
+            text = part.get("text")
+            if not isinstance(text, str):
+                raise PageIndexAPIError("text content parts must have a string 'text'.")
+            normalized.append({"type": "text", "text": text})
+        elif part_type == "image_url":
+            payload = part.get("image_url")
+            detail = None
+            if isinstance(payload, dict):
+                url = payload.get("url")
+                detail = payload.get("detail")
+            elif isinstance(payload, str):
+                url = payload
+            else:
+                raise PageIndexAPIError("image_url part must provide an image URL.")
+
+            if not isinstance(url, str) or not url.strip():
+                raise PageIndexAPIError("image_url part must provide a non-empty 'url'.")
+
+            if not url.startswith(("http://", "https://", "data:")):
+                raise PageIndexAPIError(
+                    "image_url must be an http(s) URL or a data URL (data:image/...;base64,...)."
+                )
+
+            if engine == "claude_code":
+                if url.startswith(("http://", "https://")):
+                    raise PageIndexAPIError(
+                        f"{model_name or 'claude-code'} takes base64 images (data URLs or "
+                        "Anthropic image blocks); for https image URLs, use an API model "
+                        f"with {lanes} or pass a data URL."
+                    )
+                header, _, base64_data = url.partition(",")
+                media_type = header[5:].partition(";")[0] or "image/jpeg"
+                if media_type == "image/jpg":
+                    media_type = "image/jpeg"
+                if media_type not in ("image/jpeg", "image/png", "image/gif", "image/webp"):
+                    raise PageIndexAPIError(
+                        f"{model_name or 'claude-code'} takes JPEG, PNG, GIF, or WebP images; "
+                        f"got {media_type!r}."
+                    )
+                normalized.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": base64_data,
+                    },
+                })
+            else:
+                img_dict: dict[str, Any] = {"url": url}
+                if detail is not None:
+                    img_dict["detail"] = detail
+                normalized.append({
+                    "type": "image_url",
+                    "image_url": img_dict,
+                })
+        elif part_type == "image":
+            source = part.get("source")
+            if not isinstance(source, dict):
+                raise PageIndexAPIError("image content part must provide a 'source' dict.")
+            source_type = source.get("type")
+            if source_type != "base64":
+                raise PageIndexAPIError(
+                    f"image source type must be 'base64'; got {source_type!r}."
+                )
+            media_type = source.get("media_type") or "image/jpeg"
+            if media_type == "image/jpg":
+                media_type = "image/jpeg"
+            data = source.get("data")
+            if not isinstance(data, str) or not data.strip():
+                raise PageIndexAPIError("base64 image source must contain non-empty 'data'.")
+            if data.startswith("data:"):
+                _, _, data = data.partition(",")
+
+            if engine == "claude_code":
+                if media_type not in ("image/jpeg", "image/png", "image/gif", "image/webp"):
+                    raise PageIndexAPIError(
+                        f"{model_name or 'claude-code'} takes JPEG, PNG, GIF, or WebP images; "
+                        f"got {media_type!r}."
+                    )
+                normalized.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": data,
+                    },
+                })
+            else:
+                data_url = f"data:{media_type};base64,{data}"
+                normalized.append({
+                    "type": "image_url",
+                    "image_url": {"url": data_url},
+                })
+        else:
+            raise PageIndexAPIError(
+                f"content parts on this lane must be text or images (got type {part_type!r}); "
+                f"for other structured items use {lanes}."
+            )
+    return normalized
+
+
+def _split_chat_messages(messages, text_only: Optional[str] = None, *,
+                         engine: Optional[str] = None,
+                         model_name: Optional[str] = None,
                          ) -> "tuple[list[str], list[dict]]":
     """Validate the chat_completions surface's messages: system/developer
     content joins the managed instructions; user/assistant history passes
-    through. Tool-history round-trips belong to chat(protocol="responses")
-    or chat(protocol="messages"). ``text_only`` names a model those lanes
-    cannot run (claude-code/): its errors say so instead of sending the
-    caller there."""
+    through. User messages accept text or image parts; tool-history round-trips
+    belong to chat(protocol="responses") or chat(protocol="messages").
+    ``text_only`` / ``model_name`` names a model those lanes cannot run
+    (claude-code/): its errors say so instead of sending the caller there."""
     lanes = 'chat(protocol="responses") or chat(protocol="messages")'
+    if engine is None:
+        if text_only is not None:
+            engine = "claude_code"
+            model_name = text_only
+        else:
+            engine = "openai"
+    elif model_name is None and text_only is not None:
+        model_name = text_only
+
     messages = list(messages)
     if not messages:
         raise PageIndexAPIError("messages must be a non-empty list.")
@@ -68,22 +201,38 @@ def _split_chat_messages(messages, text_only: Optional[str] = None,
         role = message["role"]
         if role in ("system", "developer"):
             system_texts.append(_system_text(message.get("content")))
-        elif role in ("user", "assistant"):
+        elif role == "user":
+            content = message.get("content")
+            if isinstance(content, str):
+                history.append({"role": "user", "content": content})
+            elif isinstance(content, list):
+                if not content:
+                    raise PageIndexAPIError("user message content list cannot be empty.")
+                normalized = _normalize_user_content_parts(
+                    content, engine=engine, model_name=model_name)
+                history.append({"role": "user", "content": normalized})
+            else:
+                raise PageIndexAPIError(
+                    f"{model_name or 'claude-code'} takes text or image messages: content must be "
+                    f"a string or list of parts. For other structured items, use {lanes}."
+                    if engine == "claude_code" else
+                    "content must be a string or list of parts on this lane; for structured "
+                    f"items use {lanes}."
+                )
+        elif role == "assistant":
             content = message.get("content")
             if not isinstance(content, str):
                 raise PageIndexAPIError(
-                    f"{text_only} takes text messages only: content must be "
-                    "a string. For images or other structured items, use an "
-                    f"API model with {lanes}." if text_only else
-                    "content must be a string on this lane; for structured "
-                    f"items use {lanes}."
+                    f"{model_name or 'claude-code'} assistant message content must be a string."
+                    if engine == "claude_code" else
+                    f"content must be a string on this lane; for structured items use {lanes}."
                 )
-            history.append({"role": role, "content": content})
+            history.append({"role": "assistant", "content": content})
         else:
             raise PageIndexAPIError(
-                f"{text_only} takes text messages only: no {role!r} "
+                f"{model_name or 'claude-code'} takes text messages only: no {role!r} "
                 f"messages. For tool history, use an API model with {lanes}."
-                if text_only else
+                if engine == "claude_code" else
                 f"Unsupported role {role!r} on this lane. Tool history "
                 f"round-trips belong to {lanes}."
             )
@@ -1789,13 +1938,34 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
     from contextlib import aclosing
     from .integrations.claude_agent_sdk import (
         claude_code_messages, claude_code_options, tool_server)
-    system_texts, history = _split_chat_messages(messages, text_only=model_name)
+    system_texts, history = _split_chat_messages(
+        messages, engine="claude_code", model_name=model_name)
     scope = client._local_doc_scope(doc_id)
     block = targeting_block(client, doc_id, folder_id)
     blocks = [{"type": "text", "text": block}] if block else []
-    blocks += [{"type": "text", "text": f'<turn role="{m["role"]}">\n'
-                f'{m["content"].replace("</turn>", "</ turn>")}\n</turn>'}
-               for m in history]
+    for m in history:
+        role = m["role"]
+        content = m["content"]
+        if role == "assistant":
+            blocks.append({
+                "type": "text",
+                "text": f'<turn role="assistant">\n{content.replace("</turn>", "</ turn>")}\n</turn>',
+            })
+        elif isinstance(content, str):
+            blocks.append({
+                "type": "text",
+                "text": f'<turn role="user">\n{content.replace("</turn>", "</ turn>")}\n</turn>',
+            })
+        elif isinstance(content, list):
+            text_parts = [p["text"] for p in content if p.get("type") == "text"]
+            combined_text = "\n".join(text_parts)
+            blocks.append({
+                "type": "text",
+                "text": f'<turn role="user">\n{combined_text.replace("</turn>", "</ turn>")}\n</turn>',
+            })
+            for p in content:
+                if p.get("type") == "image":
+                    blocks.append(p)
     # cloud tool failures (auth, limits): the run fails on them, as the
     # bridge lanes do, instead of the model answering around them
     failures: list = []

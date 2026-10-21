@@ -466,6 +466,65 @@ def test_chat_multi_turn_history(client, store_path, fake_model):
 
 
 @needs_agents
+def test_chat_accepts_user_images_image_url(client, store_path, fake_model):
+    fake = fake_model([[_msg_item("I see a chart")]])
+    user_parts = [
+        {"type": "text", "text": "What is in this chart?"},
+        {"type": "image_url", "image_url": {"url": "https://example.com/chart.png", "detail": "high"}},
+    ]
+    history = [{"role": "user", "content": user_parts}]
+    assert client.chat(history) == "I see a chart"
+    assert fake.inputs[0][-1] == {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "What is in this chart?"},
+            {"type": "image_url", "image_url": {"url": "https://example.com/chart.png", "detail": "high"}},
+        ],
+    }
+
+
+@needs_agents
+def test_chat_accepts_user_images_anthropic_block(client, store_path, fake_model):
+    fake = fake_model([[_msg_item("A cat")]])
+    user_parts = [
+        {"type": "text", "text": "Describe"},
+        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "QUJD"}},
+    ]
+    history = [{"role": "user", "content": user_parts}]
+    assert client.chat(history) == "A cat"
+    # Anthropic base64 block is normalized to Chat Completions image_url with data URL
+    assert fake.inputs[0][-1] == {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "Describe"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,QUJD"}},
+        ],
+    }
+
+
+@needs_agents
+def test_chat_user_images_validation(client, store_path, fake_model):
+    fake_model([[_msg_item("ok")]])
+    with pytest.raises(PageIndexAPIError, match="content must be a string on this lane"):
+        client.chat([{"role": "assistant", "content": [{"type": "text", "text": "bad"}]}])
+
+    with pytest.raises(PageIndexAPIError, match="user message content list cannot be empty"):
+        client.chat([{"role": "user", "content": []}])
+
+    with pytest.raises(PageIndexAPIError, match="where each part is a dict"):
+        client.chat([{"role": "user", "content": ["not a dict"]}])
+
+    with pytest.raises(PageIndexAPIError, match="content parts on this lane must be text or images"):
+        client.chat([{"role": "user", "content": [{"type": "audio", "audio": "xyz"}]}])
+
+    with pytest.raises(PageIndexAPIError, match="image_url must be an http"):
+        client.chat([{"role": "user", "content": [{"type": "image_url", "image_url": "ftp://bad"}]}])
+
+    with pytest.raises(PageIndexAPIError, match="base64 image source must contain non-empty 'data'"):
+        client.chat([{"role": "user", "content": [{"type": "image", "source": {"type": "base64", "data": ""}}]}])
+
+
+@needs_agents
 def test_chat_reasoning_effort_reaches_the_engine(client, store_path,
                                                   fake_model, monkeypatch):
     """The business door's one thinking knob rides chat_completions'
