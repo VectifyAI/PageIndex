@@ -37,7 +37,8 @@ class ChatObject(dict[str, Any]):
 
 
 def _as_plain_dict(dumper: Any, data: ChatObject) -> Any:
-    return dumper.yaml_representers[dict](dumper, data)
+    rule = dumper.yaml_representers.get(dict)
+    return rule(dumper, data) if rule else dumper.represent_data(dict(data))
 
 
 def _yaml_as_dict() -> None:
