@@ -2701,8 +2701,9 @@ class PageIndexClient:
         Declare the metadata fields of a top-level folder (workspace), or of
         the account with ``folder_id="root"``. Subfolders share their
         top-level folder's fields. Chat's metadata search filters, sorts and
-        counts documents by these fields, and a document uploaded under the
-        folder must carry ``metadata`` that matches them. Set once: a second
+        counts documents by these fields. ``metadata`` on a document under
+        the folder may use only these fields, with their types (HTTP 400
+        otherwise); a document may leave any of them out. Set once: a second
         call on the same folder raises PageIndexAPIError (HTTP 409).
         Cloud-only: local mode raises PageIndexAPIError.
 
