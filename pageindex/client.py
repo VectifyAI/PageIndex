@@ -2703,9 +2703,10 @@ class PageIndexClient:
         top-level folder's fields. Chat's metadata search filters, sorts and
         counts documents by these fields. ``metadata`` on a document under
         the folder may use only these fields, with their types (HTTP 400
-        otherwise); a document may leave any of them out. Set once: a second
-        call on the same folder raises PageIndexAPIError (HTTP 409).
-        Cloud-only: local mode raises PageIndexAPIError.
+        otherwise); a document may leave any of them out. Documents uploaded
+        before the schema are not re-checked. Set once: a second call on the
+        same folder raises PageIndexAPIError (HTTP 409). Cloud-only: local
+        mode raises PageIndexAPIError.
 
         Args:
             folder_id (str): Top-level folder ID, or "root".
