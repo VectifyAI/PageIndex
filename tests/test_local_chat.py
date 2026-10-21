@@ -1464,6 +1464,162 @@ def test_responses_stream_events_validate_as_official_events(
         adapter.validate_python(event)
 
 
+# ── conformance: the official SDKs read each lane as their own wire ──
+
+@needs_agents
+def test_chat_completions_conforms_to_the_official_sdk(client, store_path,
+                                                       monkeypatch):
+    """Through the real LitellmModel, the envelope parses as ChatCompletion
+    and the openai SDK's own stream accumulator rebuilds it from the
+    chunks: same text, finish reason and usage."""
+    import litellm
+    from litellm.llms.base_llm.base_model_iterator import MockResponseIterator
+    from openai.lib.streaming.chat import ChatCompletionStreamState
+    from openai.types.chat import ChatCompletion, ChatCompletionChunk
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+
+    def call(**settings):
+        replies = [_litellm_reply(tool_calls=_TWO_CALLS[:1]),
+                   _litellm_reply("The answer")]
+
+        async def acompletion(**kwargs):
+            reply = replies.pop(0)
+            return (MockResponseIterator(reply) if kwargs.get("stream")
+                    else reply)
+
+        monkeypatch.setattr(litellm, "acompletion", acompletion)
+        return client.chat_completions("q", doc_id=doc_id, model="gpt-test",
+                                       **settings)
+
+    envelope = ChatCompletion.model_validate(call())
+    state = ChatCompletionStreamState()
+    for chunk in call(stream=True, stream_metadata=True):
+        state.handle_chunk(ChatCompletionChunk.model_validate(chunk))
+    rebuilt = state.get_final_completion()
+    assert rebuilt.choices[0].message.content == "The answer"
+    assert (rebuilt.choices[0].message.content
+            == envelope.choices[0].message.content)
+    assert (rebuilt.choices[0].finish_reason
+            == envelope.choices[0].finish_reason == "stop")
+    assert rebuilt.usage and envelope.usage
+    assert rebuilt.usage.total_tokens == envelope.usage.total_tokens == 30
+
+
+_RESPONSES_USAGE = {"input_tokens": 10, "output_tokens": 5,
+                    "total_tokens": 15,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens_details": {"reasoning_tokens": 0}}
+
+
+def _responses_turn(response_id, item, status="completed"):
+    return {"id": response_id, "object": "response", "created_at": 1,
+            "status": status, "model": "gpt-test",
+            "output": [item] if status == "completed" else [],
+            "parallel_tool_calls": True, "tool_choice": "auto", "tools": [],
+            "usage": _RESPONSES_USAGE if status == "completed" else None}
+
+
+def _responses_sse(response_id, item):
+    """One turn as the Responses API streams it: lifecycle, item, deltas."""
+    opening = _responses_turn(response_id, item, "in_progress")
+    events = [{"type": "response.created", "response": opening},
+              {"type": "response.in_progress", "response": opening}]
+    started = ({**item, "status": "in_progress", "content": []}
+               if item["type"] == "message"
+               else {**item, "status": "in_progress", "arguments": ""})
+    events.append({"type": "response.output_item.added", "output_index": 0,
+                   "item": started})
+    if item["type"] == "function_call":
+        events += [
+            {"type": "response.function_call_arguments.delta",
+             "item_id": item["id"], "output_index": 0,
+             "delta": item["arguments"]},
+            {"type": "response.function_call_arguments.done",
+             "item_id": item["id"], "output_index": 0,
+             "arguments": item["arguments"], "name": item["name"]}]
+    else:
+        part = {"type": "output_text", "text": "", "annotations": [],
+                "logprobs": []}
+        events.append({"type": "response.content_part.added",
+                       "item_id": item["id"], "output_index": 0,
+                       "content_index": 0, "part": part})
+        events += [{"type": "response.output_text.delta",
+                    "item_id": item["id"], "output_index": 0,
+                    "content_index": 0, "delta": piece, "logprobs": []}
+                   for piece in ("The ", "answer")]
+        events += [
+            {"type": "response.output_text.done", "item_id": item["id"],
+             "output_index": 0, "content_index": 0, "text": "The answer",
+             "logprobs": []},
+            {"type": "response.content_part.done", "item_id": item["id"],
+             "output_index": 0, "content_index": 0,
+             "part": {**part, "text": "The answer"}}]
+    events += [{"type": "response.output_item.done", "output_index": 0,
+                "item": item},
+               {"type": "response.completed",
+                "response": _responses_turn(response_id, item)}]
+    return "".join(
+        f"event: {e['type']}\n"
+        f"data: {json.dumps({**e, 'sequence_number': n})}\n\n"
+        for n, e in enumerate(events, 1))
+
+
+@needs_agents
+def test_responses_conforms_to_the_official_sdk(client, store_path):
+    """Over the real OpenAIResponsesModel and an HTTP-level fake of the
+    Responses API, a two-turn run's envelope parses as Response and the
+    openai SDK's stream accumulator takes its events: one logical
+    response, opened by created then in_progress, monotonic sequence
+    numbers, each delta on the item its output_index names."""
+    from openai import omit
+    from openai.lib.streaming.responses import ResponseStreamState
+    from openai.types.responses import Response, ResponseStreamEvent
+    from pydantic import TypeAdapter
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    call_item = {"type": "function_call", "id": "fc_1", "call_id": "call_1",
+                 "name": "get_document",
+                 "arguments": '{"doc_name": "report.pdf"}',
+                 "status": "completed"}
+    message_item = {"type": "message", "id": "msg_1", "role": "assistant",
+                    "status": "completed",
+                    "content": [{"type": "output_text", "text": "The answer",
+                                 "annotations": [], "logprobs": []}]}
+
+    def call(stream):
+        turns = [("resp_1", call_item), ("resp_2", message_item)]
+
+        def handler(request):
+            response_id, item = turns.pop(0)
+            if json.loads(request.content).get("stream"):
+                return httpx.Response(
+                    200, content=_responses_sse(response_id, item).encode(),
+                    headers={"content-type": "text/event-stream"})
+            return httpx.Response(200, json=_responses_turn(response_id, item))
+
+        backend = {"http_client": httpx.AsyncClient(
+                       transport=httpx.MockTransport(handler)),
+                   "api_key": "test", "base_url": "http://responses.test/v1"}
+        return client.chat("q", protocol="responses", doc_id=doc_id,
+                           model="gpt-test", stream=stream, backend=backend)
+
+    assert Response.model_validate(call(False)).output_text == "The answer"
+    events = list(call(True))
+    adapter = TypeAdapter(ResponseStreamEvent)
+    state = ResponseStreamState(input_tools=omit, text_format=omit)
+    for event in events:
+        # it asserts each delta lands on the item output_index names
+        state.handle_event(adapter.validate_python(event))
+    assert [e["type"] for e in events[:2]] == ["response.created",
+                                               "response.in_progress"]
+    sequence = [e["sequence_number"] for e in events]
+    assert sequence == list(range(1, len(events) + 1))
+    terminal = events[-1]["response"]
+    assert terminal["id"] == events[0]["response"]["id"]
+    assert [item["type"] for item in terminal["output"]] == [
+        "function_call", "message"]
+    assert Response.model_validate(terminal).output_text == "The answer"
+
+
 # ── messages (Anthropic engine) ──
 
 try:
@@ -1932,6 +2088,41 @@ def test_messages_reads_by_key_and_by_attribute(client, store_path,
     assert final.stop_reason == final["stop_reason"] == "end_turn"
     with pytest.raises(AttributeError):
         final.usagez
+
+
+@needs_anthropic
+def test_messages_conforms_to_the_official_sdk(client, store_path,
+                                               fake_anthropic):
+    """The envelope parses as the Anthropic SDK's Message; the stream is
+    its tool runner's, one message sequence per turn, every raw event
+    parsing as RawMessageStreamEvent beside the SDK's convenience events."""
+    from anthropic.types import Message, RawMessageStreamEvent
+    from pydantic import TypeAdapter
+    seed_doc(store_path, "pi-a", "r.pdf")
+    turns = [_anthropic_message([
+        {"type": "tool_use", "id": "tu_1", "name": "get_document",
+         "input": {"doc_name": "r.pdf"}}], "tool_use"),
+        _anthropic_message([{"type": "text", "text": "Done"}], "end_turn")]
+    fake_anthropic(turns)
+    envelope = Message.model_validate(
+        client._messages("q", model="claude-test", max_tokens=100))
+    assert envelope.content[0].type == "text"
+    fake_anthropic([_anthropic_sse(turn) for turn in turns])
+    events = list(client._messages("q", model="claude-test", max_tokens=100,
+                                   stream=True))
+    raw_types = {"message_start", "message_delta", "message_stop",
+                 "content_block_start", "content_block_delta",
+                 "content_block_stop"}
+    adapter = TypeAdapter(RawMessageStreamEvent)
+    raw = [event for event in events if event["type"] in raw_types]
+    for event in raw:
+        adapter.validate_python(event)
+    assert {e["type"] for e in events} - raw_types <= {"text", "input_json"}
+    starts = [n for n, e in enumerate(raw) if e["type"] == "message_start"]
+    stops = [n for n, e in enumerate(raw) if e["type"] == "message_stop"]
+    assert len(starts) == len(stops) == len(turns)
+    assert all(start < stop for start, stop in zip(starts, stops))
+    assert all(stop < start for stop, start in zip(stops, starts[1:]))
 
 
 @needs_anthropic

@@ -527,6 +527,17 @@ def test_chat_completions_stream_chunks(monkeypatch, chat_client):
     envelope = chat_client.chat_completions("Q")
     assert envelope.choices[0].message.content == "Hi there."
     assert envelope.usage.prompt_tokens == envelope["usage"]["prompt_tokens"]
+    # the openai SDK's own accumulator rebuilds the envelope from the chunks
+    from openai.lib.streaming.chat import ChatCompletionStreamState
+    from openai.types.chat import ChatCompletion, ChatCompletionChunk
+    state = ChatCompletionStreamState()
+    for chunk in chunks:
+        state.handle_chunk(ChatCompletionChunk.model_validate(chunk))
+    rebuilt = state.get_final_completion()
+    official = ChatCompletion.model_validate(envelope)
+    assert rebuilt.choices[0].message.content == official.choices[0].message.content
+    assert rebuilt.choices[0].finish_reason == official.choices[0].finish_reason
+    assert rebuilt.usage == official.usage
 
 
 @needs_claude
