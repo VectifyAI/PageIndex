@@ -1643,11 +1643,11 @@ class PageIndexClient:
                 System/developer messages, wherever they sit, join the
                 managed system prompt after the client's ``instructions``
                 (the managed endpoint receives them as its one leading
-                system message). Own-model chat takes the rest as text
-                plus, with an API chat model, Chat Completions tool
-                history (assistant ``tool_calls``, ``tool`` rows) as
-                ``messages`` returns it; a ``claude-code/`` model takes
-                text only, dropping fields beyond role/content.
+                system message). Own-model chat takes the rest as text,
+                dropping other fields, plus, with an API chat model, Chat
+                Completions tool history as ``messages`` returns it
+                (assistant ``tool_calls`` and reasoning, ``tool`` rows);
+                a ``claude-code/`` model takes text only.
             stream: Enable streaming responses.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the

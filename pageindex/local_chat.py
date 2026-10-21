@@ -113,7 +113,8 @@ def _split_chat_messages(messages, text_only: Optional[str] = None,
                 raise PageIndexAPIError(
                     f"{text_only} takes text messages only: content must be "
                     "a string. For images or other structured items, use an "
-                    f"API model with {lanes}." if text_only else
+                    f"API model with {lanes}; for tool history, an API chat "
+                    "model." if text_only else
                     "content must be a string on this lane; for structured "
                     f"items use {lanes}."
                 )

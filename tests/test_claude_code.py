@@ -169,6 +169,10 @@ def test_chat_refuses_what_the_cli_cannot_take(chat_client):
              {"type": "image_url", "image_url": {"url": "data:image/png;base64,QUJD"}}]
     for messages, hint in (
             ([{"role": "user", "content": image}], "use an API model with"),
+            ([{"role": "assistant", "content": None, "tool_calls": [
+                {"id": "c", "type": "function",
+                 "function": {"name": "f", "arguments": "{}"}}]},
+              {"role": "user", "content": "Q"}], "an API chat model."),
             ([{"role": "tool", "tool_call_id": "c", "content": "x"},
               {"role": "user", "content": "Q"}], "use an API chat model.")):
         with pytest.raises(PageIndexAPIError,
