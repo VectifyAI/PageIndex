@@ -451,12 +451,13 @@ def test_chat_stream_weaves_the_run(monkeypatch, chat_client):
 
 @needs_claude
 @pytest.mark.parametrize("stop_reason, finish_reason", [
-    ("max_tokens", "length"), ("refusal", "content_filter")])
+    ("max_tokens", "length"), ("model_context_window_exceeded", "length"),
+    ("refusal", "content_filter")])
 def test_chat_raises_when_the_answer_is_cut_short(monkeypatch, chat_client,
                                                   stop_reason, finish_reason):
     """The answer lane never returns an unfinished answer: the stream raises
     after its text, a plain call carries the text; the protocol lane marks
-    it with LiteLLM's finish_reason for the stop instead."""
+    it with an OpenAI finish_reason for the stop instead."""
     cut = result("It has 1", usage={"input_tokens": 3, "output_tokens": 2})
     cut.stop_reason = stop_reason
     said = AssistantMessage(content=[TextBlock("It has 1")], model="haiku")

@@ -2397,7 +2397,8 @@ def test_cloud_chat_stream_error_chunk_raises(cloud, monkeypatch):
             list(it)
 
 
-@pytest.mark.parametrize("finish", ["max_tokens", "refusal"])
+@pytest.mark.parametrize("finish", ["max_tokens", "refusal",
+                                    "model_context_window_exceeded"])
 def test_cloud_chat_text_stream_raises_on_a_cut_answer(cloud, monkeypatch, finish):
     """The endpoint ends a cut or refused answer with that stop reason as
     its finish_reason, then [DONE]."""

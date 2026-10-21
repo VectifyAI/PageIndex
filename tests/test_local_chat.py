@@ -604,7 +604,8 @@ def test_chat_process_managed_off_is_clean_answer(monkeypatch):
     assert "doc_name" not in plain
 
 
-@pytest.mark.parametrize("finish", ["length", "max_tokens", "refusal"])
+@pytest.mark.parametrize("finish", ["length", "max_tokens", "refusal",
+                                    "model_context_window_exceeded"])
 def test_managed_chat_raises_on_an_unfinished_answer(monkeypatch, finish):
     """The managed answer lane holds an unfinished answer to the same
     rule: a stream raises after its text, a plain call carries the text

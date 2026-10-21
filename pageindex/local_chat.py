@@ -684,7 +684,8 @@ def _with_usage(error: PageIndexAPIError, usage: dict) -> PageIndexAPIError:
 
 # the finish_reasons of an answer the model stopped short of finishing;
 # the managed endpoint reports Anthropic's names for them
-_CUT_SHORT = ("length", "content_filter", "max_tokens", "refusal")
+_CUT_SHORT = ("length", "content_filter", "max_tokens", "refusal",
+              "model_context_window_exceeded")
 
 
 def _cut_short_error(finish_reason: str) -> PageIndexAPIError:
@@ -1783,8 +1784,9 @@ def run_messages(client, messages, model: str, route: str,
 _TURNS_NOTE = ("The conversation so far arrives as <turn> blocks in the user "
                "message, oldest first. Answer the last user turn.")
 
-# Claude's stop reasons for an unfinished answer, as LiteLLM maps them
+# Claude's stop reasons for an unfinished answer, as OpenAI finish_reasons
 _CLAUDE_CUT: dict[Optional[str], str] = {"max_tokens": "length",
+                                          "model_context_window_exceeded": "length",
                                           "refusal": "content_filter"}
 
 
