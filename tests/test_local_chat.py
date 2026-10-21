@@ -1125,7 +1125,7 @@ def test_responses_end_to_end(client, store_path, fake_model):
     assert fake_model.state["protocols"][0][0] == "responses"
     assert [item.get("type", "message") for item in result["output"]] == [
         "function_call", "message"]
-    assert [item.get("type", "message") for item in result["items"]] == [
+    assert [item.get("type", "message") for item in result["messages"]] == [
         "function_call", "function_call_output", "message"]
     # The final item is the assistant answer.
     assert "The answer" in json.dumps(result["output"][-1])
@@ -1144,7 +1144,7 @@ def test_responses_round_trip_extends_prefix(client, store_path, fake_model):
 
     second = fake_model([[_msg_item("Done")]])
     follow_up = ([{"role": "user", "content": "What status?"}]
-                 + result["items"]
+                 + result["messages"]
                  + [{"role": "user", "content": "and now?"}])
     client._responses(follow_up)
     previous_final = first.inputs[-1]
@@ -1164,7 +1164,7 @@ def test_responses_round_trip_prefix_with_doc_id(client, store_path, fake_model)
 
     second = fake_model([[_msg_item("Done")]])
     follow_up = ([{"role": "user", "content": "What status?"}]
-                 + result["items"]
+                 + result["messages"]
                  + [{"role": "user", "content": "and now?"}])
     client._responses(follow_up, doc_id="pi-a")
     previous_final = first.inputs[-1]
@@ -1197,7 +1197,7 @@ def test_doc_id_conversations_get_distinct_cache_keys(client, store_path,
 
     fake_model([[_msg_item("c")]])
     follow_up = ([{"role": "user", "content": "What is the CAGR?"}]
-                 + result["items"]
+                 + result["messages"]
                  + [{"role": "user", "content": "and now?"}])
     client._responses(follow_up, doc_id="pi-a")
     assert keys[2] == keys[0]  # a continuation keeps its conversation's key
@@ -1242,7 +1242,7 @@ def test_responses_stream_passthrough(client, store_path, fake_model):
     assert final["usage"]["total_tokens"] == 30
     assert [item.get("type", "message") for item in final["output"]] == [
         "function_call", "message"]
-    assert [item.get("type", "message") for item in final["items"]] == [
+    assert [item.get("type", "message") for item in final["messages"]] == [
         "function_call", "function_call_output", "message"]
     # output_index addresses the logical response.output: turn 2's deltas
     # are re-based past turn 1's item instead of restarting at 0.
@@ -1304,7 +1304,7 @@ def test_responses_stream_counts_a_call_cut_short(client, store_path,
     usage = final["response"]["usage"]
     assert (usage["input_tokens"], usage["output_tokens"]) == (50, 104)
     assert len(usage["request_usage_entries"]) == 2
-    assert [item.get("id") for item in final["response"]["items"]] == [
+    assert [item.get("id") for item in final["response"]["messages"]] == [
         "fc_1", None, "rs_1", "msg_1"]
     assert final["response"]["output"][-1]["content"][0]["text"] == "cut"
 
@@ -1332,7 +1332,7 @@ def test_responses_counts_a_call_cut_short(client, store_path, fake_model):
     usage = result["usage"]
     assert (usage["input_tokens"], usage["output_tokens"]) == (50, 104)
     assert len(usage["request_usage_entries"]) == 2
-    assert [item.get("id") for item in result["items"]] == [
+    assert [item.get("id") for item in result["messages"]] == [
         "fc_1", None, "rs_1", "msg_1"]
     assert result["output"][-1]["content"][0]["text"] == "cut"
     from openai.types.responses import Response
@@ -1378,7 +1378,7 @@ def test_responses_envelope_validates_as_official_response(client, store_path,
     parsed = Response.model_validate(result)
     assert [item.type for item in parsed.output] == ["function_call",
                                                      "message"]
-    assert parsed.model_dump()["items"] == result["items"]
+    assert parsed.model_dump()["messages"] == result["messages"]
 
 
 @needs_agents
@@ -2503,7 +2503,7 @@ def test_responses_cut_short_still_returns_the_envelope(store_path):
         "http_client": http})
     asyncio.run(http.aclose())
     assert envelope["status"] == "incomplete"
-    assert [item["type"] for item in envelope["items"]] == [
+    assert [item["type"] for item in envelope["messages"]] == [
         "function_call", "function_call_output", "message"]
     assert envelope["output"][-1]["content"][0]["text"] == "The range was"
     usage = envelope["usage"]
@@ -4651,7 +4651,7 @@ def test_a_cut_response_runs_no_tools(bridge_client, fake_model):
     result = client._responses("q")
     assert ran == []
     assert result["status"] == "incomplete"
-    assert [item["type"] for item in result["items"]] == ["reasoning", "message"]
+    assert [item["type"] for item in result["messages"]] == ["reasoning", "message"]
 
 
 @needs_agents

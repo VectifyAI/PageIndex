@@ -1298,7 +1298,7 @@ def run_responses(client, input, model: Optional[str] = None,
             "status": recorded.get("status") or "completed",
             "output": [item for item in transcript
                        if item.get("type") != "function_call_output"],
-            "items": transcript,
+            "messages": transcript,
             "usage": _responses_usage(raw_responses),
             "instructions": managed,
             "tools": [{"type": "function", "name": tool.name,

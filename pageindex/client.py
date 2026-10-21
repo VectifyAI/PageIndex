@@ -1240,12 +1240,12 @@ class PageIndexClient:
         the history may carry its transcript (Responses items, or
         Messages content blocks with prior tool_use/tool_result
         round-trips), and the return is its response envelope, streaming
-        its native events. A round-tripped transcript (``messages``,
-        ``items``) continues the agent's memory and the provider's cached
-        prefix: follow-ups re-read the run instead of redoing the tool
-        work. The protocol is declared, never inferred from the model
-        name. Keep ``doc_id`` and ``protocol`` constant across a
-        conversation's calls.
+        its native events. A round-tripped ``messages`` transcript
+        continues the agent's memory and the provider's cached prefix:
+        follow-ups re-read the run instead of redoing the tool work. The
+        protocol is declared, never inferred from the model name. Keep
+        ``doc_id`` and ``protocol`` constant across a conversation's
+        calls.
 
         A ``claude-code/`` chat model runs Claude Code, not LiteLLM (see
         the constructor's ``chat_model``): ``backend``, ``extra_headers``
@@ -1401,7 +1401,7 @@ class PageIndexClient:
             - protocol lane, stream=False: the protocol's response
               envelope — Chat Completions: ``choices`` and ``usage``,
               plus ``messages`` from an API chat model;
-              Responses: ``output`` plus an ``items``
+              Responses: ``output`` plus a ``messages``
               transcript and cross-turn ``usage``; Messages: the final
               message with a ``messages`` turn sequence and aggregated
               ``usage``. Each own-model ``usage`` also lists the run's
@@ -1797,8 +1797,8 @@ class PageIndexClient:
         Responses shape — ``output`` carries the model-produced items
         and parses with the openai SDK types — and the whole process
         transcript (including the tool outputs the SDK executed) rides
-        in the extra ``items`` field.
-        Append the returned ``items`` to your next call's ``input`` verbatim
+        in the extra ``messages`` field.
+        Append the returned ``messages`` to your next call's ``input`` verbatim
         to keep provider prompt-cache prefix continuity and the agent's
         memory of what it already read.
 
@@ -1811,7 +1811,7 @@ class PageIndexClient:
 
         Args:
             input: A user message string, or a list of Responses input items
-                (round-trip prior ``items`` here).
+                (round-trip prior ``messages`` here).
             model: Backend model name (defaults to ``chat_model``).
             stream: Yield Responses stream events as dicts — one logical
                 response per call: per-turn backend lifecycle events are
@@ -1820,7 +1820,7 @@ class PageIndexClient:
                 monotonically, and ``output_index`` is re-based onto the
                 single logical ``output``. The final event is the
                 terminal ``response.*`` for the run's status; its
-                ``response`` carries the tool outputs in ``items``.
+                ``response`` carries the tool outputs in ``messages``.
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call and is part
