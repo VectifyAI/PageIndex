@@ -376,8 +376,9 @@ def test_anthropic_routed_models_mark_managed_prefix_for_cache(
                  "bedrock/us.anthropic.claude-sonnet-5",
                  "vertex_ai/claude-sonnet-4-5"):
         agent = _openai_agent(client, "chat", name, "sys", None, None)
-        assert (agent.model_settings.extra_args["cache_control_injection_points"]
-                == marked["cache_control_injection_points"])
+        # beside the marks, the effort that keeps Claude's thinking is dropped
+        assert agent.model_settings.extra_args == {
+            **marked, "additional_drop_params": ["reasoning_effort"]}
     for name in ("gpt-5", "openai/Qwen/x", "litellm/groq/x",
                  "bedrock/meta.llama3-70b-instruct-v1:0",
                  "vertex_ai/gemini-2.5-pro"):
@@ -2612,17 +2613,18 @@ def test_reasoning_passthrough_reaches_each_engine(monkeypatch):
     marker. The responses door's object rides ModelSettings.reasoning,
     which the Responses model forwards verbatim. Unset sends nothing."""
     pytest.importorskip("litellm")
+    from openai.types.shared import Reasoning
     monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
     monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
                         lambda *a, **k: [])
     agent = local_chat._openai_agent(None, "chat", "gpt-test", "sys",
                                      None, None, reasoning_effort="low")
-    assert agent.model_settings.reasoning.effort == "low"
+    assert agent.model_settings.reasoning == Reasoning(effort="low")
     assert agent.model_settings.extra_args is None
     agent = local_chat._openai_agent(None, "chat", "anthropic/claude-x",
                                      "sys", None, None,
                                      reasoning_effort="none")
-    assert agent.model_settings.reasoning.effort == "none"
+    assert agent.model_settings.reasoning == Reasoning(effort="none")
     agent = local_chat._openai_agent(None, "chat", "anthropic/claude-x",
                                      "sys", None, None,
                                      reasoning_effort="disable")
@@ -2747,6 +2749,7 @@ def test_extra_body_passthrough_reaches_each_engine(monkeypatch):
     destinations — and ride LiteLLM's own kwargs elsewhere, where
     extra_body would plant literal fields providers reject."""
     pytest.importorskip("litellm")
+    from openai.types.shared import Reasoning
     monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
     monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
                         lambda *a, **k: [])
@@ -2763,7 +2766,7 @@ def test_extra_body_passthrough_reaches_each_engine(monkeypatch):
                                      extra_body={"top_k": 20})
     assert agent.model_settings.extra_body is None
     assert agent.model_settings.extra_args["top_k"] == 20
-    assert agent.model_settings.reasoning.effort == "low"
+    assert agent.model_settings.reasoning == Reasoning(effort="low")
     assert "cache_control_injection_points" in agent.model_settings.extra_args
     agent = local_chat._openai_agent(None, "responses", "gpt-test", "sys",
                                      None, None,
