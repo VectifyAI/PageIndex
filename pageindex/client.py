@@ -1389,9 +1389,9 @@ class PageIndexClient:
                 are refused); extend the prompt with ``instructions=`` or a
                 leading system row in ``messages``. ``stream`` / ``doc_id``
                 / ``folder_id`` / ``model`` / ``reasoning_effort`` are
-                refused too: each has its own argument. Credentials and the endpoint (``api_key`` /
-                ``base_url`` / ``api_base``) belong in ``backend``, never
-                here.
+                refused too: each has its own argument. Credentials and the
+                endpoint (``api_key`` / ``base_url`` / ``api_base``) belong
+                in ``backend``, never here.
 
         Returns:
             - answer lane, stream=False: the answer string
@@ -1704,9 +1704,9 @@ class PageIndexClient:
                 fields here (``system`` / ``instructions`` / ``input`` /
                 ``messages`` / ``tools`` are refused), nor are ``stream``
                 / ``doc_id`` / ``folder_id`` / ``model`` /
-                ``reasoning_effort``: each has its own argument. Credentials and the endpoint (``api_key`` /
-                ``base_url`` / ``api_base``) belong in ``backend``, never
-                here.
+                ``reasoning_effort``: each has its own argument.
+                Credentials and the endpoint (``api_key`` / ``base_url`` /
+                ``api_base``) belong in ``backend``, never here.
             extra_headers: Own-model chat only — extra HTTP headers merged into
                 each backend request; caller headers win. One exception:
                 LiteLLM forwards an ``anthropic-beta`` flag only if it is
