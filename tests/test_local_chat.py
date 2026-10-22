@@ -553,6 +553,47 @@ def test_chat_completions_messages_resend_the_wire(client, store_path,
 
 
 @needs_agents
+@pytest.mark.parametrize("settings", [
+    {"reasoning_effort": "high"},
+    {"extra_body": {"reasoning": {"effort": "high"}}},
+])
+def test_claude_thinking_goes_back_with_its_calls(client, store_path,
+                                                  monkeypatch, settings):
+    """Either way of setting effort, Claude's thinking blocks go back on
+    the tool continuation and in the returned messages."""
+    pytest.importorskip("litellm")
+    thinking = [{"type": "thinking", "thinking": "hmm", "signature": "SIG1"}]
+    first, sent = _two_turns(store_path, monkeypatch, client,
+                             "anthropic/claude-test",
+                             _litellm_reply(tool_calls=_TWO_CALLS,
+                                            thinking_blocks=thinking),
+                             **settings)
+    for messages in (first["messages"], sent[1], sent[2]):
+        calls = [m for m in messages if m.get("tool_calls")]
+        assert calls[0].get("thinking_blocks") == thinking
+
+
+@needs_agents
+@pytest.mark.parametrize("model, effort", [
+    ("anthropic/claude-test", "high"),
+    ("gemini/gemini-test", "disable"),
+])
+def test_reasoning_effort_reaches_litellm_as_given(client, monkeypatch,
+                                                   model, effort):
+    pytest.importorskip("litellm")
+    import litellm
+    seen = []
+
+    async def acompletion(**kwargs):
+        seen.append(kwargs.get("reasoning_effort"))
+        return _litellm_reply("ok")
+
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+    client.chat_completions("q", model=model, reasoning_effort=effort)
+    assert seen == [effort]
+
+
+@needs_agents
 def test_chat_completions_messages_keep_gemini_signatures(client, store_path,
                                                           monkeypatch):
     """Gemini thought signatures ride messages back in Google's
@@ -632,7 +673,7 @@ def test_chat_reasoning_effort_reaches_the_engine(client, store_path,
     monkeypatch.setattr(local_chat, "_openai_agent", spy)
     fake_model([[_msg_item("ok")]])
     client.chat("q", reasoning_effort="low")
-    assert seen["settings"].extra_args["reasoning_effort"] == "low"
+    assert seen["settings"].reasoning.effort == "low"
     fake_model([[_msg_item("ok")]])
     client.chat("q")
     assert seen["settings"].extra_args is None
@@ -2448,23 +2489,28 @@ def test_agent_carries_prompt_cache_key_in_extra_body(monkeypatch):
 @needs_agents
 def test_reasoning_passthrough_reaches_each_engine(monkeypatch):
     """Per-door native reasoning, forwarded verbatim. The chat door's
-    effort rides extra_args — LiteLLM's own top-level kwarg on every
-    supported openai-agents version, and the channel admits values outside
-    the OpenAI enum ("none") — coexisting with the Claude cache marker.
-    The responses door's object rides ModelSettings.reasoning, which the
-    Responses model forwards verbatim. Unset sends nothing."""
+    effort rides ModelSettings.reasoning, which openai-agents forwards to
+    LiteLLM and reads to keep Claude's thinking blocks; a value outside the
+    OpenAI enum ("disable") rides extra_args, beside the Claude cache
+    marker. The responses door's object rides ModelSettings.reasoning,
+    which the Responses model forwards verbatim. Unset sends nothing."""
     pytest.importorskip("litellm")
     monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
     monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
                         lambda *a, **k: [])
     agent = local_chat._openai_agent(None, "chat", "gpt-test", "sys",
                                      None, None, reasoning_effort="low")
-    assert agent.model_settings.extra_args == {"reasoning_effort": "low"}
-    assert agent.model_settings.reasoning is None
+    assert agent.model_settings.reasoning.effort == "low"
+    assert agent.model_settings.extra_args is None
     agent = local_chat._openai_agent(None, "chat", "anthropic/claude-x",
                                      "sys", None, None,
                                      reasoning_effort="none")
-    assert agent.model_settings.extra_args["reasoning_effort"] == "none"
+    assert agent.model_settings.reasoning.effort == "none"
+    agent = local_chat._openai_agent(None, "chat", "anthropic/claude-x",
+                                     "sys", None, None,
+                                     reasoning_effort="disable")
+    assert agent.model_settings.reasoning is None
+    assert agent.model_settings.extra_args["reasoning_effort"] == "disable"
     assert "cache_control_injection_points" in agent.model_settings.extra_args
     agent = local_chat._openai_agent(None, "responses", "gpt-test", "sys",
                                      None, None,
@@ -2536,7 +2582,7 @@ def test_extra_body_passthrough_reaches_each_engine(monkeypatch):
                                      extra_body={"top_k": 20})
     assert agent.model_settings.extra_body is None
     assert agent.model_settings.extra_args["top_k"] == 20
-    assert agent.model_settings.extra_args["reasoning_effort"] == "low"
+    assert agent.model_settings.reasoning.effort == "low"
     assert "cache_control_injection_points" in agent.model_settings.extra_args
     agent = local_chat._openai_agent(None, "responses", "gpt-test", "sys",
                                      None, None,

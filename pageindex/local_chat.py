@@ -398,6 +398,8 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
                   max_tokens=None, backend=None, extra_headers=None):
     _refuse_skeleton(extra_body)
     from agents import Agent, ModelSettings
+    from openai.types.shared import Reasoning
+    from pydantic import ValidationError
     from .integrations.openai_agents import build_openai_tools
     # ModelSettings.extra_body is the one channel all three engines put on
     # the wire: LiteLLM drops the bare prompt_cache_key kwarg (wire-verified),
@@ -406,13 +408,17 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
     # other providers' request bodies, which Anthropic rejects as unknown.
     # The responses lane is the OpenAI SDK whatever the name says.
     openai_backend = protocol == "responses" or _openai_protocol(model_name)
-    # Chat-lane effort rides extra_args: LiteLLM takes it as its own
-    # top-level kwarg on every supported openai-agents version, and the
-    # channel admits values outside the OpenAI enum ("none").
+    # Chat-lane effort rides ModelSettings.reasoning: openai-agents forwards
+    # it to LiteLLM and keeps Claude's thinking blocks across tool turns only
+    # when it is set there. A value outside the OpenAI enum ("disable") rides
+    # extra_args, the channel openai-agents keeps for those.
     extra_args = _cache_extra_args(model_name) if protocol == "chat" else None
     if reasoning_effort:
-        extra_args = {**(extra_args or {}),
-                      "reasoning_effort": reasoning_effort}
+        try:
+            reasoning = Reasoning(effort=reasoning_effort)
+        except ValidationError:
+            extra_args = {**(extra_args or {}),
+                          "reasoning_effort": reasoning_effort}
     conn = _sdk_backend(backend) if backend else {}
     if conn and protocol == "chat":
         # LiteLLM takes connection params per call, except the two names
@@ -439,7 +445,6 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
             rest = {k: v for k, v in extra_body.items() if k not in own}
             if rest:
                 extra_args = {**(extra_args or {}), **rest}
-    from pydantic import ValidationError
     try:
         settings = ModelSettings(**{
             "temperature": temperature, "top_p": top_p,
