@@ -35,12 +35,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+      # "without" is the default install: openai-agents (a dependency) but
+      # neither optional extra; "with" adds anthropic and claude-agent-sdk
       - run: pip install -r requirements.txt pytest
-      - if: matrix.agent-frameworks == 'without'
-        # requirements.txt carries it; this leg tests the no-framework paths
-        run: pip uninstall -y openai-agents
       - if: matrix.agent-frameworks == 'with'
-        run: pip install openai-agents claude-agent-sdk anthropic
+        run: pip install claude-agent-sdk anthropic
       - if: matrix.pdfium == '4'
         run: pip install "pypdfium2<5"
       - run: python -m pytest -q

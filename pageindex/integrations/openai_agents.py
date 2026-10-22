@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 
-from ..errors import PageIndexAPIError, _pageindex_cause
+from ..errors import _pageindex_cause
 
 
 def _tool_failure(ctx, error):
@@ -76,14 +76,8 @@ def build_mcp_server(client, include_management: bool = False, doc_ids=None):
 
 def build_openai_tools(client, include_management: bool = False,
                        hosted: bool = False, doc_ids=None) -> list:
-    try:
-        from agents import HostedMCPTool
-        from agents.mcp import MCPUtil
-    except ImportError as exc:
-        raise PageIndexAPIError(
-            "as_openai_tools requires the OpenAI Agents SDK — "
-            "pip install openai-agents."
-        ) from exc
+    from agents import HostedMCPTool
+    from agents.mcp import MCPUtil
     if getattr(client, "api_key", None) and hosted:
         # include_management picks the endpoint — the URL itself is the
         # gate (?tools=read serves only readOnlyHint-annotated tools), so

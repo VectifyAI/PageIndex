@@ -228,19 +228,6 @@ class _ChatCompletionChunk(ChatObject):
         return construct_type(type_=ChatCompletionChunk, value=data)
 
 
-def _require_openai_agents(method: str) -> None:
-    try:
-        import agents  # noqa: F401
-    except ImportError as exc:
-        raise PageIndexAPIError(
-            f"{method} with your own chat model requires the OpenAI "
-            "Agents SDK — "
-            "pip install openai-agents. "
-            "chat(protocol='messages') runs on the anthropic extra "
-            "instead."
-        ) from exc
-
-
 def _sdk_backend(backend) -> dict:
     """chat_backend for an SDK constructor: LiteLLM takes either endpoint
     spelling, the openai and anthropic SDKs only ``base_url``."""
@@ -1130,7 +1117,6 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
 
         return ChatStream(text=lambda: _weave(claude_events(), options),
                           events=claude_events)
-    _require_openai_agents("chat")
     agent, items, _ = _chat_agent(client, messages, doc_id, model,
                                   reasoning_effort=reasoning_effort,
                                   extra_body=extra_body, backend=backend,
@@ -1181,7 +1167,6 @@ def run_chat_completions(client, messages, stream: bool = False,
                                backend=backend)
         return _claude_code_completions(run, model or client.chat_model,
                                         stream, stream_metadata)
-    _require_openai_agents("chat")
     agent, items, model_name = _chat_agent(
         client, messages, doc_id, model, temperature=temperature,
         top_p=top_p, reasoning_effort=reasoning_effort,
@@ -1321,7 +1306,6 @@ def run_responses(client, input, model: Optional[str] = None,
                   backend: Optional[dict] = None,
                   folder_id: Optional[str] = None,
                   ) -> Union[ChatObject, Iterator[ChatObject]]:
-    _require_openai_agents("chat(protocol='responses')")
     _validate_max_turns(max_turns)
     if isinstance(input, str) and input.strip():
         items = [{"role": "user", "content": input}]

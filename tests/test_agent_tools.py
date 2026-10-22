@@ -600,12 +600,6 @@ def test_unknown_tool_envelope_uses_standard_formatting(client):
 
 # ── framework adapters ──
 
-def test_as_openai_tools_missing_dependency(client, monkeypatch):
-    monkeypatch.setitem(sys.modules, "agents", None)
-    with pytest.raises(PageIndexAPIError, match="openai-agents"):
-        client.as_openai_tools()
-
-
 def test_as_openai_tools_local_in_process(client):
     pytest.importorskip("agents")
     tools = client.as_openai_tools()

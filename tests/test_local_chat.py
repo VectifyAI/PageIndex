@@ -325,12 +325,6 @@ def test_chat_completions_stream_modes(client, store_path, fake_model):
     assert all(c["object"] == "chat.completion.chunk" for c in chunks[:-1])
 
 
-def test_chat_completions_missing_framework(client, monkeypatch):
-    monkeypatch.setitem(sys.modules, "agents", None)
-    with pytest.raises(PageIndexAPIError, match="pip install openai-agents"):
-        client.chat_completions([{"role": "user", "content": "x"}])
-
-
 def test_cloud_guards(monkeypatch):
     cloud = PageIndexCloudClient(api_key="pi-test-key")
     # empty is unset, as on the local lane — the managed chat serves it

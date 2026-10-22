@@ -48,12 +48,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: pip install -r requirements.txt pytest
-      # mirror tests.yml's install shapes: the gate must cover the framework
-      # tests, the no-framework import paths, and the pdfium 4.x insurance alike
-      - if: matrix.agent-frameworks == 'without'
-        run: pip uninstall -y openai-agents
+      # mirror tests.yml's install shapes: the gate must cover the default
+      # install, the optional extras, and the pdfium 4.x insurance alike
       - if: matrix.agent-frameworks == 'with'
-        run: pip install openai-agents claude-agent-sdk anthropic
+        run: pip install claude-agent-sdk anthropic
       - if: matrix.pdfium == '4'
         run: pip install "pypdfium2<5"
       - run: python -m pytest -q
