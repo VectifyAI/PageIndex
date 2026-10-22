@@ -376,7 +376,8 @@ def test_anthropic_routed_models_mark_managed_prefix_for_cache(
                  "bedrock/us.anthropic.claude-sonnet-5",
                  "vertex_ai/claude-sonnet-4-5"):
         agent = _openai_agent(client, "chat", name, "sys", None, None)
-        assert agent.model_settings.extra_args == marked
+        assert (agent.model_settings.extra_args["cache_control_injection_points"]
+                == marked["cache_control_injection_points"])
     for name in ("gpt-5", "openai/Qwen/x", "litellm/groq/x",
                  "bedrock/meta.llama3-70b-instruct-v1:0",
                  "vertex_ai/gemini-2.5-pro"):
@@ -400,14 +401,9 @@ def test_status_recorder_attaches_to_the_real_responses_model(monkeypatch):
     asyncio.run(backend.close())
 
 
-@needs_agents
-def test_cache_marker_reaches_the_anthropic_wire(client, store_path,
-                                                 monkeypatch):
-    # End-to-end guard for the injection flag: through the real
-    # LitellmModel and litellm's request build, the marker must appear in
-    # the HTTP body — a regression in either vendor hop silently reverts
-    # anthropic-routed calls to full price.
-    pytest.importorskip("litellm")
+def _anthropic_wire(monkeypatch, client, model, **settings):
+    """One chat_completions call through the real LitellmModel and
+    litellm's request build: the HTTP request it sent, and the envelope."""
     from litellm.llms.custom_httpx.http_handler import (AsyncHTTPHandler,
                                                         HTTPHandler)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
@@ -435,8 +431,19 @@ def test_cache_marker_reaches_the_anthropic_wire(client, store_path,
 
     monkeypatch.setattr(AsyncHTTPHandler, "post", fake_apost)
     monkeypatch.setattr(HTTPHandler, "post", fake_post)
-    result = client.chat_completions(
-        "hi", model="anthropic/claude-3-5-sonnet-20240620")
+    return captured, client.chat_completions("hi", model=model, **settings)
+
+
+@needs_agents
+def test_cache_marker_reaches_the_anthropic_wire(client, store_path,
+                                                 monkeypatch):
+    # End-to-end guard for the injection flag: through the real
+    # LitellmModel and litellm's request build, the marker must appear in
+    # the HTTP body — a regression in either vendor hop silently reverts
+    # anthropic-routed calls to full price.
+    pytest.importorskip("litellm")
+    captured, result = _anthropic_wire(
+        monkeypatch, client, "anthropic/claude-3-5-sonnet-20240620")
     assert "/v1/messages" in captured["url"]
     assert '"cache_control"' in json.dumps(captured["body"])
     # The OpenAI cache-routing hint must not leak here: LiteLLM plants
@@ -583,6 +590,42 @@ def test_claude_thinking_goes_back_with_its_calls(client, store_path,
     for messages in (first["messages"], sent[1], sent[2]):
         calls = [m for m in messages if m.get("tool_calls")]
         assert calls[0].get("thinking_blocks") == thinking
+
+
+@needs_agents
+@pytest.mark.parametrize("settings", [
+    {}, {"extra_body": {"thinking": {"type": "adaptive"}}},
+    {"stream": True, "stream_metadata": True}])
+def test_claude_thinking_goes_back_with_no_effort_set(client, store_path,
+                                                      monkeypatch, settings):
+    """Claude 5.x thinks unasked, and openai-agents replays thinking only
+    when ModelSettings.reasoning carries an effort: with none from the
+    caller the SDK opens that gate and has LiteLLM drop the effort, so the
+    request carries none."""
+    pytest.importorskip("litellm")
+    thinking = [{"type": "thinking", "thinking": "", "signature": "SIG1"}]
+    first, sent = _two_turns(store_path, monkeypatch, client,
+                             "anthropic/claude-test",
+                             _litellm_reply(tool_calls=_TWO_CALLS[:1],
+                                            thinking_blocks=thinking),
+                             **settings)
+    for messages in (first["messages"], sent[1], sent[2]):
+        calls = [m for m in messages if m.get("tool_calls")]
+        assert calls[0].get("thinking_blocks") == thinking
+
+
+@needs_agents
+def test_kept_thinking_sends_no_effort(client, monkeypatch):
+    """The effort that keeps Claude's thinking never reaches the provider:
+    LiteLLM drops it before building the request, so the wire carries no
+    thinking or effort setting; one the caller sets still goes out."""
+    pytest.importorskip("litellm")
+    model = "anthropic/claude-sonnet-5-5"
+    unset, _ = _anthropic_wire(monkeypatch, client, model)
+    assert not {"thinking", "output_config"} & set(unset["body"])
+    chosen, _ = _anthropic_wire(monkeypatch, client, model,
+                                reasoning_effort="high")
+    assert chosen["body"]["output_config"] == {"effort": "high"}
 
 
 @needs_agents

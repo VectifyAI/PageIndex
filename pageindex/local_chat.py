@@ -404,7 +404,8 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
     # it to LiteLLM and keeps Claude's thinking blocks across tool turns only
     # when it is set there. A value outside the OpenAI enum ("disable") rides
     # extra_args, the channel openai-agents keeps for those.
-    extra_args = _cache_extra_args(model_name) if protocol == "chat" else None
+    marks = _cache_extra_args(model_name) if protocol == "chat" else None
+    extra_args = marks
     if reasoning_effort:
         try:
             reasoning = Reasoning(effort=reasoning_effort)
@@ -439,6 +440,17 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
                     if k not in _LITELLM_MODEL_SETTINGS}
             if rest:
                 extra_args = {**(extra_args or {}), **rest}
+    if (marks and reasoning is None and "reasoning" not in routed
+            and "reasoning_effort" not in (extra_args or {})):
+        # Temporary: Claude 5.x thinks unasked, and openai-agents replays its
+        # thinking only when ModelSettings.reasoning carries an effort. This
+        # one opens that gate and never reaches the model: LiteLLM drops it
+        # before building the request. Remove once openai-agents keys the
+        # replay on the returned blocks.
+        reasoning = Reasoning(effort="high")
+        drop = list((extra_args or {}).get("additional_drop_params") or ())
+        extra_args = {**(extra_args or {}),
+                      "additional_drop_params": [*drop, "reasoning_effort"]}
     try:
         settings = ModelSettings(**{
             "temperature": temperature, "top_p": top_p,
