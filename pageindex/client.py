@@ -1369,9 +1369,11 @@ class PageIndexClient:
                 Messages. Passed through verbatim.
             extra_headers: Own-model chat only — extra HTTP headers
                 merged into each backend request; caller headers win.
-                LiteLLM's anthropic adapter owns ``anthropic-beta`` on the
-                answer lane and ``protocol="chat_completions"`` —
-                Anthropic beta flags ride ``protocol="messages"``.
+                On the answer lane and ``protocol="chat_completions"``,
+                LiteLLM forwards an ``anthropic-beta`` flag only if it is
+                on LiteLLM's own list and drops the rest silently —
+                Anthropic beta flags it doesn't know ride
+                ``protocol="messages"``.
             extra_body: The wire's own request fields beyond this
                 method's parameters, in the lane's wire names (Responses
                 ``max_output_tokens``, Messages ``thinking`` / ``top_k``;
@@ -1707,9 +1709,10 @@ class PageIndexClient:
                 here.
             extra_headers: Own-model chat only — extra HTTP headers merged into
                 each backend request; caller headers win. One exception:
-                LiteLLM's anthropic adapter owns the ``anthropic-beta``
-                header (your value is dropped there) — Anthropic beta
-                flags ride ``chat(protocol="messages")``.
+                LiteLLM forwards an ``anthropic-beta`` flag only if it is
+                on LiteLLM's own list and drops the rest silently —
+                Anthropic beta flags it doesn't know ride
+                ``chat(protocol="messages")``.
             backend: Own-model chat only — connection overrides for this call's
                 backend, merged over the client's ``chat_backend``
                 (per-call keys win). Keys are LiteLLM's own connection
@@ -2213,9 +2216,7 @@ class PageIndexClient:
             if config["model"].startswith("litellm/"):
                 # The runner resolves this model through LiteLLM in the
                 # caller's process, outside our completion helpers.
-                from .utils import (_mute_litellm_bridge_usage_warning,
-                                    _repair_litellm_types)
-                _repair_litellm_types()
+                from .utils import _mute_litellm_bridge_usage_warning
                 _mute_litellm_bridge_usage_warning()
                 # Marks follow this lane's routing: the SDK strips litellm/
                 # and LiteLLM resolves the rest (bare claude-* → Anthropic);

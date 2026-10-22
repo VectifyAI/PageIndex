@@ -38,6 +38,12 @@ def build_claude_mcp(client, include_management: bool = False, *,
     logging.getLogger("asyncio").addFilter(_drop_probe_reaped)
     if getattr(client, "api_key", None):
         return _cloud_relay(client, include_management, server_name)
+    if _sdk_release() < (0, 2, 166):
+        # the claude extra's floor, the oldest release verified to pass
+        # MAX_RESULT_CHARS on to the CLI
+        raise PageIndexAPIError(
+            "as_claude_mcp requires claude-agent-sdk 0.2.166 or newer — "
+            "pip install -U claude-agent-sdk.")
     return tool_server(client, include_management, server_name=server_name)
 
 
@@ -51,7 +57,8 @@ def tool_server(client, include_management: bool = False, *,
     server) for the engine to fail the run on; the CLI then gets the call
     back as an error."""
     try:
-        from claude_agent_sdk import create_sdk_mcp_server, tool
+        from claude_agent_sdk import (ToolAnnotations, create_sdk_mcp_server,
+                                      tool)
     except ImportError as exc:
         raise PageIndexAPIError(
             "The Claude Agent SDK is not installed — "
@@ -75,19 +82,12 @@ def tool_server(client, include_management: bool = False, *,
             return result
         return handler
 
-    def tool_kwargs(name: str) -> dict:
-        try:
-            from claude_agent_sdk import ToolAnnotations
-        except ImportError:
-            return {}
-        return {"annotations": ToolAnnotations(
-            **(hints.get(name) or {}), maxResultSizeChars=MAX_RESULT_CHARS)}
-
     hints: dict = {}  # readOnlyHint lets the CLI run the read tools in parallel
     specs = _tool_specs(client, include_management, doc_ids, annotations=hints)
     tools = [
-        tool(name, description, schema,
-             **tool_kwargs(name))(make_handler(invoke))
+        tool(name, description, schema, annotations=ToolAnnotations(
+            **(hints.get(name) or {}), maxResultSizeChars=MAX_RESULT_CHARS),
+        )(make_handler(invoke))
         for name, description, schema, invoke in specs
     ]
     return create_sdk_mcp_server(name=server_name, version=sdk_version(),
