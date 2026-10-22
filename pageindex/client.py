@@ -1271,7 +1271,12 @@ class PageIndexClient:
                 Keep it identical across a conversation's calls. Local
                 documents: also enforced at the tool layer, not just
                 prompted. Cloud documents: the managed chat scopes
-                server-side; own-model chat targets at the prompt level.
+                server-side; own-model chat targets at the prompt level,
+                opening with the document's metadata as each call fetches
+                it. If that changes mid-conversation (status, metadata,
+                folder), Claude models that bind thinking to the
+                conversation reject the earlier thinking with a 400 on
+                accounts that enforce it: start a new conversation.
             folder_id: Folder ID to steer discovery toward that folder's
                 documents. Cloud-only. The managed chat scopes it
                 server-side; own-model chat leads the conversation with
@@ -1666,7 +1671,11 @@ class PageIndexClient:
                 of the cached prompt prefix. Local documents: also
                 enforced at the tool layer, not just prompted. Cloud
                 documents: the managed chat scopes server-side;
-                own-model chat targets at the prompt level.
+                own-model chat targets at the prompt level. If the
+                document's metadata changes mid-conversation (status,
+                metadata, folder), Claude models that bind thinking to the
+                conversation reject the earlier thinking with a 400 on
+                accounts that enforce it: start a new conversation.
             folder_id: Folder ID to steer discovery toward that folder's
                 documents (cloud-only): the managed chat scopes it
                 server-side; own-model chat leads the conversation with
