@@ -10,7 +10,8 @@ Either way the tool set reaches the framework as an MCP server (an
 in-process one over the bridge or the local store), and the FunctionTools
 are the framework's own conversion of it: the schema goes to the model
 verbatim, and tool results reach it in the framework's shapes (text as
-text, images as images). The SDK carries MCP types and renders nothing.
+text, images as images, except on its OpenAIChatCompletionsModel, which
+keeps only text). The SDK carries MCP types and renders nothing.
 """
 from __future__ import annotations
 

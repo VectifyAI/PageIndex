@@ -1639,7 +1639,9 @@ class PageIndexClient:
         agent's visible text as it is produced, including narration before
         tool calls. ``finish_reason`` carries the final turn's native
         finish reason — "stop", or the backend's "length" /
-        "content_filter" when the last turn was cut short. An API chat
+        "content_filter" when the last turn was cut short (a filtered
+        turn with no content at all raises PageIndexAPIError instead:
+        openai-agents turns it into a refusal). An API chat
         model's run also returns ``messages`` (on the closing usage chunk
         with ``stream_metadata``): the call's new messages — assistant
         tool calls, tool results, the answer — to append as they are, so
@@ -2131,7 +2133,9 @@ class PageIndexClient:
         from the PageIndex MCP server and executed from your process —
         works with any model backend. The tools are the framework's own
         MCP conversion, so results reach the model in its shapes: text
-        as text, images (e.g. ``get_document_image``) as images. Pass
+        as text, images (e.g. ``get_document_image``) as images, except
+        on its ``OpenAIChatCompletionsModel``, which keeps only a tool
+        result's text; a ``litellm/`` model keeps the images. Pass
         ``hosted=True`` to
         hand the connection to OpenAI instead: one hosted MCP tool, tool
         calls executed server-side (lowest latency; requires an
