@@ -1,10 +1,16 @@
 """Local chat surfaces: three protocols over fake backends — no network,
 no LLM keys. Tool execution runs for real against a seeded local store."""
 import asyncio
+import contextlib
+import copy
 import inspect
 import json
+import pickle
 import sys
 import types
+import warnings
+
+import yaml
 
 import httpx  # via the hard `openai` dependency
 import pytest
@@ -16,7 +22,8 @@ except ImportError:  # older anthropic rides classic httpx
 
 import pageindex.local_chat as local_chat
 from pageindex import (PageIndexAPIError, PageIndexClient,
-                       PageIndexCloudClient, PageIndexLocalClient)
+                       PageIndexCloudClient, PageIndexLocalClient,
+                       ChatObject)
 from pageindex.local_chat import CHAT_HEADER
 from pageindex.local_store import DocStore
 
@@ -276,8 +283,18 @@ def test_chat_completions_validation(client, store_path, fake_model):
     with pytest.raises(PageIndexAPIError, match="managed chat endpoint"):
         client.chat_completions([{"role": "user", "content": "x"}],
                                 enable_citations=True)
-    with pytest.raises(PageIndexAPIError, match="chat\\(protocol="):
+    with pytest.raises(PageIndexAPIError, match="tool_call_id"):
         client.chat_completions([{"role": "tool", "content": "x"}])
+    with pytest.raises(PageIndexAPIError, match="needs content"):
+        client.chat_completions([{"role": "assistant", "content": None}])
+    with pytest.raises(PageIndexAPIError, match="needs content"):
+        client.chat_completions([{"role": "assistant", "content": None,
+                                  "reasoning_content": "x"}])
+    with pytest.raises(PageIndexAPIError, match="Invalid assistant message"):
+        client.chat_completions([{"role": "assistant",
+                                  "tool_calls": [{"id": "c"}]}])
+    with pytest.raises(PageIndexAPIError, match="Unsupported role"):
+        client.chat_completions([{"role": "function", "content": "x"}])
     with pytest.raises(PageIndexAPIError, match="must be a string"):
         client.chat_completions([{"role": "user", "content": [1]}])
     with pytest.raises(PageIndexAPIError, match="non-empty"):
@@ -433,6 +450,128 @@ def test_cache_marker_reaches_the_anthropic_wire(client, store_path,
     assert result["choices"][0]["message"]["content"] == "ok"
 
 
+@needs_agents
+def test_chat_completions_messages_on_both_paths(client, store_path,
+                                                 fake_model):
+    """The run's new messages ride the envelope and the closing usage
+    chunk alike."""
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+
+    def run():
+        return [[_call_item("get_document", {"doc_name": "report.pdf"})],
+                [_msg_item("The answer")]]
+
+    fake_model(run())
+    envelope = client.chat_completions("q", doc_id=doc_id)
+    fake_model(run())
+    *_, closing = client.chat_completions("q", doc_id=doc_id, stream=True,
+                                          stream_metadata=True)
+    assert closing["messages"] == envelope["messages"]
+    assert [m["role"] for m in envelope["messages"]] == [
+        "assistant", "tool", "assistant"]
+    assert envelope["messages"][0]["tool_calls"][0]["id"] == "call_1"
+    assert envelope["messages"][-1] == {"role": "assistant",
+                                        "content": "The answer"}
+
+
+def _litellm_reply(content=None, tool_calls=None, **extra):
+    import litellm
+    return litellm.ModelResponse(
+        choices=[litellm.Choices(
+            finish_reason="tool_calls" if tool_calls else "stop",
+            message=litellm.Message(content=content, role="assistant",
+                                    tool_calls=tool_calls, **extra))],
+        usage=litellm.Usage(prompt_tokens=10, completion_tokens=5,
+                            total_tokens=15))
+
+
+_TWO_CALLS = [{"id": f"call_{n}", "type": "function",
+               "function": {"name": "get_document",
+                            "arguments": '{"doc_name": "report.pdf"}'}}
+              for n in (1, 2)]
+
+
+def _two_turns(store_path, monkeypatch, client, model, first_reply,
+               **settings):
+    """Two calls through the real LitellmModel, the second appending the
+    first's ``messages``: the first envelope (or closing chunk), and each
+    request's messages as LiteLLM received them."""
+    import litellm
+    from litellm.llms.base_llm.base_model_iterator import MockResponseIterator
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    sent = []
+    replies = [first_reply, _litellm_reply("A1"), _litellm_reply("A2")]
+
+    async def acompletion(**kwargs):
+        sent.append(json.loads(json.dumps(kwargs["messages"])))
+        reply = replies.pop(0)
+        return MockResponseIterator(reply) if kwargs.get("stream") else reply
+
+    def call(history):
+        out = client.chat_completions(history, doc_id=doc_id, model=model,
+                                      **settings)
+        return list(out)[-1] if settings.get("stream") else out
+
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+    question = {"role": "user", "content": "q1"}
+    first = call([question])
+    call([question, *first["messages"], {"role": "user", "content": "q2"}])
+    return first, sent
+
+
+@needs_agents
+@pytest.mark.parametrize("model, extra, settings", [
+    ("gpt-test", {}, {}),
+    # streamed turns are rebuilt by agents' own stream handler; OpenAI
+    # streams open with an empty content delta
+    ("gpt-test", {"content": ""}, {"stream": True, "stream_metadata": True}),
+    ("anthropic/claude-test", {"reasoning_content": "hmm", "thinking_blocks": [
+        {"type": "thinking", "thinking": "hmm", "signature": "SIG1"}]},
+     {"extra_body": {"reasoning": {"effort": "high"}}, "stream": True,
+      "stream_metadata": True}),
+    # LitellmModel re-pairs parallel calls with their results here
+    ("anthropic/claude-test", {}, {}),
+    ("anthropic/claude-test", {"thinking_blocks": [
+        {"type": "thinking", "thinking": "hmm", "signature": "SIG1"}]},
+     {"extra_body": {"reasoning": {"effort": "high"}}}),
+    # replayed as reasoning_content beside the calls
+    ("deepseek/deepseek-chat", {"reasoning_content": "think"}, {}),
+])
+def test_chat_completions_messages_resend_the_wire(client, store_path,
+                                                   monkeypatch, model, extra,
+                                                   settings):
+    """Appending a call's messages opens the next call's first request
+    with the previous call's last one, unchanged: the provider's cached
+    prefix carries over."""
+    pytest.importorskip("litellm")
+    first, sent = _two_turns(store_path, monkeypatch, client, model,
+                             _litellm_reply(tool_calls=_TWO_CALLS, **extra),
+                             **settings)
+    assert [m["role"] for m in first["messages"]] == [
+        "assistant", "tool", "tool", "assistant"]
+    assert sent[2][:len(sent[1])] == sent[1]
+
+
+@needs_agents
+def test_chat_completions_messages_keep_gemini_signatures(client, store_path,
+                                                          monkeypatch):
+    """Gemini thought signatures ride messages back in Google's
+    extra_content and reach LiteLLM's own field on every turn, so the next
+    request opens with the previous one unchanged."""
+    pytest.importorskip("litellm")
+    signed = [{**_TWO_CALLS[0], "provider_specific_fields": {
+        "thought_signature": "sig1"}}, _TWO_CALLS[1]]
+    first, sent = _two_turns(store_path, monkeypatch, client,
+                             "gemini/gemini-test",
+                             _litellm_reply(tool_calls=signed))
+    assert first["messages"][0]["tool_calls"][0]["extra_content"] == {
+        "google": {"thought_signature": "sig1"}}
+    assert sent[2][:len(sent[1])] == sent[1]
+    calls = next(m["tool_calls"] for m in sent[2] if m.get("tool_calls"))
+    assert calls[0]["provider_specific_fields"] == {
+        "thought_signature": "sig1"}
+
+
 # ── chat (front door) ──
 
 @needs_agents
@@ -463,6 +602,18 @@ def test_chat_multi_turn_history(client, store_path, fake_model):
     ]
     assert client.chat(history) == "Chapter 4 covers pears"
     assert fake.inputs[0][-3:] == history
+
+
+@needs_agents
+@pytest.mark.parametrize("extra", [{"refusal": None},
+                                   {"reasoning_content": "think"}])
+def test_chat_empty_answer_row_stays_text(client, store_path, fake_model,
+                                          extra):
+    fake = fake_model([[_msg_item("ok")]])
+    empty = {"role": "assistant", "content": ""}
+    client.chat([{"role": "user", "content": "q1"}, {**empty, **extra},
+                 {"role": "user", "content": "q2"}])
+    assert fake.inputs[0][-2] == empty
 
 
 @needs_agents
@@ -992,7 +1143,7 @@ def test_responses_end_to_end(client, store_path, fake_model):
     assert fake_model.state["protocols"][0][0] == "responses"
     assert [item.get("type", "message") for item in result["output"]] == [
         "function_call", "message"]
-    assert [item.get("type", "message") for item in result["items"]] == [
+    assert [item.get("type", "message") for item in result["messages"]] == [
         "function_call", "function_call_output", "message"]
     # The final item is the assistant answer.
     assert "The answer" in json.dumps(result["output"][-1])
@@ -1011,7 +1162,7 @@ def test_responses_round_trip_extends_prefix(client, store_path, fake_model):
 
     second = fake_model([[_msg_item("Done")]])
     follow_up = ([{"role": "user", "content": "What status?"}]
-                 + result["items"]
+                 + result["messages"]
                  + [{"role": "user", "content": "and now?"}])
     client._responses(follow_up)
     previous_final = first.inputs[-1]
@@ -1031,7 +1182,7 @@ def test_responses_round_trip_prefix_with_doc_id(client, store_path, fake_model)
 
     second = fake_model([[_msg_item("Done")]])
     follow_up = ([{"role": "user", "content": "What status?"}]
-                 + result["items"]
+                 + result["messages"]
                  + [{"role": "user", "content": "and now?"}])
     client._responses(follow_up, doc_id="pi-a")
     previous_final = first.inputs[-1]
@@ -1064,7 +1215,7 @@ def test_doc_id_conversations_get_distinct_cache_keys(client, store_path,
 
     fake_model([[_msg_item("c")]])
     follow_up = ([{"role": "user", "content": "What is the CAGR?"}]
-                 + result["items"]
+                 + result["messages"]
                  + [{"role": "user", "content": "and now?"}])
     client._responses(follow_up, doc_id="pi-a")
     assert keys[2] == keys[0]  # a continuation keeps its conversation's key
@@ -1109,7 +1260,7 @@ def test_responses_stream_passthrough(client, store_path, fake_model):
     assert final["usage"]["total_tokens"] == 30
     assert [item.get("type", "message") for item in final["output"]] == [
         "function_call", "message"]
-    assert [item.get("type", "message") for item in final["items"]] == [
+    assert [item.get("type", "message") for item in final["messages"]] == [
         "function_call", "function_call_output", "message"]
     # output_index addresses the logical response.output: turn 2's deltas
     # are re-based past turn 1's item instead of restarting at 0.
@@ -1171,7 +1322,7 @@ def test_responses_stream_counts_a_call_cut_short(client, store_path,
     usage = final["response"]["usage"]
     assert (usage["input_tokens"], usage["output_tokens"]) == (50, 104)
     assert len(usage["request_usage_entries"]) == 2
-    assert [item.get("id") for item in final["response"]["items"]] == [
+    assert [item.get("id") for item in final["response"]["messages"]] == [
         "fc_1", None, "rs_1", "msg_1"]
     assert final["response"]["output"][-1]["content"][0]["text"] == "cut"
 
@@ -1199,11 +1350,46 @@ def test_responses_counts_a_call_cut_short(client, store_path, fake_model):
     usage = result["usage"]
     assert (usage["input_tokens"], usage["output_tokens"]) == (50, 104)
     assert len(usage["request_usage_entries"]) == 2
-    assert [item.get("id") for item in result["items"]] == [
+    assert [item.get("id") for item in result["messages"]] == [
         "fc_1", None, "rs_1", "msg_1"]
     assert result["output"][-1]["content"][0]["text"] == "cut"
     from openai.types.responses import Response
     Response.model_validate(result)  # still the official shape
+
+
+def _same_thread(agen_factory):
+    """_stream_sync without its pump thread: the generator advances only
+    when the caller asks for the next event, so the caller's edits between
+    events land at a known point."""
+    loop = asyncio.new_event_loop()
+    agen = agen_factory()
+    try:
+        while True:
+            try:
+                yield loop.run_until_complete(agen.__anext__())
+            except StopAsyncIteration:
+                return
+    finally:
+        loop.run_until_complete(agen.aclose())
+        loop.close()
+
+
+@needs_agents
+def test_responses_in_progress_owns_its_snapshot_before_created_is_read(
+        client, store_path, fake_model, monkeypatch):
+    """in_progress copies the opening snapshot before created is handed
+    out: an edit to created the moment it arrives stays out of it."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([[_msg_item("The answer")]]).emit_created = True
+    monkeypatch.setattr(local_chat, "_stream_sync", _same_thread)
+    # closed on a failed assert too: left to gc, the open run deadlocks
+    with contextlib.closing(client._responses("q", stream=True)) as events:
+        created = next(events)
+        created["response"]["status"] = "edited"
+        progress = next(events)
+        assert progress["type"] == "response.in_progress"
+        assert progress["response"]["status"] != "edited"
+        list(events)
 
 
 @needs_agents
@@ -1222,6 +1408,12 @@ def test_responses_stream_opens_with_created(client, store_path, fake_model):
     created = [e for e in events if e["type"] == "response.created"]
     assert len(created) == 1 and events[0] is created[0]
     assert events[0]["sequence_number"] == 1
+    in_progress = [e for e in events if e["type"] == "response.in_progress"]
+    assert len(in_progress) == 1 and events[1] is in_progress[0]
+    assert events[1]["sequence_number"] == 2
+    assert events[1]["response"]["id"] == events[0]["response"]["id"]
+    events[1]["response"]["status"] = "edited"  # each event owns its snapshot
+    assert events[0]["response"]["status"] != "edited"
     terminal = events[-1]
     assert terminal["type"] == "response.completed"
     assert created[0]["response"]["id"] == terminal["response"]["id"]
@@ -1245,7 +1437,80 @@ def test_responses_envelope_validates_as_official_response(client, store_path,
     parsed = Response.model_validate(result)
     assert [item.type for item in parsed.output] == ["function_call",
                                                      "message"]
-    assert parsed.model_dump()["items"] == result["items"]
+    assert parsed.model_dump()["messages"] == result["messages"]
+    assert "items" not in parsed.model_dump()
+
+
+@needs_agents
+def test_responses_items_reads_messages_with_a_warning(client, store_path,
+                                                       fake_model):
+    """The transcript's old name still reads, warned, on the envelope and the
+    stream's terminal one, and is never stored: keys and JSON carry it once."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([[_msg_item("The answer")], [_msg_item("The answer")]])
+    for result in (client._responses("q"),
+                   list(client._responses("q", stream=True))[-1]["response"]):
+        with pytest.warns(DeprecationWarning, match='"items" is now "messages"'):
+            assert result["items"] is result["messages"]
+        with pytest.warns(DeprecationWarning):
+            assert result.get("items") is result["messages"]
+        with pytest.warns(DeprecationWarning):
+            assert "items" in result
+        assert "items" not in list(result)
+        assert '"items"' not in json.dumps(result)
+
+
+@needs_agents
+def test_openai_lanes_read_by_key_and_by_attribute(client, store_path,
+                                                   fake_model):
+    """Chat Completions and Responses envelopes, chunks and events are dicts
+    that also read as the official SDK objects: the same values both ways,
+    an official field the dict lacks reads None, any other name raises."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([[_msg_item("The answer")]] * 4)
+    r = client.chat_completions("q")
+    assert isinstance(r, dict) and json.loads(json.dumps(r)) == r
+    assert isinstance(r, ChatObject)
+    # yaml writes it as the plain mapping it is, safe_dump included
+    assert yaml.safe_load(yaml.safe_dump(r)) == r
+    assert yaml.safe_load(yaml.dump(r)) == r
+    for name in ("CSafeDumper", "CDumper"):  # libyaml's, when built
+        if hasattr(yaml, name):
+            assert yaml.safe_load(yaml.dump(r, Dumper=getattr(yaml, name))) == r
+    bare = ChatObject({"a": 1})  # no official type behind it
+    assert bare["a"] == 1 and not hasattr(bare, "a")
+    assert getattr(bare, "a", None) is None
+    assert (r.choices[0].message.content
+            == r["choices"][0]["message"]["content"] == "The answer")
+    assert r.system_fingerprint is None
+    assert r.choices[0].message.refusal is None
+    assert r.messages == r["messages"]
+    with pytest.raises(AttributeError):
+        r.choicez
+    chunks = list(client.chat_completions("q", stream=True,
+                                          stream_metadata=True))
+    assert "".join(chunk.choices[0].delta.content or ""
+                   for chunk in chunks if chunk.choices) == "The answer"
+    assert chunks[-1].usage.total_tokens == chunks[-1]["usage"]["total_tokens"]
+    r = client._responses("q")
+    assert r.output_text == "The answer" and r.messages == r["messages"]
+    with pytest.raises(AttributeError, match="read-only"):
+        r.model = "other"  # would shadow r["model"], which stays the truth
+    for clone in (copy.copy(r), copy.deepcopy(r), pickle.loads(pickle.dumps(r))):
+        assert type(clone) is type(r) and clone == r
+        assert clone.output_text == "The answer"
+    events = list(client._responses("q", stream=True))
+    assert [event.type for event in events] == [e["type"] for e in events]
+    assert events[-1].response.output_text == "The answer"
+    # as the SDK reads the wire: a value it doesn't know reads as sent
+    odd = local_chat._ChatCompletion({"choices": [
+        {"index": 0, "finish_reason": "max_tokens",
+         "message": {"role": "assistant", "content": "cut"}}]})
+    assert odd.choices[0].finish_reason == "max_tokens"
+    assert odd.choices[0].message.content == "cut"
+    future = local_chat._ResponsesEvent({"type": "response.future_event",
+                                         "sequence_number": 1})
+    assert future.type == "response.future_event"
 
 
 @needs_agents
@@ -1265,6 +1530,162 @@ def test_responses_stream_events_validate_as_official_events(
     assert events
     for event in events:
         adapter.validate_python(event)
+
+
+# ── conformance: the official SDKs read each lane as their own wire ──
+
+@needs_agents
+def test_chat_completions_conforms_to_the_official_sdk(client, store_path,
+                                                       monkeypatch):
+    """Through the real LitellmModel, the envelope parses as ChatCompletion
+    and the openai SDK's own stream accumulator rebuilds it from the
+    chunks: same text, finish reason and usage."""
+    import litellm
+    from litellm.llms.base_llm.base_model_iterator import MockResponseIterator
+    from openai.lib.streaming.chat import ChatCompletionStreamState
+    from openai.types.chat import ChatCompletion, ChatCompletionChunk
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+
+    def call(**settings):
+        replies = [_litellm_reply(tool_calls=_TWO_CALLS[:1]),
+                   _litellm_reply("The answer")]
+
+        async def acompletion(**kwargs):
+            reply = replies.pop(0)
+            return (MockResponseIterator(reply) if kwargs.get("stream")
+                    else reply)
+
+        monkeypatch.setattr(litellm, "acompletion", acompletion)
+        return client.chat_completions("q", doc_id=doc_id, model="gpt-test",
+                                       **settings)
+
+    envelope = ChatCompletion.model_validate(call())
+    state = ChatCompletionStreamState()
+    for chunk in call(stream=True, stream_metadata=True):
+        state.handle_chunk(ChatCompletionChunk.model_validate(chunk))
+    rebuilt = state.get_final_completion()
+    assert rebuilt.choices[0].message.content == "The answer"
+    assert (rebuilt.choices[0].message.content
+            == envelope.choices[0].message.content)
+    assert (rebuilt.choices[0].finish_reason
+            == envelope.choices[0].finish_reason == "stop")
+    assert rebuilt.usage and envelope.usage
+    assert rebuilt.usage.total_tokens == envelope.usage.total_tokens == 30
+
+
+_RESPONSES_USAGE = {"input_tokens": 10, "output_tokens": 5,
+                    "total_tokens": 15,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens_details": {"reasoning_tokens": 0}}
+
+
+def _responses_turn(response_id, item, status="completed"):
+    return {"id": response_id, "object": "response", "created_at": 1,
+            "status": status, "model": "gpt-test",
+            "output": [item] if status == "completed" else [],
+            "parallel_tool_calls": True, "tool_choice": "auto", "tools": [],
+            "usage": _RESPONSES_USAGE if status == "completed" else None}
+
+
+def _responses_sse(response_id, item):
+    """One turn as the Responses API streams it: lifecycle, item, deltas."""
+    opening = _responses_turn(response_id, item, "in_progress")
+    events = [{"type": "response.created", "response": opening},
+              {"type": "response.in_progress", "response": opening}]
+    started = ({**item, "status": "in_progress", "content": []}
+               if item["type"] == "message"
+               else {**item, "status": "in_progress", "arguments": ""})
+    events.append({"type": "response.output_item.added", "output_index": 0,
+                   "item": started})
+    if item["type"] == "function_call":
+        events += [
+            {"type": "response.function_call_arguments.delta",
+             "item_id": item["id"], "output_index": 0,
+             "delta": item["arguments"]},
+            {"type": "response.function_call_arguments.done",
+             "item_id": item["id"], "output_index": 0,
+             "arguments": item["arguments"], "name": item["name"]}]
+    else:
+        part = {"type": "output_text", "text": "", "annotations": [],
+                "logprobs": []}
+        events.append({"type": "response.content_part.added",
+                       "item_id": item["id"], "output_index": 0,
+                       "content_index": 0, "part": part})
+        events += [{"type": "response.output_text.delta",
+                    "item_id": item["id"], "output_index": 0,
+                    "content_index": 0, "delta": piece, "logprobs": []}
+                   for piece in ("The ", "answer")]
+        events += [
+            {"type": "response.output_text.done", "item_id": item["id"],
+             "output_index": 0, "content_index": 0, "text": "The answer",
+             "logprobs": []},
+            {"type": "response.content_part.done", "item_id": item["id"],
+             "output_index": 0, "content_index": 0,
+             "part": {**part, "text": "The answer"}}]
+    events += [{"type": "response.output_item.done", "output_index": 0,
+                "item": item},
+               {"type": "response.completed",
+                "response": _responses_turn(response_id, item)}]
+    return "".join(
+        f"event: {e['type']}\n"
+        f"data: {json.dumps({**e, 'sequence_number': n})}\n\n"
+        for n, e in enumerate(events, 1))
+
+
+@needs_agents
+def test_responses_conforms_to_the_official_sdk(client, store_path):
+    """Over the real OpenAIResponsesModel and an HTTP-level fake of the
+    Responses API, a two-turn run's envelope parses as Response and the
+    openai SDK's stream accumulator takes its events: one logical
+    response, opened by created then in_progress, monotonic sequence
+    numbers, each delta on the item its output_index names."""
+    from openai import omit
+    from openai.lib.streaming.responses import ResponseStreamState
+    from openai.types.responses import Response, ResponseStreamEvent
+    from pydantic import TypeAdapter
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    call_item = {"type": "function_call", "id": "fc_1", "call_id": "call_1",
+                 "name": "get_document",
+                 "arguments": '{"doc_name": "report.pdf"}',
+                 "status": "completed"}
+    message_item = {"type": "message", "id": "msg_1", "role": "assistant",
+                    "status": "completed",
+                    "content": [{"type": "output_text", "text": "The answer",
+                                 "annotations": [], "logprobs": []}]}
+
+    def call(stream):
+        turns = [("resp_1", call_item), ("resp_2", message_item)]
+
+        def handler(request):
+            response_id, item = turns.pop(0)
+            if json.loads(request.content).get("stream"):
+                return httpx.Response(
+                    200, content=_responses_sse(response_id, item).encode(),
+                    headers={"content-type": "text/event-stream"})
+            return httpx.Response(200, json=_responses_turn(response_id, item))
+
+        backend = {"http_client": httpx.AsyncClient(
+                       transport=httpx.MockTransport(handler)),
+                   "api_key": "test", "base_url": "http://responses.test/v1"}
+        return client.chat("q", protocol="responses", doc_id=doc_id,
+                           model="gpt-test", stream=stream, backend=backend)
+
+    assert Response.model_validate(call(False)).output_text == "The answer"
+    events = list(call(True))
+    adapter = TypeAdapter(ResponseStreamEvent)
+    state = ResponseStreamState(input_tools=omit, text_format=omit)
+    for event in events:
+        # it asserts each delta lands on the item output_index names
+        state.handle_event(adapter.validate_python(event))
+    assert [e["type"] for e in events[:2]] == ["response.created",
+                                               "response.in_progress"]
+    sequence = [e["sequence_number"] for e in events]
+    assert sequence == list(range(1, len(events) + 1))
+    terminal = events[-1]["response"]
+    assert terminal["id"] == events[0]["response"]["id"]
+    assert [item["type"] for item in terminal["output"]] == [
+        "function_call", "message"]
+    assert Response.model_validate(terminal).output_text == "The answer"
 
 
 # ── messages (Anthropic engine) ──
@@ -1453,8 +1874,8 @@ def test_messages_usage_sums_every_count_across_turns():
 
 
 @needs_anthropic
-def test_messages_stream_final_result_is_the_run_total(client, store_path,
-                                                       fake_anthropic):
+def test_messages_stream_final_message_is_the_non_stream_result(
+        client, store_path, fake_anthropic):
     seed_doc(store_path, "pi-a", "r.pdf")
     replies = [_anthropic_message([
         {"type": "tool_use", "id": tool_id, "name": "get_document",
@@ -1469,20 +1890,23 @@ def test_messages_stream_final_result_is_the_run_total(client, store_path,
     events = list(stream)
     assert events[-1].type == "message_stop"
     assert events[-1].message.content[0].text == "Done"
-    final = stream.get_final_result()
+    final = stream.get_final_message()
+    assert stream.get_final_text() == "Done"
 
     # Called mid-stream, it reads the rest of the run first.
     fake_anthropic([_anthropic_sse(reply) for reply in replies])
     early = client._messages(question, model="claude-test", max_tokens=100,
                              stream=True)
     next(early)
-    early_usage = early.get_final_result().usage
+    early_usage = early.get_final_message()["usage"]
 
     fake_anthropic(replies)
     result = client._messages(question, model="claude-test", max_tokens=100)
     assert result["usage"]["input_tokens"] == 30
-    assert final.usage == early_usage == result["usage"]
+    assert final["usage"] == early_usage == result["usage"]
+    assert final.usage.input_tokens == 30
     assert final.stop_reason == result["stop_reason"] == "end_turn"
+    assert final == result
     # The same continuation transcript the non-stream envelope carries.
     assert [m["role"] for m in final.messages] == [
         "assistant", "user", "assistant", "user", "assistant"]
@@ -1491,8 +1915,28 @@ def test_messages_stream_final_result_is_the_run_total(client, store_path,
     fake_anthropic([_anthropic_sse(_anthropic_message(
         [{"type": "text", "text": "Do"}], "max_tokens"))])
     cut = client._messages(question, model="claude-test", max_tokens=100,
-                           stream=True).get_final_result()
+                           stream=True).get_final_message()
     assert cut.stop_reason == "max_tokens"
+    # a bare string can't mark the cut, so get_final_text() raises instead
+    fake_anthropic([_anthropic_sse(_anthropic_message(
+        [{"type": "text", "text": "Do"}], "max_tokens"))])
+    with pytest.raises(PageIndexAPIError, match="unfinished") as err:
+        client._messages(question, model="claude-test", max_tokens=100,
+                         stream=True).get_final_text()
+    assert err.value.partial_answer == "Do"
+    assert err.value.usage["output_tokens"] == 5
+    # every text block joins (citations split an answer); a stop sequence
+    # is a finished answer
+    fake_anthropic([_anthropic_sse(_anthropic_message(
+        [{"type": "text", "text": "The "}, {"type": "text", "text": "answer"}],
+        "stop_sequence"))])
+    assert client._messages(question, model="claude-test", max_tokens=100,
+                            stream=True).get_final_text() == "The answer"
+
+    fake_anthropic([_anthropic_sse(_anthropic_message([], "end_turn"))])
+    with pytest.raises(PageIndexAPIError, match="no text block"):
+        client._messages(question, model="claude-test", max_tokens=100,
+                         stream=True).get_final_text()
 
 
 @needs_anthropic
@@ -1508,19 +1952,19 @@ def test_messages_stream_cut_mid_message_raises(client, store_path,
     stream = client._messages("q", model="claude-test", max_tokens=100,
                               stream=True)
     with pytest.raises(PageIndexAPIError, match="ended before") as err:
-        stream.get_final_result()
+        stream.get_final_message()
     usage = err.value.usage
     assert usage is not None
     assert usage["input_tokens"] == 10 and len(usage["iterations"]) == 1
-    with pytest.raises(PageIndexAPIError, match="no final result"):
-        stream.get_final_result()
+    with pytest.raises(PageIndexAPIError, match="no final message"):
+        stream.get_final_message()
 
     # Only message_stop missing: the message itself is complete.
     unstopped = _anthropic_sse(answer).rsplit("event: message_stop", 1)[0]
     fake_anthropic([_anthropic_sse(tool_turn), unstopped])
     final = client._messages("q", model="claude-test", max_tokens=100,
-                             stream=True).get_final_result()
-    assert final.usage["input_tokens"] == 20
+                             stream=True).get_final_message()
+    assert final["usage"]["input_tokens"] == 20
     assert final.messages[-1]["content"][0]["text"] == "Done"
 
 
@@ -1698,6 +2142,82 @@ def test_messages_stream_passthrough(client, store_path, fake_anthropic):
                                   stream=True))
     types = [event.type for event in events]
     assert "content_block_delta" in types and "message_stop" in types
+
+
+@needs_anthropic
+def test_messages_reads_by_key_and_by_attribute(client, store_path,
+                                                fake_anthropic):
+    """The Messages envelope, each stream event and get_final_message() are
+    dicts that also read by attribute, as the Anthropic SDK's objects."""
+    reply = _anthropic_message([{"type": "text", "text": "Done"}], "end_turn")
+    question = [{"role": "user", "content": "q"}]
+    fake_anthropic([reply])
+    r = client._messages(question, model="claude-test", max_tokens=100)
+    assert isinstance(r, dict) and json.loads(json.dumps(r)) == r
+    assert r.content[0].text == r["content"][0]["text"] == "Done"
+    assert r.stop_reason == "end_turn" and r.messages == r["messages"]
+    with pytest.raises(AttributeError):
+        r.contentz
+    fake_anthropic([_anthropic_sse(reply)])
+    stream = client._messages(question, model="claude-test", max_tokens=100,
+                              stream=True)
+    events = list(stream)
+    assert all(isinstance(event, dict) for event in events)
+    assert [event.type for event in events] == [e["type"] for e in events]
+    assert (events[-1].message.content[0].text
+            == events[-1]["message"]["content"][0]["text"] == "Done")
+    for clone in (copy.deepcopy(events[-1]),
+                  pickle.loads(pickle.dumps(events[-1]))):
+        assert type(clone) is type(events[-1]) and clone == events[-1]
+        assert clone.message.content[0].text == "Done"
+    with pytest.raises(AttributeError, match="read-only"):
+        events[-1].type = "other"
+    # the dict is the truth: an edit through the keys shows by attribute
+    delta = next(e for e in events if e["type"] == "content_block_delta")
+    delta["delta"]["text"] = "[redacted]"
+    assert delta.delta.text == "[redacted]"
+    final = stream.get_final_message()
+    assert final.usage.output_tokens == final["usage"]["output_tokens"]
+    assert final.stop_reason == final["stop_reason"] == "end_turn"
+    with pytest.raises(AttributeError):
+        final.usagez
+
+
+@needs_anthropic
+def test_messages_conforms_to_the_official_sdk(client, store_path,
+                                               fake_anthropic):
+    """The envelope parses as the Anthropic SDK's Message; the stream is
+    its tool runner's, one message sequence per turn, every raw event
+    parsing as RawMessageStreamEvent beside the SDK's convenience events."""
+    from anthropic.types import Message, RawMessageStreamEvent
+    from pydantic import TypeAdapter
+    seed_doc(store_path, "pi-a", "r.pdf")
+    turns = [_anthropic_message([
+        {"type": "tool_use", "id": "tu_1", "name": "get_document",
+         "input": {"doc_name": "r.pdf"}}], "tool_use"),
+        _anthropic_message([{"type": "text", "text": "Done"}], "end_turn")]
+    fake_anthropic(turns)
+    envelope = Message.model_validate(
+        client._messages("q", model="claude-test", max_tokens=100))
+    assert envelope.content[0].type == "text"
+    fake_anthropic([_anthropic_sse(turn) for turn in turns])
+    with warnings.catch_warnings():  # the dict views dump the SDK's objects
+        warnings.filterwarnings("error", message="Pydantic serializer")
+        events = list(client._messages("q", model="claude-test",
+                                       max_tokens=100, stream=True))
+    raw_types = {"message_start", "message_delta", "message_stop",
+                 "content_block_start", "content_block_delta",
+                 "content_block_stop"}
+    adapter = TypeAdapter(RawMessageStreamEvent)
+    raw = [event for event in events if event["type"] in raw_types]
+    for event in raw:
+        adapter.validate_python(event)
+    assert {e["type"] for e in events} - raw_types <= {"text", "input_json"}
+    starts = [n for n, e in enumerate(raw) if e["type"] == "message_start"]
+    stops = [n for n, e in enumerate(raw) if e["type"] == "message_stop"]
+    assert len(starts) == len(stops) == len(turns)
+    assert all(start < stop for start, stop in zip(starts, stops))
+    assert all(stop < start for stop, start in zip(stops, starts[1:]))
 
 
 @needs_anthropic
@@ -2370,7 +2890,7 @@ def test_responses_cut_short_still_returns_the_envelope(store_path):
         "http_client": http})
     asyncio.run(http.aclose())
     assert envelope["status"] == "incomplete"
-    assert [item["type"] for item in envelope["items"]] == [
+    assert [item["type"] for item in envelope["messages"]] == [
         "function_call", "function_call_output", "message"]
     assert envelope["output"][-1]["content"][0]["text"] == "The range was"
     usage = envelope["usage"]
@@ -4248,16 +4768,23 @@ def test_extra_body_refuses_skeleton_keys():
 
 def test_extra_body_refuses_non_dicts_and_argument_keys():
     """The same gate: a non-dict would be splatted into the payload as
-    fabricated fields; stream / doc_id select the SDK's parser and scope,
-    so they ride their own arguments on every lane."""
+    fabricated fields; a field with its own argument rides that argument
+    on every lane."""
     for bad in (["ab"], "messages", 5, [("a", 1)]):
         with pytest.raises(PageIndexAPIError,
                            match="extra_body must be a dict"):
             local_chat._refuse_skeleton(bad)
-    for key in ("stream", "doc_id"):
-        with pytest.raises(PageIndexAPIError,
-                           match=rf"extra_body cannot carry {key}: use {key}="):
+    backend = r"backend= \(API chat models only\)"
+    for key, argument in (("stream", "stream="), ("doc_id", "doc_id="),
+                          ("folder_id", "folder_id="), ("model", "model="),
+                          ("api_key", backend), ("base_url", backend),
+                          ("api_base", backend)):
+        with pytest.raises(PageIndexAPIError, match=(
+                rf"extra_body cannot carry {key}: use {argument} instead")):
             local_chat._refuse_skeleton({key: True})
+    with pytest.raises(PageIndexAPIError, match=(
+            rf"cannot carry api_key, base_url: use {backend} instead")):
+        local_chat._refuse_skeleton({"api_key": "k", "base_url": "u"})
     local_chat._refuse_skeleton(None)
     local_chat._refuse_skeleton({})
     local_chat._refuse_skeleton({"service_tier": "auto"})
@@ -4518,7 +5045,7 @@ def test_a_cut_response_runs_no_tools(bridge_client, fake_model):
     result = client._responses("q")
     assert ran == []
     assert result["status"] == "incomplete"
-    assert [item["type"] for item in result["items"]] == ["reasoning", "message"]
+    assert [item["type"] for item in result["messages"]] == ["reasoning", "message"]
 
 
 @needs_agents

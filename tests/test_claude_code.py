@@ -167,13 +167,18 @@ def test_chat_refuses_what_the_cli_cannot_take(chat_client):
     # protocol lanes, which refuse claude-code/ too
     image = [{"type": "text", "text": "What is this?"},
              {"type": "image_url", "image_url": {"url": "data:image/png;base64,QUJD"}}]
-    for messages in ([{"role": "user", "content": image}],
-                     [{"role": "tool", "tool_call_id": "c", "content": "x"},
-                      {"role": "user", "content": "Q"}]):
+    for messages, hint in (
+            ([{"role": "user", "content": image}], "use an API model with"),
+            ([{"role": "assistant", "content": None, "tool_calls": [
+                {"id": "c", "type": "function",
+                 "function": {"name": "f", "arguments": "{}"}}]},
+              {"role": "user", "content": "Q"}], "an API chat model."),
+            ([{"role": "tool", "tool_call_id": "c", "content": "x"},
+              {"role": "user", "content": "Q"}], "use an API chat model.")):
         with pytest.raises(PageIndexAPIError,
                            match="claude-code/haiku takes text messages only") as err:
             chat_client.chat(messages)
-        assert "use an API model with" in str(err.value)
+        assert hint in str(err.value)
     with pytest.raises(PageIndexAPIError, match="drives the Anthropic API"):
         chat_client.anthropic_runner_config()
 
@@ -514,6 +519,25 @@ def test_chat_completions_stream_chunks(monkeypatch, chat_client):
     assert chunks[4]["choices"] == [] and chunks[4]["usage"]["completion_tokens"] == 2
     assert len(chunks) == 5
     assert "".join(chat_client.chat_completions("Q", stream=True)) == "Hi there."
+    assert chunks[1].choices[0].delta.content == "Hi "
+    assert chunks[4].usage.completion_tokens == 2
+    fake_cli(monkeypatch,
+             AssistantMessage(content=[TextBlock(text="Hi there.")], model="haiku"),
+             result("Hi there.", usage={"input_tokens": 3, "output_tokens": 2}))
+    envelope = chat_client.chat_completions("Q")
+    assert envelope.choices[0].message.content == "Hi there."
+    assert envelope.usage.prompt_tokens == envelope["usage"]["prompt_tokens"]
+    # the openai SDK's own accumulator rebuilds the envelope from the chunks
+    from openai.lib.streaming.chat import ChatCompletionStreamState
+    from openai.types.chat import ChatCompletion, ChatCompletionChunk
+    state = ChatCompletionStreamState()
+    for chunk in chunks:
+        state.handle_chunk(ChatCompletionChunk.model_validate(chunk))
+    rebuilt = state.get_final_completion()
+    official = ChatCompletion.model_validate(envelope)
+    assert rebuilt.choices[0].message.content == official.choices[0].message.content
+    assert rebuilt.choices[0].finish_reason == official.choices[0].finish_reason
+    assert rebuilt.usage == official.usage
 
 
 @needs_claude

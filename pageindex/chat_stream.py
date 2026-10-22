@@ -1,10 +1,60 @@
-"""chat(stream=True)'s return types: the answer lane's ChatStream and the
-Messages protocol's MessagesStream."""
+"""chat()'s return types: the answer lane's ChatStream, the Messages
+protocol's MessagesStream, and the protocol lanes' ChatObject."""
 from __future__ import annotations
 
 from typing import Any, Iterator, Optional
 
 from .errors import PageIndexAPIError
+
+
+class ChatObject(dict[str, Any]):
+    """What chat()'s protocol lanes return, envelopes, chunks and events
+    alike: the protocol's JSON as a dict, which also reads by attribute as
+    the official SDK reads that JSON (its lenient construct_type):
+    ``r.choices[0].message.content`` beside
+    ``r["choices"][0]["message"]["content"]``. A value or event type the
+    installed SDK doesn't know reads as sent, a field the type has and the
+    dict lacks reads None, and a name the official object lacks raises.
+    The attribute view is read-only: write through the keys. chat() returns
+    it; callers don't construct one."""
+
+    @staticmethod
+    def _parse(data: dict) -> Any:
+        # a bare ChatObject names no official type to read through
+        raise AttributeError("ChatObject reads attributes only as a lane's "
+                             "envelope, chunk or event")
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return getattr(self._parse(dict(self)), name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if not name.startswith("_"):
+            raise AttributeError(
+                f"attributes are a read-only view; set [{name!r}] instead")
+        super().__setattr__(name, value)
+
+
+def _as_plain_dict(dumper: Any, data: ChatObject) -> Any:
+    rule = dumper.yaml_representers.get(dict)
+    return rule(dumper, data) if rule else dumper.represent_data(dict(data))
+
+
+def _yaml_as_dict() -> None:
+    """yaml writes a ChatObject exactly as the plain dict it is, through
+    the dumper's own dict rule (safe_dump refuses a dict subclass, and dump
+    would tag it as a Python object). The rule goes on every representer
+    class that already holds its own table, BaseRepresenter, Representer
+    or a caller's dumper that registered something; the rest inherit it
+    and keep inheriting what others register later."""
+    from yaml.representer import BaseRepresenter
+    pending: list = [BaseRepresenter]
+    while pending:
+        representer = pending.pop()
+        if "yaml_multi_representers" in vars(representer):
+            representer.add_multi_representer(ChatObject, _as_plain_dict)
+        pending.extend(representer.__subclasses__())
 
 
 class ChatStream:
@@ -72,17 +122,17 @@ class ChatStream:
 
 class MessagesStream:
     """chat(protocol="messages", stream=True)'s stream: iterate it for the
-    Anthropic SDK's events, one message sequence per turn; read the run's
-    totals from ``get_final_result()``."""
+    Anthropic SDK's events, one message sequence per turn; then
+    ``get_final_message()`` returns what the non-stream call returns."""
 
     def __init__(self, events):
-        self._events = events  # a generator that returns the run's result
+        self._events = events  # a generator that returns the run's envelope
         self._result: Any = None
 
     def __iter__(self) -> "MessagesStream":
         return self
 
-    def __next__(self) -> Any:
+    def __next__(self) -> ChatObject:
         try:
             return next(self._events)
         except StopIteration as stop:
@@ -94,15 +144,37 @@ class MessagesStream:
         """Stop the run, like closing a generator."""
         self._events.close()
 
-    def get_final_result(self) -> Any:
+    def get_final_message(self) -> ChatObject:
         """Read the stream to its end (raising what iterating it would),
-        then return the run's ``usage``, aggregated across turns, its
-        ``messages`` turn sequence and its final turn's ``stop_reason``,
-        as attributes."""
+        then return the run's envelope as the non-stream call returns it:
+        the final message, with ``usage`` aggregated across turns and the
+        ``messages`` turn sequence."""
         for _ in self:
             pass
         if self._result is None:
             raise PageIndexAPIError(
-                "This stream has no final result: the run failed, or the "
+                "This stream has no final message: the run failed, or the "
                 "stream was closed before the run finished.")
         return self._result
+
+    def get_final_text(self) -> str:
+        """The final message's text blocks, joined. A bare string has
+        nowhere to mark an answer cut short, so unless the message finished
+        (stop_reason ``end_turn`` or ``stop_sequence``) this raises, the cut
+        text in ``partial_answer``; it raises too when there is no text."""
+        message = self.get_final_message()
+        texts = [block["text"] for block in message["content"]
+                 if block.get("type") == "text"]
+        stop = message.get("stop_reason")
+        if stop not in ("end_turn", "stop_sequence"):
+            error = PageIndexAPIError(
+                f"The final message is unfinished (stop_reason {stop!r}); "
+                "get_final_message() returns it as it is.")
+            error.partial_answer = "".join(texts)
+            error.usage = message.get("usage")
+            raise error
+        if not texts:
+            raise PageIndexAPIError(
+                "The final message has no text block; its content is in "
+                "get_final_message().content.")
+        return "".join(texts)
