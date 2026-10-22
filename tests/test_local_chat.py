@@ -402,7 +402,8 @@ def test_status_recorder_attaches_to_the_real_responses_model(monkeypatch):
     asyncio.run(backend.close())
 
 
-def _anthropic_wire(monkeypatch, client, model, **settings):
+def _anthropic_wire(monkeypatch, client, model, messages: str | list = "hi",
+                    **settings):
     """One chat_completions call through the real LitellmModel and
     litellm's request build: the HTTP request it sent, and the envelope."""
     from litellm.llms.custom_httpx.http_handler import (AsyncHTTPHandler,
@@ -432,7 +433,7 @@ def _anthropic_wire(monkeypatch, client, model, **settings):
 
     monkeypatch.setattr(AsyncHTTPHandler, "post", fake_apost)
     monkeypatch.setattr(HTTPHandler, "post", fake_post)
-    return captured, client.chat_completions("hi", model=model, **settings)
+    return captured, client.chat_completions(messages, model=model, **settings)
 
 
 @needs_agents
@@ -580,17 +581,20 @@ def test_chat_completions_messages_resend_the_wire(client, store_path,
 def test_claude_thinking_goes_back_with_its_calls(client, store_path,
                                                   monkeypatch, settings):
     """Either way of setting effort, Claude's thinking blocks go back on
-    the tool continuation and in the returned messages."""
+    the tool continuation and in the returned messages, and only there:
+    not again as reasoning_content."""
     pytest.importorskip("litellm")
     thinking = [{"type": "thinking", "thinking": "hmm", "signature": "SIG1"}]
     first, sent = _two_turns(store_path, monkeypatch, client,
                              "anthropic/claude-test",
                              _litellm_reply(tool_calls=_TWO_CALLS,
-                                            thinking_blocks=thinking),
+                                            thinking_blocks=thinking,
+                                            reasoning_content="hmm"),
                              **settings)
     for messages in (first["messages"], sent[1], sent[2]):
         calls = [m for m in messages if m.get("tool_calls")]
         assert calls[0].get("thinking_blocks") == thinking
+        assert "reasoning_content" not in calls[0]
 
 
 @needs_agents
@@ -613,6 +617,103 @@ def test_claude_thinking_goes_back_with_no_effort_set(client, store_path,
     for messages in (first["messages"], sent[1], sent[2]):
         calls = [m for m in messages if m.get("tool_calls")]
         assert calls[0].get("thinking_blocks") == thinking
+
+
+@needs_agents
+@pytest.mark.parametrize("model", [
+    "moonshot/kimi-k2-thinking", "zai/glm-4.6", "dashscope/qwen3-test",
+    "openrouter/qwen/qwen3-test-thinking", "deepseek/deepseek-chat"])
+def test_reasoning_content_goes_back_to_its_model(client, store_path,
+                                                  monkeypatch, model):
+    """Kimi, GLM and DeepSeek ask for a turn's reasoning_content back
+    across tool calls, and Qwen and OpenRouter read it there; openai-agents
+    sends it back only to DeepSeek names. Each model's own reasoning goes
+    back to it on the continuation, in messages and on the next call."""
+    pytest.importorskip("litellm")
+    first, sent = _two_turns(store_path, monkeypatch, client, model,
+                             _litellm_reply(tool_calls=_TWO_CALLS[:1],
+                                            reasoning_content="think"))
+    for messages in (first["messages"], sent[1], sent[2]):
+        calls = [m for m in messages if m.get("tool_calls")]
+        assert calls[0].get("reasoning_content") == "think"
+
+
+@needs_agents
+def test_reasoning_content_never_reaches_claude(client, monkeypatch):
+    """Claude's thinking rides thinking_blocks: another model's
+    reasoning_content in the history stays out of the Anthropic request."""
+    pytest.importorskip("litellm")
+    history = [{"role": "user", "content": "q1"},
+               {"role": "assistant", "content": None,
+                "reasoning_content": "Kimi's own plan",
+                "tool_calls": _TWO_CALLS[:1]},
+               {"role": "tool", "tool_call_id": "call_1", "content": "r"},
+               {"role": "assistant", "content": "A1"},
+               {"role": "user", "content": "q2"}]
+    captured, _ = _anthropic_wire(monkeypatch, client, "anthropic/claude-test",
+                                  messages=history)
+    assert captured["body"]["messages"]
+    assert "Kimi's own plan" not in json.dumps(captured["body"])
+
+
+@needs_agents
+@pytest.mark.parametrize("settings", [{}, {"stream": True}])
+def test_refused_reasoning_content_goes_again_without_it(client, store_path,
+                                                         monkeypatch,
+                                                         settings):
+    """An API that refuses reasoning_content on an assistant message (Groq
+    answers 400) gets that request again without it, and the model gets no
+    more of it: both runs finish."""
+    pytest.importorskip("litellm")
+    import litellm
+    from litellm.exceptions import BadRequestError
+    from litellm.llms.base_llm.base_model_iterator import MockResponseIterator
+    monkeypatch.setattr(local_chat, "_REASONING_CONTENT_REFUSED", set())
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    sent = []
+
+    async def acompletion(**kwargs):
+        messages = kwargs["messages"]
+        sent.append(any(m.get("reasoning_content") for m in messages))
+        if sent[-1]:
+            raise BadRequestError(
+                message="property 'reasoning_content' is unsupported",
+                model=kwargs["model"], llm_provider="groq")
+        reply = (_litellm_reply("A") if any(m["role"] == "tool"
+                                            for m in messages)
+                 else _litellm_reply(tool_calls=_TWO_CALLS[:1],
+                                     reasoning_content="think"))
+        return MockResponseIterator(reply) if kwargs.get("stream") else reply
+
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+    for _ in range(2):
+        out = client.chat_completions("q", doc_id=doc_id,
+                                      model="groq/qwen/qwen3-32b", **settings)
+        if settings:
+            assert "A" in "".join(out)
+        else:
+            assert out.choices[0].message.content == "A"
+    assert sent == [False, True, False, False, False]
+
+
+@needs_agents
+def test_other_400s_are_not_retried(client, monkeypatch):
+    """Only a model that was sent reasoning_content gets the retry: any
+    other 400 surfaces after one call."""
+    pytest.importorskip("litellm")
+    import litellm
+    from litellm.exceptions import BadRequestError
+    calls = []
+
+    async def acompletion(**kwargs):
+        calls.append(kwargs)
+        raise BadRequestError(message="bad request", model=kwargs["model"],
+                              llm_provider="groq")
+
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+    with pytest.raises(PageIndexAPIError):
+        client.chat_completions("q", model="groq/never-sent-reasoning")
+    assert len(calls) == 1
 
 
 @needs_agents

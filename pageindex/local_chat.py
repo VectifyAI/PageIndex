@@ -235,6 +235,43 @@ def _sdk_backend(backend) -> dict:
             for key, value in (backend or {}).items()}
 
 
+# Models a replayed reasoning_content went to, and those that refused it.
+_REASONING_CONTENT_SENT: set = set()
+_REASONING_CONTENT_REFUSED: set = set()
+
+
+def _replay_reasoning_content(context) -> bool:
+    """A turn's reasoning_content goes back to the model that wrote it:
+    Kimi, GLM and DeepSeek ask for it across tool calls, and openai-agents
+    sends it only to DeepSeek names. A caller's history carries no origin,
+    so it goes back too. Thinking that rides thinking_blocks (Claude's)
+    stays there, and a model that refused the field gets no more of it."""
+    if (context.model in _REASONING_CONTENT_REFUSED
+            or "thinking_blocks" in context.reasoning.provider_data):
+        return False
+    origin = context.reasoning.origin_model
+    if origin is not None and origin != context.model:
+        return False
+    _REASONING_CONTENT_SENT.add(context.model)
+    return True
+
+
+def _reasoning_content_retry(model):
+    """Some APIs refuse a replayed reasoning_content with a 400 (Groq:
+    "property 'reasoning_content' is unsupported"): the runner sends the
+    request again at once without it, and that model gets no more."""
+    from agents import ModelRetrySettings, RetryDecision
+
+    def policy(context):
+        if (context.normalized.status_code in (400, 422)
+                and model.model in _REASONING_CONTENT_SENT
+                and model.model not in _REASONING_CONTENT_REFUSED):
+            _REASONING_CONTENT_REFUSED.add(model.model)
+            return RetryDecision(retry=True, delay=0)
+        return False
+    return ModelRetrySettings(max_retries=1, policy=policy)
+
+
 def _openai_model(protocol: str, model_name: str, backend=None):
     """The backend protocol driver — the seam tests replace with a fake."""
     if protocol == "responses":
@@ -267,7 +304,8 @@ def _openai_model(protocol: str, model_name: str, backend=None):
     except litellm.NotFoundError as exc:
         raise PageIndexAPIError(str(exc)) from exc
     return LitellmModel(wire, api_key=(backend or {}).get("api_key"),
-                        base_url=(backend or {}).get("base_url"))
+                        base_url=(backend or {}).get("base_url"),
+                        should_replay_reasoning_content=_replay_reasoning_content)
 
 
 def _reported_model(model_name: str) -> str:
@@ -451,6 +489,7 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
         drop = list((extra_args or {}).get("additional_drop_params") or ())
         extra_args = {**(extra_args or {}),
                       "additional_drop_params": [*drop, "reasoning_effort"]}
+    model = _openai_model(protocol, model_name, conn or None)
     try:
         settings = ModelSettings(**{
             "temperature": temperature, "top_p": top_p,
@@ -461,6 +500,8 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
             "extra_body": body,
             "extra_headers": extra_headers,
             "extra_args": extra_args,
+            "retry": (_reasoning_content_retry(model)
+                      if protocol == "chat" else None),
             **routed})
     except ValidationError as exc:
         raise PageIndexAPIError(f"Invalid model settings: {exc}") from exc
@@ -468,7 +509,7 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
         name="PageIndex",
         instructions=instructions,
         tools=build_openai_tools(client, doc_ids=doc_ids),
-        model=_openai_model(protocol, model_name, conn or None),
+        model=model,
         model_settings=settings,
     )
 
