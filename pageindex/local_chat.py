@@ -348,6 +348,7 @@ _SKELETON_KEYS = frozenset({"system", "instructions", "input", "messages",
                             "tools"})
 _ARGUMENT_KEYS = {"stream": "stream=", "doc_id": "doc_id=",
                   "folder_id": "folder_id=", "model": "model=",
+                  "reasoning_effort": "reasoning_effort=",
                   **dict.fromkeys(("api_key", "base_url", "api_base"),
                                   "backend= (API chat models only)")}
 # The ModelSettings fields openai-agents' LitellmModel reads.

@@ -4951,6 +4951,9 @@ def test_extra_body_refuses_non_dicts_and_argument_keys():
     backend = r"backend= \(API chat models only\)"
     for key, argument in (("stream", "stream="), ("doc_id", "doc_id="),
                           ("folder_id", "folder_id="), ("model", "model="),
+                          # on the chat lane it turned thinking on, but
+                          # openai-agents replays it only from the argument
+                          ("reasoning_effort", "reasoning_effort="),
                           ("api_key", backend), ("base_url", backend),
                           ("api_base", backend)):
         with pytest.raises(PageIndexAPIError, match=(
