@@ -1828,8 +1828,9 @@ class PageIndexClient:
             model: Backend model name (defaults to ``chat_model``).
             stream: Yield Responses stream events as dicts — one logical
                 response per call: per-turn backend lifecycle events are
-                collapsed to one opening ``response.created`` and one
-                final terminal event, sequence numbers are reassigned
+                collapsed to one opening ``response.created`` followed
+                by ``response.in_progress``, and one final terminal
+                event, sequence numbers are reassigned
                 monotonically, and ``output_index`` is re-based onto the
                 single logical ``output``. The final event is the
                 terminal ``response.*`` for the run's status; its
