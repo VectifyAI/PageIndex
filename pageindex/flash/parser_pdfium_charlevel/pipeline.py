@@ -222,15 +222,14 @@ def parse_charlevel_meta(doc_handle: Union[str, Path, BytesIO]) -> tuple[list[li
     # keeps its per-object split (the fallback behavior). A separate bytes copy
     # avoids racing pypdfium2's read of the same BytesIO.
     pdf_doc = None
-    if _pypdf2 is not None:
-        try:
-            if isinstance(doc_handle, (str, Path)):
-                pdf_doc = _PdfDoc(_pypdf2.PdfReader(str(doc_handle)))
-            elif isinstance(doc_handle, BytesIO):
-                # Read a copy so we never race pdfium's read of the same buffer.
-                pdf_doc = _PdfDoc(_pypdf2.PdfReader(BytesIO(doc_handle.getvalue())))
-        except Exception:
-            pdf_doc = None
+    try:
+        if isinstance(doc_handle, (str, Path)):
+            pdf_doc = _PdfDoc(_pypdf2.PdfReader(str(doc_handle)))
+        elif isinstance(doc_handle, BytesIO):
+            # Read a copy so we never race pdfium's read of the same buffer.
+            pdf_doc = _PdfDoc(_pypdf2.PdfReader(BytesIO(doc_handle.getvalue())))
+    except Exception:
+        pdf_doc = None
 
     # Pass 1: extract raw chars for every page (including each glyph's raw
     # advance) and accumulate per-font identity-matrix Type-3 glyph-bbox

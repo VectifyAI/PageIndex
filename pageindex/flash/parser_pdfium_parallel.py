@@ -105,14 +105,13 @@ def _init_worker(kind: str, payload) -> None:
     else:
         _worker_pdf = pdfium.PdfDocument(BytesIO(payload))
     _worker_pdf_doc = None
-    if _pypdf2 is not None:
-        try:
-            if kind == "path":
-                _worker_pdf_doc = _PdfDoc(_pypdf2.PdfReader(payload))
-            else:
-                _worker_pdf_doc = _PdfDoc(_pypdf2.PdfReader(BytesIO(payload)))
-        except Exception:
-            _worker_pdf_doc = None
+    try:
+        if kind == "path":
+            _worker_pdf_doc = _PdfDoc(_pypdf2.PdfReader(payload))
+        else:
+            _worker_pdf_doc = _PdfDoc(_pypdf2.PdfReader(BytesIO(payload)))
+    except Exception:
+        _worker_pdf_doc = None
     _worker_font_maps = {}
 
 

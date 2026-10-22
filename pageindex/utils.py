@@ -1,7 +1,6 @@
 import contextvars
 import logging
 import os
-import sys
 import textwrap
 from datetime import datetime
 import time
@@ -67,23 +66,6 @@ def _add_usage_counts(counts, usage=None) -> None:
             _add_usage_counts(value, usage.setdefault(key, {}))
         else:
             usage[key] = usage.get(key, 0) + (value or 0)
-
-
-def _repair_litellm_types() -> None:
-    """litellm 1.97.0's Message/Delta annotations carry nested forward refs
-    Python 3.10 cannot resolve (BerriAI/litellm#36384), so every completion
-    dies constructing its response. Rebuild them once with the defining
-    modules' names; no-op on 3.11+ and on fixed litellm releases."""
-    if sys.version_info >= (3, 11):
-        return
-    try:
-        import litellm.types.llms.openai as openai_types
-        import litellm.types.utils as litellm_types
-        namespace = {**vars(openai_types), **vars(litellm_types)}
-        litellm_types.Message.model_rebuild(_types_namespace=namespace)
-        litellm_types.Delta.model_rebuild(_types_namespace=namespace)
-    except Exception:
-        pass  # best-effort: a failed repair leaves litellm's own error
 
 
 def _mute_litellm_bridge_usage_warning() -> None:
@@ -213,7 +195,6 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
     backend = _llm_backend.get()
     model = _litellm_model(model)
-    _repair_litellm_types()
     _quiet_litellm()
     for i in range(max_retries):
         try:
@@ -254,7 +235,6 @@ async def llm_acompletion(model, prompt, **params):
     messages = [{"role": "user", "content": prompt}]
     backend = _llm_backend.get()
     model = _litellm_model(model)
-    _repair_litellm_types()
     _quiet_litellm()
     for i in range(max_retries):
         try:

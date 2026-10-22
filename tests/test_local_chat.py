@@ -3,6 +3,7 @@ no LLM keys. Tool execution runs for real against a seeded local store."""
 import asyncio
 import contextlib
 import copy
+import dataclasses
 import inspect
 import json
 import pickle
@@ -591,6 +592,28 @@ def test_reasoning_effort_reaches_litellm_as_given(client, monkeypatch,
     monkeypatch.setattr(litellm, "acompletion", acompletion)
     client.chat_completions("q", model=model, reasoning_effort=effort)
     assert seen == [effort]
+
+
+@needs_agents
+def test_extra_body_settings_litellm_model_skips_reach_litellm(client,
+                                                               monkeypatch):
+    """ModelSettings fields LitellmModel never reads reach LiteLLM as its
+    kwargs; routed into the settings object they were dropped, and retry
+    turned on the runner's own retries instead."""
+    pytest.importorskip("litellm")
+    import litellm
+    seen = []
+
+    async def acompletion(**kwargs):
+        seen.append(kwargs)
+        return _litellm_reply("ok")
+
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+    extras = {"context_management": {"edits": []}, "verbosity": "low",
+              "store": False, "retry": {"max_retries": 2}}
+    client.chat_completions("q", model="anthropic/claude-test",
+                            extra_body=extras)
+    assert {key: seen[0].get(key) for key in extras} == extras
 
 
 @needs_agents
@@ -2415,22 +2438,33 @@ def test_responses_envelope_fields_and_cache_group(client, store_path,
     assert result["tool_choice"] == "auto"
 
 
+@needs_agents
+def test_litellm_import_failure_surfaces_its_cause(monkeypatch):
+    # litellm is a base dependency, so a failing import is a version skew
+    # to show, not a missing install to suggest.
+    pytest.importorskip("agents.extensions.models.litellm_model")
+    monkeypatch.setitem(sys.modules, "litellm", None)
+    with pytest.raises(PageIndexAPIError, match="failed to import") as info:
+        local_chat._openai_model("chat", "anthropic/claude-x")
+    assert "not installed" not in str(info.value)
+    assert isinstance(info.value.__cause__, ImportError)
+
+
 def test_sol_class_refusal_names_its_exits():
     """The chatcmpl+tools-while-reasoning 400 is a lane problem, not a
-    retry problem — the wrapped error must name every exit that is real
-    for the caller's lane. Chat has three; a Responses-lane caller gets only
-    the litellm upgrade (it IS the other lane, and its reasoning knob is
-    ``reasoning``, not ``reasoning_effort``)."""
+    retry problem — the chat lane's error names both real exits. Upgrading
+    litellm is none: the pinned range already routes such calls, except
+    from a custom base URL with the effort unset. The Responses lane is
+    the other route already and gets no exits."""
     refusal = Exception(
         "Error code: 400 - Function tools with reasoning_effort are not "
         "supported for gpt-5.6-sol in /v1/chat/completions.")
     chat = str(local_chat._model_backend_error(refusal, "chat"))
-    assert "chat(protocol='responses')" in chat and "litellm" in chat
+    assert "chat(protocol='responses')" in chat
     assert "pass reasoning_effort" in chat
+    assert "upgrade" not in chat
     resp = str(local_chat._model_backend_error(refusal, "responses"))
-    assert "upgrade litellm" in resp
-    assert "protocol='responses'" not in resp
-    assert "pass reasoning_effort" not in resp
+    assert resp == f"The model backend failed: {refusal}"
     plain = local_chat._model_backend_error(Exception("rate limited"), "chat")
     assert "protocol='responses'" not in str(plain)
 
@@ -2532,12 +2566,15 @@ def test_reasoning_passthrough_reaches_each_engine(monkeypatch):
 
 @needs_agents
 def test_extra_body_model_settings_fields_ride_their_field(monkeypatch):
-    """LiteLLM-routed answer lane: openai-agents passes ModelSettings'
-    own fields to litellm by name beside **extra_args, so a caller's copy
-    in extra_args collided with them. Those ride their field, the
-    caller's value winning; the rest stay LiteLLM kwargs. OpenAI
-    destinations keep the request-body path."""
+    """LiteLLM-routed answer lane: LitellmModel passes the settings it
+    reads to litellm by name beside **extra_args, so a caller's copy in
+    extra_args collided with them. Those ride their field, the caller's
+    value winning; the rest stay LiteLLM kwargs. OpenAI destinations keep
+    the request-body path."""
     pytest.importorskip("litellm")
+    from agents import ModelSettings
+    assert local_chat._LITELLM_MODEL_SETTINGS <= {
+        field.name for field in dataclasses.fields(ModelSettings)}
     monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
     monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
                         lambda *a, **k: [])
@@ -3664,7 +3701,8 @@ def test_messages_bad_backend_wraps_like_the_other_doors():
 def test_extra_headers_ride_model_settings(monkeypatch):
     """Both openai-agents doors merge ModelSettings.extra_headers into
     their requests (wire-probed: LiteLLM's chatcmpl adapters forward
-    custom headers; its anthropic adapter owns anthropic-beta only)."""
+    custom headers; its anthropic adapter forwards only the anthropic-beta
+    flags on LiteLLM's own list)."""
     monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
     monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
                         lambda *a, **k: [])
@@ -4626,32 +4664,22 @@ def test_anthropic_client_unconfigured_route_keeps_the_error_contract(
 
 
 @needs_anthropic
-def test_missing_route_client_class_names_the_upgrade(monkeypatch):
-    # A build predating a route's client class gets the tool-runner
-    # probe's contract, not a bare AttributeError.
+@pytest.mark.parametrize("model", [
+    "claude-sonnet-4-6", "bedrock/anthropic.claude-sonnet-4-6-v1:0"])
+def test_messages_refuses_anthropic_below_its_floor(client, monkeypatch,
+                                                     model):
+    # anthropic 0.107 runs a refused turn's tool calls and passes every
+    # feature the lane uses; 0.108-0.121 lack the Bedrock/Vertex runner.
     import anthropic
-    monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
-    monkeypatch.delattr(anthropic, "AnthropicFoundry", raising=False)
+
+    def transport(*args):
+        raise AssertionError("the gate let the call through")
+
+    monkeypatch.setattr(local_chat, "_anthropic_client", transport)
+    monkeypatch.setattr(anthropic, "__version__", "0.107.1")
     with pytest.raises(PageIndexAPIError,
-                       match="AnthropicFoundry.*pip install -U anthropic"):
-        local_chat._anthropic_client(None, "azure_ai")
-
-
-@needs_anthropic
-def test_messages_names_the_missing_tool_runner(client, monkeypatch):
-    # anthropic 0.108–0.121 constructs Bedrock/Vertex clients whose beta
-    # surface has no tool runner: name the gap, not an AttributeError.
-    class _Runnerless:
-        class beta:
-            class messages: ...
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr(local_chat, "_anthropic_client",
-                        lambda backend=None, route="anthropic": _Runnerless())
-    with pytest.raises(PageIndexAPIError, match="tool runner"):
-        client._messages("q", model="bedrock/anthropic.claude-sonnet-4-6-v1:0")
+                       match=r"anthropic 0\.122\.0 or newer, found 0\.107\.1"):
+        client._messages("q", model=model)
 
 
 def _failing_runner_client(monkeypatch, exc):

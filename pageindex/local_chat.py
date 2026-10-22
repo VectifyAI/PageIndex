@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import copy
-import dataclasses
 import hashlib
 import inspect
 import json
@@ -267,14 +266,13 @@ def _openai_model(protocol: str, model_name: str, backend=None):
     try:
         from agents.extensions.models.litellm_model import LitellmModel
         import litellm
-    except ImportError:
+    except ImportError as exc:
+        # litellm is a base dependency: what fails here is a version skew
         raise PageIndexAPIError(
-            f"'{model_name}' routes through LiteLLM, but litellm is not "
-            "installed. Run:  pip install -U litellm"
-        )
+            f"'{model_name}' routes through LiteLLM, which failed to "
+            f"import: {exc}") from exc
     from .utils import (_litellm_model, _mute_litellm_bridge_usage_warning,
-                        _quiet_litellm, _repair_litellm_types)
-    _repair_litellm_types()
+                        _quiet_litellm)
     _mute_litellm_bridge_usage_warning()
     _quiet_litellm()
     try:
@@ -341,14 +339,14 @@ def _openai_protocol(model_name: str) -> bool:
         return True
     try:
         import litellm
+        from litellm.constants import openai_compatible_providers
         from .utils import _quiet_litellm
         _quiet_litellm()
         _, provider, _, _ = litellm.get_llm_provider(model=wire)
     except Exception:
         return False
     return (provider in ("openai", "azure", "openrouter")
-            or provider in getattr(litellm, "openai_compatible_providers",
-                                   ()))
+            or provider in openai_compatible_providers)
 
 
 def _merged_backend(client, backend):
@@ -365,6 +363,12 @@ _ARGUMENT_KEYS = {"stream": "stream=", "doc_id": "doc_id=",
                   "folder_id": "folder_id=", "model": "model=",
                   **dict.fromkeys(("api_key", "base_url", "api_base"),
                                   "backend= (API chat models only)")}
+# The ModelSettings fields openai-agents' LitellmModel reads.
+_LITELLM_MODEL_SETTINGS = frozenset({
+    "temperature", "top_p", "frequency_penalty", "presence_penalty",
+    "max_tokens", "tool_choice", "parallel_tool_calls", "reasoning",
+    "top_logprobs", "include_usage", "extra_headers", "extra_query",
+    "metadata"})
 
 
 def _refuse_skeleton(extra_body) -> None:
@@ -438,11 +442,13 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
         if openai_backend:
             body = {**(body or {}), **extra_body}
         else:
-            # openai-agents passes ModelSettings' own fields to litellm by
-            # name beside **extra_args, so those ride their field.
-            own = {field.name for field in dataclasses.fields(ModelSettings)}
-            routed = {k: v for k, v in extra_body.items() if k in own}
-            rest = {k: v for k, v in extra_body.items() if k not in own}
+            # LitellmModel passes the settings it reads to litellm by name
+            # beside **extra_args, so those ride their field; it ignores
+            # the other ModelSettings fields, so the rest stay kwargs.
+            routed = {k: v for k, v in extra_body.items()
+                      if k in _LITELLM_MODEL_SETTINGS}
+            rest = {k: v for k, v in extra_body.items()
+                    if k not in _LITELLM_MODEL_SETTINGS}
             if rest:
                 extra_args = {**(extra_args or {}), **rest}
     try:
@@ -477,10 +483,11 @@ def _conversation_cache_key(model_name: str, instructions: str, doc_id,
                             items, folder_id=None) -> str:
     """Stable per-conversation cache-routing key, sent as the OpenAI
     ``prompt_cache_key`` through ModelSettings.extra_body (openai-agents
-    0.20 no longer derives it from RunConfig.group_id — verified against a
-    captured wire). Keyed on the prefix identity — model, instructions,
-    doc targeting, first conversation item — so a conversation's
-    continuations share one route without pooling unrelated conversations.
+    derives one only for its own OpenAI models, and per run unless the
+    RunConfig groups runs; LitellmModel gets none). Keyed on the prefix
+    identity — model, instructions, doc targeting, first conversation
+    item — so a conversation's continuations share one route without
+    pooling unrelated conversations.
     Callers pass the conversation's own items, never the SDK-prepended
     doc-targeting block: that block is byte-identical for every
     conversation about a document and would pool them all under one key.
@@ -497,26 +504,19 @@ def _conversation_cache_key(model_name: str, instructions: str, doc_id,
 
 def _model_backend_error(exc, lane: str, client=None) -> PageIndexAPIError:
     """Wrap a provider failure; the sol-class refusal (chatcmpl rejects
-    function tools while reasoning is on) gets its documented exits
-    appended, since the fix is a different route, not a retry. The exits
-    are per-lane: of the chat lane's three, two are dead ends for a
-    Responses-lane caller — it IS the other lane, and its reasoning knob is
-    ``reasoning``, not ``reasoning_effort``. On a cloud client an
-    auth-shaped failure gets the own-model architecture spelled out —
-    the misreading it corrects ("the cloud runs my model") surfaces
-    exactly here."""
+    function tools while reasoning is on) gets its exits appended on the
+    chat lane, since the fix is a different route, not a retry. LiteLLM
+    takes that route by itself unless the endpoint is a custom base URL
+    and the effort is unset. On a cloud client an auth-shaped failure gets
+    the own-model architecture spelled out — the misreading it corrects
+    ("the cloud runs my model") surfaces exactly here."""
     message = f"The model backend failed: {exc}"
-    if "Function tools with reasoning_effort" in str(exc):
+    if lane == "chat" and "Function tools with reasoning_effort" in str(exc):
         message += (
-            " — this model runs tools on the Responses lane: upgrade "
-            "litellm (newer releases route it there automatically)"
-        )
-        message += (
-            ", pass reasoning_effort (older litellm routes explicit "
-            "efforts), or use chat(protocol='responses') instead."
-            if lane == "chat"
-            else "."
-        )
+            " — this model runs tools on the Responses lane, where LiteLLM "
+            "sends it from a custom base URL only with reasoning_effort "
+            "set: pass reasoning_effort, or use chat(protocol='responses') "
+            "instead.")
     if (getattr(client, "api_key", None)
             and (getattr(exc, "status_code", None) == 401
                  or "api key" in str(exc).lower().replace("_", " "))):
@@ -950,7 +950,7 @@ async def _chat_events_agen(client, agent, items, run_kwargs):
                                  client),
             _openai_usage(recorder.responses)) from exc
     finally:
-        if not completed and hasattr(streamed, "cancel"):
+        if not completed:
             streamed.cancel()  # abandoned/failed: stop the agent task
         await _aclose_backend(agent)
     if recorded.get("finish_reason") in _CUT_SHORT:
@@ -1253,7 +1253,7 @@ def run_chat_completions(client, messages, stream: bool = False,
                 _translate_run_error(exc, max_turns, "chat", client),
                 _openai_usage(recorder.responses)) from exc
         finally:
-            if not completed and hasattr(streamed, "cancel"):
+            if not completed:
                 streamed.cancel()  # abandoned/failed: stop the agent task
             await _aclose_backend(agent)
         yield chunk({}, finish=recorded.get("finish_reason") or "stop")
@@ -1505,7 +1505,7 @@ def run_responses(client, input, model: Optional[str] = None,
                 _translate_run_error(exc, max_turns, "responses", client),
                 _responses_usage(recorder.responses)) from exc
         finally:
-            if not completed and hasattr(streamed, "cancel"):
+            if not completed:
                 streamed.cancel()  # abandoned/failed: stop the agent task
             await _aclose_backend(agent)
         transcript = streamed.to_input_list()[len(items):] + dropped
@@ -1541,21 +1541,20 @@ class _MessagesEvent(ChatObject):
 
 def _require_anthropic() -> None:
     try:
-        import anthropic  # noqa: F401
+        import anthropic
     except ImportError as exc:
         raise PageIndexAPIError(
             "chat(protocol='messages') drives your own chat model and "
             "requires the Anthropic SDK — "
             "pip install anthropic (or pip install 'pageindex[anthropic]')."
         ) from exc
-    try:
-        from anthropic import beta_tool  # noqa: F401
-        from anthropic.lib.tools import ToolError  # noqa: F401
-    except ImportError as exc:
+    # The extra is optional, so a plain pip install can predate its floor:
+    # older tool runners execute a refused turn's tool calls (before 0.108)
+    # or lack the Bedrock/Vertex runner (before 0.122).
+    if tuple(int(n) for n in anthropic.__version__.split(".")[:2]) < (0, 122):
         raise PageIndexAPIError(
-            "chat(protocol='messages') requires the anthropic SDK tool "
-            "runner (with ToolError) — pip install -U anthropic."
-        ) from exc
+            "chat(protocol='messages') requires anthropic 0.122.0 or newer, "
+            f"found {anthropic.__version__} — pip install -U anthropic.")
 
 
 _ANTHROPIC_CLIENTS: dict = {}  # (route, backend) key -> client, kept open
@@ -1584,16 +1583,8 @@ def _anthropic_client(backend, route):
         key = None
     if key in _ANTHROPIC_CLIENTS:
         return _ANTHROPIC_CLIENTS[key]
-    cls = getattr(anthropic, _ROUTE_CLIENTS[route], None)
-    if cls is None:
-        # A build predating this route's client class: same contract as
-        # the tool-runner probe, one step earlier.
-        raise PageIndexAPIError(
-            f"messages on this route needs the anthropic SDK's "
-            f"{_ROUTE_CLIENTS[route]} client, which this anthropic build "
-            "lacks — pip install -U anthropic.")
     try:
-        client = cls(**kwargs)
+        client = getattr(anthropic, _ROUTE_CLIENTS[route])(**kwargs)
     except (anthropic.AnthropicError, ValueError, TypeError) as exc:
         # Vertex/Foundry refuse a missing region or credential right at
         # construction, each with its own type; same contract for all.
@@ -1780,13 +1771,6 @@ def run_messages(client, messages, model: str, route: str,
                       and backend_client
                       not in list(_ANTHROPIC_CLIENTS.values()))
     try:
-        if not hasattr(backend_client.beta.messages, "tool_runner"):
-            # An anthropic build predating this route's tool runner passes
-            # _require_anthropic (its probes are older): name the gap here.
-            raise PageIndexAPIError(
-                "messages on this route needs the anthropic SDK's tool "
-                "runner, which this anthropic build lacks — "
-                "pip install -U anthropic.")
         if max_tokens is None:
             max_tokens = _default_max_tokens(
                 (extra_body or {}).get("thinking", thinking))
@@ -1894,7 +1878,7 @@ def run_messages(client, messages, model: str, route: str,
 
     def envelope(turns):
         final = turns[-1]
-        message = _Message(final.model_dump(mode="json", warnings=False))
+        message = _Message(final.model_dump(mode="json"))
         message["content"] = [_dump_block(item) for item in final.content]
         message["usage"] = run_usage(turns)
         message["messages"] = transcript(turns)
@@ -1906,10 +1890,7 @@ def run_messages(client, messages, model: str, route: str,
             try:
                 for turn_stream in runner:
                     for event in turn_stream:
-                        # the SDK's streamed Parsed* subclasses trip
-                        # pydantic's union check
-                        yield _MessagesEvent(event.model_dump(
-                            mode="json", warnings=False))
+                        yield _MessagesEvent(event.model_dump(mode="json"))
                     message = turn_stream.get_final_message()
                     if message.stop_reason is None:
                         raise PageIndexAPIError(
