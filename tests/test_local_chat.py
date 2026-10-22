@@ -2655,9 +2655,6 @@ def test_extra_body_model_settings_fields_ride_their_field(monkeypatch):
     value winning; the rest stay LiteLLM kwargs. OpenAI destinations keep
     the request-body path."""
     pytest.importorskip("litellm")
-    from agents import ModelSettings
-    assert local_chat._LITELLM_MODEL_SETTINGS <= {
-        field.name for field in dataclasses.fields(ModelSettings)}
     monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
     monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
                         lambda *a, **k: [])
@@ -2678,6 +2675,70 @@ def test_extra_body_model_settings_fields_ride_their_field(monkeypatch):
         local_chat._openai_agent(None, "chat", "anthropic/claude-x", "sys",
                                  None, None,
                                  extra_body={"temperature": "hot"})
+
+
+@needs_agents
+def test_litellm_model_settings_list_matches_litellm_model(monkeypatch):
+    """_LITELLM_MODEL_SETTINGS must name exactly the ModelSettings fields
+    LitellmModel forwards to litellm: set one at a time through its public
+    stream_response, those that change litellm's arguments. A field added
+    upstream fails here until it gets a sample."""
+    pytest.importorskip("litellm")
+    import litellm
+    from agents import ModelSettings, ModelTracing, function_tool
+    from agents.extensions.models.litellm_model import LitellmModel
+    from openai.types.shared import Reasoning
+    samples = {
+        "temperature": 0.3, "top_p": 0.5, "frequency_penalty": 0.1,
+        "presence_penalty": 0.2, "tool_choice": "required",
+        "parallel_tool_calls": False, "truncation": "auto", "max_tokens": 7,
+        "reasoning": Reasoning(effort="low"), "verbosity": "low",
+        "metadata": {"k": "v"}, "store": True,
+        "prompt_cache_retention": "24h", "include_usage": True,
+        "response_include": ["reasoning.encrypted_content"],
+        "top_logprobs": 2, "extra_query": {"q": "1"}, "extra_body": {"x": 1},
+        "extra_headers": {"X-Probe": "1"}, "extra_args": {"y": 2},
+        "retry": {"max_retries": 1},
+        "context_management": [{"type": "compaction",
+                                "compact_threshold": 1000}],
+        "prompt_cache_options": {"mode": "explicit", "ttl": "30m"},
+        "preserve_raw_usage": True}
+    assert {field.name for field in dataclasses.fields(ModelSettings)} == set(
+        samples), "a ModelSettings field changed: update samples"
+    seen = []
+
+    class Sent(Exception):
+        pass
+
+    async def acompletion(**kwargs):
+        seen.append(kwargs)
+        raise Sent
+
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+
+    @function_tool
+    def lookup(page: int) -> str:
+        return str(page)
+
+    model = LitellmModel("anthropic/claude-test", api_key="k")
+
+    def sent_with(settings):
+        async def run():
+            async for _ in model.stream_response(
+                    None, "q", settings, [lookup], None, [],
+                    ModelTracing.DISABLED):
+                pass
+
+        seen.clear()
+        with pytest.raises(Sent):
+            asyncio.run(run())
+        return seen[0]
+
+    unset = sent_with(ModelSettings())
+    forwarded = {name for name, value in samples.items()
+                 if sent_with(ModelSettings(**{name: value})) != unset}
+    assert forwarded - {"extra_body", "extra_args"} == (
+        local_chat._LITELLM_MODEL_SETTINGS)
 
 
 @needs_agents
