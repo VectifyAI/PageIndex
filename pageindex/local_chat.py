@@ -591,13 +591,35 @@ def _cut_text(output) -> list:
                 and after.get("type") == "message")]
 
 
+def _drop_repeated_thinking(chunk, streamed: list) -> None:
+    """LiteLLM's Anthropic stream closes each thinking block with a chunk
+    repeating the block's whole text beside its signature; openai-agents
+    appends that text to the deltas it already holds, so the block would
+    go back doubled under the original signature. When the text repeats
+    what streamed, only the signature stays; a block that arrives whole
+    keeps its text."""
+    choices = getattr(chunk, "choices", None)
+    delta = getattr(choices[0], "delta", None) if choices else None
+    for block in getattr(delta, "thinking_blocks", None) or ():
+        if not isinstance(block, dict) or block.get("type") != "thinking":
+            continue
+        text = block.get("thinking") or ""
+        if block.get("signature"):
+            if text and text == "".join(streamed):
+                block["thinking"] = ""
+            streamed.clear()
+        elif text:
+            streamed.append(text)
+
+
 def _record_chat_finish(agent, recorded: dict) -> None:
     """Capture each turn's native finish_reason from the raw LiteLLM
     response: openai-agents' ModelResponse drops it, so a truncated or
     content-filtered final turn would otherwise report as a clean "stop".
     The chat protocol has no transport client to hook (cf.
     _record_response_status), so this wraps the model's response fetch;
-    no-op if that private seam moves."""
+    no-op if that private seam moves. Streamed chunks also pass through
+    _drop_repeated_thinking on the way."""
     model = getattr(agent, "model", None)
     fetch = getattr(model, "_fetch_response", None)
     if fetch is None:
@@ -615,12 +637,14 @@ def _record_chat_finish(agent, recorded: dict) -> None:
 
         def __init__(self, inner):
             self._inner = inner
+            self._thinking: list = []
 
         def __aiter__(self):
             return self
 
         async def __anext__(self):
             chunk = await self._inner.__anext__()
+            _drop_repeated_thinking(chunk, self._thinking)
             note(chunk)
             return chunk
 

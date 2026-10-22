@@ -480,6 +480,21 @@ def _litellm_reply(content=None, tool_calls=None, **extra):
                             total_tokens=15))
 
 
+def _litellm_chunks(*deltas, finish="tool_calls"):
+    """A streamed turn as LiteLLM's parser hands it on: one chunk per
+    delta, then the finish."""
+    from litellm.types.utils import Delta, ModelResponseStream, StreamingChoices
+    return [ModelResponseStream(choices=[StreamingChoices(
+        delta=Delta(**delta), finish_reason=None)]) for delta in deltas] + [
+        ModelResponseStream(choices=[StreamingChoices(
+            delta=Delta(), finish_reason=finish)])]
+
+
+async def _chunk_stream(chunks):
+    for chunk in chunks:
+        yield chunk
+
+
 _TWO_CALLS = [{"id": f"call_{n}", "type": "function",
                "function": {"name": "get_document",
                             "arguments": '{"doc_name": "report.pdf"}'}}
@@ -500,6 +515,8 @@ def _two_turns(store_path, monkeypatch, client, model, first_reply,
     async def acompletion(**kwargs):
         sent.append(json.loads(json.dumps(kwargs["messages"])))
         reply = replies.pop(0)
+        if isinstance(reply, list):
+            return _chunk_stream(reply)
         return MockResponseIterator(reply) if kwargs.get("stream") else reply
 
     def call(history):
@@ -563,6 +580,35 @@ def test_claude_thinking_goes_back_with_its_calls(client, store_path,
                              _litellm_reply(tool_calls=_TWO_CALLS,
                                             thinking_blocks=thinking),
                              **settings)
+    for messages in (first["messages"], sent[1], sent[2]):
+        calls = [m for m in messages if m.get("tool_calls")]
+        assert calls[0].get("thinking_blocks") == thinking
+
+
+@needs_agents
+def test_streamed_claude_thinking_goes_back_once(client, store_path,
+                                                 monkeypatch):
+    """LiteLLM's Anthropic stream repeats a thinking block's whole text
+    beside its signature, and openai-agents appends that to the deltas it
+    already holds: the block went back doubled under the original
+    signature. A block that arrives whole keeps its text (the stream
+    parametrization of the transcript test above)."""
+    pytest.importorskip("litellm")
+    call = {"index": 0, **_TWO_CALLS[0]}
+    first, sent = _two_turns(
+        store_path, monkeypatch, client, "anthropic/claude-test",
+        _litellm_chunks(
+            {"reasoning_content": "plan", "thinking_blocks": [
+                {"type": "thinking", "thinking": "plan"}]},
+            {"reasoning_content": " step", "thinking_blocks": [
+                {"type": "thinking", "thinking": " step"}]},
+            {"reasoning_content": "", "thinking_blocks": [
+                {"type": "thinking", "thinking": "plan step",
+                 "signature": "SIG1"}]},
+            {"tool_calls": [call]}),
+        reasoning_effort="high", stream=True, stream_metadata=True)
+    thinking = [{"type": "thinking", "thinking": "plan step",
+                 "signature": "SIG1"}]
     for messages in (first["messages"], sent[1], sent[2]):
         calls = [m for m in messages if m.get("tool_calls")]
         assert calls[0].get("thinking_blocks") == thinking
