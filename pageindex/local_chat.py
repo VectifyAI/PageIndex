@@ -1786,9 +1786,7 @@ def run_messages(client, messages, model: str, route: str,
             max_tokens = _default_max_tokens(
                 (extra_body or {}).get("thinking", thinking))
         tool_runner = backend_client.beta.messages.tool_runner
-        # anthropic 2.2+ runs the loop on a server-held thread by default:
-        # later turns send only new messages, which proxies (OpenRouter)
-        # reject. Off, every turn sends the full history, as before.
+        # anthropic 2.2+ threads the loop server-side, which proxies reject
         threadless = ({"thread": False} if "thread" in
                       inspect.signature(tool_runner).parameters else {})
         runner = tool_runner(
@@ -1858,18 +1856,17 @@ def run_messages(client, messages, model: str, route: str,
                 "incompatible with this pageindex release."
             ), run_usage(turns))
         conversation = list(captured["messages"])
-        # Before 2.2 the runner appends a turn to its params only when it
-        # executed tools from it, and which turns qualify is vendor policy
-        # that has changed across anthropic releases, so stop_reason alone
-        # cannot tell. Whether final's tool_use ids already sit in the
-        # history is the ground truth for "already appended". 2.2+ appends
-        # every reply: one the history ends on is final, with no results
-        # after it, so it goes and final is re-added below as before.
+        # The runner appends a turn to its params only when it executed
+        # tools from it, and which turns qualify is vendor policy that has
+        # changed across anthropic releases, so stop_reason alone cannot
+        # tell. Whether final's tool_use ids already sit in the history is
+        # the ground truth for "already appended".
         new_messages = [_dump_message(message)
                         for message in conversation[len(prepared):]]
-        if new_messages and new_messages[-1].get("role") == "assistant":
-            new_messages.pop()
         final_blocks = [_dump_block(item) for item in final.content]
+        # anthropic 2.2+ appends final too; it is re-added below
+        if new_messages and new_messages[-1].get("content") == final_blocks:
+            new_messages.pop()
         final_ids = {block.get("id") for block in final_blocks
                      if block.get("type") == "tool_use"}
         history_ids = {block.get("id")
