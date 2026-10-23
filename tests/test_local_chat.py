@@ -3376,6 +3376,66 @@ def test_messages_tool_use_cut_by_max_tokens_not_duplicated(client,
         assert [block["type"] for block in result["content"]] == ["tool_use"]
 
 
+_PAUSED = ([{"type": "text", "text": "Paused part"}], "pause_turn")
+_DONE = ([{"type": "text", "text": "Done"}], "end_turn")
+
+
+@needs_anthropic
+@pytest.mark.parametrize("turns,kept,texts", [
+    pytest.param([_DONE], 1, ["Done"], id="2.2-final"),
+    pytest.param([([{"type": "text", "text": "Partial"},
+                    _anthropic_tool_use()], "max_tokens")], 1, ["Partial"],
+                 id="2.2-cut-tool-use"),
+    pytest.param([_PAUSED, _DONE], 2, ["Paused part", "Done"], id="2.2-paused"),
+    pytest.param([_PAUSED, _DONE], 1, ["Paused part", "Done"],
+                 id="2.1-paused"),
+])
+def test_messages_transcript_carries_each_turn_once(client, store_path,
+                                                    monkeypatch, turns, kept,
+                                                    texts):
+    """Each turn appears once in the transcript; the loop runs unthreaded."""
+    from anthropic.types.beta import BetaMessage
+    seed_doc(store_path, "pi-a", "report.pdf")
+    replies = [BetaMessage.model_validate(_anthropic_message(*turn))
+               for turn in turns]
+    seen = {}
+
+    class _Runner:
+        def __init__(self, messages):
+            self.history = [*messages, *({"role": "assistant",
+                                          "content": reply.content}
+                                         for reply in replies[:kept])]
+
+        def __iter__(self):
+            return iter(replies)
+
+        def generate_tool_call_response(self):
+            return None
+
+        def set_messages_params(self, callback):
+            callback({"messages": self.history})
+
+    class _Fake:
+        class beta:
+            class messages:
+                @staticmethod
+                def tool_runner(*, messages, thread=None, **kwargs):
+                    seen["thread"] = thread
+                    return _Runner(messages)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(local_chat, "_anthropic_client",
+                        lambda backend=None, route="anthropic": _Fake())
+    result = client._messages("q", model="claude-test", max_tokens=100)
+    assert seen["thread"] is False
+    assert [[(block["type"], block.get("text")) for block in message["content"]]
+            for message in result["messages"]] == [[("text", text)]
+                                                    for text in texts]
+    assert {message["role"] for message in result["messages"]} == {"assistant"}
+
+
 @needs_anthropic
 def test_messages_refusal_with_tool_use_stays_appendable(client, store_path,
                                                          fake_anthropic):
