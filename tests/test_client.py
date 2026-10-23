@@ -1839,6 +1839,10 @@ def test_folders_are_cloud_only(local_client):
     with pytest.raises(PageIndexAPIError, match="cloud-only"):
         local_client.create_metadata_schema("f", {"year": {"type": "number"}})
     with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        local_client.get_metadata_schema("f")
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        local_client.delete_metadata_schema("f")
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
         local_client.folder_context("f")
     assert local_client.folder_context("root") == ""  # the library itself
 
@@ -1937,6 +1941,17 @@ def test_cloud_request_wiring(cloud, sample_pdf):
     assert calls[-1]["url"] == "https://api.pageindex.ai/folder/f%2F1/metadata/schema/"
     assert calls[-1]["json"] == {"fields": fields}
     assert calls[-1]["timeout"] == 30
+
+    fake.payload = {"folder_id": "f/1", "workspace_id": "f/1",
+                    "inherited": False, "schema": {"fields": fields}}
+    assert client.get_metadata_schema("f/1") == fake.payload
+    assert calls[-1]["method"] == "GET"
+    assert calls[-1]["url"] == "https://api.pageindex.ai/folder/f%2F1/metadata/schema/"
+
+    fake.payload = {"folder_id": "f/1", "deleted": True}
+    assert client.delete_metadata_schema("f/1") == fake.payload
+    assert calls[-1]["method"] == "DELETE"
+    assert calls[-1]["url"] == "https://api.pageindex.ai/folder/f%2F1/metadata/schema/"
 
     client.BASE_URL = "https://staging.example"
     client.api_key = "other"
@@ -2043,6 +2058,8 @@ def test_cloud_errors_carry_status_code(cloud, monkeypatch, sample_pdf):
         lambda: client.create_folder("f"),
         lambda: client.list_folders(),
         lambda: client.create_metadata_schema("f", {}),
+        lambda: client.get_metadata_schema("f"),
+        lambda: client.delete_metadata_schema("f"),
         lambda: client.folder_context("f"),
     ]
     for attempt in attempts:
