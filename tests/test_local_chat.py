@@ -376,7 +376,6 @@ def test_anthropic_routed_models_mark_managed_prefix_for_cache(
                  "bedrock/us.anthropic.claude-sonnet-5",
                  "vertex_ai/claude-sonnet-4-5"):
         agent = _openai_agent(client, "chat", name, "sys", None, None)
-        # beside the marks, the effort that keeps Claude's thinking is dropped
         assert agent.model_settings.extra_args == {
             **marked, "additional_drop_params": ["reasoning_effort"]}
     for name in ("gpt-5", "openai/Qwen/x", "litellm/groq/x",
@@ -404,8 +403,7 @@ def test_status_recorder_attaches_to_the_real_responses_model(monkeypatch):
 
 def _anthropic_wire(monkeypatch, client, model, messages: str | list = "hi",
                     **settings):
-    """One chat_completions call through the real LitellmModel and
-    litellm's request build: the HTTP request it sent, and the envelope."""
+    """One chat_completions call via the real stack: (request, envelope)."""
     from litellm.llms.custom_httpx.http_handler import (AsyncHTTPHandler,
                                                         HTTPHandler)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
@@ -439,10 +437,6 @@ def _anthropic_wire(monkeypatch, client, model, messages: str | list = "hi",
 @needs_agents
 def test_cache_marker_reaches_the_anthropic_wire(client, store_path,
                                                  monkeypatch):
-    # End-to-end guard for the injection flag: through the real
-    # LitellmModel and litellm's request build, the marker must appear in
-    # the HTTP body — a regression in either vendor hop silently reverts
-    # anthropic-routed calls to full price.
     pytest.importorskip("litellm")
     captured, result = _anthropic_wire(
         monkeypatch, client, "anthropic/claude-3-5-sonnet-20240620")
@@ -490,8 +484,7 @@ def _litellm_reply(content=None, tool_calls=None, **extra):
 
 
 def _litellm_chunks(*deltas, finish="tool_calls"):
-    """A streamed turn as LiteLLM's parser hands it on: one chunk per
-    delta, then the finish."""
+    """A streamed turn as LiteLLM's parser yields it."""
     from litellm.types.utils import Delta, ModelResponseStream, StreamingChoices
     return [ModelResponseStream(choices=[StreamingChoices(
         delta=Delta(**delta), finish_reason=None)]) for delta in deltas] + [
@@ -580,9 +573,7 @@ def test_chat_completions_messages_resend_the_wire(client, store_path,
 ])
 def test_claude_thinking_goes_back_with_its_calls(client, store_path,
                                                   monkeypatch, settings):
-    """Either way of setting effort, Claude's thinking blocks go back on
-    the tool continuation and in the returned messages, and only there:
-    not again as reasoning_content."""
+    """Thinking goes back as thinking_blocks, never as reasoning_content."""
     pytest.importorskip("litellm")
     thinking = [{"type": "thinking", "thinking": "hmm", "signature": "SIG1"}]
     first, sent = _two_turns(store_path, monkeypatch, client,
@@ -603,10 +594,7 @@ def test_claude_thinking_goes_back_with_its_calls(client, store_path,
     {"stream": True, "stream_metadata": True}])
 def test_claude_thinking_goes_back_with_no_effort_set(client, store_path,
                                                       monkeypatch, settings):
-    """Claude 5.x thinks unasked, and openai-agents replays thinking only
-    when ModelSettings.reasoning carries an effort: with none from the
-    caller the SDK opens that gate and has LiteLLM drop the effort, so the
-    request carries none."""
+    """Claude's thinking goes back with no effort set, and none is sent."""
     pytest.importorskip("litellm")
     thinking = [{"type": "thinking", "thinking": "", "signature": "SIG1"}]
     first, sent = _two_turns(store_path, monkeypatch, client,
@@ -625,10 +613,7 @@ def test_claude_thinking_goes_back_with_no_effort_set(client, store_path,
     "openrouter/qwen/qwen3-test-thinking", "deepseek/deepseek-chat"])
 def test_reasoning_content_goes_back_to_its_model(client, store_path,
                                                   monkeypatch, model):
-    """Kimi, GLM and DeepSeek ask for a turn's reasoning_content back
-    across tool calls, and Qwen and OpenRouter read it there; openai-agents
-    sends it back only to DeepSeek names. Each model's own reasoning goes
-    back to it on the continuation, in messages and on the next call."""
+    """Each model's reasoning_content goes back to it."""
     pytest.importorskip("litellm")
     first, sent = _two_turns(store_path, monkeypatch, client, model,
                              _litellm_reply(tool_calls=_TWO_CALLS[:1],
@@ -640,8 +625,7 @@ def test_reasoning_content_goes_back_to_its_model(client, store_path,
 
 @needs_agents
 def test_reasoning_content_never_reaches_claude(client, monkeypatch):
-    """Claude's thinking rides thinking_blocks: another model's
-    reasoning_content in the history stays out of the Anthropic request."""
+    """Another model's reasoning_content stays out of Claude's request."""
     pytest.importorskip("litellm")
     history = [{"role": "user", "content": "q1"},
                {"role": "assistant", "content": None,
@@ -661,9 +645,7 @@ def test_reasoning_content_never_reaches_claude(client, monkeypatch):
 def test_refused_reasoning_content_goes_again_without_it(client, store_path,
                                                          monkeypatch,
                                                          settings):
-    """An API that refuses reasoning_content on an assistant message (Groq
-    answers 400) gets that request again without it, and the model gets no
-    more of it: both runs finish."""
+    """A refused reasoning_content is retried without, then never sent."""
     pytest.importorskip("litellm")
     import litellm
     from litellm.exceptions import BadRequestError
@@ -698,8 +680,7 @@ def test_refused_reasoning_content_goes_again_without_it(client, store_path,
 
 @needs_agents
 def test_other_400s_are_not_retried(client, monkeypatch):
-    """Only a 400 that names reasoning_content gets the retry: any other
-    surfaces after one call."""
+    """A 400 that doesn't name reasoning_content is not retried."""
     pytest.importorskip("litellm")
     import litellm
     from litellm.exceptions import BadRequestError
@@ -719,9 +700,7 @@ def test_other_400s_are_not_retried(client, monkeypatch):
 @needs_agents
 def test_other_400s_keep_the_reasoning_content_replay(client, store_path,
                                                       monkeypatch):
-    """A model that took its reasoning_content back and then hits an
-    unrelated 400 (a context limit, say) gets no retry, and keeps getting
-    its reasoning back on later calls."""
+    """An unrelated 400 leaves the reasoning_content replay on."""
     pytest.importorskip("litellm")
     import litellm
     from litellm.exceptions import BadRequestError
@@ -752,9 +731,7 @@ def test_other_400s_keep_the_reasoning_content_replay(client, store_path,
 
 @needs_agents
 def test_kept_thinking_sends_no_effort(client, monkeypatch):
-    """The effort that keeps Claude's thinking never reaches the provider:
-    LiteLLM drops it before building the request, so the wire carries no
-    thinking or effort setting; one the caller sets still goes out."""
+    """The thinking-keeping effort never reaches the wire; a caller's does."""
     pytest.importorskip("litellm")
     model = "anthropic/claude-sonnet-5-5"
     unset, _ = _anthropic_wire(monkeypatch, client, model)
@@ -767,11 +744,7 @@ def test_kept_thinking_sends_no_effort(client, monkeypatch):
 @needs_agents
 def test_streamed_claude_thinking_goes_back_once(client, store_path,
                                                  monkeypatch):
-    """LiteLLM's Anthropic stream repeats a thinking block's whole text
-    beside its signature, and openai-agents appends that to the deltas it
-    already holds: the block went back doubled under the original
-    signature. A block that arrives whole keeps its text (the stream
-    parametrization of the transcript test above)."""
+    """Streamed thinking goes back once, not doubled."""
     pytest.importorskip("litellm")
     call = {"index": 0, **_TWO_CALLS[0]}
     first, sent = _two_turns(
@@ -816,9 +789,7 @@ def test_reasoning_effort_reaches_litellm_as_given(client, monkeypatch,
 @needs_agents
 def test_extra_body_settings_litellm_model_skips_reach_litellm(client,
                                                                monkeypatch):
-    """ModelSettings fields LitellmModel never reads reach LiteLLM as its
-    kwargs; routed into the settings object they were dropped, and retry
-    turned on the runner's own retries instead."""
+    """Settings LitellmModel ignores reach LiteLLM as kwargs."""
     pytest.importorskip("litellm")
     import litellm
     seen = []
@@ -2659,8 +2630,6 @@ def test_responses_envelope_fields_and_cache_group(client, store_path,
 
 @needs_agents
 def test_litellm_import_failure_surfaces_its_cause(monkeypatch):
-    # litellm is a base dependency, so a failing import is a version skew
-    # to show, not a missing install to suggest.
     pytest.importorskip("agents.extensions.models.litellm_model")
     monkeypatch.setitem(sys.modules, "litellm", None)
     with pytest.raises(PageIndexAPIError, match="failed to import") as info:
@@ -2670,11 +2639,7 @@ def test_litellm_import_failure_surfaces_its_cause(monkeypatch):
 
 
 def test_sol_class_refusal_names_its_exits():
-    """The chatcmpl+tools-while-reasoning 400 is a lane problem, not a
-    retry problem — the chat lane's error names both real exits. Upgrading
-    litellm is none: the pinned range already routes such calls, except
-    from a custom base URL with the effort unset. The Responses lane is
-    the other route already and gets no exits."""
+    """The tools-with-reasoning 400 names its exits on the chat lane only."""
     refusal = Exception(
         "Error code: 400 - Function tools with reasoning_effort are not "
         "supported for gpt-5.6-sol in /v1/chat/completions.")
@@ -2741,12 +2706,7 @@ def test_agent_carries_prompt_cache_key_in_extra_body(monkeypatch):
 
 @needs_agents
 def test_reasoning_passthrough_reaches_each_engine(monkeypatch):
-    """Per-door native reasoning, forwarded verbatim. The chat door's
-    effort rides ModelSettings.reasoning, which openai-agents forwards to
-    LiteLLM and reads to keep Claude's thinking blocks; a value outside the
-    OpenAI enum ("disable") rides extra_args, beside the Claude cache
-    marker. The responses door's object rides ModelSettings.reasoning,
-    which the Responses model forwards verbatim. Unset sends nothing."""
+    """Each door forwards its native reasoning; unset sends nothing."""
     pytest.importorskip("litellm")
     from openai.types.shared import Reasoning
     monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
@@ -2786,11 +2746,7 @@ def test_reasoning_passthrough_reaches_each_engine(monkeypatch):
 
 @needs_agents
 def test_extra_body_model_settings_fields_ride_their_field(monkeypatch):
-    """LiteLLM-routed answer lane: LitellmModel passes the settings it
-    reads to litellm by name beside **extra_args, so a caller's copy in
-    extra_args collided with them. Those ride their field, the caller's
-    value winning; the rest stay LiteLLM kwargs. OpenAI destinations keep
-    the request-body path."""
+    """extra_body settings LitellmModel reads ride their field, caller wins."""
     pytest.importorskip("litellm")
     monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
     monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
@@ -2816,10 +2772,7 @@ def test_extra_body_model_settings_fields_ride_their_field(monkeypatch):
 
 @needs_agents
 def test_litellm_model_settings_list_matches_litellm_model(monkeypatch):
-    """_LITELLM_MODEL_SETTINGS must name exactly the ModelSettings fields
-    LitellmModel forwards to litellm: set one at a time through its public
-    stream_response, those that change litellm's arguments. A field added
-    upstream fails here until it gets a sample."""
+    """_LITELLM_MODEL_SETTINGS names exactly what LitellmModel forwards."""
     pytest.importorskip("litellm")
     import litellm
     from agents import ModelSettings, ModelTracing, function_tool
@@ -3981,10 +3934,7 @@ def test_messages_bad_backend_wraps_like_the_other_doors():
 
 @needs_agents
 def test_extra_headers_ride_model_settings(monkeypatch):
-    """Both openai-agents doors merge ModelSettings.extra_headers into
-    their requests (wire-probed: LiteLLM's chatcmpl adapters forward
-    custom headers; its anthropic adapter forwards only the anthropic-beta
-    flags on LiteLLM's own list)."""
+    """Both openai-agents doors send ModelSettings.extra_headers."""
     monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
     monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
                         lambda *a, **k: [])
@@ -4950,8 +4900,6 @@ def test_anthropic_client_unconfigured_route_keeps_the_error_contract(
     "claude-sonnet-4-6", "bedrock/anthropic.claude-sonnet-4-6-v1:0"])
 def test_messages_refuses_anthropic_below_its_floor(client, monkeypatch,
                                                      model):
-    # anthropic 0.107 runs a refused turn's tool calls and passes every
-    # feature the lane uses; 0.108-0.121 lack the Bedrock/Vertex runner.
     import anthropic
 
     def transport(*args):
@@ -5193,8 +5141,6 @@ def test_extra_body_refuses_non_dicts_and_argument_keys():
     backend = r"backend= \(API chat models only\)"
     for key, argument in (("stream", "stream="), ("doc_id", "doc_id="),
                           ("folder_id", "folder_id="), ("model", "model="),
-                          # on the chat lane it turned thinking on, but
-                          # openai-agents replays it only from the argument
                           ("reasoning_effort", "reasoning_effort="),
                           ("api_key", backend), ("base_url", backend),
                           ("api_base", backend)):

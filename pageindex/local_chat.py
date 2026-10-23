@@ -235,16 +235,11 @@ def _sdk_backend(backend) -> dict:
             for key, value in (backend or {}).items()}
 
 
-# Models whose API refused a replayed reasoning_content.
 _REASONING_CONTENT_REFUSED: set = set()
 
 
 def _replay_reasoning_content(context) -> bool:
-    """A turn's reasoning_content goes back to the model that wrote it:
-    Kimi, GLM and DeepSeek ask for it across tool calls, and openai-agents
-    sends it only to DeepSeek names. A caller's history carries no origin,
-    so it goes back too. Thinking that rides thinking_blocks (Claude's)
-    stays there, and a model that refused the field gets no more of it."""
+    """A turn's reasoning_content goes back to the model that wrote it."""
     if (context.model in _REASONING_CONTENT_REFUSED
             or "thinking_blocks" in context.reasoning.provider_data):
         return False
@@ -253,10 +248,7 @@ def _replay_reasoning_content(context) -> bool:
 
 
 def _reasoning_content_retry(model):
-    """Some APIs refuse a replayed reasoning_content with a 400 that names
-    it (Groq: "property 'reasoning_content' is unsupported"): the runner
-    sends the request again at once without it, and that model gets no
-    more. Any other 400 (a context limit, a content filter) is left alone."""
+    """Retry once without reasoning_content when a 400 names it."""
     from agents import ModelRetrySettings, RetryDecision
 
     def policy(context):
@@ -288,7 +280,6 @@ def _openai_model(protocol: str, model_name: str, backend=None):
         from agents.extensions.models.litellm_model import LitellmModel
         import litellm
     except ImportError as exc:
-        # litellm is a base dependency: what fails here is a version skew
         raise PageIndexAPIError(
             f"'{model_name}' routes through LiteLLM, which failed to "
             f"import: {exc}") from exc
@@ -435,10 +426,6 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
     # other providers' request bodies, which Anthropic rejects as unknown.
     # The responses lane is the OpenAI SDK whatever the name says.
     openai_backend = protocol == "responses" or _openai_protocol(model_name)
-    # Chat-lane effort rides ModelSettings.reasoning: openai-agents forwards
-    # it to LiteLLM and keeps Claude's thinking blocks across tool turns only
-    # when it is set there. A value outside the OpenAI enum ("disable") rides
-    # extra_args, the channel openai-agents keeps for those.
     marks = _cache_extra_args(model_name) if protocol == "chat" else None
     extra_args = marks
     if reasoning_effort:
@@ -466,9 +453,6 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
         if openai_backend:
             body = {**(body or {}), **extra_body}
         else:
-            # LitellmModel passes the settings it reads to litellm by name
-            # beside **extra_args, so those ride their field; it ignores
-            # the other ModelSettings fields, so the rest stay kwargs.
             routed = {k: v for k, v in extra_body.items()
                       if k in _LITELLM_MODEL_SETTINGS}
             rest = {k: v for k, v in extra_body.items()
@@ -477,11 +461,7 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
                 extra_args = {**(extra_args or {}), **rest}
     if (marks and reasoning is None and "reasoning" not in routed
             and "reasoning_effort" not in (extra_args or {})):
-        # Temporary: Claude 5.x thinks unasked, and openai-agents replays its
-        # thinking only when ModelSettings.reasoning carries an effort. This
-        # one opens that gate and never reaches the model: LiteLLM drops it
-        # before building the request. Remove once openai-agents keys the
-        # replay on the returned blocks.
+        # Temporary until openai-agents replays thinking without an effort
         reasoning = Reasoning(effort="high")
         drop = list((extra_args or {}).get("additional_drop_params") or ())
         extra_args = {**(extra_args or {}),
@@ -519,19 +499,7 @@ def _validate_max_turns(max_turns) -> None:
 
 def _conversation_cache_key(model_name: str, instructions: str, doc_id,
                             items, folder_id=None) -> str:
-    """Stable per-conversation cache-routing key, sent as the OpenAI
-    ``prompt_cache_key`` through ModelSettings.extra_body (openai-agents
-    derives one only for its own OpenAI models, and per run unless the
-    RunConfig groups runs; LitellmModel gets none). Keyed on the prefix
-    identity — model, instructions, doc targeting, first conversation
-    item — so a conversation's continuations share one route without
-    pooling unrelated conversations.
-    Callers pass the conversation's own items, never the SDK-prepended
-    doc-targeting block: that block is byte-identical for every
-    conversation about a document and would pool them all under one key.
-    doc_id and folder_id carry the targeting identity instead — the same
-    opening question against different documents is different
-    conversations."""
+    """prompt_cache_key per conversation; items exclude the targeting block."""
     scope = [doc_id] if isinstance(doc_id, str) else doc_id
     seed = json.dumps([model_name, instructions, scope,
                        *([folder_id] if folder_id else []),
@@ -541,13 +509,7 @@ def _conversation_cache_key(model_name: str, instructions: str, doc_id,
 
 
 def _model_backend_error(exc, lane: str, client=None) -> PageIndexAPIError:
-    """Wrap a provider failure; the sol-class refusal (chatcmpl rejects
-    function tools while reasoning is on) gets its exits appended on the
-    chat lane, since the fix is a different route, not a retry. LiteLLM
-    takes that route by itself unless the endpoint is a custom base URL
-    and the effort is unset. On a cloud client an auth-shaped failure gets
-    the own-model architecture spelled out — the misreading it corrects
-    ("the cloud runs my model") surfaces exactly here."""
+    """Wrap a provider failure, appending the hint that fixes it, if any."""
     message = f"The model backend failed: {exc}"
     if lane == "chat" and "Function tools with reasoning_effort" in str(exc):
         message += (
@@ -643,12 +605,7 @@ def _cut_text(output) -> list:
 
 
 def _drop_repeated_thinking(chunk, streamed: list) -> None:
-    """LiteLLM's Anthropic stream closes each thinking block with a chunk
-    repeating the block's whole text beside its signature; openai-agents
-    appends that text to the deltas it already holds, so the block would
-    go back doubled under the original signature. When the text repeats
-    what streamed, only the signature stays; a block that arrives whole
-    keeps its text."""
+    """Blank a closing thinking block's text that repeats what streamed."""
     choices = getattr(chunk, "choices", None)
     delta = getattr(choices[0], "delta", None) if choices else None
     for block in getattr(delta, "thinking_blocks", None) or ():
@@ -664,13 +621,7 @@ def _drop_repeated_thinking(chunk, streamed: list) -> None:
 
 
 def _record_chat_finish(agent, recorded: dict) -> None:
-    """Capture each turn's native finish_reason from the raw LiteLLM
-    response: openai-agents' ModelResponse drops it, so a truncated or
-    content-filtered final turn would otherwise report as a clean "stop".
-    The chat protocol has no transport client to hook (cf.
-    _record_response_status), so this wraps the model's response fetch;
-    no-op if that private seam moves. Streamed chunks also pass through
-    _drop_repeated_thinking on the way."""
+    """Record each turn's finish_reason; dedupe streamed thinking."""
     model = getattr(agent, "model", None)
     fetch = getattr(model, "_fetch_response", None)
     if fetch is None:
@@ -1607,9 +1558,6 @@ def _require_anthropic() -> None:
             "requires the Anthropic SDK — "
             "pip install anthropic (or pip install 'pageindex[anthropic]')."
         ) from exc
-    # The extra is optional, so a plain pip install can predate its floor:
-    # older tool runners execute a refused turn's tool calls (before 0.108)
-    # or lack the Bedrock/Vertex runner (before 0.122).
     if tuple(int(n) for n in anthropic.__version__.split(".")[:2]) < (0, 122):
         raise PageIndexAPIError(
             "chat(protocol='messages') requires anthropic 0.122.0 or newer, "

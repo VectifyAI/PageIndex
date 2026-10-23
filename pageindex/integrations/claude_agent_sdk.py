@@ -39,8 +39,6 @@ def build_claude_mcp(client, include_management: bool = False, *,
     if getattr(client, "api_key", None):
         return _cloud_relay(client, include_management, server_name)
     if _sdk_release() < (0, 2, 166):
-        # the claude extra's floor, the oldest release verified to pass
-        # MAX_RESULT_CHARS on to the CLI
         raise PageIndexAPIError(
             "as_claude_mcp requires claude-agent-sdk 0.2.166 or newer — "
             "pip install -U claude-agent-sdk.")

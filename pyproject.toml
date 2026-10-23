@@ -29,7 +29,6 @@ python = ">=3.10"
 requests = ">=2.28.0"
 # MCP retries use Retry(allowed_methods=...), added in urllib3 1.26.
 urllib3 = ">=1.26"
-# openai-agents' own floor.
 openai = ">=2.45.0"
 # Older releases break resending streamed chat `messages`: a tool turn
 # loses its empty content (0.18.1), Claude thinking fails validation (<0.20).

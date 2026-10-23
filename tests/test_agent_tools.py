@@ -849,9 +849,7 @@ def test_as_claude_mcp_cloud_needs_an_sdk_that_serves_the_relay(monkeypatch):
 
 def test_as_claude_mcp_local_needs_an_sdk_that_keeps_results_whole(
         client, monkeypatch):
-    """An SDK older than the claude extra's floor drops the result-size
-    annotation, so results over 50,000 chars would reach the model as a
-    2KB preview."""
+    """Locally, an SDK below the claude extra's floor is refused."""
     pytest.importorskip("claude_agent_sdk")
     import importlib.metadata
 
@@ -1103,9 +1101,7 @@ def test_non_string_doc_name_stays_not_found(client, store_path):
 @pytest.mark.parametrize("mute", ["_mute_litellm_bridge_usage_warning",
                                   "_quiet_litellm"])
 def test_openai_agent_config_quiets_litellm(tmp_path, monkeypatch, mute):
-    """The BYO path resolves its model through LiteLLM in the caller's
-    process, outside our completion helpers — the LiteLLM noise mutes must
-    run at config time, and only for LiteLLM-routed models."""
+    """LiteLLM's noise mutes run at config time, for LiteLLM models only."""
     pytest.importorskip("agents")
     import pageindex.utils
     calls = []

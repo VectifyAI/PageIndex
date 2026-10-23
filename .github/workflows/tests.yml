@@ -35,8 +35,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      # "without" is the default install: openai-agents (a dependency) but
-      # neither optional extra; "with" adds anthropic and claude-agent-sdk
+      # "without" is the default install; "with" adds both optional extras
       - run: pip install -r requirements.txt pytest
       - if: matrix.agent-frameworks == 'with'
         run: pip install claude-agent-sdk anthropic

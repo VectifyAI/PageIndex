@@ -48,8 +48,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: pip install -r requirements.txt pytest
-      # mirror tests.yml's install shapes: the gate must cover the default
-      # install, the optional extras, and the pdfium 4.x insurance alike
+      # mirror tests.yml's install shapes
       - if: matrix.agent-frameworks == 'with'
         run: pip install claude-agent-sdk anthropic
       - if: matrix.pdfium == '4'
