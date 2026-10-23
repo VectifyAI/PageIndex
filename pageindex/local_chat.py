@@ -235,8 +235,7 @@ def _sdk_backend(backend) -> dict:
             for key, value in (backend or {}).items()}
 
 
-# Models a replayed reasoning_content went to, and those that refused it.
-_REASONING_CONTENT_SENT: set = set()
+# Models whose API refused a replayed reasoning_content.
 _REASONING_CONTENT_REFUSED: set = set()
 
 
@@ -250,21 +249,19 @@ def _replay_reasoning_content(context) -> bool:
             or "thinking_blocks" in context.reasoning.provider_data):
         return False
     origin = context.reasoning.origin_model
-    if origin is not None and origin != context.model:
-        return False
-    _REASONING_CONTENT_SENT.add(context.model)
-    return True
+    return origin is None or origin == context.model
 
 
 def _reasoning_content_retry(model):
-    """Some APIs refuse a replayed reasoning_content with a 400 (Groq:
-    "property 'reasoning_content' is unsupported"): the runner sends the
-    request again at once without it, and that model gets no more."""
+    """Some APIs refuse a replayed reasoning_content with a 400 that names
+    it (Groq: "property 'reasoning_content' is unsupported"): the runner
+    sends the request again at once without it, and that model gets no
+    more. Any other 400 (a context limit, a content filter) is left alone."""
     from agents import ModelRetrySettings, RetryDecision
 
     def policy(context):
         if (context.normalized.status_code in (400, 422)
-                and model.model in _REASONING_CONTENT_SENT
+                and "reasoning_content" in str(context.error)
                 and model.model not in _REASONING_CONTENT_REFUSED):
             _REASONING_CONTENT_REFUSED.add(model.model)
             return RetryDecision(retry=True, delay=0)

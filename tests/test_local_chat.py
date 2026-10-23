@@ -698,8 +698,8 @@ def test_refused_reasoning_content_goes_again_without_it(client, store_path,
 
 @needs_agents
 def test_other_400s_are_not_retried(client, monkeypatch):
-    """Only a model that was sent reasoning_content gets the retry: any
-    other 400 surfaces after one call."""
+    """Only a 400 that names reasoning_content gets the retry: any other
+    surfaces after one call."""
     pytest.importorskip("litellm")
     import litellm
     from litellm.exceptions import BadRequestError
@@ -714,6 +714,40 @@ def test_other_400s_are_not_retried(client, monkeypatch):
     with pytest.raises(PageIndexAPIError):
         client.chat_completions("q", model="groq/never-sent-reasoning")
     assert len(calls) == 1
+
+
+@needs_agents
+def test_other_400s_keep_the_reasoning_content_replay(client, store_path,
+                                                      monkeypatch):
+    """A model that took its reasoning_content back and then hits an
+    unrelated 400 (a context limit, say) gets no retry, and keeps getting
+    its reasoning back on later calls."""
+    pytest.importorskip("litellm")
+    import litellm
+    from litellm.exceptions import BadRequestError
+    monkeypatch.setattr(local_chat, "_REASONING_CONTENT_REFUSED", set())
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    sent = []
+
+    async def acompletion(**kwargs):
+        messages = kwargs["messages"]
+        sent.append(any(m.get("reasoning_content") for m in messages))
+        if any(m.get("content") == "too long" for m in messages):
+            raise BadRequestError(message="context length exceeded",
+                                  model=kwargs["model"],
+                                  llm_provider="moonshot")
+        if any(m["role"] == "tool" for m in messages):
+            return _litellm_reply("A")
+        return _litellm_reply(tool_calls=_TWO_CALLS[:1],
+                              reasoning_content="think")
+
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+    model = "moonshot/kimi-k2-thinking"
+    client.chat_completions("q", doc_id=doc_id, model=model)
+    with pytest.raises(PageIndexAPIError):
+        client.chat_completions("too long", doc_id=doc_id, model=model)
+    client.chat_completions("q", doc_id=doc_id, model=model)
+    assert sent == [False, True, False, False, True]
 
 
 @needs_agents
