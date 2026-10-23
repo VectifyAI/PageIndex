@@ -1858,13 +1858,17 @@ def run_messages(client, messages, model: str, route: str,
                 "incompatible with this pageindex release."
             ), run_usage(turns))
         conversation = list(captured["messages"])
-        # The runner appends a turn to its params only when it executed
-        # tools from it, and which turns qualify is vendor policy that has
-        # changed across anthropic releases, so stop_reason alone cannot
-        # tell. Whether final's tool_use ids already sit in the history is
-        # the ground truth for "already appended".
+        # Before 2.2 the runner appends a turn to its params only when it
+        # executed tools from it, and which turns qualify is vendor policy
+        # that has changed across anthropic releases, so stop_reason alone
+        # cannot tell. Whether final's tool_use ids already sit in the
+        # history is the ground truth for "already appended". 2.2+ appends
+        # every reply: one the history ends on is final, with no results
+        # after it, so it goes and final is re-added below as before.
         new_messages = [_dump_message(message)
                         for message in conversation[len(prepared):]]
+        if new_messages and new_messages[-1].get("role") == "assistant":
+            new_messages.pop()
         final_blocks = [_dump_block(item) for item in final.content]
         final_ids = {block.get("id") for block in final_blocks
                      if block.get("type") == "tool_use"}

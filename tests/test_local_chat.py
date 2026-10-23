@@ -3377,6 +3377,55 @@ def test_messages_tool_use_cut_by_max_tokens_not_duplicated(client,
 
 
 @needs_anthropic
+@pytest.mark.parametrize("content,stop_reason", [
+    ([{"type": "text", "text": "The answer"}], "end_turn"),
+    ([{"type": "text", "text": "Partial"}, _anthropic_tool_use()], "max_tokens"),
+])
+def test_messages_runner_keeping_every_reply(client, store_path, monkeypatch,
+                                             content, stop_reason):
+    """anthropic 2.2+: the runner's history holds every reply, final too,
+    and the loop runs on a server-held thread unless given thread=False.
+    The run goes unthreaded, and final enters the transcript once, minus
+    tool_use that never ran."""
+    from anthropic.types.beta import BetaMessage
+    seed_doc(store_path, "pi-a", "report.pdf")
+    final = BetaMessage.model_validate(_anthropic_message(content, stop_reason))
+    seen = {}
+
+    class _Runner:
+        def __init__(self, messages):
+            self.history = [*messages, {"role": "assistant", "content": content}]
+
+        def __iter__(self):
+            return iter([final])
+
+        def generate_tool_call_response(self):
+            return None
+
+        def set_messages_params(self, callback):
+            callback({"messages": self.history})
+
+    class _Fake:
+        class beta:
+            class messages:
+                @staticmethod
+                def tool_runner(*, messages, thread=None, **kwargs):
+                    seen["thread"] = thread
+                    return _Runner(messages)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(local_chat, "_anthropic_client",
+                        lambda backend=None, route="anthropic": _Fake())
+    result = client._messages("q", model="claude-test", max_tokens=100)
+    assert seen["thread"] is False
+    assert [message["role"] for message in result["messages"]] == ["assistant"]
+    assert [block["type"] for block in result["messages"][0]["content"]] == [
+        "text"]
+
+
+@needs_anthropic
 def test_messages_refusal_with_tool_use_stays_appendable(client, store_path,
                                                          fake_anthropic):
     """A refusal turn is never executed by the runner; its tool_use blocks
