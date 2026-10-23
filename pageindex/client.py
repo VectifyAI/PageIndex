@@ -2740,7 +2740,7 @@ class PageIndexClient:
         otherwise); a document may leave any of them out. Documents uploaded
         before the schema are not re-checked. Set once: a second call on the
         same folder raises PageIndexAPIError (HTTP 409); to change the
-        fields, ``delete_metadata_schema()`` and declare them again.
+        fields, call ``delete_metadata_schema()``, then declare them again.
         Cloud-only: local mode raises PageIndexAPIError.
 
         Args:
