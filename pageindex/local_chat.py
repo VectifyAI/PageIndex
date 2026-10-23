@@ -7,6 +7,7 @@ import asyncio
 import copy
 import dataclasses
 import hashlib
+import inspect
 import json
 import queue
 import threading
@@ -1784,7 +1785,13 @@ def run_messages(client, messages, model: str, route: str,
         if max_tokens is None:
             max_tokens = _default_max_tokens(
                 (extra_body or {}).get("thinking", thinking))
-        runner = backend_client.beta.messages.tool_runner(
+        tool_runner = backend_client.beta.messages.tool_runner
+        # anthropic 2.2+ runs the loop on a server-held thread by default:
+        # later turns send only new messages, which proxies (OpenRouter)
+        # reject. Off, every turn sends the full history, as before.
+        threadless = ({"thread": False} if "thread" in
+                      inspect.signature(tool_runner).parameters else {})
+        runner = tool_runner(
             max_tokens=max_tokens,
             messages=prepared,
             model=model,
@@ -1795,6 +1802,7 @@ def run_messages(client, messages, model: str, route: str,
             max_iterations=max_turns if max_turns is not None else 10,
             **passthrough,
             **cached,
+            **threadless,
         )
     except BaseException:
         # A failure before the runner handoff must not strand the transport
