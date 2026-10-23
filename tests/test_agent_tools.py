@@ -1100,16 +1100,16 @@ def test_non_string_doc_name_stays_not_found(client, store_path):
     assert is_error and payload["errorCode"] == "NOT_FOUND"
 
 
-@pytest.mark.parametrize("repair", ["_mute_litellm_bridge_usage_warning",
-                                    "_quiet_litellm"])
-def test_openai_agent_config_quiets_litellm(tmp_path, monkeypatch, repair):
+@pytest.mark.parametrize("mute", ["_mute_litellm_bridge_usage_warning",
+                                  "_quiet_litellm"])
+def test_openai_agent_config_quiets_litellm(tmp_path, monkeypatch, mute):
     """The BYO path resolves its model through LiteLLM in the caller's
     process, outside our completion helpers — the LiteLLM noise mutes must
     run at config time, and only for LiteLLM-routed models."""
     pytest.importorskip("agents")
     import pageindex.utils
     calls = []
-    monkeypatch.setattr(pageindex.utils, repair,
+    monkeypatch.setattr(pageindex.utils, mute,
                         lambda: calls.append(True))
     client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
                                   chat_model="anthropic/claude-x")
