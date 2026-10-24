@@ -2738,10 +2738,11 @@ class PageIndexClient:
         counts documents by these fields. ``metadata`` on a document under
         the folder may use only these fields, with their types (HTTP 400
         otherwise); a document may leave any of them out. Documents uploaded
-        before the schema are not re-checked. Set once: a second call on the
-        same folder raises PageIndexAPIError (HTTP 409); to change the
-        fields, call ``delete_metadata_schema()``, then declare them again.
-        Cloud-only: local mode raises PageIndexAPIError.
+        before the schema are not re-checked: a value stored with another
+        type no longer filters correctly (``"2021"`` is not ``2021``). Set
+        once: a second call on the same folder raises PageIndexAPIError (HTTP
+        409); to change the fields, call ``delete_metadata_schema()``, then
+        declare them again. Cloud-only: local mode raises PageIndexAPIError.
 
         Args:
             folder_id (str): Top-level folder ID, or "root".
@@ -2758,10 +2759,10 @@ class PageIndexClient:
 
     def get_metadata_schema(self, folder_id: str) -> dict[str, Any]:
         """
-        Get the metadata fields that apply to a folder's documents: its
-        top-level folder's fields, else the account's (``"root"``) fields.
-        ``schema`` is None when neither declares any; ``inherited`` is True
-        when the fields come from a parent folder or the account.
+        Get the metadata fields that apply to a folder's documents: from its
+        top-level folder's schema, else the account's (``"root"``) schema.
+        ``schema`` is None when neither has one; ``inherited`` is True when
+        the fields come from a parent folder or the account.
         Cloud-only: local mode raises PageIndexAPIError.
 
         Args:
@@ -2784,9 +2785,7 @@ class PageIndexClient:
         folder's documents then fall back to the account's fields; to leave
         them with no fields, declare ``create_metadata_schema(folder_id, {})``.
         Documents keep their metadata and are not re-checked against new
-        fields: if a field's type changes, values stored with the old type
-        no longer filter correctly (``"2021"`` is not ``2021``). Cloud-only:
-        local mode raises PageIndexAPIError.
+        fields. Cloud-only: local mode raises PageIndexAPIError.
 
         Args:
             folder_id (str): Top-level folder ID, or "root".

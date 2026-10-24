@@ -586,7 +586,7 @@ class CloudAPI:
                 - inherited (bool): True when the schema comes from a
                   parent folder or the account
                 - schema (dict | None): {"fields": ...}, or None when no
-                  fields are declared
+                  schema is declared
         """
         response = requests.get(
             f"{self.BASE_URL}/folder/{_enc(folder_id)}/metadata/schema/",
