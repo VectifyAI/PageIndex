@@ -574,13 +574,17 @@ def _two_turns(store_path, monkeypatch, client, model, first_reply,
 def test_chat_completions_messages_resend_the_wire(client, store_path,
                                                    monkeypatch, model, extra,
                                                    settings):
-    """The returned messages are what the model saw, so appending them
-    opens the next call's first request with the previous call's last one,
-    unchanged: the provider's cached prefix carries over."""
+    """The returned messages are what the model saw, each assistant
+    message naming its model, so appending them opens the next call's
+    first request with the previous call's last one, unchanged: the
+    provider's cached prefix carries over."""
     pytest.importorskip("litellm")
     first, sent = _two_turns(store_path, monkeypatch, client, model,
                              _litellm_reply(tool_calls=_TWO_CALLS, **extra),
                              **settings)
+    writers = {m.pop("model") for m in first["messages"]
+               if m["role"] == "assistant"}
+    assert writers == {model if "/" in model else f"openai/{model}"}
     assert first["messages"][:-1] == sent[1][len(sent[0]):]
     assert first["messages"][-1]["content"] == "A1"
     assert sent[2][:len(sent[1])] == sent[1]
@@ -663,6 +667,54 @@ def test_reasoning_content_never_reaches_claude(client, monkeypatch):
     assert "Kimi's own plan" not in json.dumps(captured["body"])
 
 
+def _history(writer=None):
+    reply = {"role": "assistant", "content": None,
+             "tool_calls": _TWO_CALLS[:1], "reasoning_content": "plan",
+             "thinking_blocks": [{"type": "thinking", "thinking": "plan",
+                                  "signature": "SIG"}],
+             "id": "msg_1", "finish_reason": "tool_calls"}
+    return [{"role": "user", "content": "q1"},
+            {**reply, "model": writer} if writer else reply,
+            {"role": "tool", "tool_call_id": "call_1", "content": "r"},
+            {"role": "assistant", "content": "A1"},
+            {"role": "user", "content": "q2"}]
+
+
+@needs_agents
+@pytest.mark.parametrize("writer", [None, "anthropic/claude-test"])
+def test_history_fields_go_back_to_their_own_model_only(client, monkeypatch,
+                                                        writer):
+    """A history message's fields go back only to the model its ``model``
+    names: another model's reasoning, and the keys of a message that
+    names none, stay off the request."""
+    pytest.importorskip("litellm")
+    sent = _mock_litellm(monkeypatch, [_litellm_reply("A2")])
+    client.chat_completions(_history(writer), model="gemini/gemini-test")
+    turn = next(m for m in sent[0] if m.get("tool_calls"))
+    assert not {"reasoning_content", "thinking_blocks", "id",
+                "finish_reason", "model"} & set(turn)
+
+
+@needs_agents
+def test_own_history_given_as_a_generator_goes_back(client, monkeypatch):
+    pytest.importorskip("litellm")
+    model = "moonshot/kimi-k2-thinking"
+    sent = _mock_litellm(monkeypatch, [_litellm_reply("A2")])
+    client.chat_completions(iter(_history(model)), model=model)
+    turn = next(m for m in sent[0] if m.get("tool_calls"))
+    assert turn["reasoning_content"] == "plan" and "model" not in turn
+
+
+@needs_agents
+def test_reply_with_no_choices_records_nothing(client, monkeypatch):
+    """The Agents SDK reads a reply with no choices as an empty answer."""
+    pytest.importorskip("litellm")
+    import litellm
+    _mock_litellm(monkeypatch, [litellm.ModelResponse(choices=[])])
+    out = client.chat_completions("q", model="gpt-test")
+    assert out.choices[0].message.content == ""
+
+
 def _refusal(field):
     from litellm.exceptions import BadRequestError
     return BadRequestError(message=f"property '{field}' is unsupported",
@@ -691,6 +743,30 @@ def test_refused_field_goes_again_without_it(client, store_path, monkeypatch,
             assert out.choices[0].message.content == "A"
     assert [any(m.get("reasoning_content") for m in messages)
             for messages in sent] == [False, True, False, False, False]
+
+
+@needs_agents
+def test_refused_fields_go_again_one_by_one(client, store_path, monkeypatch):
+    """Each 400 refuses the field it names, the Agents SDK's own too
+    (reasoning_content, for a DeepSeek name), until one goes through."""
+    pytest.importorskip("litellm")
+    monkeypatch.setattr(local_chat, "_REFUSED", set())
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    model = "groq/deepseek-r1-distill-llama-70b"
+    details = [{"type": "reasoning.text", "text": "plan"}]
+    sent = _mock_litellm(monkeypatch, [
+        _litellm_reply(tool_calls=_TWO_CALLS[:1], reasoning_content="plan",
+                       provider_specific_fields={"reasoning_details": details}),
+        _refusal("reasoning_content"), _refusal("reasoning_details"),
+        _litellm_reply("A")])
+    out = client.chat_completions("q", doc_id=doc_id, model=model)
+    assert out.choices[0].message.content == "A"
+    assert [sorted({"reasoning_content", "reasoning_details"} & set(m))
+            for messages in sent[1:] for m in messages
+            if m.get("tool_calls")] == [
+        ["reasoning_content", "reasoning_details"], ["reasoning_details"], []]
+    assert local_chat._REFUSED == {(model, "reasoning_content"),
+                                   (model, "reasoning_details")}
 
 
 @needs_agents
@@ -877,14 +953,17 @@ def test_streamed_fields_litellm_drops_go_back(client, store_path,
     encrypted = {"type": "reasoning.encrypted", "data": "ENC"}
     first, sent = _two_turns(
         store_path, monkeypatch, client, "openrouter/x-ai/grok-test",
-        [_openai_chunk({"role": "assistant", "reasoning_details": [text]}),
-         _openai_chunk({"tool_calls": [{"index": 0, **_TWO_CALLS[0]}]}),
+        [_openai_chunk({"role": "assistant", "reasoning_details": [text],
+                        "trace": "pl"}),
+         _openai_chunk({"tool_calls": [{"index": 0, **_TWO_CALLS[0]}],
+                        "trace": "an"}),
          _openai_chunk({"reasoning_details": [encrypted]}),
          _openai_chunk({}, finish="tool_calls")],
         stream=True, stream_metadata=True)
     for messages in (first["messages"], sent[1], sent[2]):
         calls = [m for m in messages if m.get("tool_calls")]
         assert calls[0]["reasoning_details"] == [text, encrypted]
+        assert calls[0]["trace"] == "plan"
 
 
 @needs_agents
@@ -973,6 +1052,52 @@ def test_fill_only_adds():
                     "tool_calls": [{**call, "caller": {"type": "direct"}}]}]
 
 
+@needs_agents
+def test_native_routes_keep_provider_fields_nested(client, store_path,
+                                                   monkeypatch):
+    """LiteLLM's own adapter reads provider_specific_fields nested (Gemini's
+    thought_signatures, Anthropic's web_search_results), so they go back
+    there; a Gemini call id matches without the signature LiteLLM folds in
+    and the Agents SDK strips."""
+    pytest.importorskip("litellm")
+    fields = {"thought_signatures": ["SIG"]}
+    first, sent = _two_turns(store_path, monkeypatch, client,
+                             "gemini/gemini-test", _litellm_reply(
+                                 tool_calls=[{**_TWO_CALLS[0],
+                                              "id": "call_1__thought__SIG"}],
+                                 provider_specific_fields=fields))
+    for messages in (first["messages"], sent[1], sent[2]):
+        turn = next(m for m in messages if m.get("tool_calls"))
+        assert turn["provider_specific_fields"] == fields
+        assert "thought_signatures" not in turn
+
+
+def test_fields_the_sdk_set_count_as_sent(monkeypatch):
+    """A field the Agents SDK set itself is refusable like one put back."""
+    monkeypatch.setattr(local_chat, "_REFUSED", set())
+    replies = local_chat._Replies("m")
+    replies.record({"role": "assistant", "content": "OK"}, own=False)
+    message = {"role": "assistant", "content": "OK", "reasoning_content": "r"}
+    replies.fill([message])
+    assert replies.sent == {"reasoning_content"}
+    local_chat._REFUSED.add(("m", "reasoning_content"))
+    assert replies.fill([message]) == [{"role": "assistant", "content": "OK"}]
+
+
+def test_unassembled_streams_are_skipped(monkeypatch):
+    pytest.importorskip("litellm")
+    import litellm
+
+    def fail(chunks):
+        raise ValueError("unassembled")
+
+    monkeypatch.setattr(litellm, "stream_chunk_builder", fail)
+    replies = local_chat._Replies("m")
+    replies.streams.append((["chunk"], {"reasoning_details": [[1]]}))
+    message = {"role": "assistant", "content": "OK"}
+    assert replies.fill([message]) == [message]
+
+
 def test_requests_outside_a_chat_run_pass_untouched():
     pytest.importorskip("litellm")
     local_chat._register_fill()
@@ -992,18 +1117,20 @@ def test_fill_hook_returns_when_callbacks_are_replaced(client, monkeypatch):
     assert local_chat._fill_hook in litellm.callbacks
 
 
-def test_gateways_get_cache_marks_for_every_model():
-    """A gateway passes marks on to an upstream that caches only on them
-    and drops them for one that caches by itself, so every model behind
-    it gets them. OpenAI's own API gets none: there they turn on explicit
-    caching, which loses its automatic hits."""
+def test_gateways_get_cache_marks_for_claude():
+    """Claude caches only on marks, so it gets them through a gateway too.
+    Every other model caches by itself and gets none, as on OpenAI's own
+    API, where marks turn on explicit caching and lose its automatic
+    hits."""
     pytest.importorskip("litellm")
     relay = "https://openrouter.ai/api/v1"
-    for name in ("openai/anthropic/claude-x", "openai/x-ai/grok-x", "gpt-x",
-                 "litellm/openai/qwen/x"):
+    for name in ("openai/anthropic/claude-x", "litellm/openai/Claude-x"):
         assert local_chat._cache_extra_args(name, relay), name
-    assert local_chat._cache_extra_args("openrouter/x-ai/grok-x")
-    for name, base in (("gpt-x", None),
+    assert local_chat._cache_extra_args("openrouter/anthropic/claude-x")
+    for name, base in (("openai/x-ai/grok-x", relay), ("gpt-x", relay),
+                       ("litellm/openai/qwen/x", relay),
+                       ("openai/deepseek-chat", "https://api.deepseek.com"),
+                       ("openrouter/x-ai/grok-x", None), ("gpt-x", None),
                        ("openai/gpt-x", "https://api.openai.com/v1"),
                        ("openai/gpt-x", "https://us.api.openai.com/v1"),
                        ("gemini/gemini-x", relay)):
@@ -1048,12 +1175,12 @@ def test_gateway_refusing_marks_goes_again_without_them(client,
                                 _litellm_reply("A"), _litellm_reply("A")],
                   marks)
     backend = {"base_url": "https://gateway.example/v1", "api_key": "k"}
+    model = "openai/anthropic/claude-strict"
     for _ in range(2):
-        out = client.chat_completions("q", model="openai/strict-x",
-                                      backend=backend)
+        out = client.chat_completions("q", model=model, backend=backend)
         assert out.choices[0].message.content == "A"
     assert [bool(points) for points in marks] == [True, False, False]
-    assert local_chat._REFUSED == {("openai/strict-x", "cache_control")}
+    assert local_chat._REFUSED == {(model, "cache_control")}
 
 
 # ── chat (front door) ──

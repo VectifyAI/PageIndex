@@ -241,15 +241,19 @@ def _sdk_backend(backend) -> dict:
 
 # LitellmModel rebuilds each reply into the Agents SDK's items and back,
 # dropping what it doesn't convert (signed or encrypted reasoning, thought
-# signatures, ...): every request of a chat run gets that back, unchanged.
+# signatures, ...): every request of a chat run gets that back, unchanged,
+# for the model that wrote it.
 _REFUSED: set = set()  # (model, field) a provider rejected
 _REPLIES: contextvars.ContextVar = contextvars.ContextVar(
     "pageindex_replies", default=None)
 _FILL_LOCK = threading.Lock()
 _fill_hook = None
-# What the Agents SDK writes itself, a tool call's identity, and the
-# stream delta fields LiteLLM's own assembler keeps.
-_REBUILT = frozenset({"role", "content", "tool_calls"})
+# Returned assistant messages name the model that wrote them.
+_WRITER = "model"
+# What the Agents SDK writes itself, with the writer's name, a tool
+# call's identity, and the stream delta fields LiteLLM's own assembler
+# keeps.
+_REBUILT = frozenset({"role", "content", "tool_calls", _WRITER})
 _CALL_IDENTITY = frozenset({"id", "type", "function", "index"})
 _ASSEMBLED = frozenset({"content", "role", "tool_calls", "function_call",
                         "refusal", "audio", "reasoning_content",
@@ -261,14 +265,19 @@ def _empty(value) -> bool:
     return value is None or value == "" or value == [] or value == {}
 
 
-def _reply_fields(message: dict) -> dict:
-    """A reply's fields as its provider sent them: LiteLLM's nested
-    provider_specific_fields on top, empty values left out."""
+def _reply_fields(message: dict, nested: bool = False) -> dict:
+    """A reply's fields as its provider sent them, empty values left out.
+    LiteLLM's provider_specific_fields stay nested where its own adapter
+    reads them, and go on top for an OpenAI-protocol host."""
     fields = {key: value for key, value in message.items()
               if key != "provider_specific_fields" and not _empty(value)}
-    for key, value in (message.get("provider_specific_fields") or {}).items():
-        if not _empty(value):
-            fields.setdefault(key, value)
+    provider = message.get("provider_specific_fields") or {}
+    if nested and not _empty(provider):
+        fields["provider_specific_fields"] = provider
+    elif not nested:
+        for key, value in provider.items():
+            if not _empty(value):
+                fields.setdefault(key, value)
     return fields
 
 
@@ -285,29 +294,40 @@ class _Replies:
     """A chat run's replies as their model returned them, and its latest
     request as sent."""
 
-    def __init__(self, model: str):
+    def __init__(self, model: str, nested: bool = False):
         self.model = model
+        self.nested = nested  # LiteLLM's adapter reads provider fields itself
         self.messages: dict = {}  # ("call", first call id) | ("text", text)
         self.calls: dict = {}     # call id -> the call's own fields
-        self.streams: list = []   # (chunks, raw delta fields) to assemble
+        self.streams: list = []   # (chunks, raw delta parts) to assemble
         self.first: Optional[int] = None  # messages in the first request
         self.last: list = []
-        self.filled: set = set()  # fields put into the latest request
+        self.sent: set = set()  # latest request's fields a 400 may refuse
 
-    def record(self, message: dict) -> None:
-        fields = _reply_fields(message)
+    def _call_id(self, call: dict) -> str:
+        # LiteLLM folds a Gemini signature into the id; the SDK strips it
+        from agents.models.chatcmpl_helpers import ChatCmplHelpers
+        return ChatCmplHelpers.clean_gemini_tool_call_id(
+            call.get("id") or "", self.model)
+
+    def record(self, message: dict, own: bool = True) -> None:
+        """A reply's fields under its first call id or its text; another
+        model's message, or one this SDK didn't return, holds its place
+        with nothing to put back."""
+        fields = _reply_fields(message, self.nested)
         calls = [call for call in fields.get("tool_calls") or ()
                  if isinstance(call, dict)]
         for call in calls:
-            self.calls.setdefault(call.get("id"), []).append(
+            self.calls.setdefault(self._call_id(call), []).append(
                 {key: value for key, value in call.items()
-                 if key not in _CALL_IDENTITY and not _empty(value)})
-        key = (("call", calls[0].get("id")) if calls
+                 if own and key not in _CALL_IDENTITY and not _empty(value)})
+        key = (("call", self._call_id(calls[0])) if calls
                else ("text", fields["content"])
                if isinstance(fields.get("content"), str) else None)
         if key is not None:
             self.messages.setdefault(key, []).append(
-                {k: v for k, v in fields.items() if k not in _REBUILT})
+                {k: v for k, v in fields.items()
+                 if own and k not in _REBUILT})
 
     def _assemble(self) -> None:
         """Streamed replies: LiteLLM's assembler over its parsed chunks,
@@ -315,32 +335,44 @@ class _Replies:
         import litellm
         while self.streams:
             chunks, raw = self.streams.pop(0)
-            built = litellm.stream_chunk_builder(chunks) if chunks else None
-            reply = getattr(built.choices[0], "message", None) if built else None
+            try:
+                built = (litellm.stream_chunk_builder(chunks)
+                         if chunks else None)
+            except Exception:  # LiteLLM's APIError: nothing to put back
+                built = None
+            choices = getattr(built, "choices", None)
+            reply = getattr(choices[0], "message", None) if choices else None
             if reply is None:
                 continue
             message = reply.model_dump()
             nested = message.get("provider_specific_fields") or {}
-            for key, value in raw.items():
+            for key, parts in raw.items():
                 if message.get(key) is None and not nested.get(key):
-                    message[key] = value
+                    message[key] = ("".join(parts) if isinstance(parts[0], str)
+                                    else [x for part in parts for x in part])
             self.record(message)
 
-    def _put(self, target: dict, fields) -> dict:
+    def _put(self, target: dict, fields, own: frozenset) -> dict:
+        """Add what the reply had and target lacks, then drop what a
+        provider refused; what's left beside ``own`` counts as sent."""
         for key, value in (fields or {}).items():
-            if target.get(key) is None and (self.model, key) not in _REFUSED:
+            if target.get(key) is None:
                 target[key] = value
-                self.filled.add(key)
+        for key in [key for key in target if key not in own]:
+            if (self.model, key) in _REFUSED:
+                del target[key]
+            else:
+                self.sent.add(key)
         return target
 
     def fill(self, messages: list) -> list:
-        """Each assistant message with what its reply had and the Agents
-        SDK left off, fields it set kept: a reply it split per call fills
-        its first message, each call by id. Every assistant message has
-        content, as the SDK writes it for history, so a split reply's
-        later messages read the same on the next turn."""
+        """Each assistant message with what its own model's reply had and
+        the Agents SDK left off, fields it set kept: a reply it split per
+        call fills its first message, each call by id. Every assistant
+        message has content, as the SDK writes it for history, so a split
+        reply's later messages read the same on the next turn."""
         self._assemble()
-        self.filled = set()
+        self.sent = set()
         seen: dict = {}
         out = []
         for message in messages:
@@ -350,16 +382,17 @@ class _Replies:
                 continue
             message = {"role": "assistant", "content": None, **message}
             calls = message.get("tool_calls") or []
+            ids = [self._call_id(call) for call in calls]
             content = message.get("content")
-            key = (("call", calls[0].get("id")) if calls
+            key = (("call", ids[0]) if calls
                    else ("text", content) if isinstance(content, str)
                    else None)
-            self._put(message, _nth(self.messages, key, seen))
+            self._put(message, _nth(self.messages, key, seen), _REBUILT)
             if calls:
                 message["tool_calls"] = [
-                    self._put(dict(call), _nth(self.calls, call.get("id"),
-                                               seen))
-                    for call in calls]
+                    self._put(dict(call), _nth(self.calls, call_id, seen),
+                              _CALL_IDENTITY)
+                    for call, call_id in zip(calls, ids)]
             out.append(message)
         return out
 
@@ -398,7 +431,7 @@ def _register_fill() -> None:
                                 and isinstance(m.get("content"), str)
                                 and m["content"] else m
                                 for m in messages]
-                            replies.filled.add("cache_control")
+                            replies.sent.add("cache_control")
                     if replies.first is None:
                         replies.first = len(messages)
                     replies.last = messages
@@ -414,7 +447,7 @@ def _recording(create, replies: _Replies):
     A thinking block's closing repeat of its text is blanked here, for the
     Agents SDK and the record alike."""
     chunks: list = []
-    raw: dict = {}
+    raw: dict = {}  # key -> its fragments, all str or all list
     thinking: list = []
     replies.streams.append((chunks, raw))
 
@@ -424,14 +457,11 @@ def _recording(create, replies: _Replies):
         dump = getattr(delta, "model_dump", None)
         fields = delta if isinstance(delta, dict) else dump() if dump else {}
         for key, value in fields.items():
-            if key in _ASSEMBLED:
+            if key in _ASSEMBLED or not isinstance(value, (str, list)):
                 continue
-            before = raw.get(key)
-            if isinstance(value, str) and isinstance(before, (str, type(None))):
-                raw[key] = (before or "") + value
-            elif (isinstance(value, list)
-                  and isinstance(before, (list, type(None)))):
-                raw[key] = (before or []) + value
+            parts = raw.setdefault(key, [])
+            if not parts or type(parts[0]) is type(value):
+                parts.append(value)
         processed = create(chunk=chunk)
         if processed is not None:
             _drop_repeated_thinking(processed, thinking)
@@ -441,20 +471,21 @@ def _recording(create, replies: _Replies):
 
 
 def _refusal_retry(replies: _Replies):
-    """Once more without the fields a 400 names, of those just put back."""
+    """Again without the fields a 400 names, of those the request had that
+    may be refused: each retry refuses one for good, so retries end."""
     from agents import ModelRetrySettings, RetryDecision
 
     def policy(context):
         if context.normalized.status_code not in (400, 422):
             return False
         text = str(context.error)
-        named = {key for key in replies.filled
+        named = {key for key in replies.sent
                  if re.search(rf"\b{re.escape(key)}\b", text)}
         if not named:
             return False
         _REFUSED.update((replies.model, key) for key in named)
         return RetryDecision(retry=True, delay=0)
-    return ModelRetrySettings(max_retries=1, policy=policy)
+    return ModelRetrySettings(max_retries=3, policy=policy)
 
 
 def _keep_reply_fields(agent, messages) -> Optional[_Replies]:
@@ -468,10 +499,10 @@ def _keep_reply_fields(agent, messages) -> Optional[_Replies]:
     if not isinstance(model, LitellmModel):
         return None
     fetch = model._fetch_response
-    replies = _Replies(model.model)
+    replies = _Replies(model.model, nested=not _openai_protocol(model.model))
     for message in messages:
         if isinstance(message, dict) and message.get("role") == "assistant":
-            replies.record(message)
+            replies.record(message, own=message.get(_WRITER) == model.model)
     _register_fill()
 
     async def fetching(*args, **kwargs):
@@ -481,7 +512,8 @@ def _keep_reply_fields(agent, messages) -> Optional[_Replies]:
         finally:
             _REPLIES.reset(token)
         if not isinstance(result, tuple):
-            replies.record(result.choices[0].message.model_dump())
+            if result.choices:
+                replies.record(result.choices[0].message.model_dump())
             return result
         create = getattr(result[1], "chunk_creator", None)
         if create is not None:  # LiteLLM's CustomStreamWrapper
@@ -580,14 +612,13 @@ def _cache_extra_args(model_name: str,
                       base_url: Optional[str] = None) -> Optional[dict]:
     """The chat lane's marks: normalized exactly as _litellm_model
     normalizes the wire (bare names get openai/), so this predicate
-    cannot disagree with where chat_completions actually routes. A
-    gateway gets them for every model: it passes them to an upstream
-    that caches only on marks (Claude) and translates or drops them for
-    one that caches by itself. OpenAI's own API gets none: there they
+    cannot disagree with where chat_completions actually routes. Claude
+    caches only on marks, so it gets them on every route, a gateway too;
+    every other model caches by itself, and on OpenAI's own API marks
     turn on explicit caching, which loses its automatic hits."""
     wire = model_name.removeprefix("litellm/")
     if _gateway(wire, base_url):
-        return _injected_marks()
+        return _injected_marks() if "claude" in wire.lower() else None
     if "/" not in wire or wire.startswith("openai/"):
         return None
     return _litellm_claude_marks(wire)
@@ -1045,6 +1076,7 @@ def _chat_agent(client, messages, doc_id, model, temperature=None,
     """The chat lane's shared prologue: validated history, doc targeting,
     and the configured agent. Returns (agent, input items, model name,
     the run's replies)."""
+    messages = list(messages)
     system_texts, history = _split_chat_messages(messages)
     scope = client._local_doc_scope(doc_id)
     block = targeting_block(client, doc_id, folder_id)
@@ -1066,9 +1098,9 @@ def _chat_agent(client, messages, doc_id, model, temperature=None,
 def _chat_transcript(agent, new_items, replies=None) -> list:
     """The run's new items as Chat Completions messages as the model saw
     them, so a caller who appends them resends that: its last request past
-    the first one's length, then the final reply filled the same way.
-    With no request seen (a test double), converted as LitellmModel
-    converts each request."""
+    the first one's length, then the final reply filled the same way,
+    each assistant message naming its model. With no request seen (a
+    test double), converted as LitellmModel converts each request."""
     from agents.models.chatcmpl_converter import Converter
     model, reasoning = agent.model, agent.model_settings.reasoning
     converted = Converter.items_to_messages(
@@ -1081,8 +1113,10 @@ def _chat_transcript(agent, new_items, replies=None) -> list:
             model, "should_replay_reasoning_content", None))
     if replies is None or replies.first is None:
         return converted
-    return (replies.last[replies.first:]
-            + replies.fill(replies.last + converted[-1:])[len(replies.last):])
+    messages = (replies.last[replies.first:] + replies.fill(
+        replies.last + converted[-1:])[len(replies.last):])
+    return [{**m, _WRITER: replies.model} if m.get("role") == "assistant"
+            else m for m in messages]
 
 
 def _output_text(output) -> str:
