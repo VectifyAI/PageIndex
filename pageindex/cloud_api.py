@@ -581,8 +581,8 @@ class CloudAPI:
         Returns:
             dict: Effective schema containing:
                 - folder_id (str): The folder ID asked for
-                - workspace_id (str): The top-level folder whose schema
-                  applies, or "root"
+                - workspace_id (str): The folder's top-level folder, or
+                  "root"
                 - inherited (bool): True when the schema comes from a
                   parent folder or the account
                 - schema (dict | None): {"fields": ...}, or None when no
@@ -601,8 +601,10 @@ class CloudAPI:
 
     def delete_metadata_schema(self, folder_id: str) -> Dict[str, Any]:
         """
-        Clear the metadata fields of a top-level folder (workspace), or of
-        the account with folder_id "root". Documents keep their metadata.
+        Delete the metadata fields declared on a top-level folder
+        (workspace), or on the account with folder_id "root". A top-level
+        folder's documents then fall back to the account's fields; declare
+        empty fields to leave them with none. Documents keep their metadata.
 
         Args:
             folder_id (str): Top-level folder ID, or "root".

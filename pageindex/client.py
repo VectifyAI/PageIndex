@@ -2778,11 +2778,15 @@ class PageIndexClient:
 
     def delete_metadata_schema(self, folder_id: str) -> dict[str, Any]:
         """
-        Clear the metadata fields of a top-level folder (workspace), or of
-        the account with ``folder_id="root"``, so they can be declared again
-        with ``create_metadata_schema()``. Documents keep their metadata and
-        are not re-checked against new fields. Cloud-only: local mode raises
-        PageIndexAPIError.
+        Delete the metadata fields declared on a top-level folder
+        (workspace), or on the account with ``folder_id="root"``, so they can
+        be declared again with ``create_metadata_schema()``. A top-level
+        folder's documents then fall back to the account's fields; to leave
+        them with no fields, declare ``create_metadata_schema(folder_id, {})``.
+        Documents keep their metadata and are not re-checked against new
+        fields: if a field's type changes, values stored with the old type
+        stop matching filters on it (``"2021"`` is not ``2021``). Cloud-only:
+        local mode raises PageIndexAPIError.
 
         Args:
             folder_id (str): Top-level folder ID, or "root".
