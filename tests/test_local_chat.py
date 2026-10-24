@@ -513,8 +513,9 @@ _TWO_CALLS = [{"id": f"call_{n}", "type": "function",
 def _mock_litellm(monkeypatch, replies, marks=None):
     """Real LiteLLM answering each request with the next reply, after the
     SDK's own hook has filled it: a ModelResponse, a list of chunks to
-    stream, or an exception to raise. Returns each request's messages as
-    sent; ``marks`` collects each request's cache injection points."""
+    stream (an exception in it breaks the stream there), or an exception
+    to raise. Returns each request's messages as sent; ``marks`` collects
+    each request's cache injection points."""
     import litellm
     import litellm.main
     from litellm.integrations.custom_logger import CustomLogger
@@ -532,6 +533,8 @@ def _mock_litellm(monkeypatch, replies, marks=None):
     async def stream(model_response, mock_response, **kwargs):
         if isinstance(mock_response, list):
             for chunk in mock_response:
+                if isinstance(chunk, Exception):
+                    raise chunk
                 yield chunk
             return
         async for chunk in streaming(model_response,
@@ -777,6 +780,48 @@ def test_refused_fields_go_again_one_by_one(client, store_path, monkeypatch):
             for messages in sent[1:] for m in messages
             if m.get("tool_calls")] == [
         ["reasoning_content", "reasoning_details"], ["reasoning_details"], []]
+
+
+def _aborted(*chunks):
+    """A stream OpenRouter cuts off after chunks, as LiteLLM reads it."""
+    from litellm.exceptions import APIConnectionError
+    return [*chunks, APIConnectionError(
+        message="The operation was aborted", llm_provider="openai",
+        model="m")]
+
+
+@needs_agents
+@pytest.mark.parametrize("breaks", [1, 3, 4])
+def test_stream_broken_before_output_goes_again(client, monkeypatch, breaks):
+    """A stream the server breaks before any output goes again, three
+    times at most."""
+    pytest.importorskip("litellm")
+    sent = _mock_litellm(monkeypatch, [_aborted() for _ in range(breaks)]
+                         + [_litellm_reply("A")])
+    out = client.chat_completions("q", model="gpt-test", stream=True)
+    if breaks <= 3:
+        assert "".join(out) == "A"
+    else:
+        with pytest.raises(PageIndexAPIError):
+            "".join(out)
+    assert len(sent) == min(breaks + 1, 4)
+
+
+@needs_agents
+def test_stream_broken_after_output_is_not_replayed(client, monkeypatch):
+    """The runner won't replay a stream that already showed text, nor
+    does the lane retry a request that wasn't streamed."""
+    pytest.importorskip("litellm")
+    from litellm.exceptions import InternalServerError
+    sent = _mock_litellm(monkeypatch, [
+        _aborted(*_litellm_chunks({"content": "Hi"})[:1]),
+        InternalServerError(message="boom", llm_provider="openai", model="m"),
+        _litellm_reply("A")])
+    with pytest.raises(PageIndexAPIError):
+        "".join(client.chat_completions("q", model="gpt-test", stream=True))
+    with pytest.raises(PageIndexAPIError):
+        client.chat_completions("q", model="gpt-test")
+    assert len(sent) == 2
 
 
 @needs_agents

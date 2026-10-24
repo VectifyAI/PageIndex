@@ -470,14 +470,18 @@ def _recording(create, replies: _Replies):
     return creating
 
 
-def _refusal_retry(replies: _Replies):
-    """Again without the fields a 400 names, of those the request had that
-    may be refused, for the rest of the call: each retry refuses one more,
-    so retries end."""
+def _chat_retry(replies: _Replies):
+    """Again for a stream the server broke before any output (the runner
+    asks only then; OpenRouter aborts some). Again without the fields a
+    400 names, of those the request had that may be refused, for the rest
+    of the call: each retry refuses one more. Three retries at most."""
     from agents import ModelRetrySettings, RetryDecision
 
     def policy(context):
-        if context.normalized.status_code not in (400, 422):
+        status = context.normalized.status_code
+        if context.stream and status is not None and status >= 500:
+            return True
+        if status not in (400, 422):
             return False
         text = str(context.error)
         named = {key for key in replies.sent
@@ -523,7 +527,7 @@ def _keep_reply_fields(agent, messages) -> Optional[_Replies]:
 
     model._fetch_response = fetching
     agent.model_settings = dataclasses.replace(
-        agent.model_settings, retry=_refusal_retry(replies))
+        agent.model_settings, retry=_chat_retry(replies))
     return replies
 
 
