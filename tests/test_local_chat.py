@@ -3,6 +3,7 @@ no LLM keys. Tool execution runs for real against a seeded local store."""
 import asyncio
 import contextlib
 import copy
+import dataclasses
 import inspect
 import json
 import pickle
@@ -324,12 +325,6 @@ def test_chat_completions_stream_modes(client, store_path, fake_model):
     assert all(c["object"] == "chat.completion.chunk" for c in chunks[:-1])
 
 
-def test_chat_completions_missing_framework(client, monkeypatch):
-    monkeypatch.setitem(sys.modules, "agents", None)
-    with pytest.raises(PageIndexAPIError, match="pip install openai-agents"):
-        client.chat_completions([{"role": "user", "content": "x"}])
-
-
 def test_cloud_guards(monkeypatch):
     cloud = PageIndexCloudClient(api_key="pi-test-key")
     # empty is unset, as on the local lane — the managed chat serves it
@@ -405,14 +400,9 @@ def test_status_recorder_attaches_to_the_real_responses_model(monkeypatch):
     asyncio.run(backend.close())
 
 
-@needs_agents
-def test_cache_marker_reaches_the_anthropic_wire(client, store_path,
-                                                 monkeypatch):
-    # End-to-end guard for the injection flag: through the real
-    # LitellmModel and litellm's request build, the marker must appear in
-    # the HTTP body — a regression in either vendor hop silently reverts
-    # anthropic-routed calls to full price.
-    pytest.importorskip("litellm")
+def _anthropic_wire(monkeypatch, client, model, messages: str | list = "hi",
+                    **settings):
+    """One chat_completions call via the real stack: (request, envelope)."""
     from litellm.llms.custom_httpx.http_handler import (AsyncHTTPHandler,
                                                         HTTPHandler)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
@@ -440,8 +430,28 @@ def test_cache_marker_reaches_the_anthropic_wire(client, store_path,
 
     monkeypatch.setattr(AsyncHTTPHandler, "post", fake_apost)
     monkeypatch.setattr(HTTPHandler, "post", fake_post)
-    result = client.chat_completions(
-        "hi", model="anthropic/claude-3-5-sonnet-20240620")
+    return captured, client.chat_completions(messages, model=model, **settings)
+
+
+@needs_agents
+def test_foundry_claude_gets_no_openai_fields(client, monkeypatch):
+    """LiteLLM sends azure_ai's Claude to Foundry's Anthropic API, which
+    refuses prompt_cache_key like Anthropic's own (400, extra inputs)."""
+    pytest.importorskip("litellm")
+    captured, _ = _anthropic_wire(
+        monkeypatch, client, "azure_ai/claude-sonnet-5-5",
+        backend={"api_base": "https://x.services.ai.azure.com",
+                 "api_key": "k"})
+    assert captured["url"].endswith("/anthropic/v1/messages")
+    assert "prompt_cache_key" not in captured["body"]
+
+
+@needs_agents
+def test_cache_marker_reaches_the_anthropic_wire(client, store_path,
+                                                 monkeypatch):
+    pytest.importorskip("litellm")
+    captured, result = _anthropic_wire(
+        monkeypatch, client, "anthropic/claude-3-5-sonnet-20240620")
     assert "/v1/messages" in captured["url"]
     assert '"cache_control"' in json.dumps(captured["body"])
     # The OpenAI cache-routing hint must not leak here: LiteLLM plants
@@ -485,34 +495,73 @@ def _litellm_reply(content=None, tool_calls=None, **extra):
                             total_tokens=15))
 
 
+def _litellm_chunks(*deltas, finish="tool_calls"):
+    """A streamed turn as LiteLLM's parser yields it."""
+    from litellm.types.utils import Delta, ModelResponseStream, StreamingChoices
+    return [ModelResponseStream(choices=[StreamingChoices(
+        delta=Delta(**delta), finish_reason=None)]) for delta in deltas] + [
+        ModelResponseStream(choices=[StreamingChoices(
+            delta=Delta(), finish_reason=finish)])]
+
+
 _TWO_CALLS = [{"id": f"call_{n}", "type": "function",
                "function": {"name": "get_document",
                             "arguments": '{"doc_name": "report.pdf"}'}}
               for n in (1, 2)]
 
 
-def _two_turns(store_path, monkeypatch, client, model, first_reply,
-               **settings):
-    """Two calls through the real LitellmModel, the second appending the
-    first's ``messages``: the first envelope (or closing chunk), and each
-    request's messages as LiteLLM received them."""
+def _mock_litellm(monkeypatch, replies, marks=None):
+    """Real LiteLLM answering each request with the next reply, after the
+    SDK's own hook has filled it: a ModelResponse, a list of chunks to
+    stream (an exception in it breaks the stream there), or an exception
+    to raise. Returns each request's messages as sent; ``marks`` collects
+    each request's cache injection points."""
     import litellm
-    from litellm.llms.base_llm.base_model_iterator import MockResponseIterator
-    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    import litellm.main
+    from litellm.integrations.custom_logger import CustomLogger
     sent = []
-    replies = [first_reply, _litellm_reply("A1"), _litellm_reply("A2")]
+    replies = list(replies)
+    streaming = litellm.main.async_mock_completion_streaming_obj
 
-    async def acompletion(**kwargs):
-        sent.append(json.loads(json.dumps(kwargs["messages"])))
-        reply = replies.pop(0)
-        return MockResponseIterator(reply) if kwargs.get("stream") else reply
+    class Answer(CustomLogger):
+        async def async_pre_call_deployment_hook(self, kwargs, call_type):
+            sent.append(json.loads(json.dumps(kwargs["messages"])))
+            if marks is not None:
+                marks.append(kwargs.get("cache_control_injection_points"))
+            return {**kwargs, "mock_response": replies.pop(0)}
+
+    async def stream(model_response, mock_response, **kwargs):
+        if isinstance(mock_response, list):
+            for chunk in mock_response:
+                if isinstance(chunk, Exception):
+                    raise chunk
+                yield chunk
+            return
+        async for chunk in streaming(model_response,
+                                     mock_response=mock_response, **kwargs):
+            yield chunk
+
+    monkeypatch.setattr(litellm.main, "async_mock_completion_streaming_obj",
+                        stream)
+    local_chat._register_fill()
+    monkeypatch.setattr(litellm, "callbacks", [*litellm.callbacks, Answer()])
+    return sent
+
+
+def _two_turns(store_path, monkeypatch, client, model, first_reply,
+               marks=None, **settings):
+    """Two calls through the real LitellmModel and LiteLLM, the second
+    appending the first's ``messages``: the first envelope (or closing
+    chunk), and each request's messages as LiteLLM sends them."""
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    sent = _mock_litellm(monkeypatch, [first_reply, _litellm_reply("A1"),
+                                       _litellm_reply("A2")], marks)
 
     def call(history):
         out = client.chat_completions(history, doc_id=doc_id, model=model,
                                       **settings)
         return list(out)[-1] if settings.get("stream") else out
 
-    monkeypatch.setattr(litellm, "acompletion", acompletion)
     question = {"role": "user", "content": "q1"}
     first = call([question])
     call([question, *first["messages"], {"role": "user", "content": "q2"}])
@@ -525,13 +574,14 @@ def _two_turns(store_path, monkeypatch, client, model, first_reply,
     # streamed turns are rebuilt by agents' own stream handler; OpenAI
     # streams open with an empty content delta
     ("gpt-test", {"content": ""}, {"stream": True, "stream_metadata": True}),
-    ("anthropic/claude-test", {"reasoning_content": "hmm", "thinking_blocks": [
-        {"type": "thinking", "thinking": "hmm", "signature": "SIG1"}]},
+    ("anthropic/claude-sonnet-5-5", {
+        "reasoning_content": "hmm", "thinking_blocks": [
+            {"type": "thinking", "thinking": "hmm", "signature": "SIG1"}]},
      {"extra_body": {"reasoning": {"effort": "high"}}, "stream": True,
       "stream_metadata": True}),
-    # LitellmModel re-pairs parallel calls with their results here
+    # LitellmModel sends parallel calls one per message here
     ("anthropic/claude-test", {}, {}),
-    ("anthropic/claude-test", {"thinking_blocks": [
+    ("anthropic/claude-sonnet-5-5", {"thinking_blocks": [
         {"type": "thinking", "thinking": "hmm", "signature": "SIG1"}]},
      {"extra_body": {"reasoning": {"effort": "high"}}}),
     # replayed as reasoning_content beside the calls
@@ -540,23 +590,393 @@ def _two_turns(store_path, monkeypatch, client, model, first_reply,
 def test_chat_completions_messages_resend_the_wire(client, store_path,
                                                    monkeypatch, model, extra,
                                                    settings):
-    """Appending a call's messages opens the next call's first request
-    with the previous call's last one, unchanged: the provider's cached
-    prefix carries over."""
+    """The returned messages are what the model saw, each assistant
+    message naming its model, so appending them opens the next call's
+    first request with the previous call's last one, unchanged: the
+    provider's cached prefix carries over."""
     pytest.importorskip("litellm")
     first, sent = _two_turns(store_path, monkeypatch, client, model,
                              _litellm_reply(tool_calls=_TWO_CALLS, **extra),
                              **settings)
-    assert [m["role"] for m in first["messages"]] == [
-        "assistant", "tool", "tool", "assistant"]
+    writers = {m.pop("model") for m in first["messages"]
+               if m["role"] == "assistant"}
+    assert writers == {model if "/" in model else f"openai/{model}"}
+    assert first["messages"][:-1] == sent[1][len(sent[0]):]
+    assert first["messages"][-1]["content"] == "A1"
     assert sent[2][:len(sent[1])] == sent[1]
+
+
+@needs_agents
+@pytest.mark.parametrize("settings", [
+    {"reasoning_effort": "high"},
+    {"extra_body": {"reasoning": {"effort": "high"}}},
+])
+def test_claude_thinking_goes_back_with_its_calls(client, store_path,
+                                                  monkeypatch, settings):
+    """Thinking goes back once, as thinking_blocks."""
+    pytest.importorskip("litellm")
+    thinking = [{"type": "thinking", "thinking": "hmm", "signature": "SIG1"}]
+    first, sent = _two_turns(store_path, monkeypatch, client,
+                             "anthropic/claude-sonnet-5-5",
+                             _litellm_reply(tool_calls=_TWO_CALLS,
+                                            thinking_blocks=thinking,
+                                            reasoning_content="hmm"),
+                             **settings)
+    for messages in (first["messages"], sent[1], sent[2]):
+        calls = [m for m in messages if m.get("tool_calls")]
+        assert calls[0].get("thinking_blocks") == thinking
+
+
+@needs_agents
+@pytest.mark.parametrize("settings", [
+    {}, {"extra_body": {"thinking": {"type": "adaptive"}}},
+    {"stream": True, "stream_metadata": True}])
+@pytest.mark.parametrize("calls", [1, 2])
+def test_claude_thinking_goes_back_with_no_effort_set(client, store_path,
+                                                      monkeypatch, settings,
+                                                      calls):
+    """Claude's thinking goes back with no effort set, on the first
+    message of a reply sent one call per message."""
+    pytest.importorskip("litellm")
+    thinking = [{"type": "thinking", "thinking": "", "signature": "SIG1"}]
+    first, sent = _two_turns(store_path, monkeypatch, client,
+                             "anthropic/claude-sonnet-5-5",
+                             _litellm_reply(tool_calls=_TWO_CALLS[:calls],
+                                            thinking_blocks=thinking),
+                             **settings)
+    for messages in (first["messages"], sent[1], sent[2]):
+        sent_calls = [m for m in messages if m.get("tool_calls")]
+        assert sent_calls[0].get("thinking_blocks") == thinking
+        assert all("thinking_blocks" not in m for m in sent_calls[1:])
+
+
+@needs_agents
+@pytest.mark.parametrize("model", [
+    "moonshot/kimi-k2-thinking", "zai/glm-4.6", "dashscope/qwen3-test",
+    "openrouter/qwen/qwen3-test-thinking", "deepseek/deepseek-chat"])
+def test_reasoning_content_goes_back_to_its_model(client, store_path,
+                                                  monkeypatch, model):
+    """Each model's reasoning_content goes back to it."""
+    pytest.importorskip("litellm")
+    first, sent = _two_turns(store_path, monkeypatch, client, model,
+                             _litellm_reply(tool_calls=_TWO_CALLS[:1],
+                                            reasoning_content="think"))
+    for messages in (first["messages"], sent[1], sent[2]):
+        calls = [m for m in messages if m.get("tool_calls")]
+        assert calls[0].get("reasoning_content") == "think"
+
+
+@needs_agents
+def test_reasoning_content_never_reaches_claude(client, monkeypatch):
+    """Another model's reasoning_content stays out of Claude's request."""
+    pytest.importorskip("litellm")
+    history = [{"role": "user", "content": "q1"},
+               {"role": "assistant", "content": None,
+                "reasoning_content": "Kimi's own plan",
+                "tool_calls": _TWO_CALLS[:1]},
+               {"role": "tool", "tool_call_id": "call_1", "content": "r"},
+               {"role": "assistant", "content": "A1"},
+               {"role": "user", "content": "q2"}]
+    captured, _ = _anthropic_wire(monkeypatch, client, "anthropic/claude-test",
+                                  messages=history)
+    assert captured["body"]["messages"]
+    assert "Kimi's own plan" not in json.dumps(captured["body"])
+
+
+def _history(writer=None):
+    reply = {"role": "assistant", "content": None,
+             "tool_calls": _TWO_CALLS[:1], "reasoning_content": "plan",
+             "thinking_blocks": [{"type": "thinking", "thinking": "plan",
+                                  "signature": "SIG"}],
+             "id": "msg_1", "finish_reason": "tool_calls"}
+    return [{"role": "user", "content": "q1"},
+            {**reply, "model": writer} if writer else reply,
+            {"role": "tool", "tool_call_id": "call_1", "content": "r"},
+            {"role": "assistant", "content": "A1"},
+            {"role": "user", "content": "q2"}]
+
+
+@needs_agents
+@pytest.mark.parametrize("writer, model, settings", [
+    (None, "gemini/gemini-test", {}),
+    ("anthropic/claude-test", "gemini/gemini-test", {}),
+    # the Agents SDK's own replays read the writer too
+    ("anthropic/claude-test", "anthropic/claude-sonnet-5-5",
+     {"reasoning_effort": "high"}),
+    ("anthropic/claude-test", "deepseek/deepseek-chat", {})])
+def test_history_fields_go_back_to_their_own_model_only(client, monkeypatch,
+                                                        writer, model,
+                                                        settings):
+    """A history message's fields go back only to the model its ``model``
+    names: another model's reasoning, and the keys of a message that
+    names none, stay off the request."""
+    pytest.importorskip("litellm")
+    sent = _mock_litellm(monkeypatch, [_litellm_reply("A2")])
+    client.chat_completions(_history(writer), model=model, **settings)
+    turn = next(m for m in sent[0] if m.get("tool_calls"))
+    assert not {"reasoning_content", "thinking_blocks", "id",
+                "finish_reason", "model"} & set(turn)
+
+
+@needs_agents
+def test_own_history_given_as_a_generator_goes_back(client, monkeypatch):
+    pytest.importorskip("litellm")
+    model = "moonshot/kimi-k2-thinking"
+    sent = _mock_litellm(monkeypatch, [_litellm_reply("A2")])
+    client.chat_completions(iter(_history(model)), model=model)
+    turn = next(m for m in sent[0] if m.get("tool_calls"))
+    assert turn["reasoning_content"] == "plan" and "model" not in turn
+
+
+@needs_agents
+def test_reply_with_no_choices_records_nothing(client, monkeypatch):
+    """The Agents SDK reads a reply with no choices as an empty answer."""
+    pytest.importorskip("litellm")
+    import litellm
+    _mock_litellm(monkeypatch, [litellm.ModelResponse(choices=[])])
+    out = client.chat_completions("q", model="gpt-test")
+    assert out.choices[0].message.content == ""
+
+
+def _refusal(field):
+    from litellm.exceptions import BadRequestError
+    return BadRequestError(message=f"property '{field}' is unsupported",
+                           model="m", llm_provider="groq")
+
+
+@needs_agents
+@pytest.mark.parametrize("settings", [{}, {"stream": True}])
+def test_refused_field_goes_again_without_it(client, store_path, monkeypatch,
+                                             settings):
+    """A field a 400 names goes again at once without it and stays out for
+    the rest of the call; the next call tries it afresh."""
+    pytest.importorskip("litellm")
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    call = _litellm_reply(tool_calls=_TWO_CALLS[:1], reasoning_content="think")
+    sent = _mock_litellm(monkeypatch, [
+        call, _refusal("reasoning_content"),
+        _litellm_reply(tool_calls=_TWO_CALLS[1:]), _litellm_reply("A"),
+        call, _litellm_reply("A")])
+    for _ in range(2):
+        out = client.chat_completions("q", doc_id=doc_id,
+                                      model="groq/qwen/qwen3-32b", **settings)
+        if settings:
+            assert "A" in "".join(out)
+        else:
+            assert out.choices[0].message.content == "A"
+    assert [any(m.get("reasoning_content") for m in messages)
+            for messages in sent] == [False, True, False, False, False, True]
+
+
+@needs_agents
+def test_missing_field_400_costs_one_retry_at_most(client, store_path,
+                                                    monkeypatch):
+    """A 400 naming a field the provider wants rather than refuses gets one
+    retry without it; the provider's own error then surfaces, and the next
+    call sends the field again."""
+    pytest.importorskip("litellm")
+    from litellm.exceptions import BadRequestError
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    model = "deepseek/deepseek-chat"
+    call = _litellm_reply(tool_calls=_TWO_CALLS[:1], reasoning_content="think")
+    missing = "Missing `reasoning_content` field in the assistant message"
+    sent = _mock_litellm(monkeypatch, [
+        call, *[BadRequestError(message=missing, model="m",
+                                llm_provider="deepseek") for _ in range(2)],
+        call, _litellm_reply("A")])
+    with pytest.raises(PageIndexAPIError, match=missing):
+        client.chat_completions("q", doc_id=doc_id, model=model)
+    client.chat_completions("q", doc_id=doc_id, model=model)
+    assert [any(m.get("reasoning_content") for m in messages)
+            for messages in sent] == [False, True, False, False, True]
+
+
+@needs_agents
+def test_refused_fields_go_again_one_by_one(client, store_path, monkeypatch):
+    """Each 400 refuses the field it names, the Agents SDK's own too
+    (reasoning_content, for a DeepSeek name), until one goes through."""
+    pytest.importorskip("litellm")
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    model = "groq/deepseek-r1-distill-llama-70b"
+    details = [{"type": "reasoning.text", "text": "plan"}]
+    sent = _mock_litellm(monkeypatch, [
+        _litellm_reply(tool_calls=_TWO_CALLS[:1], reasoning_content="plan",
+                       provider_specific_fields={"reasoning_details": details}),
+        _refusal("reasoning_content"), _refusal("reasoning_details"),
+        _litellm_reply("A")])
+    out = client.chat_completions("q", doc_id=doc_id, model=model)
+    assert out.choices[0].message.content == "A"
+    assert [sorted({"reasoning_content", "reasoning_details"} & set(m))
+            for messages in sent[1:] for m in messages
+            if m.get("tool_calls")] == [
+        ["reasoning_content", "reasoning_details"], ["reasoning_details"], []]
+
+
+def _aborted(*chunks):
+    """A stream OpenRouter cuts off after chunks, as LiteLLM reads it."""
+    from litellm.exceptions import APIConnectionError
+    return [*chunks, APIConnectionError(
+        message="The operation was aborted", llm_provider="openai",
+        model="m")]
+
+
+@needs_agents
+@pytest.mark.parametrize("breaks", [1, 3, 4])
+def test_stream_broken_before_output_goes_again(client, monkeypatch, breaks):
+    """A stream the server breaks before any output goes again, three
+    times at most."""
+    pytest.importorskip("litellm")
+    sent = _mock_litellm(monkeypatch, [_aborted() for _ in range(breaks)]
+                         + [_litellm_reply("A")])
+    out = client.chat_completions("q", model="gpt-test", stream=True)
+    if breaks <= 3:
+        assert "".join(out) == "A"
+    else:
+        with pytest.raises(PageIndexAPIError):
+            "".join(out)
+    assert len(sent) == min(breaks + 1, 4)
+
+
+@needs_agents
+def test_stream_broken_after_output_is_not_replayed(client, monkeypatch):
+    """The runner won't replay a stream that already showed text, nor
+    does the lane retry a request that wasn't streamed."""
+    pytest.importorskip("litellm")
+    from litellm.exceptions import InternalServerError
+    sent = _mock_litellm(monkeypatch, [
+        _aborted(*_litellm_chunks({"content": "Hi"})[:1]),
+        InternalServerError(message="boom", llm_provider="openai", model="m"),
+        _litellm_reply("A")])
+    with pytest.raises(PageIndexAPIError):
+        "".join(client.chat_completions("q", model="gpt-test", stream=True))
+    with pytest.raises(PageIndexAPIError):
+        client.chat_completions("q", model="gpt-test")
+    assert len(sent) == 2
+
+
+@needs_agents
+def test_other_400s_are_not_retried(client, monkeypatch):
+    """A 400 that doesn't name reasoning_content is not retried."""
+    pytest.importorskip("litellm")
+    import litellm
+    from litellm.exceptions import BadRequestError
+    calls = []
+
+    async def acompletion(**kwargs):
+        calls.append(kwargs)
+        raise BadRequestError(message="bad request", model=kwargs["model"],
+                              llm_provider="groq")
+
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+    with pytest.raises(PageIndexAPIError):
+        client.chat_completions("q", model="groq/never-sent-reasoning")
+    assert len(calls) == 1
+
+
+@needs_agents
+@pytest.mark.parametrize("error", [
+    # names fields this request didn't get back, or only as part of a name
+    "messages.1.content.0: Invalid `signature` in `thinking` block",
+    "reasoning_content_mode is unsupported"])
+def test_unrelated_400s_refuse_nothing(client, store_path, monkeypatch,
+                                       error):
+    """A 400 naming no field the request carried is not retried."""
+    pytest.importorskip("litellm")
+    from litellm.exceptions import BadRequestError
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    call = _litellm_reply(tool_calls=_TWO_CALLS[:1], reasoning_content="think")
+    sent = _mock_litellm(monkeypatch, [call, BadRequestError(
+        message=error, model="m", llm_provider="anthropic")])
+    with pytest.raises(PageIndexAPIError):
+        client.chat_completions("q", doc_id=doc_id,
+                                model="moonshot/kimi-k2-thinking")
+    assert [any(m.get("reasoning_content") for m in messages)
+            for messages in sent] == [False, True]
+
+
+@needs_agents
+def test_unset_effort_sends_none(client, monkeypatch):
+    """No effort reaches the wire unless the caller sets one."""
+    pytest.importorskip("litellm")
+    model = "anthropic/claude-sonnet-5-5"
+    unset, _ = _anthropic_wire(monkeypatch, client, model)
+    assert not {"thinking", "output_config"} & set(unset["body"])
+    chosen, _ = _anthropic_wire(monkeypatch, client, model,
+                                reasoning_effort="high")
+    assert chosen["body"]["output_config"] == {"effort": "high"}
+
+
+@needs_agents
+@pytest.mark.parametrize("effort", [{"reasoning_effort": "high"}, {}])
+def test_streamed_claude_thinking_goes_back_once(client, store_path,
+                                                 monkeypatch, effort):
+    """Streamed thinking goes back once, not doubled."""
+    pytest.importorskip("litellm")
+    call = {"index": 0, **_TWO_CALLS[0]}
+    first, sent = _two_turns(
+        store_path, monkeypatch, client, "anthropic/claude-sonnet-5-5",
+        _litellm_chunks(
+            {"reasoning_content": "plan", "thinking_blocks": [
+                {"type": "thinking", "thinking": "plan"}]},
+            {"reasoning_content": " step", "thinking_blocks": [
+                {"type": "thinking", "thinking": " step"}]},
+            {"reasoning_content": "", "thinking_blocks": [
+                {"type": "thinking", "thinking": "plan step",
+                 "signature": "SIG1"}]},
+            {"tool_calls": [call]}),
+        **effort, stream=True, stream_metadata=True)
+    thinking = [{"type": "thinking", "thinking": "plan step",
+                 "signature": "SIG1"}]
+    for messages in (first["messages"], sent[1], sent[2]):
+        calls = [m for m in messages if m.get("tool_calls")]
+        assert calls[0].get("thinking_blocks") == thinking
+
+
+@needs_agents
+@pytest.mark.parametrize("model, effort", [
+    ("anthropic/claude-test", "high"),
+    ("gemini/gemini-test", "disable"),
+])
+def test_reasoning_effort_reaches_litellm_as_given(client, monkeypatch,
+                                                   model, effort):
+    pytest.importorskip("litellm")
+    import litellm
+    seen = []
+
+    async def acompletion(**kwargs):
+        seen.append(kwargs.get("reasoning_effort"))
+        return _litellm_reply("ok")
+
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+    client.chat_completions("q", model=model, reasoning_effort=effort)
+    assert seen == [effort]
+
+
+@needs_agents
+def test_extra_body_settings_litellm_model_skips_reach_litellm(client,
+                                                               monkeypatch):
+    """Settings LitellmModel ignores reach LiteLLM as kwargs."""
+    pytest.importorskip("litellm")
+    import litellm
+    seen = []
+
+    async def acompletion(**kwargs):
+        seen.append(kwargs)
+        return _litellm_reply("ok")
+
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+    extras = {"context_management": {"edits": []}, "verbosity": "low",
+              "store": False, "retry": {"max_retries": 2}}
+    client.chat_completions("q", model="anthropic/claude-test",
+                            extra_body=extras)
+    assert {key: seen[0].get(key) for key in extras} == extras
 
 
 @needs_agents
 def test_chat_completions_messages_keep_gemini_signatures(client, store_path,
                                                           monkeypatch):
-    """Gemini thought signatures ride messages back in Google's
-    extra_content and reach LiteLLM's own field on every turn, so the next
+    """Gemini thought signatures ride messages back in LiteLLM's own field,
+    as the model was sent them, and stay on every turn's calls, so the next
     request opens with the previous one unchanged."""
     pytest.importorskip("litellm")
     signed = [{**_TWO_CALLS[0], "provider_specific_fields": {
@@ -564,12 +984,284 @@ def test_chat_completions_messages_keep_gemini_signatures(client, store_path,
     first, sent = _two_turns(store_path, monkeypatch, client,
                              "gemini/gemini-test",
                              _litellm_reply(tool_calls=signed))
-    assert first["messages"][0]["tool_calls"][0]["extra_content"] == {
-        "google": {"thought_signature": "sig1"}}
+    assert first["messages"][0]["tool_calls"][0][
+        "provider_specific_fields"] == {"thought_signature": "sig1"}
     assert sent[2][:len(sent[1])] == sent[1]
     calls = next(m["tool_calls"] for m in sent[2] if m.get("tool_calls"))
     assert calls[0]["provider_specific_fields"] == {
         "thought_signature": "sig1"}
+
+
+@needs_agents
+@pytest.mark.parametrize("field, value", [
+    ("reasoning_details", [{"type": "reasoning.encrypted", "data": "ENC"}]),
+    ("reasoning_items", [{"id": "rs_1", "type": "reasoning",
+                          "encrypted_content": "ENC", "summary": []}]),
+])
+def test_reply_fields_the_agents_sdk_drops_go_back(client, store_path,
+                                                   monkeypatch, field, value):
+    """What LiteLLM parsed from a reply and the Agents SDK drops
+    (OpenRouter's reasoning_details, the Responses bridge's
+    reasoning_items, ...) goes back with that reply on every later
+    request, and rides the returned messages."""
+    pytest.importorskip("litellm")
+    first, sent = _two_turns(store_path, monkeypatch, client,
+                             "openrouter/x-ai/grok-test",
+                             _litellm_reply(tool_calls=_TWO_CALLS[:1],
+                                            provider_specific_fields={
+                                                field: value}))
+    for messages in (first["messages"], sent[1], sent[2]):
+        calls = [m for m in messages if m.get("tool_calls")]
+        assert calls[0][field] == value
+
+
+def _openai_chunk(delta, finish=None):
+    from openai.types.chat import ChatCompletionChunk
+    return ChatCompletionChunk.model_validate({
+        "id": "c1", "object": "chat.completion.chunk", "created": 0,
+        "model": "m", "choices": [{"index": 0, "delta": delta,
+                                   "finish_reason": finish}]})
+
+
+@needs_agents
+def test_streamed_fields_litellm_drops_go_back(client, store_path,
+                                               monkeypatch):
+    """A delta carrying only a field LiteLLM doesn't know, as OpenRouter
+    streams a signature or encrypted reasoning, still goes back."""
+    pytest.importorskip("litellm")
+    text = {"type": "reasoning.text", "text": "plan"}
+    encrypted = {"type": "reasoning.encrypted", "data": "ENC"}
+    first, sent = _two_turns(
+        store_path, monkeypatch, client, "openrouter/x-ai/grok-test",
+        [_openai_chunk({"role": "assistant", "reasoning_details": [text],
+                        "trace": "pl"}),
+         _openai_chunk({"tool_calls": [{"index": 0, **_TWO_CALLS[0]}],
+                        "trace": "an"}),
+         _openai_chunk({"reasoning_details": [encrypted]}),
+         _openai_chunk({}, finish="tool_calls")],
+        stream=True, stream_metadata=True)
+    for messages in (first["messages"], sent[1], sent[2]):
+        calls = [m for m in messages if m.get("tool_calls")]
+        assert calls[0]["reasoning_details"] == [text, encrypted]
+        assert calls[0]["trace"] == "plan"
+
+
+@needs_agents
+@pytest.mark.parametrize("stream", [False, True])
+def test_claude_thinking_reaches_the_anthropic_wire_once(client, store_path,
+                                                         monkeypatch, stream):
+    """Through LiteLLM's own Anthropic parsing and request building, with
+    no effort set: the run's next request carries the signed thinking
+    block once, a stream's closing repeat of its text dropped."""
+    pytest.importorskip("litellm")
+    from litellm.llms.custom_httpx.http_handler import (AsyncHTTPHandler,
+                                                        HTTPHandler)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    thinking = {"type": "thinking", "thinking": "plan step",
+                "signature": "SIG1"}
+    call = {"type": "tool_use", "id": "toolu_1", "name": "get_document",
+            "input": {"doc_name": "report.pdf"}}
+    answer = {"type": "text", "text": "done"}
+    replies = [_anthropic_message([thinking, call], "tool_use"),
+               _anthropic_message([answer], "end_turn")]
+    if stream:
+        replies = [_anthropic_sse(message) for message in replies]
+    bodies = []
+
+    def reply(url, kwargs):
+        bodies.append(json.loads(kwargs["data"]) if kwargs.get("data")
+                      else kwargs.get("json"))
+        request = httpx.Request("POST", str(url))
+        body = replies.pop(0)
+        if isinstance(body, str):
+            return httpx.Response(200, content=body.encode(), request=request,
+                                  headers={"content-type": "text/event-stream"})
+        return httpx.Response(200, json=body, request=request)
+
+    async def fake_apost(self, url=None, *args, **kwargs):
+        return reply(url, kwargs)
+
+    monkeypatch.setattr(AsyncHTTPHandler, "post", fake_apost)
+    monkeypatch.setattr(HTTPHandler, "post",
+                        lambda self, url=None, *args, **kwargs:
+                        reply(url, kwargs))
+    out = client.chat_completions("q", doc_id=doc_id,
+                                  model="anthropic/claude-sonnet-5-5",
+                                  stream=stream, stream_metadata=stream)
+    result = list(out)[-1] if stream else out
+    assert not {"thinking", "output_config"} & set(bodies[0])
+    turn = next(m for m in bodies[1]["messages"] if m["role"] == "assistant")
+    assert [b for b in turn["content"] if b["type"] == "thinking"] == [
+        thinking]
+    assert result["messages"][0]["thinking_blocks"] == [thinking]
+
+
+def test_repeated_answers_keep_their_own_fields():
+    """Records keep conversation order: a repeated answer (or a reused call
+    id) gets its own reply's fields back, not the latest one's."""
+    replies = local_chat._Replies("m")
+    for n in (1, 2):
+        replies.record({"role": "assistant", "content": "OK",
+                        "reasoning_details": [n]})
+    out = replies.fill([{"role": "assistant", "content": "OK"},
+                        {"role": "user", "content": "again"},
+                        {"role": "assistant", "content": "OK"}])
+    assert [m.get("reasoning_details") for m in out
+            if m["role"] == "assistant"] == [[1], [2]]
+
+
+def test_fill_only_adds():
+    """Fields the Agents SDK set stay as it set them; empty ones the reply
+    had never go back; LiteLLM's nested provider fields go on top."""
+    call = {"id": "c1", "type": "function",
+            "function": {"name": "f", "arguments": "{}"}}
+    replies = local_chat._Replies("m")
+    replies.record({"role": "assistant", "content": "",
+                    "tool_calls": [{**call, "caller": {"type": "direct"}}],
+                    "thinking_blocks": [{"type": "thinking", "thinking": "a",
+                                         "signature": "S"}],
+                    "reasoning_content": "",
+                    "provider_specific_fields": {"reasoning_details": [],
+                                                 "extra": "x"}})
+    own = [{"type": "thinking", "thinking": "b", "signature": "T"}]
+    out = replies.fill([{"role": "assistant", "thinking_blocks": own,
+                         "tool_calls": [call]}])
+    assert out == [{"role": "assistant", "content": None,
+                    "thinking_blocks": own, "extra": "x",
+                    "tool_calls": [{**call, "caller": {"type": "direct"}}]}]
+
+
+@needs_agents
+def test_native_routes_keep_provider_fields_nested(client, store_path,
+                                                   monkeypatch):
+    """LiteLLM's own adapter reads provider_specific_fields nested (Gemini's
+    thought_signatures, Anthropic's web_search_results), so they go back
+    there; a Gemini call id matches without the signature LiteLLM folds in
+    and the Agents SDK strips."""
+    pytest.importorskip("litellm")
+    fields = {"thought_signatures": ["SIG"]}
+    first, sent = _two_turns(store_path, monkeypatch, client,
+                             "gemini/gemini-test", _litellm_reply(
+                                 tool_calls=[{**_TWO_CALLS[0],
+                                              "id": "call_1__thought__SIG"}],
+                                 provider_specific_fields=fields))
+    for messages in (first["messages"], sent[1], sent[2]):
+        turn = next(m for m in messages if m.get("tool_calls"))
+        assert turn["provider_specific_fields"] == fields
+        assert "thought_signatures" not in turn
+
+
+def test_fields_the_sdk_set_count_as_sent():
+    """A field the Agents SDK set itself is refusable like one put back."""
+    replies = local_chat._Replies("m")
+    replies.record({"role": "assistant", "content": "OK"}, own=False)
+    message = {"role": "assistant", "content": "OK", "reasoning_content": "r"}
+    replies.fill([message])
+    assert replies.sent == {"reasoning_content"}
+    replies.refused.add("reasoning_content")
+    assert replies.fill([message]) == [{"role": "assistant", "content": "OK"}]
+
+
+def test_unassembled_streams_are_skipped(monkeypatch):
+    pytest.importorskip("litellm")
+    import litellm
+
+    def fail(chunks):
+        raise ValueError("unassembled")
+
+    monkeypatch.setattr(litellm, "stream_chunk_builder", fail)
+    replies = local_chat._Replies("m")
+    replies.streams.append((["chunk"], {"reasoning_details": [[1]]}))
+    message = {"role": "assistant", "content": "OK"}
+    assert replies.fill([message]) == [message]
+
+
+def test_requests_outside_a_chat_run_pass_untouched():
+    pytest.importorskip("litellm")
+    local_chat._register_fill()
+    kwargs = {"messages": [{"role": "assistant", "content": "OK"}]}
+    assert asyncio.run(local_chat._fill_hook.async_pre_call_deployment_hook(
+        kwargs, None)) is None
+
+
+@needs_agents
+def test_fill_hook_returns_when_callbacks_are_replaced(client, monkeypatch):
+    """A caller replacing litellm.callbacks doesn't turn the fill off."""
+    pytest.importorskip("litellm")
+    import litellm
+    _mock_litellm(monkeypatch, [_litellm_reply("A")])
+    monkeypatch.setattr(litellm, "callbacks", litellm.callbacks[-1:])
+    client.chat_completions("q", model="gpt-test")
+    assert local_chat._fill_hook in litellm.callbacks
+
+
+def test_gateways_get_cache_marks_for_claude():
+    """Claude caches only on marks, so it gets them through a gateway too.
+    Every other model caches by itself and gets none, as on OpenAI's own
+    API, where marks turn on explicit caching and lose its automatic
+    hits."""
+    pytest.importorskip("litellm")
+    relay = "https://openrouter.ai/api/v1"
+    for name in ("openai/anthropic/claude-x", "litellm/openai/Claude-x"):
+        assert local_chat._cache_extra_args(name, relay), name
+    assert local_chat._cache_extra_args("openrouter/anthropic/claude-x")
+    for name, base in (("openai/x-ai/grok-x", relay), ("gpt-x", relay),
+                       ("litellm/openai/qwen/x", relay),
+                       ("openai/deepseek-chat", "https://api.deepseek.com"),
+                       ("openrouter/x-ai/grok-x", None), ("gpt-x", None),
+                       ("openai/gpt-x", "https://api.openai.com/v1"),
+                       ("openai/gpt-x", "https://us.api.openai.com/v1"),
+                       ("gemini/gemini-x", relay)):
+        assert local_chat._cache_extra_args(name, base) is None, (name, base)
+
+
+@needs_agents
+@pytest.mark.parametrize("model, backend, blocks", [
+    ("openai/anthropic/claude-test",
+     {"base_url": "https://openrouter.ai/api/v1", "api_key": "k"}, True),
+    ("anthropic/claude-test", None, False),
+])
+def test_gateway_requests_send_user_text_as_blocks(client, store_path,
+                                                   monkeypatch, model,
+                                                   backend, blocks):
+    """Through a gateway every request carries the marks with user text
+    as content blocks: a gateway keeps a mark only inside a block and
+    merges adjacent text messages, so a message keeps one shape whether
+    or not it holds this request's mark. A Claude route sends the text as
+    is, and LiteLLM places the marks itself."""
+    pytest.importorskip("litellm")
+    marks = []
+    first, sent = _two_turns(store_path, monkeypatch, client, model,
+                             _litellm_reply(tool_calls=_TWO_CALLS[:1]),
+                             marks, backend=backend)
+    assert len(marks) == len(sent) == 3 and all(marks)
+    users = [m for messages in sent for m in messages if m["role"] == "user"]
+    assert users and all(isinstance(m["content"], list) == blocks
+                         for m in users)
+    assert sent[2][:len(sent[1])] == sent[1]
+
+
+@needs_agents
+def test_gateway_refusing_marks_goes_again_without_them(client, store_path,
+                                                        monkeypatch):
+    """A gateway that refuses cache_control gets the request again without
+    the marks, and none for the rest of the call; the next call tries them
+    afresh."""
+    pytest.importorskip("litellm")
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    marks = []
+    _mock_litellm(monkeypatch, [
+        _refusal("cache_control"), _litellm_reply(tool_calls=_TWO_CALLS[:1]),
+        _litellm_reply("A"), _refusal("cache_control"), _litellm_reply("A")],
+        marks)
+    backend = {"base_url": "https://gateway.example/v1", "api_key": "k"}
+    for _ in range(2):
+        out = client.chat_completions("q", doc_id=doc_id, backend=backend,
+                                      model="openai/anthropic/claude-strict")
+        assert out.choices[0].message.content == "A"
+    assert [bool(points) for points in marks] == [True, False, False, True,
+                                                  False]
 
 
 # ── chat (front door) ──
@@ -632,7 +1324,7 @@ def test_chat_reasoning_effort_reaches_the_engine(client, store_path,
     monkeypatch.setattr(local_chat, "_openai_agent", spy)
     fake_model([[_msg_item("ok")]])
     client.chat("q", reasoning_effort="low")
-    assert seen["settings"].extra_args["reasoning_effort"] == "low"
+    assert seen["settings"].reasoning.effort == "low"
     fake_model([[_msg_item("ok")]])
     client.chat("q")
     assert seen["settings"].extra_args is None
@@ -1719,21 +2411,31 @@ def _anthropic_message(content, stop_reason):
 
 
 def _anthropic_sse(message):
-    """Render text/tool turns for the real streaming tool runner."""
+    """Render text, thinking and tool turns for a real streaming parser."""
     events = [{"type": "message_start", "message": {
         **message, "content": [], "stop_reason": None}}]
     for index, block in enumerate(message["content"]):
         if block["type"] == "tool_use":
             initial = {**block, "input": {}}
-            delta = {"type": "input_json_delta",
-                     "partial_json": json.dumps(block["input"])}
+            deltas = [{"type": "input_json_delta",
+                       "partial_json": json.dumps(block["input"])}]
+        elif block["type"] == "thinking":
+            # the text in two deltas, then its signature in its own
+            initial = {**block, "thinking": "", "signature": ""}
+            half = len(block["thinking"]) // 2
+            deltas = [{"type": "thinking_delta", "thinking": text}
+                      for text in (block["thinking"][:half],
+                                   block["thinking"][half:])]
+            deltas.append({"type": "signature_delta",
+                           "signature": block["signature"]})
         else:
             initial = {**block, "text": ""}
-            delta = {"type": "text_delta", "text": block["text"]}
+            deltas = [{"type": "text_delta", "text": block["text"]}]
         events.extend([
             {"type": "content_block_start", "index": index,
              "content_block": initial},
-            {"type": "content_block_delta", "index": index, "delta": delta},
+            *({"type": "content_block_delta", "index": index, "delta": delta}
+              for delta in deltas),
             {"type": "content_block_stop", "index": index},
         ])
     events.extend([
@@ -2374,22 +3076,27 @@ def test_responses_envelope_fields_and_cache_group(client, store_path,
     assert result["tool_choice"] == "auto"
 
 
+@needs_agents
+def test_litellm_import_failure_surfaces_its_cause(monkeypatch):
+    pytest.importorskip("agents.extensions.models.litellm_model")
+    monkeypatch.setitem(sys.modules, "litellm", None)
+    with pytest.raises(PageIndexAPIError, match="failed to import") as info:
+        local_chat._openai_model("chat", "anthropic/claude-x")
+    assert "not installed" not in str(info.value)
+    assert isinstance(info.value.__cause__, ImportError)
+
+
 def test_sol_class_refusal_names_its_exits():
-    """The chatcmpl+tools-while-reasoning 400 is a lane problem, not a
-    retry problem — the wrapped error must name every exit that is real
-    for the caller's lane. Chat has three; a Responses-lane caller gets only
-    the litellm upgrade (it IS the other lane, and its reasoning knob is
-    ``reasoning``, not ``reasoning_effort``)."""
+    """The tools-with-reasoning 400 names its exits on the chat lane only."""
     refusal = Exception(
         "Error code: 400 - Function tools with reasoning_effort are not "
         "supported for gpt-5.6-sol in /v1/chat/completions.")
     chat = str(local_chat._model_backend_error(refusal, "chat"))
-    assert "chat(protocol='responses')" in chat and "litellm" in chat
+    assert "chat(protocol='responses')" in chat
     assert "pass reasoning_effort" in chat
+    assert "upgrade" not in chat
     resp = str(local_chat._model_backend_error(refusal, "responses"))
-    assert "upgrade litellm" in resp
-    assert "protocol='responses'" not in resp
-    assert "pass reasoning_effort" not in resp
+    assert resp == f"The model backend failed: {refusal}"
     plain = local_chat._model_backend_error(Exception("rate limited"), "chat")
     assert "protocol='responses'" not in str(plain)
 
@@ -2447,24 +3154,25 @@ def test_agent_carries_prompt_cache_key_in_extra_body(monkeypatch):
 
 @needs_agents
 def test_reasoning_passthrough_reaches_each_engine(monkeypatch):
-    """Per-door native reasoning, forwarded verbatim. The chat door's
-    effort rides extra_args — LiteLLM's own top-level kwarg on every
-    supported openai-agents version, and the channel admits values outside
-    the OpenAI enum ("none") — coexisting with the Claude cache marker.
-    The responses door's object rides ModelSettings.reasoning, which the
-    Responses model forwards verbatim. Unset sends nothing."""
+    """Each door forwards its native reasoning; unset sends nothing."""
     pytest.importorskip("litellm")
+    from openai.types.shared import Reasoning
     monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
     monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
                         lambda *a, **k: [])
     agent = local_chat._openai_agent(None, "chat", "gpt-test", "sys",
                                      None, None, reasoning_effort="low")
-    assert agent.model_settings.extra_args == {"reasoning_effort": "low"}
-    assert agent.model_settings.reasoning is None
+    assert agent.model_settings.reasoning == Reasoning(effort="low")
+    assert agent.model_settings.extra_args is None
     agent = local_chat._openai_agent(None, "chat", "anthropic/claude-x",
                                      "sys", None, None,
                                      reasoning_effort="none")
-    assert agent.model_settings.extra_args["reasoning_effort"] == "none"
+    assert agent.model_settings.reasoning == Reasoning(effort="none")
+    agent = local_chat._openai_agent(None, "chat", "anthropic/claude-x",
+                                     "sys", None, None,
+                                     reasoning_effort="disable")
+    assert agent.model_settings.reasoning is None
+    assert agent.model_settings.extra_args["reasoning_effort"] == "disable"
     assert "cache_control_injection_points" in agent.model_settings.extra_args
     agent = local_chat._openai_agent(None, "responses", "gpt-test", "sys",
                                      None, None,
@@ -2486,11 +3194,7 @@ def test_reasoning_passthrough_reaches_each_engine(monkeypatch):
 
 @needs_agents
 def test_extra_body_model_settings_fields_ride_their_field(monkeypatch):
-    """LiteLLM-routed answer lane: openai-agents passes ModelSettings'
-    own fields to litellm by name beside **extra_args, so a caller's copy
-    in extra_args collided with them. Those ride their field, the
-    caller's value winning; the rest stay LiteLLM kwargs. OpenAI
-    destinations keep the request-body path."""
+    """extra_body settings LitellmModel reads ride their field, caller wins."""
     pytest.importorskip("litellm")
     monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
     monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
@@ -2515,11 +3219,73 @@ def test_extra_body_model_settings_fields_ride_their_field(monkeypatch):
 
 
 @needs_agents
+def test_litellm_model_settings_list_matches_litellm_model(monkeypatch):
+    """_LITELLM_MODEL_SETTINGS names exactly what LitellmModel forwards."""
+    pytest.importorskip("litellm")
+    import litellm
+    from agents import ModelSettings, ModelTracing, function_tool
+    from agents.extensions.models.litellm_model import LitellmModel
+    from openai.types.shared import Reasoning
+    samples = {
+        "temperature": 0.3, "top_p": 0.5, "frequency_penalty": 0.1,
+        "presence_penalty": 0.2, "tool_choice": "required",
+        "parallel_tool_calls": False, "truncation": "auto", "max_tokens": 7,
+        "reasoning": Reasoning(effort="low"), "verbosity": "low",
+        "metadata": {"k": "v"}, "store": True,
+        "prompt_cache_retention": "24h", "include_usage": True,
+        "response_include": ["reasoning.encrypted_content"],
+        "top_logprobs": 2, "extra_query": {"q": "1"}, "extra_body": {"x": 1},
+        "extra_headers": {"X-Probe": "1"}, "extra_args": {"y": 2},
+        "retry": {"max_retries": 1},
+        "context_management": [{"type": "compaction",
+                                "compact_threshold": 1000}],
+        "prompt_cache_options": {"mode": "explicit", "ttl": "30m"},
+        "preserve_raw_usage": True}
+    assert {field.name for field in dataclasses.fields(ModelSettings)} == set(
+        samples), "a ModelSettings field changed: update samples"
+    seen = []
+
+    class Sent(Exception):
+        pass
+
+    async def acompletion(**kwargs):
+        seen.append(kwargs)
+        raise Sent
+
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+
+    @function_tool
+    def lookup(page: int) -> str:
+        return str(page)
+
+    model = LitellmModel("anthropic/claude-test", api_key="k")
+
+    def sent_with(settings):
+        async def run():
+            async for _ in model.stream_response(
+                    None, "q", settings, [lookup], None, [],
+                    ModelTracing.DISABLED):
+                pass
+
+        seen.clear()
+        with pytest.raises(Sent):
+            asyncio.run(run())
+        return seen[0]
+
+    unset = sent_with(ModelSettings())
+    forwarded = {name for name, value in samples.items()
+                 if sent_with(ModelSettings(**{name: value})) != unset}
+    assert forwarded - {"extra_body", "extra_args"} == (
+        local_chat._LITELLM_MODEL_SETTINGS)
+
+
+@needs_agents
 def test_extra_body_passthrough_reaches_each_engine(monkeypatch):
     """Caller extras merge last — over the cache key on OpenAI
     destinations — and ride LiteLLM's own kwargs elsewhere, where
     extra_body would plant literal fields providers reject."""
     pytest.importorskip("litellm")
+    from openai.types.shared import Reasoning
     monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
     monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
                         lambda *a, **k: [])
@@ -2536,7 +3302,7 @@ def test_extra_body_passthrough_reaches_each_engine(monkeypatch):
                                      extra_body={"top_k": 20})
     assert agent.model_settings.extra_body is None
     assert agent.model_settings.extra_args["top_k"] == 20
-    assert agent.model_settings.extra_args["reasoning_effort"] == "low"
+    assert agent.model_settings.reasoning == Reasoning(effort="low")
     assert "cache_control_injection_points" in agent.model_settings.extra_args
     agent = local_chat._openai_agent(None, "responses", "gpt-test", "sys",
                                      None, None,
@@ -3616,9 +4382,7 @@ def test_messages_bad_backend_wraps_like_the_other_doors():
 
 @needs_agents
 def test_extra_headers_ride_model_settings(monkeypatch):
-    """Both openai-agents doors merge ModelSettings.extra_headers into
-    their requests (wire-probed: LiteLLM's chatcmpl adapters forward
-    custom headers; its anthropic adapter owns anthropic-beta only)."""
+    """Both openai-agents doors send ModelSettings.extra_headers."""
     monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
     monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
                         lambda *a, **k: [])
@@ -3993,11 +4757,11 @@ def test_openai_protocol_predicate_follows_litellm_routing():
     for name in ("gpt-5", "openai/gpt-4o", "litellm/gpt-4o",
                  "azure/gpt-4o", "openrouter/openai/gpt-4o",
                  "deepseek/deepseek-chat", "groq/llama-3.3-70b-versatile",
-                 "xai/grok-3"):
+                 "xai/grok-3", "azure_ai/mistral-large"):
         assert local_chat._openai_protocol(name), name
     for name in ("anthropic/claude-sonnet-4-5", "gemini/gemini-2.5-pro",
                  "bedrock/us.anthropic.claude-sonnet-5",
-                 "vertex_ai/claude-sonnet-4-5"):
+                 "vertex_ai/claude-sonnet-4-5", "azure_ai/claude-sonnet-5-5"):
         assert not local_chat._openai_protocol(name), name
 
 
@@ -4580,32 +5344,20 @@ def test_anthropic_client_unconfigured_route_keeps_the_error_contract(
 
 
 @needs_anthropic
-def test_missing_route_client_class_names_the_upgrade(monkeypatch):
-    # A build predating a route's client class gets the tool-runner
-    # probe's contract, not a bare AttributeError.
+@pytest.mark.parametrize("model", [
+    "claude-sonnet-4-6", "bedrock/anthropic.claude-sonnet-4-6-v1:0"])
+def test_messages_refuses_anthropic_below_its_floor(client, monkeypatch,
+                                                     model):
     import anthropic
-    monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
-    monkeypatch.delattr(anthropic, "AnthropicFoundry", raising=False)
+
+    def transport(*args):
+        raise AssertionError("the gate let the call through")
+
+    monkeypatch.setattr(local_chat, "_anthropic_client", transport)
+    monkeypatch.setattr(anthropic, "__version__", "0.107.1")
     with pytest.raises(PageIndexAPIError,
-                       match="AnthropicFoundry.*pip install -U anthropic"):
-        local_chat._anthropic_client(None, "azure_ai")
-
-
-@needs_anthropic
-def test_messages_names_the_missing_tool_runner(client, monkeypatch):
-    # anthropic 0.108–0.121 constructs Bedrock/Vertex clients whose beta
-    # surface has no tool runner: name the gap, not an AttributeError.
-    class _Runnerless:
-        class beta:
-            class messages: ...
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr(local_chat, "_anthropic_client",
-                        lambda backend=None, route="anthropic": _Runnerless())
-    with pytest.raises(PageIndexAPIError, match="tool runner"):
-        client._messages("q", model="bedrock/anthropic.claude-sonnet-4-6-v1:0")
+                       match=r"anthropic 0\.122\.0 or newer, found 0\.107\.1"):
+        client._messages("q", model=model)
 
 
 def _failing_runner_client(monkeypatch, exc):
@@ -4837,6 +5589,7 @@ def test_extra_body_refuses_non_dicts_and_argument_keys():
     backend = r"backend= \(API chat models only\)"
     for key, argument in (("stream", "stream="), ("doc_id", "doc_id="),
                           ("folder_id", "folder_id="), ("model", "model="),
+                          ("reasoning_effort", "reasoning_effort="),
                           ("api_key", backend), ("base_url", backend),
                           ("api_base", backend)):
         with pytest.raises(PageIndexAPIError, match=(

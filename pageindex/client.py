@@ -1236,7 +1236,11 @@ class PageIndexClient:
         too. With an API chat model it adds ``messages`` (on the closing
         usage chunk when streaming): the call's new Chat Completions
         messages — assistant tool calls, tool results, the answer — to
-        append as they are, ``history += r["messages"]``.
+        append as they are, ``history += r["messages"]``. Each assistant
+        message names its LiteLLM route as ``model`` (``openai/gpt-6-luna``
+        where the response says ``gpt-6-luna``); keep it when storing the
+        history: a message's reasoning goes back only to the model it
+        names.
         ``protocol="responses"`` / ``"messages"``: own-model chat
         driven natively over the OpenAI Responses API or Anthropic's
         Messages API. Input and output are that protocol's own shapes —
@@ -1274,7 +1278,12 @@ class PageIndexClient:
                 Keep it identical across a conversation's calls. Local
                 documents: also enforced at the tool layer, not just
                 prompted. Cloud documents: the managed chat scopes
-                server-side; own-model chat targets at the prompt level.
+                server-side; own-model chat targets at the prompt level,
+                opening with the document's metadata as each call fetches
+                it. If that changes mid-conversation (status, metadata,
+                folder), Claude models that bind thinking to the
+                conversation reject the earlier thinking with a 400 on
+                accounts that enforce it: start a new conversation.
             folder_id: Folder ID to steer discovery toward that folder's
                 documents. Cloud-only. The managed chat scopes it
                 server-side; own-model chat leads the conversation with
@@ -1372,9 +1381,11 @@ class PageIndexClient:
                 Messages. Passed through verbatim.
             extra_headers: Own-model chat only — extra HTTP headers
                 merged into each backend request; caller headers win.
-                LiteLLM's anthropic adapter owns ``anthropic-beta`` on the
-                answer lane and ``protocol="chat_completions"`` —
-                Anthropic beta flags ride ``protocol="messages"``.
+                On the answer lane and ``protocol="chat_completions"``,
+                LiteLLM forwards an ``anthropic-beta`` flag only if it is
+                on LiteLLM's own list and drops the rest silently —
+                Anthropic beta flags it doesn't know ride
+                ``protocol="messages"``.
             extra_body: The wire's own request fields beyond this
                 method's parameters, in the lane's wire names (Responses
                 ``max_output_tokens``, Messages ``thinking`` / ``top_k``;
@@ -1389,10 +1400,10 @@ class PageIndexClient:
                 ``instructions`` / ``input`` / ``messages`` / ``tools``
                 are refused); extend the prompt with ``instructions=`` or a
                 leading system row in ``messages``. ``stream`` / ``doc_id``
-                / ``folder_id`` / ``model`` are refused too: each has its
-                own argument. Credentials and the endpoint (``api_key`` /
-                ``base_url`` / ``api_base``) belong in ``backend``, never
-                here.
+                / ``folder_id`` / ``model`` / ``reasoning_effort`` are
+                refused too: each has its own argument. Credentials and the
+                endpoint (``api_key`` / ``base_url`` / ``api_base``) belong
+                in ``backend``, never here.
 
         Returns:
             - answer lane, stream=False: the answer string
@@ -1635,12 +1646,18 @@ class PageIndexClient:
         agent's visible text as it is produced, including narration before
         tool calls. ``finish_reason`` carries the final turn's native
         finish reason — "stop", or the backend's "length" /
-        "content_filter" when the last turn was cut short. An API chat
+        "content_filter" when the last turn was cut short (a filtered
+        turn with no content at all raises PageIndexAPIError instead:
+        openai-agents turns it into a refusal). An API chat
         model's run also returns ``messages`` (on the closing usage chunk
         with ``stream_metadata``): the call's new messages — assistant
         tool calls, tool results, the answer — to append as they are, so
         the next call resends what the model saw and re-reads the
-        provider's cached prefix instead of redoing the tool work.
+        provider's cached prefix instead of redoing the tool work. Each
+        assistant message names its LiteLLM route as ``model``
+        (``openai/gpt-6-luna`` where the response says ``gpt-6-luna``);
+        keep it when storing the history: a message's reasoning goes back
+        only to the model it names.
 
         A ``claude-code/`` chat model runs Claude Code, not LiteLLM (see
         the constructor's ``chat_model``): ``temperature``, ``top_p``,
@@ -1667,7 +1684,11 @@ class PageIndexClient:
                 of the cached prompt prefix. Local documents: also
                 enforced at the tool layer, not just prompted. Cloud
                 documents: the managed chat scopes server-side;
-                own-model chat targets at the prompt level.
+                own-model chat targets at the prompt level. If the
+                document's metadata changes mid-conversation (status,
+                metadata, folder), Claude models that bind thinking to the
+                conversation reject the earlier thinking with a 400 on
+                accounts that enforce it: start a new conversation.
             folder_id: Folder ID to steer discovery toward that folder's
                 documents (cloud-only): the managed chat scopes it
                 server-side; own-model chat leads the conversation with
@@ -1704,15 +1725,16 @@ class PageIndexClient:
                 The managed prompt, conversation and tools are not
                 fields here (``system`` / ``instructions`` / ``input`` /
                 ``messages`` / ``tools`` are refused), nor are ``stream``
-                / ``doc_id`` / ``folder_id`` / ``model``: each has its own
-                argument. Credentials and the endpoint (``api_key`` /
-                ``base_url`` / ``api_base``) belong in ``backend``, never
-                here.
+                / ``doc_id`` / ``folder_id`` / ``model`` /
+                ``reasoning_effort``: each has its own argument.
+                Credentials and the endpoint (``api_key`` / ``base_url`` /
+                ``api_base``) belong in ``backend``, never here.
             extra_headers: Own-model chat only — extra HTTP headers merged into
                 each backend request; caller headers win. One exception:
-                LiteLLM's anthropic adapter owns the ``anthropic-beta``
-                header (your value is dropped there) — Anthropic beta
-                flags ride ``chat(protocol="messages")``.
+                LiteLLM forwards an ``anthropic-beta`` flag only if it is
+                on LiteLLM's own list and drops the rest silently —
+                Anthropic beta flags it doesn't know ride
+                ``chat(protocol="messages")``.
             backend: Own-model chat only — connection overrides for this call's
                 backend, merged over the client's ``chat_backend``
                 (per-call keys win). Keys are LiteLLM's own connection
@@ -2122,7 +2144,9 @@ class PageIndexClient:
         from the PageIndex MCP server and executed from your process —
         works with any model backend. The tools are the framework's own
         MCP conversion, so results reach the model in its shapes: text
-        as text, images (e.g. ``get_document_image``) as images. Pass
+        as text, images (e.g. ``get_document_image``) as images, except
+        on its ``OpenAIChatCompletionsModel``, which keeps only a tool
+        result's text; a ``litellm/`` model keeps the images. Pass
         ``hosted=True`` to
         hand the connection to OpenAI instead: one hosted MCP tool, tool
         calls executed server-side (lowest latency; requires an
@@ -2216,9 +2240,7 @@ class PageIndexClient:
             if config["model"].startswith("litellm/"):
                 # The runner resolves this model through LiteLLM in the
                 # caller's process, outside our completion helpers.
-                from .utils import (_mute_litellm_bridge_usage_warning,
-                                    _repair_litellm_types)
-                _repair_litellm_types()
+                from .utils import _mute_litellm_bridge_usage_warning
                 _mute_litellm_bridge_usage_warning()
                 # Marks follow this lane's routing: the SDK strips litellm/
                 # and LiteLLM resolves the rest (bare claude-* → Anthropic);
