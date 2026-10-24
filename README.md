@@ -205,7 +205,7 @@ print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 | Storage | Local directory | Cloud storage |
 | Citations | Page-level | Block-level |
 | OCR & image understanding | — | ✓ |
-| [Metadata](https://docs.pageindex.ai/sdk/documents#metadata-cloud) | — | ✓ |
+| [Metadata](https://docs.pageindex.ai/sdk/documents#metadata) | — | ✓ |
 | [Folders](https://docs.pageindex.ai/sdk/documents#folders-cloud) | — | ✓ |
 | [MCP server](https://docs.pageindex.ai/mcp) | — | ✓ |
 
