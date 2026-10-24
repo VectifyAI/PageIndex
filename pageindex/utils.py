@@ -938,6 +938,21 @@ def default_summary_reasoning_effort(model):
     with) the summaries send it and drop it if the server refuses it."""
     if {"reasoning_effort", "thinking"} & (_llm_backend.get() or {}).keys():
         return None
+    # MiniMax M3.1-Flash uses adaptive thinking only, and M3 ignores
+    # effort fields. Omit the generic summary default before LiteLLM's
+    # model metadata catches up.
+    wire = _strip_prefix(model or "", "litellm/")
+    if wire in {
+        "MiniMax-M3.1-Flash",
+        "minimax/MiniMax-M3.1-Flash",
+        "openai/MiniMax-M3.1-Flash",
+        "anthropic/MiniMax-M3.1-Flash",
+        "MiniMax-M3",
+        "minimax/MiniMax-M3",
+        "openai/MiniMax-M3",
+        "anthropic/MiniMax-M3",
+    }:
+        return None
     import litellm
     try:
         info = litellm.get_model_info(_litellm_model(model))
