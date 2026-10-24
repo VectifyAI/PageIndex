@@ -2738,9 +2738,11 @@ class PageIndexClient:
         counts documents by these fields. ``metadata`` on a document under
         the folder may use only these fields, with their types (HTTP 400
         otherwise); a document may leave any of them out. Documents uploaded
-        before the schema are not re-checked. Set once: a second call on the
-        same folder raises PageIndexAPIError (HTTP 409). Cloud-only: local
-        mode raises PageIndexAPIError.
+        before the schema are not re-checked: a value stored with another
+        type no longer filters correctly (``"2021"`` is not ``2021``). Set
+        once: a second call on the same folder raises PageIndexAPIError (HTTP
+        409); to change the fields, call ``delete_metadata_schema()``, then
+        declare them again. Cloud-only: local mode raises PageIndexAPIError.
 
         Args:
             folder_id (str): Top-level folder ID, or "root".
@@ -2754,6 +2756,49 @@ class PageIndexClient:
         ).create_metadata_schema(
             folder_id=folder_id, fields=fields,
         )
+
+    def get_metadata_schema(self, folder_id: str) -> dict[str, Any]:
+        """
+        Get the metadata fields that apply to a folder's documents: from its
+        top-level folder's schema, else the account's (``"root"``) schema.
+        ``schema`` is None when neither has one; ``inherited`` is True when
+        the fields come from a parent folder or the account.
+        Cloud-only: local mode raises PageIndexAPIError.
+
+        Args:
+            folder_id (str): Any folder ID, or "root" for the account-level
+                fields alone.
+
+        Returns:
+            dict: {'folder_id', 'workspace_id', 'inherited', 'schema'}.
+        """
+        return self._require_cloud(
+            "get_metadata_schema is cloud-only — local mode has no "
+            "metadata schemas. Create the client with an api_key to use them."
+        ).get_metadata_schema(folder_id=folder_id)
+
+    def delete_metadata_schema(self, folder_id: str) -> dict[str, Any]:
+        """
+        Delete the metadata fields declared on a top-level folder
+        (workspace), or on the account with ``folder_id="root"``, so they can
+        be declared again with ``create_metadata_schema()``. It deletes only
+        what this folder itself declares, and ``deleted`` is True even when
+        that was nothing. A top-level folder's documents then fall back to the
+        account's fields; to allow no metadata at all, declare
+        ``create_metadata_schema(folder_id, {})``. Documents keep their
+        metadata and are not re-checked against new fields. Cloud-only: local
+        mode raises PageIndexAPIError.
+
+        Args:
+            folder_id (str): Top-level folder ID, or "root".
+
+        Returns:
+            dict: {'folder_id', 'deleted': True}.
+        """
+        return self._require_cloud(
+            "delete_metadata_schema is cloud-only — local mode has no "
+            "metadata schemas. Create the client with an api_key to use them."
+        ).delete_metadata_schema(folder_id=folder_id)
 
     # ---------- PATH HELPERS ----------
 
