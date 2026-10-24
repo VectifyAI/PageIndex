@@ -376,8 +376,7 @@ def test_anthropic_routed_models_mark_managed_prefix_for_cache(
                  "bedrock/us.anthropic.claude-sonnet-5",
                  "vertex_ai/claude-sonnet-4-5"):
         agent = _openai_agent(client, "chat", name, "sys", None, None)
-        assert agent.model_settings.extra_args == {
-            **marked, "additional_drop_params": ["reasoning_effort"]}
+        assert agent.model_settings.extra_args == marked
     for name in ("gpt-5", "openai/Qwen/x", "litellm/groq/x",
                  "bedrock/meta.llama3-70b-instruct-v1:0",
                  "vertex_ai/gemini-2.5-pro"):
@@ -492,41 +491,59 @@ def _litellm_chunks(*deltas, finish="tool_calls"):
             delta=Delta(), finish_reason=finish)])]
 
 
-async def _chunk_stream(chunks):
-    for chunk in chunks:
-        yield chunk
-
-
 _TWO_CALLS = [{"id": f"call_{n}", "type": "function",
                "function": {"name": "get_document",
                             "arguments": '{"doc_name": "report.pdf"}'}}
               for n in (1, 2)]
 
 
+def _mock_litellm(monkeypatch, replies):
+    """Real LiteLLM answering each request with the next reply, after the
+    SDK's own hook has filled it: a ModelResponse, a list of chunks to
+    stream, or an exception to raise. Returns each request's messages as
+    sent."""
+    import litellm
+    import litellm.main
+    from litellm.integrations.custom_logger import CustomLogger
+    sent = []
+    replies = list(replies)
+    streaming = litellm.main.async_mock_completion_streaming_obj
+
+    class Answer(CustomLogger):
+        async def async_pre_call_deployment_hook(self, kwargs, call_type):
+            sent.append(json.loads(json.dumps(kwargs["messages"])))
+            return {**kwargs, "mock_response": replies.pop(0)}
+
+    async def stream(model_response, mock_response, **kwargs):
+        if isinstance(mock_response, list):
+            for chunk in mock_response:
+                yield chunk
+            return
+        async for chunk in streaming(model_response,
+                                     mock_response=mock_response, **kwargs):
+            yield chunk
+
+    monkeypatch.setattr(litellm.main, "async_mock_completion_streaming_obj",
+                        stream)
+    local_chat._register_fill()
+    monkeypatch.setattr(litellm, "callbacks", [*litellm.callbacks, Answer()])
+    return sent
+
+
 def _two_turns(store_path, monkeypatch, client, model, first_reply,
                **settings):
-    """Two calls through the real LitellmModel, the second appending the
-    first's ``messages``: the first envelope (or closing chunk), and each
-    request's messages as LiteLLM received them."""
-    import litellm
-    from litellm.llms.base_llm.base_model_iterator import MockResponseIterator
+    """Two calls through the real LitellmModel and LiteLLM, the second
+    appending the first's ``messages``: the first envelope (or closing
+    chunk), and each request's messages as LiteLLM sends them."""
     doc_id = seed_doc(store_path, "pi-a", "report.pdf")
-    sent = []
-    replies = [first_reply, _litellm_reply("A1"), _litellm_reply("A2")]
-
-    async def acompletion(**kwargs):
-        sent.append(json.loads(json.dumps(kwargs["messages"])))
-        reply = replies.pop(0)
-        if isinstance(reply, list):
-            return _chunk_stream(reply)
-        return MockResponseIterator(reply) if kwargs.get("stream") else reply
+    sent = _mock_litellm(monkeypatch, [first_reply, _litellm_reply("A1"),
+                                       _litellm_reply("A2")])
 
     def call(history):
         out = client.chat_completions(history, doc_id=doc_id, model=model,
                                       **settings)
         return list(out)[-1] if settings.get("stream") else out
 
-    monkeypatch.setattr(litellm, "acompletion", acompletion)
     question = {"role": "user", "content": "q1"}
     first = call([question])
     call([question, *first["messages"], {"role": "user", "content": "q2"}])
@@ -539,13 +556,14 @@ def _two_turns(store_path, monkeypatch, client, model, first_reply,
     # streamed turns are rebuilt by agents' own stream handler; OpenAI
     # streams open with an empty content delta
     ("gpt-test", {"content": ""}, {"stream": True, "stream_metadata": True}),
-    ("anthropic/claude-test", {"reasoning_content": "hmm", "thinking_blocks": [
-        {"type": "thinking", "thinking": "hmm", "signature": "SIG1"}]},
+    ("anthropic/claude-sonnet-5-5", {
+        "reasoning_content": "hmm", "thinking_blocks": [
+            {"type": "thinking", "thinking": "hmm", "signature": "SIG1"}]},
      {"extra_body": {"reasoning": {"effort": "high"}}, "stream": True,
       "stream_metadata": True}),
-    # LitellmModel re-pairs parallel calls with their results here
+    # LitellmModel sends parallel calls one per message here
     ("anthropic/claude-test", {}, {}),
-    ("anthropic/claude-test", {"thinking_blocks": [
+    ("anthropic/claude-sonnet-5-5", {"thinking_blocks": [
         {"type": "thinking", "thinking": "hmm", "signature": "SIG1"}]},
      {"extra_body": {"reasoning": {"effort": "high"}}}),
     # replayed as reasoning_content beside the calls
@@ -554,15 +572,15 @@ def _two_turns(store_path, monkeypatch, client, model, first_reply,
 def test_chat_completions_messages_resend_the_wire(client, store_path,
                                                    monkeypatch, model, extra,
                                                    settings):
-    """Appending a call's messages opens the next call's first request
-    with the previous call's last one, unchanged: the provider's cached
-    prefix carries over."""
+    """The returned messages are what the model saw, so appending them
+    opens the next call's first request with the previous call's last one,
+    unchanged: the provider's cached prefix carries over."""
     pytest.importorskip("litellm")
     first, sent = _two_turns(store_path, monkeypatch, client, model,
                              _litellm_reply(tool_calls=_TWO_CALLS, **extra),
                              **settings)
-    assert [m["role"] for m in first["messages"]] == [
-        "assistant", "tool", "tool", "assistant"]
+    assert first["messages"][:-1] == sent[1][len(sent[0]):]
+    assert first["messages"][-1]["content"] == "A1"
     assert sent[2][:len(sent[1])] == sent[1]
 
 
@@ -573,11 +591,11 @@ def test_chat_completions_messages_resend_the_wire(client, store_path,
 ])
 def test_claude_thinking_goes_back_with_its_calls(client, store_path,
                                                   monkeypatch, settings):
-    """Thinking goes back as thinking_blocks, never as reasoning_content."""
+    """Thinking goes back once, as thinking_blocks."""
     pytest.importorskip("litellm")
     thinking = [{"type": "thinking", "thinking": "hmm", "signature": "SIG1"}]
     first, sent = _two_turns(store_path, monkeypatch, client,
-                             "anthropic/claude-test",
+                             "anthropic/claude-sonnet-5-5",
                              _litellm_reply(tool_calls=_TWO_CALLS,
                                             thinking_blocks=thinking,
                                             reasoning_content="hmm"),
@@ -585,26 +603,29 @@ def test_claude_thinking_goes_back_with_its_calls(client, store_path,
     for messages in (first["messages"], sent[1], sent[2]):
         calls = [m for m in messages if m.get("tool_calls")]
         assert calls[0].get("thinking_blocks") == thinking
-        assert "reasoning_content" not in calls[0]
 
 
 @needs_agents
 @pytest.mark.parametrize("settings", [
     {}, {"extra_body": {"thinking": {"type": "adaptive"}}},
     {"stream": True, "stream_metadata": True}])
+@pytest.mark.parametrize("calls", [1, 2])
 def test_claude_thinking_goes_back_with_no_effort_set(client, store_path,
-                                                      monkeypatch, settings):
-    """Claude's thinking goes back with no effort set, and none is sent."""
+                                                      monkeypatch, settings,
+                                                      calls):
+    """Claude's thinking goes back with no effort set, on the first
+    message of a reply sent one call per message."""
     pytest.importorskip("litellm")
     thinking = [{"type": "thinking", "thinking": "", "signature": "SIG1"}]
     first, sent = _two_turns(store_path, monkeypatch, client,
-                             "anthropic/claude-test",
-                             _litellm_reply(tool_calls=_TWO_CALLS[:1],
+                             "anthropic/claude-sonnet-5-5",
+                             _litellm_reply(tool_calls=_TWO_CALLS[:calls],
                                             thinking_blocks=thinking),
                              **settings)
     for messages in (first["messages"], sent[1], sent[2]):
-        calls = [m for m in messages if m.get("tool_calls")]
-        assert calls[0].get("thinking_blocks") == thinking
+        sent_calls = [m for m in messages if m.get("tool_calls")]
+        assert sent_calls[0].get("thinking_blocks") == thinking
+        assert all("thinking_blocks" not in m for m in sent_calls[1:])
 
 
 @needs_agents
@@ -640,34 +661,25 @@ def test_reasoning_content_never_reaches_claude(client, monkeypatch):
     assert "Kimi's own plan" not in json.dumps(captured["body"])
 
 
+def _refusal(field):
+    from litellm.exceptions import BadRequestError
+    return BadRequestError(message=f"property '{field}' is unsupported",
+                           model="m", llm_provider="groq")
+
+
 @needs_agents
 @pytest.mark.parametrize("settings", [{}, {"stream": True}])
-def test_refused_reasoning_content_goes_again_without_it(client, store_path,
-                                                         monkeypatch,
-                                                         settings):
-    """A refused reasoning_content is retried without, then never sent."""
+def test_refused_field_goes_again_without_it(client, store_path, monkeypatch,
+                                             settings):
+    """A field a 400 names is retried without, then never sent to that
+    model again."""
     pytest.importorskip("litellm")
-    import litellm
-    from litellm.exceptions import BadRequestError
-    from litellm.llms.base_llm.base_model_iterator import MockResponseIterator
-    monkeypatch.setattr(local_chat, "_REASONING_CONTENT_REFUSED", set())
+    monkeypatch.setattr(local_chat, "_REFUSED", set())
     doc_id = seed_doc(store_path, "pi-a", "report.pdf")
-    sent = []
-
-    async def acompletion(**kwargs):
-        messages = kwargs["messages"]
-        sent.append(any(m.get("reasoning_content") for m in messages))
-        if sent[-1]:
-            raise BadRequestError(
-                message="property 'reasoning_content' is unsupported",
-                model=kwargs["model"], llm_provider="groq")
-        reply = (_litellm_reply("A") if any(m["role"] == "tool"
-                                            for m in messages)
-                 else _litellm_reply(tool_calls=_TWO_CALLS[:1],
-                                     reasoning_content="think"))
-        return MockResponseIterator(reply) if kwargs.get("stream") else reply
-
-    monkeypatch.setattr(litellm, "acompletion", acompletion)
+    call = _litellm_reply(tool_calls=_TWO_CALLS[:1], reasoning_content="think")
+    sent = _mock_litellm(monkeypatch, [
+        call, _refusal("reasoning_content"), _litellm_reply("A"),
+        call, _litellm_reply("A")])
     for _ in range(2):
         out = client.chat_completions("q", doc_id=doc_id,
                                       model="groq/qwen/qwen3-32b", **settings)
@@ -675,7 +687,8 @@ def test_refused_reasoning_content_goes_again_without_it(client, store_path,
             assert "A" in "".join(out)
         else:
             assert out.choices[0].message.content == "A"
-    assert sent == [False, True, False, False, False]
+    assert [any(m.get("reasoning_content") for m in messages)
+            for messages in sent] == [False, True, False, False, False]
 
 
 @needs_agents
@@ -698,40 +711,34 @@ def test_other_400s_are_not_retried(client, monkeypatch):
 
 
 @needs_agents
-def test_other_400s_keep_the_reasoning_content_replay(client, store_path,
-                                                      monkeypatch):
-    """An unrelated 400 leaves the reasoning_content replay on."""
+@pytest.mark.parametrize("error", [
+    # names fields this request didn't get back, or only as part of a name
+    "messages.1.content.0: Invalid `signature` in `thinking` block",
+    "reasoning_content_mode is unsupported"])
+def test_unrelated_400s_refuse_nothing(client, store_path, monkeypatch,
+                                       error):
+    """A 400 naming no field just put back is not retried and leaves every
+    field going back."""
     pytest.importorskip("litellm")
-    import litellm
     from litellm.exceptions import BadRequestError
-    monkeypatch.setattr(local_chat, "_REASONING_CONTENT_REFUSED", set())
+    monkeypatch.setattr(local_chat, "_REFUSED", set())
     doc_id = seed_doc(store_path, "pi-a", "report.pdf")
-    sent = []
-
-    async def acompletion(**kwargs):
-        messages = kwargs["messages"]
-        sent.append(any(m.get("reasoning_content") for m in messages))
-        if any(m.get("content") == "too long" for m in messages):
-            raise BadRequestError(message="context length exceeded",
-                                  model=kwargs["model"],
-                                  llm_provider="moonshot")
-        if any(m["role"] == "tool" for m in messages):
-            return _litellm_reply("A")
-        return _litellm_reply(tool_calls=_TWO_CALLS[:1],
-                              reasoning_content="think")
-
-    monkeypatch.setattr(litellm, "acompletion", acompletion)
+    call = _litellm_reply(tool_calls=_TWO_CALLS[:1], reasoning_content="think")
+    sent = _mock_litellm(monkeypatch, [
+        call, BadRequestError(message=error, model="m", llm_provider="anthropic"),
+        call, _litellm_reply("A")])
     model = "moonshot/kimi-k2-thinking"
-    client.chat_completions("q", doc_id=doc_id, model=model)
     with pytest.raises(PageIndexAPIError):
-        client.chat_completions("too long", doc_id=doc_id, model=model)
+        client.chat_completions("q", doc_id=doc_id, model=model)
     client.chat_completions("q", doc_id=doc_id, model=model)
-    assert sent == [False, True, False, False, True]
+    assert [any(m.get("reasoning_content") for m in messages)
+            for messages in sent] == [False, True, False, True]
+    assert local_chat._REFUSED == set()
 
 
 @needs_agents
-def test_kept_thinking_sends_no_effort(client, monkeypatch):
-    """The thinking-keeping effort never reaches the wire; a caller's does."""
+def test_unset_effort_sends_none(client, monkeypatch):
+    """No effort reaches the wire unless the caller sets one."""
     pytest.importorskip("litellm")
     model = "anthropic/claude-sonnet-5-5"
     unset, _ = _anthropic_wire(monkeypatch, client, model)
@@ -742,13 +749,14 @@ def test_kept_thinking_sends_no_effort(client, monkeypatch):
 
 
 @needs_agents
+@pytest.mark.parametrize("effort", [{"reasoning_effort": "high"}, {}])
 def test_streamed_claude_thinking_goes_back_once(client, store_path,
-                                                 monkeypatch):
+                                                 monkeypatch, effort):
     """Streamed thinking goes back once, not doubled."""
     pytest.importorskip("litellm")
     call = {"index": 0, **_TWO_CALLS[0]}
     first, sent = _two_turns(
-        store_path, monkeypatch, client, "anthropic/claude-test",
+        store_path, monkeypatch, client, "anthropic/claude-sonnet-5-5",
         _litellm_chunks(
             {"reasoning_content": "plan", "thinking_blocks": [
                 {"type": "thinking", "thinking": "plan"}]},
@@ -758,7 +766,7 @@ def test_streamed_claude_thinking_goes_back_once(client, store_path,
                 {"type": "thinking", "thinking": "plan step",
                  "signature": "SIG1"}]},
             {"tool_calls": [call]}),
-        reasoning_effort="high", stream=True, stream_metadata=True)
+        **effort, stream=True, stream_metadata=True)
     thinking = [{"type": "thinking", "thinking": "plan step",
                  "signature": "SIG1"}]
     for messages in (first["messages"], sent[1], sent[2]):
@@ -809,8 +817,8 @@ def test_extra_body_settings_litellm_model_skips_reach_litellm(client,
 @needs_agents
 def test_chat_completions_messages_keep_gemini_signatures(client, store_path,
                                                           monkeypatch):
-    """Gemini thought signatures ride messages back in Google's
-    extra_content and reach LiteLLM's own field on every turn, so the next
+    """Gemini thought signatures ride messages back in LiteLLM's own field,
+    as the model was sent them, and stay on every turn's calls, so the next
     request opens with the previous one unchanged."""
     pytest.importorskip("litellm")
     signed = [{**_TWO_CALLS[0], "provider_specific_fields": {
@@ -818,12 +826,168 @@ def test_chat_completions_messages_keep_gemini_signatures(client, store_path,
     first, sent = _two_turns(store_path, monkeypatch, client,
                              "gemini/gemini-test",
                              _litellm_reply(tool_calls=signed))
-    assert first["messages"][0]["tool_calls"][0]["extra_content"] == {
-        "google": {"thought_signature": "sig1"}}
+    assert first["messages"][0]["tool_calls"][0][
+        "provider_specific_fields"] == {"thought_signature": "sig1"}
     assert sent[2][:len(sent[1])] == sent[1]
     calls = next(m["tool_calls"] for m in sent[2] if m.get("tool_calls"))
     assert calls[0]["provider_specific_fields"] == {
         "thought_signature": "sig1"}
+
+
+@needs_agents
+@pytest.mark.parametrize("field, value", [
+    ("reasoning_details", [{"type": "reasoning.encrypted", "data": "ENC"}]),
+    ("reasoning_items", [{"id": "rs_1", "type": "reasoning",
+                          "encrypted_content": "ENC", "summary": []}]),
+])
+def test_reply_fields_the_agents_sdk_drops_go_back(client, store_path,
+                                                   monkeypatch, field, value):
+    """What LiteLLM parsed from a reply and the Agents SDK drops
+    (OpenRouter's reasoning_details, the Responses bridge's
+    reasoning_items, ...) goes back with that reply on every later
+    request, and rides the returned messages."""
+    pytest.importorskip("litellm")
+    first, sent = _two_turns(store_path, monkeypatch, client,
+                             "openrouter/x-ai/grok-test",
+                             _litellm_reply(tool_calls=_TWO_CALLS[:1],
+                                            provider_specific_fields={
+                                                field: value}))
+    for messages in (first["messages"], sent[1], sent[2]):
+        calls = [m for m in messages if m.get("tool_calls")]
+        assert calls[0][field] == value
+
+
+def _openai_chunk(delta, finish=None):
+    from openai.types.chat import ChatCompletionChunk
+    return ChatCompletionChunk.model_validate({
+        "id": "c1", "object": "chat.completion.chunk", "created": 0,
+        "model": "m", "choices": [{"index": 0, "delta": delta,
+                                   "finish_reason": finish}]})
+
+
+@needs_agents
+def test_streamed_fields_litellm_drops_go_back(client, store_path,
+                                               monkeypatch):
+    """A delta carrying only a field LiteLLM doesn't know, as OpenRouter
+    streams a signature or encrypted reasoning, still goes back."""
+    pytest.importorskip("litellm")
+    text = {"type": "reasoning.text", "text": "plan"}
+    encrypted = {"type": "reasoning.encrypted", "data": "ENC"}
+    first, sent = _two_turns(
+        store_path, monkeypatch, client, "openrouter/x-ai/grok-test",
+        [_openai_chunk({"role": "assistant", "reasoning_details": [text]}),
+         _openai_chunk({"tool_calls": [{"index": 0, **_TWO_CALLS[0]}]}),
+         _openai_chunk({"reasoning_details": [encrypted]}),
+         _openai_chunk({}, finish="tool_calls")],
+        stream=True, stream_metadata=True)
+    for messages in (first["messages"], sent[1], sent[2]):
+        calls = [m for m in messages if m.get("tool_calls")]
+        assert calls[0]["reasoning_details"] == [text, encrypted]
+
+
+@needs_agents
+@pytest.mark.parametrize("stream", [False, True])
+def test_claude_thinking_reaches_the_anthropic_wire_once(client, store_path,
+                                                         monkeypatch, stream):
+    """Through LiteLLM's own Anthropic parsing and request building, with
+    no effort set: the run's next request carries the signed thinking
+    block once, a stream's closing repeat of its text dropped."""
+    pytest.importorskip("litellm")
+    from litellm.llms.custom_httpx.http_handler import (AsyncHTTPHandler,
+                                                        HTTPHandler)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    thinking = {"type": "thinking", "thinking": "plan step",
+                "signature": "SIG1"}
+    call = {"type": "tool_use", "id": "toolu_1", "name": "get_document",
+            "input": {"doc_name": "report.pdf"}}
+    answer = {"type": "text", "text": "done"}
+    replies = [_anthropic_message([thinking, call], "tool_use"),
+               _anthropic_message([answer], "end_turn")]
+    if stream:
+        replies = [_anthropic_sse(message) for message in replies]
+    bodies = []
+
+    def reply(url, kwargs):
+        bodies.append(json.loads(kwargs["data"]) if kwargs.get("data")
+                      else kwargs.get("json"))
+        request = httpx.Request("POST", str(url))
+        body = replies.pop(0)
+        if isinstance(body, str):
+            return httpx.Response(200, content=body.encode(), request=request,
+                                  headers={"content-type": "text/event-stream"})
+        return httpx.Response(200, json=body, request=request)
+
+    async def fake_apost(self, url=None, *args, **kwargs):
+        return reply(url, kwargs)
+
+    monkeypatch.setattr(AsyncHTTPHandler, "post", fake_apost)
+    monkeypatch.setattr(HTTPHandler, "post",
+                        lambda self, url=None, *args, **kwargs:
+                        reply(url, kwargs))
+    out = client.chat_completions("q", doc_id=doc_id,
+                                  model="anthropic/claude-sonnet-5-5",
+                                  stream=stream, stream_metadata=stream)
+    result = list(out)[-1] if stream else out
+    assert not {"thinking", "output_config"} & set(bodies[0])
+    turn = next(m for m in bodies[1]["messages"] if m["role"] == "assistant")
+    assert [b for b in turn["content"] if b["type"] == "thinking"] == [
+        thinking]
+    assert result["messages"][0]["thinking_blocks"] == [thinking]
+
+
+def test_repeated_answers_keep_their_own_fields():
+    """Records keep conversation order: a repeated answer (or a reused call
+    id) gets its own reply's fields back, not the latest one's."""
+    replies = local_chat._Replies("m")
+    for n in (1, 2):
+        replies.record({"role": "assistant", "content": "OK",
+                        "reasoning_details": [n]})
+    out = replies.fill([{"role": "assistant", "content": "OK"},
+                        {"role": "user", "content": "again"},
+                        {"role": "assistant", "content": "OK"}])
+    assert [m.get("reasoning_details") for m in out
+            if m["role"] == "assistant"] == [[1], [2]]
+
+
+def test_fill_only_adds():
+    """Fields the Agents SDK set stay as it set them; empty ones the reply
+    had never go back; LiteLLM's nested provider fields go on top."""
+    call = {"id": "c1", "type": "function",
+            "function": {"name": "f", "arguments": "{}"}}
+    replies = local_chat._Replies("m")
+    replies.record({"role": "assistant", "content": "",
+                    "tool_calls": [{**call, "caller": {"type": "direct"}}],
+                    "thinking_blocks": [{"type": "thinking", "thinking": "a",
+                                         "signature": "S"}],
+                    "reasoning_content": "",
+                    "provider_specific_fields": {"reasoning_details": [],
+                                                 "extra": "x"}})
+    own = [{"type": "thinking", "thinking": "b", "signature": "T"}]
+    out = replies.fill([{"role": "assistant", "thinking_blocks": own,
+                         "tool_calls": [call]}])
+    assert out == [{"role": "assistant", "content": None,
+                    "thinking_blocks": own, "extra": "x",
+                    "tool_calls": [{**call, "caller": {"type": "direct"}}]}]
+
+
+def test_requests_outside_a_chat_run_pass_untouched():
+    pytest.importorskip("litellm")
+    local_chat._register_fill()
+    kwargs = {"messages": [{"role": "assistant", "content": "OK"}]}
+    assert asyncio.run(local_chat._fill_hook.async_pre_call_deployment_hook(
+        kwargs, None)) is None
+
+
+@needs_agents
+def test_fill_hook_returns_when_callbacks_are_replaced(client, monkeypatch):
+    """A caller replacing litellm.callbacks doesn't turn the fill off."""
+    pytest.importorskip("litellm")
+    import litellm
+    _mock_litellm(monkeypatch, [_litellm_reply("A")])
+    monkeypatch.setattr(litellm, "callbacks", litellm.callbacks[-1:])
+    client.chat_completions("q", model="gpt-test")
+    assert local_chat._fill_hook in litellm.callbacks
 
 
 # ── chat (front door) ──
@@ -1973,21 +2137,31 @@ def _anthropic_message(content, stop_reason):
 
 
 def _anthropic_sse(message):
-    """Render text/tool turns for the real streaming tool runner."""
+    """Render text, thinking and tool turns for a real streaming parser."""
     events = [{"type": "message_start", "message": {
         **message, "content": [], "stop_reason": None}}]
     for index, block in enumerate(message["content"]):
         if block["type"] == "tool_use":
             initial = {**block, "input": {}}
-            delta = {"type": "input_json_delta",
-                     "partial_json": json.dumps(block["input"])}
+            deltas = [{"type": "input_json_delta",
+                       "partial_json": json.dumps(block["input"])}]
+        elif block["type"] == "thinking":
+            # the text in two deltas, then its signature in its own
+            initial = {**block, "thinking": "", "signature": ""}
+            half = len(block["thinking"]) // 2
+            deltas = [{"type": "thinking_delta", "thinking": text}
+                      for text in (block["thinking"][:half],
+                                   block["thinking"][half:])]
+            deltas.append({"type": "signature_delta",
+                           "signature": block["signature"]})
         else:
             initial = {**block, "text": ""}
-            delta = {"type": "text_delta", "text": block["text"]}
+            deltas = [{"type": "text_delta", "text": block["text"]}]
         events.extend([
             {"type": "content_block_start", "index": index,
              "content_block": initial},
-            {"type": "content_block_delta", "index": index, "delta": delta},
+            *({"type": "content_block_delta", "index": index, "delta": delta}
+              for delta in deltas),
             {"type": "content_block_stop", "index": index},
         ])
     events.extend([
