@@ -101,5 +101,74 @@ class MarkdownCliTest(unittest.TestCase):
                              ["SUMMARY-SENTINEL"], res.stdout.decode())
 
 
+class MarkdownOptionalThresholdTest(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.path = Path(self.directory.name) / "note.md"
+        self.path.write_text(
+            "# Title\n\nShort body.\n\n## Child\n\nShort child body.\n",
+            encoding="utf-8",
+        )
+
+    def test_summaries_without_threshold_use_short_node_text(self):
+        import asyncio
+        from unittest.mock import patch
+        from pageindex import md_to_tree
+        for kwargs in ({}, {"summary_token_threshold": None}):
+            with self.subTest(kwargs=kwargs), patch(
+                "pageindex.page_index_md.generate_node_summary",
+                side_effect=AssertionError("Short default summaries need no model"),
+            ):
+                result = asyncio.run(md_to_tree(
+                    self.path, if_add_node_summary="yes",
+                    if_add_node_text="yes", **kwargs))
+                parent = result["structure"][0]
+                self.assertEqual(parent["prefix_summary"], parent["text"])
+                child = parent["nodes"][0]
+                self.assertEqual(child["summary"], child["text"])
+
+    def test_thinning_without_threshold_preserves_merged_content(self):
+        import asyncio
+        from pageindex import md_to_tree
+        for kwargs in ({}, {"min_token_threshold": None}):
+            with self.subTest(kwargs=kwargs):
+                result = asyncio.run(md_to_tree(
+                    self.path, if_thinning=True, if_add_node_text="yes", **kwargs))
+                parent = result["structure"][0]
+                self.assertNotIn("nodes", parent)
+                self.assertIn("Short body.", parent["text"])
+                self.assertIn("Short child body.", parent["text"])
+
+    def test_explicit_zero_summary_threshold_calls_model_for_short_nodes(self):
+        import asyncio
+        from unittest.mock import patch
+        from pageindex import md_to_tree
+        async def fake_summary(node, model=None):
+            return "Summary of " + node["title"]
+        with patch("pageindex.page_index_md.generate_node_summary",
+                   side_effect=fake_summary) as generate:
+            result = asyncio.run(md_to_tree(
+                self.path, if_add_node_summary="yes", summary_token_threshold=0))
+        parent = result["structure"][0]
+        self.assertEqual(generate.call_count, 2)
+        self.assertEqual(parent["prefix_summary"], "Summary of Title")
+        self.assertEqual(parent["nodes"][0]["summary"], "Summary of Child")
+
+    def test_explicit_thinning_threshold_keeps_larger_nodes(self):
+        import asyncio
+        from pageindex import md_to_tree
+        for threshold in (0, 1):
+            with self.subTest(threshold=threshold):
+                result = asyncio.run(md_to_tree(
+                    self.path, if_thinning=True, min_token_threshold=threshold,
+                    if_add_node_text="yes"))
+                parent = result["structure"][0]
+                self.assertEqual(parent["nodes"][0]["title"], "Child")
+                self.assertNotIn("Short child body.", parent["text"])
+
+
 if __name__ == "__main__":
     unittest.main()
