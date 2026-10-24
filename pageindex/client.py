@@ -2785,7 +2785,7 @@ class PageIndexClient:
         them with no fields, declare ``create_metadata_schema(folder_id, {})``.
         Documents keep their metadata and are not re-checked against new
         fields: if a field's type changes, values stored with the old type
-        stop matching filters on it (``"2021"`` is not ``2021``). Cloud-only:
+        no longer filter correctly (``"2021"`` is not ``2021``). Cloud-only:
         local mode raises PageIndexAPIError.
 
         Args:
