@@ -762,6 +762,29 @@ def test_refused_field_goes_again_without_it(client, store_path, monkeypatch,
 
 
 @needs_agents
+def test_missing_field_400_costs_one_retry_at_most(client, store_path,
+                                                    monkeypatch):
+    """A 400 naming a field the provider wants rather than refuses gets one
+    retry without it; the provider's own error then surfaces, and the next
+    call sends the field again."""
+    pytest.importorskip("litellm")
+    from litellm.exceptions import BadRequestError
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    model = "deepseek/deepseek-chat"
+    call = _litellm_reply(tool_calls=_TWO_CALLS[:1], reasoning_content="think")
+    missing = "Missing `reasoning_content` field in the assistant message"
+    sent = _mock_litellm(monkeypatch, [
+        call, *[BadRequestError(message=missing, model="m",
+                                llm_provider="deepseek") for _ in range(2)],
+        call, _litellm_reply("A")])
+    with pytest.raises(PageIndexAPIError, match=missing):
+        client.chat_completions("q", doc_id=doc_id, model=model)
+    client.chat_completions("q", doc_id=doc_id, model=model)
+    assert [any(m.get("reasoning_content") for m in messages)
+            for messages in sent] == [False, True, False, False, True]
+
+
+@needs_agents
 def test_refused_fields_go_again_one_by_one(client, store_path, monkeypatch):
     """Each 400 refuses the field it names, the Agents SDK's own too
     (reasoning_content, for a DeepSeek name), until one goes through."""
