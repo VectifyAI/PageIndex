@@ -1233,9 +1233,11 @@ class PageIndexClient:
         too. With an API chat model it adds ``messages`` (on the closing
         usage chunk when streaming): the call's new Chat Completions
         messages — assistant tool calls, tool results, the answer — to
-        append as they are, ``history += r["messages"]``. Its assistant
-        messages name their ``model``, and their reasoning goes back to
-        that model only.
+        append as they are, ``history += r["messages"]``. Each assistant
+        message names its LiteLLM route as ``model`` (``openai/gpt-6-luna``
+        where the response says ``gpt-6-luna``); keep it when storing the
+        history: a message's reasoning goes back only to the model it
+        names.
         ``protocol="responses"`` / ``"messages"``: own-model chat
         driven natively over the OpenAI Responses API or Anthropic's
         Messages API. Input and output are that protocol's own shapes —
@@ -1648,9 +1650,11 @@ class PageIndexClient:
         with ``stream_metadata``): the call's new messages — assistant
         tool calls, tool results, the answer — to append as they are, so
         the next call resends what the model saw and re-reads the
-        provider's cached prefix instead of redoing the tool work. Its
-        assistant messages name their ``model``, and their reasoning goes
-        back to that model only.
+        provider's cached prefix instead of redoing the tool work. Each
+        assistant message names its LiteLLM route as ``model``
+        (``openai/gpt-6-luna`` where the response says ``gpt-6-luna``);
+        keep it when storing the history: a message's reasoning goes back
+        only to the model it names.
 
         A ``claude-code/`` chat model runs Claude Code, not LiteLLM (see
         the constructor's ``chat_model``): ``temperature``, ``top_p``,
