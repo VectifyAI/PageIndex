@@ -5,11 +5,26 @@ import json
 import logging
 import os
 import shutil
+import threading
 import uuid
+import weakref
 from contextlib import contextmanager
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+_lock_registry_guard = threading.Lock()
+_lock_registry = weakref.WeakValueDictionary()
+_lock_depth = threading.local()
+
+
+def _thread_lock_for(path: Path):
+    key = os.path.normcase(str(path.resolve()))
+    with _lock_registry_guard:
+        lock = _lock_registry.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _lock_registry[key] = lock
+    return key, lock
 
 
 def _write_json_atomic(path: Path, data) -> None:
@@ -95,21 +110,46 @@ class DocStore:
 
     @contextmanager
     def lock(self):
-        """Cross-process mutex for check-then-write sequences (name
-        uniquing before save). fcntl is absent on Windows, where the
-        pre-existing best-effort behavior stays."""
-        try:
-            import fcntl
-        except ImportError:
-            yield
-            return
+        """Serialize check-then-write sequences across threads and processes."""
         self._root.mkdir(parents=True, exist_ok=True)
-        with open(self._root / ".lock", "w") as handle:
-            fcntl.flock(handle, fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(handle, fcntl.LOCK_UN)
+        lock_path = self._root / ".lock"
+        key, thread_lock = _thread_lock_for(lock_path)
+        with thread_lock:
+            depths = getattr(_lock_depth, "paths", None)
+            if depths is None:
+                depths = _lock_depth.paths = {}
+            if depths.get(key, 0):
+                depths[key] += 1
+                try:
+                    yield
+                finally:
+                    depths[key] -= 1
+                return
+
+            with open(lock_path, "a+b") as handle:
+                try:
+                    import fcntl
+                except ImportError:
+                    import msvcrt
+
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+
+                    def unlock():
+                        handle.seek(0)
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(handle, fcntl.LOCK_EX)
+
+                    def unlock():
+                        fcntl.flock(handle, fcntl.LOCK_UN)
+
+                depths[key] = 1
+                try:
+                    yield
+                finally:
+                    depths.pop(key)
+                    unlock()
 
     # ── documents ──
     def save_document(self, doc_id: str, meta: dict, tree: list, pages: list) -> None:
