@@ -243,7 +243,6 @@ def _sdk_backend(backend) -> dict:
 # dropping what it doesn't convert (signed or encrypted reasoning, thought
 # signatures, ...): every request of a chat run gets that back, unchanged,
 # for the model that wrote it.
-_REFUSED: set = set()  # (model, field) a provider rejected
 _REPLIES: contextvars.ContextVar = contextvars.ContextVar(
     "pageindex_replies", default=None)
 _FILL_LOCK = threading.Lock()
@@ -303,6 +302,7 @@ class _Replies:
         self.first: Optional[int] = None  # messages in the first request
         self.last: list = []
         self.sent: set = set()  # latest request's fields a 400 may refuse
+        self.refused: set = set()  # fields a 400 refused in this call
 
     def _call_id(self, call: dict) -> str:
         # LiteLLM folds a Gemini signature into the id; the SDK strips it
@@ -359,7 +359,7 @@ class _Replies:
             if target.get(key) is None:
                 target[key] = value
         for key in [key for key in target if key not in own]:
-            if (self.model, key) in _REFUSED:
+            if key in self.refused:
                 del target[key]
             else:
                 self.sent.add(key)
@@ -416,7 +416,7 @@ def _register_fill() -> None:
                     if (kwargs.get("cache_control_injection_points")
                             and _gateway(str(kwargs.get("model") or ""),
                                          kwargs.get("base_url"))):
-                        if (replies.model, "cache_control") in _REFUSED:
+                        if "cache_control" in replies.refused:
                             kwargs = {key: value for key, value
                                       in kwargs.items() if key
                                       != "cache_control_injection_points"}
@@ -472,7 +472,8 @@ def _recording(create, replies: _Replies):
 
 def _refusal_retry(replies: _Replies):
     """Again without the fields a 400 names, of those the request had that
-    may be refused: each retry refuses one for good, so retries end."""
+    may be refused, for the rest of the call: each retry refuses one more,
+    so retries end."""
     from agents import ModelRetrySettings, RetryDecision
 
     def policy(context):
@@ -483,7 +484,7 @@ def _refusal_retry(replies: _Replies):
                  if re.search(rf"\b{re.escape(key)}\b", text)}
         if not named:
             return False
-        _REFUSED.update((replies.model, key) for key in named)
+        replies.refused.update(named)
         return RetryDecision(retry=True, delay=0)
     return ModelRetrySettings(max_retries=3, policy=policy)
 

@@ -738,14 +738,14 @@ def _refusal(field):
 @pytest.mark.parametrize("settings", [{}, {"stream": True}])
 def test_refused_field_goes_again_without_it(client, store_path, monkeypatch,
                                              settings):
-    """A field a 400 names is retried without, then never sent to that
-    model again."""
+    """A field a 400 names goes again at once without it and stays out for
+    the rest of the call; the next call tries it afresh."""
     pytest.importorskip("litellm")
-    monkeypatch.setattr(local_chat, "_REFUSED", set())
     doc_id = seed_doc(store_path, "pi-a", "report.pdf")
     call = _litellm_reply(tool_calls=_TWO_CALLS[:1], reasoning_content="think")
     sent = _mock_litellm(monkeypatch, [
-        call, _refusal("reasoning_content"), _litellm_reply("A"),
+        call, _refusal("reasoning_content"),
+        _litellm_reply(tool_calls=_TWO_CALLS[1:]), _litellm_reply("A"),
         call, _litellm_reply("A")])
     for _ in range(2):
         out = client.chat_completions("q", doc_id=doc_id,
@@ -755,7 +755,7 @@ def test_refused_field_goes_again_without_it(client, store_path, monkeypatch,
         else:
             assert out.choices[0].message.content == "A"
     assert [any(m.get("reasoning_content") for m in messages)
-            for messages in sent] == [False, True, False, False, False]
+            for messages in sent] == [False, True, False, False, False, True]
 
 
 @needs_agents
@@ -763,7 +763,6 @@ def test_refused_fields_go_again_one_by_one(client, store_path, monkeypatch):
     """Each 400 refuses the field it names, the Agents SDK's own too
     (reasoning_content, for a DeepSeek name), until one goes through."""
     pytest.importorskip("litellm")
-    monkeypatch.setattr(local_chat, "_REFUSED", set())
     doc_id = seed_doc(store_path, "pi-a", "report.pdf")
     model = "groq/deepseek-r1-distill-llama-70b"
     details = [{"type": "reasoning.text", "text": "plan"}]
@@ -778,8 +777,6 @@ def test_refused_fields_go_again_one_by_one(client, store_path, monkeypatch):
             for messages in sent[1:] for m in messages
             if m.get("tool_calls")] == [
         ["reasoning_content", "reasoning_details"], ["reasoning_details"], []]
-    assert local_chat._REFUSED == {(model, "reasoning_content"),
-                                   (model, "reasoning_details")}
 
 
 @needs_agents
@@ -808,23 +805,18 @@ def test_other_400s_are_not_retried(client, monkeypatch):
     "reasoning_content_mode is unsupported"])
 def test_unrelated_400s_refuse_nothing(client, store_path, monkeypatch,
                                        error):
-    """A 400 naming no field just put back is not retried and leaves every
-    field going back."""
+    """A 400 naming no field the request carried is not retried."""
     pytest.importorskip("litellm")
     from litellm.exceptions import BadRequestError
-    monkeypatch.setattr(local_chat, "_REFUSED", set())
     doc_id = seed_doc(store_path, "pi-a", "report.pdf")
     call = _litellm_reply(tool_calls=_TWO_CALLS[:1], reasoning_content="think")
-    sent = _mock_litellm(monkeypatch, [
-        call, BadRequestError(message=error, model="m", llm_provider="anthropic"),
-        call, _litellm_reply("A")])
-    model = "moonshot/kimi-k2-thinking"
+    sent = _mock_litellm(monkeypatch, [call, BadRequestError(
+        message=error, model="m", llm_provider="anthropic")])
     with pytest.raises(PageIndexAPIError):
-        client.chat_completions("q", doc_id=doc_id, model=model)
-    client.chat_completions("q", doc_id=doc_id, model=model)
+        client.chat_completions("q", doc_id=doc_id,
+                                model="moonshot/kimi-k2-thinking")
     assert [any(m.get("reasoning_content") for m in messages)
-            for messages in sent] == [False, True, False, True]
-    assert local_chat._REFUSED == set()
+            for messages in sent] == [False, True]
 
 
 @needs_agents
@@ -1085,15 +1077,14 @@ def test_native_routes_keep_provider_fields_nested(client, store_path,
         assert "thought_signatures" not in turn
 
 
-def test_fields_the_sdk_set_count_as_sent(monkeypatch):
+def test_fields_the_sdk_set_count_as_sent():
     """A field the Agents SDK set itself is refusable like one put back."""
-    monkeypatch.setattr(local_chat, "_REFUSED", set())
     replies = local_chat._Replies("m")
     replies.record({"role": "assistant", "content": "OK"}, own=False)
     message = {"role": "assistant", "content": "OK", "reasoning_content": "r"}
     replies.fill([message])
     assert replies.sent == {"reasoning_content"}
-    local_chat._REFUSED.add(("m", "reasoning_content"))
+    replies.refused.add("reasoning_content")
     assert replies.fill([message]) == [{"role": "assistant", "content": "OK"}]
 
 
@@ -1177,23 +1168,25 @@ def test_gateway_requests_send_user_text_as_blocks(client, store_path,
 
 
 @needs_agents
-def test_gateway_refusing_marks_goes_again_without_them(client,
+def test_gateway_refusing_marks_goes_again_without_them(client, store_path,
                                                         monkeypatch):
     """A gateway that refuses cache_control gets the request again without
-    the marks, and that model gets none after."""
+    the marks, and none for the rest of the call; the next call tries them
+    afresh."""
     pytest.importorskip("litellm")
-    monkeypatch.setattr(local_chat, "_REFUSED", set())
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
     marks = []
-    _mock_litellm(monkeypatch, [_refusal("cache_control"),
-                                _litellm_reply("A"), _litellm_reply("A")],
-                  marks)
+    _mock_litellm(monkeypatch, [
+        _refusal("cache_control"), _litellm_reply(tool_calls=_TWO_CALLS[:1]),
+        _litellm_reply("A"), _refusal("cache_control"), _litellm_reply("A")],
+        marks)
     backend = {"base_url": "https://gateway.example/v1", "api_key": "k"}
-    model = "openai/anthropic/claude-strict"
     for _ in range(2):
-        out = client.chat_completions("q", model=model, backend=backend)
+        out = client.chat_completions("q", doc_id=doc_id, backend=backend,
+                                      model="openai/anthropic/claude-strict")
         assert out.choices[0].message.content == "A"
-    assert [bool(points) for points in marks] == [True, False, False]
-    assert local_chat._REFUSED == {(model, "cache_control")}
+    assert [bool(points) for points in marks] == [True, False, False, True,
+                                                  False]
 
 
 # ── chat (front door) ──
