@@ -629,7 +629,8 @@ def _openai_protocol(model_name: str) -> bool:
     prompt_cache_key means something and extra_body lands in the request
     body. Resolution is LiteLLM's own (same as _cache_extra_args), so the
     answer follows actual routing; azure and openrouter ride the OpenAI
-    protocol without appearing in openai_compatible_providers."""
+    protocol without appearing in openai_compatible_providers, and
+    azure_ai's Claude rides Anthropic's although azure_ai appears."""
     wire = model_name.removeprefix("litellm/")
     if "/" not in wire or wire.startswith("openai/"):
         return True
@@ -638,8 +639,10 @@ def _openai_protocol(model_name: str) -> bool:
         from litellm.constants import openai_compatible_providers
         from .utils import _quiet_litellm
         _quiet_litellm()
-        _, provider, _, _ = litellm.get_llm_provider(model=wire)
+        model, provider, _, _ = litellm.get_llm_provider(model=wire)
     except Exception:
+        return False
+    if provider == "azure_ai" and "claude" in model.lower():
         return False
     return (provider in ("openai", "azure", "openrouter")
             or provider in openai_compatible_providers)

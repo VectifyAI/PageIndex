@@ -434,6 +434,19 @@ def _anthropic_wire(monkeypatch, client, model, messages: str | list = "hi",
 
 
 @needs_agents
+def test_foundry_claude_gets_no_openai_fields(client, monkeypatch):
+    """LiteLLM sends azure_ai's Claude to Foundry's Anthropic API, which
+    refuses prompt_cache_key like Anthropic's own (400, extra inputs)."""
+    pytest.importorskip("litellm")
+    captured, _ = _anthropic_wire(
+        monkeypatch, client, "azure_ai/claude-sonnet-5-5",
+        backend={"api_base": "https://x.services.ai.azure.com",
+                 "api_key": "k"})
+    assert captured["url"].endswith("/anthropic/v1/messages")
+    assert "prompt_cache_key" not in captured["body"]
+
+
+@needs_agents
 def test_cache_marker_reaches_the_anthropic_wire(client, store_path,
                                                  monkeypatch):
     pytest.importorskip("litellm")
@@ -4676,11 +4689,11 @@ def test_openai_protocol_predicate_follows_litellm_routing():
     for name in ("gpt-5", "openai/gpt-4o", "litellm/gpt-4o",
                  "azure/gpt-4o", "openrouter/openai/gpt-4o",
                  "deepseek/deepseek-chat", "groq/llama-3.3-70b-versatile",
-                 "xai/grok-3"):
+                 "xai/grok-3", "azure_ai/mistral-large"):
         assert local_chat._openai_protocol(name), name
     for name in ("anthropic/claude-sonnet-4-5", "gemini/gemini-2.5-pro",
                  "bedrock/us.anthropic.claude-sonnet-5",
-                 "vertex_ai/claude-sonnet-4-5"):
+                 "vertex_ai/claude-sonnet-4-5", "azure_ai/claude-sonnet-5-5"):
         assert not local_chat._openai_protocol(name), name
 
 
