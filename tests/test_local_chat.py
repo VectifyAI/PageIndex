@@ -544,6 +544,11 @@ def _mock_litellm(monkeypatch, replies, marks=None):
     monkeypatch.setattr(litellm.main, "async_mock_completion_streaming_obj",
                         stream)
     local_chat._register_fill()
+    # LiteLLM copies litellm.callbacks into these lists on each call
+    for name in ("input_callback", "success_callback", "failure_callback",
+                 "_async_input_callback", "_async_success_callback",
+                 "_async_failure_callback"):
+        monkeypatch.setattr(litellm, name, list(getattr(litellm, name)))
     monkeypatch.setattr(litellm, "callbacks", [*litellm.callbacks, Answer()])
     return sent
 
@@ -603,6 +608,35 @@ def test_chat_completions_messages_resend_the_wire(client, store_path,
     assert writers == {model if "/" in model else f"openai/{model}"}
     assert first["messages"][:-1] == sent[1][len(sent[0]):]
     assert first["messages"][-1]["content"] == "A1"
+    assert sent[2][:len(sent[1])] == sent[1]
+
+
+@needs_agents
+@pytest.mark.parametrize("model, extra", [
+    ("gpt-test", {}),
+    # the reply's own fields come back through the fill
+    ("deepseek/deepseek-chat", {"reasoning_content": "think"}),
+])
+def test_messages_continuing_a_reply_keep_their_tool_call(client, store_path,
+                                                          monkeypatch, model,
+                                                          extra):
+    """A history ending with a returned reply: the run's tool call stays
+    its own assistant message, on the wire and in the returned messages,
+    so they append back whole."""
+    pytest.importorskip("litellm")
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    sent = _mock_litellm(monkeypatch, [
+        _litellm_reply("A0", **extra),
+        _litellm_reply(tool_calls=_TWO_CALLS[:1]), _litellm_reply("A1")])
+    question = {"role": "user", "content": "q"}
+    first = client.chat_completions([question], doc_id=doc_id, model=model)
+    out = client.chat_completions([question, *first["messages"]],
+                                  doc_id=doc_id, model=model)
+    assert [m["role"] for m in out["messages"]] == ["assistant", "tool",
+                                                    "assistant"]
+    assert out["messages"][0]["tool_calls"][0]["id"] == "call_1"
+    assert sent[1][-1].get("reasoning_content") == extra.get(
+        "reasoning_content")
     assert sent[2][:len(sent[1])] == sent[1]
 
 
@@ -716,6 +750,20 @@ def test_history_fields_go_back_to_their_own_model_only(client, monkeypatch,
     turn = next(m for m in sent[0] if m.get("tool_calls"))
     assert not {"reasoning_content", "thinking_blocks", "id",
                 "finish_reason", "model"} & set(turn)
+
+
+@needs_agents
+def test_untagged_replies_keep_the_sdk_replay(client, monkeypatch):
+    """A reply that names no model goes in as it did before ``model``
+    existed: the Agents SDK still replays DeepSeek its reasoning_content."""
+    pytest.importorskip("litellm")
+    sent = _mock_litellm(monkeypatch, [_litellm_reply("A2")])
+    client.chat_completions([
+        {"role": "user", "content": "q1"},
+        {"role": "assistant", "content": "A1", "reasoning_content": "plan"},
+        {"role": "user", "content": "q2"}], model="deepseek/deepseek-chat")
+    reply = next(m for m in sent[0] if m.get("content") == "A1")
+    assert reply.get("reasoning_content") == "plan"
 
 
 @needs_agents
@@ -933,12 +981,14 @@ def test_streamed_claude_thinking_goes_back_once(client, store_path,
 
 
 @needs_agents
-@pytest.mark.parametrize("model, effort", [
-    ("anthropic/claude-test", "high"),
-    ("gemini/gemini-test", "disable"),
+@pytest.mark.parametrize("model, effort, extra_body", [
+    ("anthropic/claude-test", "high", None),
+    ("gemini/gemini-test", "disable", None),
+    # extra_body's reasoning names no effort, so the argument's stays
+    ("anthropic/claude-test", "high", {"reasoning": {"summary": "auto"}}),
 ])
 def test_reasoning_effort_reaches_litellm_as_given(client, monkeypatch,
-                                                   model, effort):
+                                                   model, effort, extra_body):
     pytest.importorskip("litellm")
     import litellm
     seen = []
@@ -948,7 +998,8 @@ def test_reasoning_effort_reaches_litellm_as_given(client, monkeypatch,
         return _litellm_reply("ok")
 
     monkeypatch.setattr(litellm, "acompletion", acompletion)
-    client.chat_completions("q", model=model, reasoning_effort=effort)
+    client.chat_completions("q", model=model, reasoning_effort=effort,
+                            extra_body=extra_body)
     assert seen == [effort]
 
 
@@ -1217,20 +1268,26 @@ def test_gateways_get_cache_marks_for_claude():
 
 
 @needs_agents
-@pytest.mark.parametrize("model, backend, blocks", [
+@pytest.mark.parametrize("model, backend, env, blocks", [
     ("openai/anthropic/claude-test",
-     {"base_url": "https://openrouter.ai/api/v1", "api_key": "k"}, True),
-    ("anthropic/claude-test", None, False),
+     {"base_url": "https://openrouter.ai/api/v1", "api_key": "k"}, None,
+     True),
+    # the gateway LiteLLM reads from the environment
+    ("openai/anthropic/claude-test", None, "https://openrouter.ai/api/v1",
+     True),
+    ("anthropic/claude-test", None, None, False),
 ])
 def test_gateway_requests_send_user_text_as_blocks(client, store_path,
                                                    monkeypatch, model,
-                                                   backend, blocks):
+                                                   backend, env, blocks):
     """Through a gateway every request carries the marks with user text
     as content blocks: a gateway keeps a mark only inside a block and
     merges adjacent text messages, so a message keeps one shape whether
     or not it holds this request's mark. A Claude route sends the text as
     is, and LiteLLM places the marks itself."""
     pytest.importorskip("litellm")
+    if env:
+        monkeypatch.setenv("OPENAI_BASE_URL", env)
     marks = []
     first, sent = _two_turns(store_path, monkeypatch, client, model,
                              _litellm_reply(tool_calls=_TWO_CALLS[:1]),
@@ -5589,7 +5646,8 @@ def test_extra_body_refuses_non_dicts_and_argument_keys():
     backend = r"backend= \(API chat models only\)"
     for key, argument in (("stream", "stream="), ("doc_id", "doc_id="),
                           ("folder_id", "folder_id="), ("model", "model="),
-                          ("reasoning_effort", "reasoning_effort="),
+                          ("reasoning_effort",
+                           r"reasoning_effort= \(own chat models only\)"),
                           ("api_key", backend), ("base_url", backend),
                           ("api_base", backend)):
         with pytest.raises(PageIndexAPIError, match=(

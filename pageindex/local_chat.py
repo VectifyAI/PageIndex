@@ -10,6 +10,7 @@ import dataclasses
 import hashlib
 import inspect
 import json
+import os
 import queue
 import re
 import threading
@@ -96,6 +97,11 @@ def _split_chat_messages(messages, text_only: Optional[str] = None,
     messages = list(messages)
     if not messages:
         raise PageIndexAPIError("messages must be a non-empty list.")
+    # The reply a run goes on from stays text, its fields coming back
+    # through the fill: the SDK would fold the run's first tool call into it.
+    tail = next((m for m in reversed(messages) if not (
+        isinstance(m, dict) and m.get("role") in ("system", "developer"))),
+        None)
     system_texts: list[str] = []
     history: list[dict] = []
     for message in messages:
@@ -106,7 +112,8 @@ def _split_chat_messages(messages, text_only: Optional[str] = None,
         if role in ("system", "developer"):
             system_texts.append(_system_text(message.get("content")))
         elif (role == "assistant" and not text_only
-              and (set(message) - {"role", "content"}
+              and ((set(message) - {"role", "content"} and message is not tail)
+                   or message.get("tool_calls") or message.get("refusal")
                    or not isinstance(message.get("content"), str))):
             history.extend(_assistant_items(message))
         elif role == "tool" and not text_only:
@@ -610,8 +617,12 @@ def _injected_marks() -> dict:
 
 def _gateway(wire: str, base_url=None) -> bool:
     """A relay serving other vendors' models: the OpenAI protocol to a
-    host that isn't OpenAI's own, or LiteLLM's OpenRouter adapter."""
+    host that isn't OpenAI's own (with no base URL passed, the one LiteLLM
+    reads from OPENAI_BASE_URL or OPENAI_API_BASE), or LiteLLM's
+    OpenRouter adapter."""
     if "/" not in wire or wire.startswith("openai/"):
+        base_url = (base_url or os.environ.get("OPENAI_BASE_URL")
+                    or os.environ.get("OPENAI_API_BASE"))
         host = urlparse(base_url).hostname if base_url else None
         return bool(host) and not host.endswith(".openai.com")
     return wire.startswith("openrouter/")
@@ -669,7 +680,8 @@ _SKELETON_KEYS = frozenset({"system", "instructions", "input", "messages",
                             "tools"})
 _ARGUMENT_KEYS = {"stream": "stream=", "doc_id": "doc_id=",
                   "folder_id": "folder_id=", "model": "model=",
-                  "reasoning_effort": "reasoning_effort=",
+                  "reasoning_effort":
+                      "reasoning_effort= (own chat models only)",
                   **dict.fromkeys(("api_key", "base_url", "api_base"),
                                   "backend= (API chat models only)")}
 # The ModelSettings fields openai-agents' LitellmModel reads.
@@ -721,17 +733,15 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
     # other providers' request bodies, which Anthropic rejects as unknown.
     # The responses lane is the OpenAI SDK whatever the name says.
     openai_backend = protocol == "responses" or _openai_protocol(model_name)
-    base_url = _sdk_backend(backend).get("base_url")
-    marks = (_cache_extra_args(model_name, base_url)
-             if protocol == "chat" else None)
-    extra_args = marks
+    conn = _sdk_backend(backend)
+    extra_args = (_cache_extra_args(model_name, conn.get("base_url"))
+                  if protocol == "chat" else None)
     if reasoning_effort:
         try:
             reasoning = Reasoning(effort=reasoning_effort)
         except ValidationError:
             extra_args = {**(extra_args or {}),
                           "reasoning_effort": reasoning_effort}
-    conn = _sdk_backend(backend) if backend else {}
     if conn and protocol == "chat":
         # LiteLLM takes connection params per call, except the two names
         # LitellmModel pins as its own keywords — those ride its constructor.
@@ -752,6 +762,11 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
         else:
             routed = {k: v for k, v in extra_body.items()
                       if k in _LITELLM_MODEL_SETTINGS}
+            if (reasoning is not None
+                    and isinstance(routed.get("reasoning"), Mapping)):
+                # reasoning_effort's effort, unless extra_body names one
+                routed["reasoning"] = {"effort": reasoning.effort,
+                                       **routed["reasoning"]}
             rest = {k: v for k, v in extra_body.items()
                     if k not in _LITELLM_MODEL_SETTINGS}
             if rest:
