@@ -58,7 +58,8 @@ def _system_text(content: Any) -> str:
 
 def _assistant_items(message) -> list:
     """An assistant turn beyond plain text as the Agents SDK's items, by the
-    SDK's own converter for a model reply: the items its run held."""
+    SDK's own converter for a model reply: the items its run held, from the
+    model it names."""
     from openai.types.chat import ChatCompletionMessage
     from pydantic import ValidationError
     from agents.models.chatcmpl_converter import Converter
@@ -69,8 +70,11 @@ def _assistant_items(message) -> list:
         raise PageIndexAPIError(
             f"Invalid assistant message: {error['msg']} at "
             f"{'.'.join(map(str, error['loc']))}.") from exc
+    writer = message.get(_WRITER)
     items = [item.model_dump(exclude_unset=True)
-             for item in Converter.message_to_output_items(parsed)]
+             for item in Converter.message_to_output_items(
+                 parsed, provider_data={"model": writer}
+                 if isinstance(writer, str) else None)]
     if any(item.get("type") != "reasoning" for item in items):
         return items
     if isinstance(message.get("content"), str):
