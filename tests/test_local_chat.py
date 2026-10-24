@@ -497,11 +497,11 @@ _TWO_CALLS = [{"id": f"call_{n}", "type": "function",
               for n in (1, 2)]
 
 
-def _mock_litellm(monkeypatch, replies):
+def _mock_litellm(monkeypatch, replies, marks=None):
     """Real LiteLLM answering each request with the next reply, after the
     SDK's own hook has filled it: a ModelResponse, a list of chunks to
     stream, or an exception to raise. Returns each request's messages as
-    sent."""
+    sent; ``marks`` collects each request's cache injection points."""
     import litellm
     import litellm.main
     from litellm.integrations.custom_logger import CustomLogger
@@ -512,6 +512,8 @@ def _mock_litellm(monkeypatch, replies):
     class Answer(CustomLogger):
         async def async_pre_call_deployment_hook(self, kwargs, call_type):
             sent.append(json.loads(json.dumps(kwargs["messages"])))
+            if marks is not None:
+                marks.append(kwargs.get("cache_control_injection_points"))
             return {**kwargs, "mock_response": replies.pop(0)}
 
     async def stream(model_response, mock_response, **kwargs):
@@ -531,13 +533,13 @@ def _mock_litellm(monkeypatch, replies):
 
 
 def _two_turns(store_path, monkeypatch, client, model, first_reply,
-               **settings):
+               marks=None, **settings):
     """Two calls through the real LitellmModel and LiteLLM, the second
     appending the first's ``messages``: the first envelope (or closing
     chunk), and each request's messages as LiteLLM sends them."""
     doc_id = seed_doc(store_path, "pi-a", "report.pdf")
     sent = _mock_litellm(monkeypatch, [first_reply, _litellm_reply("A1"),
-                                       _litellm_reply("A2")])
+                                       _litellm_reply("A2")], marks)
 
     def call(history):
         out = client.chat_completions(history, doc_id=doc_id, model=model,
@@ -988,6 +990,70 @@ def test_fill_hook_returns_when_callbacks_are_replaced(client, monkeypatch):
     monkeypatch.setattr(litellm, "callbacks", litellm.callbacks[-1:])
     client.chat_completions("q", model="gpt-test")
     assert local_chat._fill_hook in litellm.callbacks
+
+
+def test_gateways_get_cache_marks_for_every_model():
+    """A gateway passes marks on to an upstream that caches only on them
+    and drops them for one that caches by itself, so every model behind
+    it gets them. OpenAI's own API gets none: there they turn on explicit
+    caching, which loses its automatic hits."""
+    pytest.importorskip("litellm")
+    relay = "https://openrouter.ai/api/v1"
+    for name in ("openai/anthropic/claude-x", "openai/x-ai/grok-x", "gpt-x",
+                 "litellm/openai/qwen/x"):
+        assert local_chat._cache_extra_args(name, relay), name
+    assert local_chat._cache_extra_args("openrouter/x-ai/grok-x")
+    for name, base in (("gpt-x", None),
+                       ("openai/gpt-x", "https://api.openai.com/v1"),
+                       ("openai/gpt-x", "https://us.api.openai.com/v1"),
+                       ("gemini/gemini-x", relay)):
+        assert local_chat._cache_extra_args(name, base) is None, (name, base)
+
+
+@needs_agents
+@pytest.mark.parametrize("model, backend, blocks", [
+    ("openai/anthropic/claude-test",
+     {"base_url": "https://openrouter.ai/api/v1", "api_key": "k"}, True),
+    ("anthropic/claude-test", None, False),
+])
+def test_gateway_requests_send_user_text_as_blocks(client, store_path,
+                                                   monkeypatch, model,
+                                                   backend, blocks):
+    """Through a gateway every request carries the marks with user text
+    as content blocks: a gateway keeps a mark only inside a block and
+    merges adjacent text messages, so a message keeps one shape whether
+    or not it holds this request's mark. A Claude route sends the text as
+    is, and LiteLLM places the marks itself."""
+    pytest.importorskip("litellm")
+    marks = []
+    first, sent = _two_turns(store_path, monkeypatch, client, model,
+                             _litellm_reply(tool_calls=_TWO_CALLS[:1]),
+                             marks, backend=backend)
+    assert len(marks) == len(sent) == 3 and all(marks)
+    users = [m for messages in sent for m in messages if m["role"] == "user"]
+    assert users and all(isinstance(m["content"], list) == blocks
+                         for m in users)
+    assert sent[2][:len(sent[1])] == sent[1]
+
+
+@needs_agents
+def test_gateway_refusing_marks_goes_again_without_them(client,
+                                                        monkeypatch):
+    """A gateway that refuses cache_control gets the request again without
+    the marks, and that model gets none after."""
+    pytest.importorskip("litellm")
+    monkeypatch.setattr(local_chat, "_REFUSED", set())
+    marks = []
+    _mock_litellm(monkeypatch, [_refusal("cache_control"),
+                                _litellm_reply("A"), _litellm_reply("A")],
+                  marks)
+    backend = {"base_url": "https://gateway.example/v1", "api_key": "k"}
+    for _ in range(2):
+        out = client.chat_completions("q", model="openai/strict-x",
+                                      backend=backend)
+        assert out.choices[0].message.content == "A"
+    assert [bool(points) for points in marks] == [True, False, False]
+    assert local_chat._REFUSED == {("openai/strict-x", "cache_control")}
 
 
 # ── chat (front door) ──

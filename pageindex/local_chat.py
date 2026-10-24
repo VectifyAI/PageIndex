@@ -17,6 +17,7 @@ import time
 import uuid
 import warnings
 from typing import Any, Generator, Iterator, Mapping, Optional, Union
+from urllib.parse import urlparse
 
 from .agent_tools import _base_instructions, targeting_block
 from .chat_stream import (ChatStream, MessagesStream, ChatObject,
@@ -379,6 +380,25 @@ def _register_fill() -> None:
                             or not isinstance(kwargs.get("messages"), list)):
                         return None
                     messages = replies.fill(kwargs["messages"])
+                    if (kwargs.get("cache_control_injection_points")
+                            and _gateway(str(kwargs.get("model") or ""),
+                                         kwargs.get("base_url"))):
+                        if (replies.model, "cache_control") in _REFUSED:
+                            kwargs = {key: value for key, value
+                                      in kwargs.items() if key
+                                      != "cache_control_injection_points"}
+                        else:
+                            # A gateway keeps a mark only inside a content
+                            # block and merges adjacent text messages, so
+                            # user text goes as a block on every request.
+                            messages = [
+                                {**m, "content": [{"type": "text",
+                                                   "text": m["content"]}]}
+                                if m.get("role") == "user"
+                                and isinstance(m.get("content"), str)
+                                and m["content"] else m
+                                for m in messages]
+                            replies.filled.add("cache_control")
                     if replies.first is None:
                         replies.first = len(messages)
                     replies.last = messages
@@ -534,20 +554,40 @@ def _litellm_claude_marks(wire: str) -> Optional[dict]:
     if provider == "anthropic" or (
             provider in ("bedrock", "vertex_ai", "azure_ai")
             and "claude" in model.lower()):
-        # The stable prefix plus the newest message, so each turn re-reads
-        # the turns before it. LiteLLM seeds nothing unprompted, so this
-        # pair is the marks' sole source.
-        return {"cache_control_injection_points": [
-            {"location": "message", "role": "system"},
-            {"location": "message", "index": -1}]}
+        return _injected_marks()
     return None
 
 
-def _cache_extra_args(model_name: str) -> Optional[dict]:
+def _injected_marks() -> dict:
+    # The stable prefix plus the newest message, so each turn re-reads
+    # the turns before it. LiteLLM seeds nothing unprompted, so this
+    # pair is the marks' sole source.
+    return {"cache_control_injection_points": [
+        {"location": "message", "role": "system"},
+        {"location": "message", "index": -1}]}
+
+
+def _gateway(wire: str, base_url=None) -> bool:
+    """A relay serving other vendors' models: the OpenAI protocol to a
+    host that isn't OpenAI's own, or LiteLLM's OpenRouter adapter."""
+    if "/" not in wire or wire.startswith("openai/"):
+        host = urlparse(base_url).hostname if base_url else None
+        return bool(host) and not host.endswith(".openai.com")
+    return wire.startswith("openrouter/")
+
+
+def _cache_extra_args(model_name: str,
+                      base_url: Optional[str] = None) -> Optional[dict]:
     """The chat lane's marks: normalized exactly as _litellm_model
     normalizes the wire (bare names get openai/), so this predicate
-    cannot disagree with where chat_completions actually routes."""
+    cannot disagree with where chat_completions actually routes. A
+    gateway gets them for every model: it passes them to an upstream
+    that caches only on marks (Claude) and translates or drops them for
+    one that caches by itself. OpenAI's own API gets none: there they
+    turn on explicit caching, which loses its automatic hits."""
     wire = model_name.removeprefix("litellm/")
+    if _gateway(wire, base_url):
+        return _injected_marks()
     if "/" not in wire or wire.startswith("openai/"):
         return None
     return _litellm_claude_marks(wire)
@@ -638,7 +678,9 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
     # other providers' request bodies, which Anthropic rejects as unknown.
     # The responses lane is the OpenAI SDK whatever the name says.
     openai_backend = protocol == "responses" or _openai_protocol(model_name)
-    marks = _cache_extra_args(model_name) if protocol == "chat" else None
+    base_url = _sdk_backend(backend).get("base_url")
+    marks = (_cache_extra_args(model_name, base_url)
+             if protocol == "chat" else None)
     extra_args = marks
     if reasoning_effort:
         try:
