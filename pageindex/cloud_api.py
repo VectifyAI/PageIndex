@@ -602,9 +602,8 @@ class CloudAPI:
     def delete_metadata_schema(self, folder_id: str) -> Dict[str, Any]:
         """
         Delete the metadata fields declared on a top-level folder
-        (workspace), or on the account with folder_id "root". A top-level
-        folder's documents then fall back to the account's fields; declare
-        empty fields to leave them with none. Documents keep their metadata.
+        (workspace), or on the account with folder_id "root". Documents keep
+        their metadata.
 
         Args:
             folder_id (str): Top-level folder ID, or "root".

@@ -2781,11 +2781,13 @@ class PageIndexClient:
         """
         Delete the metadata fields declared on a top-level folder
         (workspace), or on the account with ``folder_id="root"``, so they can
-        be declared again with ``create_metadata_schema()``. A top-level
-        folder's documents then fall back to the account's fields; to leave
-        them with no fields, declare ``create_metadata_schema(folder_id, {})``.
-        Documents keep their metadata and are not re-checked against new
-        fields. Cloud-only: local mode raises PageIndexAPIError.
+        be declared again with ``create_metadata_schema()``. It deletes only
+        what this folder itself declares, and ``deleted`` is True even when
+        that was nothing. A top-level folder's documents then fall back to the
+        account's fields; to allow no metadata at all, declare
+        ``create_metadata_schema(folder_id, {})``. Documents keep their
+        metadata and are not re-checked against new fields. Cloud-only: local
+        mode raises PageIndexAPIError.
 
         Args:
             folder_id (str): Top-level folder ID, or "root".
