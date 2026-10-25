@@ -57,6 +57,12 @@ def _system_text(content: Any) -> str:
     )
 
 
+def _text_reply(message: dict) -> bool:
+    """An assistant turn of text alone: no tool calls, no refusal."""
+    return (isinstance(message.get("content"), str)
+            and not message.get("tool_calls") and not message.get("refusal"))
+
+
 def _assistant_items(message) -> list:
     """An assistant turn beyond plain text as the Agents SDK's items, by the
     SDK's own converter for a model reply: the items its run held, from the
@@ -88,26 +94,19 @@ def _split_chat_messages(messages, text_only: Optional[str] = None,
                          ) -> "tuple[list[str], list[dict]]":
     """Validate the chat_completions surface's messages: system/developer
     content joins the managed instructions; user/assistant text passes
-    through; assistant turns carrying more (tool calls, a refusal,
-    reasoning) and tool results become the Agents SDK's items, so a
-    returned ``messages`` transcript appends back verbatim. ``text_only``
-    names a model that takes text alone (claude-code/): its errors say so
-    and point to what takes more."""
+    through, a text reply's other fields coming back through the fill (as
+    a reply item, the SDK would fold the next tool call into it); assistant
+    turns with tool calls or a refusal, and tool results, become the Agents
+    SDK's items, so a returned ``messages`` transcript appends back
+    verbatim. ``text_only`` names a model that takes text alone
+    (claude-code/): its errors say so and point to what takes more."""
     lanes = 'chat(protocol="responses") or chat(protocol="messages")'
     messages = list(messages)
     if not messages:
         raise PageIndexAPIError("messages must be a non-empty list.")
-    # A text reply that another reply follows, or that a run goes on from,
-    # stays text, its fields coming back through the fill if it names this
-    # model: the SDK would fold the next tool call into it.
-    turns = [i for i, m in enumerate(messages) if not (
-        isinstance(m, dict) and m.get("role") in ("system", "developer"))]
-    open_ends = {i for i, j in zip(turns, [*turns[1:], None])
-                 if j is None or (isinstance(messages[j], dict)
-                                  and messages[j].get("role") == "assistant")}
     system_texts: list[str] = []
     history: list[dict] = []
-    for i, message in enumerate(messages):
+    for message in messages:
         if not isinstance(message, dict) or "role" not in message:
             raise PageIndexAPIError(
                 "Each message must be a dict with 'role' and 'content'.")
@@ -115,9 +114,7 @@ def _split_chat_messages(messages, text_only: Optional[str] = None,
         if role in ("system", "developer"):
             system_texts.append(_system_text(message.get("content")))
         elif (role == "assistant" and not text_only
-              and ((set(message) - {"role", "content"} and i not in open_ends)
-                   or message.get("tool_calls") or message.get("refusal")
-                   or not isinstance(message.get("content"), str))):
+              and not _text_reply(message)):
             history.extend(_assistant_items(message))
         elif role == "tool" and not text_only:
             call_id = message.get("tool_call_id")
@@ -517,8 +514,13 @@ def _keep_reply_fields(agent, messages) -> Optional[_Replies]:
     fetch = model._fetch_response
     replies = _Replies(model.model, nested=not _openai_protocol(model.model))
     for message in messages:
-        if isinstance(message, dict) and message.get("role") == "assistant":
+        if not (isinstance(message, dict)
+                and message.get("role") == "assistant"):
+            continue
+        if isinstance(message.get(_WRITER), str) or not _text_reply(message):
             replies.record(message, own=message.get(_WRITER) == model.model)
+        else:  # it names no model: what the Agents SDK itself replays
+            replies.record(_as_sent(agent, _assistant_items(message))[-1])
     _register_fill()
 
     async def fetching(*args, **kwargs):
@@ -1122,6 +1124,21 @@ def _chat_agent(client, messages, doc_id, model, temperature=None,
     return agent, items, model_name, _keep_reply_fields(agent, messages)
 
 
+def _as_sent(agent, items) -> list:
+    """Items as Chat Completions messages, converted as LitellmModel
+    converts each request."""
+    from agents.models.chatcmpl_converter import Converter
+    model, reasoning = agent.model, agent.model_settings.reasoning
+    return Converter.items_to_messages(
+        items, model=getattr(model, "model", None),
+        base_url=getattr(model, "base_url", None),
+        preserve_thinking_blocks=(reasoning is not None
+                                  and reasoning.effort is not None),
+        preserve_tool_output_all_content=True,
+        should_replay_reasoning_content=getattr(
+            model, "should_replay_reasoning_content", None))
+
+
 def _chat_transcript(agent, new_items, replies=None) -> list:
     """The run's new items as Chat Completions messages as the model saw
     them, so a caller who appends them resends that: its last request past
@@ -1129,16 +1146,7 @@ def _chat_transcript(agent, new_items, replies=None) -> list:
     filled the same way, each assistant message naming its model. With no
     request seen (a test double), converted as LitellmModel converts each
     request."""
-    from agents.models.chatcmpl_converter import Converter
-    model, reasoning = agent.model, agent.model_settings.reasoning
-    converted = Converter.items_to_messages(
-        new_items, model=getattr(model, "model", None),
-        base_url=getattr(model, "base_url", None),
-        preserve_thinking_blocks=(reasoning is not None
-                                  and reasoning.effort is not None),
-        preserve_tool_output_all_content=True,
-        should_replay_reasoning_content=getattr(
-            model, "should_replay_reasoning_content", None))
+    converted = _as_sent(agent, new_items)
     if replies is None or replies.first is None:
         return converted
     final = [m for m in converted[-1:] if m.get("role") == "assistant"]

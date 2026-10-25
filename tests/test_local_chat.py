@@ -764,19 +764,19 @@ def test_history_fields_go_back_to_their_own_model_only(client, monkeypatch,
     ("anthropic/claude-sonnet-5-5", {"thinking_blocks": [
         {"type": "thinking", "thinking": "plan", "signature": "SIG"}]},
      {"reasoning_effort": "high"})])
+@pytest.mark.parametrize("tail", [[{"role": "user", "content": "q2"}], []])
 def test_untagged_replies_keep_the_sdk_replay(client, monkeypatch, model,
-                                              fields, settings):
-    """A reply that names no model, with a user message after it, goes in
-    as it did before ``model`` existed: the Agents SDK still replays its
-    reasoning, which Claude needs: it binds each thinking block to the ones
-    before it, so where that binding is enforced, one left off gets every
-    later block refused."""
+                                              fields, settings, tail):
+    """A reply that names no model goes in as it did before ``model``
+    existed, a run going on from it too: with the reasoning the Agents SDK
+    replays, which DeepSeek needs on every earlier reply and Claude binds
+    each later thinking block to."""
     pytest.importorskip("litellm")
     sent = _mock_litellm(monkeypatch, [_litellm_reply("A2")])
     client.chat_completions([
         {"role": "user", "content": "q1"},
-        {"role": "assistant", "content": "A1", **fields},
-        {"role": "user", "content": "q2"}], model=model, **settings)
+        {"role": "assistant", "content": "A1", **fields}, *tail],
+        model=model, **settings)
     reply = next(m for m in sent[0] if m.get("content") == "A1")
     assert {key: reply.get(key) for key in fields} == fields
 
