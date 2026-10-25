@@ -367,11 +367,9 @@ class _Replies:
             self.record(message)
 
     def _put(self, target: dict, fields, own: frozenset) -> dict:
-        """Add what the reply had and target lacks, then drop what a
+        """Put back what the reply had, as it had it, then drop what a
         provider refused; what's left beside ``own`` counts as sent."""
-        for key, value in (fields or {}).items():
-            if target.get(key) is None:
-                target[key] = value
+        target.update(fields or {})
         for key in [key for key in target if key not in own]:
             if key in self.refused:
                 del target[key]
@@ -380,11 +378,12 @@ class _Replies:
         return target
 
     def fill(self, messages: list) -> list:
-        """Each assistant message with what its own model's reply had and
-        the Agents SDK left off, fields it set kept: a reply it split per
-        call fills its first message, each call by id. Every assistant
-        message has content, as the SDK writes it for history, so a split
-        reply's later messages read the same on the next turn."""
+        """Each assistant message with its own model's reply fields as the
+        reply had them, over what the Agents SDK wrote in their place (its
+        Gemini signature placeholder): a reply it split per call fills its
+        first message, each call by id. Every assistant message has
+        content, as the SDK writes it for history, so a split reply's later
+        messages read the same on the next turn."""
         self._assemble()
         self.sent = set()
         seen: dict = {}

@@ -759,17 +759,25 @@ def test_history_fields_go_back_to_their_own_model_only(client, monkeypatch,
 
 
 @needs_agents
-def test_untagged_replies_keep_the_sdk_replay(client, monkeypatch):
+@pytest.mark.parametrize("model, fields, settings", [
+    ("deepseek/deepseek-chat", {"reasoning_content": "plan"}, {}),
+    ("anthropic/claude-sonnet-5-5", {"thinking_blocks": [
+        {"type": "thinking", "thinking": "plan", "signature": "SIG"}]},
+     {"reasoning_effort": "high"})])
+def test_untagged_replies_keep_the_sdk_replay(client, monkeypatch, model,
+                                              fields, settings):
     """A reply that names no model goes in as it did before ``model``
-    existed: the Agents SDK still replays DeepSeek its reasoning_content."""
+    existed: the Agents SDK still replays its reasoning, which Claude
+    needs: it binds each thinking block to the ones before it, so one left
+    off makes it refuse every later block."""
     pytest.importorskip("litellm")
     sent = _mock_litellm(monkeypatch, [_litellm_reply("A2")])
     client.chat_completions([
         {"role": "user", "content": "q1"},
-        {"role": "assistant", "content": "A1", "reasoning_content": "plan"},
-        {"role": "user", "content": "q2"}], model="deepseek/deepseek-chat")
+        {"role": "assistant", "content": "A1", **fields},
+        {"role": "user", "content": "q2"}], model=model, **settings)
     reply = next(m for m in sent[0] if m.get("content") == "A1")
-    assert reply.get("reasoning_content") == "plan"
+    assert {key: reply.get(key) for key in fields} == fields
 
 
 @needs_agents
@@ -1050,6 +1058,30 @@ def test_chat_completions_messages_keep_gemini_signatures(client, store_path,
 
 
 @needs_agents
+@pytest.mark.parametrize("model", ["gemini/gemini-test",
+                                   "vertex_ai/gemini-test"])
+def test_gemini_signatures_go_back_on_a_continued_run(client, store_path,
+                                                      monkeypatch, model):
+    """A run that goes on from a tool result sends the call's own thought
+    signature, not the placeholder the Agents SDK puts on calls after the
+    last user message, so it opens with the previous call's request."""
+    pytest.importorskip("litellm")
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    signed = [{**_TWO_CALLS[0], "provider_specific_fields": {
+        "thought_signature": "sig1"}}]
+    sent = _mock_litellm(monkeypatch, [
+        _litellm_reply(tool_calls=signed), _litellm_reply("A1"),
+        _litellm_reply("A2")])
+    question = {"role": "user", "content": "q"}
+    first = client.chat_completions([question], doc_id=doc_id, model=model)
+    client.chat_completions([question, *first["messages"][:2]],
+                            doc_id=doc_id, model=model)
+    assert sent[2][-2]["tool_calls"][0]["provider_specific_fields"] == {
+        "thought_signature": "sig1"}
+    assert sent[2] == sent[1]
+
+
+@needs_agents
 @pytest.mark.parametrize("field, value", [
     ("reasoning_details", [{"type": "reasoning.encrypted", "data": "ENC"}]),
     ("reasoning_items", [{"id": "rs_1", "type": "reasoning",
@@ -1168,25 +1200,30 @@ def test_repeated_answers_keep_their_own_fields():
             if m["role"] == "assistant"] == [[1], [2]]
 
 
-def test_fill_only_adds():
-    """Fields the Agents SDK set stay as it set them; empty ones the reply
-    had never go back; LiteLLM's nested provider fields go on top."""
+def test_fill_puts_the_reply_back_as_it_was():
+    """A reply's fields go back as it had them, over what the Agents SDK
+    wrote in their place; empty ones never go back; LiteLLM's nested
+    provider fields go on top."""
     call = {"id": "c1", "type": "function",
             "function": {"name": "f", "arguments": "{}"}}
+    signed = {**call, "caller": {"type": "direct"},
+              "provider_specific_fields": {"thought_signature": "SIG"}}
+    thinking = [{"type": "thinking", "thinking": "a", "signature": "S"}]
     replies = local_chat._Replies("m")
     replies.record({"role": "assistant", "content": "",
-                    "tool_calls": [{**call, "caller": {"type": "direct"}}],
-                    "thinking_blocks": [{"type": "thinking", "thinking": "a",
-                                         "signature": "S"}],
+                    "tool_calls": [signed], "thinking_blocks": thinking,
                     "reasoning_content": "",
                     "provider_specific_fields": {"reasoning_details": [],
                                                  "extra": "x"}})
-    own = [{"type": "thinking", "thinking": "b", "signature": "T"}]
-    out = replies.fill([{"role": "assistant", "thinking_blocks": own,
-                         "tool_calls": [call]}])
+    out = replies.fill([{
+        "role": "assistant",
+        "thinking_blocks": [{"type": "thinking", "thinking": "b",
+                             "signature": "T"}],
+        "tool_calls": [{**call, "provider_specific_fields": {
+            "thought_signature": "skip_thought_signature_validator"}}]}])
     assert out == [{"role": "assistant", "content": None,
-                    "thinking_blocks": own, "extra": "x",
-                    "tool_calls": [{**call, "caller": {"type": "direct"}}]}]
+                    "thinking_blocks": thinking, "extra": "x",
+                    "tool_calls": [signed]}]
 
 
 @needs_agents
