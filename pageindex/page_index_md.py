@@ -1,7 +1,11 @@
 import asyncio
+import json
 import re
 import os
-from .utils import *
+try:
+    from .utils import *
+except:
+    from utils import *
 
 async def get_node_summary(node, summary_token_threshold=200, model=None):
     node_text = node.get('text')
@@ -298,3 +302,44 @@ async def md_to_tree(md_path, if_thinning=False, min_token_threshold=None, if_ad
         'structure': tree_structure,
     }
 
+
+if __name__ == "__main__":
+    import os
+    import json
+    
+    # MD_NAME = 'Detect-Order-Construct'
+    MD_NAME = 'cognitive-load'
+    MD_PATH = os.path.join(os.path.dirname(__file__), '..', 'examples/documents/', f'{MD_NAME}.md')
+
+
+    MODEL="gpt-4.1"
+    IF_THINNING=False
+    THINNING_THRESHOLD=5000
+    SUMMARY_TOKEN_THRESHOLD=200
+    IF_SUMMARY=True
+
+    tree_structure = asyncio.run(md_to_tree(
+        md_path=MD_PATH, 
+        if_thinning=IF_THINNING, 
+        min_token_threshold=THINNING_THRESHOLD, 
+        if_add_node_summary='yes' if IF_SUMMARY else 'no', 
+        summary_token_threshold=SUMMARY_TOKEN_THRESHOLD, 
+        model=MODEL))
+    
+    print('\n' + '='*60)
+    print('TREE STRUCTURE')
+    print('='*60)
+    print_json(tree_structure)
+
+    print('\n' + '='*60)
+    print('TABLE OF CONTENTS')
+    print('='*60)
+    print_toc(tree_structure['structure'])
+
+    output_path = os.path.join(os.path.dirname(__file__), '..', 'results', f'{MD_NAME}_structure.json')
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(tree_structure, f, indent=2, ensure_ascii=False)
+    
+    print(f"\nTree structure saved to: {output_path}")
