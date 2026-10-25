@@ -769,7 +769,6 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
                     if k not in _LITELLM_MODEL_SETTINGS}
             if rest:
                 extra_args = {**(extra_args or {}), **rest}
-    model = _openai_model(protocol, model_name, conn or None)
     try:
         settings = ModelSettings(**{
             "temperature": temperature, "top_p": top_p,
@@ -787,7 +786,7 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
         name="PageIndex",
         instructions=instructions,
         tools=build_openai_tools(client, doc_ids=doc_ids),
-        model=model,
+        model=_openai_model(protocol, model_name, conn or None),
         model_settings=settings,
     )
 
