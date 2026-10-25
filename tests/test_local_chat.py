@@ -622,12 +622,14 @@ def test_messages_continuing_a_reply_keep_their_tool_call(client, store_path,
                                                           extra):
     """A history ending with a returned reply: the run's tool call stays
     its own assistant message, on the wire and in the returned messages,
-    so they append back whole."""
+    so they append back whole and the next call opens with this one's
+    last request."""
     pytest.importorskip("litellm")
     doc_id = seed_doc(store_path, "pi-a", "report.pdf")
     sent = _mock_litellm(monkeypatch, [
         _litellm_reply("A0", **extra),
-        _litellm_reply(tool_calls=_TWO_CALLS[:1]), _litellm_reply("A1")])
+        _litellm_reply(tool_calls=_TWO_CALLS[:1]), _litellm_reply("A1"),
+        _litellm_reply("A2")])
     question = {"role": "user", "content": "q"}
     first = client.chat_completions([question], doc_id=doc_id, model=model)
     out = client.chat_completions([question, *first["messages"]],
@@ -638,6 +640,10 @@ def test_messages_continuing_a_reply_keep_their_tool_call(client, store_path,
     assert sent[1][-1].get("reasoning_content") == extra.get(
         "reasoning_content")
     assert sent[2][:len(sent[1])] == sent[1]
+    client.chat_completions([question, *first["messages"], *out["messages"],
+                             {"role": "user", "content": "q2"}],
+                            doc_id=doc_id, model=model)
+    assert sent[3][:len(sent[2])] == sent[2]
 
 
 @needs_agents

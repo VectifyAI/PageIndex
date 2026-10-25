@@ -97,14 +97,17 @@ def _split_chat_messages(messages, text_only: Optional[str] = None,
     messages = list(messages)
     if not messages:
         raise PageIndexAPIError("messages must be a non-empty list.")
-    # The reply a run goes on from stays text, its fields coming back
-    # through the fill: the SDK would fold the run's first tool call into it.
-    tail = next((m for m in reversed(messages) if not (
-        isinstance(m, dict) and m.get("role") in ("system", "developer"))),
-        None)
+    # A text reply that another reply follows, or that a run goes on from,
+    # stays text, its fields coming back through the fill: the SDK would
+    # fold the next tool call into it.
+    turns = [i for i, m in enumerate(messages) if not (
+        isinstance(m, dict) and m.get("role") in ("system", "developer"))]
+    open_ends = {i for i, j in zip(turns, [*turns[1:], None])
+                 if j is None or (isinstance(messages[j], dict)
+                                  and messages[j].get("role") == "assistant")}
     system_texts: list[str] = []
     history: list[dict] = []
-    for message in messages:
+    for i, message in enumerate(messages):
         if not isinstance(message, dict) or "role" not in message:
             raise PageIndexAPIError(
                 "Each message must be a dict with 'role' and 'content'.")
@@ -112,7 +115,7 @@ def _split_chat_messages(messages, text_only: Optional[str] = None,
         if role in ("system", "developer"):
             system_texts.append(_system_text(message.get("content")))
         elif (role == "assistant" and not text_only
-              and ((set(message) - {"role", "content"} and message is not tail)
+              and ((set(message) - {"role", "content"} and i not in open_ends)
                    or message.get("tool_calls") or message.get("refusal")
                    or not isinstance(message.get("content"), str))):
             history.extend(_assistant_items(message))
