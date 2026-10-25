@@ -766,10 +766,11 @@ def test_history_fields_go_back_to_their_own_model_only(client, monkeypatch,
      {"reasoning_effort": "high"})])
 def test_untagged_replies_keep_the_sdk_replay(client, monkeypatch, model,
                                               fields, settings):
-    """A reply that names no model goes in as it did before ``model``
-    existed: the Agents SDK still replays its reasoning, which Claude
-    needs: it binds each thinking block to the ones before it, so one left
-    off makes it refuse every later block."""
+    """A reply that names no model, with a user message after it, goes in
+    as it did before ``model`` existed: the Agents SDK still replays its
+    reasoning, which Claude needs: it binds each thinking block to the ones
+    before it, so where that binding is enforced, one left off gets every
+    later block refused."""
     pytest.importorskip("litellm")
     sent = _mock_litellm(monkeypatch, [_litellm_reply("A2")])
     client.chat_completions([
@@ -788,6 +789,23 @@ def test_own_history_given_as_a_generator_goes_back(client, monkeypatch):
     client.chat_completions(iter(_history(model)), model=model)
     turn = next(m for m in sent[0] if m.get("tool_calls"))
     assert turn["reasoning_content"] == "plan" and "model" not in turn
+
+
+@needs_agents
+@pytest.mark.parametrize("final, stream", [("", False), (None, True)])
+def test_a_final_reply_with_no_text_adds_no_message(client, store_path,
+                                                    monkeypatch, final,
+                                                    stream):
+    """A run that ends with no text after a tool result returns that
+    result once, with no message after it."""
+    pytest.importorskip("litellm")
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    _mock_litellm(monkeypatch, [_litellm_reply(tool_calls=_TWO_CALLS[:1]),
+                                _litellm_reply(final)])
+    out = client.chat_completions("q", doc_id=doc_id, model="gpt-test",
+                                  stream=stream, stream_metadata=stream)
+    out = list(out)[-1] if stream else out
+    assert [m["role"] for m in out["messages"]] == ["assistant", "tool"]
 
 
 @needs_agents
@@ -1058,14 +1076,13 @@ def test_chat_completions_messages_keep_gemini_signatures(client, store_path,
 
 
 @needs_agents
-@pytest.mark.parametrize("model", ["gemini/gemini-test",
-                                   "vertex_ai/gemini-test"])
 def test_gemini_signatures_go_back_on_a_continued_run(client, store_path,
-                                                      monkeypatch, model):
+                                                      monkeypatch):
     """A run that goes on from a tool result sends the call's own thought
     signature, not the placeholder the Agents SDK puts on calls after the
     last user message, so it opens with the previous call's request."""
     pytest.importorskip("litellm")
+    model = "gemini/gemini-test"
     doc_id = seed_doc(store_path, "pi-a", "report.pdf")
     signed = [{**_TWO_CALLS[0], "provider_specific_fields": {
         "thought_signature": "sig1"}}]

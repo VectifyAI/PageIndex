@@ -98,8 +98,8 @@ def _split_chat_messages(messages, text_only: Optional[str] = None,
     if not messages:
         raise PageIndexAPIError("messages must be a non-empty list.")
     # A text reply that another reply follows, or that a run goes on from,
-    # stays text, its fields coming back through the fill: the SDK would
-    # fold the next tool call into it.
+    # stays text, its fields coming back through the fill if it names this
+    # model: the SDK would fold the next tool call into it.
     turns = [i for i, m in enumerate(messages) if not (
         isinstance(m, dict) and m.get("role") in ("system", "developer"))]
     open_ends = {i for i, j in zip(turns, [*turns[1:], None])
@@ -487,7 +487,8 @@ def _chat_retry(replies: _Replies):
     """Again for a stream the server broke before any output (the runner
     asks only then; OpenRouter aborts some). Again without the fields a
     400 names, of those the request had that may be refused, for the rest
-    of the call: each retry refuses one more. Three retries at most."""
+    of the call: each retry refuses what its 400 named. Three retries at
+    most."""
     from agents import ModelRetrySettings, RetryDecision
 
     def policy(context):
@@ -509,10 +510,7 @@ def _chat_retry(replies: _Replies):
 def _keep_reply_fields(agent, messages) -> Optional[_Replies]:
     """Records the caller's history and each reply around LitellmModel's
     _fetch_response; the hook fills each request it sends."""
-    try:
-        from agents.extensions.models.litellm_model import LitellmModel
-    except ImportError:
-        return None
+    from agents.extensions.models.litellm_model import LitellmModel
     model = agent.model
     if not isinstance(model, LitellmModel):
         return None
@@ -1127,9 +1125,10 @@ def _chat_agent(client, messages, doc_id, model, temperature=None,
 def _chat_transcript(agent, new_items, replies=None) -> list:
     """The run's new items as Chat Completions messages as the model saw
     them, so a caller who appends them resends that: its last request past
-    the first one's length, then the final reply filled the same way,
-    each assistant message naming its model. With no request seen (a
-    test double), converted as LitellmModel converts each request."""
+    the first one's length, then the final reply, if it has a message,
+    filled the same way, each assistant message naming its model. With no
+    request seen (a test double), converted as LitellmModel converts each
+    request."""
     from agents.models.chatcmpl_converter import Converter
     model, reasoning = agent.model, agent.model_settings.reasoning
     converted = Converter.items_to_messages(
@@ -1142,8 +1141,9 @@ def _chat_transcript(agent, new_items, replies=None) -> list:
             model, "should_replay_reasoning_content", None))
     if replies is None or replies.first is None:
         return converted
+    final = [m for m in converted[-1:] if m.get("role") == "assistant"]
     messages = (replies.last[replies.first:] + replies.fill(
-        replies.last + converted[-1:])[len(replies.last):])
+        replies.last + final)[len(replies.last):])
     return [{**m, _WRITER: replies.model} if m.get("role") == "assistant"
             else m for m in messages]
 
