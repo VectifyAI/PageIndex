@@ -1218,9 +1218,9 @@ def test_repeated_answers_keep_their_own_fields():
 
 
 def test_fill_puts_the_reply_back_as_it_was():
-    """A reply's fields go back as it had them, over what the Agents SDK
-    wrote in their place; empty ones never go back; LiteLLM's nested
-    provider fields go on top."""
+    """A reply's fields go back as it had them, empty ones too, over what
+    the Agents SDK wrote in their place; a field it lacks (None) stays out;
+    LiteLLM's nested provider fields go on top."""
     call = {"id": "c1", "type": "function",
             "function": {"name": "f", "arguments": "{}"}}
     signed = {**call, "caller": {"type": "direct"},
@@ -1229,7 +1229,7 @@ def test_fill_puts_the_reply_back_as_it_was():
     replies = local_chat._Replies("m")
     replies.record({"role": "assistant", "content": "",
                     "tool_calls": [signed], "thinking_blocks": thinking,
-                    "reasoning_content": "",
+                    "reasoning_content": "", "audio": None,
                     "provider_specific_fields": {"reasoning_details": [],
                                                  "extra": "x"}})
     out = replies.fill([{
@@ -1239,8 +1239,24 @@ def test_fill_puts_the_reply_back_as_it_was():
         "tool_calls": [{**call, "provider_specific_fields": {
             "thought_signature": "skip_thought_signature_validator"}}]}])
     assert out == [{"role": "assistant", "content": None,
-                    "thinking_blocks": thinking, "extra": "x",
+                    "thinking_blocks": thinking, "reasoning_content": "",
+                    "reasoning_details": [], "extra": "x",
                     "tool_calls": [signed]}]
+
+
+@needs_agents
+def test_empty_reasoning_goes_back(client, store_path, monkeypatch):
+    """A reply's empty reasoning_content goes back as it had it: DeepSeek's
+    thinking mode refuses a request whose replies in the current turn lack
+    the field, and its replies sometimes reason nothing."""
+    pytest.importorskip("litellm")
+    first, sent = _two_turns(store_path, monkeypatch, client,
+                             "deepseek/deepseek-chat",
+                             _litellm_reply(tool_calls=_TWO_CALLS[:1],
+                                            reasoning_content=""))
+    for messages in (first["messages"], sent[1], sent[2]):
+        calls = [m for m in messages if m.get("tool_calls")]
+        assert calls[0].get("reasoning_content") == ""
 
 
 @needs_agents

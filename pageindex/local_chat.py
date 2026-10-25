@@ -271,22 +271,18 @@ _ASSEMBLED = frozenset({"content", "role", "tool_calls", "function_call",
                         "annotations", "images"})
 
 
-def _empty(value) -> bool:
-    return value is None or value == "" or value == [] or value == {}
-
-
 def _reply_fields(message: dict, nested: bool = False) -> dict:
-    """A reply's fields as its provider sent them, empty values left out.
-    LiteLLM's provider_specific_fields stay nested where its own adapter
-    reads them, and go on top for an OpenAI-protocol host."""
+    """A reply's fields as its provider sent them, empty ones too; a field
+    it lacks is None. LiteLLM's provider_specific_fields stay nested where
+    its own adapter reads them, and go on top for an OpenAI-protocol host."""
     fields = {key: value for key, value in message.items()
-              if key != "provider_specific_fields" and not _empty(value)}
+              if key != "provider_specific_fields" and value is not None}
     provider = message.get("provider_specific_fields") or {}
-    if nested and not _empty(provider):
+    if nested and provider:
         fields["provider_specific_fields"] = provider
     elif not nested:
         for key, value in provider.items():
-            if not _empty(value):
+            if value is not None:
                 fields.setdefault(key, value)
     return fields
 
@@ -331,7 +327,7 @@ class _Replies:
         for call in calls:
             self.calls.setdefault(self._call_id(call), []).append(
                 {key: value for key, value in call.items()
-                 if own and key not in _CALL_IDENTITY and not _empty(value)})
+                 if own and key not in _CALL_IDENTITY and value is not None})
         key = (("call", self._call_id(calls[0])) if calls
                else ("text", fields["content"])
                if isinstance(fields.get("content"), str) else None)
