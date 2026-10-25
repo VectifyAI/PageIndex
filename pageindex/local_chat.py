@@ -64,9 +64,9 @@ def _text_reply(message: dict) -> bool:
 
 
 def _assistant_items(message) -> list:
-    """An assistant turn beyond plain text as the Agents SDK's items, by the
-    SDK's own converter for a model reply: the items its run held, from the
-    model it names."""
+    """An assistant turn as the Agents SDK's items, by the SDK's own
+    converter for a model reply: the items its run held, from the model it
+    names."""
     from openai.types.chat import ChatCompletionMessage
     from pydantic import ValidationError
     from agents.models.chatcmpl_converter import Converter
@@ -272,9 +272,9 @@ _ASSEMBLED = frozenset({"content", "role", "tool_calls", "function_call",
 
 
 def _reply_fields(message: dict, nested: bool = False) -> dict:
-    """A reply's fields as its provider sent them, empty ones too; a field
-    it lacks is None. LiteLLM's provider_specific_fields stay nested where
-    its own adapter reads them, and go on top for an OpenAI-protocol host."""
+    """A reply's fields as LiteLLM parsed them, empty ones too; a field it
+    lacks is None. LiteLLM's provider_specific_fields stay nested where its
+    own adapter reads them, and go on top for an OpenAI-protocol host."""
     fields = {key: value for key, value in message.items()
               if key != "provider_specific_fields" and value is not None}
     provider = message.get("provider_specific_fields") or {}

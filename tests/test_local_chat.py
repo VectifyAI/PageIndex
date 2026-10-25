@@ -729,11 +729,12 @@ def _history(writer=None):
              "thinking_blocks": [{"type": "thinking", "thinking": "plan",
                                   "signature": "SIG"}],
              "id": "msg_1", "finish_reason": "tool_calls"}
-    return [{"role": "user", "content": "q1"},
-            {**reply, "model": writer} if writer else reply,
+    answer = {"role": "assistant", "content": "A1", "reasoning_content": "sum",
+              "id": "msg_2", "finish_reason": "stop"}
+    tag = {"model": writer} if writer else {}
+    return [{"role": "user", "content": "q1"}, {**reply, **tag},
             {"role": "tool", "tool_call_id": "call_1", "content": "r"},
-            {"role": "assistant", "content": "A1"},
-            {"role": "user", "content": "q2"}]
+            {**answer, **tag}, {"role": "user", "content": "q2"}]
 
 
 @needs_agents
@@ -749,13 +750,15 @@ def test_history_fields_go_back_to_their_own_model_only(client, monkeypatch,
                                                         settings):
     """A history message's fields go back only to the model its ``model``
     names: another model's reasoning, and the keys of a message that
-    names none, stay off the request."""
+    names none, stay off the request, a text reply's too."""
     pytest.importorskip("litellm")
     sent = _mock_litellm(monkeypatch, [_litellm_reply("A2")])
     client.chat_completions(_history(writer), model=model, **settings)
     turn = next(m for m in sent[0] if m.get("tool_calls"))
-    assert not {"reasoning_content", "thinking_blocks", "id",
-                "finish_reason", "model"} & set(turn)
+    answer = next(m for m in sent[0] if m.get("content") == "A1")
+    for message in (turn, answer):
+        assert not {"reasoning_content", "thinking_blocks", "id",
+                    "finish_reason", "model"} & set(message)
 
 
 @needs_agents
@@ -769,8 +772,8 @@ def test_untagged_replies_keep_the_sdk_replay(client, monkeypatch, model,
                                               fields, settings, tail):
     """A reply that names no model goes in as it did before ``model``
     existed, a run going on from it too: with the reasoning the Agents SDK
-    replays, which DeepSeek needs on every earlier reply and Claude binds
-    each later thinking block to."""
+    replays, which DeepSeek needs on a reply in the current turn and Claude
+    binds each later thinking block to."""
     pytest.importorskip("litellm")
     sent = _mock_litellm(monkeypatch, [_litellm_reply("A2")])
     client.chat_completions([
