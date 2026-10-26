@@ -168,9 +168,9 @@ def _session_message(payload: dict):
 
 CLAUDE_CODE_PREFIX = "claude-code/"
 
-# One CLI process per call, ~150 MB each (measured): indexing's 64-wide
-# summary lane must not start 64 of them.
-CLAUDE_CODE_CONCURRENCY = 8
+# One CLI process per call, ~150 MB each (measured): indexing's summary
+# lane (SUMMARY_CONCURRENCY wide) must not start that many.
+CLAUDE_CODE_CONCURRENCY = 16
 _GATES: dict = {}  # event loop -> [its cap, calls inside]
 
 # AssistantMessage.error kinds, for a CLI that reports no api_error_status.
