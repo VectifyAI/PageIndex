@@ -221,8 +221,10 @@ def claude_code_options(model: str, reasoning_effort=None, **options):
         options["thinking"] = {"type": "disabled"}
     elif reasoning_effort:
         options["effort"] = reasoning_effort
-    # not a git repo, so the CLI adds no git status to the prompt
-    cwd = os.path.join(tempfile.gettempdir(), "pageindex-claude-code")
+    # not a git repo, so the CLI adds no git status to the prompt; resolved,
+    # as the CLI lists a symlinked cwd (macOS's /var) twice in every prompt
+    cwd = os.path.realpath(
+        os.path.join(tempfile.gettempdir(), "pageindex-claude-code"))
     os.makedirs(cwd, exist_ok=True)
     return ClaudeAgentOptions(
         model=wire, tools=[], setting_sources=[], strict_mcp_config=True,

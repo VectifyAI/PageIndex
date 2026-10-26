@@ -2,6 +2,7 @@
 user's subscription — over a faked CLI session: no subprocess, no login."""
 import asyncio
 import logging
+import os
 import sys
 import time
 from types import SimpleNamespace
@@ -213,6 +214,7 @@ def test_index_call_runs_isolated_on_the_subscription(monkeypatch):
     assert opts.env["DISABLE_PROMPT_CACHING"] == "1"
     assert "no-session-persistence" in opts.extra_args
     assert opts.max_buffer_size > 2**20  # a page image's tool result is one line
+    assert opts.cwd == os.path.realpath(opts.cwd)  # a symlinked cwd is listed twice
     assert first.closed and second.closed
 
 
