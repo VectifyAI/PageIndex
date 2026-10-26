@@ -2575,10 +2575,11 @@ class PageIndexClient:
             answer (str): The answer text, tags included.
             doc_id (str | list[str], optional): The documents the answer
                 was about — what ``chat(doc_id=...)`` took. Citations name
-                documents, and the ids come from here; without it your own
-                library is listed. Two documents sharing a cited name
-                raise PageIndexAPIError naming both ids: pass ``doc_id``
-                to pick.
+                documents by name or by library path
+                (``Research/2024/Q3.pdf``), and the ids come from here;
+                without it your own library is listed. Two documents
+                sharing a cited name raise PageIndexAPIError naming both
+                ids: pass ``doc_id`` to pick.
 
         Returns:
             list: One dict per distinct citation: ``{'document', 'doc_id',
@@ -2604,6 +2605,7 @@ class PageIndexClient:
         if not citations:
             return []
         names: dict[str, list[str]] = {}
+        paths: dict[str, list[str]] = {}
         if doc_id is not None:
             doc_ids = [doc_id] if isinstance(doc_id, str) else doc_id
             for one_id in dict.fromkeys(doc_ids):
@@ -2614,9 +2616,24 @@ class PageIndexClient:
             for doc in _all_documents(self):
                 if doc.get("name") and doc.get("id"):
                     names.setdefault(doc["name"], []).append(doc["id"])
+                if doc.get("path") and doc.get("id"):
+                    paths.setdefault(doc["path"], []).append(doc["id"])
         resolved: list[dict[str, Any]] = []
         for citation in citations:
-            ids = list(dict.fromkeys(names.get(citation["document"], [])))
+            cited = citation["document"]
+            # The MCP server's cite format names a document by its library
+            # path ("Research/2024/Q3.pdf"); a root document's path is its
+            # name, so a cite without "/" keeps resolving by name.
+            ids = paths.get(cited) if "/" in cited else None
+            if not ids:
+                ids = names.get(cited)
+            if not ids and "/" in cited and doc_id is not None:
+                # ponytail: the metadata lookup carries no path, so match the
+                # file name within the documents the caller scoped to. Two
+                # scoped same-name documents still raise; listing them via
+                # _all_documents(stop_ids=) would tell them apart by path.
+                ids = names.get(cited.rsplit("/", 1)[1])
+            ids = list(dict.fromkeys(ids or []))
             if len(ids) > 1:
                 raise PageIndexAPIError(
                     f"{citation['document']!r} names {len(ids)} documents "
