@@ -8,6 +8,7 @@ import urllib.parse
 from .chat_stream import ChatObject
 from .errors import PageIndexAPIError
 from .naming import sanitize_filename, validate_folder_name
+from .retry import cloud_session
 
 
 def _enc(value: str) -> str:
@@ -22,6 +23,7 @@ class CloudAPI:
 
     def __init__(self, client):
         self._client = client
+        self._http = cloud_session()
 
     @property
     def BASE_URL(self) -> str:
@@ -73,7 +75,7 @@ class CloudAPI:
             data['metadata'] = json.dumps(metadata)
 
         with open(file_path, "rb") as f:
-            response = requests.post(
+            response = self._http.post(
                 f"{self.BASE_URL}/doc/",
                 headers=self._headers(),
                 files={'file': (sanitize_filename(Path(file_path).name), f)},
@@ -102,7 +104,7 @@ class CloudAPI:
         if format not in ["page", "node", "raw"]:
             raise ValueError("Format parameter must be 'page', 'node', or 'raw'")
 
-        response = requests.get(
+        response = self._http.get(
             f"{self.BASE_URL}/doc/{_enc(doc_id)}/?type=ocr&format={format}",
             headers=self._headers(),
             timeout=30
@@ -129,7 +131,7 @@ class CloudAPI:
                 height (0-1000), origin top-left. A 404 means the
                 document has no such block.
         """
-        response = requests.get(
+        response = self._http.get(
             f"{self.BASE_URL}/doc/{_enc(doc_id)}/block/{_enc(block_id)}/",
             headers=self._headers(),
             timeout=30
@@ -150,7 +152,7 @@ class CloudAPI:
         Returns:
             str: A presigned URL to the page image (JPEG).
         """
-        response = requests.get(
+        response = self._http.get(
             f"{self.BASE_URL}/doc/s3/{_enc(doc_id)}/images",
             headers=self._headers(),
             params={"start": page, "end": page},
@@ -176,7 +178,7 @@ class CloudAPI:
         Returns:
             str: A presigned URL to the image.
         """
-        response = requests.get(
+        response = self._http.get(
             f"{self.BASE_URL}/doc/{_enc(doc_id)}/image/{_enc(img_id)}/",
             headers=self._headers(),
             timeout=30
@@ -204,7 +206,7 @@ class CloudAPI:
         Returns:
             dict: API response with status and, if ready, tree structure.
         """
-        response = requests.get(
+        response = self._http.get(
             f"{self.BASE_URL}/doc/{_enc(doc_id)}/?type=tree&summary={node_summary}"
             f"&include_text={str(include_text).lower()}",
             headers=self._headers(),
@@ -235,7 +237,7 @@ class CloudAPI:
             "query": query,
             "thinking": thinking
         }
-        response = requests.post(
+        response = self._http.post(
             f"{self.BASE_URL}/retrieval/",
             headers=self._headers(),
             json=payload,
@@ -257,7 +259,7 @@ class CloudAPI:
         Returns:
             dict: Retrieval status and results.
         """
-        response = requests.get(
+        response = self._http.get(
             f"{self.BASE_URL}/retrieval/{_enc(retrieval_id)}/",
             headers=self._headers(),
             timeout=30
@@ -321,7 +323,7 @@ class CloudAPI:
 
         payload.update(extra_body or {})
 
-        response = requests.post(
+        response = self._http.post(
             f"{self.BASE_URL}/chat/completions/",
             headers=self._headers(),
             json=payload,
@@ -390,7 +392,7 @@ class CloudAPI:
                 - folderId (str | None): Containing folder ID
                 - metadata (dict | None): Your own tags from submit_document
         """
-        response = requests.get(
+        response = self._http.get(
             f"{self.BASE_URL}/doc/{_enc(doc_id)}/metadata/",
             headers=self._headers(),
             timeout=30
@@ -411,7 +413,7 @@ class CloudAPI:
         Returns:
             dict: API response.
         """
-        response = requests.delete(
+        response = self._http.delete(
             f"{self.BASE_URL}/doc/{_enc(doc_id)}/",
             headers=self._headers(),
             timeout=30
@@ -454,7 +456,7 @@ class CloudAPI:
         if recursive:
             params["recursive"] = recursive
 
-        response = requests.get(
+        response = self._http.get(
             f"{self.BASE_URL}/docs/",
             headers=self._headers(),
             params=params,
@@ -497,7 +499,7 @@ class CloudAPI:
         if parent_folder_id is not None:
             payload["parent_folder_id"] = parent_folder_id
 
-        response = requests.post(
+        response = self._http.post(
             f"{self.BASE_URL}/folder/",
             headers=self._headers(),
             json=payload,
@@ -526,7 +528,7 @@ class CloudAPI:
         if parent_folder_id is not None:
             params["parent_folder_id"] = parent_folder_id
 
-        response = requests.get(
+        response = self._http.get(
             f"{self.BASE_URL}/folders/",
             headers=self._headers(),
             params=params,
@@ -558,7 +560,7 @@ class CloudAPI:
                 - folder_id (str): The folder ID, or "root"
                 - schema (dict): {"fields": ...} as stored
         """
-        response = requests.put(
+        response = self._http.put(
             f"{self.BASE_URL}/folder/{_enc(folder_id)}/metadata/schema/",
             headers=self._headers(),
             json={"fields": fields},
@@ -588,7 +590,7 @@ class CloudAPI:
                 - schema (dict | None): {"fields": ...}, or None when no
                   schema is declared
         """
-        response = requests.get(
+        response = self._http.get(
             f"{self.BASE_URL}/folder/{_enc(folder_id)}/metadata/schema/",
             headers=self._headers(),
             timeout=30
@@ -611,7 +613,7 @@ class CloudAPI:
         Returns:
             dict: {"folder_id": ..., "deleted": True}
         """
-        response = requests.delete(
+        response = self._http.delete(
             f"{self.BASE_URL}/folder/{_enc(folder_id)}/metadata/schema/",
             headers=self._headers(),
             timeout=30

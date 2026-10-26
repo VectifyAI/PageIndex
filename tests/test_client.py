@@ -1,5 +1,6 @@
 """SDK surface tests: PageIndexClient in local and cloud mode."""
 import asyncio
+import contextlib
 import importlib
 import inspect
 import json
@@ -1889,15 +1890,11 @@ class FakeResponse:
 
 
 def _patch_requests(monkeypatch, handler):
-    """Replace cloud_api's requests module with per-verb fakes."""
-    fake = types.SimpleNamespace(
-        post=lambda url, **kw: handler("POST", url, kw),
-        get=lambda url, **kw: handler("GET", url, kw),
-        put=lambda url, **kw: handler("PUT", url, kw),
-        delete=lambda url, **kw: handler("DELETE", url, kw),
-        Response=FakeResponse,
-    )
-    monkeypatch.setattr("pageindex.cloud_api.requests", fake)
+    """Replace cloud_api's session verbs with per-verb fakes."""
+    import requests
+    for verb in ("get", "post", "put", "delete"):
+        monkeypatch.setattr(requests.Session, verb,
+                            lambda self, url, _verb=verb.upper(), **kw: handler(_verb, url, kw))
 
 
 @pytest.fixture
@@ -2895,8 +2892,8 @@ class _LLMError(Exception):
 ], ids=["408", "409", "429", "500", "503", "529", "402", "413", "422",
         "header-no", "header-yes", "connect", "timeout", "local"])
 def test_llm_retry_follows_the_official_sdk_rule(make, retry):
-    pytest.importorskip("litellm")
-    assert pageindex.utils._should_retry(make()) is retry
+    from pageindex.retry import should_retry
+    assert should_retry(make()) is retry
 
 
 @pytest.mark.parametrize("headers, wait", [
@@ -2906,18 +2903,20 @@ def test_llm_retry_follows_the_official_sdk_rule(make, retry):
     ({"retry-after": "Wed, 21 Oct 2015 07:28:00 GMT"}, None),
     ({}, None),
 ])
-def test_llm_retry_waits_as_the_server_asks(headers, wait):
-    pytest.importorskip("litellm")
-    from pageindex.utils import _retry_delay
-    err = _LLMError(429, headers)
+def test_retry_waits_as_the_server_asks(headers, wait):
+    from pageindex import retry
+    headers = httpx.Headers(headers)
     if wait is not None:
-        assert _retry_delay(3, err) == wait
+        assert retry.delay(3, headers, retry.INDEX_MAX_DELAY) == wait
         return
-    caps = [min(30, 2 ** i) for i in range(9)]
-    slept = [_retry_delay(i, err) for i in range(9)]
-    assert all(cap / 2 <= s <= cap for s, cap in zip(slept, caps))
-    assert any(s < cap for s, cap in zip(slept, caps))
-    assert sum(slept) > 60
+    for cap, budget in ((retry.INDEX_MAX_DELAY, retry.INDEX_RETRIES),
+                        (retry.SDK_MAX_DELAY, retry.SDK_RETRIES)):
+        caps = [min(cap, 2 ** i) for i in range(budget)]
+        slept = [retry.delay(i, headers, cap) for i in range(budget)]
+        assert all(c / 2 <= s <= c for s, c in zip(slept, caps))
+        assert any(s < c for s, c in zip(slept, caps))
+    assert sum(retry.delay(i, headers, retry.INDEX_MAX_DELAY)
+               for i in range(retry.INDEX_RETRIES)) > 60
 
 
 @pytest.mark.parametrize("make, calls, slept", [
@@ -2949,6 +2948,140 @@ def test_llm_retry_ladder(monkeypatch, make, calls, slept):
         with pytest.raises(pageindex.utils.LLMRetriesExhausted) as err:
             run()
         assert (len(sent), waits, err.value.status_code) == (calls, slept, make().status_code)
+
+
+def test_retry_budgets_follow_the_constants(monkeypatch):
+    pytest.importorskip("litellm")
+    import litellm
+    from pageindex.retry import cloud_session
+    sent = []
+
+    def fail(**kw):
+        sent.append(1)
+        raise _LLMError(429, {"retry-after": "7"})
+    monkeypatch.setattr(litellm, "completion", fail)
+    monkeypatch.setattr("pageindex.utils.time.sleep", lambda s: None)
+    monkeypatch.setattr("pageindex.retry.INDEX_RETRIES", 1)
+    monkeypatch.setattr("pageindex.retry.SDK_RETRIES", 0)
+    with pytest.raises(pageindex.utils.LLMRetriesExhausted, match="after 2 attempts"):
+        pageindex.utils.llm_completion("gpt-4o", "p")
+    with _flaky_server(fails=2) as (url, seen):
+        assert cloud_session().get(url).status_code == 503
+    assert (len(sent), len(seen)) == (2, 1)
+
+
+@contextlib.contextmanager
+def _flaky_server(fails, status=503, retry_after="0.01", stall=0.0):
+    """A loopback server answering `status` (with Retry-After), after `stall` seconds, `fails` times, then 200."""
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import threading
+    hits = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def _answer(self):
+            self.rfile.read(int(self.headers.get("content-length") or 0))
+            hits.append(self.command)
+            failing = len(hits) <= fails
+            if failing and stall:
+                threading.Event().wait(stall)  # not time.sleep, which tests patch
+            self.send_response(status if failing else 200)
+            if failing:
+                self.send_header("Retry-After", retry_after)
+            self.send_header("content-length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+        do_GET = do_POST = do_PUT = do_DELETE = _answer
+
+        def log_message(self, format, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}/", hits
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize("model, path", [("openai/gpt-x", "/v1"), ("anthropic/claude-x", "")])
+@pytest.mark.parametrize("status, hits", [(503, 3), (429, 3), (422, 1)])
+def test_litellm_errors_keep_the_shape_the_retry_rule_reads(monkeypatch, model, path,
+                                                            status, hits):
+    """Canary for LiteLLM upgrades: real server errors through real LiteLLM, sync and async."""
+    pytest.importorskip("litellm")
+    from pageindex import utils
+
+    async def _nosleep(s):
+        pass
+    monkeypatch.setattr("pageindex.retry.INDEX_RETRIES", 2)
+    monkeypatch.setattr("pageindex.utils.time.sleep", lambda s: None)
+    monkeypatch.setattr("pageindex.utils.asyncio.sleep", _nosleep)
+    for run in (utils.llm_completion,
+                lambda m, p: asyncio.run(utils.llm_acompletion(m, p))):
+        with _flaky_server(fails=9, status=status) as (url, seen):
+            token = utils._llm_backend.set({"api_base": url.rstrip("/") + path, "api_key": "x"})
+            try:
+                with pytest.raises(utils.LLMRetriesExhausted):
+                    run(model, "p")
+            finally:
+                utils._llm_backend.reset(token)
+        assert len(seen) == hits
+
+
+@pytest.mark.parametrize("method, status, hits", [
+    ("GET", 503, 3), ("PUT", 503, 3), ("DELETE", 503, 3),
+    ("POST", 503, 1), ("POST", 500, 1), ("POST", 429, 3)])
+def test_cloud_session_retries_what_is_safe_to_repeat(method, status, hits):
+    from pageindex.retry import cloud_session
+    with _flaky_server(fails=2, status=status) as (url, seen):
+        response = cloud_session().request(method, url)
+    assert (len(seen), response.status_code) == (hits, 200 if hits > 1 else status)
+
+
+@pytest.mark.parametrize("method, hits", [("GET", 3), ("POST", 1)])
+def test_cloud_session_replays_a_timed_out_read_only_when_idempotent(monkeypatch, method,
+                                                                     hits):
+    import requests
+    from pageindex.retry import cloud_session
+    monkeypatch.setattr("urllib3.util.retry.time.sleep", lambda s: None)
+    with _flaky_server(fails=2, stall=0.3) as (url, seen):
+        if hits > 1:
+            assert cloud_session().request(method, url, timeout=0.1).status_code == 200
+        else:
+            with pytest.raises(requests.ReadTimeout):
+                cloud_session().request(method, url, timeout=0.1)
+    assert len(seen) == hits
+
+
+@pytest.mark.parametrize("call, status, hits", [
+    (lambda c: c.get_document("pi-1"), 503, 3),
+    (lambda c: c.chat_completions([{"role": "user", "content": "q"}]), 503, 1),
+    (lambda c: c.chat_completions([{"role": "user", "content": "q"}]), 429, 3),
+    (lambda c: c.create_folder("f"), 503, 1)],
+    ids=["read", "chat-error", "chat-refused", "create"])
+def test_cloud_client_sends_through_its_retrying_session(monkeypatch, call, status, hits):
+    with _flaky_server(fails=2, status=status) as (url, seen):
+        client = PageIndexClient(api_key="k")
+        monkeypatch.setattr(client, "BASE_URL", url.rstrip("/"))
+        if hits > 1:
+            call(client)
+        else:
+            with pytest.raises(PageIndexAPIError):
+                call(client)
+    assert len(seen) == hits
+
+
+@pytest.mark.parametrize("retry_after, bounds", [
+    ("7", [(7, 7), (7, 7)]), ("120", [(0.5, 1), (1, 2)])])
+def test_cloud_session_waits_as_the_server_asks(monkeypatch, retry_after, bounds):
+    from pageindex.retry import cloud_session
+    waits = []
+    monkeypatch.setattr("urllib3.util.retry.time.sleep", waits.append)
+    with _flaky_server(fails=2, status=429, retry_after=retry_after) as (url, seen):
+        assert cloud_session().get(url).status_code == 200
+    assert len(waits) == len(bounds)
+    assert all(low <= w <= high for w, (low, high) in zip(waits, bounds))
 
 
 def test_parse_pages_keeps_whitespace_tolerance():

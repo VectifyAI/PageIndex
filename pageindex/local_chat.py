@@ -398,7 +398,9 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
                   max_tokens=None, backend=None, extra_headers=None):
     _refuse_skeleton(extra_body)
     from agents import Agent, ModelSettings
+    from agents.retry import ModelRetrySettings
     from .integrations.openai_agents import build_openai_tools
+    from .retry import SDK_RETRIES, agent_policy
     # ModelSettings.extra_body is the one channel all three engines put on
     # the wire: LiteLLM drops the bare prompt_cache_key kwarg (wire-verified),
     # and both OpenAI model classes pass extra_body through verbatim. OpenAI
@@ -409,7 +411,9 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
     # Chat-lane effort rides extra_args: LiteLLM takes it as its own
     # top-level kwarg on every supported openai-agents version, and the
     # channel admits values outside the OpenAI enum ("none").
-    extra_args = _cache_extra_args(model_name) if protocol == "chat" else None
+    # LiteLLM's own retries off: the runner's (below) are the chat lane's one layer.
+    extra_args = ({"max_retries": 0, **(_cache_extra_args(model_name) or {})}
+                  if protocol == "chat" else None)
     if reasoning_effort:
         extra_args = {**(extra_args or {}),
                       "reasoning_effort": reasoning_effort}
@@ -450,6 +454,8 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
             "extra_body": body,
             "extra_headers": extra_headers,
             "extra_args": extra_args,
+            "retry": (ModelRetrySettings(max_retries=SDK_RETRIES, policy=agent_policy)
+                      if protocol == "chat" else None),
             **routed})
     except ValidationError as exc:
         raise PageIndexAPIError(f"Invalid model settings: {exc}") from exc
