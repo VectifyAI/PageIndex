@@ -3041,6 +3041,14 @@ def test_cloud_session_retries_what_is_safe_to_repeat(method, status, hits):
     assert (len(seen), response.status_code) == (hits, 200 if hits > 1 else status)
 
 
+def test_cloud_session_never_resends_a_post_after_a_tls_error():
+    from urllib3.exceptions import MaxRetryError, SSLError
+    from pageindex.retry import cloud_session
+    retry = cloud_session().get_adapter("https://api.pageindex.ai/").max_retries
+    with pytest.raises(MaxRetryError):
+        retry.increment("POST", "/chat/completions/", error=SSLError("bad record mac"))
+
+
 @pytest.mark.parametrize("method, hits", [("GET", 3), ("POST", 1)])
 def test_cloud_session_replays_a_timed_out_read_only_when_idempotent(monkeypatch, method,
                                                                      hits):

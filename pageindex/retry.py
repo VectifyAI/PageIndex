@@ -72,7 +72,7 @@ class _CloudRetry(Retry):
 
 def cloud_session():
     """Cloud API session: GET/PUT/DELETE retry; a POST only if it was never sent or got a 429."""
-    retry = _CloudRetry(total=SDK_RETRIES, status_forcelist=(*RETRY_STATUS, *range(500, 600)),
+    retry = _CloudRetry(total=SDK_RETRIES, other=0, status_forcelist=(*RETRY_STATUS, *range(500, 600)),
                         raise_on_status=False)
     session = requests.Session()
     adapter = HTTPAdapter(max_retries=retry)
