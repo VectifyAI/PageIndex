@@ -929,7 +929,7 @@ async def generate_summaries_for_structure(structure, model=None):
     return structure
 
 
-SUMMARY_CONCURRENCY = 64        # simultaneous summary model calls
+SUMMARY_CONCURRENCY = 128       # simultaneous summary model calls
 SUMMARY_INTRO_MAX_PAGES = 3     # cap on leading pages fed into a parent summary
 SUMMARY_MAX_WORDS = 150         # word cap the summary prompts ask for
 TOKENS_PER_WORD = 4 / 3

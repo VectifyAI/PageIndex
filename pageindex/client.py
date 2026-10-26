@@ -429,7 +429,7 @@ class PageIndexClient:
         summary_concurrency (int, optional): Local flash mode only — cap on
             simultaneous indexing model calls per lane: the summaries, and
             expand up to its own ceiling of 32. The lanes overlap, so up to
-            cap + min(32, cap) calls run at once. Defaults to 64.
+            cap + min(32, cap) calls run at once. Defaults to 128.
         summary_reasoning_effort (str, optional): Local flash mode only —
             the reasoning effort sent with each node-summary call, over any
             in ``index_backend`` (``"none"``, ``"low"``, ``"high"``, ...; a
