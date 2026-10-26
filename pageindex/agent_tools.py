@@ -45,18 +45,19 @@ _SIMILAR_NAMES_LIMIT = 3
 _TOOL_WAIT_TIMEOUT = 180.0  # "up to 3 minutes", per the wait_for_completion schema
 _TOOL_WAIT_INTERVAL = 5.0
 
-_DOC_NAME_DESCRIPTION = (
-    'Copy the `name` field verbatim from a browse_documents() or '
-    'search_documents() response (case-sensitive, include extension). '
-    'Example: "Q3 Report.pdf". If the response shows two documents with the '
-    'same name, pass `folder_id` alongside to disambiguate.'
+_PATH_DESCRIPTION = (
+    "The document's `path`, copied verbatim from a browse_documents(), "
+    "search_documents() or get_document() response (case-sensitive, "
+    'includes folders and the extension). Example: "Research/2024/Q3 '
+    'Report.pdf". A document at the library root is just its file name.'
 )
-_FOLDER_ID_DISAMBIGUATOR_DESCRIPTION = (
-    'Disambiguator for same-name documents. Copy the `folder_id` from the '
-    'intended browse/search result; use "root" for root-level documents, or '
-    '"shared-with-me"/"following" for the read-only folders at the library '
-    'root; omit if `doc_name` is unique. Copy any folder_id verbatim from a '
-    'browse_documents()/get_folder_structure() response, never construct one.'
+_DEPRECATED_DOC_NAME_DESCRIPTION = (
+    "Deprecated: pass `path` instead. The document's file name; ignored "
+    "when `path` is given."
+)
+_DEPRECATED_FOLDER_ID_DESCRIPTION = (
+    "Deprecated: pass `path` instead. Disambiguates `doc_name`; ignored "
+    "when `path` is given."
 )
 _WAIT_FOR_COMPLETION_DESCRIPTION = (
     "If true and document is processing, automatically wait up to 3 minutes "
@@ -75,7 +76,7 @@ TOOL_CONTRACT: dict[str, dict[str, Any]] = {
             "`get_metadata_schema()` so you know which fields metadata mode "
             "could filter on — use this for all document-related questions. "
             "The bare call returns root-level sub-folders and documents; pass "
-            "`folder_id` to drill into a sub-folder level by level. Use "
+            "a folder's `path` to drill into it level by level. Use "
             '`sort="relevance"` + `query` for semantic ranking. Do NOT jump '
             "to `search_documents()` first — keyword search and metadata mode "
             "are escalation paths, only after "
@@ -87,17 +88,23 @@ TOOL_CONTRACT: dict[str, dict[str, Any]] = {
         "schema": {
             "type": "object",
             "properties": {
+                "path": {
+                    "type": "string",
+                    "description": (
+                        'A folder as a library path (e.g. "Research/2024"): '
+                        "copy a folder's `path` from a browse_documents() or "
+                        "get_folder_structure() response — a document's `path` "
+                        'names a file, not a folder. "" is the library root, '
+                        'and "Shared with me" / "Following" are the read-only '
+                        "shared folders there. Takes precedence over folder_id."
+                    ),
+                },
                 "folder_id": {
                     "type": "string",
                     "default": "root",
                     "description": (
-                        'Folder scope (default "root"). Pass a specific folder '
-                        'ID to scope into that folder, or "root" to reference '
-                        "the library root. The read-only \"shared-with-me\" and "
-                        '"following" folders live at the library root — pass '
-                        "one of those ids to browse them. Copy any folder_id "
-                        "verbatim from a browse/tree response, never construct "
-                        "one. Combine with `recursive` to control breadth."
+                        'Deprecated: pass `path` instead. Folder scope ID '
+                        '(default "root"); ignored when `path` is given.'
                     ),
                 },
                 "recursive": {
@@ -105,8 +112,8 @@ TOOL_CONTRACT: dict[str, dict[str, Any]] = {
                     "default": False,
                     "description": (
                         "Whether to include documents from descendant folders. "
-                        "When false (default), returns the direct contents of "
-                        "folder_id along with its sub-folders — prefer this for "
+                        "When false (default), returns the folder's direct "
+                        "contents along with its sub-folders — prefer this for "
                         "level-by-level exploration so you retain folder "
                         "hierarchy context. When true, flattens all descendant "
                         "documents into one list and omits sub-folders — use "
@@ -124,7 +131,7 @@ TOOL_CONTRACT: dict[str, dict[str, Any]] = {
                         '(newest first); "relevance" orders documents by '
                         "semantic relevance to `query`. Relevance also works "
                         "inside the read-only shared folders — pass their "
-                        "folder_id — but at the library root it ranks only "
+                        "path — but at the library root it ranks only "
                         "your own documents."
                     ),
                 },
@@ -170,14 +177,19 @@ TOOL_CONTRACT: dict[str, dict[str, Any]] = {
         "schema": {
             "type": "object",
             "properties": {
+                "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": _PATH_DESCRIPTION,
+                },
                 "doc_name": {
                     "type": "string",
                     "minLength": 1,
-                    "description": _DOC_NAME_DESCRIPTION,
+                    "description": _DEPRECATED_DOC_NAME_DESCRIPTION,
                 },
                 "folder_id": {
                     "anyOf": [{"type": "string"}, {"type": "null"}],
-                    "description": _FOLDER_ID_DISAMBIGUATOR_DESCRIPTION,
+                    "description": _DEPRECATED_FOLDER_ID_DESCRIPTION,
                 },
                 "wait_for_completion": {
                     "type": "boolean",
@@ -185,7 +197,7 @@ TOOL_CONTRACT: dict[str, dict[str, Any]] = {
                     "description": _WAIT_FOR_COMPLETION_DESCRIPTION,
                 },
             },
-            "required": ["doc_name"],
+            "required": [],
         },
     },
     "get_document_structure": {
@@ -201,14 +213,19 @@ TOOL_CONTRACT: dict[str, dict[str, Any]] = {
         "schema": {
             "type": "object",
             "properties": {
+                "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": _PATH_DESCRIPTION,
+                },
                 "doc_name": {
                     "type": "string",
                     "minLength": 1,
-                    "description": _DOC_NAME_DESCRIPTION,
+                    "description": _DEPRECATED_DOC_NAME_DESCRIPTION,
                 },
                 "folder_id": {
                     "anyOf": [{"type": "string"}, {"type": "null"}],
-                    "description": _FOLDER_ID_DISAMBIGUATOR_DESCRIPTION,
+                    "description": _DEPRECATED_FOLDER_ID_DESCRIPTION,
                 },
                 "part": {
                     "type": "integer",
@@ -227,7 +244,7 @@ TOOL_CONTRACT: dict[str, dict[str, Any]] = {
                     "description": _WAIT_FOR_COMPLETION_DESCRIPTION,
                 },
             },
-            "required": ["doc_name"],
+            "required": [],
         },
     },
     "get_page_content": {
@@ -243,14 +260,19 @@ TOOL_CONTRACT: dict[str, dict[str, Any]] = {
         "schema": {
             "type": "object",
             "properties": {
+                "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": _PATH_DESCRIPTION,
+                },
                 "doc_name": {
                     "type": "string",
                     "minLength": 1,
-                    "description": _DOC_NAME_DESCRIPTION,
+                    "description": _DEPRECATED_DOC_NAME_DESCRIPTION,
                 },
                 "folder_id": {
                     "anyOf": [{"type": "string"}, {"type": "null"}],
-                    "description": _FOLDER_ID_DISAMBIGUATOR_DESCRIPTION,
+                    "description": _DEPRECATED_FOLDER_ID_DESCRIPTION,
                 },
                 "pages": {
                     "type": "string",
@@ -267,7 +289,7 @@ TOOL_CONTRACT: dict[str, dict[str, Any]] = {
                     "description": _WAIT_FOR_COMPLETION_DESCRIPTION,
                 },
             },
-            "required": ["doc_name", "pages"],
+            "required": ["pages"],
         },
     },
     "remove_document": {
@@ -277,32 +299,47 @@ TOOL_CONTRACT: dict[str, dict[str, Any]] = {
             "Permanently delete documents and all associated data. Only invoke "
             "when the user explicitly names the documents AND confirms "
             "deletion. Returns `results` — one entry per requested document: "
-            '`{ doc_name, status: "deleted" | "not_found" | "failed", '
-            "error? }`. Inspect each entry for per-document failures. This "
-            "action is irreversible."
+            '`{ path, doc_name, status: "deleted" | "not_found" | "failed", '
+            "error? }`. Inspect each entry for per-document failures. A "
+            "document still processing (e.g. just uploaded) cannot be deleted "
+            "until processing finishes. This action is irreversible."
         ),
         "schema": {
             "type": "object",
             "properties": {
+                "paths": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                    "minItems": 1,
+                    "maxItems": 10,
+                    "description": (
+                        "Paths of the documents to delete, each copied "
+                        "verbatim from the `path` field of a "
+                        "browse_documents() or search_documents() response "
+                        "(case-sensitive, includes folders and the "
+                        'extension). Example: ["Research/Q3 Report.pdf", '
+                        '"draft.pdf"]. Max 10 per call.'
+                    ),
+                },
                 "doc_names": {
                     "type": "array",
                     "items": {"type": "string", "minLength": 1},
                     "minItems": 1,
                     "maxItems": 10,
                     "description": (
-                        "Array of document names to delete. Each name must be "
-                        "copied verbatim from the `name` field of a "
-                        "browse_documents() or search_documents() response "
-                        "(case-sensitive, include extension). Example: "
-                        '["Q3 Report.pdf", "draft.pdf"]. Max 10 per call.'
+                        "Deprecated: pass `paths` instead. Document file "
+                        "names; ignored when `paths` is given."
                     ),
                 },
                 "folder_id": {
                     "anyOf": [{"type": "string"}, {"type": "null"}],
-                    "description": _FOLDER_ID_DISAMBIGUATOR_DESCRIPTION,
+                    "description": (
+                        "Deprecated: pass `paths` instead. Disambiguates "
+                        "`doc_names`; ignored when `paths` is given."
+                    ),
                 },
             },
-            "required": ["doc_names"],
+            "required": [],
         },
     },
 }
@@ -514,12 +551,18 @@ def _folder_unsupported(param: str) -> tuple[dict, bool]:
         None,
         {
             "summary": "This local library does not have folders yet",
-            "options": ["Retry the call without a folder_id",
+            "options": [f"Retry the call without {param}",
                         "Use browse_documents() to list the library root",
                         "Folders are available on PageIndex cloud (PageIndexCloudClient with an API key)"],
         },
         "INVALID_INPUT",
     )
+
+
+def _local_name(path: Optional[str], doc_name: Optional[str]) -> str:
+    """A local library has no folders, so a document's path is its name.
+    `path` wins over the deprecated `doc_name`, as on the cloud."""
+    return path if path is not None else (doc_name or "")
 
 
 # ── page spec handling ──
@@ -725,10 +768,13 @@ def _split_oversized_node(node: Any, budget: int) -> list[Any]:
 
 # ── tool implementations (client-backed; mode-blind) ──
 
-def _browse_documents(client, folder_id: str = "root", recursive: bool = False,
+def _browse_documents(client, path: str = "", folder_id: str = "root",
+                      recursive: bool = False,
                       sort: str = "time", query: Optional[str] = None,
                       offset: int = 0, limit: int = 10,
                       _allowed_ids: Optional[frozenset] = None) -> tuple[dict, bool]:
+    if path:
+        return _folder_unsupported("path")
     if folder_id != "root":
         return _folder_unsupported("folder_id")
     if sort not in ("time", "relevance"):
@@ -788,6 +834,7 @@ def _browse_documents(client, folder_id: str = "root", recursive: bool = False,
             "description": doc.get("description") or "No description provided",
             "status": status,
             "created_at": _normalize_created_at(doc.get("createdAt")),
+            "path": doc.get("name") or "Unknown Document",
         }
         metadata = _flat_metadata(doc.get("metadata"))
         if metadata is not None:
@@ -815,7 +862,7 @@ def _browse_documents(client, folder_id: str = "root", recursive: bool = False,
 
     options = []
     if items:
-        options.append("Use get_document() with a document name to view details")
+        options.append("Use get_document() with a document path to view details")
         options.append(
             "Results returned ≠ correct results. Verify these documents match "
             "the user's actual intent (topic, time period, document type) "
@@ -839,11 +886,14 @@ def _browse_documents(client, folder_id: str = "root", recursive: bool = False,
     return _success(data, {"summary": summary, "options": options})
 
 
-def _get_document(client, doc_name: str, folder_id: Optional[str] = None,
+def _get_document(client, path: Optional[str] = None,
+                  doc_name: Optional[str] = None,
+                  folder_id: Optional[str] = None,
                   wait_for_completion: bool = False,
                   _allowed_ids: Optional[frozenset] = None) -> tuple[dict, bool]:
     if folder_id not in (None, "root"):
         return _folder_unsupported("folder_id")
+    doc_name = _local_name(path, doc_name)
     entry, error = _resolve_document(client, doc_name, allowed_ids=_allowed_ids)
     if error is not None:
         return error
@@ -866,20 +916,20 @@ def _get_document(client, doc_name: str, folder_id: Optional[str] = None,
             if page_num <= 5:
                 suggestions.extend([
                     f"This is a short document with {page_num} pages.",
-                    f'First explore structure: get_document_structure(doc_name: "{name}")',
-                    f'Then extract all content: get_page_content(doc_name: "{name}", pages: "1-{page_num}")',
+                    f'First explore structure: get_document_structure(path: "{name}")',
+                    f'Then extract all content: get_page_content(path: "{name}", pages: "1-{page_num}")',
                 ])
             elif page_num <= STRUCTURE_FIRST_PAGE_THRESHOLD:
                 suggestions.extend([
                     f"This document has {page_num} pages.",
-                    f'First explore structure: get_document_structure(doc_name: "{name}")',
-                    f'Then extract key pages: get_page_content(doc_name: "{name}", pages: "1,5,10")',
+                    f'First explore structure: get_document_structure(path: "{name}")',
+                    f'Then extract key pages: get_page_content(path: "{name}", pages: "1,5,10")',
                 ])
             else:
                 suggestions.extend([
                     f"This is a large document with {page_num} pages.",
-                    f'First explore structure: get_document_structure(doc_name: "{name}")',
-                    f'Then target specific sections: get_page_content(doc_name: "{name}", pages: "1-3")',
+                    f'First explore structure: get_document_structure(path: "{name}")',
+                    f'Then target specific sections: get_page_content(path: "{name}", pages: "1-3")',
                 ])
     else:
         suggestions.append("Document processing failed. Index the document "
@@ -892,6 +942,7 @@ def _get_document(client, doc_name: str, folder_id: Optional[str] = None,
         "created_at": _normalize_created_at(entry.get("createdAt")),
         "page_count": page_num or None,
         "folder_id": entry.get("folderId"),
+        "path": name,
     }
     metadata = _flat_metadata(entry.get("metadata"))
     if metadata is not None:
@@ -907,12 +958,14 @@ def _get_document(client, doc_name: str, folder_id: Optional[str] = None,
     })
 
 
-def _get_document_structure(client, doc_name: str,
+def _get_document_structure(client, path: Optional[str] = None,
+                            doc_name: Optional[str] = None,
                             folder_id: Optional[str] = None, part: int = 1,
                             wait_for_completion: bool = False,
                             _allowed_ids: Optional[frozenset] = None) -> tuple[dict, bool]:
     if folder_id not in (None, "root"):
         return _folder_unsupported("folder_id")
+    doc_name = _local_name(path, doc_name)
     entry, error = _resolve_document(client, doc_name, allowed_ids=_allowed_ids)
     if error is not None:
         return error
@@ -967,7 +1020,7 @@ def _get_document_structure(client, doc_name: str,
 
     if total_parts == 1:
         return _success(
-            {"doc_name": doc_name, "structure": chunks[0]},
+            {"doc_name": doc_name, "path": doc_name, "structure": chunks[0]},
             {
                 "summary": "Document structure retrieved successfully.",
                 "options": [
@@ -996,6 +1049,7 @@ def _get_document_structure(client, doc_name: str,
     return _success(
         {
             "doc_name": doc_name,
+            "path": doc_name,
             "total_parts": total_parts,
             "structure": chunks[current - 1],
             "pagination": {
@@ -1008,12 +1062,14 @@ def _get_document_structure(client, doc_name: str,
     )
 
 
-def _get_page_content(client, doc_name: str, pages: str,
+def _get_page_content(client, pages: str, path: Optional[str] = None,
+                      doc_name: Optional[str] = None,
                       folder_id: Optional[str] = None,
                       wait_for_completion: bool = False,
                       _allowed_ids: Optional[frozenset] = None) -> tuple[dict, bool]:
     if folder_id not in (None, "root"):
         return _folder_unsupported("folder_id")
+    doc_name = _local_name(path, doc_name)
     entry, error = _resolve_document(client, doc_name, allowed_ids=_allowed_ids)
     if error is not None:
         return error
@@ -1118,6 +1174,7 @@ def _get_page_content(client, doc_name: str, pages: str,
     return _success(
         {
             "doc_name": doc_name,
+            "path": doc_name,
             "total_pages": max_page,
             "requested_pages": _format_page_spec(requested),
             "returned_pages": _format_page_spec(included),
@@ -1127,24 +1184,27 @@ def _get_page_content(client, doc_name: str, pages: str,
     )
 
 
-def _remove_document(client, doc_names: list[str],
+def _remove_document(client, paths: Optional[list[str]] = None,
+                     doc_names: Optional[list[str]] = None,
                      folder_id: Optional[str] = None,
                      _allowed_ids: Optional[frozenset] = None) -> tuple[dict, bool]:
     if folder_id not in (None, "root"):
         return _folder_unsupported("folder_id")
+    # A local path is the document's name; `paths` wins, as on the cloud.
+    doc_names = paths if paths is not None else doc_names
     if not isinstance(doc_names, list) or not doc_names:
-        return _failure("At least one document name is required", None,
-                        {"summary": "No document names provided",
-                         "options": ["Pass doc_names as a non-empty array"]},
+        return _failure("At least one document path is required", None,
+                        {"summary": "No document paths provided",
+                         "options": ["Pass paths as a non-empty array"]},
                         "INVALID_INPUT")
     # Validate every element before deleting anything: a rejection envelope
     # must mean nothing was destroyed.
     if not all(isinstance(name, str) and name.strip() for name in doc_names):
         return _failure(
-            "doc_names must be an array of non-empty document name strings",
+            "paths must be an array of non-empty document path strings",
             None,
             {"summary": "Invalid document names",
-             "options": ["Copy each name verbatim from a browse_documents() "
+             "options": ["Copy each path verbatim from a browse_documents() "
                          "response"]},
             "INVALID_INPUT")
     doc_names = list(dict.fromkeys(doc_names))
@@ -1159,15 +1219,18 @@ def _remove_document(client, doc_names: list[str],
         entry, error = _resolve_document(client, doc_name, documents=documents,
                                          allowed_ids=_allowed_ids)
         if error is not None or entry is None:
-            results.append({"doc_name": doc_name, "status": "not_found"})
+            results.append({"path": doc_name, "doc_name": doc_name,
+                            "status": "not_found"})
             continue
         try:
             client.delete_document(entry["id"])
-            results.append({"doc_name": doc_name, "status": "deleted"})
+            results.append({"path": doc_name, "doc_name": doc_name,
+                            "status": "deleted"})
         except Exception as exc:
             # Any escape here (OSError, transport errors) would discard the
             # entries for documents already irreversibly deleted.
-            results.append({"doc_name": doc_name, "status": "failed",
+            results.append({"path": doc_name, "doc_name": doc_name,
+                            "status": "failed",
                             "error": str(exc)})
     deleted = sum(1 for item in results if item["status"] == "deleted")
     return _success(
@@ -1272,17 +1335,18 @@ def _tool_docstring(description: str, properties: dict[str, Any]) -> str:
 
 
 _LOCAL_HIDDEN_PARAMS: dict[str, tuple[str, ...]] = {
-    "browse_documents": ("folder_id", "recursive", "sort", "query"),
+    "browse_documents": ("path", "folder_id", "recursive", "sort", "query"),
     "get_document": ("folder_id",),
     "get_document_structure": ("folder_id",),
     "get_page_content": ("folder_id",),
     "remove_document": ("folder_id",),
 }
 
-_LOCAL_DOC_NAME_DESCRIPTION = (
-    'Copy the `name` field verbatim from a browse_documents() response '
-    '(case-sensitive, include extension). Example: "Q3 Report.pdf". '
-    "Document names are unique in a local library."
+_LOCAL_PATH_DESCRIPTION = (
+    "The document's `path`, copied verbatim from a browse_documents() or "
+    "get_document() response (case-sensitive, includes the extension). "
+    'Example: "Q3 Report.pdf". A local library has no folders, so a path is '
+    "the document's file name."
 )
 
 _LOCAL_DESCRIPTIONS: dict[str, str] = {
@@ -1303,14 +1367,14 @@ _LOCAL_DESCRIPTIONS: dict[str, str] = {
 }
 
 _LOCAL_PARAM_DESCRIPTIONS: dict[tuple[str, str], str] = {
-    ("get_document", "doc_name"): _LOCAL_DOC_NAME_DESCRIPTION,
-    ("get_document_structure", "doc_name"): _LOCAL_DOC_NAME_DESCRIPTION,
-    ("get_page_content", "doc_name"): _LOCAL_DOC_NAME_DESCRIPTION,
-    ("remove_document", "doc_names"): (
-        "Array of document names to delete. Each name must be copied "
-        "verbatim from the `name` field of a browse_documents() response "
-        '(case-sensitive, include extension). Example: ["Q3 Report.pdf", '
-        '"draft.pdf"]. Max 10 per call.'
+    ("get_document", "path"): _LOCAL_PATH_DESCRIPTION,
+    ("get_document_structure", "path"): _LOCAL_PATH_DESCRIPTION,
+    ("get_page_content", "path"): _LOCAL_PATH_DESCRIPTION,
+    ("remove_document", "paths"): (
+        "Paths of the documents to delete, each copied verbatim from the "
+        "`path` field of a browse_documents() response (case-sensitive, "
+        'includes the extension). Example: ["Q3 Report.pdf", "draft.pdf"]. '
+        "Max 10 per call."
     ),
 }
 
@@ -1595,6 +1659,11 @@ _INSTRUCTIONS_HEADER = (
     "financial reports, legal docs, textbooks, etc.)."
 )
 
+# The cloud's ADDRESSING, minus folders: a local path is the file name.
+_ADDRESSING = """\
+ADDRESSING:
+- Every document is addressed by its `path`; a local library has no folders, so a path is the document's file name. Copy `path` verbatim from a tool response into the `path` parameter of the next call — never construct or shorten one."""
+
 _TOOL_USAGE_RULES = """\
 TOOL USAGE RULES:
 - Invoke a tool only when all required parameters are present or clearly inferable. Never invent placeholder values.
@@ -1623,6 +1692,7 @@ Only after ALL steps have been tried may you conclude the document is not in the
 
 AGENT_INSTRUCTIONS = "\n\n".join([
     _INSTRUCTIONS_HEADER,
+    _ADDRESSING,
     _DISCOVERY,
     _DECISION,
     _AFTER_DISCOVERY,
@@ -1642,7 +1712,8 @@ GROUNDING
 - Never fill a gap from general knowledge. When the documents do not answer the question, say so.
 
 CITATIONS
-- Cite only statements supported by tool outputs, as a bracketed reference: [{docName}, p. {pageNumber}] or [{docName}, p. {pageNumber}, block {blockId}]. Place immediately after the claim.
+- Cite only statements supported by tool outputs, as a bracketed reference: [{path}, p. {pageNumber}] or [{path}, p. {pageNumber}, block {blockId}]. Place immediately after the claim.
+- {path} is the document's `path` exactly as the tools returned it (folders included, e.g. Research/2024/Q3 Report.pdf) — never a shortened name.
 - When page content includes block_id values, citations MUST be block-level: copy the exact block_id of the supporting block. Page-only cites are allowed ONLY when the tool output carries no block_id (legacy documents, structure outlines). NEVER invent or alter block_id values.
 - For a claim drawn from multiple blocks on one page, add one reference per supporting block (at most 3); beyond that, cite the single strongest block.
 - Each reference must reference a SINGLE page integer. For multi-page citations, use separate references.""",
@@ -1652,7 +1723,8 @@ GROUNDING
 - Never fill a gap from general knowledge. When the documents do not answer the question, say so.
 
 CITATIONS
-- Cite only statements supported by tool outputs: <cite doc="{docName}" page="{pageNumber}"/> or <cite doc="{docName}" page="{pageNumber}" block="{blockId}"/>. Place immediately after the claim.
+- Cite only statements supported by tool outputs: <cite doc="{path}" page="{pageNumber}"/> or <cite doc="{path}" page="{pageNumber}" block="{blockId}"/>. Place immediately after the claim.
+- {path} is the document's `path` exactly as the tools returned it (folders included, e.g. Research/2024/Q3 Report.pdf) — never a shortened name.
 - When page content includes block_id values, citations MUST be block-level: copy the exact block_id of the supporting block. Page-only cites are allowed ONLY when the tool output carries no block_id (legacy documents, structure outlines). NEVER invent or alter block_id values.
 - For a claim drawn from multiple blocks on one page, add one tag per supporting block (at most 3); beyond that, cite the single strongest block.
 - Each tag must reference a SINGLE page integer. For multi-page citations, use separate tags.""",

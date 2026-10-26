@@ -6,19 +6,23 @@
         "readOnlyHint": true,
         "openWorldHint": false
       },
-      "description": "Primary document retrieval tool. After orienting with `get_folder_structure()` (when available) — and, for queries that may involve typed attributes, pairing it with `get_metadata_schema()` so you know which fields metadata mode could filter on — use this for all document-related questions. The bare call returns root-level sub-folders and documents; pass `folder_id` to drill into a sub-folder level by level. Use `sort=\"relevance\"` + `query` for semantic ranking. Do NOT jump to `search_documents()` first — keyword search and metadata mode are escalation paths, only after `browse_documents(sort=\"relevance\")` + the persistence retries have failed. `browse_documents` does not filter by attribute — for typed-attribute queries, escalate to `search_documents(mode=\"metadata\")`.",
+      "description": "Primary document retrieval tool. After orienting with `get_folder_structure()` (when available) — and, for queries that may involve typed attributes, pairing it with `get_metadata_schema()` so you know which fields metadata mode could filter on — use this for all document-related questions. The bare call returns root-level sub-folders and documents; pass a folder's `path` to drill into it level by level. Use `sort=\"relevance\"` + `query` for semantic ranking. Do NOT jump to `search_documents()` first — keyword search and metadata mode are escalation paths, only after `browse_documents(sort=\"relevance\")` + the persistence retries have failed. `browse_documents` does not filter by attribute — for typed-attribute queries, escalate to `search_documents(mode=\"metadata\")`.",
       "schema": {
         "type": "object",
         "properties": {
+          "path": {
+            "type": "string",
+            "description": "A folder as a library path (e.g. \"Research/2024\"): copy a folder's `path` from a browse_documents() or get_folder_structure() response — a document's `path` names a file, not a folder. \"\" is the library root, and \"Shared with me\" / \"Following\" are the read-only shared folders there. Takes precedence over folder_id."
+          },
           "folder_id": {
             "type": "string",
             "default": "root",
-            "description": "Folder scope (default \"root\"). Pass a specific folder ID to scope into that folder, or \"root\" to reference the library root. The read-only \"shared-with-me\" and \"following\" folders live at the library root — pass one of those ids to browse them. Copy any folder_id verbatim from a browse/tree response, never construct one. Combine with `recursive` to control breadth."
+            "description": "Deprecated: pass `path` instead. Folder scope ID (default \"root\"); ignored when `path` is given."
           },
           "recursive": {
             "type": "boolean",
             "default": false,
-            "description": "Whether to include documents from descendant folders. When false (default), returns the direct contents of folder_id along with its sub-folders — prefer this for level-by-level exploration so you retain folder hierarchy context. When true, flattens all descendant documents into one list and omits sub-folders — use only when a non-recursive browse of the target folder returned no relevant results and you need to widen the scope, or the user explicitly requests a flat listing."
+            "description": "Whether to include documents from descendant folders. When false (default), returns the folder's direct contents along with its sub-folders — prefer this for level-by-level exploration so you retain folder hierarchy context. When true, flattens all descendant documents into one list and omits sub-folders — use only when a non-recursive browse of the target folder returned no relevant results and you need to widen the scope, or the user explicitly requests a flat listing."
           },
           "sort": {
             "type": "string",
@@ -27,7 +31,7 @@
               "relevance"
             ],
             "default": "time",
-            "description": "Sort order. \"time\" (default) sorts by upload date (newest first); \"relevance\" orders documents by semantic relevance to `query`. Relevance also works inside the read-only shared folders — pass their folder_id — but at the library root it ranks only your own documents."
+            "description": "Sort order. \"time\" (default) sorts by upload date (newest first); \"relevance\" orders documents by semantic relevance to `query`. Relevance also works inside the read-only shared folders — pass their path — but at the library root it ranks only your own documents."
           },
           "query": {
             "type": "string",
@@ -60,10 +64,15 @@
       "schema": {
         "type": "object",
         "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The document's `path`, copied verbatim from a browse_documents(), search_documents() or get_document() response (case-sensitive, includes folders and the extension). Example: \"Research/2024/Q3 Report.pdf\". A document at the library root is just its file name."
+          },
           "doc_name": {
             "type": "string",
             "minLength": 1,
-            "description": "Copy the `name` field verbatim from a browse_documents() or search_documents() response (case-sensitive, include extension). Example: \"Q3 Report.pdf\". If the response shows two documents with the same name, pass `folder_id` alongside to disambiguate."
+            "description": "Deprecated: pass `path` instead. The document's file name; ignored when `path` is given."
           },
           "folder_id": {
             "anyOf": [
@@ -74,7 +83,7 @@
                 "type": "null"
               }
             ],
-            "description": "Disambiguator for same-name documents. Copy the `folder_id` from the intended browse/search result; use \"root\" for root-level documents, or \"shared-with-me\"/\"following\" for the read-only folders at the library root; omit if `doc_name` is unique. Copy any folder_id verbatim from a browse_documents()/get_folder_structure() response, never construct one."
+            "description": "Deprecated: pass `path` instead. Disambiguates `doc_name`; ignored when `path` is given."
           },
           "wait_for_completion": {
             "type": "boolean",
@@ -82,9 +91,7 @@
             "description": "If true and document is processing, automatically wait up to 3 minutes until completed. Reduces repeated tool calls."
           }
         },
-        "required": [
-          "doc_name"
-        ]
+        "required": []
       }
     },
     "get_document_structure": {
@@ -96,10 +103,15 @@
       "schema": {
         "type": "object",
         "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The document's `path`, copied verbatim from a browse_documents(), search_documents() or get_document() response (case-sensitive, includes folders and the extension). Example: \"Research/2024/Q3 Report.pdf\". A document at the library root is just its file name."
+          },
           "doc_name": {
             "type": "string",
             "minLength": 1,
-            "description": "Copy the `name` field verbatim from a browse_documents() or search_documents() response (case-sensitive, include extension). Example: \"Q3 Report.pdf\". If the response shows two documents with the same name, pass `folder_id` alongside to disambiguate."
+            "description": "Deprecated: pass `path` instead. The document's file name; ignored when `path` is given."
           },
           "folder_id": {
             "anyOf": [
@@ -110,7 +122,7 @@
                 "type": "null"
               }
             ],
-            "description": "Disambiguator for same-name documents. Copy the `folder_id` from the intended browse/search result; use \"root\" for root-level documents, or \"shared-with-me\"/\"following\" for the read-only folders at the library root; omit if `doc_name` is unique. Copy any folder_id verbatim from a browse_documents()/get_folder_structure() response, never construct one."
+            "description": "Deprecated: pass `path` instead. Disambiguates `doc_name`; ignored when `path` is given."
           },
           "part": {
             "type": "integer",
@@ -125,9 +137,7 @@
             "description": "If true and document is processing, automatically wait up to 3 minutes until completed. Reduces repeated tool calls."
           }
         },
-        "required": [
-          "doc_name"
-        ]
+        "required": []
       }
     },
     "get_page_content": {
@@ -139,10 +149,15 @@
       "schema": {
         "type": "object",
         "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The document's `path`, copied verbatim from a browse_documents(), search_documents() or get_document() response (case-sensitive, includes folders and the extension). Example: \"Research/2024/Q3 Report.pdf\". A document at the library root is just its file name."
+          },
           "doc_name": {
             "type": "string",
             "minLength": 1,
-            "description": "Copy the `name` field verbatim from a browse_documents() or search_documents() response (case-sensitive, include extension). Example: \"Q3 Report.pdf\". If the response shows two documents with the same name, pass `folder_id` alongside to disambiguate."
+            "description": "Deprecated: pass `path` instead. The document's file name; ignored when `path` is given."
           },
           "folder_id": {
             "anyOf": [
@@ -153,7 +168,7 @@
                 "type": "null"
               }
             ],
-            "description": "Disambiguator for same-name documents. Copy the `folder_id` from the intended browse/search result; use \"root\" for root-level documents, or \"shared-with-me\"/\"following\" for the read-only folders at the library root; omit if `doc_name` is unique. Copy any folder_id verbatim from a browse_documents()/get_folder_structure() response, never construct one."
+            "description": "Deprecated: pass `path` instead. Disambiguates `doc_name`; ignored when `path` is given."
           },
           "pages": {
             "type": "string",
@@ -168,7 +183,6 @@
           }
         },
         "required": [
-          "doc_name",
           "pages"
         ]
       }
@@ -180,10 +194,20 @@
         "idempotentHint": true,
         "openWorldHint": false
       },
-      "description": "Permanently delete documents and all associated data. Only invoke when the user explicitly names the documents AND confirms deletion. Returns `results` — one entry per requested document: `{ doc_name, status: \"deleted\" | \"not_found\" | \"failed\", error? }`. Inspect each entry for per-document failures. This action is irreversible.",
+      "description": "Permanently delete documents and all associated data. Only invoke when the user explicitly names the documents AND confirms deletion. Returns `results` — one entry per requested document: `{ path, doc_name, status: \"deleted\" | \"not_found\" | \"failed\", error? }`. Inspect each entry for per-document failures. A document still processing (e.g. just uploaded) cannot be deleted until processing finishes. This action is irreversible.",
       "schema": {
         "type": "object",
         "properties": {
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "maxItems": 10,
+            "description": "Paths of the documents to delete, each copied verbatim from the `path` field of a browse_documents() or search_documents() response (case-sensitive, includes folders and the extension). Example: [\"Research/Q3 Report.pdf\", \"draft.pdf\"]. Max 10 per call."
+          },
           "doc_names": {
             "type": "array",
             "items": {
@@ -192,7 +216,7 @@
             },
             "minItems": 1,
             "maxItems": 10,
-            "description": "Array of document names to delete. Each name must be copied verbatim from the `name` field of a browse_documents() or search_documents() response (case-sensitive, include extension). Example: [\"Q3 Report.pdf\", \"draft.pdf\"]. Max 10 per call."
+            "description": "Deprecated: pass `paths` instead. Document file names; ignored when `paths` is given."
           },
           "folder_id": {
             "anyOf": [
@@ -203,12 +227,10 @@
                 "type": "null"
               }
             ],
-            "description": "Disambiguator for same-name documents. Copy the `folder_id` from the intended browse/search result; use \"root\" for root-level documents, or \"shared-with-me\"/\"following\" for the read-only folders at the library root; omit if `doc_name` is unique. Copy any folder_id verbatim from a browse_documents()/get_folder_structure() response, never construct one."
+            "description": "Deprecated: pass `paths` instead. Disambiguates `doc_names`; ignored when `paths` is given."
           }
         },
-        "required": [
-          "doc_names"
-        ]
+        "required": []
       }
     }
   }
