@@ -6,6 +6,7 @@ import textwrap
 from datetime import datetime
 import time
 import json
+import random
 import PyPDF2
 import copy
 import asyncio
@@ -175,14 +176,15 @@ def _litellm_model(model):
 
 
 # Misconfiguration: no retry can fix a rejected key or a model that does not
-# exist, and every later call fails the same way. An unknown status is a
-# transport failure and stays retryable.
+# exist, and every later call fails the same way.
 _UNRECOVERABLE_STATUS = frozenset({401, 403, 404})
 
 # A 400 (context_length_exceeded) is equally unfixable by retry — the prompt
 # will not shrink — but it is per-prompt: the ladder raises it immediately
 # and consumers absorb it instead of failing the run.
 _NO_RETRY_STATUS = _UNRECOVERABLE_STATUS | frozenset({400})
+
+_RETRY_STATUS = frozenset({408, 409, 429})
 
 
 class LLMRetriesExhausted(RuntimeError):
@@ -199,6 +201,38 @@ def _is_unrecoverable(exc: Exception) -> bool:
         # caller absorbs (see above); any other exhausted ladder is fatal.
         return exc.status_code != 400
     return getattr(exc, "status_code", None) in _UNRECOVERABLE_STATUS
+
+
+def _should_retry(exc):
+    """As the official SDKs: a network failure or a server's 408/409/429/5xx (x-should-retry overrides); never a local error."""
+    import httpx
+    chain, link = [], exc
+    while link is not None and link not in chain:
+        chain.append(link)
+        link = link.__cause__ or link.__context__
+    if any(isinstance(link, httpx.TransportError) for link in chain):
+        return True
+    if not any(isinstance(link, httpx.HTTPStatusError) for link in chain):
+        return False
+    verdict = (getattr(exc, "litellm_response_headers", None) or {}).get("x-should-retry")
+    if verdict in ("true", "false"):
+        return verdict == "true"
+    status = getattr(exc, "status_code", None) or 0
+    return status in _RETRY_STATUS or status >= 500
+
+
+def _retry_delay(attempt, exc):
+    """Seconds before retry `attempt` (0-based): the server's Retry-After if 0-60, else doubling up to 30, jittered."""
+    headers = getattr(exc, "litellm_response_headers", None) or {}
+    for key, per_second in (("retry-after-ms", 1000), ("retry-after", 1)):
+        try:
+            seconds = float(headers.get(key, "")) / per_second
+        except (TypeError, ValueError):
+            continue
+        if 0 < seconds <= 60:
+            return seconds
+        break
+    return min(30, 2 ** attempt) * random.uniform(0.5, 1)
 
 
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
@@ -235,12 +269,14 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
             if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
                 raise
             logging.error(f"Error: {e}")
-            if i < max_retries - 1:
+            retry = _should_retry(e)
+            if retry and i < max_retries - 1:
                 logging.warning("Retrying LLM completion")
-                time.sleep(1)
+                time.sleep(_retry_delay(i, e))
             else:
                 raise LLMRetriesExhausted(
-                    f"LLM completion failed after {max_retries} retries: {e}",
+                    f"LLM completion failed after {max_retries} retries: {e}" if retry
+                    else f"LLM completion failed: {e}",
                     status_code=getattr(e, "status_code", None),
                 ) from e
 
@@ -272,12 +308,14 @@ async def llm_acompletion(model, prompt, **params):
             if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
                 raise
             logging.error(f"Error: {e}")
-            if i < max_retries - 1:
+            retry = _should_retry(e)
+            if retry and i < max_retries - 1:
                 logging.warning("Retrying LLM completion")
-                await asyncio.sleep(1)
+                await asyncio.sleep(_retry_delay(i, e))
             else:
                 raise LLMRetriesExhausted(
-                    f"LLM completion failed after {max_retries} retries: {e}",
+                    f"LLM completion failed after {max_retries} retries: {e}" if retry
+                    else f"LLM completion failed: {e}",
                     status_code=getattr(e, "status_code", None),
                 ) from e
 

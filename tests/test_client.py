@@ -11,6 +11,7 @@ import sys
 import types
 from pathlib import Path
 
+import httpx
 import pytest
 
 import pageindex.flash
@@ -938,7 +939,7 @@ def test_submit_shows_an_explained_llm_failure_alone(local_client, sample_pdf,
                                                      monkeypatch, status):
     """An exhausted ladder with a status (a claude-code/ login included)
     names its cause, so the traceback shows the submit error alone; one
-    without, such as a bug the ladder retried, keeps its chain. Neither
+    without, such as a bug, keeps its chain. Neither
     carries run_off_loop's no-running-loop RuntimeError."""
     def fail(pdf, **kwargs):
         raise pageindex.utils.LLMRetriesExhausted("LLM call failed",
@@ -2663,23 +2664,25 @@ def test_index_lane_makes_no_key_prejudgment(monkeypatch):
 
 
 def test_llm_completion_surfaces_litellms_credential_verdict(monkeypatch):
-    """LiteLLM's own missing-credentials error (a retryable-shaped 500)
-    rides the retry loop and lands verbatim in the terminal error."""
+    """LiteLLM's own missing-credentials error (a 500 raised before any
+    request) fails on the first attempt, verbatim in the terminal error."""
     pytest.importorskip("litellm")
     import litellm  # noqa: F401 — first import may load a .env; delenv after
     from pageindex.utils import llm_completion
 
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setattr("pageindex.utils.time.sleep", lambda s: None)
+    slept = []
+    monkeypatch.setattr("pageindex.utils.time.sleep", slept.append)
     with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
         llm_completion("gpt-4o", "probe")
 
-    async def _nosleep(s):
-        pass
+    async def _asleep(s):
+        slept.append(s)
 
-    monkeypatch.setattr("pageindex.utils.asyncio.sleep", _nosleep)
+    monkeypatch.setattr("pageindex.utils.asyncio.sleep", _asleep)
     with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
         asyncio.run(pageindex.utils.llm_acompletion("gpt-4o", "probe"))
+    assert slept == []
 
 
 def test_litellm_model_normalizes_without_key_prejudgment(monkeypatch):
@@ -2866,6 +2869,86 @@ def test_llm_acompletion_400_skips_the_retry_ladder(monkeypatch):
     with pytest.raises(Rejected):
         asyncio.run(pageindex.utils.llm_acompletion("gpt-4o", "p"))
     assert calls["n"] == 1
+
+
+class _LLMError(Exception):
+    """A LiteLLM-shaped error: a server reply unless `cause` says otherwise."""
+
+    def __init__(self, status, headers=None, cause=None):
+        super().__init__(f"HTTP {status}")
+        request = httpx.Request("POST", "https://llm.example/v1/chat/completions")
+        response = httpx.Response(status, headers=headers, request=request)
+        self.status_code = status
+        self.litellm_response_headers = response.headers
+        self.__cause__ = cause if cause is not None else httpx.HTTPStatusError(
+            "reply", request=request, response=response)
+
+
+@pytest.mark.parametrize("make, retry", [
+    *[(lambda s=s: _LLMError(s), True) for s in (408, 409, 429, 500, 503, 529)],
+    *[(lambda s=s: _LLMError(s), False) for s in (402, 413, 422)],
+    (lambda: _LLMError(503, {"x-should-retry": "false"}), False),
+    (lambda: _LLMError(422, {"x-should-retry": "true"}), True),
+    (lambda: _LLMError(500, cause=httpx.ConnectError("refused")), True),
+    (lambda: _LLMError(408, cause=httpx.ReadTimeout("slow")), True),
+    (lambda: _LLMError(500, cause=ValueError("Missing credentials")), False),
+], ids=["408", "409", "429", "500", "503", "529", "402", "413", "422",
+        "header-no", "header-yes", "connect", "timeout", "local"])
+def test_llm_retry_follows_the_official_sdk_rule(make, retry):
+    pytest.importorskip("litellm")
+    assert pageindex.utils._should_retry(make()) is retry
+
+
+@pytest.mark.parametrize("headers, wait", [
+    ({"retry-after": "7"}, 7),
+    ({"retry-after-ms": "1500", "retry-after": "7"}, 1.5),
+    ({"retry-after": "120"}, None),
+    ({"retry-after": "Wed, 21 Oct 2015 07:28:00 GMT"}, None),
+    ({}, None),
+])
+def test_llm_retry_waits_as_the_server_asks(headers, wait):
+    pytest.importorskip("litellm")
+    from pageindex.utils import _retry_delay
+    err = _LLMError(429, headers)
+    if wait is not None:
+        assert _retry_delay(3, err) == wait
+        return
+    caps = [min(30, 2 ** i) for i in range(9)]
+    slept = [_retry_delay(i, err) for i in range(9)]
+    assert all(cap / 2 <= s <= cap for s, cap in zip(slept, caps))
+    assert any(s < cap for s, cap in zip(slept, caps))
+    assert sum(slept) > 60
+
+
+@pytest.mark.parametrize("make, calls, slept", [
+    (lambda: _LLMError(429, {"retry-after": "7"}), 10, [7] * 9),
+    (lambda: _LLMError(500, cause=ValueError("Missing credentials")), 1, []),
+], ids=["rate-limited", "local"])
+def test_llm_retry_ladder(monkeypatch, make, calls, slept):
+    pytest.importorskip("litellm")
+    import litellm
+    sent, waits = [], []
+
+    def fail(**kw):
+        sent.append(1)
+        raise make()
+
+    async def afail(**kw):
+        fail()
+
+    async def _asleep(s):
+        waits.append(s)
+    monkeypatch.setattr(litellm, "completion", fail)
+    monkeypatch.setattr(litellm, "acompletion", afail)
+    monkeypatch.setattr("pageindex.utils.time.sleep", waits.append)
+    monkeypatch.setattr("pageindex.utils.asyncio.sleep", _asleep)
+    for run in (lambda: pageindex.utils.llm_completion("gpt-4o", "p"),
+                lambda: asyncio.run(pageindex.utils.llm_acompletion("gpt-4o", "p"))):
+        sent.clear()
+        waits.clear()
+        with pytest.raises(pageindex.utils.LLMRetriesExhausted) as err:
+            run()
+        assert (len(sent), waits, err.value.status_code) == (calls, slept, make().status_code)
 
 
 def test_parse_pages_keeps_whitespace_tolerance():
@@ -3284,7 +3367,7 @@ def test_retry_notice_logs_instead_of_stdout(monkeypatch, capsys, caplog):
     def flaky(**kwargs):
         if not attempts:
             attempts.append(1)
-            raise RuntimeError("boom")
+            raise httpx.ConnectError("boom")
         message = types.SimpleNamespace(content="ok")
         choice = types.SimpleNamespace(message=message, finish_reason="stop")
         return types.SimpleNamespace(choices=[choice])
@@ -3302,7 +3385,7 @@ def test_retry_notice_only_when_a_retry_follows(monkeypatch, caplog):
     from pageindex import utils
 
     def broken(**kwargs):
-        raise RuntimeError("boom")
+        raise httpx.ConnectError("boom")
 
     monkeypatch.setattr(litellm, "completion", broken)
     monkeypatch.setattr(utils.time, "sleep", lambda s: None)
