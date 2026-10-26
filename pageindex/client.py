@@ -2577,9 +2577,10 @@ class PageIndexClient:
                 was about — what ``chat(doc_id=...)`` took. Citations name
                 documents by name or by library path
                 (``Research/2024/Q3.pdf``), and the ids come from here;
-                without it your own library is listed. Two documents
-                sharing a cited name raise PageIndexAPIError naming both
-                ids: pass ``doc_id`` to pick.
+                without it your own library is listed. With it, a cited
+                path matches by its file name. Two documents sharing a
+                cited name raise PageIndexAPIError naming both ids: pass
+                ``doc_id`` to pick.
 
         Returns:
             list: One dict per distinct citation: ``{'document', 'doc_id',
@@ -2628,10 +2629,9 @@ class PageIndexClient:
             if not ids:
                 ids = names.get(cited)
             if not ids and "/" in cited and doc_id is not None:
-                # ponytail: the metadata lookup carries no path, so match the
-                # file name within the documents the caller scoped to. Two
-                # scoped same-name documents still raise; listing them via
-                # _all_documents(stop_ids=) would tell them apart by path.
+                # Document metadata carries no path: match the file name
+                # within the documents the caller scoped to. Two scoped
+                # documents sharing it still raise.
                 ids = names.get(cited.rsplit("/", 1)[1])
             ids = list(dict.fromkeys(ids or []))
             if len(ids) > 1:
