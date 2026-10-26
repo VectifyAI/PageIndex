@@ -210,6 +210,7 @@ def test_index_call_runs_isolated_on_the_subscription(monkeypatch):
     # a .env written for API models must not bill or reroute the run
     assert all(opts.env[var] == "" for var in (
         "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"))
+    assert opts.env["DISABLE_PROMPT_CACHING"] == "1"
     assert "no-session-persistence" in opts.extra_args
     assert opts.max_buffer_size > 2**20  # a page image's tool result is one line
     assert first.closed and second.closed
@@ -426,6 +427,7 @@ def test_chat_sends_one_message_with_a_block_per_turn(monkeypatch, chat_client):
     assert list(opts.mcp_servers) == ["pageindex"]
     assert opts.allowed_tools == ["mcp__pageindex"] and opts.tools == []
     assert opts.max_turns == 10 and not opts.include_partial_messages
+    assert "DISABLE_PROMPT_CACHING" not in opts.env  # later turns read the cache
 
     envelope = chat_client.chat(history, doc_id="pi-doc1", protocol="chat_completions")
     assert envelope["model"] == "haiku"

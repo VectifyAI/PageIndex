@@ -351,6 +351,8 @@ async def claude_code_complete(model: str, prompt: str,
     reply = ""
     try:
         options = claude_code_options(model, reasoning_effort, max_turns=1)
+        # one turn, never read back: a cache write would only cost more
+        options.env["DISABLE_PROMPT_CACHING"] = "1"
         from claude_agent_sdk import ResultMessage
         async with entry[0]:
             async for message in claude_code_messages(prompt, options):
