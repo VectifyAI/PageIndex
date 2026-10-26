@@ -760,11 +760,14 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
         else:
             routed = {k: v for k, v in extra_body.items()
                       if k in _LITELLM_MODEL_SETTINGS}
-            if (reasoning is not None
-                    and isinstance(routed.get("reasoning"), Mapping)):
+            given = routed.get("reasoning")
+            if isinstance(given, Reasoning):
+                given = given.model_dump()
+            if reasoning is not None and "reasoning" in routed and (
+                    given is None or isinstance(given, Mapping)):
                 # reasoning_effort's effort, unless extra_body names one
-                routed["reasoning"] = {"effort": reasoning.effort,
-                                       **routed["reasoning"]}
+                routed["reasoning"] = {"effort": reasoning.effort, **{
+                    k: v for k, v in (given or {}).items() if v is not None}}
             rest = {k: v for k, v in extra_body.items()
                     if k not in _LITELLM_MODEL_SETTINGS}
             if rest:

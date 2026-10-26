@@ -15,6 +15,7 @@ import yaml
 
 import httpx  # via the hard `openai` dependency
 import pytest
+from openai.types.shared import Reasoning
 
 try:  # anthropic >= 1.0 validates http_client against httpx2
     import httpx2 as anthropic_httpx
@@ -1021,6 +1022,10 @@ def test_streamed_claude_thinking_goes_back_once(client, store_path,
     ("gemini/gemini-test", "disable", None),
     # extra_body's reasoning names no effort, so the argument's stays
     ("anthropic/claude-test", "high", {"reasoning": {"summary": "auto"}}),
+    ("anthropic/claude-test", "high", {"reasoning": Reasoning(summary="auto")}),
+    ("anthropic/claude-test", "high",
+     {"reasoning": Reasoning(summary="auto").model_dump()}),
+    ("anthropic/claude-test", "high", {"reasoning": None}),
 ])
 def test_reasoning_effort_reaches_litellm_as_given(client, monkeypatch,
                                                    model, effort, extra_body):
