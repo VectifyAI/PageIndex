@@ -1141,14 +1141,21 @@ def _chat_transcript(agent, new_items, replies=None) -> list:
     """The run's new items as Chat Completions messages as the model saw
     them, so a caller who appends them resends that: its last request past
     the first one's length, then the final reply, if it has a message,
-    filled the same way, each assistant message naming its model. With no
-    request seen (a test double), converted as LitellmModel converts each
+    filled the same way, each assistant message naming its model. Calls
+    the SDK folded into the history's last message (a refusal) come first,
+    as sent, without that message's own refusal and text. With no request
+    seen (a test double), converted as LitellmModel converts each
     request."""
     converted = _as_sent(agent, new_items)
     if replies is None or replies.first is None:
         return converted
     final = [m for m in converted[-1:] if m.get("role") == "assistant"]
-    messages = (replies.last[replies.first:] + replies.fill(
+    host = replies.last[replies.first - 1]
+    folded = []
+    if host.get("tool_calls"):
+        folded = [{**{k: v for k, v in host.items() if k != "refusal"},
+                   "content": None}]
+    messages = (folded + replies.last[replies.first:] + replies.fill(
         replies.last + final)[len(replies.last):])
     return [{**m, _WRITER: replies.model} if m.get("role") == "assistant"
             else m for m in messages]

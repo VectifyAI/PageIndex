@@ -648,6 +648,51 @@ def test_messages_continuing_a_reply_keep_their_tool_call(client, store_path,
 
 
 @needs_agents
+@pytest.mark.parametrize("model, extra, split, text, stream", [
+    ("gpt-test", {}, False, None, False),
+    ("gpt-test", {}, False, None, True),
+    # LitellmModel sends each call in its own message
+    ("anthropic/claude-test", {}, True, None, False),
+    ("deepseek/deepseek-chat", {"reasoning_content": "think"}, False, None,
+     False),
+    ("gpt-test", {}, False, "Sorry.", False),
+])
+def test_messages_continuing_a_refusal_keep_their_tool_calls(
+        client, store_path, monkeypatch, model, extra, split, text, stream):
+    """A history ending with a refusal: the SDK folds the run's first tool
+    calls into it on the wire, and the returned messages open with them,
+    the refusal and its text left in the history, so they append back
+    whole and the next call opens with this one's last request."""
+    pytest.importorskip("litellm")
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    sent = _mock_litellm(monkeypatch, [
+        _litellm_reply(tool_calls=_TWO_CALLS, **extra), _litellm_reply("A1"),
+        _litellm_reply("A2")])
+    settings = {"stream": True, "stream_metadata": True} if stream else {}
+
+    def call(history):
+        out = client.chat_completions(history, doc_id=doc_id, model=model,
+                                      **settings)
+        return list(out)[-1] if stream else out
+
+    history = [{"role": "user", "content": "q"},
+               {"role": "assistant", "content": text, "refusal": "No."}]
+    out = call(history)
+    one = [("assistant", ["call_1", "call_2"]), ("tool", []), ("tool", [])]
+    each = [("assistant", ["call_1"]), ("tool", []),
+            ("assistant", ["call_2"]), ("tool", [])]
+    assert [(m["role"], [c["id"] for c in m.get("tool_calls") or ()])
+            for m in out["messages"]] == (each if split else one) + [
+        ("assistant", [])]
+    assert "refusal" not in out["messages"][0]
+    assert out["messages"][0]["content"] is None
+    assert out["messages"][0].get("reasoning_content") == extra.get(
+        "reasoning_content")
+    call([*history, *out["messages"], {"role": "user", "content": "q2"}])
+    assert sent[2][:len(sent[1])] == sent[1]
+
+
+@needs_agents
 @pytest.mark.parametrize("settings", [
     {"reasoning_effort": "high"},
     {"extra_body": {"reasoning": {"effort": "high"}}},
