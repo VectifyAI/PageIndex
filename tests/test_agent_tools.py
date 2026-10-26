@@ -88,7 +88,7 @@ def test_tool_surface_and_docstrings(client):
         schema = _local_schema(tool.__name__)
         exposed = list(schema["properties"])
         # Required params come first: a signature cannot put them after
-        # defaulted ones (get_page_content's `pages` follows `path`).
+        # defaulted ones (get_page_content's `pages` follows `doc_name`).
         required = set(schema.get("required", []))
         assert list(inspect.signature(tool).parameters) == (
             [p for p in exposed if p in required]
@@ -254,35 +254,6 @@ def test_get_document(client, store_path):
     assert payload["metadata"] == {"team": "research"}
     assert any("short document" in option
                for option in payload["next_steps"]["options"])
-
-
-def test_documents_are_addressed_by_path(client, store_path):
-    """A local library has no folders, so a document's path is its name:
-    every item carries it, every document tool takes it (and wins over the
-    deprecated doc_name, as on the cloud), and a folder path is refused."""
-    seed_doc(store_path, "pi-a", "report.pdf")
-    seed_doc(store_path, "pi-b", "other.pdf")
-    browse, _ = run(client, "browse_documents")
-    assert {item["path"] for item in browse["documents"]} == {"report.pdf",
-                                                             "other.pdf"}
-    document, is_error = run(client, "get_document", path="report.pdf",
-                             doc_name="other.pdf")
-    assert not is_error and document["name"] == document["path"] == "report.pdf"
-    assert 'get_page_content(path: "report.pdf"' in " ".join(
-        document["next_steps"]["options"])
-    structure, is_error = run(client, "get_document_structure",
-                              path="report.pdf")
-    assert not is_error and structure["path"] == "report.pdf"
-    pages, is_error = run(client, "get_page_content", path="report.pdf",
-                          pages="1")
-    assert not is_error and pages["path"] == "report.pdf"
-    missing, is_error = run(client, "get_document")
-    assert is_error and missing["errorCode"] == "NOT_FOUND"
-    folder, is_error = run(client, "browse_documents", path="Research")
-    assert is_error and folder["errorCode"] == "INVALID_INPUT"
-    removed, _ = run(client, "remove_document", paths=["report.pdf"])
-    assert removed["results"] == [
-        {"path": "report.pdf", "doc_name": "report.pdf", "status": "deleted"}]
 
 
 def test_get_document_not_found_suggests_similar(client, store_path):
@@ -510,8 +481,8 @@ def test_remove_document(client, store_path):
                             doc_names=["report.pdf", "ghost.pdf"])
     assert not is_error
     assert payload["results"] == [
-        {"path": "report.pdf", "doc_name": "report.pdf", "status": "deleted"},
-        {"path": "ghost.pdf", "doc_name": "ghost.pdf", "status": "not_found"},
+        {"doc_name": "report.pdf", "status": "deleted"},
+        {"doc_name": "ghost.pdf", "status": "not_found"},
     ]
     assert client.list_documents()["total"] == 0
 
@@ -546,8 +517,8 @@ def test_remove_document_partial_failure_keeps_results(client, store_path,
                             doc_names=["a.pdf", "b.pdf"])
     assert not is_error
     assert payload["results"] == [
-        {"path": "a.pdf", "doc_name": "a.pdf", "status": "deleted"},
-        {"path": "b.pdf", "doc_name": "b.pdf", "status": "failed",
+        {"doc_name": "a.pdf", "status": "deleted"},
+        {"doc_name": "b.pdf", "status": "failed",
          "error": "[Errno 13] Permission denied"},
     ]
 
@@ -2632,6 +2603,7 @@ _CLOUD_ONLY_LINES = (
     "filters there silently return nothing.",
     "- Direct: counts / averages / extremes / distributions, which browse "
     "cannot answer.",
+    "ADDRESSING:",
     '- Every document and folder is addressed by its `path`: "Research/2024/'
     'Q3 Report.pdf" for a document, "Research/2024" for a folder; a document '
     "at the library root is just its file name. Copy `path` verbatim from a "
@@ -2645,10 +2617,6 @@ _CLOUD_ONLY_LINES = (
 # the cloud must fail the reverse comparison, not become a new exception.
 _LOCAL_ONLY_LINES = (
     "DOCUMENT DISCOVERY:",
-    "- Every document is addressed by its `path`; a local library has no "
-    "folders, so a path is the document's file name. Copy `path` verbatim "
-    "from a tool response into the `path` parameter of the next call \u2014 "
-    "never construct or shorten one.",
     "- browse_documents() — DEFAULT discovery tool, first choice for any "
     "document-related question. The bare call returns your documents newest "
     "first with names and descriptions; match them against the user's intent.",
@@ -3199,7 +3167,7 @@ def test_remove_document_repeated_name_deletes_once(client, store_path):
     payload, is_error = run(client, "remove_document",
                             doc_names=["a.pdf", "a.pdf"])
     assert not is_error
-    assert payload["results"] == [{"path": "a.pdf", "doc_name": "a.pdf", "status": "deleted"}]
+    assert payload["results"] == [{"doc_name": "a.pdf", "status": "deleted"}]
     assert "1 of 1" in payload["next_steps"]["summary"]
 
 

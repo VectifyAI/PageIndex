@@ -551,18 +551,12 @@ def _folder_unsupported(param: str) -> tuple[dict, bool]:
         None,
         {
             "summary": "This local library does not have folders yet",
-            "options": [f"Retry the call without {param}",
+            "options": ["Retry the call without a folder_id",
                         "Use browse_documents() to list the library root",
                         "Folders are available on PageIndex cloud (PageIndexCloudClient with an API key)"],
         },
         "INVALID_INPUT",
     )
-
-
-def _local_name(path: Optional[str], doc_name: Optional[str]) -> str:
-    """A local library has no folders, so a document's path is its name.
-    `path` wins over the deprecated `doc_name`, as on the cloud."""
-    return path if path is not None else (doc_name or "")
 
 
 # ── page spec handling ──
@@ -768,13 +762,10 @@ def _split_oversized_node(node: Any, budget: int) -> list[Any]:
 
 # ── tool implementations (client-backed; mode-blind) ──
 
-def _browse_documents(client, path: str = "", folder_id: str = "root",
-                      recursive: bool = False,
+def _browse_documents(client, folder_id: str = "root", recursive: bool = False,
                       sort: str = "time", query: Optional[str] = None,
                       offset: int = 0, limit: int = 10,
                       _allowed_ids: Optional[frozenset] = None) -> tuple[dict, bool]:
-    if path:
-        return _folder_unsupported("path")
     if folder_id != "root":
         return _folder_unsupported("folder_id")
     if sort not in ("time", "relevance"):
@@ -834,7 +825,6 @@ def _browse_documents(client, path: str = "", folder_id: str = "root",
             "description": doc.get("description") or "No description provided",
             "status": status,
             "created_at": _normalize_created_at(doc.get("createdAt")),
-            "path": doc.get("name") or "Unknown Document",
         }
         metadata = _flat_metadata(doc.get("metadata"))
         if metadata is not None:
@@ -862,7 +852,7 @@ def _browse_documents(client, path: str = "", folder_id: str = "root",
 
     options = []
     if items:
-        options.append("Use get_document() with a document path to view details")
+        options.append("Use get_document() with a document name to view details")
         options.append(
             "Results returned ≠ correct results. Verify these documents match "
             "the user's actual intent (topic, time period, document type) "
@@ -886,14 +876,11 @@ def _browse_documents(client, path: str = "", folder_id: str = "root",
     return _success(data, {"summary": summary, "options": options})
 
 
-def _get_document(client, path: Optional[str] = None,
-                  doc_name: Optional[str] = None,
-                  folder_id: Optional[str] = None,
+def _get_document(client, doc_name: str, folder_id: Optional[str] = None,
                   wait_for_completion: bool = False,
                   _allowed_ids: Optional[frozenset] = None) -> tuple[dict, bool]:
     if folder_id not in (None, "root"):
         return _folder_unsupported("folder_id")
-    doc_name = _local_name(path, doc_name)
     entry, error = _resolve_document(client, doc_name, allowed_ids=_allowed_ids)
     if error is not None:
         return error
@@ -916,20 +903,20 @@ def _get_document(client, path: Optional[str] = None,
             if page_num <= 5:
                 suggestions.extend([
                     f"This is a short document with {page_num} pages.",
-                    f'First explore structure: get_document_structure(path: "{name}")',
-                    f'Then extract all content: get_page_content(path: "{name}", pages: "1-{page_num}")',
+                    f'First explore structure: get_document_structure(doc_name: "{name}")',
+                    f'Then extract all content: get_page_content(doc_name: "{name}", pages: "1-{page_num}")',
                 ])
             elif page_num <= STRUCTURE_FIRST_PAGE_THRESHOLD:
                 suggestions.extend([
                     f"This document has {page_num} pages.",
-                    f'First explore structure: get_document_structure(path: "{name}")',
-                    f'Then extract key pages: get_page_content(path: "{name}", pages: "1,5,10")',
+                    f'First explore structure: get_document_structure(doc_name: "{name}")',
+                    f'Then extract key pages: get_page_content(doc_name: "{name}", pages: "1,5,10")',
                 ])
             else:
                 suggestions.extend([
                     f"This is a large document with {page_num} pages.",
-                    f'First explore structure: get_document_structure(path: "{name}")',
-                    f'Then target specific sections: get_page_content(path: "{name}", pages: "1-3")',
+                    f'First explore structure: get_document_structure(doc_name: "{name}")',
+                    f'Then target specific sections: get_page_content(doc_name: "{name}", pages: "1-3")',
                 ])
     else:
         suggestions.append("Document processing failed. Index the document "
@@ -942,7 +929,6 @@ def _get_document(client, path: Optional[str] = None,
         "created_at": _normalize_created_at(entry.get("createdAt")),
         "page_count": page_num or None,
         "folder_id": entry.get("folderId"),
-        "path": name,
     }
     metadata = _flat_metadata(entry.get("metadata"))
     if metadata is not None:
@@ -958,14 +944,12 @@ def _get_document(client, path: Optional[str] = None,
     })
 
 
-def _get_document_structure(client, path: Optional[str] = None,
-                            doc_name: Optional[str] = None,
+def _get_document_structure(client, doc_name: str,
                             folder_id: Optional[str] = None, part: int = 1,
                             wait_for_completion: bool = False,
                             _allowed_ids: Optional[frozenset] = None) -> tuple[dict, bool]:
     if folder_id not in (None, "root"):
         return _folder_unsupported("folder_id")
-    doc_name = _local_name(path, doc_name)
     entry, error = _resolve_document(client, doc_name, allowed_ids=_allowed_ids)
     if error is not None:
         return error
@@ -1020,7 +1004,7 @@ def _get_document_structure(client, path: Optional[str] = None,
 
     if total_parts == 1:
         return _success(
-            {"doc_name": doc_name, "path": doc_name, "structure": chunks[0]},
+            {"doc_name": doc_name, "structure": chunks[0]},
             {
                 "summary": "Document structure retrieved successfully.",
                 "options": [
@@ -1049,7 +1033,6 @@ def _get_document_structure(client, path: Optional[str] = None,
     return _success(
         {
             "doc_name": doc_name,
-            "path": doc_name,
             "total_parts": total_parts,
             "structure": chunks[current - 1],
             "pagination": {
@@ -1062,14 +1045,12 @@ def _get_document_structure(client, path: Optional[str] = None,
     )
 
 
-def _get_page_content(client, pages: str, path: Optional[str] = None,
-                      doc_name: Optional[str] = None,
+def _get_page_content(client, doc_name: str, pages: str,
                       folder_id: Optional[str] = None,
                       wait_for_completion: bool = False,
                       _allowed_ids: Optional[frozenset] = None) -> tuple[dict, bool]:
     if folder_id not in (None, "root"):
         return _folder_unsupported("folder_id")
-    doc_name = _local_name(path, doc_name)
     entry, error = _resolve_document(client, doc_name, allowed_ids=_allowed_ids)
     if error is not None:
         return error
@@ -1174,7 +1155,6 @@ def _get_page_content(client, pages: str, path: Optional[str] = None,
     return _success(
         {
             "doc_name": doc_name,
-            "path": doc_name,
             "total_pages": max_page,
             "requested_pages": _format_page_spec(requested),
             "returned_pages": _format_page_spec(included),
@@ -1184,27 +1164,24 @@ def _get_page_content(client, pages: str, path: Optional[str] = None,
     )
 
 
-def _remove_document(client, paths: Optional[list[str]] = None,
-                     doc_names: Optional[list[str]] = None,
+def _remove_document(client, doc_names: list[str],
                      folder_id: Optional[str] = None,
                      _allowed_ids: Optional[frozenset] = None) -> tuple[dict, bool]:
     if folder_id not in (None, "root"):
         return _folder_unsupported("folder_id")
-    # A local path is the document's name; `paths` wins, as on the cloud.
-    doc_names = paths if paths is not None else doc_names
     if not isinstance(doc_names, list) or not doc_names:
-        return _failure("At least one document path is required", None,
-                        {"summary": "No document paths provided",
-                         "options": ["Pass paths as a non-empty array"]},
+        return _failure("At least one document name is required", None,
+                        {"summary": "No document names provided",
+                         "options": ["Pass doc_names as a non-empty array"]},
                         "INVALID_INPUT")
     # Validate every element before deleting anything: a rejection envelope
     # must mean nothing was destroyed.
     if not all(isinstance(name, str) and name.strip() for name in doc_names):
         return _failure(
-            "paths must be an array of non-empty document path strings",
+            "doc_names must be an array of non-empty document name strings",
             None,
             {"summary": "Invalid document names",
-             "options": ["Copy each path verbatim from a browse_documents() "
+             "options": ["Copy each name verbatim from a browse_documents() "
                          "response"]},
             "INVALID_INPUT")
     doc_names = list(dict.fromkeys(doc_names))
@@ -1219,18 +1196,15 @@ def _remove_document(client, paths: Optional[list[str]] = None,
         entry, error = _resolve_document(client, doc_name, documents=documents,
                                          allowed_ids=_allowed_ids)
         if error is not None or entry is None:
-            results.append({"path": doc_name, "doc_name": doc_name,
-                            "status": "not_found"})
+            results.append({"doc_name": doc_name, "status": "not_found"})
             continue
         try:
             client.delete_document(entry["id"])
-            results.append({"path": doc_name, "doc_name": doc_name,
-                            "status": "deleted"})
+            results.append({"doc_name": doc_name, "status": "deleted"})
         except Exception as exc:
             # Any escape here (OSError, transport errors) would discard the
             # entries for documents already irreversibly deleted.
-            results.append({"path": doc_name, "doc_name": doc_name,
-                            "status": "failed",
+            results.append({"doc_name": doc_name, "status": "failed",
                             "error": str(exc)})
     deleted = sum(1 for item in results if item["status"] == "deleted")
     return _success(
@@ -1336,17 +1310,16 @@ def _tool_docstring(description: str, properties: dict[str, Any]) -> str:
 
 _LOCAL_HIDDEN_PARAMS: dict[str, tuple[str, ...]] = {
     "browse_documents": ("path", "folder_id", "recursive", "sort", "query"),
-    "get_document": ("folder_id",),
-    "get_document_structure": ("folder_id",),
-    "get_page_content": ("folder_id",),
-    "remove_document": ("folder_id",),
+    "get_document": ("path", "folder_id"),
+    "get_document_structure": ("path", "folder_id"),
+    "get_page_content": ("path", "folder_id"),
+    "remove_document": ("paths", "folder_id"),
 }
 
-_LOCAL_PATH_DESCRIPTION = (
-    "The document's `path`, copied verbatim from a browse_documents() or "
-    "get_document() response (case-sensitive, includes the extension). "
-    'Example: "Q3 Report.pdf". A local library has no folders, so a path is '
-    "the document's file name."
+_LOCAL_DOC_NAME_DESCRIPTION = (
+    'Copy the `name` field verbatim from a browse_documents() response '
+    '(case-sensitive, include extension). Example: "Q3 Report.pdf". '
+    "Document names are unique in a local library."
 )
 
 _LOCAL_DESCRIPTIONS: dict[str, str] = {
@@ -1367,14 +1340,14 @@ _LOCAL_DESCRIPTIONS: dict[str, str] = {
 }
 
 _LOCAL_PARAM_DESCRIPTIONS: dict[tuple[str, str], str] = {
-    ("get_document", "path"): _LOCAL_PATH_DESCRIPTION,
-    ("get_document_structure", "path"): _LOCAL_PATH_DESCRIPTION,
-    ("get_page_content", "path"): _LOCAL_PATH_DESCRIPTION,
-    ("remove_document", "paths"): (
-        "Paths of the documents to delete, each copied verbatim from the "
-        "`path` field of a browse_documents() response (case-sensitive, "
-        'includes the extension). Example: ["Q3 Report.pdf", "draft.pdf"]. '
-        "Max 10 per call."
+    ("get_document", "doc_name"): _LOCAL_DOC_NAME_DESCRIPTION,
+    ("get_document_structure", "doc_name"): _LOCAL_DOC_NAME_DESCRIPTION,
+    ("get_page_content", "doc_name"): _LOCAL_DOC_NAME_DESCRIPTION,
+    ("remove_document", "doc_names"): (
+        "Array of document names to delete. Each name must be copied "
+        "verbatim from the `name` field of a browse_documents() response "
+        '(case-sensitive, include extension). Example: ["Q3 Report.pdf", '
+        '"draft.pdf"]. Max 10 per call.'
     ),
 }
 
@@ -1659,11 +1632,6 @@ _INSTRUCTIONS_HEADER = (
     "financial reports, legal docs, textbooks, etc.)."
 )
 
-# The cloud's ADDRESSING, minus folders: a local path is the file name.
-_ADDRESSING = """\
-ADDRESSING:
-- Every document is addressed by its `path`; a local library has no folders, so a path is the document's file name. Copy `path` verbatim from a tool response into the `path` parameter of the next call — never construct or shorten one."""
-
 _TOOL_USAGE_RULES = """\
 TOOL USAGE RULES:
 - Invoke a tool only when all required parameters are present or clearly inferable. Never invent placeholder values.
@@ -1692,7 +1660,6 @@ Only after ALL steps have been tried may you conclude the document is not in the
 
 AGENT_INSTRUCTIONS = "\n\n".join([
     _INSTRUCTIONS_HEADER,
-    _ADDRESSING,
     _DISCOVERY,
     _DECISION,
     _AFTER_DISCOVERY,
