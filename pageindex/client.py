@@ -2606,7 +2606,6 @@ class PageIndexClient:
         if not citations:
             return []
         names: dict[str, list[str]] = {}
-        paths: dict[str, list[str]] = {}
         if doc_id is not None:
             doc_ids = [doc_id] if isinstance(doc_id, str) else doc_id
             for one_id in dict.fromkeys(doc_ids):
@@ -2618,21 +2617,15 @@ class PageIndexClient:
                 if doc.get("name") and doc.get("id"):
                     names.setdefault(doc["name"], []).append(doc["id"])
                 if doc.get("path") and doc.get("id"):
-                    paths.setdefault(doc["path"], []).append(doc["id"])
+                    names.setdefault(doc["path"], []).append(doc["id"])
         resolved: list[dict[str, Any]] = []
         for citation in citations:
             cited = citation["document"]
-            # The MCP server's cite format names a document by its library
-            # path ("Research/2024/Q3.pdf"); a root document's path is its
-            # name, so a cite without "/" keeps resolving by name.
-            ids = paths.get(cited) if "/" in cited else None
-            if not ids:
-                ids = names.get(cited)
-            if not ids and "/" in cited and doc_id is not None:
-                # Document metadata carries no path: match the file name
-                # within the documents the caller scoped to. Two scoped
-                # documents sharing it still raise.
-                ids = names.get(cited.rsplit("/", 1)[1])
+            ids = names.get(cited)
+            if not ids and doc_id is not None:
+                # Document metadata carries no path: a cited path matches
+                # by its file name within the scoped documents.
+                ids = names.get(cited.rsplit("/", 1)[-1])
             ids = list(dict.fromkeys(ids or []))
             if len(ids) > 1:
                 raise PageIndexAPIError(
