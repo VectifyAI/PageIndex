@@ -2889,8 +2889,10 @@ class _LLMError(Exception):
     (lambda: _LLMError(500, cause=httpx.ConnectError("refused")), True),
     (lambda: _LLMError(408, cause=httpx.ReadTimeout("slow")), True),
     (lambda: _LLMError(500, cause=ValueError("Missing credentials")), False),
+    (lambda: _LLMError(500, cause=httpx.LocalProtocolError("Illegal header value b'sk-x\\n'")), False),
+    (lambda: _LLMError(500, cause=httpx.UnsupportedProtocol("Request URL is missing an 'http://' or 'https://' protocol.")), False),
 ], ids=["408", "409", "429", "500", "503", "529", "402", "413", "422",
-        "header-no", "header-yes", "connect", "timeout", "local"])
+        "header-no", "header-yes", "connect", "timeout", "local", "bad-header", "no-scheme"])
 def test_llm_retry_follows_the_official_sdk_rule(make, retry):
     from pageindex.retry import should_retry
     assert should_retry(make()) is retry

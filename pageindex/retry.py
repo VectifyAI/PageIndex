@@ -19,7 +19,8 @@ def should_retry(exc):
     while link is not None and link not in chain:
         chain.append(link)
         link = link.__cause__ or link.__context__
-    if any(isinstance(link, httpx.TransportError) for link in chain):
+    if any(isinstance(link, httpx.TransportError)
+           and not isinstance(link, (httpx.LocalProtocolError, httpx.UnsupportedProtocol)) for link in chain):
         return True
     if not any(isinstance(link, httpx.HTTPStatusError) for link in chain):
         return False
