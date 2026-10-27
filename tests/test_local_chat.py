@@ -1302,15 +1302,21 @@ def test_streamed_fields_litellm_drops_go_back(client, store_path,
 
 
 @needs_agents
-@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("stream, blank", [(False, True), (True, True),
+                                           (True, False)])
 def test_claude_thinking_reaches_the_anthropic_wire_once(client, store_path,
-                                                         monkeypatch, stream):
+                                                         monkeypatch, stream,
+                                                         blank):
     """Through LiteLLM's own Anthropic parsing and request building, with
     no effort set: the run's next request carries the signed thinking
-    block once, a stream's closing repeat of its text dropped."""
+    block once, a stream's closing repeat of its text blanked. Without the
+    blanking LiteLLM's stream must still repeat it, or the blanking goes."""
     pytest.importorskip("litellm")
     from litellm.llms.custom_httpx.http_handler import (AsyncHTTPHandler,
                                                         HTTPHandler)
+    if not blank:
+        monkeypatch.setattr(local_chat, "_drop_repeated_thinking",
+                            lambda chunk, streamed: None)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     doc_id = seed_doc(store_path, "pi-a", "report.pdf")
     thinking = {"type": "thinking", "thinking": "plan step",
@@ -1347,8 +1353,13 @@ def test_claude_thinking_reaches_the_anthropic_wire_once(client, store_path,
     result = list(out)[-1] if stream else out
     assert not {"thinking", "output_config"} & set(bodies[0])
     turn = next(m for m in bodies[1]["messages"] if m["role"] == "assistant")
-    assert [b for b in turn["content"] if b["type"] == "thinking"] == [
-        thinking]
+    sent = [b for b in turn["content"] if b["type"] == "thinking"]
+    if not blank:
+        assert sent == [{**thinking, "thinking": "plan stepplan step"}], (
+            "LiteLLM stopped repeating streamed thinking: drop "
+            "_drop_repeated_thinking")
+        return
+    assert sent == [thinking]
     assert result["messages"][0]["thinking_blocks"] == [thinking]
 
 
