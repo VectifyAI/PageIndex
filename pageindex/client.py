@@ -1307,9 +1307,10 @@ class PageIndexClient:
                 backend accepts is its own). Each lane sends its native
                 spelling: LiteLLM's ``reasoning_effort``, Responses
                 ``reasoning.effort``, Messages ``output_config.effort``.
-                Through LiteLLM, ``"none"`` turns a Claude model's thinking
-                off on Anthropic, Bedrock or Vertex, and raises on one that
-                can't (Opus 5.5, Fable), as on a ``claude-code/`` model.
+                ``"none"`` turns a Claude model's thinking off with its own
+                switch, on Messages and through LiteLLM to Anthropic,
+                Bedrock or Vertex, and raises on one that can't (Opus 5.5,
+                Fable), as on a ``claude-code/`` model.
                 Unset sends nothing — the model's default applies.
             show_process: Answer lane, streamed chat — weave the run into
                 the text stream for display: thinking flows as
@@ -1518,12 +1519,23 @@ class PageIndexClient:
                     extra_headers=extra_headers, backend=backend)
             body = extra_body
             if reasoning_effort:
+                from .utils import claude_none_switch
+                given = extra_body or {}
+                # Anthropic's effort takes no "none": a Claude model's own
+                # thinking switch stands in, unless the caller sent one.
+                swap = (reasoning_effort == "none" and "thinking" not in given
+                        and claude_none_switch(model or self.chat_model))
+                if swap and "reasoning_effort" in swap:
+                    raise PageIndexAPIError(
+                        f"{model or self.chat_model} can't turn thinking off, "
+                        "so it can't honor reasoning_effort='none'; pass "
+                        "'low' or leave it unset.")
                 # Anthropic's own effort field, beside the caller's other
                 # output_config keys — theirs still win.
-                given = extra_body or {}
-                body = {**given, "output_config": {
-                    "effort": reasoning_effort,
-                    **given.get("output_config", {})}}
+                body = {**given, **swap} if swap else {
+                    **given, "output_config": {
+                        "effort": reasoning_effort,
+                        **given.get("output_config", {})}}
             return self._messages(
                 messages, model=model, stream=stream, doc_id=doc_id,
                 folder_id=folder_id,

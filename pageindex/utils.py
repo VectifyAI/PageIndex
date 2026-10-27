@@ -201,10 +201,10 @@ def _is_unrecoverable(exc: Exception) -> bool:
     return getattr(exc, "status_code", None) in _UNRECOVERABLE_STATUS
 
 
-# LiteLLM sends no thinking field for reasoning_effort "none" on Claude
-# (BerriAI/litellm#47924, #44298), and these models think by default: each
-# gets its own off switch, or its lowest effort where it has none. The first
-# name in the model wins, so a longer name comes before its prefix.
+# What turns thinking off on the Claude models that think by default: each
+# one's own switch, as the Anthropic Models API lists it, or its lowest effort
+# where it has none. The first name in the model wins, so a longer name comes
+# before its prefix.
 _CLAUDE_NONE = (
     ("claude-sonnet-5-5", {"thinking": {"type": "between_tools"}}),
     ("claude-opus-5-5", {"reasoning_effort": "low"}),
@@ -215,13 +215,20 @@ _CLAUDE_NONE = (
 )
 
 
+def claude_none_switch(model):
+    """What replaces reasoning_effort "none" on a Claude model that thinks by
+    default (see _CLAUDE_NONE); None for any other model."""
+    return next((swap for name, swap in _CLAUDE_NONE if name in (model or "")), None)
+
+
 def _claude_none(model):
-    """What replaces reasoning_effort "none" on a Claude model LiteLLM
-    routes to Anthropic, Bedrock or Vertex; None keeps it."""
+    """claude_none_switch on a model LiteLLM routes to Anthropic, Bedrock or
+    Vertex, which LiteLLM sends no thinking field for "none"
+    (BerriAI/litellm#47924, #44298); None elsewhere."""
     model = _strip_prefix(model or "", "litellm/")
     if model.split("/", 1)[0] not in ("anthropic", "bedrock", "vertex_ai"):
         return None
-    return next((swap for name, swap in _CLAUDE_NONE if name in model), None)
+    return claude_none_switch(model)
 
 
 def thinking_stays_on(model):
@@ -1137,6 +1144,7 @@ class SummaryScheduler:
                                    if small_node_tokens is None else small_node_tokens)
         self._gate = _PriorityGate(concurrency or SUMMARY_CONCURRENCY)
         self._asked = self._answered = False
+        self._failure = None  # the first summary call's error, for the all-failed message
         self._marks = {}     # id(node) -> future resolved once the node is final
         self._tasks = {}     # id(node) -> its summary task
         self._finals = []    # (node, ids of its children when it was marked)
@@ -1279,6 +1287,7 @@ class SummaryScheduler:
                                      else self._leaf_summary(node, depth))
         except Exception as e:
             node['summary'] = ""
+            self._failure = self._failure or e
             if _is_unrecoverable(e):
                 raise
         if not node['summary']:
@@ -1315,8 +1324,9 @@ class SummaryScheduler:
             raise RuntimeError(
                 "Summary generation failed for all nodes "
                 "(every summary call failed or returned empty; "
-                "check the model and its context limits)"
-            )
+                + (f"first failure: {self._failure}" if self._failure
+                   else "check the model and its context limits") + ")"
+            ) from self._failure
 
         strip_internal_keys(self.structure)
         return self.structure

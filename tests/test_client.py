@@ -3780,7 +3780,9 @@ def test_flash_summaries_drop_a_default_effort_the_server_refuses(tmp_path, monk
         with pytest.raises(Refused):
             run(optimize, lambda params: True, status=401)
         assert None not in sent
-        with pytest.raises(RuntimeError, match="Summary generation failed"):
+        # the error names the refusal instead of only pointing at context limits
+        with pytest.raises(RuntimeError,
+                           match="Summary generation failed.*first failure: unsupported value"):
             run(optimize, lambda params: "reasoning_effort" in params, effort="high")
         assert set(sent) == {"high"}
 

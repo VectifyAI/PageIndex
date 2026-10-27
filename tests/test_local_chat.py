@@ -4846,6 +4846,28 @@ def test_chat_protocol_messages_is_the_door(client, monkeypatch):
     assert seen[-1][1]["extra_body"] is None
 
 
+def test_chat_protocol_messages_none_turns_claude_thinking_off(client, monkeypatch):
+    """Anthropic's effort takes no "none": a Claude model gets its own
+    thinking switch instead, one that can't turn thinking off raises, and a
+    caller's own thinking or another model keeps the effort field."""
+    seen = []
+    monkeypatch.setattr(local_chat, "run_messages",
+                        lambda c, messages, **kw: seen.append(kw) or "door")
+    for model, body in (("claude-haiku-5-5", {"thinking": {"type": "disabled"}}),
+                        ("anthropic/claude-sonnet-5-5",
+                         {"thinking": {"type": "between_tools"}}),
+                        ("claude-x", {"output_config": {"effort": "none"}})):
+        client.chat("q", protocol="messages", model=model, reasoning_effort="none")
+        assert seen[-1]["extra_body"] == body, model
+    client.chat("q", protocol="messages", model="claude-haiku-5-5",
+                reasoning_effort="none", extra_body={"thinking": {"type": "adaptive"}})
+    assert seen[-1]["extra_body"] == {"thinking": {"type": "adaptive"},
+                                      "output_config": {"effort": "none"}}
+    with pytest.raises(PageIndexAPIError, match="can't turn thinking off"):
+        client.chat("q", protocol="messages", model="claude-opus-5-5",
+                    reasoning_effort="none")
+
+
 def test_extra_body_refuses_skeleton_keys():
     """The managed prompt, conversation and tools are the SDK's on every
     lane; extra_body merges last, so a caller's copy would silently
