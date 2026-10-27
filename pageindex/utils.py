@@ -229,11 +229,11 @@ def thinking_stays_on(model):
     return "reasoning_effort" in (_claude_none(model) or {})
 
 
-def _claude_none_kwargs(kwargs):
-    """The completion kwargs with a "none" effort swapped as _claude_none
-    says; a caller's own thinking wins."""
+def _claude_none_kwargs(model, kwargs):
+    """LiteLLM kwargs for `model` with a "none" effort swapped as
+    _claude_none says; a caller's own thinking wins."""
     swap = (kwargs.get("reasoning_effort") == "none" and "thinking" not in kwargs
-            and _claude_none(kwargs["model"]))
+            and _claude_none(model))
     if not swap:
         return kwargs
     return {**{k: v for k, v in kwargs.items() if k != "reasoning_effort"}, **swap}
@@ -255,7 +255,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
     _quiet_litellm()
     for i in range(max_retries):
         try:
-            response = litellm.completion(**_claude_none_kwargs({
+            response = litellm.completion(**_claude_none_kwargs(model, {
                 "model": model,
                 "messages": messages,
                 "drop_params": True,
@@ -296,7 +296,7 @@ async def llm_acompletion(model, prompt, **params):
     _quiet_litellm()
     for i in range(max_retries):
         try:
-            response = await litellm.acompletion(**_claude_none_kwargs({
+            response = await litellm.acompletion(**_claude_none_kwargs(model, {
                 "model": model,
                 "messages": messages,
                 "drop_params": True,

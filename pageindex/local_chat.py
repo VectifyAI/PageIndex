@@ -439,6 +439,14 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
             rest = {k: v for k, v in extra_body.items() if k not in own}
             if rest:
                 extra_args = {**(extra_args or {}), **rest}
+    if protocol == "chat" and extra_args and extra_args.get("reasoning_effort") == "none" \
+            and "thinking" not in extra_args:
+        from .utils import _claude_none_kwargs, thinking_stays_on
+        if thinking_stays_on(model_name):
+            raise PageIndexAPIError(
+                f"{model_name} can't turn thinking off, so it can't honor "
+                "reasoning_effort='none'; pass 'low' or leave it unset.")
+        extra_args = _claude_none_kwargs(model_name, extra_args)
     from pydantic import ValidationError
     try:
         settings = ModelSettings(**{
@@ -1968,6 +1976,10 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
         raise PageIndexAPIError(
             f"{model_name} runs the Claude Code CLI, which takes no "
             f"{', '.join(given)} — drop them.")
+    if reasoning_effort == "none":
+        raise PageIndexAPIError(
+            f"{model_name} can't turn thinking off, so it can't honor "
+            "reasoning_effort='none'; pass 'low' or leave it unset.")
     from contextlib import aclosing
     from .integrations.claude_agent_sdk import (
         claude_code_messages, claude_code_options, tool_server)

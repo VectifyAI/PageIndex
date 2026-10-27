@@ -1307,6 +1307,9 @@ class PageIndexClient:
                 backend accepts is its own). Each lane sends its native
                 spelling: LiteLLM's ``reasoning_effort``, Responses
                 ``reasoning.effort``, Messages ``output_config.effort``.
+                Through LiteLLM, ``"none"`` turns a Claude model's thinking
+                off on Anthropic, Bedrock or Vertex, and raises on one that
+                can't (Opus 5.5, Fable), as on a ``claude-code/`` model.
                 Unset sends nothing — the model's default applies.
             show_process: Answer lane, streamed chat — weave the run into
                 the text stream for display: thinking flows as
@@ -1697,7 +1700,10 @@ class PageIndexClient:
             reasoning_effort: Own-model chat only — passed through verbatim as
                 LiteLLM's ``reasoning_effort``; each provider maps it to
                 its own thinking control, and the values mean what the
-                backend says they mean. Unset sends nothing (the
+                backend says they mean. ``"none"`` is the exception: it
+                turns a Claude model's thinking off on Anthropic, Bedrock
+                or Vertex, and raises on one that can't (Opus 5.5, Fable),
+                as on a ``claude-code/`` model. Unset sends nothing (the
                 backend's default applies).
             extra_body: Extra request fields beyond this method's
                 parameters, merged last so they win. The managed endpoint
