@@ -521,20 +521,36 @@ def _recording(create, replies: _Replies):
     return creating
 
 
+async def _again_with_published_models():
+    from agents import RetryDecision
+    from .utils import learn_published_models
+    if await learn_published_models():
+        return RetryDecision(retry=True, delay=0)
+    return False
+
+
 def _chat_retry(replies: _Replies):
     """Again for a stream the server broke before any output (the runner
-    asks only then; OpenRouter aborts some). Again without the fields a
-    400 names, of those the request had that may be refused, for the rest
-    of the call: each retry refuses what its 400 named. Three retries at
-    most."""
+    asks only then; OpenRouter aborts some). Once again after LiteLLM
+    refused the request itself, with the entries its packaged model map
+    lacks taken from the published one (a model newer than the package).
+    Again without the fields a 400 names, of those the request had that
+    may be refused, for the rest of the call: each retry refuses what its
+    400 named. Three retries at most."""
     from agents import ModelRetrySettings, RetryDecision
+    from litellm.exceptions import UnsupportedParamsError
+    learned = False
 
     def policy(context):
+        nonlocal learned
         status = context.normalized.status_code
         if context.stream and status is not None and status >= 500:
             return True
         if status not in (400, 422):
             return False
+        if isinstance(context.error, UnsupportedParamsError) and not learned:
+            learned = True
+            return _again_with_published_models()
         text = str(context.error)
         named = {key for key in replies.sent
                  if re.search(rf"\b{re.escape(key)}\b", text)}
