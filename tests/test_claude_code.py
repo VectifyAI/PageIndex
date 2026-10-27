@@ -318,6 +318,24 @@ def test_index_calls_are_capped(monkeypatch):
     assert cc._GATES == {}  # the cap goes with its last call, not kept per loop
 
 
+@needs_claude
+def test_queued_index_calls_go_highest_priority_first(monkeypatch):
+    from pageindex.utils import llm_priority
+    monkeypatch.setattr(cc, "CLAUDE_CODE_CONCURRENCY", 1)
+    sessions = fake_cli(monkeypatch, result("ok"), during=lambda: asyncio.sleep(0.01))
+
+    async def call(prompt, prio):
+        with llm_priority(prio):
+            return await llm_acompletion("claude-code/haiku", prompt)
+
+    async def run():
+        first = asyncio.create_task(call("first", 0))
+        await asyncio.sleep(0)  # it takes the one slot; the rest queue behind it
+        await asyncio.gather(first, call("low", 1), call("high", 3), call("mid", 2))
+    asyncio.run(run())
+    assert [s.prompt for s in sessions] == ["first", "high", "mid", "low"]
+
+
 @pytest.fixture
 def asyncio_log():
     """The asyncio logger without the probe filter an earlier test may have

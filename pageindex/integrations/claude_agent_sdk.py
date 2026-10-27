@@ -345,10 +345,12 @@ async def claude_code_complete(model: str, prompt: str,
     """One indexing prompt on the claude-code/ route: no tools, one turn.
     Every failure is final — the CLI already retried what it could — and
     only a 400 stays per-prompt, for the indexing callers to absorb."""
-    from ..utils import LLMRetriesExhausted, _add_usage_counts
+    from ..utils import (LLMRetriesExhausted, _add_usage_counts, _llm_priority,
+                         _PriorityGate)
     loop = asyncio.get_running_loop()
-    # one cap per event loop; submits on separate threads each get their own
-    entry = _GATES.setdefault(loop, [asyncio.Semaphore(CLAUDE_CODE_CONCURRENCY), 0])
+    # one cap per event loop; submits on separate threads each get their own.
+    # The wider indexing lanes queue their calls here, highest priority first
+    entry = _GATES.setdefault(loop, [_PriorityGate(CLAUDE_CODE_CONCURRENCY), 0])
     entry[1] += 1
     reply = ""
     try:
@@ -356,7 +358,7 @@ async def claude_code_complete(model: str, prompt: str,
         # one turn, never read back: a cache write would only cost more
         options.env["DISABLE_PROMPT_CACHING"] = "1"
         from claude_agent_sdk import ResultMessage
-        async with entry[0]:
+        async with entry[0].slot(_llm_priority.get()):
             async for message in claude_code_messages(prompt, options):
                 if isinstance(message, ResultMessage):
                     reply = message.result or ""
