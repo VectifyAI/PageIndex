@@ -222,11 +222,11 @@ def claude_none_switch(model):
 
 
 def _claude_none(model):
-    """claude_none_switch on a model LiteLLM routes to Anthropic, Bedrock or
-    Vertex, which LiteLLM sends no thinking field for "none"
+    """claude_none_switch on a model LiteLLM routes to Anthropic, Bedrock,
+    Vertex or Foundry, which LiteLLM sends no thinking field for "none"
     (BerriAI/litellm#47924, #44298); None elsewhere."""
     model = _strip_prefix(model or "", "litellm/")
-    if model.split("/", 1)[0] not in ("anthropic", "bedrock", "vertex_ai"):
+    if model.split("/", 1)[0] not in ("anthropic", "bedrock", "vertex_ai", "azure_ai"):
         return None
     return claude_none_switch(model)
 

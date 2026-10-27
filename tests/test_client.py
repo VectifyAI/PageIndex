@@ -2899,6 +2899,7 @@ def test_claude_none_sends_the_models_own_off_switch(monkeypatch):
                             ("bedrock/global.anthropic.claude-sonnet-5-5", between),
                             ("bedrock/invoke/global.anthropic.claude-haiku-5-5", off),
                             ("vertex_ai/claude-opus-5", off),
+                            ("azure_ai/claude-haiku-5-5", off),
                             ("litellm/anthropic/claude-haiku-5-5", off),
                             ("anthropic/claude-opus-4-8", none),
                             ("openrouter/anthropic/claude-haiku-5.5", none),

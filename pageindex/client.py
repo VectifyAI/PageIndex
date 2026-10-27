@@ -1309,8 +1309,8 @@ class PageIndexClient:
                 ``reasoning.effort``, Messages ``output_config.effort``.
                 ``"none"`` turns a Claude model's thinking off with its own
                 switch, on Messages and through LiteLLM to Anthropic,
-                Bedrock or Vertex, and raises on one that can't (Opus 5.5,
-                Fable), as on a ``claude-code/`` model.
+                Bedrock, Vertex or Foundry, and raises on one that can't
+                (Opus 5.5, Fable), as on a ``claude-code/`` model.
                 Unset sends nothing — the model's default applies.
             show_process: Answer lane, streamed chat — weave the run into
                 the text stream for display: thinking flows as
@@ -1713,10 +1713,10 @@ class PageIndexClient:
                 LiteLLM's ``reasoning_effort``; each provider maps it to
                 its own thinking control, and the values mean what the
                 backend says they mean. ``"none"`` is the exception: it
-                turns a Claude model's thinking off on Anthropic, Bedrock
-                or Vertex, and raises on one that can't (Opus 5.5, Fable),
-                as on a ``claude-code/`` model. Unset sends nothing (the
-                backend's default applies).
+                turns a Claude model's thinking off on Anthropic, Bedrock,
+                Vertex or Foundry, and raises on one that can't (Opus 5.5,
+                Fable), as on a ``claude-code/`` model. Unset sends nothing
+                (the backend's default applies).
             extra_body: Extra request fields beyond this method's
                 parameters, merged last so they win. The managed endpoint
                 and OpenAI-compatible backends take them verbatim in the
