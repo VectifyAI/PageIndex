@@ -212,6 +212,7 @@ def test_index_call_runs_isolated_on_the_subscription(monkeypatch):
     assert all(opts.env[var] == "" for var in (
         "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"))
     assert opts.env["DISABLE_PROMPT_CACHING"] == "1"
+    assert opts.env["CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS"] == "30000"
     assert "no-session-persistence" in opts.extra_args
     assert opts.max_buffer_size > 2**20  # a page image's tool result is one line
     assert opts.cwd == os.path.realpath(opts.cwd)  # a symlinked cwd is listed twice

@@ -357,6 +357,9 @@ async def claude_code_complete(model: str, prompt: str,
         options = claude_code_options(model, reasoning_effort, max_turns=1)
         # one turn, never read back: a cache write would only cost more
         options.env["DISABLE_PROMPT_CACHING"] = "1"
+        # a stream with no bytes, pings included, is dead: re-sent after 30 s,
+        # not the CLI's 3 minutes
+        options.env["CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS"] = "30000"
         from claude_agent_sdk import ResultMessage
         async with entry[0].slot(_llm_priority.get()):
             async for message in claude_code_messages(prompt, options):
