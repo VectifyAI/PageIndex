@@ -1366,14 +1366,87 @@ def test_requests_outside_a_chat_run_pass_untouched():
 
 
 @needs_agents
-def test_fill_hook_returns_when_callbacks_are_replaced(client, monkeypatch):
-    """A caller replacing litellm.callbacks doesn't turn the fill off."""
+def test_fill_hook_returns_when_callbacks_are_replaced(client, store_path,
+                                                       monkeypatch):
+    """A caller replacing litellm.callbacks mid-run doesn't turn the fill
+    off: each request puts the hook back."""
     pytest.importorskip("litellm")
     import litellm
-    _mock_litellm(monkeypatch, [_litellm_reply("A")])
-    monkeypatch.setattr(litellm, "callbacks", litellm.callbacks[-1:])
-    client.chat_completions("q", model="gpt-test")
-    assert local_chat._fill_hook in litellm.callbacks
+    from litellm.integrations.custom_logger import CustomLogger
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    _mock_litellm(monkeypatch, [_litellm_reply(tool_calls=_TWO_CALLS[:1]),
+                                _litellm_reply("A")])
+
+    class Replace(CustomLogger):
+        async def async_pre_call_deployment_hook(self, kwargs, call_type):
+            litellm.callbacks = [callback for callback in litellm.callbacks
+                                 if callback is not local_chat._fill_hook]
+
+    monkeypatch.setattr(litellm, "callbacks", [*litellm.callbacks, Replace()])
+    messages = client.chat_completions("q", doc_id=doc_id,
+                                       model="gpt-test")["messages"]
+    assert [m["role"] for m in messages] == ["assistant", "tool", "assistant"]
+    assert all(m.get("model") == "openai/gpt-test" for m in messages
+               if m["role"] == "assistant")
+
+
+@needs_agents
+def test_a_request_the_fill_missed_returns_the_sdks_messages(
+        client, store_path, monkeypatch):
+    """A request that went out without the fill (here a hook ahead of it
+    drops the call id) leaves no record of what was sent, so the returned
+    messages are the SDK's own conversion, tool turns whole."""
+    pytest.importorskip("litellm")
+    import litellm
+    from litellm.integrations.custom_logger import CustomLogger
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    _mock_litellm(monkeypatch, [_litellm_reply(tool_calls=_TWO_CALLS[:1]),
+                                _litellm_reply("A")])
+
+    class Strip(CustomLogger):
+        requests = 0
+
+        async def async_pre_call_deployment_hook(self, kwargs, call_type):
+            Strip.requests += 1
+            if Strip.requests == 2:
+                return {key: value for key, value in kwargs.items()
+                        if key != "litellm_call_id"}
+
+    monkeypatch.setattr(litellm, "callbacks", [Strip(), *litellm.callbacks])
+    messages = client.chat_completions("q", doc_id=doc_id,
+                                       model="gpt-test")["messages"]
+    assert [m["role"] for m in messages] == ["assistant", "tool", "assistant"]
+    assert not any("model" in m for m in messages)
+
+
+@needs_agents
+def test_another_callbacks_own_call_is_not_the_runs(client, store_path,
+                                                    monkeypatch):
+    """A LiteLLM call another callback makes during a chat request is
+    neither filled nor recorded as the run's, so the returned messages
+    keep the run's tool turns."""
+    pytest.importorskip("litellm")
+    import litellm
+    from litellm.integrations.custom_logger import CustomLogger
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    _mock_litellm(monkeypatch, [
+        _litellm_reply(tool_calls=_TWO_CALLS[:1]), _litellm_reply("checked"),
+        _litellm_reply("A"), _litellm_reply("checked")])
+    check = {"role": "user", "content": "check"}
+
+    class Guard(CustomLogger):
+        async def async_pre_call_deployment_hook(self, kwargs, call_type):
+            if kwargs["messages"][-1] != check:
+                await litellm.acompletion(model="openai/guard",
+                                          messages=[check], api_key="k")
+
+    monkeypatch.setattr(litellm, "callbacks", [*litellm.callbacks, Guard()])
+    messages = client.chat_completions("q", doc_id=doc_id,
+                                       model="gpt-test")["messages"]
+    assert [m["role"] for m in messages] == ["assistant", "tool", "assistant"]
+    assert all(m.get("model") == "openai/gpt-test" for m in messages
+               if m["role"] == "assistant")
+    assert messages[-1]["content"] == "A"
 
 
 def test_gateways_get_cache_marks_for_claude():

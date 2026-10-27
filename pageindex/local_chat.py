@@ -4,7 +4,6 @@ managed endpoint's chunk stream."""
 from __future__ import annotations
 
 import asyncio
-import contextvars
 import copy
 import dataclasses
 import hashlib
@@ -253,9 +252,9 @@ def _sdk_backend(backend) -> dict:
 # LitellmModel rebuilds each reply into the Agents SDK's items and back,
 # dropping what it doesn't convert (signed or encrypted reasoning, thought
 # signatures, ...): every request of a chat run gets that back, unchanged,
-# for the model that wrote it.
-_REPLIES: contextvars.ContextVar = contextvars.ContextVar(
-    "pageindex_replies", default=None)
+# for the model that wrote it. The hook fills only the requests listed
+# here, by their LiteLLM call id.
+_REQUESTS: dict = {}
 _FILL_LOCK = threading.Lock()
 _fill_hook = None
 # Returned assistant messages name the model that wrote them.
@@ -308,6 +307,8 @@ class _Replies:
         self.streams: list = []   # (chunks, raw delta parts) to assemble
         self.first: Optional[int] = None  # messages in the first request
         self.last: list = []
+        self.request: Optional[str] = None  # the latest filled call id
+        self.missed = False  # a request went out without the fill
         self.sent: set = set()  # latest request's fields a 400 may refuse
         self.refused: set = set()  # fields a 400 refused in this call
 
@@ -405,7 +406,8 @@ class _Replies:
 
 def _register_fill() -> None:
     """The LiteLLM pre-request hook that fills a run's requests, in
-    litellm.callbacks: added once, and again if a caller replaced the list."""
+    litellm.callbacks: added before each request, again if a caller
+    replaced the list."""
     global _fill_hook
     import litellm
     from litellm.integrations.custom_logger import CustomLogger
@@ -414,7 +416,7 @@ def _register_fill() -> None:
             class _Fill(CustomLogger):
                 async def async_pre_call_deployment_hook(self, kwargs,
                                                          call_type):
-                    replies = _REPLIES.get()
+                    replies = _REQUESTS.get(kwargs.get("litellm_call_id"))
                     if (replies is None
                             or not isinstance(kwargs.get("messages"), list)):
                         return None
@@ -441,6 +443,7 @@ def _register_fill() -> None:
                     if replies.first is None:
                         replies.first = len(messages)
                     replies.last = messages
+                    replies.request = kwargs["litellm_call_id"]
                     return {**kwargs, "messages": messages}
             _fill_hook = _Fill()
         if _fill_hook not in litellm.callbacks:
@@ -502,7 +505,8 @@ def _chat_retry(replies: _Replies):
 
 def _keep_reply_fields(agent, messages) -> Optional[_Replies]:
     """Records the caller's history and each reply around LitellmModel's
-    _fetch_response; the hook fills each request it sends."""
+    _fetch_response; the hook fills each request it sends, known by the
+    call id it passes LiteLLM."""
     from agents.extensions.models.litellm_model import LitellmModel
     model = agent.model
     if not isinstance(model, LitellmModel):
@@ -517,14 +521,21 @@ def _keep_reply_fields(agent, messages) -> Optional[_Replies]:
             replies.record(message, own=message.get(_WRITER) == model.model)
         else:  # it names no model: what the Agents SDK itself replays
             replies.record(_as_sent(agent, _assistant_items(message))[-1])
-    _register_fill()
 
-    async def fetching(*args, **kwargs):
-        token = _REPLIES.set(replies)
+    async def fetching(system_instructions, input, model_settings, *args,
+                       **kwargs):
+        call_id = str(uuid.uuid4())
+        model_settings = dataclasses.replace(model_settings, extra_args={
+            **(model_settings.extra_args or {}), "litellm_call_id": call_id})
+        _register_fill()
+        _REQUESTS[call_id] = replies
         try:
-            result = await fetch(*args, **kwargs)
+            result = await fetch(system_instructions, input, model_settings,
+                                 *args, **kwargs)
         finally:
-            _REPLIES.reset(token)
+            del _REQUESTS[call_id]
+        if replies.request != call_id:
+            replies.missed = True
         if not isinstance(result, tuple):
             if result.choices:
                 replies.record(result.choices[0].message.model_dump())
@@ -1143,11 +1154,11 @@ def _chat_transcript(agent, new_items, replies=None) -> list:
     the first one's length, then the final reply, if it has a message,
     filled the same way, each assistant message naming its model. Calls
     the SDK folded into the history's last message (a refusal) come first,
-    as sent, without that message's own refusal and text. With no request
-    seen (a test double), converted as LitellmModel converts each
-    request."""
+    as sent, without that message's own refusal and text. With a request
+    the hook didn't see (a test double, or litellm.callbacks replaced
+    mid-call), converted as LitellmModel converts each request."""
     converted = _as_sent(agent, new_items)
-    if replies is None or replies.first is None:
+    if replies is None or replies.first is None or replies.missed:
         return converted
     final = [m for m in converted[-1:] if m.get("role") == "assistant"]
     host = replies.last[replies.first - 1]
