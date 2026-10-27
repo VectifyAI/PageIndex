@@ -387,9 +387,9 @@ class PageIndexClient:
             own use — a product serving other people needs an API key).
             There a reasoning effort must be a level Claude Code lists for
             the model (one listing none drops it), checked before any
-            prompt goes out, and ``"none"``
-            turns thinking off only where the model allows it, the
-            model's default applying otherwise.
+            prompt goes out. The default ``"none"`` turns thinking off
+            only where the model allows it, the model's default applying
+            otherwise; a ``"none"`` you pass raises.
         chat_model (str, optional): Your own model for the chat surfaces
             (``chat``, ``chat_completions``; a value you set also
             carries onto ``chat(protocol="messages")`` and the two
@@ -436,7 +436,10 @@ class PageIndexClient:
             model without the setting drops it). Defaults to ``"none"``
             unless LiteLLM lists the model as refusing it, and stops
             sending it once a prompt the server refused with it (HTTP
-            400) goes through without it.
+            400) goes through without it. ``"none"`` raises on a model
+            whose thinking can't be turned off (Claude Opus 5.5 and Fable,
+            ``claude-code/`` models); the default runs Opus 5.5 and Fable
+            at ``"low"``.
             Expand keeps the model's own default. A
             ``mode="standard"`` submit refuses any of the summary knobs.
         use_embedded_toc (bool, optional): Local mode only — whether flash
@@ -1313,6 +1316,10 @@ class PageIndexClient:
                 backend accepts is its own). Each lane sends its native
                 spelling: LiteLLM's ``reasoning_effort``, Responses
                 ``reasoning.effort``, Messages ``output_config.effort``.
+                ``"none"`` turns a Claude model's thinking off with its own
+                switch, on Messages and through LiteLLM to Anthropic,
+                Bedrock, Vertex or Foundry, and raises on one that can't
+                (Opus 5.5, Fable), as on a ``claude-code/`` model.
                 Unset sends nothing — the model's default applies.
             show_process: Answer lane, streamed chat — weave the run into
                 the text stream for display: thinking flows as
@@ -1523,12 +1530,23 @@ class PageIndexClient:
                     extra_headers=extra_headers, backend=backend)
             body = extra_body
             if reasoning_effort:
+                from .utils import claude_none_switch
+                given = extra_body or {}
+                # Anthropic's effort takes no "none": a Claude model's own
+                # thinking switch stands in, unless the caller sent one.
+                swap = (reasoning_effort == "none" and "thinking" not in given
+                        and claude_none_switch(model or self.chat_model))
+                if swap and "reasoning_effort" in swap:
+                    raise PageIndexAPIError(
+                        f"{model or self.chat_model} can't turn thinking off, "
+                        "so it can't honor reasoning_effort='none'; pass "
+                        "'low' or leave it unset.")
                 # Anthropic's own effort field, beside the caller's other
                 # output_config keys — theirs still win.
-                given = extra_body or {}
-                body = {**given, "output_config": {
-                    "effort": reasoning_effort,
-                    **given.get("output_config", {})}}
+                body = {**given, **swap} if swap else {
+                    **given, "output_config": {
+                        "effort": reasoning_effort,
+                        **given.get("output_config", {})}}
             return self._messages(
                 messages, model=model, stream=stream, doc_id=doc_id,
                 folder_id=folder_id,
@@ -1715,8 +1733,11 @@ class PageIndexClient:
             reasoning_effort: Own-model chat only — passed through verbatim as
                 LiteLLM's ``reasoning_effort``; each provider maps it to
                 its own thinking control, and the values mean what the
-                backend says they mean. Unset sends nothing (the
-                backend's default applies).
+                backend says they mean. ``"none"`` is the exception: it
+                turns a Claude model's thinking off on Anthropic, Bedrock,
+                Vertex or Foundry, and raises on one that can't (Opus 5.5,
+                Fable), as on a ``claude-code/`` model. Unset sends nothing
+                (the backend's default applies).
             extra_body: Extra request fields beyond this method's
                 parameters, merged last so they win. The managed endpoint
                 and OpenAI-compatible backends take them verbatim in the

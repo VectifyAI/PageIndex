@@ -3706,6 +3706,39 @@ def test_reasoning_passthrough_reaches_each_engine(monkeypatch):
 
 
 @needs_agents
+def test_chat_none_turns_claude_thinking_off(monkeypatch):
+    """The LiteLLM chat lane sends a Claude model's own off switch for
+    reasoning_effort "none", indexing's table, and refuses it on a model
+    that can't turn thinking off; a caller's own thinking wins."""
+    pytest.importorskip("litellm")
+    monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
+    monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
+                        lambda *a, **k: [])
+
+    def sent(model, **kw):
+        args = local_chat._openai_agent(None, "chat", model, "sys", None, None,
+                                        reasoning_effort="none", **kw).model_settings.extra_args
+        return {k: args[k] for k in ("reasoning_effort", "thinking") if k in args}
+    assert sent("anthropic/claude-haiku-5-5") == {"thinking": {"type": "disabled"}}
+    assert sent("bedrock/global.anthropic.claude-sonnet-5-5") == {
+        "thinking": {"type": "between_tools"}}
+    assert sent("openrouter/anthropic/claude-haiku-5.5") == {"reasoning_effort": "none"}
+    assert sent("anthropic/claude-opus-5-5", extra_body={"thinking": {"type": "adaptive"}}) == {
+        "reasoning_effort": "none", "thinking": {"type": "adaptive"}}
+    for model in ("anthropic/claude-opus-5-5", "vertex_ai/claude-fable-5-1"):
+        with pytest.raises(PageIndexAPIError, match="can't turn thinking off"):
+            sent(model)
+
+
+def test_claude_code_chat_refuses_none():
+    """Claude Code won't turn thinking off for the models it serves, so a
+    chosen "none" raises before the CLI starts."""
+    with pytest.raises(PageIndexAPIError, match="can't turn thinking off"):
+        local_chat._claude_code_run(None, [{"role": "user", "content": "q"}],
+                                    "claude-code/sonnet", reasoning_effort="none")
+
+
+@needs_agents
 def test_extra_body_model_settings_fields_ride_their_field(monkeypatch):
     """extra_body settings LitellmModel reads ride their field, caller wins."""
     pytest.importorskip("litellm")
@@ -6089,6 +6122,28 @@ def test_chat_protocol_messages_is_the_door(client, monkeypatch):
     client.chat("q", protocol="messages", model="claude-x",
                 reasoning_effort="")
     assert seen[-1][1]["extra_body"] is None
+
+
+def test_chat_protocol_messages_none_turns_claude_thinking_off(client, monkeypatch):
+    """Anthropic's effort takes no "none": a Claude model gets its own
+    thinking switch instead, one that can't turn thinking off raises, and a
+    caller's own thinking or another model keeps the effort field."""
+    seen = []
+    monkeypatch.setattr(local_chat, "run_messages",
+                        lambda c, messages, **kw: seen.append(kw) or "door")
+    for model, body in (("claude-haiku-5-5", {"thinking": {"type": "disabled"}}),
+                        ("anthropic/claude-sonnet-5-5",
+                         {"thinking": {"type": "between_tools"}}),
+                        ("claude-x", {"output_config": {"effort": "none"}})):
+        client.chat("q", protocol="messages", model=model, reasoning_effort="none")
+        assert seen[-1]["extra_body"] == body, model
+    client.chat("q", protocol="messages", model="claude-haiku-5-5",
+                reasoning_effort="none", extra_body={"thinking": {"type": "adaptive"}})
+    assert seen[-1]["extra_body"] == {"thinking": {"type": "adaptive"},
+                                      "output_config": {"effort": "none"}}
+    with pytest.raises(PageIndexAPIError, match="can't turn thinking off"):
+        client.chat("q", protocol="messages", model="claude-opus-5-5",
+                    reasoning_effort="none")
 
 
 def test_extra_body_refuses_skeleton_keys():
