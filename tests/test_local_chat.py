@@ -5166,13 +5166,15 @@ def test_messages_without_credentials_raises_the_sdks_own_error(client,
             client._messages("q", model="claude-test", backend=backend)
 
 
-def test_cache_extra_args_follow_wire_normalization():
+def test_cache_extra_args_follow_wire_normalization(monkeypatch):
     """Chat lane only: litellm/<bare-name> rides the OpenAI protocol on
     this wire (bare names get openai/), so it must carry no Anthropic
     cache marks; explicit anthropic routes keep them. The agents lane
     routes the same spelling to Anthropic and marks it — see
     test_openai_agent_config_marks_bare_claude_behind_litellm_prefix."""
-    pytest.importorskip("litellm")
+    pytest.importorskip("litellm")  # first import may load a .env; delenv after
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
     assert local_chat._cache_extra_args("litellm/claude-sonnet-4-5") is None
     assert local_chat._cache_extra_args("anthropic/claude-x") is not None
     assert local_chat._cache_extra_args("litellm/anthropic/claude-x") is not None
