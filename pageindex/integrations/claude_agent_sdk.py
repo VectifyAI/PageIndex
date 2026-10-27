@@ -355,6 +355,9 @@ async def claude_code_complete(model: str, prompt: str,
     reply = ""
     try:
         options = claude_code_options(model, reasoning_effort, max_turns=1)
+        if reasoning_effort == "none":
+            # where Claude Code keeps thinking on anyway, it thinks least at low
+            options.effort = "low"
         # one turn, never read back: a cache write would only cost more
         options.env["DISABLE_PROMPT_CACHING"] = "1"
         # a stream with no bytes, pings included, is dead: re-sent after 30 s,

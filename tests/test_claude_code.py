@@ -206,6 +206,8 @@ def test_index_call_runs_isolated_on_the_subscription(monkeypatch):
     assert opts.model == "haiku" and opts.tools == [] and opts.setting_sources == []
     assert opts.strict_mcp_config and opts.max_turns == 1 and not opts.mcp_servers
     assert opts.thinking == {"type": "disabled"} and second.options.thinking is None
+    # Claude Code keeps thinking on for some models; it thinks least at low
+    assert opts.effort == "low" and second.options.effort is None
     # an @/path in document text must not make the CLI read that file
     assert opts.verbatim_prompts
     # a .env written for API models must not bill or reroute the run
@@ -274,8 +276,8 @@ def test_an_effort_claude_code_does_not_list_is_refused_before_any_prompt(monkey
             asyncio.run(llm_acompletion(f"claude-code/{model}", "P", reasoning_effort=effort))
         assert _is_unrecoverable(err.value)  # fatal, not one prompt's miss
     assert all(s.prompt is None and s.closed for s in sessions)  # nothing billed
-    # no effort and "none" are never checked; an unlisted model takes any
-    # listed model's levels; a model without effort levels drops it
+    # no effort is never checked and "none" runs at low; an unlisted model
+    # takes any listed model's levels; a model without effort levels drops it
     for model, effort in (("haiku", None), ("haiku", "none"),
                           ("claude-haiku-5-5", "high"), ("claude-sonnet-4-5", "max"),
                           ("tiny", "high")):

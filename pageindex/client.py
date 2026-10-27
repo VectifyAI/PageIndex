@@ -387,9 +387,8 @@ class PageIndexClient:
             own use — a product serving other people needs an API key).
             There a reasoning effort must be a level Claude Code lists for
             the model (one listing none drops it), checked before any
-            prompt goes out, and ``"none"``
-            turns thinking off only where the model allows it, the
-            model's default applying otherwise.
+            prompt goes out, and ``"none"`` asks for low effort and turns
+            thinking off where the model allows it.
         chat_model (str, optional): Your own model for the chat surfaces
             (``chat``, ``chat_completions``; a value you set also
             carries onto ``chat(protocol="messages")`` and the two
