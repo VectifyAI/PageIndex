@@ -254,7 +254,8 @@ def _sdk_backend(backend) -> dict:
 # dropping what it doesn't convert (signed or encrypted reasoning, thought
 # signatures, ...): every request of a chat run gets that back, unchanged,
 # for the model that wrote it. The hook fills only the requests listed
-# here, by their LiteLLM call id.
+# here, by their LiteLLM call id. A test fails once the Agents SDK keeps
+# those fields itself; the fill can go then.
 _REQUESTS: dict = {}
 _FILL_LOCK = threading.Lock()
 _fill_hook = None
@@ -791,8 +792,7 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
     from pydantic import ValidationError
     from .integrations.openai_agents import build_openai_tools
     # ModelSettings.extra_body is the one channel all three engines put on
-    # the wire: LiteLLM drops the bare prompt_cache_key kwarg (wire-verified),
-    # and both OpenAI model classes pass extra_body through verbatim. OpenAI
+    # the wire verbatim: LiteLLM and both OpenAI model classes. OpenAI
     # destinations only — LiteLLM plants extra_body as a literal field in
     # other providers' request bodies, which Anthropic rejects as unknown.
     # The responses lane is the OpenAI SDK whatever the name says.
@@ -932,7 +932,9 @@ def _record_response_status(agent, recorded: dict) -> None:
     final turn truncated at the output cap would otherwise report as a clean
     completion. A response cut short ends the run there, as from 0.22 and on
     the stream: before 0.22 it ran the cut turn's half-written tool calls.
-    No-op for backends without an OpenAI responses resource
+    From 0.24 openai-agents raises on such a response itself
+    (response_terminal_failure_error): this raise goes once the floor gets
+    there. No-op for backends without an OpenAI responses resource
     (the streaming path records from lifecycle events instead)."""
     responses = getattr(getattr(getattr(agent, "model", None), "_client", None),
                         "responses", None)
@@ -994,7 +996,9 @@ def _drop_repeated_thinking(chunk, streamed: list) -> None:
 
 
 def _record_chat_finish(agent, recorded: dict) -> None:
-    """Record each turn's finish_reason."""
+    """Record each turn's finish_reason, which openai-agents' ModelResponse
+    drops (0.24 too), so a truncated or filtered final turn would report
+    "stop". A test fails once ModelResponse carries it; this goes then."""
     model = getattr(agent, "model", None)
     fetch = getattr(model, "_fetch_response", None)
     if fetch is None:
@@ -1799,7 +1803,7 @@ def run_responses(client, input, model: Optional[str] = None,
             if (run_data is not None
                     and recorded.get("status") in ("failed", "incomplete")):
                 # the run ended on a response cut short, before openai-agents'
-                # hooks or items saw it
+                # hooks or items saw it; this goes once they see it
                 cut = recorded["response"]
                 transcript = [item.to_input_item()
                               for item in run_data.new_items]
@@ -1878,6 +1882,7 @@ def run_responses(client, input, model: Optional[str] = None,
                             if data["type"] != "response.completed" and cut:
                                 # openai-agents raises on a call cut short
                                 # before its hooks see it; it was billed.
+                                # This goes once its hooks see it.
                                 recorder.responses.append(
                                     SimpleNamespace(usage=cut))
                         continue
@@ -2146,8 +2151,11 @@ def run_messages(client, messages, model: str, route: str,
     # Top-level cache_control: the server re-marks the newest block each
     # turn, so the loop re-reads the growing conversation from cache.
     # Counts toward the 4-breakpoint limit (live-verified 400 past it).
-    # Bedrock's InvokeModel integration rejects the field for Opus 4.6 and
-    # earlier: there each turn's tool results carry the breakpoint instead.
+    # Bedrock's InvokeModel rejects the field for the ARN-versioned models
+    # (Anthropic's legacy Bedrock page: Opus 4.6, Sonnet 4.6, Haiku 4.5 and
+    # earlier), so every Bedrock request, whatever the model, puts the
+    # breakpoint on each turn's tool results instead. The field can cover
+    # Bedrock once those models are gone.
     marks_fit = _cache_marks(system_blocks, prepared) < 4
     cached: dict[str, Any] = (
         {"cache_control": {"type": "ephemeral"}}
@@ -2192,8 +2200,8 @@ def run_messages(client, messages, model: str, route: str,
         if owns_transport:
             backend_client.close()
         raise
-    # Older Anthropic versions also execute tools on max_tokens turns, newer
-    # ones skip them: check right after the runner's own tool step.
+    # anthropic before 1.1 also executes tools on max_tokens turns, 1.1 and
+    # later skip them: check right after the runner's own tool step.
     generate_tool_response = runner.generate_tool_call_response
     moved: list = []  # the block holding the bedrock breakpoint
 
