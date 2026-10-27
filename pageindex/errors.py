@@ -19,6 +19,19 @@ class PageIndexAPIError(Exception):
         self.partial_answer: str | None = None
 
 
+class PageIndexValidationError(PageIndexAPIError):
+    """The SDK refused the call before reaching a provider or the agent
+    backend: an argument had the wrong shape, a managed field was
+    passed where the SDK owns the value, the requested protocol needs
+    a missing dependency, or the configured model cannot drive the
+    chosen lane. ``status_code`` is always ``None`` — there was no
+    request to time out or to receive a status from.
+
+    Use ``except PageIndexValidationError`` (and ``except
+    PageIndexAPIError`` for the rest) to tell caller-side mistakes apart
+    from upstream failures without inspecting exception messages."""
+
+
 def _pageindex_cause(exc: BaseException | None) -> PageIndexAPIError | None:
     """The PageIndexAPIError behind a framework's wrapper exception, if any."""
     while exc is not None:
