@@ -8,6 +8,14 @@ def _llm_key(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 
 
+@pytest.fixture(autouse=True)
+def _no_published_model_map(monkeypatch):
+    """No test downloads LiteLLM's published model map; the tests of that
+    download fake it (test_local_chat._publish)."""
+    from pageindex import utils
+    monkeypatch.setattr(utils, "_MAP_SET_BY_USER", True)
+
+
 def build_pdf(page_texts, font="<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"):
     """Build a minimal, uncompressed PDF (one line per page, a page's
     (x, y, size, text) lines, or a page's raw content stream as bytes, in
