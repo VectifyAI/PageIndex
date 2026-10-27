@@ -1513,6 +1513,8 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
                 "messages must be a non-empty string or a list of "
                 "message dicts.")
         messages = [{"role": "user", "content": messages}]
+    from .utils import prefetch_model_map
+    prefetch_model_map(model)
     from .integrations.claude_agent_sdk import is_claude_code
     if is_claude_code(model or client.chat_model):
         run = _claude_code_run(client, messages, model or client.chat_model,
@@ -1566,6 +1568,8 @@ def run_chat_completions(client, messages, stream: bool = False,
                if getattr(client, "api_key", None) else "")
             + "cite with your own model via chat(citations=True).")
     _validate_max_turns(max_turns)
+    from .utils import prefetch_model_map
+    prefetch_model_map(model)
     from .integrations.claude_agent_sdk import is_claude_code
     if is_claude_code(model or client.chat_model):
         run = _claude_code_run(client, messages, model or client.chat_model,

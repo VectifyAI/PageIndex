@@ -102,6 +102,7 @@ _PUBLISHED_MAP_URL = os.environ.get(
     "model_prices_and_context_window.json")
 _published = None
 _published_lock = threading.Lock()
+_checked: set = set()
 
 
 def _packaged_model_map() -> dict:
@@ -143,8 +144,10 @@ def prefetch_model_map(model) -> None:
     map doesn't list ``model``, so a refusal for lack of the model's entry
     finds it at hand."""
     if (_MAP_SET_BY_USER or not isinstance(model, str)
-            or model.startswith("claude-code/")):
+            or model.startswith("claude-code/") or model in _checked
+            or _published is not None):
         return
+    _checked.add(model)
 
     def check():
         try:
