@@ -388,7 +388,12 @@ class PageIndexClient:
             There a reasoning effort must be a level Claude Code lists for
             the model (one listing none drops it), checked before any
             prompt goes out, and ``"none"`` asks for low effort and turns
-            thinking off where the model allows it.
+            thinking off where the model allows it. The summaries run as
+            the agents of one Claude Code workflow, up to 64 at a time by
+            default (``PAGEINDEX_CLAUDE_CODE_WORKFLOW`` sets how many; 0
+            runs each call in a process of its own, as do prompts over
+            10,000 characters and plans without workflows, such as Pro
+            by default).
         chat_model (str, optional): Your own model for the chat surfaces
             (``chat``, ``chat_completions``; a value you set also
             carries onto ``chat(protocol="messages")`` and the two

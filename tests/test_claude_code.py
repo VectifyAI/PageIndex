@@ -1,6 +1,7 @@
 """The claude-code/ route — indexing and chat as Claude Code CLI runs on the
 user's subscription — over a faked CLI session: no subprocess, no login."""
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -337,6 +338,304 @@ def test_queued_index_calls_go_highest_priority_first(monkeypatch):
         await asyncio.gather(first, call("low", 1), call("high", 3), call("mid", 2))
     asyncio.run(run())
     assert [s.prompt for s in sessions] == ["first", "high", "mid", "low"]
+
+
+def fake_workflow(monkeypatch, lose=(), balk=(), plan=(), session_id="s"):
+    """Replace the CLI with sessions that answer "process: <prompt>" as a
+    process run and, as a workflow's session, run its lanes: each lane asks
+    the SubagentStart hook for a call and answers "agent: <prompt>" through
+    SubagentStop, except a prompt in ``lose``, whose agent ends without
+    SubagentStop (an API error), and one in ``balk``, whose agent answers it
+    saw no call, ending its lane. ``plan`` says how the workflow sessions
+    behave, one entry each in turn and "runs" past its end: "unstarted"
+    (the launch turn ends without a workflow), "unhooked" (SubagentStart
+    reaches no agent, so each ends with no call), ("dies", n) or ("limited", n)
+    (its agents answer n calls, then the workflow fails, or the usage limit
+    is hit, as the next agent takes its call). A prompt after the launch
+    gets a result whose model_usage stands for the session's; a session
+    whose workflow died gives a process a moment to start before it does.
+    Returns .taken, the prompts the lanes took, .stopped, the workflows
+    stopped through stop_task, .workflows, each workflow session's plan,
+    .options, each one's options, and .order, "process" for each process
+    started and "usage" for each usage result."""
+    import threading
+    from claude_agent_sdk import (RateLimitEvent, RateLimitInfo,
+                                  TaskNotificationMessage, TaskStartedMessage)
+    seen = SimpleNamespace(taken=[], stopped=[], workflows=[], options=[], order=[])
+    plans, process_started = list(plan), threading.Event()
+
+    class Session:
+        def __init__(self, options):
+            self.options = options
+            if options.hooks:
+                self.plan = plans.pop(0) if plans else "runs"
+                seen.workflows.append(self.plan)
+                seen.options.append(options)
+            else:
+                seen.order.append("process")
+                process_started.set()
+
+        async def __aenter__(self):
+            self.queries, self.stopped, self.asked_usage = 0, asyncio.Event(), asyncio.Event()
+            return self
+
+        async def __aexit__(self, *exc):
+            await asyncio.sleep(0)
+
+        async def get_server_info(self):
+            return {"account": {"apiProvider": "firstParty"}}
+
+        async def query(self, prompt):
+            self.prompt = prompt
+            self.queries += 1
+            if self.queries > 1:  # past the launch: the usage prompt
+                self.asked_usage.set()
+
+        async def receive_response(self):
+            yield result(f"process: {self.prompt}")
+
+        async def stop_task(self, task_id):
+            seen.stopped.append(task_id)
+            self.stopped.set()
+
+        async def receive_messages(self):
+            usage = ResultMessage(
+                subtype="success", duration_ms=1, duration_api_ms=1, is_error=False,
+                num_turns=2, session_id=session_id, result="done",
+                model_usage={"claude-haiku-5-5": {
+                    "inputTokens": 10, "outputTokens": 5, "cacheReadInputTokens": 100,
+                    "cacheCreationInputTokens": 20}})
+            if self.plan == "unstarted":
+                yield result("Workflows are off.")
+                await self.asked_usage.wait()
+                yield usage
+                return
+            kind, after = self.plan if isinstance(self.plan, tuple) else (self.plan, None)
+            hooks = self.options.hooks
+            start = hooks["SubagentStart"][0].hooks[0]
+            stop = hooks["SubagentStop"][0].hooks[0]
+            answered, broke = [0], asyncio.Event()
+
+            async def lane(k):
+                if kind == "unhooked":
+                    await stop({"agent_type": f"pageindex-lane-{k}",
+                                "last_assistant_message": cc._NO_TASK}, None, None)
+                    return
+                while True:
+                    asked = await start({"agent_type": f"pageindex-lane-{k}"}, None, None)
+                    prompt = asked["hookSpecificOutput"]["additionalContext"]
+                    seen.taken.append(prompt)
+                    if answered[0] == after:
+                        broke.set()
+                        return
+                    await asyncio.sleep(0.05)
+                    if prompt in balk:
+                        await stop({"agent_type": f"pageindex-lane-{k}",
+                                    "last_assistant_message": cc._NO_TASK}, None, None)
+                        return
+                    if prompt not in lose:
+                        await stop({"agent_type": f"pageindex-lane-{k}",
+                                    "last_assistant_message": f"agent: {prompt}"}, None, None)
+                    answered[0] += 1
+            width = int(self.options.env["CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS"])
+            lanes = [asyncio.create_task(lane(k)) for k in range(width)]
+            yield TaskStartedMessage(subtype="task_started", data={}, task_id="w",
+                                     description="lanes", uuid="u", session_id=session_id)
+            halts = [asyncio.create_task(self.stopped.wait()), asyncio.create_task(broke.wait())]
+            await asyncio.wait(halts, return_when=asyncio.FIRST_COMPLETED)
+            if kind == "limited" and broke.is_set():
+                yield RateLimitEvent(rate_limit_info=RateLimitInfo(status="rejected"),
+                                     uuid="u", session_id=session_id)
+                await self.stopped.wait()
+            for task in lanes + halts:
+                task.cancel()
+            died = kind == "dies" and broke.is_set()
+            yield TaskNotificationMessage(
+                subtype="task_notification", data={}, task_id="w",
+                status="failed" if died else "stopped",
+                output_file="", summary="", uuid="u", session_id=session_id)
+            await self.asked_usage.wait()
+            if died:
+                await asyncio.to_thread(process_started.wait, 5)
+            seen.order.append("usage")
+            yield usage
+    monkeypatch.setattr(cc, "_claude_client", Session)
+    return seen
+
+
+@needs_claude
+def test_workflow_lanes_answer_calls_by_priority_and_hand_lost_ones_to_a_process(
+        monkeypatch):
+    from pageindex.utils import llm_priority
+    seen = fake_workflow(monkeypatch, lose={"lost"})
+
+    async def call(prompt, prio):
+        with llm_priority(prio):
+            return await llm_acompletion("claude-code/haiku", prompt)
+
+    async def run():
+        first = asyncio.create_task(call("first", 0))
+        for _ in range(1000):  # the lane takes it; the rest queue behind it
+            if "first" in seen.taken:
+                break
+            await asyncio.sleep(0.005)
+        return await asyncio.gather(first, call("low", 1), call("high", 3), call("lost", 2),
+                                    call("mid", 2))
+    from pageindex import utils
+    usage = {}
+    token = utils._llm_usage.set(usage)
+    try:
+        # the session starts before any call, on a thread of its own
+        with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
+            replies = asyncio.run(run())
+    finally:
+        utils._llm_usage.reset(token)
+    assert replies == ["agent: first", "agent: low", "agent: high", "process: lost",
+                       "agent: mid"]
+    assert seen.taken == ["first", "high", "lost", "mid", "low"]
+    assert seen.stopped == ["w"] and cc._HOST.get() is None  # stopped before it closed
+    # the session's model_usage, its agents' included, joins the indexing tally
+    assert (usage["prompt_tokens"], usage["completion_tokens"]) == (130, 5)
+    assert usage["prompt_tokens_details"] == {"cached_tokens": 100, "cache_write_tokens": 20}
+    # outside a scope, calls run in processes
+    assert asyncio.run(llm_acompletion("claude-code/haiku", "P")) == "process: P"
+
+
+@needs_claude
+def test_a_prompt_too_long_for_a_hook_runs_in_a_process(monkeypatch):
+    seen = fake_workflow(monkeypatch)
+    # an emoji is two UTF-16 code units, as the CLI counts
+    fits, too_long = "a" * cc.HOOK_CONTEXT_MAX, "😀" * (cc.HOOK_CONTEXT_MAX // 2 + 1)
+
+    async def run():
+        return await asyncio.gather(llm_acompletion("claude-code/haiku", fits),
+                                    llm_acompletion("claude-code/haiku", too_long))
+    with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
+        replies = asyncio.run(run())
+    assert replies == [f"agent: {fits}", f"process: {too_long}"]
+    assert seen.taken == [fits]
+
+
+@needs_claude
+def test_only_the_settings_a_scope_declares_run_in_a_workflow(monkeypatch):
+    seen = fake_workflow(monkeypatch)
+
+    async def run():
+        return await asyncio.gather(
+            llm_acompletion("claude-code/haiku", "summary", reasoning_effort="none"),
+            llm_acompletion("claude-code/haiku", "expand"))
+    with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", "none")]):
+        replies = asyncio.run(run())
+    # expand keeps the model's default effort: a process, not a workflow of its own
+    assert replies == ["agent: summary", "process: expand"]
+    assert seen.workflows == ["runs"] and seen.options[0].effort == "low"
+    with cc.claude_code_workflows(lanes=1):  # declaring none, a scope starts none
+        assert cc._HOST.get() is None
+
+
+@needs_claude
+def test_a_workflow_that_worked_and_died_is_replaced_once(monkeypatch):
+    seen = fake_workflow(monkeypatch, plan=[("dies", 1), ("dies", 1)])
+
+    async def run():
+        return [await llm_acompletion("claude-code/haiku", p) for p in "abcde"]
+    with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
+        replies = asyncio.run(run())
+    # the call an agent held as its workflow died goes to a process; the
+    # next one gets a new session, whose own death sends the rest to processes
+    assert replies == ["agent: a", "process: b", "agent: c", "process: d", "process: e"]
+    assert seen.workflows == [("dies", 1), ("dies", 1)]
+    # the call it held went to a process before the dead session's clean-up turn
+    assert seen.order[:2] == ["process", "usage"]
+
+
+@needs_claude
+def test_a_workflow_that_never_started_is_not_replaced(monkeypatch):
+    seen = fake_workflow(monkeypatch, plan=["unstarted"])
+
+    async def run():
+        return [await llm_acompletion("claude-code/haiku", p) for p in "ab"]
+    with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
+        replies = asyncio.run(run())
+    assert replies == ["process: a", "process: b"]
+    assert seen.workflows == ["unstarted"]
+
+
+@needs_claude
+def test_a_call_an_agent_says_it_never_saw_runs_in_a_process(monkeypatch):
+    seen = fake_workflow(monkeypatch, balk={"b"})
+
+    async def run():
+        return [await llm_acompletion("claude-code/haiku", p) for p in "abc"]
+    with cc.claude_code_workflows(lanes=2, prewarm=[("claude-code/haiku", None)]):
+        replies = asyncio.run(run())
+    # never its answer: the call runs again in a process, and the other lane goes on
+    assert replies == ["agent: a", "process: b", "agent: c"]
+    assert seen.taken == ["a", "b", "c"]
+
+
+@needs_claude
+def test_an_agent_the_start_hook_missed_ends_the_workflow_at_once(monkeypatch):
+    seen = fake_workflow(monkeypatch, plan=["unhooked"])
+    monkeypatch.setattr(cc, "WORKFLOW_START_S", 10)
+
+    async def run():
+        return [await llm_acompletion("claude-code/haiku", p) for p in "ab"]
+    started = time.monotonic()
+    with cc.claude_code_workflows(lanes=2, prewarm=[("claude-code/haiku", None)]):
+        replies = asyncio.run(run())
+    # not left to spin until the start deadline, nor replaced
+    assert replies == ["process: a", "process: b"] and time.monotonic() - started < 5
+    assert seen.workflows == ["unhooked"] and seen.stopped == ["w"]
+
+
+@needs_claude
+def test_a_usage_limit_ends_the_workflow_and_its_calls_go_to_processes(monkeypatch):
+    seen = fake_workflow(monkeypatch, plan=[("limited", 1)])
+
+    async def run():
+        return [await llm_acompletion("claude-code/haiku", p) for p in "abc"]
+    with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
+        replies = asyncio.run(run())
+    # its agents would wait for the window to reset; processes report the limit
+    assert replies == ["agent: a", "process: b", "process: c"]
+    assert seen.workflows == [("limited", 1)] and seen.stopped == ["w"]
+
+
+@needs_claude
+def test_a_workflow_session_deletes_what_it_left_on_disk(monkeypatch, tmp_path):
+    sid, other = "0b9e5f4a-1c2d-4e3f-8a9b-0c1d2e3f4a5b", "1b9e5f4a-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    project = tmp_path / "projects" / "-tmp-pageindex-claude-code"
+    (project / sid / "subagents" / "workflows").mkdir(parents=True)
+    (project / sid / "subagents" / "workflows" / "journal.jsonl").write_text("{}")
+    (project / other).mkdir()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+    fake_workflow(monkeypatch, session_id=sid)
+    with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
+        assert asyncio.run(llm_acompletion("claude-code/haiku", "P")) == "agent: P"
+    # its journal held every agent's reply; another session's files stay
+    assert not (project / sid).exists() and (project / other).exists()
+
+
+@needs_claude
+def test_workflows_run_by_default_one_lane_per_summary_slot(monkeypatch):
+    from pageindex.utils import SUMMARY_CONCURRENCY
+    seen = fake_workflow(monkeypatch)
+    monkeypatch.delenv("PAGEINDEX_CLAUDE_CODE_WORKFLOW")
+    with cc.claude_code_workflows(prewarm=[("claude-code/haiku", None)]):
+        assert asyncio.run(llm_acompletion("claude-code/haiku", "P")) == "agent: P"
+    env = seen.options[0].env
+    assert env["CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS"] == str(SUMMARY_CONCURRENCY)
+    # an agent no hook handed a call answers so, and its lane stops; its task
+    # text names the hook context, which comes after it, not "the task above"
+    script = open(os.path.join(seen.options[0].cwd,
+                               f"pageindex-lanes-{SUMMARY_CONCURRENCY}.js")).read()
+    assert f"agent({json.dumps(cc._LANE_TASK)}," in script
+    assert f"?.includes('{cc._NO_TASK}')) return" in script
+    assert "SubagentStart hook additional context" in cc._LANE_TASK
+    monkeypatch.setenv("PAGEINDEX_CLAUDE_CODE_WORKFLOW", "0")
+    with cc.claude_code_workflows(prewarm=[("claude-code/haiku", None)]):
+        assert cc._HOST.get() is None
 
 
 @pytest.fixture

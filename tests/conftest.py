@@ -3,9 +3,11 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _llm_key(monkeypatch):
-    """Deterministic key presence for every test; missing-key tests delenv."""
+    """Deterministic key presence for every test; missing-key tests delenv.
+    claude-code/ index calls run in processes unless a test opens workflows."""
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("PAGEINDEX_CLAUDE_CODE_WORKFLOW", "0")
 
 
 def build_pdf(page_texts, font="<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"):
