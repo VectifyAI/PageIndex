@@ -231,6 +231,7 @@ def claude_code_options(model: str, reasoning_effort=None, **options):
         options["effort"] = reasoning_effort
     # not a git repo, so the CLI adds no git status to the prompt; resolved,
     # as the CLI lists a symlinked cwd (macOS's /var) twice in every prompt
+    # (Claude Code 2.1.301)
     cwd = os.path.realpath(
         os.path.join(tempfile.gettempdir(), "pageindex-claude-code"))
     os.makedirs(cwd, exist_ok=True)
@@ -356,7 +357,8 @@ def _index_options(model, reasoning_effort):
     """claude_code_options for index calls, in a process or a workflow."""
     options = claude_code_options(model, reasoning_effort, max_turns=1)
     if reasoning_effort == "none":
-        # where Claude Code keeps thinking on anyway, it thinks least at low
+        # where Claude Code keeps thinking on anyway (2.1.301: Haiku 5.5,
+        # Sonnet 5.5, Opus 5.5, Fable), it thinks least at low
         options.effort = "low"
     # a stream with no bytes, pings included, is dead: re-sent after 30 s,
     # not the CLI's 3 minutes
@@ -428,6 +430,7 @@ _LANE = "pageindex-lane-"  # lane k runs agents of type pageindex-lane-k
 # whose hooks stop reaching workflow agents ends the workflow, not spins it.
 # The hook context comes after the agent's task text, so that text names it
 # rather than its place: told "the task above", agents answered this instead
+# (Claude Code 2.1.299 and 2.1.301)
 _NO_TASK = "PAGEINDEX_NO_TASK"
 _LANE_TASK = ("Do the task given as SubagentStart hook additional context. "
               f"If none was given, answer only: {_NO_TASK}")
@@ -553,7 +556,7 @@ def _lane(agent_type):
 def _forget_session(session_id, env):
     """Delete what a session left in the Claude Code config dir: a workflow
     writes a journal of its agents' replies there, --no-session-persistence
-    or not."""
+    or not (Claude Code 2.1.301)."""
     if not re.fullmatch(r"[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}", session_id or ""):
         return
     root = (env.get("CLAUDE_CONFIG_DIR") or os.environ.get("CLAUDE_CONFIG_DIR")
@@ -633,6 +636,7 @@ class _Workflow:
         return dataclasses.replace(
             options, tools=["Workflow", "Read"], allowed_tools=["Workflow", "Read"],
             # unset, the CLI has a Sonnet check read every agent's reply
+            # (Claude Code 2.1.301)
             permission_mode="default",
             agents={f"{_LANE}{k}": agent for k in range(self.lanes)},
             hooks={"SubagentStart": [HookMatcher(matcher=f"^{_LANE}", timeout=86400,
