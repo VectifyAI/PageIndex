@@ -2868,6 +2868,70 @@ def test_llm_acompletion_400_skips_the_retry_ladder(monkeypatch):
     assert calls["n"] == 1
 
 
+def test_claude_none_sends_the_models_own_off_switch(monkeypatch):
+    """reasoning_effort "none", from the call or the backend, reaches LiteLLM
+    as a Claude model's own off switch, or its lowest effort where it has
+    none; other models and routes, other levels and a caller's own thinking
+    pass as sent."""
+    pytest.importorskip("litellm")
+    import litellm
+    from types import SimpleNamespace
+    sent = []
+
+    def reply(**kw):
+        sent.append({k: kw[k] for k in ("reasoning_effort", "thinking") if k in kw})
+        return SimpleNamespace(choices=[SimpleNamespace(
+            message=SimpleNamespace(content="ok"), finish_reason="stop")])
+
+    async def areply(**kw):
+        return reply(**kw)
+    monkeypatch.setattr(litellm, "completion", reply)
+    monkeypatch.setattr(litellm, "acompletion", areply)
+
+    none, low = {"reasoning_effort": "none"}, {"reasoning_effort": "low"}
+    off, between = {"thinking": {"type": "disabled"}}, {"thinking": {"type": "between_tools"}}
+    for model, expected in (("anthropic/claude-haiku-5-5", off),
+                            ("anthropic/claude-sonnet-5", off),
+                            ("anthropic/claude-opus-5", off),
+                            ("anthropic/claude-sonnet-5-5", between),
+                            ("anthropic/claude-opus-5-5", low),
+                            ("anthropic/claude-fable-5-1", low),
+                            ("bedrock/global.anthropic.claude-sonnet-5-5", between),
+                            ("bedrock/invoke/global.anthropic.claude-haiku-5-5", off),
+                            ("vertex_ai/claude-opus-5", off),
+                            ("litellm/anthropic/claude-haiku-5-5", off),
+                            ("anthropic/claude-opus-4-8", none),
+                            ("openrouter/anthropic/claude-haiku-5.5", none),
+                            ("openai/claude-haiku-5-5", none),
+                            ("gpt-6-luna", none)):
+        sent.clear()
+        asyncio.run(pageindex.utils.llm_acompletion(model, "p", reasoning_effort="none"))
+        token = pageindex.utils._llm_backend.set({"reasoning_effort": "none"})
+        try:
+            pageindex.utils.llm_completion(model, "p")
+        finally:
+            pageindex.utils._llm_backend.reset(token)
+        assert sent == [expected, expected], model
+
+    for params in ({"reasoning_effort": "low"},
+                   {"reasoning_effort": "none", "thinking": {"type": "adaptive"}}):
+        sent.clear()
+        asyncio.run(pageindex.utils.llm_acompletion("anthropic/claude-haiku-5-5", "p", **params))
+        assert sent == [params]
+
+
+@pytest.mark.parametrize("model", ["claude-haiku-5-5", "claude-sonnet-5", "claude-opus-5",
+                                   "claude-sonnet-5-5"])
+def test_litellm_still_sends_claude_no_thinking_for_none(model):
+    """Fails once LiteLLM itself turns the model's thinking off for "none"
+    (BerriAI/litellm#47924, #44298): then delete its _CLAUDE_NONE row."""
+    pytest.importorskip("litellm")
+    from litellm.utils import get_optional_params
+    assert "thinking" not in get_optional_params(
+        model=model, custom_llm_provider="anthropic", reasoning_effort="none",
+        drop_params=True)
+
+
 def test_parse_pages_keeps_whitespace_tolerance():
     """0.2.10 accepted whitespace around parts (int() tolerance); the SDK
     surface keeps that while the tool layer stays on the strict pattern."""
@@ -3719,6 +3783,42 @@ def test_flash_summaries_drop_a_default_effort_the_server_refuses(tmp_path, monk
         with pytest.raises(RuntimeError, match="Summary generation failed"):
             run(optimize, lambda params: "reasoning_effort" in params, effort="high")
         assert set(sent) == {"high"}
+
+
+def test_flash_refuses_a_chosen_none_the_model_cannot_honor(tmp_path, monkeypatch):
+    """A chosen "none" on a model whose thinking can't be turned off raises
+    before any model call; the default "none" there, and a chosen "none" on
+    a model that can turn it off, still run."""
+    from conftest import build_pdf
+    import copy
+    import pageindex.flash.api as flash_api
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, _ = _expand_fixture()
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: {
+        "structure": copy.deepcopy(tree), "page_texts": list(pages)})
+    calls = []
+
+    async def capture(model, prompt, **params):
+        calls.append(params)
+        return '{"subsections": []}' if prompt.startswith("You are splitting") else '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", capture)
+    monkeypatch.setattr(tree_optimize, "llm_acompletion", capture)
+
+    for model in ("anthropic/claude-opus-5-5", "bedrock/global.anthropic.claude-fable-5-1",
+                  "claude-code/sonnet"):
+        with pytest.raises(ValueError, match="can't turn thinking off"):
+            flash_api.page_index_flash(str(pdf), summary_model=model,
+                                       summary_reasoning_effort="none")
+        assert not calls, model
+    for model, effort in (("anthropic/claude-opus-5-5", None),
+                          ("anthropic/claude-haiku-5-5", "none")):
+        flash_api.page_index_flash(str(pdf), summary_model=model,
+                                   summary_reasoning_effort=effort)
+        assert {p.get("reasoning_effort") for p in calls} >= {"none"}, model
+        calls.clear()
 
 
 def test_summary_max_words_reaches_the_local_indexer():

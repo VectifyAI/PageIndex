@@ -201,6 +201,44 @@ def _is_unrecoverable(exc: Exception) -> bool:
     return getattr(exc, "status_code", None) in _UNRECOVERABLE_STATUS
 
 
+# LiteLLM sends no thinking field for reasoning_effort "none" on Claude
+# (BerriAI/litellm#47924, #44298), and these models think by default: each
+# gets its own off switch, or its lowest effort where it has none. The first
+# name in the model wins, so a longer name comes before its prefix.
+_CLAUDE_NONE = (
+    ("claude-sonnet-5-5", {"thinking": {"type": "between_tools"}}),
+    ("claude-opus-5-5", {"reasoning_effort": "low"}),
+    ("claude-fable-5", {"reasoning_effort": "low"}),
+    ("claude-haiku-5-5", {"thinking": {"type": "disabled"}}),
+    ("claude-sonnet-5", {"thinking": {"type": "disabled"}}),
+    ("claude-opus-5", {"thinking": {"type": "disabled"}}),
+)
+
+
+def _claude_none(model):
+    """What replaces reasoning_effort "none" on a Claude model LiteLLM
+    routes to Anthropic, Bedrock or Vertex; None keeps it."""
+    model = _strip_prefix(model or "", "litellm/")
+    if model.split("/", 1)[0] not in ("anthropic", "bedrock", "vertex_ai"):
+        return None
+    return next((swap for name, swap in _CLAUDE_NONE if name in model), None)
+
+
+def thinking_stays_on(model):
+    """True when reasoning_effort "none" can't turn the model's thinking off."""
+    return "reasoning_effort" in (_claude_none(model) or {})
+
+
+def _claude_none_kwargs(kwargs):
+    """The completion kwargs with a "none" effort swapped as _claude_none
+    says; a caller's own thinking wins."""
+    swap = (kwargs.get("reasoning_effort") == "none" and "thinking" not in kwargs
+            and _claude_none(kwargs["model"]))
+    if not swap:
+        return kwargs
+    return {**{k: v for k, v in kwargs.items() if k != "reasoning_effort"}, **swap}
+
+
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
     from .integrations.claude_agent_sdk import claude_code_complete, is_claude_code
     if is_claude_code(model):
@@ -217,14 +255,14 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
     _quiet_litellm()
     for i in range(max_retries):
         try:
-            response = litellm.completion(**{
+            response = litellm.completion(**_claude_none_kwargs({
                 "model": model,
                 "messages": messages,
                 "drop_params": True,
                 # the loop is the retry policy; the merge lets a backend override win
                 "max_retries": 0,
                 **(backend or {}),
-            })
+            }))
             _add_usage(response)
             content = response.choices[0].message.content
             if return_finish_reason:
@@ -258,14 +296,14 @@ async def llm_acompletion(model, prompt, **params):
     _quiet_litellm()
     for i in range(max_retries):
         try:
-            response = await litellm.acompletion(**{
+            response = await litellm.acompletion(**_claude_none_kwargs({
                 "model": model,
                 "messages": messages,
                 "drop_params": True,
                 "max_retries": 0,
                 **(backend or {}),
                 **params,
-            })
+            }))
             _add_usage(response)
             return response.choices[0].message.content
         except Exception as e:

@@ -436,7 +436,10 @@ class PageIndexClient:
             model without the setting drops it). Defaults to ``"none"``
             unless LiteLLM lists the model as refusing it, and stops
             sending it once a prompt the server refused with it (HTTP
-            400) goes through without it.
+            400) goes through without it. ``"none"`` raises on a model
+            whose thinking can't be turned off (Claude Opus 5.5 and Fable,
+            ``claude-code/`` models); the default runs Opus 5.5 and Fable
+            at ``"low"``.
             Expand keeps the model's own default. A
             ``mode="standard"`` submit refuses any of the summary knobs.
         use_embedded_toc (bool, optional): Local mode only — whether flash
