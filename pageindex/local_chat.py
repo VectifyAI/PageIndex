@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import dataclasses
+import functools
 import hashlib
 import inspect
 import json
@@ -404,15 +405,56 @@ class _Replies:
         return out
 
 
+def _sending(data) -> bool:
+    """Encrypted reasoning that a run's request carries right now, as the
+    fill put it back."""
+    return bool(data) and any(
+        isinstance(block, dict) and block.get("data") == data
+        for replies in tuple(_REQUESTS.values())
+        for message in replies.last if isinstance(message, dict)
+        for block in message.get("thinking_blocks") or ())
+
+
+def _keep_redacted(translate):
+    """LiteLLM's Converse thinking converter, except that a run's encrypted
+    reasoning, which it turns into a blank text its assembly then drops,
+    goes back as Bedrock's redactedContent, as Bedrock returned it."""
+    @functools.wraps(translate)
+    def converting(thinking_blocks, *args, **kwargs):
+        out = []
+        for block in thinking_blocks:
+            converted = translate([block], *args, **kwargs)
+            blank = converted == [
+                {"reasoningContent": {"reasoningText": {"text": ""}}}]
+            if (blank and block.get("type") == "redacted_thinking"
+                    and _sending(block.get("data"))):
+                converted = [{"reasoningContent": {
+                    "redactedContent": block["data"]}}]
+            out += converted
+        return out
+    return converting
+
+
 def _register_fill() -> None:
     """The LiteLLM pre-request hook that fills a run's requests, in
     litellm.callbacks: added before each request, again if a caller
-    replaced the list."""
+    replaced the list. The first call also wraps LiteLLM's Converse
+    thinking converter (_keep_redacted)."""
     global _fill_hook
     import litellm
     from litellm.integrations.custom_logger import CustomLogger
     with _FILL_LOCK:
         if _fill_hook is None:
+            name = "translate_thinking_blocks_to_reasoning_content_blocks"
+            try:
+                from litellm.litellm_core_utils.prompt_templates.factory \
+                    import BedrockConverseMessagesProcessor as converse
+                translate = getattr(converse, name)
+            except (ImportError, AttributeError):
+                pass  # LiteLLM moved it: Converse drops it, as before
+            else:
+                setattr(converse, name,
+                        staticmethod(_keep_redacted(translate)))
             class _Fill(CustomLogger):
                 async def async_pre_call_deployment_hook(self, kwargs,
                                                          call_type):
