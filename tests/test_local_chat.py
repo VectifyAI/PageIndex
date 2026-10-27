@@ -1042,7 +1042,7 @@ def _publish(monkeypatch, entries, offline=False):
 
     monkeypatch.setattr(httpx, "get", get)
     monkeypatch.setattr(utils, "_published", None)
-    monkeypatch.setattr(utils, "_checked", set())
+    monkeypatch.setattr(utils, "_filled", False)
     monkeypatch.setattr(utils, "_MAP_SET_BY_USER", False)
     return fetched
 
@@ -1107,69 +1107,16 @@ def test_refusal_the_published_map_cannot_lift_surfaces(client, monkeypatch,
     assert len(sent) == (4 if case == "unpublished" else 2)
 
 
-def test_prefetch_starts_for_a_model_the_packaged_map_lacks(monkeypatch):
-    """The download starts beside LiteLLM's import only for a LiteLLM model
-    its packaged map doesn't list, once per process, and never when the
-    caller set LITELLM_LOCAL_MODEL_COST_MAP; each model is checked once."""
-    pytest.importorskip("litellm")
-    import threading
-    from pageindex import utils
-
-    class Now:
-        def __init__(self, target, daemon):
-            self.target = target
-
-        def start(self):
-            self.target()
-
-    monkeypatch.setattr(utils, "threading", types.SimpleNamespace(
-        Thread=Now, Lock=threading.Lock))
-    fetched = _publish(monkeypatch, {})
-    reads = []
-    packaged = utils._packaged_model_map
-    monkeypatch.setattr(utils, "_packaged_model_map",
-                        lambda: reads.append(1) or packaged())
-    for model in ("gpt-6-luna", "gpt-6-luna", "openai/gpt-6-luna",
-                  "claude-code/sonnet", None):
-        utils.prefetch_model_map(model)
-    assert len(reads) == 2
-    monkeypatch.setattr(utils, "_MAP_SET_BY_USER", True)
-    utils.prefetch_model_map("bedrock/global.openai.gpt-test-new")
-    assert fetched == []
-    monkeypatch.setattr(utils, "_MAP_SET_BY_USER", False)
-    utils.prefetch_model_map("bedrock/global.openai.gpt-test-new")
-    utils.prefetch_model_map("bedrock/global.openai.gpt-test-newer")
-    assert len(fetched) == 1 and len(reads) == 3
-
-
 @needs_agents
-@pytest.mark.parametrize("stream", [False, True])
-def test_a_model_passed_to_chat_starts_the_check(client, monkeypatch, stream):
-    """A model passed to a chat call starts the check as the call begins,
-    on both entries (chat(stream=True) and chat_completions)."""
+def test_a_request_litellm_takes_downloads_nothing(client, monkeypatch):
+    """A model LiteLLM doesn't refuse, in its packaged map or not, never
+    downloads the published one."""
     pytest.importorskip("litellm")
-    from pageindex import utils
-    seen = []
-    monkeypatch.setattr(utils, "prefetch_model_map", seen.append)
-    _mock_litellm(monkeypatch, [_litellm_reply("A")])
-    if stream:
-        assert list(client.chat("q", model="gpt-test-call", stream=True)) \
-            == ["A"]
-    else:
-        client.chat_completions("q", model="gpt-test-call")
-    assert seen == ["gpt-test-call"]
-
-
-def test_client_prefetches_its_chat_model(store_path, monkeypatch):
-    """The chat model a client is given, or later set, starts the check."""
-    from pageindex import utils
-    seen = []
-    monkeypatch.setattr(utils, "prefetch_model_map", seen.append)
-    client = PageIndexClient(storage_path=store_path,
-                             chat_model="bedrock/global.openai.gpt-test-a")
-    client.chat_model = "bedrock/global.openai.gpt-test-b"
-    assert seen == ["bedrock/global.openai.gpt-test-a",
-                    "bedrock/global.openai.gpt-test-b"]
+    fetched = _publish(monkeypatch, {})
+    _mock_litellm(monkeypatch, [_litellm_reply("A")] * 2)
+    for model in ("gpt-6-luna", "openrouter/vendor/model-test-unlisted"):
+        client.chat_completions("q", model=model)
+    assert fetched == []
 
 
 @needs_agents
