@@ -1248,23 +1248,34 @@ def test_gemini_signatures_go_back_on_a_continued_run(client, store_path,
 
 
 @needs_agents
+@pytest.mark.parametrize("fill", [True, False])
 @pytest.mark.parametrize("field, value", [
     ("reasoning_details", [{"type": "reasoning.encrypted", "data": "ENC"}]),
     ("reasoning_items", [{"id": "rs_1", "type": "reasoning",
                           "encrypted_content": "ENC", "summary": []}]),
 ])
 def test_reply_fields_the_agents_sdk_drops_go_back(client, store_path,
-                                                   monkeypatch, field, value):
+                                                   monkeypatch, field, value,
+                                                   fill):
     """What LiteLLM parsed from a reply and the Agents SDK drops
     (OpenRouter's reasoning_details, the Responses bridge's
     reasoning_items, ...) goes back with that reply on every later
-    request, and rides the returned messages."""
+    request, and rides the returned messages. Without the fill the Agents
+    SDK must still drop it, or the fill goes."""
     pytest.importorskip("litellm")
+    if not fill:
+        monkeypatch.setattr(local_chat, "_keep_reply_fields",
+                            lambda agent, messages: None)
     first, sent = _two_turns(store_path, monkeypatch, client,
                              "openrouter/x-ai/grok-test",
                              _litellm_reply(tool_calls=_TWO_CALLS[:1],
                                             provider_specific_fields={
                                                 field: value}))
+    if not fill:
+        calls = [m for m in sent[1] if m.get("tool_calls")]
+        assert field not in calls[0], (
+            f"the Agents SDK keeps {field} now: drop _keep_reply_fields")
+        return
     for messages in (first["messages"], sent[1], sent[2]):
         calls = [m for m in messages if m.get("tool_calls")]
         assert calls[0][field] == value
@@ -5078,6 +5089,17 @@ def test_litellm_model_still_has_the_fetch_response_seam():
     from agents.extensions.models.litellm_model import LitellmModel
 
     assert hasattr(LitellmModel, "_fetch_response")
+
+
+@needs_agents
+def test_model_response_still_lacks_finish_reason():
+    # Fails once openai-agents' ModelResponse carries finish_reason: then
+    # _record_chat_finish goes.
+    import dataclasses
+    from agents.items import ModelResponse
+
+    assert "finish_reason" not in {
+        field.name for field in dataclasses.fields(ModelResponse)}
 
 
 @needs_agents
