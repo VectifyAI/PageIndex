@@ -177,6 +177,8 @@ CLAUDE_CODE_PREFIX = "claude-code/"
 # One CLI process per call, ~150 MB each (measured): indexing's summary
 # lane (SUMMARY_CONCURRENCY wide) must not start that many.
 CLAUDE_CODE_CONCURRENCY = 16
+# The workflow backend's default width: measured at 64, wider untested.
+CLAUDE_CODE_WORKFLOW_LANES = 64
 _GATES: dict = {}  # event loop -> [its cap, calls inside]
 
 # AssistantMessage.error kinds, for a CLI that reports no api_error_status.
@@ -449,7 +451,7 @@ def claude_code_workflows(lanes=None, prewarm=()):
     """While open, claude-code/ index calls made in its context (its loops
     and their tasks) whose (model, effort) is in ``prewarm`` run as the
     agents of that setting's workflow, ``lanes`` wide (default:
-    PAGEINDEX_CLAUDE_CODE_WORKFLOW, else the summary lane's width; 0 keeps
+    PAGEINDEX_CLAUDE_CODE_WORKFLOW, else CLAUDE_CODE_WORKFLOW_LANES; 0 keeps
     processes), in sessions on a thread of their own, each started now so
     its launch overlaps whatever runs before the first call. Other calls
     run in processes. A session that dies is replaced once if its agents
@@ -461,10 +463,9 @@ def claude_code_workflows(lanes=None, prewarm=()):
     Code config dir. An inner scope defers to the outer one."""
     prewarm = list(prewarm)
     if lanes is None:
-        from ..utils import SUMMARY_CONCURRENCY
         try:
             lanes = int(os.environ.get("PAGEINDEX_CLAUDE_CODE_WORKFLOW",
-                                       SUMMARY_CONCURRENCY))
+                                       CLAUDE_CODE_WORKFLOW_LANES))
         except ValueError:
             lanes = 0
     if lanes < 1 or not prewarm or _HOST.get() is not None:

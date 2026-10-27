@@ -618,18 +618,20 @@ def test_a_workflow_session_deletes_what_it_left_on_disk(monkeypatch, tmp_path):
 
 
 @needs_claude
-def test_workflows_run_by_default_one_lane_per_summary_slot(monkeypatch):
-    from pageindex.utils import SUMMARY_CONCURRENCY
+def test_workflows_run_by_default_at_their_own_width(monkeypatch):
+    lanes = cc.CLAUDE_CODE_WORKFLOW_LANES
     seen = fake_workflow(monkeypatch)
     monkeypatch.delenv("PAGEINDEX_CLAUDE_CODE_WORKFLOW")
+    # a wider summary lane leaves the measured width as it is
+    monkeypatch.setattr("pageindex.utils.SUMMARY_CONCURRENCY", 2 * lanes)
     with cc.claude_code_workflows(prewarm=[("claude-code/haiku", None)]):
         assert asyncio.run(llm_acompletion("claude-code/haiku", "P")) == "agent: P"
     env = seen.options[0].env
-    assert env["CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS"] == str(SUMMARY_CONCURRENCY)
+    assert env["CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS"] == str(lanes)
     # an agent no hook handed a call answers so, and its lane stops; its task
     # text names the hook context, which comes after it, not "the task above"
     script = open(os.path.join(seen.options[0].cwd,
-                               f"pageindex-lanes-{SUMMARY_CONCURRENCY}.js")).read()
+                               f"pageindex-lanes-{lanes}.js")).read()
     assert f"agent({json.dumps(cc._LANE_TASK)}," in script
     assert f"?.includes('{cc._NO_TASK}')) return" in script
     assert "SubagentStart hook additional context" in cc._LANE_TASK
