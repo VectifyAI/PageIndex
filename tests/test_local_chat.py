@@ -1384,6 +1384,50 @@ def test_requests_outside_a_chat_run_pass_untouched():
         kwargs, None)) is None
 
 
+def test_converse_sends_a_runs_encrypted_reasoning_back(monkeypatch):
+    """Bedrock's encrypted reasoning, as LiteLLM parses it, goes back to
+    Converse as Bedrock returned it when a run's request carries it.
+    Another request converts exactly as LiteLLM alone does, which drops
+    it: once LiteLLM keeps it itself, _keep_redacted goes. What LiteLLM
+    converts itself stays."""
+    pytest.importorskip("litellm")
+    from litellm.litellm_core_utils.prompt_templates.factory import (
+        BedrockConverseMessagesProcessor as converse)
+    from litellm.llms.bedrock.chat.converse_transformation import (
+        AmazonConverseConfig)
+    local_chat._register_fill()
+    name = "translate_thinking_blocks_to_reasoning_content_blocks"
+    blob = "cnNuX2VuY3J5cHRlZA=="  # GPT's: base64 of "rsn_encrypted"
+    thinking = AmazonConverseConfig()._transform_thinking_blocks(
+        [{"redactedContent": blob}])
+    messages = [{"role": "user", "content": "q"},
+                {"role": "assistant", "content": "a",
+                 "thinking_blocks": thinking},
+                {"role": "user", "content": "q2"}]
+
+    def sent():
+        return asyncio.run(converse._bedrock_converse_messages_pt_async(
+            messages, "global.openai.gpt-6-sol", "bedrock_converse"))
+
+    def reasoning(converted):
+        return [block for message in converted
+                for block in message["content"] if "reasoningContent" in block]
+
+    with monkeypatch.context() as patch:
+        patch.setattr(converse, name, staticmethod(
+            getattr(converse, name).__wrapped__))
+        alone = sent()
+    assert reasoning(alone) == [], "LiteLLM keeps it now: drop _keep_redacted"
+    assert sent() == alone
+    replies = local_chat._Replies("bedrock/global.openai.gpt-6-sol")
+    replies.last = messages
+    monkeypatch.setitem(local_chat._REQUESTS, "call", replies)
+    assert reasoning(sent()) == [
+        {"reasoningContent": {"redactedContent": blob}}]
+    own = [{"reasoningContent": {"redactedContent": "LiteLLM's"}}]
+    assert local_chat._keep_redacted(lambda blocks: own)(thinking) == own
+
+
 @needs_agents
 def test_fill_hook_returns_when_callbacks_are_replaced(client, store_path,
                                                        monkeypatch):
