@@ -2925,7 +2925,10 @@ def test_claude_none_sends_the_models_own_off_switch(monkeypatch):
                                    "claude-sonnet-5-5"])
 def test_litellm_still_sends_claude_no_thinking_for_none(model):
     """Fails once LiteLLM itself turns the model's thinking off for "none"
-    (BerriAI/litellm#47924, #44298): then delete its _CLAUDE_NONE row."""
+    (BerriAI/litellm#47924, #44298), which can show only after the
+    litellm <1.106 cap is lifted: then the LiteLLM routes no longer need
+    _claude_none for it. Keep its _CLAUDE_NONE row: the Messages lane
+    still needs it, as Anthropic's effort takes no "none"."""
     pytest.importorskip("litellm")
     from litellm.utils import get_optional_params
     assert "thinking" not in get_optional_params(
