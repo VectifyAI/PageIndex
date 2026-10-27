@@ -633,7 +633,7 @@ class PageIndexClient:
             from .cloud_api import CloudAPI
             self._api = CloudAPI(self)
             if chat_mode == "own":
-                from .utils import ConfigLoader, prefetch_model_map
+                from .utils import ConfigLoader
                 overrides = {name: value for name, value in chat_conf.items()
                              if name in ("chat_model", "retrieve_model")
                              and value}
@@ -645,7 +645,6 @@ class PageIndexClient:
                                           and not _yaml_names_chat(loader))
                 self.chat_backend = chat_conf.get("chat_backend")
                 _preload_litellm()
-                prefetch_model_map(self._chat_model)
             else:
                 # Managed chat: the endpoint selects its own model.
                 self._chat_model = None
@@ -665,7 +664,7 @@ class PageIndexClient:
                     "The managed chat needs cloud documents — it cannot "
                     f"read the local store. {exits}, or set your own chat "
                     "model instead.")
-            from .utils import ConfigLoader, prefetch_model_map
+            from .utils import ConfigLoader
             overrides = {name: value for name, value in
                          {**index_conf, **chat_conf}.items()
                          if name in ("model", "index_model", "summary_model",
@@ -698,7 +697,6 @@ class PageIndexClient:
             # LiteLLM's multi-second import would otherwise land on the
             # first chat call; failures resurface there with real context.
             _preload_litellm()
-            prefetch_model_map(self._chat_model)
 
     @property
     def _local_chat(self) -> bool:
@@ -751,10 +749,8 @@ class PageIndexClient:
     def chat_model(self, value):
         # Any assignment is a choice; only the untouched stock default
         # is not one.
-        from .utils import prefetch_model_map
         self._chat_model = value
         self._chat_model_stock = False
-        prefetch_model_map(value)
 
     @property
     def retrieve_model(self):
