@@ -853,6 +853,19 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
             **routed})
     except ValidationError as exc:
         raise PageIndexAPIError(f"Invalid model settings: {exc}") from exc
+    effort = settings.reasoning.effort if settings.reasoning else None
+    args = settings.extra_args or {}
+    if protocol == "chat" and "none" in (effort, args.get("reasoning_effort")) \
+            and "thinking" not in args:
+        from .utils import _claude_none, thinking_stays_on
+        if thinking_stays_on(model_name):
+            raise PageIndexAPIError(
+                f"{model_name} can't turn thinking off, so it can't honor "
+                "reasoning_effort='none'; pass 'low' or leave it unset.")
+        swap = _claude_none(model_name)
+        if swap:
+            # LiteLLM keeps a thinking switch and drops the "none" beside it
+            settings = dataclasses.replace(settings, extra_args={**args, **swap})
     return Agent(
         name="PageIndex",
         instructions=instructions,

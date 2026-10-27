@@ -3708,26 +3708,35 @@ def test_reasoning_passthrough_reaches_each_engine(monkeypatch):
 @needs_agents
 def test_chat_none_turns_claude_thinking_off(monkeypatch):
     """The LiteLLM chat lane sends a Claude model's own off switch for
-    reasoning_effort "none", indexing's table, and refuses it on a model
-    that can't turn thinking off; a caller's own thinking wins."""
+    reasoning_effort "none", indexing's table, beside the effort, and
+    refuses it on a model that can't turn thinking off; a caller's own
+    thinking wins, and extra_body's reasoning counts as the effort."""
     pytest.importorskip("litellm")
     monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
     monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
                         lambda *a, **k: [])
 
-    def sent(model, **kw):
-        args = local_chat._openai_agent(None, "chat", model, "sys", None, None,
-                                        reasoning_effort="none", **kw).model_settings.extra_args
-        return {k: args[k] for k in ("reasoning_effort", "thinking") if k in args}
-    assert sent("anthropic/claude-haiku-5-5") == {"thinking": {"type": "disabled"}}
+    def sent(model, effort="none", **kw):
+        settings = local_chat._openai_agent(None, "chat", model, "sys", None, None,
+                                            reasoning_effort=effort, **kw).model_settings
+        args = settings.extra_args
+        return {"effort": settings.reasoning and settings.reasoning.effort,
+                **{k: args[k] for k in ("reasoning_effort", "thinking") if k in args}}
+    off = {"effort": "none", "thinking": {"type": "disabled"}}
+    assert sent("anthropic/claude-haiku-5-5") == off
+    assert sent("azure_ai/claude-haiku-5-5") == off
     assert sent("bedrock/global.anthropic.claude-sonnet-5-5") == {
-        "thinking": {"type": "between_tools"}}
-    assert sent("openrouter/anthropic/claude-haiku-5.5") == {"reasoning_effort": "none"}
+        "effort": "none", "thinking": {"type": "between_tools"}}
+    assert sent("openrouter/anthropic/claude-haiku-5.5") == {"effort": "none"}
     assert sent("anthropic/claude-opus-5-5", extra_body={"thinking": {"type": "adaptive"}}) == {
-        "reasoning_effort": "none", "thinking": {"type": "adaptive"}}
+        "effort": "none", "thinking": {"type": "adaptive"}}
+    assert sent("anthropic/claude-haiku-5-5", None,
+                extra_body={"reasoning": {"effort": "none"}}) == off
     for model in ("anthropic/claude-opus-5-5", "vertex_ai/claude-fable-5-1"):
         with pytest.raises(PageIndexAPIError, match="can't turn thinking off"):
             sent(model)
+    with pytest.raises(PageIndexAPIError, match="can't turn thinking off"):
+        sent("anthropic/claude-opus-5-5", "low", extra_body={"reasoning": {"effort": "none"}})
 
 
 def test_claude_code_chat_refuses_none():
