@@ -9,11 +9,13 @@ import PyPDF2
 import copy
 import asyncio
 import heapq
+import threading
 from contextlib import asynccontextmanager
 from io import BytesIO
 from dotenv import find_dotenv, load_dotenv
 load_dotenv(find_dotenv(usecwd=True))
 # litellm's import fetches its model map over the network unless told not to.
+_MAP_SET_BY_USER = "LITELLM_LOCAL_MODEL_COST_MAP" in os.environ
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 import logging
 import yaml
@@ -92,6 +94,86 @@ def _quiet_litellm() -> None:
         logger = logging.getLogger(name)
         if logger.level == logging.NOTSET:
             logger.setLevel(level)
+
+
+_PUBLISHED_MAP_URL = os.environ.get(
+    "LITELLM_MODEL_COST_MAP_URL",
+    "https://raw.githubusercontent.com/BerriAI/litellm/main/"
+    "model_prices_and_context_window.json")
+_published = None
+_published_lock = threading.Lock()
+
+
+def _packaged_model_map() -> dict:
+    import importlib.util
+    spec = importlib.util.find_spec("litellm")  # finds it, imports nothing
+    if spec is None or not spec.submodule_search_locations:
+        raise ImportError("litellm")
+    root = spec.submodule_search_locations[0]
+    with open(os.path.join(root, "model_prices_and_context_window_backup.json"),
+              encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _published_models(packaged=None):
+    """The entries LiteLLM's published model map has and its packaged copy
+    lacks, as a Future: one download per process, on a daemon thread."""
+    global _published
+    with _published_lock:
+        if _published is not None:
+            return _published
+        from concurrent.futures import Future
+        future = _published = Future()
+
+    def fetch():
+        try:
+            import httpx
+            known = _packaged_model_map() if packaged is None else packaged
+            published = httpx.get(_PUBLISHED_MAP_URL, timeout=5).json()
+            future.set_result({key: entry for key, entry in published.items()
+                               if key not in known and isinstance(entry, dict)})
+        except Exception as exc:
+            future.set_exception(exc)
+    threading.Thread(target=fetch, daemon=True).start()
+    return future
+
+
+def prefetch_model_map(model) -> None:
+    """Starts that download beside LiteLLM's own import when its packaged
+    map doesn't list ``model``, so a refusal for lack of the model's entry
+    finds it at hand."""
+    if (_MAP_SET_BY_USER or not isinstance(model, str)
+            or model.startswith("claude-code/")):
+        return
+
+    def check():
+        try:
+            packaged = _packaged_model_map()
+        except Exception:
+            return
+        if not {model, model.split("/", 1)[-1],
+                model.rsplit("/", 1)[-1]} & packaged.keys():
+            _published_models(packaged)
+    threading.Thread(target=check, daemon=True).start()
+
+
+async def learn_published_models() -> bool:
+    """LiteLLM takes the published map's entries its packaged map lacks;
+    True once they are in. Never when the caller set
+    LITELLM_LOCAL_MODEL_COST_MAP themselves."""
+    if _MAP_SET_BY_USER:
+        return False
+    import litellm
+    try:
+        missing = await asyncio.wrap_future(
+            _published_models(litellm.model_cost))
+    except Exception:
+        return False
+    new = {key: entry for key, entry in missing.items()
+           if key not in litellm.model_cost}
+    if new:
+        litellm.register_model(new)
+    return bool(missing)
 
 # Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
 if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):

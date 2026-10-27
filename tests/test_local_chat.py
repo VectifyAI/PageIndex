@@ -1023,6 +1023,131 @@ def test_unrelated_400s_refuse_nothing(client, store_path, monkeypatch,
             for messages in sent] == [False, True]
 
 
+_UNPACKAGED = {"litellm_provider": "bedrock_converse", "mode": "chat",
+               "supports_function_calling": True}
+
+
+def _publish(monkeypatch, entries, offline=False):
+    """LiteLLM's published model map, fetched afresh by this process: the
+    entries its packaged map lacks. Returns the URLs fetched."""
+    from pageindex import utils
+    fetched = []
+
+    def get(url, timeout):
+        fetched.append(url)
+        if offline:
+            raise httpx.ConnectError("offline")
+        return httpx.Response(200, json=entries,
+                              request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", get)
+    monkeypatch.setattr(utils, "_published", None)
+    monkeypatch.setattr(utils, "_MAP_SET_BY_USER", False)
+    return fetched
+
+
+def test_published_entries_lift_litellms_own_refusal(monkeypatch):
+    """LiteLLM refuses tools for a Bedrock model its packaged map lacks;
+    the published map's entry lifts that, by LiteLLM's own rules."""
+    pytest.importorskip("litellm")
+    from litellm.exceptions import UnsupportedParamsError
+    from litellm.utils import get_optional_params
+    from pageindex.utils import learn_published_models
+    key = "global.openai.gpt-test-lifted"
+    _publish(monkeypatch, {key: _UNPACKAGED})
+    tools = [{"type": "function", "function": {
+        "name": "read", "parameters": {"type": "object", "properties": {}}}}]
+    with pytest.raises(UnsupportedParamsError):
+        get_optional_params(model=key, custom_llm_provider="bedrock",
+                            tools=tools)
+    assert asyncio.run(learn_published_models())
+    assert get_optional_params(model=key, custom_llm_provider="bedrock",
+                               tools=tools)["tools"]
+
+
+@needs_agents
+@pytest.mark.parametrize("settings", [{}, {"stream": True}])
+def test_unpackaged_model_goes_again_with_the_published_map(
+        client, monkeypatch, settings):
+    """A request LiteLLM refuses for a model its packaged map lacks goes
+    again with the published map's entries in, downloaded once per
+    process; the next call goes straight through."""
+    pytest.importorskip("litellm")
+    key = f"global.openai.gpt-test-again-{len(settings)}"  # LiteLLM keeps it
+    fetched = _publish(monkeypatch, {key: _UNPACKAGED})
+    # the hook sees each try, the refused one too (LiteLLM checks after it)
+    sent = _mock_litellm(monkeypatch, [_litellm_reply("A")] * 3)
+    for _ in range(2):
+        out = client.chat_completions("q", model=f"bedrock/{key}", **settings)
+        assert ("".join(out) if settings
+                else out.choices[0].message.content) == "A"
+    assert len(fetched) == 1 and len(sent) == 3
+
+
+@needs_agents
+@pytest.mark.parametrize("case", ["unpublished", "offline", "user's map"])
+def test_refusal_the_published_map_cannot_lift_surfaces(client, monkeypatch,
+                                                        case):
+    """LiteLLM's refusal surfaces after one more try when the published map
+    lacks the model too, at once when the download fails or the caller set
+    LITELLM_LOCAL_MODEL_COST_MAP: never a loop, never a second download."""
+    pytest.importorskip("litellm")
+    from pageindex import utils
+    fetched = _publish(monkeypatch, {"global.openai.gpt-test-other":
+                                     _UNPACKAGED}, offline=case == "offline")
+    if case == "user's map":
+        monkeypatch.setattr(utils, "_MAP_SET_BY_USER", True)
+    sent = _mock_litellm(monkeypatch, [_litellm_reply("A")] * 4)
+    for _ in range(2):
+        with pytest.raises(PageIndexAPIError, match="does not support"):
+            client.chat_completions(
+                "q", model="bedrock/global.openai.gpt-test-unpublished")
+    assert len(fetched) == (0 if case == "user's map" else 1)
+    assert len(sent) == (4 if case == "unpublished" else 2)
+
+
+def test_prefetch_starts_for_a_model_the_packaged_map_lacks(monkeypatch):
+    """The download starts beside LiteLLM's import only for a LiteLLM model
+    its packaged map doesn't list, once per process, and never when the
+    caller set LITELLM_LOCAL_MODEL_COST_MAP."""
+    pytest.importorskip("litellm")
+    import threading
+    from pageindex import utils
+
+    class Now:
+        def __init__(self, target, daemon):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(utils, "threading", types.SimpleNamespace(
+        Thread=Now, Lock=threading.Lock))
+    fetched = _publish(monkeypatch, {})
+    for model in ("gpt-6-luna", "openai/gpt-6-luna", "claude-code/sonnet",
+                  None):
+        utils.prefetch_model_map(model)
+    monkeypatch.setattr(utils, "_MAP_SET_BY_USER", True)
+    utils.prefetch_model_map("bedrock/global.openai.gpt-test-new")
+    assert fetched == []
+    monkeypatch.setattr(utils, "_MAP_SET_BY_USER", False)
+    utils.prefetch_model_map("bedrock/global.openai.gpt-test-new")
+    utils.prefetch_model_map("bedrock/global.openai.gpt-test-newer")
+    assert len(fetched) == 1
+
+
+def test_client_prefetches_its_chat_model(store_path, monkeypatch):
+    """The chat model a client is given, or later set, starts the check."""
+    from pageindex import utils
+    seen = []
+    monkeypatch.setattr(utils, "prefetch_model_map", seen.append)
+    client = PageIndexClient(storage_path=store_path,
+                             chat_model="bedrock/global.openai.gpt-test-a")
+    client.chat_model = "bedrock/global.openai.gpt-test-b"
+    assert seen == ["bedrock/global.openai.gpt-test-a",
+                    "bedrock/global.openai.gpt-test-b"]
+
+
 @needs_agents
 def test_unset_effort_sends_none(client, monkeypatch):
     """No effort reaches the wire unless the caller sets one."""
