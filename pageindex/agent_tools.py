@@ -70,13 +70,19 @@ TOOL_CONTRACT: dict[str, dict[str, Any]] = {
         "annotations": {"readOnlyHint": True, "openWorldHint": False},
         "description": (
             "Primary document retrieval tool. After orienting with "
-            "get_folder_structure() (when available), use this for all "
-            "document-related questions. The bare call returns root-level "
-            "sub-folders and documents; pass folder_id to drill into a "
-            'sub-folder level by level. Use sort="relevance" + query for '
-            "semantic ranking. Do NOT jump to search_documents() first — it "
-            "is an escalation path, only after "
-            'browse_documents(sort="relevance") has failed.'
+            "`get_folder_structure()` (when available) — and, for queries "
+            "that may involve typed attributes, pairing it with "
+            "`get_metadata_schema()` so you know which fields metadata mode "
+            "could filter on — use this for all document-related questions. "
+            "The bare call returns root-level sub-folders and documents; pass "
+            "`folder_id` to drill into a sub-folder level by level. Use "
+            '`sort="relevance"` + `query` for semantic ranking. Do NOT jump '
+            "to `search_documents()` first — keyword search and metadata mode "
+            "are escalation paths, only after "
+            '`browse_documents(sort="relevance")` + the persistence retries '
+            "have failed. `browse_documents` does not filter by attribute — "
+            "for typed-attribute queries, escalate to "
+            '`search_documents(mode="metadata")`.'
         ),
         "schema": {
             "type": "object",
@@ -157,10 +163,9 @@ TOOL_CONTRACT: dict[str, dict[str, Any]] = {
     "get_document": {
         "annotations": {"readOnlyHint": True, "openWorldHint": False},
         "description": (
-            "Check a document's processing status and metadata. `status` is "
-            'one of "pending", "queued", "processing", "completed", or '
-            '"failed" — call this before `get_document_structure()` or '
-            "`get_page_content()` to confirm the document is ready."
+            "Check a document's processing status and metadata. Call this "
+            "before `get_document_structure()` or `get_page_content()` to "
+            'confirm the document is ready (`status === "completed"`).'
         ),
         "schema": {
             "type": "object",
@@ -1517,13 +1522,16 @@ def _require_doc_selection(doc_ids) -> None:
 
 
 def _tool_specs(client, include_management: bool = False, doc_ids=None,
+                annotations: Optional[dict] = None,
                 ) -> "list[tuple[str, str, dict, Callable[[dict], tuple[list, bool]]]]":
     """(name, description, schema, invoke) per tool, for adapters that take
     the wire schema verbatim. ``invoke`` returns (content blocks, is_error):
     the MCP content as the server sent it, one text block from the local
     tools. Schemas are copies (frameworks keep the dict by reference).
     ``doc_ids`` is the local chat scope, already validated and dropped on
-    cloud by ``_local_doc_scope``."""
+    cloud by ``_local_doc_scope``. A dict passed as ``annotations``
+    receives each annotated tool's MCP annotations by name: the server's
+    on cloud, the contract's locally."""
     if getattr(client, "api_key", None):
         bridge = _cloud_bridge(client, gated=not include_management)
         tools_meta = bridge.list_tools()
@@ -1533,6 +1541,9 @@ def _tool_specs(client, include_management: bool = False, doc_ids=None,
                 "answer from the model's own knowledge, not the documents, "
                 "with nothing to signal it."
             )
+        if annotations is not None:
+            annotations.update({str(meta.get("name") or "tool"): meta["annotations"]
+                                for meta in tools_meta if meta.get("annotations")})
         return [(str(meta.get("name") or "tool"),
                  meta.get("description") or "",
                  copy.deepcopy(meta.get("inputSchema"))
@@ -1548,6 +1559,10 @@ def _tool_specs(client, include_management: bool = False, doc_ids=None,
             return [{"type": "text", "text": text}], is_error
         return invoke
 
+    if annotations is not None:
+        annotations.update({name: TOOL_CONTRACT[name]["annotations"]
+                            for name in tool_names(include_management)
+                            if TOOL_CONTRACT[name].get("annotations")})
     return [(name, _local_description(name), _local_schema(name),
              local_invoke(name))
             for name in tool_names(include_management)]
@@ -1576,15 +1591,9 @@ def build_agent_tools(client, include_management: bool = False,
 # ── agent instructions ──
 
 _INSTRUCTIONS_HEADER = (
-    "PageIndex by Vectify AI is a document platform for uploading and "
-    "managing long PDFs (research papers, financial reports, legal docs, "
-    "textbooks, etc.)."
+    "PageIndex by Vectify AI manages the user's long PDFs (research papers, "
+    "financial reports, legal docs, textbooks, etc.)."
 )
-
-_READING_WORKFLOW = f"""\
-READING WORKFLOW:
-- For documents over {STRUCTURE_FIRST_PAGE_THRESHOLD} pages: call get_document_structure() first to locate relevant sections, then get_page_content() with targeted page ranges.
-- For small documents ({STRUCTURE_FIRST_PAGE_THRESHOLD} pages or fewer): call get_page_content() directly."""
 
 _TOOL_USAGE_RULES = """\
 TOOL USAGE RULES:
@@ -1602,12 +1611,11 @@ DECISION:
 
 _AFTER_DISCOVERY = """\
 - Skip discovery ONLY for questions with NO possible document connection (e.g., "capital of France").
-- After discovery: 1 match or 1 clearly best match → proceed to read and answer without asking. Multiple equally relevant → ask user to pick.
-- Results returned ≠ correct results. If the returned documents do not clearly match the user's intent (e.g., wrong topic, wrong time period, wrong document type), treat it the same as "not found" and continue the PERSISTENCE protocol below."""
+- After discovery: 1 match or 1 clearly best match → proceed to read and answer without asking. Multiple equally relevant → ask user to pick."""
 
 _PERSISTENCE = """\
 PERSISTENCE (before concluding the target document is not in the library):
-This protocol applies both when results are empty AND when results are returned but none match the user's intent. Do NOT give up after a single discovery attempt. Follow these steps in order:
+Applies both when results are empty AND when returned results do not clearly match the user's intent (wrong topic, time period, or document type) — treat a mismatch as "not found". Do NOT give up after a single discovery attempt. Follow these steps in order:
 1. browse_documents() and compare every returned name/description against the user's intent
 2. Rephrase the query with synonyms or alternative terms and browse again
 3. Page through the ENTIRE library with `limit: 50` and `offset: next_offset` until has_more is false — MANDATORY, must be completed before concluding "not found"
@@ -1615,12 +1623,11 @@ Only after ALL steps have been tried may you conclude the document is not in the
 
 AGENT_INSTRUCTIONS = "\n\n".join([
     _INSTRUCTIONS_HEADER,
-    _READING_WORKFLOW,
-    _TOOL_USAGE_RULES,
     _DISCOVERY,
     _DECISION,
     _AFTER_DISCOVERY,
     _PERSISTENCE,
+    _TOOL_USAGE_RULES,
 ])
 
 

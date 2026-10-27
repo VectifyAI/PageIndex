@@ -236,8 +236,8 @@ def detect_font_heading(page_scan: PageScanState, other_block: Block) -> Optiona
     return None
 
 
-def detect_heading_with_body(page_scan: PageScanState, other_block: Block) -> Optional[HeadingCandidate]:
-    """. Detect heading-with-body 2-line patterns."""
+def detect_heading_with_body(page_scan: PageScanState, other_block: Block, limit: int = 20) -> Optional[HeadingCandidate]:
+    """. Detect heading-with-body 2-line patterns, numbers below ``limit``."""
     if other_block.line_count() < 2:
         return None
     tokens = tokenize_block(other_block)
@@ -311,7 +311,7 @@ def detect_heading_with_body(page_scan: PageScanState, other_block: Block) -> Op
         return None
 
     # Reuse numbered-heading detection on the prefix.
-    heading_kind = detect_numbered_heading(page_scan, other_block, prefix)
+    heading_kind = detect_numbered_heading(page_scan, other_block, prefix, limit)
     if heading_kind is not None and len(heading_kind.numbering) > 1:
         return make_heading_candidate(page_scan, heading_kind.type, heading_kind.group_slot, heading_kind.numbering, heading_kind.secondary_slot, heading_kind.primary_slot, True)
     if heading_kind is not None and (trie_matches_all(INTRODUCTION_SECTION_TRIE, heading_kind.primary_slot) or (is_uppercase_dominant(heading_kind.primary_slot) and not is_bibliography_entry(other_block))):

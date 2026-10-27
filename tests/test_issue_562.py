@@ -109,7 +109,16 @@ class TestRequestValidation:
             _split_chat_messages([{"content": "x"}])
 
     def test_unsupported_message_role_rejected(self):
+        # "tool" is a supported role on this lane now; a malformed tool row
+        # is its own validation failure (see the tool-message checks). An
+        # unknown role reaches the unsupported-role rejection.
         with pytest.raises(PageIndexValidationError, match="Unsupported role"):
+            _split_chat_messages([{"role": "navigator", "content": "x"}])
+
+    def test_malformed_tool_message_rejected(self):
+        """A tool row without a string tool_call_id is a caller-side
+        mistake, refused before any request — validation, not execution."""
+        with pytest.raises(PageIndexValidationError, match="tool_call_id"):
             _split_chat_messages([{"role": "tool", "content": "x"}])
 
     def test_show_process_must_be_bool_or_mapping(self):

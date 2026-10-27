@@ -5,6 +5,7 @@ from typing import Optional, Dict, Any, List, Union, Iterator
 import json
 import urllib.parse
 
+from .chat_stream import ChatObject
 from .errors import PageIndexAPIError
 from .naming import sanitize_filename, validate_folder_name
 
@@ -279,7 +280,7 @@ class CloudAPI:
         enable_citations: bool = False,
         extra_body: Optional[Dict[str, Any]] = None,
         folder_id: Optional[str] = None,
-    ) -> Union[Dict[str, Any], Iterator[str], Iterator[Dict[str, Any]]]:
+    ) -> Union[ChatObject, Iterator[str], Iterator[ChatObject]]:
         """
         PageIndex Chat Completions. Optionally scoped to specific PageIndex documents.
 
@@ -294,10 +295,12 @@ class CloudAPI:
             folder_id (Optional[str], optional): Folder ID to steer discovery toward one folder; "root" means the whole library.
 
         Returns:
-            Union[Dict[str, Any], Iterator[str], Iterator[Dict[str, Any]]]:
+            Union[ChatObject, Iterator[str], Iterator[ChatObject]]:
                 - If stream=False: Complete response dictionary
                 - If stream=True and stream_metadata=False: Iterator of text content chunks
                 - If stream=True and stream_metadata=True: Iterator of raw response chunks with metadata
+            Each ChatObject is the response dict, which also reads by
+            attribute as the openai SDK's ChatCompletion / ChatCompletionChunk.
         """
         payload = {
             "messages": messages,
@@ -335,46 +338,17 @@ class CloudAPI:
             if stream_metadata:
                 return self._stream_chat_response_raw(response)
             else:
-                return self._stream_chat_response(response)
+                from .local_chat import _text_only
+                return _text_only(self._stream_chat_response_raw(response))
         else:
-            return response.json()
+            from .local_chat import _ChatCompletion
+            body = response.json()
+            # a body that isn't an object keeps reaching chat()'s own check
+            return _ChatCompletion(body) if isinstance(body, dict) else body
 
-    def _stream_chat_response(self, response: requests.Response) -> Iterator[str]:
-        """
-        Parse streaming chat completion response.
-
-        Args:
-            response: Streaming HTTP response
-
-        Yields:
-            str: Content chunks from the streaming response
-        """
-        try:
-            for line in response.iter_lines():
-                if line:
-                    line = line.decode('utf-8')
-                    if line.startswith('data: '):
-                        data = line[6:]
-                        if data == '[DONE]':
-                            break
-
-                        try:
-                            chunk = json.loads(data)
-                            if chunk.get("error"):
-                                raise PageIndexAPIError(
-                                    "Chat completion failed mid-stream: "
-                                    f"{chunk['error']}")
-                            choices = chunk.get("choices") or [{}]
-                            content = choices[0].get("delta", {}).get("content", "")
-                            if content:
-                                yield content
-                        except json.JSONDecodeError:
-                            continue
-        finally:
-            response.close()
-
-    def _stream_chat_response_raw(self, response: requests.Response) -> Iterator[Dict[str, Any]]:
+    def _stream_chat_response_raw(self, response: requests.Response) -> Iterator[ChatObject]:
         """Streaming chat completion with full metadata, including citation events."""
+        from .local_chat import _ChatCompletionChunk
         try:
             for line in response.iter_lines():
                 if line:
@@ -390,7 +364,7 @@ class CloudAPI:
                                 raise PageIndexAPIError(
                                     "Chat completion failed mid-stream: "
                                     f"{chunk['error']}")
-                            yield chunk
+                            yield _ChatCompletionChunk(chunk)
                         except json.JSONDecodeError:
                             continue
         finally:
@@ -561,5 +535,89 @@ class CloudAPI:
         if response.status_code != 200:
             raise PageIndexAPIError(
                 f"Failed to list folders: {response.text}",
+                status_code=response.status_code)
+        return response.json()
+
+    def create_metadata_schema(
+        self,
+        folder_id: str,
+        fields: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Declare the metadata fields of a top-level folder (workspace).
+
+        Args:
+            folder_id (str): Top-level folder ID, or "root" for the account-level
+                schema used where a top-level folder declares none.
+            fields (dict): Field name to spec, e.g.
+                {"year": {"type": "number", "description": "Fiscal year"}};
+                type is "string", "number" or "boolean".
+
+        Returns:
+            dict: Created schema containing:
+                - folder_id (str): The folder ID, or "root"
+                - schema (dict): {"fields": ...} as stored
+        """
+        response = requests.put(
+            f"{self.BASE_URL}/folder/{_enc(folder_id)}/metadata/schema/",
+            headers=self._headers(),
+            json={"fields": fields},
+            timeout=30
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to create metadata schema: {response.text}",
+                status_code=response.status_code)
+        return response.json()
+
+    def get_metadata_schema(self, folder_id: str) -> Dict[str, Any]:
+        """
+        Get the metadata fields that apply to a folder's documents.
+
+        Args:
+            folder_id (str): Any folder ID, or "root" for the account-level
+                schema.
+
+        Returns:
+            dict: Effective schema containing:
+                - folder_id (str): The folder ID asked for
+                - workspace_id (str): The folder's top-level folder, or
+                  "root"
+                - inherited (bool): True when the schema comes from a
+                  parent folder or the account
+                - schema (dict | None): {"fields": ...}, or None when no
+                  schema is declared
+        """
+        response = requests.get(
+            f"{self.BASE_URL}/folder/{_enc(folder_id)}/metadata/schema/",
+            headers=self._headers(),
+            timeout=30
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to get metadata schema: {response.text}",
+                status_code=response.status_code)
+        return response.json()
+
+    def delete_metadata_schema(self, folder_id: str) -> Dict[str, Any]:
+        """
+        Delete the metadata fields declared on a top-level folder
+        (workspace), or on the account with folder_id "root". Documents keep
+        their metadata.
+
+        Args:
+            folder_id (str): Top-level folder ID, or "root".
+
+        Returns:
+            dict: {"folder_id": ..., "deleted": True}
+        """
+        response = requests.delete(
+            f"{self.BASE_URL}/folder/{_enc(folder_id)}/metadata/schema/",
+            headers=self._headers(),
+            timeout=30
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to delete metadata schema: {response.text}",
                 status_code=response.status_code)
         return response.json()

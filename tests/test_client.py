@@ -632,6 +632,47 @@ def test_flash_description_reads_only_the_top_level(local_client, tmp_path, monk
     assert "report summary" in prompts[0] and "alpha summary" not in prompts[0]
 
 
+def test_local_submit_reports_the_indexing_token_usage(local_client, tmp_path, monkeypatch):
+    """Every model call of one submit, async summaries and the sync
+    description alike, is summed into its own result's usage."""
+    import litellm
+    from types import SimpleNamespace
+    from conftest import build_pdf
+    pdf = tmp_path / "long.pdf"
+    pdf.write_bytes(build_pdf([[(72, 740 - 14 * i, 10, f"{fruit} line {i} " * 6) for i in range(45)]
+                               for fruit in ("apples", "bananas")]))
+    calls = {"async": 0, "sync": 0}
+
+    def reply(content):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=content),
+                                     finish_reason="stop")],
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=3,
+                                  prompt_tokens_details=SimpleNamespace(cached_tokens=4,
+                                                                        cache_write_tokens=1),
+                                  completion_tokens_details=SimpleNamespace(reasoning_tokens=2)))
+
+    async def acompletion(**kw):
+        calls["async"] += 1
+        return reply('{"summary": "s", "subsections": []}')
+
+    def completion(**kw):
+        calls["sync"] += 1
+        return reply("d")
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+    monkeypatch.setattr(litellm, "completion", completion)
+
+    for _ in range(2):
+        calls.update({"async": 0, "sync": 0})
+        usage = local_client.submit_document(str(pdf))["usage"]
+        n = calls["async"] + calls["sync"]
+        assert calls["async"] and calls["sync"] == 1
+        assert usage == {"prompt_tokens": 10 * n, "completion_tokens": 3 * n,
+                         "total_tokens": 13 * n,
+                         "prompt_tokens_details": {"cached_tokens": 4 * n, "cache_write_tokens": n},
+                         "completion_tokens_details": {"reasoning_tokens": 2 * n}}
+
+
 def test_unify_tree_edges():
     from pageindex.utils import unify_tree
     tree = [{"title": "A", "page_index": 3, "prefix_summary": "a",
@@ -890,6 +931,26 @@ def test_submit_missing_llm_key_fails_loud(local_client, sample_pdf, monkeypatch
         with pytest.raises(PageIndexAPIError, match="OPENAI_API_KEY"):
             local_client.submit_document(sample_pdf, **kwargs)
     assert local_client.list_documents()["total"] == 0
+
+
+@pytest.mark.parametrize("status", [401, None])
+def test_submit_shows_an_explained_llm_failure_alone(local_client, sample_pdf,
+                                                     monkeypatch, status):
+    """An exhausted ladder with a status (a claude-code/ login included)
+    names its cause, so the traceback shows the submit error alone; one
+    without, such as a bug the ladder retried, keeps its chain. Neither
+    carries run_off_loop's no-running-loop RuntimeError."""
+    def fail(pdf, **kwargs):
+        raise pageindex.utils.LLMRetriesExhausted("LLM call failed",
+                                                  status_code=status)
+    monkeypatch.setattr(pageindex.flash, "page_index_flash", fail)
+    with pytest.raises(PageIndexAPIError, match="LLM call failed") as err:
+        local_client.submit_document(sample_pdf)
+    ladder = err.value.__context__
+    assert isinstance(ladder, pageindex.utils.LLMRetriesExhausted)
+    assert err.value.__cause__ is (None if status else ladder)
+    assert err.value.__suppress_context__
+    assert ladder.__context__ is None
 
 
 def test_submit_rejections(local_client, sample_pdf, tmp_path):
@@ -1776,6 +1837,12 @@ def test_folders_are_cloud_only(local_client):
     with pytest.raises(PageIndexAPIError, match="cloud-only"):
         local_client.list_folders()
     with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        local_client.create_metadata_schema("f", {"year": {"type": "number"}})
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        local_client.get_metadata_schema("f")
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        local_client.delete_metadata_schema("f")
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
         local_client.folder_context("f")
     assert local_client.folder_context("root") == ""  # the library itself
 
@@ -1825,6 +1892,7 @@ def _patch_requests(monkeypatch, handler):
     fake = types.SimpleNamespace(
         post=lambda url, **kw: handler("POST", url, kw),
         get=lambda url, **kw: handler("GET", url, kw),
+        put=lambda url, **kw: handler("PUT", url, kw),
         delete=lambda url, **kw: handler("DELETE", url, kw),
         Response=FakeResponse,
     )
@@ -1865,6 +1933,25 @@ def test_cloud_request_wiring(cloud, sample_pdf):
 
     client.get_ocr("pi/../1")
     assert "/doc/pi%2F..%2F1/" in calls[-1]["url"]
+
+    fields = {"year": {"type": "number", "description": "Fiscal year"}}
+    fake.payload = {"folder_id": "f/1", "schema": {"fields": fields}}
+    assert client.create_metadata_schema("f/1", fields) == fake.payload
+    assert calls[-1]["method"] == "PUT"
+    assert calls[-1]["url"] == "https://api.pageindex.ai/folder/f%2F1/metadata/schema/"
+    assert calls[-1]["json"] == {"fields": fields}
+    assert calls[-1]["timeout"] == 30
+
+    fake.payload = {"folder_id": "f/1", "workspace_id": "f/1",
+                    "inherited": False, "schema": {"fields": fields}}
+    assert client.get_metadata_schema("f/1") == fake.payload
+    assert calls[-1]["method"] == "GET"
+    assert calls[-1]["url"] == "https://api.pageindex.ai/folder/f%2F1/metadata/schema/"
+
+    fake.payload = {"folder_id": "f/1", "deleted": True}
+    assert client.delete_metadata_schema("f/1") == fake.payload
+    assert calls[-1]["method"] == "DELETE"
+    assert calls[-1]["url"] == "https://api.pageindex.ai/folder/f%2F1/metadata/schema/"
 
     client.BASE_URL = "https://staging.example"
     client.api_key = "other"
@@ -1970,6 +2057,9 @@ def test_cloud_errors_carry_status_code(cloud, monkeypatch, sample_pdf):
         lambda: client.list_documents(),
         lambda: client.create_folder("f"),
         lambda: client.list_folders(),
+        lambda: client.create_metadata_schema("f", {}),
+        lambda: client.get_metadata_schema("f"),
+        lambda: client.delete_metadata_schema("f"),
         lambda: client.folder_context("f"),
     ]
     for attempt in attempts:
@@ -2310,6 +2400,28 @@ def test_cloud_chat_stream_parsing(cloud, monkeypatch):
         messages=[{"role": "user", "content": "q"}], stream=True,
         stream_metadata=True))
     assert {"object": "chat.completion.citations", "citations": []} in chunks
+    # the managed endpoint's chunks read by attribute too, as the openai SDK
+    # reads that JSON: fields it doesn't send read None
+    assert chunks[1].choices[0].delta.content == "Hi"
+    assert chunks[2].citations == [] and chunks[2].choices is None
+    assert chunks[0].model is None
+
+
+def test_cloud_chat_envelope_reads_by_key_and_by_attribute(cloud):
+    client, calls, fake = cloud
+    fake.payload = {"id": "c", "object": "chat.completion", "created": 1,
+                    "choices": [{"index": 0, "finish_reason": "stop",
+                                 "message": {"role": "assistant",
+                                             "content": "ok"}}]}
+    result = client.chat_completions("q")
+    assert result == fake.payload and json.loads(json.dumps(result)) == result
+    assert result.choices[0].message.content == "ok"
+    assert result.model is None  # the endpoint sends none
+    import yaml  # a 0.2.x caller's yaml dump still writes a plain mapping
+    assert yaml.safe_load(yaml.safe_dump(result)) == fake.payload
+    assert yaml.safe_load(yaml.dump(result)) == fake.payload
+    fake.payload = ["not", "an", "object"]  # passes through as before
+    assert client.chat_completions("q") == ["not", "an", "object"]
 
 
 def test_cloud_chat_stream_error_chunk_raises(cloud, monkeypatch):
@@ -2333,6 +2445,27 @@ def test_cloud_chat_stream_error_chunk_raises(cloud, monkeypatch):
         assert first in ("Partial",
                          {"choices": [{"delta": {"content": "Partial"}}]})
         with pytest.raises(PageIndexAPIError, match="boom"):
+            list(it)
+
+
+@pytest.mark.parametrize("finish", ["max_tokens", "refusal",
+                                    "model_context_window_exceeded"])
+def test_cloud_chat_text_stream_raises_on_a_cut_answer(cloud, monkeypatch, finish):
+    """The endpoint ends a cut or refused answer with that stop reason as
+    its finish_reason, then [DONE]."""
+    client, calls, fake = cloud
+    lines = [
+        b'data: {"choices": [{"delta": {"content": "Partial"}}]}',
+        ("data: " + json.dumps({"choices": [{"delta": {},
+                                             "finish_reason": finish}]})).encode(),
+        b"data: [DONE]",
+    ]
+    _patch_requests(monkeypatch, lambda m, url, kw: FakeResponse(lines=lines))
+    for stream in (lambda: client.chat_completions("q", stream=True),
+                   lambda: client.chat("q", stream=True)):
+        it = stream()
+        assert next(it) == "Partial"
+        with pytest.raises(PageIndexAPIError, match=finish):
             list(it)
 
 
@@ -2489,8 +2622,8 @@ def test_backend_scopes_the_index_lane(tmp_path, monkeypatch):
     api = LocalAPI(storage_path=str(tmp_path / "s"), model="m",
                    summary_model="s",
                    index_backend={"api_key": "ik", "api_base": "http://b"})
-    assert api._with_backend(_llm_backend.get) == {"api_key": "ik",
-                                                   "api_base": "http://b"}
+    assert api._with_backend(None, _llm_backend.get) == {"api_key": "ik",
+                                                         "api_base": "http://b"}
     assert _llm_backend.get() is None
 
     reply = SimpleNamespace(choices=[SimpleNamespace(
@@ -2504,7 +2637,7 @@ def test_backend_scopes_the_index_lane(tmp_path, monkeypatch):
                         ("gpt-4o", "openai/gpt-4o"),
                         ("my-finetune-v2", "openai/my-finetune-v2")):
         captured.clear()
-        api._with_backend(lambda: llm_completion(model, "p"))
+        api._with_backend(None, lambda: llm_completion(model, "p"))
         assert captured["model"] == wire
         assert captured["api_key"] == "ik"
         assert captured["api_base"] == "http://b"

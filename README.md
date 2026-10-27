@@ -30,7 +30,7 @@
 <details open>
 <summary><h2>Updates</h2></summary>
 
-- [Aug '26] 🔥 [**PageIndex SDK**](#quickstart): `pip install -U pageindex` now ships **local mode**: index, retrieve, and chat entirely on your machine with your own LLM key, or point the same client at PageIndex Cloud with an API key.
+- [Aug '26] 🔥 [**PageIndex SDK**](#quickstart): **local** and **cloud** modes — one client to index, retrieve, and chat on your machine (with your own LLM API key) or on [PageIndex Cloud](https://developer.pageindex.ai/).
 - [Aug '26] ⚡ [**PageIndex Flash**](https://pageindex.ai/blog/pageindex-flash): fast tree index generation for text-based PDFs, now the default indexing method in PageIndex SDK local mode.
 - [Scale PageIndex to Millions of Documents](https://pageindex.ai/blog/pageindex-filesystem): *PageIndex File System* is a file-level tree indexing layer that lets PageIndex reason over an entire corpus, not just a single document.
 - [PageIndex App](https://app.pageindex.ai): a human-like document analysis agent for long professional documents.<!-- Also available via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer). -->
@@ -101,6 +101,8 @@ print(answer)
 - **`index=`: a basic model is sufficient.** The tree structure itself is extracted from the document layout without an LLM; the index model only summarizes and refines it, which a basic model does well.
 - **`chat=`: use the best model you can afford.** The chat model searches the tree to retrieve information. See [Query cost and accuracy](#query-cost-and-accuracy).
 
+**Have a Claude subscription?** PageIndex can use your subscription to call Claude models through Claude Code: usage is covered by your plan, no API key needed. Install with `pip install -U "pageindex[claude]"`, then prefix model names with `claude-code/`, e.g., `index="claude-code/haiku"`, `chat="claude-code/opus"` (see [example](https://github.com/VectifyAI/PageIndex/blob/main/cookbook/pageindex-claude-subscription.py)).
+
 ### [Use PageIndex through the SDK client →](https://docs.pageindex.ai/getting-started)
 
 Configure other models, streaming, multi-document search, citations, and more.
@@ -136,17 +138,15 @@ Indexing time also scales predictably with document length. In the same local se
 
 ### Query cost and accuracy
 
-[**PageIndex-OSS-Benchmark**](https://github.com/VectifyAI/PageIndex-OSS-Benchmark) measures exactly the setup in the quickstart above (`PageIndexClient()` in local mode, flash indexing, no OCR) on 62 lookup questions over 34 PDFs (1,945 pages) drawn from [MMLongBench-Doc-V2](https://github.com/VectifyAI/MMLongBench-Doc-V2). Every question's answer is a fact stated in running text, so a wrong answer is a **retrieval or reading failure**, not a reasoning one.
+[**PageIndex Financial QA Benchmark**](https://github.com/VectifyAI/pageindex-benchmarks/tree/main/financial-qa) compares the accuracy and query cost of 34 configurations of 19 LLMs answering 100 questions over 40 Form 10-K filings from 8 companies, with PageIndex doing the retrieval. Cost is measured per 100-question run and excludes one-time indexing.
 
 <div align="center">
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/VectifyAI/PageIndex/main/assets/results-dark.png">
-  <img src="https://raw.githubusercontent.com/VectifyAI/PageIndex/main/assets/results-light.png" width="75%" alt="Accuracy against average cost per question. Each model forms a near-vertical reasoning-effort ladder; moving between models costs an order of magnitude a step.">
-</picture>
+<a href="https://github.com/VectifyAI/pageindex-benchmarks/tree/main/financial-qa">
+  <img src="https://raw.githubusercontent.com/VectifyAI/pageindex-benchmarks/main/financial-qa/results/accuracy_vs_cost.png" width="90%" alt="PageIndex Financial QA Benchmark: question answering accuracy versus cost per 100-question run across 19 models on 40 Form 10-K filings from 8 companies.">
+</a>
 </div>
 
-
-Full results, data, and the runner are in the [benchmark repo](https://github.com/VectifyAI/PageIndex-OSS-Benchmark).
+Full results, data, and reproduction instructions are in the [benchmark repo](https://github.com/VectifyAI/pageindex-benchmarks/tree/main/financial-qa).
 
 ### Cost per query vs. native PDF input
 
@@ -203,7 +203,7 @@ print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 | Storage | Local directory | Cloud storage |
 | Citations | Page-level | Block-level |
 | OCR & image understanding | — | ✓ |
-| [Metadata](https://docs.pageindex.ai/sdk/documents#metadata-cloud) | — | ✓ |
+| [Metadata](https://docs.pageindex.ai/sdk/documents#metadata) | — | ✓ |
 | [Folders](https://docs.pageindex.ai/sdk/documents#folders-cloud) | — | ✓ |
 | [MCP server](https://docs.pageindex.ai/mcp) | — | ✓ |
 

@@ -13,7 +13,7 @@ from typing import Any
 from .errors import PageIndexAPIError
 from .local_store import DocStore
 from .naming import sanitize_filename, truncate_filename
-from .utils import count_tokens, run_off_loop
+from .utils import LLMRetriesExhausted, count_tokens, run_off_loop
 
 logger = logging.getLogger(__name__)
 
@@ -56,14 +56,17 @@ class LocalAPI:
         from .utils import ConfigLoader
         self._config_loader = ConfigLoader()
 
-    def _with_backend(self, func, *args):
-        """Scope the indexing lane's connection overrides around one
-        operation — runs inside whatever thread run_off_loop picked."""
-        from .utils import _llm_backend
+    def _with_backend(self, usage, func, *args):
+        """Scope the indexing lane's connection overrides and the `usage`
+        tally around one operation — runs inside whatever thread
+        run_off_loop picked."""
+        from .utils import _llm_backend, _llm_usage
         token = _llm_backend.set(self._index_backend)
+        usage_token = _llm_usage.set(usage)
         try:
             return func(*args)
         finally:
+            _llm_usage.reset(usage_token)
             _llm_backend.reset(token)
 
     # ── indexing ──
@@ -138,18 +141,26 @@ class LocalAPI:
             )
         self._unique_doc_name(doc_name)
 
+        usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+                 "prompt_tokens_details": {"cached_tokens": 0,
+                                           "cache_write_tokens": 0},
+                 "completion_tokens_details": {"reasoning_tokens": 0}}
         try:
             if mode == "flash":
                 structure, description = run_off_loop(
-                    self._with_backend, self._index_flash, file_path
+                    self._with_backend, usage, self._index_flash, file_path
                 )
             else:
                 structure, description = run_off_loop(
-                    self._with_backend, self._index_standard, file_path,
+                    self._with_backend, usage, self._index_standard, file_path,
                     page_texts
                 )
         except PageIndexAPIError:
             raise
+        except LLMRetriesExhausted as e:
+            # with a status its message names the cause; the chain stays on __context__
+            raise PageIndexAPIError(f"Failed to submit document: {e}") from (
+                None if e.status_code else e)
         except Exception as e:
             raise PageIndexAPIError(f"Failed to submit document: {e}") from e
         self._check_page_bounds(structure, len(page_texts))
@@ -174,7 +185,7 @@ class LocalAPI:
             }
             self._store.save_document(
                 doc_id, meta, remove_fields(structure, fields=["text"]), pages)
-        return {"doc_id": doc_id, "name": meta["name"]}
+        return {"doc_id": doc_id, "name": meta["name"], "usage": usage}
 
     def _unique_doc_name(self, name: str) -> str:
         """Mirror the cloud upload: a taken name gets _1.._99 appended,

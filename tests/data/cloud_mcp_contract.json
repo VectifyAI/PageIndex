@@ -6,7 +6,7 @@
         "readOnlyHint": true,
         "openWorldHint": false
       },
-      "description": "Primary document retrieval tool. After orienting with get_folder_structure() (when available), use this for all document-related questions. The bare call returns root-level sub-folders and documents; pass folder_id to drill into a sub-folder level by level. Use sort=\"relevance\" + query for semantic ranking. Do NOT jump to search_documents() first — it is an escalation path, only after browse_documents(sort=\"relevance\") has failed.",
+      "description": "Primary document retrieval tool. After orienting with `get_folder_structure()` (when available) — and, for queries that may involve typed attributes, pairing it with `get_metadata_schema()` so you know which fields metadata mode could filter on — use this for all document-related questions. The bare call returns root-level sub-folders and documents; pass `folder_id` to drill into a sub-folder level by level. Use `sort=\"relevance\"` + `query` for semantic ranking. Do NOT jump to `search_documents()` first — keyword search and metadata mode are escalation paths, only after `browse_documents(sort=\"relevance\")` + the persistence retries have failed. `browse_documents` does not filter by attribute — for typed-attribute queries, escalate to `search_documents(mode=\"metadata\")`.",
       "schema": {
         "type": "object",
         "properties": {
@@ -56,7 +56,7 @@
         "readOnlyHint": true,
         "openWorldHint": false
       },
-      "description": "Check a document's processing status and metadata. `status` is one of \"pending\", \"queued\", \"processing\", \"completed\", or \"failed\" — call this before `get_document_structure()` or `get_page_content()` to confirm the document is ready.",
+      "description": "Check a document's processing status and metadata. Call this before `get_document_structure()` or `get_page_content()` to confirm the document is ready (`status === \"completed\"`).",
       "schema": {
         "type": "object",
         "properties": {

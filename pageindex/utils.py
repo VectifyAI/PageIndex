@@ -32,6 +32,42 @@ import re
 _llm_backend: contextvars.ContextVar = contextvars.ContextVar(
     "pageindex_llm_backend", default=None)
 
+# Same scope: the dict the token usage of every indexing model call is
+# summed into, which LocalAPI returns from submit_document.
+_llm_usage: contextvars.ContextVar = contextvars.ContextVar(
+    "pageindex_llm_usage", default=None)
+
+
+def _add_usage(response) -> None:
+    usage, counted = _llm_usage.get(), getattr(response, "usage", None)
+    if usage is None or counted is None:
+        return
+    prompt = getattr(counted, "prompt_tokens", 0) or 0
+    completion = getattr(counted, "completion_tokens", 0) or 0
+    details = getattr(counted, "prompt_tokens_details", None)
+    cached = getattr(details, "cached_tokens", 0)
+    cache_write = getattr(details, "cache_write_tokens", 0)
+    reasoning = getattr(getattr(counted, "completion_tokens_details", None),
+                        "reasoning_tokens", 0)
+    usage["prompt_tokens"] += prompt
+    usage["completion_tokens"] += completion
+    usage["total_tokens"] += prompt + completion
+    usage["prompt_tokens_details"]["cached_tokens"] += cached or 0
+    usage["prompt_tokens_details"]["cache_write_tokens"] += cache_write or 0
+    usage["completion_tokens_details"]["reasoning_tokens"] += reasoning or 0
+
+
+def _add_usage_counts(counts, usage=None) -> None:
+    """Add a chat-shape usage dict (a claude-code/ run's) to the tally."""
+    usage = _llm_usage.get() if usage is None else usage
+    if usage is None:
+        return
+    for key, value in counts.items():
+        if isinstance(value, dict):
+            _add_usage_counts(value, usage.setdefault(key, {}))
+        else:
+            usage[key] = usage.get(key, 0) + (value or 0)
+
 
 def _repair_litellm_types() -> None:
     """litellm 1.97.0's Message/Delta annotations carry nested forward refs
@@ -104,10 +140,12 @@ def run_off_loop(func, *args):
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return func(*args)
-    from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(func, *args).result()
+        pass  # called below, so its errors don't chain onto this one
+    else:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(func, *args).result()
+    return func(*args)
 
 
 def _litellm_model(model):
@@ -164,6 +202,12 @@ def _is_unrecoverable(exc: Exception) -> bool:
 
 
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
+    from .integrations.claude_agent_sdk import claude_code_complete, is_claude_code
+    if is_claude_code(model):
+        if chat_history or return_finish_reason:
+            raise ValueError("claude-code/ models index in flash mode only; "
+                             "standard mode needs an API model.")
+        return run_off_loop(asyncio.run, claude_code_complete(model, prompt))
     import litellm
     max_retries = 10
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
@@ -181,6 +225,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
                 "max_retries": 0,
                 **(backend or {}),
             })
+            _add_usage(response)
             content = response.choices[0].message.content
             if return_finish_reason:
                 finish_reason = "max_output_reached" if response.choices[0].finish_reason == "length" else "finished"
@@ -201,6 +246,9 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
 
 
 async def llm_acompletion(model, prompt, **params):
+    from .integrations.claude_agent_sdk import claude_code_complete, is_claude_code
+    if is_claude_code(model):
+        return await claude_code_complete(model, prompt, **params)
     import litellm
     max_retries = 10
     messages = [{"role": "user", "content": prompt}]
@@ -218,6 +266,7 @@ async def llm_acompletion(model, prompt, **params):
                 **(backend or {}),
                 **params,
             })
+            _add_usage(response)
             return response.choices[0].message.content
         except Exception as e:
             if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
