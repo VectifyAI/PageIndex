@@ -377,12 +377,12 @@ def test_anthropic_routed_models_mark_managed_prefix_for_cache(
                  "bedrock/us.anthropic.claude-sonnet-5",
                  "vertex_ai/claude-sonnet-4-5"):
         agent = _openai_agent(client, "chat", name, "sys", None, None)
-        assert agent.model_settings.extra_args == marked
+        assert agent.model_settings.extra_args == {"max_retries": 0, **marked}
     for name in ("gpt-5", "openai/Qwen/x", "litellm/groq/x",
                  "bedrock/meta.llama3-70b-instruct-v1:0",
                  "vertex_ai/gemini-2.5-pro"):
         agent = _openai_agent(client, "chat", name, "sys", None, None)
-        assert agent.model_settings.extra_args is None
+        assert agent.model_settings.extra_args == {"max_retries": 0}
 
 
 @needs_agents
@@ -1205,6 +1205,25 @@ def test_streamed_fields_litellm_drops_go_back(client, store_path,
         assert calls[0]["trace"] == "plan"
 
 
+def _model_rate_limited():
+    """LiteLLM's 429 as a server sent it, asking for a 0.01 s wait."""
+    from litellm.exceptions import RateLimitError
+    request = httpx.Request("POST", "https://llm.example/v1/messages")
+    response = httpx.Response(429, headers={"retry-after": "0.01"}, request=request)
+    err = RateLimitError("slow down", llm_provider="anthropic", model="claude-test",
+                         response=response)
+    setattr(err, "litellm_response_headers", response.headers)
+    err.__cause__ = httpx.HTTPStatusError("reply", request=request, response=response)
+    return err
+
+
+def _model_key_missing():
+    """LiteLLM's missing-credentials 500, raised before any request."""
+    from litellm.exceptions import InternalServerError
+    return InternalServerError("Missing credentials", llm_provider="anthropic",
+                               model="claude-test")
+
+
 @needs_agents
 @pytest.mark.parametrize("stream", [False, True])
 def test_claude_thinking_reaches_the_anthropic_wire_once(client, store_path,
@@ -1523,6 +1542,79 @@ def test_gateway_refusing_marks_goes_again_without_them(client, store_path,
                                                   False]
 
 
+@needs_agents
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("error, fails, calls", [
+    (_model_rate_limited, 2, 3), (_model_rate_limited, 9, 4), (_model_key_missing, 9, 1)],
+    ids=["recovers", "exhausted", "local"])
+def test_chat_lane_retries_as_the_official_sdks(client, store_path, monkeypatch,
+                                                stream, error, fails, calls):
+    pytest.importorskip("litellm")
+    import litellm
+    from litellm.llms.base_llm.base_model_iterator import MockResponseIterator
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    sent = []
+
+    async def acompletion(**kwargs):
+        sent.append(kwargs.get("max_retries"))
+        if len(sent) <= fails:
+            raise error()
+        reply = _litellm_reply("ok")
+        return MockResponseIterator(reply) if kwargs.get("stream") else reply
+
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+
+    def ask():
+        out = client.chat_completions([{"role": "user", "content": "q"}], doc_id=doc_id,
+                                      model="anthropic/claude-test", stream=stream)
+        return list(out) if stream else out
+
+    if fails < calls:
+        ask()
+    else:
+        with pytest.raises(PageIndexAPIError):
+            ask()
+    assert sent == [0] * calls
+
+
+@needs_agents
+def test_chat_retry_waits_as_the_server_asks():
+    pytest.importorskip("litellm")
+    from agents.retry import RetryDecision
+    from pageindex.retry import agent_policy
+    assert agent_policy(types.SimpleNamespace(error=_model_rate_limited(), attempt=1)) == \
+        RetryDecision(retry=True, delay=0.01)
+    assert agent_policy(types.SimpleNamespace(error=_model_key_missing(), attempt=1)) is False
+
+
+@needs_agents
+def test_chat_retry_budget_follows_the_constant(monkeypatch):
+    monkeypatch.setattr("pageindex.retry.CHAT_RETRIES", 5)
+    assert local_chat._chat_retry(local_chat._Replies("m")).max_retries == 5
+
+
+def test_a_stream_error_retries_by_its_status():
+    """A server's error inside a stream has no httpx error behind it; its
+    status decides: OpenRouter's abort goes again, a content-policy
+    refusal (a 400 LiteLLM's Responses stream raises this way) does not."""
+    pytest.importorskip("litellm")
+    from litellm.exceptions import (APIConnectionError,
+                                    ContentPolicyViolationError,
+                                    MidStreamFallbackError)
+    from pageindex.retry import should_retry
+
+    def in_stream(error):
+        return MidStreamFallbackError(message=str(error), model="m",
+                                      llm_provider="openai",
+                                      original_exception=error)
+
+    assert should_retry(in_stream(APIConnectionError(
+        message="The operation was aborted", llm_provider="openai",
+        model="m")))
+    assert not should_retry(in_stream(ContentPolicyViolationError(
+        message="Invalid prompt", llm_provider="openai", model="m")))
+
+
 # ── chat (front door) ──
 
 @needs_agents
@@ -1571,7 +1663,7 @@ def test_chat_empty_answer_row_stays_text(client, store_path, fake_model,
 def test_chat_reasoning_effort_reaches_the_engine(client, store_path,
                                                   fake_model, monkeypatch):
     """The business door's one thinking knob rides chat_completions'
-    channel unchanged; unset sends nothing."""
+    channel unchanged; unset sends no effort."""
     seen = {}
     real = local_chat._openai_agent
 
@@ -1586,7 +1678,7 @@ def test_chat_reasoning_effort_reaches_the_engine(client, store_path,
     assert seen["settings"].reasoning.effort == "low"
     fake_model([[_msg_item("ok")]])
     client.chat("q")
-    assert seen["settings"].extra_args is None
+    assert seen["settings"].extra_args == {"max_retries": 0}
 
 
 def test_chat_cloud_unwraps_envelope(monkeypatch):
@@ -3408,7 +3500,7 @@ def test_agent_carries_prompt_cache_key_in_extra_body(monkeypatch):
             doc_ids=None, cache_key="pageindex-k2")
         assert agent.model_settings.extra_body == {
             "prompt_cache_key": "pageindex-k2"}, name
-        assert agent.model_settings.extra_args is None
+        assert agent.model_settings.extra_args == {"max_retries": 0}
 
 
 @needs_agents
@@ -3422,7 +3514,7 @@ def test_reasoning_passthrough_reaches_each_engine(monkeypatch):
     agent = local_chat._openai_agent(None, "chat", "gpt-test", "sys",
                                      None, None, reasoning_effort="low")
     assert agent.model_settings.reasoning == Reasoning(effort="low")
-    assert agent.model_settings.extra_args is None
+    assert agent.model_settings.extra_args == {"max_retries": 0}
     agent = local_chat._openai_agent(None, "chat", "anthropic/claude-x",
                                      "sys", None, None,
                                      reasoning_effort="none")
@@ -3444,11 +3536,11 @@ def test_reasoning_passthrough_reaches_each_engine(monkeypatch):
     agent = local_chat._openai_agent(None, "chat", "gpt-test", "sys",
                                      None, None)
     assert agent.model_settings.reasoning is None
-    assert agent.model_settings.extra_args is None
+    assert agent.model_settings.extra_args == {"max_retries": 0}
     # "" is unset on this lane too, like the protocol lanes
     agent = local_chat._openai_agent(None, "chat", "gpt-test", "sys",
                                      None, None, reasoning_effort="")
-    assert agent.model_settings.extra_args is None
+    assert agent.model_settings.extra_args == {"max_retries": 0}
 
 
 @needs_agents
@@ -3554,7 +3646,7 @@ def test_extra_body_passthrough_reaches_each_engine(monkeypatch):
                                                  "prompt_cache_key": "mine"})
     assert agent.model_settings.extra_body == {
         "prompt_cache_key": "mine", "logit_bias": {"1": 5}}
-    assert agent.model_settings.extra_args is None
+    assert agent.model_settings.extra_args == {"max_retries": 0}
     agent = local_chat._openai_agent(None, "chat", "anthropic/claude-x",
                                      "sys", None, None,
                                      reasoning_effort="low",

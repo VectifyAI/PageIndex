@@ -429,7 +429,7 @@ class PageIndexClient:
         summary_concurrency (int, optional): Local flash mode only — cap on
             simultaneous indexing model calls per lane: the summaries, and
             expand up to its own ceiling of 32. The lanes overlap, so up to
-            cap + min(32, cap) calls run at once. Defaults to 64.
+            cap + min(32, cap) calls run at once. Defaults to 128.
         summary_reasoning_effort (str, optional): Local flash mode only —
             the reasoning effort sent with each node-summary call, over any
             in ``index_backend`` (``"none"``, ``"low"``, ``"high"``, ...; a
@@ -797,7 +797,10 @@ class PageIndexClient:
             folder_id (str, optional): Cloud-only folder (workspace) ID.
             metadata (dict, optional): Your own JSON-serializable tags for the
                 document; returned in get_document/get_tree/get_ocr responses
-                and list_documents entries (both modes).
+                and list_documents entries (both modes). Cloud: a metadata
+                schema must apply to the folder (``create_metadata_schema()``);
+                without one, a non-empty dict raises PageIndexAPIError (HTTP
+                400).
             wait (bool): Return only once the document is ready for use.
                 Cloud: polls status until "completed" (raises on "failed" or
                 after 30 minutes). Local: indexing is synchronous already, so
@@ -2759,10 +2762,13 @@ class PageIndexClient:
         top-level folder's fields. Chat's metadata search filters, sorts and
         counts documents by these fields. ``metadata`` on a document under
         the folder may use only these fields, with their types (HTTP 400
-        otherwise); a document may leave any of them out. Documents uploaded
-        before the schema are not re-checked. Set once: a second call on the
-        same folder raises PageIndexAPIError (HTTP 409). Cloud-only: local
-        mode raises PageIndexAPIError.
+        otherwise); a document may leave any of them out. Declaring also
+        removes, from the documents these fields apply to, the metadata keys
+        they don't declare or declare with another type; matching keys stay.
+        Set once: a second call on the same folder raises PageIndexAPIError
+        (HTTP 409); to change the fields, call ``delete_metadata_schema()``,
+        then declare them again. Cloud-only: local mode raises
+        PageIndexAPIError.
 
         Args:
             folder_id (str): Top-level folder ID, or "root".
@@ -2776,6 +2782,49 @@ class PageIndexClient:
         ).create_metadata_schema(
             folder_id=folder_id, fields=fields,
         )
+
+    def get_metadata_schema(self, folder_id: str) -> dict[str, Any]:
+        """
+        Get the metadata fields that apply to a folder's documents: from its
+        top-level folder's schema, else the account's (``"root"``) schema.
+        ``schema`` is None when neither has one; ``inherited`` is True when
+        the fields come from a parent folder or the account.
+        Cloud-only: local mode raises PageIndexAPIError.
+
+        Args:
+            folder_id (str): Any folder ID, or "root" for the account-level
+                fields alone.
+
+        Returns:
+            dict: {'folder_id', 'workspace_id', 'inherited', 'schema'}.
+        """
+        return self._require_cloud(
+            "get_metadata_schema is cloud-only — local mode has no "
+            "metadata schemas. Create the client with an api_key to use them."
+        ).get_metadata_schema(folder_id=folder_id)
+
+    def delete_metadata_schema(self, folder_id: str) -> dict[str, Any]:
+        """
+        Delete the metadata fields declared on a top-level folder
+        (workspace), or on the account with ``folder_id="root"``, so they can
+        be declared again with ``create_metadata_schema()``. It deletes only
+        what this folder itself declares, and ``deleted`` is True even when
+        that was nothing. A top-level folder's documents then fall back to the
+        account's fields; to allow no metadata at all, declare
+        ``create_metadata_schema(folder_id, {})``, which removes the metadata
+        they carry. Documents keep their metadata until fields are declared
+        again. Cloud-only: local mode raises PageIndexAPIError.
+
+        Args:
+            folder_id (str): Top-level folder ID, or "root".
+
+        Returns:
+            dict: {'folder_id', 'deleted': True}.
+        """
+        return self._require_cloud(
+            "delete_metadata_schema is cloud-only — local mode has no "
+            "metadata schemas. Create the client with an api_key to use them."
+        ).delete_metadata_schema(folder_id=folder_id)
 
     # ---------- PATH HELPERS ----------
 

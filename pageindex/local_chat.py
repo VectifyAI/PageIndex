@@ -480,27 +480,23 @@ def _recording(create, replies: _Replies):
 
 
 def _chat_retry(replies: _Replies):
-    """Again for a stream the server broke before any output (the runner
-    asks only then; OpenRouter aborts some). Again without the fields a
-    400 names, of those the request had that may be refused, for the rest
-    of the call: each retry refuses what its 400 named. Three retries at
-    most."""
+    """Again at once without the fields a 400 names, of those the request
+    had that may be refused, for the rest of the call: each retry refuses
+    what its 400 named. Anything else by the SDK's one retry rule, within
+    retry.CHAT_RETRIES."""
     from agents import ModelRetrySettings, RetryDecision
+    from .retry import CHAT_RETRIES, agent_policy
 
     def policy(context):
-        status = context.normalized.status_code
-        if context.stream and status is not None and status >= 500:
-            return True
-        if status not in (400, 422):
-            return False
-        text = str(context.error)
-        named = {key for key in replies.sent
-                 if re.search(rf"\b{re.escape(key)}\b", text)}
-        if not named:
-            return False
-        replies.refused.update(named)
-        return RetryDecision(retry=True, delay=0)
-    return ModelRetrySettings(max_retries=3, policy=policy)
+        if context.normalized.status_code in (400, 422):
+            text = str(context.error)
+            named = {key for key in replies.sent
+                     if re.search(rf"\b{re.escape(key)}\b", text)}
+            if named:
+                replies.refused.update(named)
+                return RetryDecision(retry=True, delay=0)
+        return agent_policy(context)
+    return ModelRetrySettings(max_retries=CHAT_RETRIES, policy=policy)
 
 
 def _keep_reply_fields(agent, messages) -> Optional[_Replies]:
@@ -743,7 +739,9 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
     # The responses lane is the OpenAI SDK whatever the name says.
     openai_backend = protocol == "responses" or _openai_protocol(model_name)
     conn = _sdk_backend(backend)
-    extra_args = (_cache_extra_args(model_name, conn.get("base_url"))
+    # LiteLLM's own retries off: the runner's (_chat_retry) are the chat lane's one layer.
+    extra_args = ({"max_retries": 0,
+                   **(_cache_extra_args(model_name, conn.get("base_url")) or {})}
                   if protocol == "chat" else None)
     if reasoning_effort:
         try:

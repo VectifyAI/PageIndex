@@ -157,8 +157,7 @@ def _litellm_model(model):
 
 
 # Misconfiguration: no retry can fix a rejected key or a model that does not
-# exist, and every later call fails the same way. An unknown status is a
-# transport failure and stays retryable.
+# exist, and every later call fails the same way.
 _UNRECOVERABLE_STATUS = frozenset({401, 403, 404})
 
 # A 400 (context_length_exceeded) is equally unfixable by retry — the prompt
@@ -185,18 +184,19 @@ def _is_unrecoverable(exc: Exception) -> bool:
 
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
     from .integrations.claude_agent_sdk import claude_code_complete, is_claude_code
+    from .retry import INDEX_MAX_DELAY, INDEX_RETRIES, delay, should_retry
     if is_claude_code(model):
         if chat_history or return_finish_reason:
             raise ValueError("claude-code/ models index in flash mode only; "
                              "standard mode needs an API model.")
         return run_off_loop(asyncio.run, claude_code_complete(model, prompt))
     import litellm
-    max_retries = 10
+    attempts = INDEX_RETRIES + 1
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
     backend = _llm_backend.get()
     model = _litellm_model(model)
     _quiet_litellm()
-    for i in range(max_retries):
+    for i in range(attempts):
         try:
             response = litellm.completion(**{
                 "model": model,
@@ -216,27 +216,30 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
             if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
                 raise
             logging.error(f"Error: {e}")
-            if i < max_retries - 1:
+            retry = should_retry(e)
+            if retry and i < attempts - 1:
                 logging.warning("Retrying LLM completion")
-                time.sleep(1)
+                time.sleep(delay(i, getattr(e, "litellm_response_headers", None), INDEX_MAX_DELAY))
             else:
                 raise LLMRetriesExhausted(
-                    f"LLM completion failed after {max_retries} retries: {e}",
+                    f"LLM completion failed after {attempts} attempts: {e}" if retry
+                    else f"LLM completion failed: {e}",
                     status_code=getattr(e, "status_code", None),
                 ) from e
 
 
 async def llm_acompletion(model, prompt, **params):
     from .integrations.claude_agent_sdk import claude_code_complete, is_claude_code
+    from .retry import INDEX_MAX_DELAY, INDEX_RETRIES, delay, should_retry
     if is_claude_code(model):
         return await claude_code_complete(model, prompt, **params)
     import litellm
-    max_retries = 10
+    attempts = INDEX_RETRIES + 1
     messages = [{"role": "user", "content": prompt}]
     backend = _llm_backend.get()
     model = _litellm_model(model)
     _quiet_litellm()
-    for i in range(max_retries):
+    for i in range(attempts):
         try:
             response = await litellm.acompletion(**{
                 "model": model,
@@ -252,12 +255,15 @@ async def llm_acompletion(model, prompt, **params):
             if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
                 raise
             logging.error(f"Error: {e}")
-            if i < max_retries - 1:
+            retry = should_retry(e)
+            if retry and i < attempts - 1:
                 logging.warning("Retrying LLM completion")
-                await asyncio.sleep(1)
+                await asyncio.sleep(delay(i, getattr(e, "litellm_response_headers", None),
+                                          INDEX_MAX_DELAY))
             else:
                 raise LLMRetriesExhausted(
-                    f"LLM completion failed after {max_retries} retries: {e}",
+                    f"LLM completion failed after {attempts} attempts: {e}" if retry
+                    else f"LLM completion failed: {e}",
                     status_code=getattr(e, "status_code", None),
                 ) from e
 
@@ -903,7 +909,7 @@ async def generate_summaries_for_structure(structure, model=None):
     return structure
 
 
-SUMMARY_CONCURRENCY = 64        # simultaneous summary model calls
+SUMMARY_CONCURRENCY = 128       # simultaneous summary model calls
 SUMMARY_INTRO_MAX_PAGES = 3     # cap on leading pages fed into a parent summary
 SUMMARY_MAX_WORDS = 150         # word cap the summary prompts ask for
 TOKENS_PER_WORD = 4 / 3

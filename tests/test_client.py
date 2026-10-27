@@ -1,5 +1,6 @@
 """SDK surface tests: PageIndexClient in local and cloud mode."""
 import asyncio
+import contextlib
 import importlib
 import inspect
 import json
@@ -11,6 +12,7 @@ import sys
 import types
 from pathlib import Path
 
+import httpx
 import pytest
 
 import pageindex.flash
@@ -938,7 +940,7 @@ def test_submit_shows_an_explained_llm_failure_alone(local_client, sample_pdf,
                                                      monkeypatch, status):
     """An exhausted ladder with a status (a claude-code/ login included)
     names its cause, so the traceback shows the submit error alone; one
-    without, such as a bug the ladder retried, keeps its chain. Neither
+    without, such as a bug, keeps its chain. Neither
     carries run_off_loop's no-running-loop RuntimeError."""
     def fail(pdf, **kwargs):
         raise pageindex.utils.LLMRetriesExhausted("LLM call failed",
@@ -1839,6 +1841,10 @@ def test_folders_are_cloud_only(local_client):
     with pytest.raises(PageIndexAPIError, match="cloud-only"):
         local_client.create_metadata_schema("f", {"year": {"type": "number"}})
     with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        local_client.get_metadata_schema("f")
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        local_client.delete_metadata_schema("f")
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
         local_client.folder_context("f")
     assert local_client.folder_context("root") == ""  # the library itself
 
@@ -1874,15 +1880,11 @@ class FakeResponse:
 
 
 def _patch_requests(monkeypatch, handler):
-    """Replace cloud_api's requests module with per-verb fakes."""
-    fake = types.SimpleNamespace(
-        post=lambda url, **kw: handler("POST", url, kw),
-        get=lambda url, **kw: handler("GET", url, kw),
-        put=lambda url, **kw: handler("PUT", url, kw),
-        delete=lambda url, **kw: handler("DELETE", url, kw),
-        Response=FakeResponse,
-    )
-    monkeypatch.setattr("pageindex.cloud_api.requests", fake)
+    """Replace cloud_api's session verbs with per-verb fakes."""
+    import requests
+    for verb in ("get", "post", "put", "delete"):
+        monkeypatch.setattr(requests.Session, verb,
+                            lambda self, url, _verb=verb.upper(), **kw: handler(_verb, url, kw))
 
 
 @pytest.fixture
@@ -1927,6 +1929,17 @@ def test_cloud_request_wiring(cloud, sample_pdf):
     assert calls[-1]["url"] == "https://api.pageindex.ai/folder/f%2F1/metadata/schema/"
     assert calls[-1]["json"] == {"fields": fields}
     assert calls[-1]["timeout"] == 30
+
+    fake.payload = {"folder_id": "f/1", "workspace_id": "f/1",
+                    "inherited": False, "schema": {"fields": fields}}
+    assert client.get_metadata_schema("f/1") == fake.payload
+    assert calls[-1]["method"] == "GET"
+    assert calls[-1]["url"] == "https://api.pageindex.ai/folder/f%2F1/metadata/schema/"
+
+    fake.payload = {"folder_id": "f/1", "deleted": True}
+    assert client.delete_metadata_schema("f/1") == fake.payload
+    assert calls[-1]["method"] == "DELETE"
+    assert calls[-1]["url"] == "https://api.pageindex.ai/folder/f%2F1/metadata/schema/"
 
     client.BASE_URL = "https://staging.example"
     client.api_key = "other"
@@ -2033,6 +2046,8 @@ def test_cloud_errors_carry_status_code(cloud, monkeypatch, sample_pdf):
         lambda: client.create_folder("f"),
         lambda: client.list_folders(),
         lambda: client.create_metadata_schema("f", {}),
+        lambda: client.get_metadata_schema("f"),
+        lambda: client.delete_metadata_schema("f"),
         lambda: client.folder_context("f"),
     ]
     for attempt in attempts:
@@ -2636,23 +2651,25 @@ def test_index_lane_makes_no_key_prejudgment(monkeypatch):
 
 
 def test_llm_completion_surfaces_litellms_credential_verdict(monkeypatch):
-    """LiteLLM's own missing-credentials error (a retryable-shaped 500)
-    rides the retry loop and lands verbatim in the terminal error."""
+    """LiteLLM's own missing-credentials error (a 500 raised before any
+    request) fails on the first attempt, verbatim in the terminal error."""
     pytest.importorskip("litellm")
     import litellm  # noqa: F401 — first import may load a .env; delenv after
     from pageindex.utils import llm_completion
 
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setattr("pageindex.utils.time.sleep", lambda s: None)
+    slept = []
+    monkeypatch.setattr("pageindex.utils.time.sleep", slept.append)
     with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
         llm_completion("gpt-4o", "probe")
 
-    async def _nosleep(s):
-        pass
+    async def _asleep(s):
+        slept.append(s)
 
-    monkeypatch.setattr("pageindex.utils.asyncio.sleep", _nosleep)
+    monkeypatch.setattr("pageindex.utils.asyncio.sleep", _asleep)
     with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
         asyncio.run(pageindex.utils.llm_acompletion("gpt-4o", "probe"))
+    assert slept == []
 
 
 def test_litellm_model_normalizes_without_key_prejudgment(monkeypatch):
@@ -2839,6 +2856,232 @@ def test_llm_acompletion_400_skips_the_retry_ladder(monkeypatch):
     with pytest.raises(Rejected):
         asyncio.run(pageindex.utils.llm_acompletion("gpt-4o", "p"))
     assert calls["n"] == 1
+
+
+class _LLMError(Exception):
+    """A LiteLLM-shaped error: a server reply unless `cause` says otherwise."""
+
+    def __init__(self, status, headers=None, cause=None):
+        super().__init__(f"HTTP {status}")
+        request = httpx.Request("POST", "https://llm.example/v1/chat/completions")
+        response = httpx.Response(status, headers=headers, request=request)
+        self.status_code = status
+        self.litellm_response_headers = response.headers
+        self.__cause__ = cause if cause is not None else httpx.HTTPStatusError(
+            "reply", request=request, response=response)
+
+
+@pytest.mark.parametrize("make, retry", [
+    *[(lambda s=s: _LLMError(s), True) for s in (408, 409, 429, 500, 503, 529)],
+    *[(lambda s=s: _LLMError(s), False) for s in (402, 413, 422)],
+    (lambda: _LLMError(503, {"x-should-retry": "false"}), False),
+    (lambda: _LLMError(422, {"x-should-retry": "true"}), True),
+    (lambda: _LLMError(500, cause=httpx.ConnectError("refused")), True),
+    (lambda: _LLMError(408, cause=httpx.ReadTimeout("slow")), True),
+    (lambda: _LLMError(500, cause=ValueError("Missing credentials")), False),
+    (lambda: _LLMError(500, cause=httpx.LocalProtocolError("Illegal header value b'sk-x\\n'")), False),
+    (lambda: _LLMError(500, cause=httpx.UnsupportedProtocol("Request URL is missing an 'http://' or 'https://' protocol.")), False),
+], ids=["408", "409", "429", "500", "503", "529", "402", "413", "422",
+        "header-no", "header-yes", "connect", "timeout", "local", "bad-header", "no-scheme"])
+def test_llm_retry_follows_the_official_sdk_rule(make, retry):
+    from pageindex.retry import should_retry
+    assert should_retry(make()) is retry
+
+
+@pytest.mark.parametrize("headers, wait", [
+    ({"retry-after": "7"}, 7),
+    ({"retry-after-ms": "1500", "retry-after": "7"}, 1.5),
+    ({"retry-after": "120"}, None),
+    ({"retry-after": "Wed, 21 Oct 2015 07:28:00 GMT"}, None),
+    ({}, None),
+])
+def test_retry_waits_as_the_server_asks(headers, wait):
+    from pageindex import retry
+    headers = httpx.Headers(headers)
+    if wait is not None:
+        assert retry.delay(3, headers, retry.INDEX_MAX_DELAY) == wait
+        return
+    for cap, budget in ((retry.INDEX_MAX_DELAY, retry.INDEX_RETRIES),
+                        (retry.SDK_MAX_DELAY, retry.SDK_RETRIES)):
+        caps = [min(cap, 2 ** i) for i in range(budget)]
+        slept = [retry.delay(i, headers, cap) for i in range(budget)]
+        assert all(c / 2 <= s <= c for s, c in zip(slept, caps))
+        assert any(s < c for s, c in zip(slept, caps))
+    assert sum(retry.delay(i, headers, retry.INDEX_MAX_DELAY)
+               for i in range(retry.INDEX_RETRIES)) > 60
+
+
+@pytest.mark.parametrize("make, calls, slept", [
+    (lambda: _LLMError(429, {"retry-after": "7"}), 10, [7] * 9),
+    (lambda: _LLMError(500, cause=ValueError("Missing credentials")), 1, []),
+], ids=["rate-limited", "local"])
+def test_llm_retry_ladder(monkeypatch, make, calls, slept):
+    pytest.importorskip("litellm")
+    import litellm
+    sent, waits = [], []
+
+    def fail(**kw):
+        sent.append(1)
+        raise make()
+
+    async def afail(**kw):
+        fail()
+
+    async def _asleep(s):
+        waits.append(s)
+    monkeypatch.setattr(litellm, "completion", fail)
+    monkeypatch.setattr(litellm, "acompletion", afail)
+    monkeypatch.setattr("pageindex.utils.time.sleep", waits.append)
+    monkeypatch.setattr("pageindex.utils.asyncio.sleep", _asleep)
+    for run in (lambda: pageindex.utils.llm_completion("gpt-4o", "p"),
+                lambda: asyncio.run(pageindex.utils.llm_acompletion("gpt-4o", "p"))):
+        sent.clear()
+        waits.clear()
+        with pytest.raises(pageindex.utils.LLMRetriesExhausted) as err:
+            run()
+        assert (len(sent), waits, err.value.status_code) == (calls, slept, make().status_code)
+
+
+def test_retry_budgets_follow_the_constants(monkeypatch):
+    pytest.importorskip("litellm")
+    import litellm
+    from pageindex.retry import cloud_session
+    sent = []
+
+    def fail(**kw):
+        sent.append(1)
+        raise _LLMError(429, {"retry-after": "7"})
+    monkeypatch.setattr(litellm, "completion", fail)
+    monkeypatch.setattr("pageindex.utils.time.sleep", lambda s: None)
+    monkeypatch.setattr("pageindex.retry.INDEX_RETRIES", 1)
+    monkeypatch.setattr("pageindex.retry.SDK_RETRIES", 0)
+    with pytest.raises(pageindex.utils.LLMRetriesExhausted, match="after 2 attempts"):
+        pageindex.utils.llm_completion("gpt-4o", "p")
+    with _flaky_server(fails=2) as (url, seen):
+        assert cloud_session().get(url).status_code == 503
+    assert (len(sent), len(seen)) == (2, 1)
+
+
+@contextlib.contextmanager
+def _flaky_server(fails, status=503, retry_after="0.01", stall=0.0):
+    """A loopback server answering `status` (with Retry-After), after `stall` seconds, `fails` times, then 200."""
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import threading
+    hits = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def _answer(self):
+            self.rfile.read(int(self.headers.get("content-length") or 0))
+            hits.append(self.command)
+            failing = len(hits) <= fails
+            if failing and stall:
+                threading.Event().wait(stall)  # not time.sleep, which tests patch
+            self.send_response(status if failing else 200)
+            if failing:
+                self.send_header("Retry-After", retry_after)
+            self.send_header("content-length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+        do_GET = do_POST = do_PUT = do_DELETE = _answer
+
+        def log_message(self, format, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}/", hits
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize("model, path", [("openai/gpt-x", "/v1"), ("anthropic/claude-x", "")])
+@pytest.mark.parametrize("status, hits", [(503, 3), (429, 3), (422, 1)])
+def test_litellm_errors_keep_the_shape_the_retry_rule_reads(monkeypatch, model, path,
+                                                            status, hits):
+    """Canary for LiteLLM upgrades: real server errors through real LiteLLM, sync and async."""
+    pytest.importorskip("litellm")
+    from pageindex import utils
+
+    async def _nosleep(s):
+        pass
+    monkeypatch.setattr("pageindex.retry.INDEX_RETRIES", 2)
+    monkeypatch.setattr("pageindex.utils.time.sleep", lambda s: None)
+    monkeypatch.setattr("pageindex.utils.asyncio.sleep", _nosleep)
+    for run in (utils.llm_completion,
+                lambda m, p: asyncio.run(utils.llm_acompletion(m, p))):
+        with _flaky_server(fails=9, status=status) as (url, seen):
+            token = utils._llm_backend.set({"api_base": url.rstrip("/") + path, "api_key": "x"})
+            try:
+                with pytest.raises(utils.LLMRetriesExhausted):
+                    run(model, "p")
+            finally:
+                utils._llm_backend.reset(token)
+        assert len(seen) == hits
+
+
+@pytest.mark.parametrize("method, status, hits", [
+    ("GET", 503, 3), ("PUT", 503, 3), ("DELETE", 503, 3),
+    ("POST", 503, 1), ("POST", 500, 1), ("POST", 429, 3)])
+def test_cloud_session_retries_what_is_safe_to_repeat(method, status, hits):
+    from pageindex.retry import cloud_session
+    with _flaky_server(fails=2, status=status) as (url, seen):
+        response = cloud_session().request(method, url)
+    assert (len(seen), response.status_code) == (hits, 200 if hits > 1 else status)
+
+
+def test_cloud_session_never_resends_a_post_after_a_tls_error():
+    from urllib3.exceptions import MaxRetryError, SSLError
+    from pageindex.retry import cloud_session
+    retry = cloud_session().get_adapter("https://api.pageindex.ai/").max_retries
+    with pytest.raises(MaxRetryError):
+        retry.increment("POST", "/chat/completions/", error=SSLError("bad record mac"))
+
+
+@pytest.mark.parametrize("method, hits", [("GET", 3), ("POST", 1)])
+def test_cloud_session_replays_a_timed_out_read_only_when_idempotent(monkeypatch, method,
+                                                                     hits):
+    import requests
+    from pageindex.retry import cloud_session
+    monkeypatch.setattr("urllib3.util.retry.time.sleep", lambda s: None)
+    with _flaky_server(fails=2, stall=0.3) as (url, seen):
+        if hits > 1:
+            assert cloud_session().request(method, url, timeout=0.1).status_code == 200
+        else:
+            with pytest.raises(requests.ReadTimeout):
+                cloud_session().request(method, url, timeout=0.1)
+    assert len(seen) == hits
+
+
+@pytest.mark.parametrize("call, status, hits", [
+    (lambda c: c.get_document("pi-1"), 503, 3),
+    (lambda c: c.chat_completions([{"role": "user", "content": "q"}]), 503, 1),
+    (lambda c: c.chat_completions([{"role": "user", "content": "q"}]), 429, 3),
+    (lambda c: c.create_folder("f"), 503, 1)],
+    ids=["read", "chat-error", "chat-refused", "create"])
+def test_cloud_client_sends_through_its_retrying_session(monkeypatch, call, status, hits):
+    with _flaky_server(fails=2, status=status) as (url, seen):
+        client = PageIndexClient(api_key="k")
+        monkeypatch.setattr(client, "BASE_URL", url.rstrip("/"))
+        if hits > 1:
+            call(client)
+        else:
+            with pytest.raises(PageIndexAPIError):
+                call(client)
+    assert len(seen) == hits
+
+
+@pytest.mark.parametrize("retry_after, bounds", [
+    ("7", [(7, 7), (7, 7)]), ("120", [(0.5, 1), (1, 2)])])
+def test_cloud_session_waits_as_the_server_asks(monkeypatch, retry_after, bounds):
+    from pageindex.retry import cloud_session
+    waits = []
+    monkeypatch.setattr("urllib3.util.retry.time.sleep", waits.append)
+    with _flaky_server(fails=2, status=429, retry_after=retry_after) as (url, seen):
+        assert cloud_session().get(url).status_code == 200
+    assert len(waits) == len(bounds)
+    assert all(low <= w <= high for w, (low, high) in zip(waits, bounds))
 
 
 def test_parse_pages_keeps_whitespace_tolerance():
@@ -3257,7 +3500,7 @@ def test_retry_notice_logs_instead_of_stdout(monkeypatch, capsys, caplog):
     def flaky(**kwargs):
         if not attempts:
             attempts.append(1)
-            raise RuntimeError("boom")
+            raise httpx.ConnectError("boom")
         message = types.SimpleNamespace(content="ok")
         choice = types.SimpleNamespace(message=message, finish_reason="stop")
         return types.SimpleNamespace(choices=[choice])
@@ -3275,7 +3518,7 @@ def test_retry_notice_only_when_a_retry_follows(monkeypatch, caplog):
     from pageindex import utils
 
     def broken(**kwargs):
-        raise RuntimeError("boom")
+        raise httpx.ConnectError("boom")
 
     monkeypatch.setattr(litellm, "completion", broken)
     monkeypatch.setattr(utils.time, "sleep", lambda s: None)
