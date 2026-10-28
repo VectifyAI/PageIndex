@@ -32,7 +32,7 @@ _LAZY = {
 _SUBMODULES = {"agent_tools", "chat_stream", "client", "cloud_api", "errors",
                "flash", "imaging", "integrations", "local_api", "local_chat",
                "local_store", "mcp_bridge", "page_index_classic",
-               "page_index_md", "tree_optimize", "types", "utils"}
+               "page_index_md", "retry", "tree_optimize", "types", "utils"}
 
 
 def __getattr__(name):

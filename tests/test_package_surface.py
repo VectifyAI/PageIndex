@@ -162,7 +162,7 @@ def test_sdk_submodules_reachable_and_dunder_probes_stay_lazy():
     probe = (
         "import sys, pageindex\n"
         "pageindex.agent_tools; pageindex.local_chat\n"
-        "pageindex.mcp_bridge; pageindex.integrations\n"
+        "pageindex.mcp_bridge; pageindex.integrations; pageindex.retry\n"
         "assert not hasattr(pageindex, '__wrapped__')\n"
         "heavy = [m for m in ('pageindex.page_index_classic', "
         "'pageindex.flash', 'pageindex.utils') if m in sys.modules]\n"
