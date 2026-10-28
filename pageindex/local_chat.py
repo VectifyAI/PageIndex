@@ -325,8 +325,9 @@ class _Replies:
         model's message, or one this SDK didn't return, holds its place
         with nothing to put back."""
         fields = _reply_fields(message, self.nested)
-        calls = [call for call in fields.get("tool_calls") or ()
-                 if isinstance(call, dict)]
+        # history may hold the OpenAI SDK's call objects; the fill sees dicts
+        calls = [call if isinstance(call, dict) else call.model_dump()
+                 for call in fields.get("tool_calls") or ()]
         for call in calls:
             self.calls.setdefault(self._call_id(call), []).append(
                 {key: value for key, value in call.items()

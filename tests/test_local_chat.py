@@ -1434,6 +1434,29 @@ def test_repeated_answers_keep_their_own_fields():
             if m["role"] == "assistant"] == [[1], [2]]
 
 
+def test_sdk_call_objects_keep_their_own_fields():
+    """History may hold the OpenAI SDK's call objects: that reply and its
+    call keep their fields, and a later answer with the same text keeps
+    its own."""
+    from openai.types.chat import ChatCompletionMessageFunctionToolCall
+    call = {"id": "c1", "type": "function",
+            "function": {"name": "f", "arguments": "{}"}}
+    signed = {"google": {"thought_signature": "SIG"}}
+    replies = local_chat._Replies("m")
+    replies.record({"role": "assistant", "content": "Let me check.",
+                    "tool_calls": [ChatCompletionMessageFunctionToolCall
+                                   .model_validate({**call,
+                                                    "extra_content": signed})],
+                    "reasoning_details": ["A"]})
+    replies.record({"role": "assistant", "content": "Let me check.",
+                    "reasoning_details": ["B"]})
+    out = replies.fill([{"role": "assistant", "content": "Let me check.",
+                         "tool_calls": [call]},
+                        {"role": "assistant", "content": "Let me check."}])
+    assert [m.get("reasoning_details") for m in out] == [["A"], ["B"]]
+    assert out[0]["tool_calls"][0]["extra_content"] == signed
+
+
 def test_fill_puts_the_reply_back_as_it_was():
     """A reply's fields go back as it had them, empty ones too, over what
     the Agents SDK wrote in their place; a field it lacks (None) stays out;
