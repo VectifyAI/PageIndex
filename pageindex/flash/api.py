@@ -191,22 +191,6 @@ def page_index_flash(pdf, summary=True, summary_model=None,
                      use_embedded_toc=True, summary_max_words=None,
                      summary_reasoning_effort=None) -> dict:
     """Build a PageIndex tree structure from a PDF using layout statistics. The tree extraction itself uses no LLM; by default an LLM writes node summaries and expands the tree (``summary=False, optimize=False`` runs fully LLM-free). Args: pdf: path to a PDF file (``str`` or ``pathlib.Path``) or an in-memory binary stream (``io.BytesIO``). summary: if True, generate LLM summaries for each node (requires ``summary_model``). summary_model: the LLM model identifier to use for summary generation. optimize: ``"full"`` for merge + LLM expand (a model unreachable after the retry ladder — a missing credential included — fails the run loudly from expand itself; a per-prompt rejection leaves just that node collapsed), ``"merge"`` for deterministic merge only, ``False`` to disable. ``True`` is accepted as ``"full"`` for backward compatibility; defaults to ``"full"``. Expand needs readable page text, so a bookmark-only or scanned PDF runs the merge half only (``expands`` reports 0). optimize_expand: deprecated — use ``optimize``. Honored only when ``optimize`` is not passed (or is the legacy ``True``): ``False`` maps to ``"merge"``, ``True`` to ``"full"``. optimize_model: the LLM model for expand (defaults to the summary model). summary_concurrency: cap on simultaneous indexing model calls per lane: the summaries, and expand up to its own ceiling of 32 (the lanes overlap, so up to cap + min(32, cap) calls run at once); None uses the library defaults (128 and 32). use_embedded_toc: if True, consume the PDF's embedded bookmarks when trustworthy: deep bookmarks become the frame and the detected sections they lack are grafted back in after noise filtering, coarse ones become the chapter frame with detected nodes re-hung under them (deeper sparse entries are filled in when the page text confirms them, and garbled extracted titles are repaired from the bookmark strings), garbage ones are ignored. On by default; pass False for the pure detected structure. summary_max_words: word cap each model-written node summary is asked to stay within (a leaf shorter than that keeps its raw text); None uses the library default (150). summary_reasoning_effort: the reasoning effort sent with each summary call (``"none"``, ``"low"``, ``"high"``, ...; a model without the setting drops it); None sends the library default (``"none"``) unless LiteLLM lists the model as refusing it, and stops sending it once a prompt the server refused with it (HTTP 400) goes through without it. ``"none"`` raises on a model whose thinking can't be turned off (Claude Opus 5.5 and Fable under ``anthropic/``, ``bedrock/``, ``vertex_ai/`` or ``azure_ai/``; ``claude-code/`` models); the default runs them at ``"low"``. Expand keeps the model's own default. Returns: dict with keys ``doc_name``, ``doc_title``, ``structure`` (a list of ``{"title", "node_id", "start_index", "end_index"}`` dicts; ``"nodes"`` holds the children where there are any and ``"summary"`` appears when summaries ran; page indexes are 1-based; a hierarchy that starts after page 1 is preceded by a ``Preface`` node covering the pages before it, as in standard mode, and the first section's page too unless that heading opens it; a parent whose first child starts on a later page opens with a child titled ``"<parent title> (intro)"`` holding the pages before it; a parent's range and summary cover its whole subtree) and ``has_abstract_or_references_section`` (True when a top-level entry is an abstract or references heading). ``toc_source`` says where the structure came from: ``"detected"`` (layout), ``"bookmarks"`` (the embedded outline), ``"hybrid"`` (bookmarks framing the detected sections), ``"pages"`` (no hierarchy found, so one node per page titled ``Page N``; left unsummarized and unoptimized when there are more than ``FLAT_TREE_MAX_NODES`` pages, a size the local client and CLI refuse) or ``"unreadable"`` (no page carries text; ``structure`` is empty). With ``optimize`` an ``optimize`` key reports merge/expand counts and before/after search-cost metrics; a refused flat tree carries neither it nor node summaries. """
-    from ..integrations.claude_agent_sdk import claude_code_workflows, is_claude_code
-    prewarm = ()
-    if summary and is_claude_code(summary_model):
-        from ..utils import default_summary_reasoning_effort
-        effort = (summary_reasoning_effort.strip() if isinstance(summary_reasoning_effort, str)
-                  else None) or default_summary_reasoning_effort(summary_model)
-        prewarm = ((summary_model, effort),)  # its session launches while the PDF is read
-    with claude_code_workflows(prewarm=prewarm):
-        return _page_index_flash(pdf, summary, summary_model, optimize, optimize_expand,
-                                 optimize_model, summary_concurrency, use_embedded_toc,
-                                 summary_max_words, summary_reasoning_effort)
-
-
-def _page_index_flash(pdf, summary, summary_model, optimize, optimize_expand,
-                      optimize_model, summary_concurrency, use_embedded_toc,
-                      summary_max_words, summary_reasoning_effort):
     for name, value in (("summary_concurrency", summary_concurrency),
                         ("summary_max_words", summary_max_words)):
         if value is not None and not (isinstance(value, numbers.Integral) and int(value) >= 1):
@@ -215,6 +199,34 @@ def _page_index_flash(pdf, summary, summary_model, optimize, optimize_expand,
             isinstance(summary_reasoning_effort, str) and summary_reasoning_effort.strip()):
         raise ValueError(f"summary_reasoning_effort must be a non-empty str, "
                          f"got {summary_reasoning_effort!r}")
+    effort = summary_reasoning_effort and summary_reasoning_effort.strip()
+    if summary:
+        _refuse_none(summary_model, effort)
+    from ..integrations.claude_agent_sdk import claude_code_workflows, is_claude_code
+    prewarm = ()
+    if summary and is_claude_code(summary_model):
+        from ..utils import default_summary_reasoning_effort
+        effort = effort or default_summary_reasoning_effort(summary_model)
+        prewarm = ((summary_model, effort),)  # its session launches while the PDF is read
+    with claude_code_workflows(prewarm=prewarm):
+        return _page_index_flash(pdf, summary, summary_model, optimize, optimize_expand,
+                                 optimize_model, summary_concurrency, use_embedded_toc,
+                                 summary_max_words, summary_reasoning_effort)
+
+
+def _refuse_none(model, effort):
+    """Raise when ``effort`` is a "none" that ``model`` can't honor."""
+    from ..integrations.claude_agent_sdk import is_claude_code
+    from ..utils import thinking_stays_on
+    if effort == "none" and (is_claude_code(model) or thinking_stays_on(model)):
+        raise ValueError(
+            f"{model} can't turn thinking off, so it can't honor "
+            "summary_reasoning_effort='none'; pass 'low' or leave it unset.")
+
+
+def _page_index_flash(pdf, summary, summary_model, optimize, optimize_expand,
+                      optimize_model, summary_concurrency, use_embedded_toc,
+                      summary_max_words, summary_reasoning_effort):
     if optimize_expand is not None:
         import warnings
         warnings.warn(
@@ -250,18 +262,14 @@ def _page_index_flash(pdf, summary, summary_model, optimize, optimize_expand,
         from ..utils import ConfigLoader
         cfg = ConfigLoader().load()
         summary_model = getattr(cfg, 'summary_model', None) or cfg.model
-    from ..utils import (SUMMARY_MAX_WORDS, default_summary_reasoning_effort,
-                         thinking_stays_on)
+    from ..utils import SUMMARY_MAX_WORDS, default_summary_reasoning_effort
     effort = summary_reasoning_effort and summary_reasoning_effort.strip()
     defaulted = not effort
     if summary and structure and defaulted:
         effort = default_summary_reasoning_effort(summary_model)
     from ..integrations.claude_agent_sdk import claude_code_check, is_claude_code
-    if summary and structure and not defaulted and effort == "none" and (
-            is_claude_code(summary_model) or thinking_stays_on(summary_model)):
-        raise ValueError(
-            f"{summary_model} can't turn thinking off, so it can't honor "
-            "summary_reasoning_effort='none'; pass 'low' or leave it unset.")
+    if summary and structure and not defaulted:
+        _refuse_none(summary_model, effort)  # a model read from the config
     if summary and structure and not defaulted and effort != "none" \
             and is_claude_code(summary_model):
         # a summary call would first check the effort after expand has

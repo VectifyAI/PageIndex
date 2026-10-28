@@ -628,6 +628,32 @@ def test_a_scope_that_closes_as_its_workflow_launches_leaves_none_running(monkey
 
 
 @needs_claude
+def test_flash_refuses_bad_arguments_before_a_workflow_starts(monkeypatch, sample_pdf):
+    """Else on a long PDF the session's launch goes out while it is read."""
+    from pageindex.flash.api import page_index_flash
+    seen = fake_workflow(monkeypatch)
+    monkeypatch.setenv("PAGEINDEX_CLAUDE_CODE_WORKFLOW", "1")
+    with pytest.raises(ValueError, match="can't turn thinking off"):
+        page_index_flash(sample_pdf, summary_model="claude-code/haiku",
+                         summary_reasoning_effort="none")
+    with pytest.raises(ValueError, match="summary_concurrency must be"):
+        page_index_flash(sample_pdf, summary_model="claude-code/haiku",
+                         summary_concurrency=0)
+    assert seen.workflows == [] and seen.order == []
+
+
+def test_claude_code_summaries_keep_their_default_effort_under_a_backend():
+    """The backend doesn't apply there; a None would put expand in the
+    summaries' workflow and the summaries off low."""
+    from pageindex.utils import _llm_backend, default_summary_reasoning_effort
+    token = _llm_backend.set({"thinking": {"type": "enabled", "budget_tokens": 1024}})
+    try:
+        assert default_summary_reasoning_effort("claude-code/haiku") == "none"
+    finally:
+        _llm_backend.reset(token)
+
+
+@needs_claude
 def test_a_call_whose_agent_stops_with_no_reply_runs_in_a_process(monkeypatch):
     """The CLI gave up on the agent's stream (Claude Code 2.1.301): taken as
     the reply, it would leave the node's raw text as its summary."""

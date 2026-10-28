@@ -4065,6 +4065,14 @@ def test_flash_refuses_a_chosen_none_the_model_cannot_honor(tmp_path, monkeypatc
             flash_api.page_index_flash(str(pdf), summary_model=model,
                                        summary_reasoning_effort="none")
         assert not calls, model
+    # one read from the config too
+    real = pageindex.utils.ConfigLoader._load_yaml
+    with monkeypatch.context() as m:
+        m.setattr(pageindex.utils.ConfigLoader, "_load_yaml", staticmethod(
+            lambda path: {**real(path), "index_model": "anthropic/claude-opus-5-5"}))
+        with pytest.raises(ValueError, match="can't turn thinking off"):
+            flash_api.page_index_flash(str(pdf), summary_reasoning_effort="none")
+    assert not calls
     for model, effort in (("anthropic/claude-opus-5-5", None),
                           ("anthropic/claude-haiku-5-5", "none")):
         flash_api.page_index_flash(str(pdf), summary_model=model,
