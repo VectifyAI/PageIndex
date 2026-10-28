@@ -10,7 +10,7 @@ import copy
 import asyncio
 import heapq
 import threading
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from io import BytesIO
 from dotenv import find_dotenv, load_dotenv
 load_dotenv(find_dotenv(usecwd=True))
@@ -37,6 +37,20 @@ _llm_backend: contextvars.ContextVar = contextvars.ContextVar(
 # summed into, which LocalAPI returns from submit_document.
 _llm_usage: contextvars.ContextVar = contextvars.ContextVar(
     "pageindex_llm_usage", default=None)
+
+# Set by llm_priority: where a gate narrower than the indexing lanes queues
+# their model calls (the claude-code/ route's cap), the highest goes first.
+_llm_priority: contextvars.ContextVar = contextvars.ContextVar(
+    "pageindex_llm_priority", default=0)
+
+
+@contextmanager
+def llm_priority(prio):
+    token = _llm_priority.set(prio)
+    try:
+        yield
+    finally:
+        _llm_priority.reset(token)
 
 
 def _add_usage(response) -> None:
@@ -1228,7 +1242,8 @@ class SummaryScheduler:
     async def _ask(self, prompt, prio):
         self._asked = True
         async with self._gate.slot(prio):
-            reply = await self._complete(prompt)
+            with llm_priority(prio):
+                reply = await self._complete(prompt)
         if parse_summary(reply):
             self._answered = True
         return reply

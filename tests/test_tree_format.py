@@ -79,6 +79,39 @@ def test_expand_gives_a_split_node_its_intro(monkeypatch):
     assert all(n["summary"] == "ok" for n in utils._subtree(tree))
 
 
+def test_expand_and_summary_calls_carry_their_queue_priority(monkeypatch):
+    body = "body " * 250
+    pages = [body] * 12
+    pages[5] = "Sub One\n" + body
+    pages[8] = "Sub Two\n" + body
+    lines = [[line for line in page.splitlines() if line.strip()] for page in pages]
+    tree = [{"title": "R", "start_index": 1, "end_index": 12, "node_id": "0000", "nodes": [
+        {"title": "A", "start_index": 1, "end_index": 3, "node_id": "0001"},
+        {"title": "X", "start_index": 4, "end_index": 12, "node_id": "0002"}]}]
+    seen = []
+
+    async def propose(model, prompt):
+        seen.append(("expand", utils._llm_priority.get()))
+        return {"subsections": [{"title": "Sub One", "page": 6}, {"title": "Sub Two", "page": 9}]}
+
+    async def summarize(model, prompt):
+        seen.append(("summary", utils._llm_priority.get()))
+        return '{"summary": "ok"}'
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+    monkeypatch.setattr(utils, "llm_acompletion", summarize)
+
+    async def run():
+        scheduler = utils.SummaryScheduler(tree, [(page, 0) for page in pages], model="m")
+        await tree_optimize.optimize(tree, pages, lines, model="m", do_expand=True,
+                                     on_final=scheduler.mark_final)
+        await scheduler.finish()
+    asyncio.run(run())
+
+    # where the claude-code/ route's cap queues them: expand first, then the deepest summaries
+    assert {prio for kind, prio in seen if kind == "expand"} == {tree_optimize.EXPAND_PRIORITY}
+    assert sorted(prio for kind, prio in seen if kind == "summary") == [1, 2, 2, 3, 3, 3]
+
+
 def test_a_running_header_or_a_word_prefix_does_not_open_the_page():
     page = ["4.1. Discriminant Functions 181", "opening words", "4.1. Discriminant Functions"]
     assert not tree_optimize.heading_at_page_start([page], 1, "4.1. Discriminant Functions")
