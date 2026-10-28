@@ -25,7 +25,7 @@ import re
 import shutil
 import tempfile
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from typing import Any, Optional
 
 from .._version import sdk_version
@@ -418,6 +418,7 @@ async def claude_code_complete(model: str, prompt: str,
 # ── the claude-code/ workflow backend ──
 
 WORKFLOW_START_S = 30      # a workflow whose agents never ask for a call is given up
+WORKFLOW_RESULT_S = 60     # how long a workflow session's turn result is waited for
 # The hooks reference caps additionalContext at this many characters: past
 # it the CLI saves the text to a file and the agent sees its path and a
 # 2,000-character preview, so it summarizes the preview or fakes a Read.
@@ -563,6 +564,8 @@ def _forget_session(session_id, env):
             or os.path.join(os.path.expanduser("~"), ".claude"))
     for path in glob.glob(os.path.join(glob.escape(root), "projects", "*", session_id)):
         shutil.rmtree(path, ignore_errors=True)
+        with suppress(OSError):  # its cwd's project, once empty: a cwd per session
+            os.rmdir(os.path.dirname(path))
 
 
 class _Workflow:
@@ -620,13 +623,13 @@ class _Workflow:
 
     def _session_options(self, model, reasoning_effort):
         import dataclasses
+        options = _index_options(model, reasoning_effort)  # first: it names a missing SDK's fix
         from claude_agent_sdk import AgentDefinition, HookMatcher
-        options = _index_options(model, reasoning_effort)
+        # its own, so no other user's or scope's script runs in its place
+        cwd = os.path.realpath(tempfile.mkdtemp(prefix="pageindex-claude-code-"))
         script = f"pageindex-lanes-{self.lanes}.js"
-        path = os.path.join(options.cwd, script)
-        with open(f"{path}.{os.getpid()}", "w") as f:
+        with open(os.path.join(cwd, script), "w") as f:
             f.write(_LANES_JS % (json.dumps(_LANE_TASK), _LANE, _NO_TASK, self.lanes))
-        os.replace(f"{path}.{os.getpid()}", path)  # no session reads half a script
         self._launch = (f"Run the workflow script at {script} with the Workflow tool, "
                         "passing that path as scriptPath and nothing else. "
                         "Then answer only: done.")
@@ -634,7 +637,7 @@ class _Workflow:
                                 prompt="Do exactly what the task asks.", tools=[],
                                 model="inherit")
         return dataclasses.replace(
-            options, tools=["Workflow", "Read"], allowed_tools=["Workflow", "Read"],
+            options, cwd=cwd, tools=["Workflow", "Read"], allowed_tools=["Workflow", "Read"],
             # unset, the CLI has a Sonnet check read every agent's reply
             # (Claude Code 2.1.301)
             permission_mode="default",
@@ -645,7 +648,11 @@ class _Workflow:
                                                 hooks=[self._on_stop])]},
             # agents read the prompt prefix they share from the cache
             env={**options.env, "CLAUDE_CODE_PROMPT_CACHE_TTL": "5m",
-                 "CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS": str(self.lanes)})
+                 "CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS": str(self.lanes),
+                 # set, the first (the second with CLAUDE_CODE_SUBAGENT_MODEL_FORCE)
+                 # puts every agent on another model; "" reads as unset (Claude
+                 # Code 2.1.301)
+                 "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL": "", "CLAUDE_CODE_SUBAGENT_MODEL": ""})
 
     async def _on_start(self, data, _tool_use_id, _context):
         lane = _lane(data.get("agent_type"))
@@ -668,7 +675,9 @@ class _Workflow:
         fut = self._on_lane.pop(lane, None)
         reply = data.get("last_assistant_message") or ""
         if fut is not None and not fut.done():
-            if _NO_TASK in reply:  # it saw no call, and its lane stops: a process runs it
+            # it saw no call, and its lane stops, or the CLI gave up on its
+            # stream (Claude Code 2.1.301): a process runs it
+            if not reply or _NO_TASK in reply:
                 fut.set_exception(_Lost())
             else:
                 fut.set_result(reply)
@@ -680,6 +689,8 @@ class _Workflow:
         try:
             async with _claude_client(self._options) as client:
                 await _check_session(client, self._options)
+                if self._stop.is_set():  # the scope closed first: no launch to bill
+                    return
                 await client.query(self._launch)
                 reader = asyncio.create_task(self._read(client))
                 waits = {reader, asyncio.create_task(self._ended.wait()),
@@ -693,12 +704,16 @@ class _Workflow:
                     if not done and not self._asked.is_set():
                         break  # no agent ever asked: the hooks don't reach them
                 self._lose_calls()  # to processes now, not after the clean-up below
+                # not started yet, it still may: the launch turn's result follows its start
+                if not self._task_id and not reader.done():
+                    with suppress(asyncio.TimeoutError):  # one started meanwhile is stopped all the same
+                        await asyncio.wait_for(self._result.wait(), WORKFLOW_RESULT_S)
                 if self._task_id and (self._limited or not self._ended.is_set()):
                     await client.stop_task(self._task_id)
-                if not reader.done() and not self._limited:
+                if self._task_id and not reader.done() and not self._limited:
                     self._result.clear()
                     await client.query(_USAGE_PROMPT)
-                    await asyncio.wait_for(self._result.wait(), 60)
+                    await asyncio.wait_for(self._result.wait(), WORKFLOW_RESULT_S)
                 for task in waits:
                     task.cancel()
         except Exception:  # every call goes to a process, which reports it
@@ -707,6 +722,7 @@ class _Workflow:
         finally:
             self._lose_calls()
             _forget_session(self._session_id, self._options.env)
+            shutil.rmtree(self._options.cwd, ignore_errors=True)
 
     def _lose_calls(self):
         """Dead from here on: every call it holds goes to a process."""

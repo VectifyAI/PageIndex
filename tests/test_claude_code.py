@@ -1,6 +1,7 @@
 """The claude-code/ route — indexing and chat as Claude Code CLI runs on the
 user's subscription — over a faked CLI session: no subprocess, no login."""
 import asyncio
+import dataclasses
 import json
 import logging
 import os
@@ -123,12 +124,15 @@ def fake_sdk_version(monkeypatch, installed):
                         lambda options: pytest.fail("the CLI would start"))
 
 
+@pytest.mark.parametrize("workflow", [False, True])
 @pytest.mark.parametrize("installed", ["0.1.53", "0.2.165", None])
 def test_indexing_names_an_old_or_missing_agent_sdk(
-        monkeypatch, tmp_path, sample_pdf, installed):
+        monkeypatch, tmp_path, sample_pdf, installed, workflow):
     """Before 0.2.158 the route failed deep inside, on a TypeError about
     verbatim_prompts; below 0.2.166 it is unverified."""
     fake_sdk_version(monkeypatch, installed)
+    if workflow:  # the default: its session starts as indexing does
+        monkeypatch.delenv("PAGEINDEX_CLAUDE_CODE_WORKFLOW")
     if installed is None:  # no module either
         monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
     client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
@@ -137,9 +141,12 @@ def test_indexing_names_an_old_or_missing_agent_sdk(
         client.submit_document(sample_pdf)
 
 
-def test_indexing_names_a_broken_agent_sdk(monkeypatch, tmp_path, sample_pdf):
+@pytest.mark.parametrize("workflow", [False, True])
+def test_indexing_names_a_broken_agent_sdk(monkeypatch, tmp_path, sample_pdf, workflow):
     """Its metadata passes the floor but the import fails."""
     fake_sdk_version(monkeypatch, "0.2.168")
+    if workflow:
+        monkeypatch.delenv("PAGEINDEX_CLAUDE_CODE_WORKFLOW")
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
     client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
                                   index_model="claude-code/haiku")
@@ -340,15 +347,18 @@ def test_queued_index_calls_go_highest_priority_first(monkeypatch):
     assert [s.prompt for s in sessions] == ["first", "high", "mid", "low"]
 
 
-def fake_workflow(monkeypatch, lose=(), balk=(), plan=(), session_id="s"):
+def fake_workflow(monkeypatch, lose=(), balk=(), drop=(), plan=(), session_id="s"):
     """Replace the CLI with sessions that answer "process: <prompt>" as a
     process run and, as a workflow's session, run its lanes: each lane asks
     the SubagentStart hook for a call and answers "agent: <prompt>" through
     SubagentStop, except a prompt in ``lose``, whose agent ends without
-    SubagentStop (an API error), and one in ``balk``, whose agent answers it
-    saw no call, ending its lane. ``plan`` says how the workflow sessions
-    behave, one entry each in turn and "runs" past its end: "unstarted"
-    (the launch turn ends without a workflow), "unhooked" (SubagentStart
+    SubagentStop (an API error), one in ``balk``, whose agent answers it
+    saw no call, ending its lane, and one in ``drop``, whose agent stops
+    with no reply (the CLI gave up on its stream). ``plan`` says how the
+    workflow sessions behave, one entry each in turn and "runs" past its
+    end: "unstarted" (the launch turn ends without a workflow), "late" (the
+    workflow starts a moment after the launch), "resultless" (as "late", but
+    the launch turn's result never comes), "unhooked" (SubagentStart
     reaches no agent, so each ends with no call), ("dies", n) or ("limited", n)
     (its agents answer n calls, then the workflow fails, or the usage limit
     is hit, as the next agent takes its call). A prompt after the launch
@@ -356,12 +366,14 @@ def fake_workflow(monkeypatch, lose=(), balk=(), plan=(), session_id="s"):
     whose workflow died gives a process a moment to start before it does.
     Returns .taken, the prompts the lanes took, .stopped, the workflows
     stopped through stop_task, .workflows, each workflow session's plan,
-    .options, each one's options, and .order, "process" for each process
-    started and "usage" for each usage result."""
+    .options, each one's options, .prompts, the prompts its sessions were
+    sent, and .order, "process" for each process started and "usage" for
+    each usage result."""
     import threading
     from claude_agent_sdk import (RateLimitEvent, RateLimitInfo,
                                   TaskNotificationMessage, TaskStartedMessage)
-    seen = SimpleNamespace(taken=[], stopped=[], workflows=[], options=[], order=[])
+    seen = SimpleNamespace(taken=[], stopped=[], workflows=[], options=[], prompts=[],
+                           order=[])
     plans, process_started = list(plan), threading.Event()
 
     class Session:
@@ -388,6 +400,8 @@ def fake_workflow(monkeypatch, lose=(), balk=(), plan=(), session_id="s"):
         async def query(self, prompt):
             self.prompt = prompt
             self.queries += 1
+            if self.options.hooks:
+                seen.prompts.append(prompt)
             if self.queries > 1:  # past the launch: the usage prompt
                 self.asked_usage.set()
 
@@ -434,13 +448,18 @@ def fake_workflow(monkeypatch, lose=(), balk=(), plan=(), session_id="s"):
                                     "last_assistant_message": cc._NO_TASK}, None, None)
                         return
                     if prompt not in lose:
-                        await stop({"agent_type": f"pageindex-lane-{k}",
-                                    "last_assistant_message": f"agent: {prompt}"}, None, None)
+                        reply = {} if prompt in drop else {
+                            "last_assistant_message": f"agent: {prompt}"}
+                        await stop({"agent_type": f"pageindex-lane-{k}", **reply}, None, None)
                     answered[0] += 1
             width = int(self.options.env["CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS"])
             lanes = [asyncio.create_task(lane(k)) for k in range(width)]
+            if kind in ("late", "resultless"):
+                await asyncio.sleep(0.2)
             yield TaskStartedMessage(subtype="task_started", data={}, task_id="w",
                                      description="lanes", uuid="u", session_id=session_id)
+            if kind != "resultless":  # the launch turn's own, once the Workflow tool returns
+                yield dataclasses.replace(result(), session_id=session_id)
             halts = [asyncio.create_task(self.stopped.wait()), asyncio.create_task(broke.wait())]
             await asyncio.wait(halts, return_when=asyncio.FIRST_COMPLETED)
             if kind == "limited" and broke.is_set():
@@ -559,6 +578,52 @@ def test_a_workflow_that_never_started_is_not_replaced(monkeypatch):
         replies = asyncio.run(run())
     assert replies == ["process: a", "process: b"]
     assert seen.workflows == ["unstarted"]
+    assert len(seen.prompts) == 1  # no usage prompt: the launch turn's result has it
+
+
+@needs_claude
+def test_a_scope_that_closes_as_its_workflow_launches_leaves_none_running(monkeypatch):
+    """A scanned PDF, say: flash ends before its first summary call."""
+    monkeypatch.setattr(cc, "WORKFLOW_RESULT_S", 0.5)
+    # stopped once it started, or its agents would run with no call; so too
+    # when the launch turn's result never comes
+    for plan in ("late", "resultless"):
+        seen = fake_workflow(monkeypatch, plan=[plan])
+        with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
+            for _ in range(500):
+                if seen.prompts:
+                    break
+                time.sleep(0.01)
+        assert seen.stopped == ["w"], plan
+    # one already started is stopped at once, with no result to wait for
+    monkeypatch.setattr(cc, "WORKFLOW_RESULT_S", 5)
+    seen = fake_workflow(monkeypatch, plan=["resultless"])
+    with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
+        time.sleep(0.6)  # past its start
+        closing = time.monotonic()
+    assert seen.stopped == ["w"] and time.monotonic() - closing < 2
+    # closed before the launch went out, it sends none
+    seen = fake_workflow(monkeypatch)
+
+    async def slow_check(client, options):
+        await asyncio.sleep(0.5)
+    monkeypatch.setattr(cc, "_check_session", slow_check)
+    with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
+        pass
+    assert seen.workflows == ["runs"] and seen.prompts == []
+
+
+@needs_claude
+def test_a_call_whose_agent_stops_with_no_reply_runs_in_a_process(monkeypatch):
+    """The CLI gave up on the agent's stream (Claude Code 2.1.301): taken as
+    the reply, it would leave the node's raw text as its summary."""
+    fake_workflow(monkeypatch, drop={"b"})
+
+    async def run():
+        return [await llm_acompletion("claude-code/haiku", p) for p in "abc"]
+    with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
+        replies = asyncio.run(run())
+    assert replies == ["agent: a", "process: b", "agent: c"]
 
 
 @needs_claude
@@ -609,12 +674,30 @@ def test_a_workflow_session_deletes_what_it_left_on_disk(monkeypatch, tmp_path):
     (project / sid / "subagents" / "workflows").mkdir(parents=True)
     (project / sid / "subagents" / "workflows" / "journal.jsonl").write_text("{}")
     (project / other).mkdir()
+    own = tmp_path / "projects" / "-tmp-pageindex-claude-code-1a2b"
+    (own / sid).mkdir(parents=True)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
     fake_workflow(monkeypatch, session_id=sid)
     with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
         assert asyncio.run(llm_acompletion("claude-code/haiku", "P")) == "agent: P"
     # its journal held every agent's reply; another session's files stay
     assert not (project / sid).exists() and (project / other).exists()
+    assert not own.exists()  # its own cwd's project, left empty
+
+
+@needs_claude
+def test_each_workflow_runs_its_script_from_a_directory_of_its_own(monkeypatch):
+    """From a shared one, another user's script could run in its place, and
+    two scopes' writes collide."""
+    seen = fake_workflow(monkeypatch)
+    cwds = []
+    for _ in range(2):
+        with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
+            assert asyncio.run(llm_acompletion("claude-code/haiku", "P")) == "agent: P"
+            cwds.append(seen.options[-1].cwd)
+            assert os.name == "nt" or os.stat(cwds[-1]).st_mode & 0o077 == 0
+        assert not os.path.exists(cwds[-1])
+    assert cwds[0] != cwds[1]
 
 
 @needs_claude
@@ -626,12 +709,15 @@ def test_workflows_run_by_default_at_their_own_width(monkeypatch):
     monkeypatch.setattr("pageindex.utils.SUMMARY_CONCURRENCY", 2 * lanes)
     with cc.claude_code_workflows(prewarm=[("claude-code/haiku", None)]):
         assert asyncio.run(llm_acompletion("claude-code/haiku", "P")) == "agent: P"
+        script = open(os.path.join(seen.options[0].cwd,
+                                   f"pageindex-lanes-{lanes}.js")).read()
     env = seen.options[0].env
     assert env["CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS"] == str(lanes)
+    # set in the caller's environment (a Claude Code session's, say), these
+    # would put every agent on another model than the one asked for
+    assert env["CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL"] == env["CLAUDE_CODE_SUBAGENT_MODEL"] == ""
     # an agent no hook handed a call answers so, and its lane stops; its task
     # text names the hook context, which comes after it, not "the task above"
-    script = open(os.path.join(seen.options[0].cwd,
-                               f"pageindex-lanes-{lanes}.js")).read()
     assert f"agent({json.dumps(cc._LANE_TASK)}," in script
     assert f"?.includes('{cc._NO_TASK}')) return" in script
     assert "SubagentStart hook additional context" in cc._LANE_TASK
