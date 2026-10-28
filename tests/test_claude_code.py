@@ -870,6 +870,17 @@ def test_chat_sends_one_message_with_a_block_per_turn(monkeypatch, chat_client):
 
 
 @needs_claude
+def test_an_effort_given_to_chat_beats_the_callers_claude_code_one(
+        monkeypatch, chat_client):
+    sessions = fake_cli(monkeypatch, result("A"))
+    chat_client.chat("Q", reasoning_effort="low")
+    chat_client.chat("Q")
+    given, default = (s.options.env for s in sessions)
+    assert given["CLAUDE_CODE_EFFORT_LEVEL"] == ""
+    assert "CLAUDE_CODE_EFFORT_LEVEL" not in default  # with none given, theirs applies
+
+
+@needs_claude
 def test_chat_stream_weaves_the_run(monkeypatch, chat_client):
     sessions = fake_cli(
         monkeypatch,
