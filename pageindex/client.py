@@ -445,7 +445,7 @@ class PageIndexClient:
             whose thinking can't be turned off (Claude Opus 5.5 and Fable
             under ``anthropic/``, ``bedrock/``, ``vertex_ai/`` or
             ``azure_ai/``; ``claude-code/`` models); the default runs
-            Opus 5.5 and Fable there at ``"low"``.
+            them at ``"low"``.
             Expand keeps the model's own default. A
             ``mode="standard"`` submit refuses any of the summary knobs.
         use_embedded_toc (bool, optional): Local mode only — whether flash
