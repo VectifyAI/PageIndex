@@ -14,8 +14,8 @@ CHAT_RETRIES = 3  # also spent on resending without a field a 400 refused
 
 
 def should_retry(exc):
-    """A LiteLLM error worth another try: a network failure or a server's 408/409/429/5xx, in a stream too
-    (x-should-retry overrides), never one raised before the request went out."""
+    """A LiteLLM error worth another try: a network failure or a server's 408/409/429/5xx, in a stream or a
+    200's body too (x-should-retry overrides), never one raised before the request went out."""
     import httpx
     from litellm.exceptions import MidStreamFallbackError
     chain, link = [], exc
@@ -25,14 +25,15 @@ def should_retry(exc):
     if any(isinstance(link, httpx.TransportError)
            and not isinstance(link, (httpx.LocalProtocolError, httpx.UnsupportedProtocol)) for link in chain):
         return True
-    # A server's error inside a stream has no httpx error behind it.
-    if not (isinstance(exc, MidStreamFallbackError)
+    # A server's error inside a stream, or in a 200's body (OpenRouter), has no httpx error behind it.
+    # Neither has one LiteLLM raises before sending, but that never carries one of these statuses.
+    status = getattr(exc, "status_code", None) or 0
+    if not (isinstance(exc, MidStreamFallbackError) or status in RETRY_STATUS or status in (502, 503, 504)
             or any(isinstance(link, httpx.HTTPStatusError) for link in chain)):
         return False
     verdict = (getattr(exc, "litellm_response_headers", None) or {}).get("x-should-retry")
     if verdict in ("true", "false"):
         return verdict == "true"
-    status = getattr(exc, "status_code", None) or 0
     return status in RETRY_STATUS or status >= 500
 
 
