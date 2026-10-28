@@ -3981,7 +3981,8 @@ def test_flash_summaries_drop_a_default_effort_the_server_refuses(tmp_path, monk
     """The default effort is dropped once a prompt refused with it (400)
     goes through without it, calls refused after the drop included; a
     prompt refused either way keeps it; another refusal or a chosen effort
-    is never resent without it."""
+    is never resent without it, nor is any on claude-code/, which checks
+    its effort up front (dropped, the calls would leave its workflow)."""
     from conftest import build_pdf
     import copy
     import pageindex.flash.api as flash_api
@@ -3999,7 +4000,7 @@ def test_flash_summaries_drop_a_default_effort_the_server_refuses(tmp_path, monk
             self.status_code = status_code
     sent = []
 
-    def run(optimize, refuse, effort=None, concurrency=1, status=400):
+    def run(optimize, refuse, effort=None, concurrency=1, status=400, model="gpt-9-preview"):
         sent.clear()
 
         async def server(model, prompt, **params):
@@ -4013,7 +4014,7 @@ def test_flash_summaries_drop_a_default_effort_the_server_refuses(tmp_path, monk
         monkeypatch.setattr(pageindex.utils, "llm_acompletion", server)
         monkeypatch.setattr(tree_optimize, "llm_acompletion", server)
         return flash_api.page_index_flash(
-            str(pdf), summary_model="gpt-9-preview", optimize=optimize,
+            str(pdf), summary_model=model, optimize=optimize,
             summary_concurrency=concurrency, summary_reasoning_effort=effort)
 
     def summaries(nodes):
@@ -4035,6 +4036,8 @@ def test_flash_summaries_drop_a_default_effort_the_server_refuses(tmp_path, monk
                            match="Summary generation failed.*first failure: unsupported value"):
             run(optimize, lambda params: "reasoning_effort" in params, effort="high")
         assert set(sent) == {"high"}
+        run(optimize, lambda params: len(sent) == 1, model="claude-code/haiku")
+        assert len(sent) > 2 and set(sent) == {"none"}
 
 
 def test_flash_refuses_a_chosen_none_the_model_cannot_honor(tmp_path, monkeypatch):

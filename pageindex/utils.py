@@ -1195,7 +1195,9 @@ class SummaryScheduler:
         self._pdf_pages = pdf_pages
         self._split_shared_pages = split_shared_pages
         self._params = {"reasoning_effort": reasoning_effort} if reasoning_effort else {}
-        self._drop_refused_effort = drop_refused_effort
+        from .integrations.claude_agent_sdk import is_claude_code
+        # claude-code/ checks its effort before any prompt: a 400 there isn't the effort's
+        self._drop_refused_effort = drop_refused_effort and not is_claude_code(model)
         self._model = model
         self._max_intro_pages = max_intro_pages
         self._max_words = max_words or SUMMARY_MAX_WORDS
@@ -1406,7 +1408,8 @@ async def summarize_tree(structure, pdf_pages, model=None, small_node_tokens=Non
     a page it shares with the next or previous leaf (see leaf_own_text); a set
     `reasoning_effort` goes with every summary call, over the indexing
     backend's, and with `drop_refused_effort` the calls stop sending it once
-    a prompt the server refused with it goes through without it. Model calls
+    a prompt the server refused with it goes through without it (never on
+    claude-code/, whose effort is checked up front). Model calls
     run deepest node first, both in starting order and in leaving the queue:
     depth counts the calls left on a node's path to the root, its own
     included."""

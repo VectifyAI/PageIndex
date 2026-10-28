@@ -441,7 +441,8 @@ class PageIndexClient:
             model without the setting drops it). Defaults to ``"none"``
             unless LiteLLM lists the model as refusing it, and stops
             sending it once a prompt the server refused with it (HTTP
-            400) goes through without it. ``"none"`` raises on a model
+            400) goes through without it (never on ``claude-code/``,
+            whose effort is checked up front). ``"none"`` raises on a model
             whose thinking can't be turned off (Claude Opus 5.5 and Fable
             under ``anthropic/``, ``bedrock/``, ``vertex_ai/`` or
             ``azure_ai/``; ``claude-code/`` models); the default runs
