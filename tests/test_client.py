@@ -2945,6 +2945,33 @@ def test_llm_retry_ladder(monkeypatch, make, calls, slept):
         assert (len(sent), waits, err.value.status_code) == (calls, slept, make().status_code)
 
 
+def test_llm_ladder_retries_a_reply_without_choices(monkeypatch):
+    """A 200 with no choices is tried again: standard mode's gathers swallow
+    the error, so a page the check never confirmed would stay in the tree."""
+    pytest.importorskip("litellm")
+    import litellm
+    sent = []
+
+    def answer(**kw):
+        sent.append(1)
+        return litellm.ModelResponse(choices=[] if len(sent) == 1 else
+                                     [{"message": {"role": "assistant", "content": "ok"}}])
+
+    async def aanswer(**kw):
+        return answer()
+
+    async def _nosleep(s):
+        pass
+    monkeypatch.setattr(litellm, "completion", answer)
+    monkeypatch.setattr(litellm, "acompletion", aanswer)
+    monkeypatch.setattr("pageindex.utils.time.sleep", lambda s: None)
+    monkeypatch.setattr("pageindex.utils.asyncio.sleep", _nosleep)
+    for run in (lambda: pageindex.utils.llm_completion("gpt-4o", "p"),
+                lambda: asyncio.run(pageindex.utils.llm_acompletion("gpt-4o", "p"))):
+        sent.clear()
+        assert (run(), len(sent)) == ("ok", 2)
+
+
 def test_retry_budgets_follow_the_constants(monkeypatch):
     pytest.importorskip("litellm")
     import litellm

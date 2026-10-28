@@ -317,7 +317,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
             if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
                 raise
             logging.error(f"Error: {e}")
-            retry = should_retry(e)
+            retry = should_retry(e) or isinstance(e, IndexError)  # a 200 with no choices
             if retry and i < attempts - 1:
                 logging.warning("Retrying LLM completion")
                 time.sleep(delay(i, getattr(e, "litellm_response_headers", None), INDEX_MAX_DELAY))
@@ -356,7 +356,7 @@ async def llm_acompletion(model, prompt, **params):
             if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
                 raise
             logging.error(f"Error: {e}")
-            retry = should_retry(e)
+            retry = should_retry(e) or isinstance(e, IndexError)  # a 200 with no choices
             if retry and i < attempts - 1:
                 logging.warning("Retrying LLM completion")
                 await asyncio.sleep(delay(i, getattr(e, "litellm_response_headers", None),
