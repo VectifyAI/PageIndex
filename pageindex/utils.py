@@ -115,6 +115,8 @@ def _published_map():
             return _published
         from concurrent.futures import Future
         future = _published = Future()
+        # running: a cancelled waiter can't cancel it for the others
+        future.set_running_or_notify_cancel()
 
     def fetch():
         try:

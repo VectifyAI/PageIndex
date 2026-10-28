@@ -8,6 +8,7 @@ import inspect
 import json
 import pickle
 import sys
+import threading
 import types
 import warnings
 
@@ -1064,6 +1065,32 @@ def test_published_entries_lift_litellms_own_refusal(monkeypatch):
     assert asyncio.run(learn_published_models())
     assert get_optional_params(model=key, custom_llm_provider="bedrock",
                                tools=tools)["tools"]
+
+
+def test_a_cancelled_wait_leaves_the_download_to_the_others(monkeypatch):
+    """A chat cancelled while the published map downloads (a closed
+    stream, Ctrl-C) leaves the one download running for every later one."""
+    pytest.importorskip("litellm")
+    from pageindex.utils import learn_published_models
+    fetched = _publish(monkeypatch, {"global.openai.gpt-test-cancel":
+                                     _UNPACKAGED})
+    get, release = httpx.get, threading.Event()
+
+    def slow(url, timeout):
+        release.wait(5)
+        return get(url, timeout=timeout)
+    monkeypatch.setattr(httpx, "get", slow)
+
+    async def cancel_one():
+        task = asyncio.create_task(learn_published_models())
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    asyncio.run(cancel_one())
+    release.set()
+    assert asyncio.run(learn_published_models())
+    assert len(fetched) == 1
 
 
 @needs_agents
