@@ -1272,7 +1272,8 @@ def page_index_main(doc, opt=None, logger=None, page_list=None):
         if opt.if_add_node_text == 'yes':
             add_node_text(structure, page_list)
         if opt.if_add_node_summary == 'yes':
-            await summarize_tree(structure, page_list, model=getattr(opt, 'summary_model', None) or opt.model)
+            await summarize_tree(structure, page_list, model=getattr(opt, 'summary_model', None) or opt.model,
+                                 concurrency=64)
             if opt.if_add_doc_description == 'yes':
                 # Create a clean structure without unnecessary fields for description generation
                 clean_structure = create_clean_structure_for_description(structure, top_level_only=True)

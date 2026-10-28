@@ -525,6 +525,26 @@ def test_standard_index_stores_intros_covering_ranges_and_section_summaries(tmp_
     assert '"summary": "whole C2"' in prompts[-1]
 
 
+def test_standard_index_keeps_its_summary_width(tmp_path, monkeypatch):
+    """Flash's summaries went to 128 at a time; standard mode's stay at 64."""
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["one"]))
+    widths = []
+
+    async def tree_parser(page_list, opt, doc=None, logger=None):
+        return [{"title": "A", "start_index": 1, "end_index": 1}]
+
+    async def summarize_tree(structure, pdf_pages, **kw):
+        widths.append(kw.get("concurrency"))
+    monkeypatch.setattr(classic, "tree_parser", tree_parser)
+    monkeypatch.setattr(classic, "summarize_tree", summarize_tree)
+    opt = utils.ConfigLoader().load({"model": "m", "if_add_node_summary": "yes",
+                                     "if_add_doc_description": "no"})
+    classic.page_index_main(str(pdf), opt, logger=SimpleNamespace(info=print),
+                            page_list=[("one", 1)])
+    assert widths == [64]
+
+
 def test_standard_index_gives_toc_and_split_parents_intros(tmp_path, monkeypatch):
     texts = [f"page {n}" for n in range(1, 41)]
     pdf = tmp_path / "doc.pdf"
