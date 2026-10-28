@@ -1,11 +1,13 @@
 """The claude-code/ route — indexing and chat as Claude Code CLI runs on the
 user's subscription — over a faked CLI session: no subprocess, no login."""
 import asyncio
+import contextlib
 import dataclasses
 import json
 import logging
 import os
 import sys
+import tempfile
 import time
 from types import SimpleNamespace
 
@@ -223,10 +225,20 @@ def test_index_call_runs_isolated_on_the_subscription(monkeypatch):
         "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"))
     assert opts.env["DISABLE_PROMPT_CACHING"] == "1"
     assert opts.env["CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS"] == "30000"
+    assert opts.env["CLAUDE_CODE_EFFORT_LEVEL"] == ""
     assert "no-session-persistence" in opts.extra_args
     assert opts.max_buffer_size > 2**20  # a page image's tool result is one line
     assert opts.cwd == os.path.realpath(opts.cwd)  # a symlinked cwd is listed twice
     assert first.closed and second.closed
+
+
+@needs_claude
+def test_the_shared_cwd_follows_no_link_planted_at_its_name(monkeypatch, tmp_path):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    (tmp_path / "pageindex-claude-code").symlink_to(tmp_path / "planted")
+    with contextlib.suppress(FileExistsError):
+        cc.claude_code_options("claude-code/haiku")
+    assert not (tmp_path / "planted").exists()
 
 
 @needs_claude
@@ -523,16 +535,18 @@ def test_workflow_lanes_answer_calls_by_priority_and_hand_lost_ones_to_a_process
 @needs_claude
 def test_a_prompt_too_long_for_a_hook_runs_in_a_process(monkeypatch):
     seen = fake_workflow(monkeypatch)
-    # an emoji is two UTF-16 code units, as the CLI counts
+    # an emoji is two UTF-16 code units, as the CLI counts; a lone surrogate one
     fits, too_long = "a" * cc.HOOK_CONTEXT_MAX, "😀" * (cc.HOOK_CONTEXT_MAX // 2 + 1)
+    lone = "Revenue rose \ud83d sharply"
 
     async def run():
         return await asyncio.gather(llm_acompletion("claude-code/haiku", fits),
-                                    llm_acompletion("claude-code/haiku", too_long))
+                                    llm_acompletion("claude-code/haiku", too_long),
+                                    llm_acompletion("claude-code/haiku", lone))
     with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
         replies = asyncio.run(run())
-    assert replies == [f"agent: {fits}", f"process: {too_long}"]
-    assert seen.taken == [fits]
+    assert replies == [f"agent: {fits}", f"process: {too_long}", f"agent: {lone}"]
+    assert seen.taken == [fits, lone]
 
 
 @needs_claude
@@ -762,6 +776,14 @@ def test_a_run_drops_asyncio_noise_about_the_reaped_version_probe(
         monkeypatch, caplog, asyncio_log):
     fake_cli(monkeypatch, result("ok"))
     assert asyncio.run(llm_acompletion("claude-code/haiku", "P")) == "ok"
+    assert_drops_only_the_probe_warning(asyncio_log, caplog)
+
+
+@needs_claude
+def test_a_workflow_drops_it_before_any_process_runs(monkeypatch, caplog, asyncio_log):
+    fake_workflow(monkeypatch)
+    with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
+        assert asyncio.run(llm_acompletion("claude-code/haiku", "P")) == "agent: P"
     assert_drops_only_the_probe_warning(asyncio_log, caplog)
 
 

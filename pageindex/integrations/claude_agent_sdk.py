@@ -229,11 +229,10 @@ def claude_code_options(model: str, reasoning_effort=None, **options):
         options["thinking"] = {"type": "disabled"}
     elif reasoning_effort:
         options["effort"] = reasoning_effort
-    # not a git repo, so the CLI adds no git status to the prompt; resolved,
-    # as the CLI lists a symlinked cwd (macOS's /var) twice in every prompt
-    # (Claude Code 2.1.301)
-    cwd = os.path.realpath(
-        os.path.join(tempfile.gettempdir(), "pageindex-claude-code"))
+    # not a git repo, so the CLI adds no git status to the prompt; the temp
+    # dir resolved, as the CLI lists a symlinked cwd (macOS's /var) twice in
+    # every prompt (Claude Code 2.1.301), but not a link planted at the name
+    cwd = os.path.join(os.path.realpath(tempfile.gettempdir()), "pageindex-claude-code")
     os.makedirs(cwd, exist_ok=True)
     return ClaudeAgentOptions(
         model=wire, tools=[], setting_sources=[], strict_mcp_config=True,
@@ -360,6 +359,8 @@ def _index_options(model, reasoning_effort):
         # where Claude Code keeps thinking on anyway (2.1.301: Haiku 5.5,
         # Sonnet 5.5, Opus 5.5, Fable), it thinks least at low
         options.effort = "low"
+    # inherited, it outranks the effort; "" reads as unset (Claude Code 2.1.301)
+    options.env["CLAUDE_CODE_EFFORT_LEVEL"] = ""
     # a stream with no bytes, pings included, is dead: re-sent after 30 s,
     # not the CLI's 3 minutes
     options.env["CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS"] = "30000"
@@ -379,7 +380,7 @@ async def claude_code_complete(model: str, prompt: str,
                          _PriorityGate)
     host = _HOST.get()
     # the CLI measures in UTF-16 code units, as JavaScript strings do
-    if host is not None and len(prompt.encode("utf-16-le")) // 2 <= HOOK_CONTEXT_MAX:
+    if host is not None and len(prompt.encode("utf-16-le", "surrogatepass")) // 2 <= HOOK_CONTEXT_MAX:
         try:
             return await host.complete(model, reasoning_effort, prompt,
                                        _llm_priority.get())
@@ -686,6 +687,7 @@ class _Workflow:
         return {}
 
     async def _run(self):
+        logging.getLogger("asyncio").addFilter(_drop_probe_reaped)  # added once
         try:
             async with _claude_client(self._options) as client:
                 await _check_session(client, self._options)
