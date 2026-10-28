@@ -235,7 +235,9 @@ def claude_code_options(model: str, reasoning_effort=None, **options):
              # no session-title model call per run
              "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
              # the advisor consults a stronger model: extra quota
-             "CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1"},
+             "CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1",
+             # inherited, it outranks the effort given (Claude Code 2.1.301)
+             **({"CLAUDE_CODE_EFFORT_LEVEL": ""} if reasoning_effort else {})},
         **options)
 
 
