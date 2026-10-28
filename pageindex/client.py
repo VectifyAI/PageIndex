@@ -437,9 +437,10 @@ class PageIndexClient:
             unless LiteLLM lists the model as refusing it, and stops
             sending it once a prompt the server refused with it (HTTP
             400) goes through without it. ``"none"`` raises on a model
-            whose thinking can't be turned off (Claude Opus 5.5 and Fable,
-            ``claude-code/`` models); the default runs Opus 5.5 and Fable
-            at ``"low"``.
+            whose thinking can't be turned off (Claude Opus 5.5 and Fable
+            under ``anthropic/``, ``bedrock/``, ``vertex_ai/`` or
+            ``azure_ai/``; ``claude-code/`` models); the default runs
+            Opus 5.5 and Fable there at ``"low"``.
             Expand keeps the model's own default. A
             ``mode="standard"`` submit refuses any of the summary knobs.
         use_embedded_toc (bool, optional): Local mode only — whether flash
@@ -1318,7 +1319,8 @@ class PageIndexClient:
                 ``reasoning.effort``, Messages ``output_config.effort``.
                 ``"none"`` turns a Claude model's thinking off with its own
                 switch, on Messages and through LiteLLM to Anthropic,
-                Bedrock, Vertex or Foundry, and raises on one that can't
+                Bedrock, Vertex or Foundry (Sonnet 5.5's still thinks
+                between tool calls), and raises on one that can't
                 (Opus 5.5, Fable), as on a ``claude-code/`` model.
                 Unset sends nothing — the model's default applies.
             show_process: Answer lane, streamed chat — weave the run into
@@ -1735,8 +1737,9 @@ class PageIndexClient:
                 its own thinking control, and the values mean what the
                 backend says they mean. ``"none"`` is the exception: it
                 turns a Claude model's thinking off on Anthropic, Bedrock,
-                Vertex or Foundry, and raises on one that can't (Opus 5.5,
-                Fable), as on a ``claude-code/`` model. Unset sends nothing
+                Vertex or Foundry (Sonnet 5.5's still thinks between tool
+                calls), and raises on one that can't (Opus 5.5, Fable), as
+                on a ``claude-code/`` model. Unset sends nothing
                 (the backend's default applies).
             extra_body: Extra request fields beyond this method's
                 parameters, merged last so they win. The managed endpoint
