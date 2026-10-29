@@ -28,9 +28,10 @@ from .errors import PageIndexAPIError
 _PROTOCOL_VERSION = "2025-06-18"
 _TIMEOUT = (10, 240)  # tools may wait server-side (wait_for_completion: 3 min)
 # Below the tool layer, so the model never plays retry loop. read=0: a read
-# timeout is a full wait the server may have acted on, never replayed.
+# timeout is a full wait the server may have acted on, never replayed;
+# other=0: nor is a reply a TLS error cut off.
 # Retry-After is ignored: a long one is a quota, not a blip.
-_RETRY = Retry(total=3, read=0, backoff_factor=1,
+_RETRY = Retry(total=3, read=0, other=0, backoff_factor=1,
                status_forcelist=(429, *range(500, 600)),
                allowed_methods=None, raise_on_status=False,
                respect_retry_after_header=False)

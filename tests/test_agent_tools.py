@@ -1204,6 +1204,16 @@ def test_anthropic_runner_config_thinking_lifts_max_tokens(client):
         model="claude-sonnet-4-5")
 
 
+def test_mcp_bridge_never_resends_a_tool_call_after_a_tls_error():
+    """A reply a TLS error cut off may come from a tool that already ran
+    (an upload, a delete): the call is not sent again."""
+    from urllib3.exceptions import MaxRetryError, SSLError
+    from pageindex.mcp_bridge import _pooled_session
+    retry = _pooled_session().get_adapter("https://api.pageindex.ai/mcp").max_retries
+    with pytest.raises(MaxRetryError):
+        retry.increment("POST", "/mcp", error=SSLError("bad record mac"))
+
+
 def test_mcp_bridge_opens_its_own_session_in_a_forked_child(monkeypatch):
     """A forked worker opens its own connections and MCP session: on its
     parent's pooled sockets it read replies meant for another process, and
