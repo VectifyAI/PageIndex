@@ -1351,6 +1351,33 @@ def test_summarize_tree_child_unrecoverable_raises(monkeypatch):
             structure, pdf_pages, small_node_tokens=0))
 
 
+@pytest.mark.parametrize("check", ["start", "verify", "fix"])
+def test_standard_checks_stop_on_a_call_out_of_retries(monkeypatch, check):
+    """A standard-mode check whose call ran out of retries stops the run,
+    as summaries do: taken as a "no" or skipped, it kept a section on a
+    page no check confirmed."""
+    from pageindex import page_index_classic as classic
+
+    async def exhausted(model, prompt):
+        raise pageindex.utils.LLMRetriesExhausted(
+            "LLM completion failed after 10 attempts: rate limited",
+            status_code=429)
+    monkeypatch.setattr(classic, "llm_acompletion", exhausted)
+    pages = [("Alpha starts here", 4), ("Beta starts here", 4)]
+    toc = [{"title": "Alpha", "physical_index": 1},
+           {"title": "Beta", "physical_index": 2}]
+    run = {
+        "start": lambda: classic.check_title_appearance_in_start_concurrent(
+            toc, pages),
+        "verify": lambda: classic.verify_toc(pages, toc),
+        "fix": lambda: classic.fix_incorrect_toc(
+            toc, pages, [{"list_index": 1, "title": "Beta",
+                          "physical_index": 1}]),
+    }[check]
+    with pytest.raises(pageindex.utils.LLMRetriesExhausted):
+        asyncio.run(run())
+
+
 def test_summarize_tree_fails_loud_when_every_model_call_fails(monkeypatch):
     """A failure foreign to the retry ladder (not LLMRetriesExhausted)
     blanks per node; the asked-and-never-answered backstop must still fail

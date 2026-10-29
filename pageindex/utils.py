@@ -244,7 +244,7 @@ class LLMRetriesExhausted(RuntimeError):
         self.status_code = status_code
 
 
-def _is_unrecoverable(exc: Exception) -> bool:
+def _is_unrecoverable(exc: BaseException) -> bool:
     if isinstance(exc, LLMRetriesExhausted):
         # 400 carries context_length_exceeded, the per-prompt failure the
         # caller absorbs (see above); any other exhausted ladder is fatal.
