@@ -2138,12 +2138,13 @@ def test_parse_citations_scans_in_linear_time():
 
 def _library(docs):
     """A cloud handler serving /docs/ (100 per page) and /doc/<id>/block/
-    lookups from {doc_id: (name, {block_id: block})}."""
+    lookups from {doc_id: (name, {block_id: block}[, path])}."""
     def handler(method, url, kw):
         if url.endswith("/docs/"):
             offset = kw["params"]["offset"]
-            entries = [{"id": doc_id, "name": name}
-                       for doc_id, (name, _) in docs.items()]
+            entries = [{"id": doc_id, "name": doc[0],
+                        **({"path": doc[2]} if len(doc) > 2 else {})}
+                       for doc_id, doc in docs.items()]
             return FakeResponse({"documents": entries[offset:offset + 100],
                                  "total": len(entries), "limit": 100,
                                  "offset": offset})
@@ -2265,6 +2266,34 @@ def test_get_citations_refuses_a_shared_name(cloud, monkeypatch):
     assert client.get_citations('<cite doc="a.pdf" page="1"/>',
                                     doc_id=["pi-2"]) == [
         {"document": "a.pdf", "doc_id": "pi-2", "page": 1}]
+
+
+def test_get_citations_resolves_library_paths(cloud, monkeypatch):
+    """The MCP server cites by library path: a nested path picks its own
+    document over a same-name one at the root, a bare name keeps the
+    shared-name refusal, and a path outside the listing (a shared mount)
+    stays unresolved rather than borrowing a same-name own document."""
+    client, calls, fake = cloud
+    block = {"doc_id": "pi-n", "page": 4, "block_id": "p4_text_1",
+             "bbox": [1, 2, 3, 4], "block_type": "text", "text": "Revenue."}
+    _patch_requests(monkeypatch, _library({
+        "pi-r": ("Q3 Report.pdf", {}, "Q3 Report.pdf"),
+        "pi-n": ("Q3 Report.pdf", {"p4_text_1": block},
+                 "Research/2024/Q3 Report.pdf"),
+    }))
+    nested = 'See <cite doc="Research/2024/Q3 Report.pdf" page="4" block="p4_text_1"/>.'
+    assert client.get_citations(nested) == [
+        {"document": "Research/2024/Q3 Report.pdf", **block}]
+    with pytest.raises(PageIndexAPIError, match=r"pi-r, pi-n.*doc_id="):
+        client.get_citations('<cite doc="Q3 Report.pdf" page="1"/>')
+    assert client.get_citations(
+        '<cite doc="Shared with me/Deals/Q3 Report.pdf" page="2"/>') == [
+        {"document": "Shared with me/Deals/Q3 Report.pdf", "doc_id": None,
+         "page": 2}]
+    # doc_id= reads metadata, which carries no path: the file name decides.
+    assert client.get_citations('<cite doc="Research/2024/Q3 Report.pdf" page="4"/>',
+                                doc_id="pi-n") == [
+        {"document": "Research/2024/Q3 Report.pdf", "doc_id": "pi-n", "page": 4}]
 
 
 def test_get_citations_keeps_blocks_it_cannot_read(cloud, monkeypatch):

@@ -2122,10 +2122,11 @@ class PageIndexClient:
         Returns:
             dict: {'documents': [...], 'total', 'limit', 'offset'}.
 
-        Each document carries ``path``, its folder chain rendered
-        ``"Parent/Child"`` — what a flat listing otherwise loses. None
-        at the library root, for a folder reached only through a share
-        of something below it, and for every local document.
+        Each document carries ``path``, its folder chain plus its file
+        name, ``"Parent/Child/Q3.pdf"`` — what a flat listing otherwise
+        loses. Just the file name at the library root; None for a folder
+        reached only through a share of something below it, and for
+        every local document.
         """
         return self._api.list_documents(limit=limit, offset=offset,
                                         folder_id=folder_id, recursive=recursive)
@@ -2635,10 +2636,12 @@ class PageIndexClient:
             answer (str): The answer text, tags included.
             doc_id (str | list[str], optional): The documents the answer
                 was about — what ``chat(doc_id=...)`` took. Citations name
-                documents, and the ids come from here; without it your own
-                library is listed. Two documents sharing a cited name
-                raise PageIndexAPIError naming both ids: pass ``doc_id``
-                to pick.
+                documents by name or by library path
+                (``Research/2024/Q3.pdf``), and the ids come from here;
+                without it your own library is listed. With it, a cited
+                path matches by its file name. Two documents sharing a
+                cited name raise PageIndexAPIError naming both ids: pass
+                ``doc_id`` to pick.
 
         Returns:
             list: One dict per distinct citation: ``{'document', 'doc_id',
@@ -2674,9 +2677,17 @@ class PageIndexClient:
             for doc in _all_documents(self):
                 if doc.get("name") and doc.get("id"):
                     names.setdefault(doc["name"], []).append(doc["id"])
+                if doc.get("path") and doc.get("id"):
+                    names.setdefault(doc["path"], []).append(doc["id"])
         resolved: list[dict[str, Any]] = []
         for citation in citations:
-            ids = list(dict.fromkeys(names.get(citation["document"], [])))
+            cited = citation["document"]
+            ids = names.get(cited)
+            if not ids and doc_id is not None:
+                # Document metadata carries no path: a cited path matches
+                # by its file name within the scoped documents.
+                ids = names.get(cited.rsplit("/", 1)[-1])
+            ids = list(dict.fromkeys(ids or []))
             if len(ids) > 1:
                 raise PageIndexAPIError(
                     f"{citation['document']!r} names {len(ids)} documents "
