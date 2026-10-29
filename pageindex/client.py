@@ -1289,7 +1289,7 @@ class PageIndexClient:
                 history (assistant ``tool_calls``, ``tool`` rows), as
                 ``messages`` returns it. A ``claude-code/`` model takes
                 text only.
-            doc_id: Document ID or list of IDs to scope the conversation.
+            doc_id: Document ID or list of IDs the conversation targets.
                 Keep it identical across a conversation's calls. Local
                 documents: also enforced at the tool layer, not just
                 prompted. Cloud documents: prompted, not enforced, on the
@@ -1711,7 +1711,7 @@ class PageIndexClient:
                 (assistant ``tool_calls`` and reasoning, ``tool`` rows);
                 a ``claude-code/`` model takes text only.
             stream: Enable streaming responses.
-            doc_id: Document ID or list of IDs to scope the conversation.
+            doc_id: Document ID or list of IDs the conversation targets.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call and is part
                 of the cached prompt prefix. Local documents: also
@@ -1898,7 +1898,7 @@ class PageIndexClient:
                 single logical ``output``. The final event is the
                 terminal ``response.*`` for the run's status; its
                 ``response`` carries the tool outputs in ``messages``.
-            doc_id: Document ID or list of IDs to scope the conversation.
+            doc_id: Document ID or list of IDs the conversation targets.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call and is part
                 of the cached prompt prefix. Local documents: also
@@ -2009,7 +2009,7 @@ class PageIndexClient:
                 returns, and ``get_final_text()`` that message's text
                 (raising on an unfinished one, the text in
                 ``partial_answer``).
-            doc_id: Document ID or list of IDs to scope the conversation.
+            doc_id: Document ID or list of IDs the conversation targets.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call. Local
                 documents: also enforced at the tool layer; cloud

@@ -292,12 +292,12 @@ class CloudAPI:
         folder_id: Optional[str] = None,
     ) -> Union[ChatObject, Iterator[str], Iterator[ChatObject]]:
         """
-        PageIndex Chat Completions. Optionally scoped to specific PageIndex documents.
+        PageIndex Chat Completions. Optionally targeted at specific PageIndex documents.
 
         Args:
             messages (List[Dict[str, str]]): Conversation messages with 'role' and 'content' keys.
             stream (bool, optional): Enable streaming responses. Default is False.
-            doc_id (Optional[Union[str, List[str]]], optional): Document ID(s) to scope the conversation. Can be a single ID or a list of IDs.
+            doc_id (Optional[Union[str, List[str]]], optional): Document ID(s) the conversation targets, in its prompt only: the chat's tools reach every document the api_key can. Can be a single ID or a list of IDs.
             temperature (Optional[float], optional): Sampling temperature. Default is None (uses API default).
             stream_metadata (bool, optional): If True and stream=True, return raw chunks with metadata instead of just text. Default is False.
             enable_citations (bool, optional): Enable citation instructions in responses. Default is False.
