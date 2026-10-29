@@ -931,8 +931,30 @@ def _conversation_cache_key(model_name: str, instructions: str, doc_id,
     return "pageindex-" + hashlib.sha256(seed.encode()).hexdigest()[:16]
 
 
+def _mcp_too_old(exc):
+    """What fixes LiteLLM's MCP handler failing to import from the installed
+    mcp (LiteLLM imports it on calls with tools), else None."""
+    from importlib.metadata import PackageNotFoundError, version
+    seen = []
+    while exc is not None and exc not in seen:
+        if isinstance(exc, ImportError) and (exc.name or "").split(".")[0] == "mcp":
+            try:
+                mcp, litellm = version("mcp"), version("litellm")
+            except PackageNotFoundError:
+                return None
+            return (f"LiteLLM {litellm} needs a newer version of `mcp` than the "
+                    f"installed {mcp}. Run `pip install -U mcp`, or use a different "
+                    f"version of LiteLLM that works with mcp {mcp}.")
+        seen.append(exc)
+        exc = exc.__cause__ or exc.__context__
+    return None
+
+
 def _model_backend_error(exc, lane: str, client=None) -> PageIndexAPIError:
     """Wrap a provider failure, appending the hint that fixes it, if any."""
+    fix = _mcp_too_old(exc)
+    if fix:
+        return PageIndexAPIError(fix)
     message = f"The model backend failed: {exc}"
     if lane == "chat" and "Function tools with reasoning_effort" in str(exc):
         message += (

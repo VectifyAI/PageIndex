@@ -3794,6 +3794,29 @@ def test_sol_class_refusal_names_its_exits():
     assert "protocol='responses'" not in str(plain)
 
 
+def test_an_mcp_too_old_for_litellm_names_the_fix(monkeypatch):
+    """LiteLLM 1.106+ imports its MCP handler on calls with tools; from an
+    older mcp that import fails, inside the connection error LiteLLM
+    raises. The error names both versions and the fix, not the import."""
+    from importlib import metadata
+    monkeypatch.setattr(metadata, "version",
+                        {"mcp": "1.26.0", "litellm": "1.106.6"}.get)
+    try:
+        try:
+            raise ImportError("cannot import name 'CacheableResult' from "
+                              "'mcp.types'", name="mcp.types")
+        except ImportError:
+            raise Exception("litellm.APIConnectionError: cannot import name")
+    except Exception as exc:
+        refused = exc
+    assert str(local_chat._model_backend_error(refused, "chat")) == (
+        "LiteLLM 1.106.6 needs a newer version of `mcp` than the installed "
+        "1.26.0. Run `pip install -U mcp`, or use a different version of "
+        "LiteLLM that works with mcp 1.26.0.")
+    other = ImportError("no module", name="mcpx")
+    assert "failed" in str(local_chat._model_backend_error(other, "chat"))
+
+
 def test_conversation_cache_key_stable_per_conversation():
     """Cache-routing key, sent as the OpenAI prompt_cache_key. A
     conversation's continuations must share one key (same model /
