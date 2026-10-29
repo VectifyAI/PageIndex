@@ -103,8 +103,17 @@ def _mute_litellm_bridge_usage_warning() -> None:
 
 def _quiet_litellm() -> None:
     """Mute litellm's stdout "Provider List:" banner and default its loggers
-    to LITELLM_LOG (ERROR unset); a level set elsewhere stays."""
+    to LITELLM_LOG (ERROR unset); a level set elsewhere stays. Also maps
+    Claude's stop at its context window to "length": LiteLLM reads a stop
+    reason it doesn't know as "stop", and only warns, so a cut-off answer
+    would pass as whole."""
     import litellm
+    try:
+        from litellm.litellm_core_utils.core_helpers import _FINISH_REASON_MAP
+    except ImportError:
+        pass  # LiteLLM moved it: the stop reads as "stop", as before
+    else:
+        _FINISH_REASON_MAP.setdefault("model_context_window_exceeded", "length")
     litellm.suppress_debug_info = True
     level = getattr(logging, os.environ.get("LITELLM_LOG", "ERROR").upper(),
                     logging.ERROR)

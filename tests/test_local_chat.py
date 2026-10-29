@@ -5531,6 +5531,18 @@ def test_quiet_litellm_honors_the_chosen_default(monkeypatch, caplog):
         assert gated.level == chosen
 
 
+def test_claudes_stop_at_its_context_window_reads_as_cut_off():
+    """LiteLLM reads Claude's model_context_window_exceeded, a stop reason
+    it doesn't map, as "stop": a cut-off answer would pass as whole. Mapped
+    to "length", the chat lane raises it and standard mode sees the cut.
+    Fails, too, when LiteLLM moves the map the mapping is written into."""
+    pytest.importorskip("litellm")
+    from litellm.litellm_core_utils.core_helpers import map_finish_reason
+    from pageindex.utils import _quiet_litellm
+    _quiet_litellm()
+    assert map_finish_reason("model_context_window_exceeded") == "length"
+
+
 def test_openai_protocol_predicate_follows_litellm_routing():
     pytest.importorskip("litellm")
     for name in ("gpt-5", "openai/gpt-4o", "litellm/gpt-4o",
