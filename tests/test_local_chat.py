@@ -860,34 +860,40 @@ def test_a_final_reply_with_no_text_adds_no_message(client, store_path,
 
 @needs_agents
 @pytest.mark.parametrize("stream", [False, True])
-@pytest.mark.parametrize("empty, sent", [(1, 2), (4, 4)],
+@pytest.mark.parametrize("empty, sent, answered", [(1, 3, True),
+                                                   (4, 5, False)],
                          ids=["recovers", "exhausted"])
-def test_reply_with_no_choices_goes_again(client, monkeypatch, stream, empty,
-                                          sent):
-    """A reply with no choices (Gemini with no candidates) goes again, as
-    on the index lane, and never passes as an empty answer."""
+def test_reply_with_no_choices_goes_again(client, store_path, monkeypatch,
+                                          stream, empty, sent, answered):
+    """A reply with no choices (Gemini with no candidates, as after a tool
+    result) goes again, as on the index lane, and never passes as an empty
+    answer."""
     pytest.importorskip("litellm")
     import litellm
     from litellm.types.utils import ModelResponseStream
     monkeypatch.setattr("pageindex.retry.delay", lambda *args: 0)
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
     # streamed as LiteLLM streams OpenRouter: the chunk, then the dict it
     # makes of the provider's [DONE]
+    none = ModelResponseStream(choices=[])
     done = {"text": "", "is_finished": True, "finish_reason": "stop",
             "usage": None, "index": 0}
-    replies = [[ModelResponseStream(choices=[]), done] if stream
-               else litellm.ModelResponse(choices=[])] * empty
-    # an answer streamed with usage ends on a chunk with no choices too
-    replies.append(_litellm_chunks({"content": "A"}, finish="stop")
-                   + [ModelResponseStream(choices=[])] if stream
-                   else _litellm_reply("A"))
+    replies = [_litellm_chunks({"tool_calls": [{"index": 0, **_TWO_CALLS[0]}]})
+               if stream else _litellm_reply(tool_calls=_TWO_CALLS[:1])]
+    replies += [[none, done] if stream
+                else litellm.ModelResponse(choices=[])] * empty
+    # a streamed answer can open on a chunk with no choices (Azure), and
+    # ends on one when it carries usage
+    replies.append([none, *_litellm_chunks({"content": "A"}, finish="stop"),
+                    none] if stream else _litellm_reply("A"))
     requests = _mock_litellm(monkeypatch, replies)
 
     def ask():
-        out = client.chat("q", model="gpt-test", stream=stream)
+        out = client.chat("q", doc_id=doc_id, model="gpt-test", stream=stream)
         return "".join(out) if stream else out
 
-    if empty < sent:
-        assert ask() == "A"
+    if answered:  # a stream shows the tool turn first
+        assert ask().split("\n\n")[-1] == "A"
     else:
         with pytest.raises(PageIndexAPIError, match="no choices"):
             ask()

@@ -3144,14 +3144,15 @@ def test_cloud_client_sends_through_its_retrying_session(monkeypatch, call, stat
 def test_cloud_client_pools_apart_from_its_forked_children(monkeypatch):
     """A forked worker opens its own connections: on its parent's pooled ones, it would read a reply meant for
     another process, another document's."""
-    from pageindex.retry import SDK_RETRIES
+    from pageindex.retry import SDK_RETRIES, _CloudRetry
     api = PageIndexClient(api_key="k")._api
     parent = api._http
     assert api._http is parent
     monkeypatch.setattr("pageindex.cloud_api.os.getpid", lambda: -1)
     child = api._http
     assert child is not parent and api._http is child
-    assert child.get_adapter("https://api.pageindex.ai/").max_retries.total == SDK_RETRIES
+    retries = child.get_adapter("https://api.pageindex.ai/").max_retries
+    assert isinstance(retries, _CloudRetry) and retries.total == SDK_RETRIES
 
 
 @pytest.mark.parametrize("retry_after, bounds", [
