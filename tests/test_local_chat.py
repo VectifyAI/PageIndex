@@ -1147,6 +1147,30 @@ def test_published_entries_lift_litellms_own_refusal(monkeypatch):
                                tools=tools)["tools"]
 
 
+def test_indexing_learns_a_model_whose_effort_litellm_would_drop(monkeypatch):
+    """LiteLLM drops a summary's reasoning_effort, unseen, for a Fireworks
+    model its packaged map lacks; the published map's entry, learned before
+    the summaries, keeps it. A model whose effort LiteLLM sends, or one its
+    packaged map has, downloads nothing."""
+    pytest.importorskip("litellm")
+    from litellm.utils import get_optional_params
+    from pageindex.utils import learn_model_if_effort_dropped
+    name = "accounts/fireworks/models/test-unpackaged"  # LiteLLM keeps it
+    fetched = _publish(monkeypatch, {f"fireworks_ai/{name}": {
+        "litellm_provider": "fireworks_ai", "mode": "chat",
+        "supports_reasoning": True}})
+
+    def sent():
+        return get_optional_params(model=name, custom_llm_provider="fireworks_ai",
+                                   reasoning_effort="none",
+                                   drop_params=True).get("reasoning_effort")
+    for model in ("openrouter/vendor/model-test-unlisted", "gpt-4o"):
+        learn_model_if_effort_dropped(model)
+    assert not fetched and sent() is None
+    learn_model_if_effort_dropped(f"fireworks_ai/{name}")
+    assert len(fetched) == 1 and sent() == "none"
+
+
 def test_a_cancelled_wait_leaves_the_download_to_the_others(monkeypatch):
     """A chat cancelled while the published map downloads (a closed
     stream, Ctrl-C) leaves the one download running for every later one."""

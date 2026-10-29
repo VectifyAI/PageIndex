@@ -266,12 +266,15 @@ def _page_index_flash(pdf, summary, summary_model, optimize, optimize_expand,
         from ..utils import ConfigLoader
         cfg = ConfigLoader().load()
         summary_model = getattr(cfg, 'summary_model', None) or cfg.model
-    from ..utils import SUMMARY_MAX_WORDS, default_summary_reasoning_effort
+    from ..utils import (SUMMARY_MAX_WORDS, default_summary_reasoning_effort,
+                         learn_model_if_effort_dropped)
+    from ..integrations.claude_agent_sdk import claude_code_check, is_claude_code
+    if summary and structure and not is_claude_code(summary_model):
+        learn_model_if_effort_dropped(summary_model)  # before the default reads the map
     effort = summary_reasoning_effort and summary_reasoning_effort.strip()
     defaulted = not effort
     if summary and structure and defaulted:
         effort = default_summary_reasoning_effort(summary_model)
-    from ..integrations.claude_agent_sdk import claude_code_check, is_claude_code
     if summary and structure and not defaulted:
         _refuse_none(summary_model, effort)  # a model read from the config
     if summary and structure and not defaulted and effort != "none" \

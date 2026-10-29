@@ -15,8 +15,11 @@ from io import BytesIO
 from dotenv import find_dotenv, load_dotenv
 load_dotenv(find_dotenv(usecwd=True))
 # litellm's import fetches its model map over the network unless told not to.
-_MAP_SET_BY_USER = "LITELLM_LOCAL_MODEL_COST_MAP" in os.environ
-os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+# A spawned worker inherits the value set below; the marker says it is ours.
+_MAP_SET_BY_USER = os.environ.get("LITELLM_LOCAL_MODEL_COST_MAP") not in (
+    None, os.environ.get("_PAGEINDEX_LOCAL_MODEL_MAP"))
+if not _MAP_SET_BY_USER:
+    os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = os.environ["_PAGEINDEX_LOCAL_MODEL_MAP"] = "True"
 import logging
 import yaml
 from pathlib import Path
@@ -172,6 +175,23 @@ async def learn_published_models() -> bool:
         litellm.register_model(new)
         _filled = True
     return _filled
+
+
+def learn_model_if_effort_dropped(model) -> None:
+    """learn_published_models when LiteLLM's packaged map lacks `model` and
+    LiteLLM so drops a reasoning_effort sent with it: drop_params drops it
+    unseen, leaving no refusal to learn on."""
+    import litellm
+    model = _litellm_model(model)
+    try:
+        litellm.get_model_info(model)
+        return  # in the packaged map: the published one adds nothing for it
+    except Exception:
+        pass
+    provider, name = model.split("/", 1)
+    if "reasoning_effort" not in (litellm.get_supported_openai_params(
+            model=name, custom_llm_provider=provider) or []):
+        run_off_loop(asyncio.run, learn_published_models())
 
 # Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
 if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
@@ -1047,8 +1067,9 @@ def default_summary_reasoning_effort(model):
     it, else None. claude-code/ models, where neither applies, always get it.
     Where LiteLLM says nothing (openrouter/..., models it has not caught up
     with) the summaries send it and drop it if the server refuses it; a
-    provider LiteLLM sends it to only for models its packaged map knows
-    (xai/, fireworks_ai/, ...) has it dropped before sending instead."""
+    provider LiteLLM sends it to only for models its map knows (xai/,
+    fireworks_ai/, ...) has it dropped before sending instead, unless the
+    published map, learned first (learn_model_if_effort_dropped), knows it."""
     from .integrations.claude_agent_sdk import is_claude_code
     if is_claude_code(model):
         return SUMMARY_REASONING_EFFORT

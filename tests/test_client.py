@@ -4044,6 +4044,15 @@ def test_flash_summaries_send_the_reasoning_effort_and_expand_does_not(tmp_path,
         assert bool(expands) == (optimize == "full")
         assert all("reasoning_effort" not in p for p in expands)
 
+    # a model LiteLLM's packaged map lacks is learned before the default reads it
+    order = []
+    monkeypatch.setattr(pageindex.utils, "learn_model_if_effort_dropped",
+                        lambda model: order.append("learn"))
+    monkeypatch.setattr(pageindex.utils, "default_summary_reasoning_effort",
+                        lambda model: order.append("default"))
+    flash_api.page_index_flash(str(pdf), summary_model="m", optimize=False)
+    assert order == ["learn", "default"]
+
     monkeypatch.setattr(pageindex.utils, "default_summary_reasoning_effort",
                         lambda model: pytest.fail("looked up with summaries off"))
     flash_api.page_index_flash(str(pdf), summary=False, optimize=False)
