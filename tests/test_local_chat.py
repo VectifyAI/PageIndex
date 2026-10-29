@@ -1173,6 +1173,16 @@ def test_a_cancelled_wait_leaves_the_download_to_the_others(monkeypatch):
     assert len(fetched) == 1
 
 
+def test_a_forked_child_drops_its_parents_pending_download(monkeypatch):
+    """A worker forked while the published map downloads lacks the thread
+    that download runs on: it starts its own instead of waiting forever."""
+    from concurrent.futures import Future
+    from conftest import exit_code_in_forked_child
+    from pageindex import utils
+    monkeypatch.setattr(utils, "_published", Future())
+    assert exit_code_in_forked_child(lambda: utils._published is None) == 0
+
+
 @needs_agents
 @pytest.mark.parametrize("settings", [{}, {"stream": True}])
 def test_unpackaged_model_goes_again_with_the_published_map(
@@ -5056,6 +5066,17 @@ def test_messages_backend_merges_and_reaches_the_client(client, fake_anthropic,
     client.chat_backend = {"base_url": "http://cb"}
     client._messages("q", model="claude-sonnet-4-5", backend={"api_key": "z"})
     assert seen["backend"] == {"base_url": "http://cb", "api_key": "z"}
+
+
+def test_a_forked_child_keeps_none_of_its_parents_anthropic_clients(
+        monkeypatch):
+    """On its parent's pooled connections a forked worker reads replies
+    meant for another process: it builds its own clients."""
+    from conftest import exit_code_in_forked_child
+    monkeypatch.setitem(local_chat._ANTHROPIC_CLIENTS, ("anthropic", ()),
+                        object())
+    assert exit_code_in_forked_child(
+        lambda: not local_chat._ANTHROPIC_CLIENTS) == 0
 
 
 @needs_anthropic

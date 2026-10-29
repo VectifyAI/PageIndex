@@ -144,6 +144,16 @@ def _published_map():
     return future
 
 
+def _forget_published():
+    # a forked child lacks the thread a pending download runs on
+    global _published
+    _published = None
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_forget_published)
+
+
 async def learn_published_models() -> bool:
     """LiteLLM takes the published map's entries its packaged map lacks;
     True once any are in. Never when the caller set

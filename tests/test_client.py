@@ -3155,6 +3155,25 @@ def test_cloud_client_pools_apart_from_its_forked_children(monkeypatch):
     assert isinstance(retries, _CloudRetry) and retries.total == SDK_RETRIES
 
 
+def test_a_fork_waits_for_the_litellm_preload(monkeypatch, tmp_path):
+    """A worker forked while a client imports litellm in the background
+    would wait forever on that import's lock, held by a thread it lacks: the
+    fork waits for the import instead."""
+    import time
+    import pageindex.client as client_mod
+    from conftest import exit_code_in_forked_child
+    (tmp_path / "litellm.py").write_text("import time\ntime.sleep(0.5)\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setitem(sys.modules, "litellm", None)  # the real one comes back after
+    del sys.modules["litellm"]
+    monkeypatch.setattr(client_mod, "_litellm_preload_started", False)
+    client_mod._preload_litellm()
+    deadline = time.monotonic() + 5
+    while "litellm" not in sys.modules and time.monotonic() < deadline:
+        time.sleep(0.01)  # until the import has begun
+    assert exit_code_in_forked_child(lambda: importlib.import_module("litellm")) == 0
+
+
 @pytest.mark.parametrize("retry_after, bounds", [
     ("7", [(7, 7), (7, 7)]), ("120", [(0.5, 1), (1, 2)])])
 def test_cloud_session_waits_as_the_server_asks(monkeypatch, retry_after, bounds):

@@ -30,7 +30,12 @@ def _preload_litellm() -> None:
         except Exception:
             pass
 
-    threading.Thread(target=_import, daemon=True).start()
+    thread = threading.Thread(target=_import, daemon=True)
+    thread.start()
+    if hasattr(os, "register_at_fork"):
+        # a child forked mid-import would wait forever on the import lock of
+        # a thread it lacks, so a fork waits for the import to finish
+        os.register_at_fork(before=thread.join)
 
 
 def _parse_pages(pages: str) -> list[int]:

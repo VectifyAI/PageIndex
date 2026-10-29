@@ -18,6 +18,27 @@ def _no_published_model_map(monkeypatch):
     monkeypatch.setattr(utils, "_MAP_SET_BY_USER", True)
 
 
+def exit_code_in_forked_child(check, timeout=5):
+    """``check()`` run in a forked child of this process: exit code 0 when it
+    returns true, 1 when false or raising, minus SIGALRM when it hangs."""
+    import os
+    import signal
+    import warnings
+    if not hasattr(os, "fork"):
+        pytest.skip("fork is POSIX only")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)  # forks a threaded process
+        pid = os.fork()
+    if pid == 0:
+        code = 1
+        try:
+            signal.alarm(timeout)
+            code = 0 if check() else 1
+        finally:
+            os._exit(code)
+    return os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1])
+
+
 def build_pdf(page_texts, font="<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"):
     """Build a minimal, uncompressed PDF (one line per page, a page's
     (x, y, size, text) lines, or a page's raw content stream as bytes, in

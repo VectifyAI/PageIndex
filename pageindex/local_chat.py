@@ -2010,6 +2010,10 @@ def _require_anthropic() -> None:
 
 
 _ANTHROPIC_CLIENTS: dict = {}  # (route, backend) key -> client, kept open
+if hasattr(os, "register_at_fork"):
+    # on its parent's pooled connections a forked child reads replies
+    # meant for another process
+    os.register_at_fork(after_in_child=_ANTHROPIC_CLIENTS.clear)
 
 # The transport class per routing prefix — the anthropic SDK ships one
 # client per channel, so a row here is what makes a route reachable.
