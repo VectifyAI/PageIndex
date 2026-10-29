@@ -876,7 +876,9 @@ def test_reply_with_no_choices_goes_again(client, monkeypatch, stream, empty,
             "usage": None, "index": 0}
     replies = [[ModelResponseStream(choices=[]), done] if stream
                else litellm.ModelResponse(choices=[])] * empty
-    replies.append(_litellm_chunks({"content": "A"}, finish="stop") if stream
+    # an answer streamed with usage ends on a chunk with no choices too
+    replies.append(_litellm_chunks({"content": "A"}, finish="stop")
+                   + [ModelResponseStream(choices=[])] if stream
                    else _litellm_reply("A"))
     requests = _mock_litellm(monkeypatch, replies)
 
