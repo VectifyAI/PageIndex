@@ -859,13 +859,33 @@ def test_a_final_reply_with_no_text_adds_no_message(client, store_path,
 
 
 @needs_agents
-def test_reply_with_no_choices_records_nothing(client, monkeypatch):
-    """The Agents SDK reads a reply with no choices as an empty answer."""
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("empty, sent", [(1, 2), (4, 4)],
+                         ids=["recovers", "exhausted"])
+def test_reply_with_no_choices_goes_again(client, monkeypatch, stream, empty,
+                                          sent):
+    """A reply with no choices (Gemini with no candidates) goes again, as
+    on the index lane, and never passes as an empty answer."""
     pytest.importorskip("litellm")
     import litellm
-    _mock_litellm(monkeypatch, [litellm.ModelResponse(choices=[])])
-    out = client.chat_completions("q", model="gpt-test")
-    assert out.choices[0].message.content == ""
+    from litellm.types.utils import ModelResponseStream
+    monkeypatch.setattr("pageindex.retry.delay", lambda *args: 0)
+    replies = [[ModelResponseStream(choices=[])] if stream
+               else litellm.ModelResponse(choices=[])] * empty
+    replies.append(_litellm_chunks({"content": "A"}, finish="stop") if stream
+                   else _litellm_reply("A"))
+    requests = _mock_litellm(monkeypatch, replies)
+
+    def ask():
+        out = client.chat("q", model="gpt-test", stream=stream)
+        return "".join(out) if stream else out
+
+    if empty < sent:
+        assert ask() == "A"
+    else:
+        with pytest.raises(PageIndexAPIError, match="no choices"):
+            ask()
+    assert len(requests) == sent
 
 
 def _refusal(field):

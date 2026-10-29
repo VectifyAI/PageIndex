@@ -311,6 +311,7 @@ class _Replies:
         self.last: list = []
         self.request: Optional[str] = None  # the latest filled call id
         self.missed = False  # a request went out without the fill
+        self.unanswered = False  # the latest stream has carried no choice
         self.sent: set = set()  # latest request's fields a 400 may refuse
         self.refused: set = set()  # fields a 400 refused in this call
 
@@ -506,6 +507,8 @@ def _recording(create, replies: _Replies):
 
     def creating(chunk):
         choices = getattr(chunk, "choices", None) or ()
+        if choices:
+            replies.unanswered = False
         delta = getattr(choices[0], "delta", None) if choices else None
         dump = getattr(delta, "model_dump", None)
         fields = delta if isinstance(delta, dict) else dump() if dump else {}
@@ -536,11 +539,12 @@ def _chat_retry(replies: _Replies):
     entries its packaged model map lacks taken from the published one (a
     model newer than the package). Again at once without the fields a 400
     names, of those the request had that may be refused, for the rest of
-    the call: each retry refuses what its 400 named. Anything else by the
-    SDK's one retry rule, within retry.CHAT_RETRIES."""
+    the call: each retry refuses what its 400 named. A reply with no
+    choices goes again, as on the index lane. Anything else by the SDK's
+    one retry rule, within retry.CHAT_RETRIES."""
     from agents import ModelRetrySettings, RetryDecision
     from litellm.exceptions import UnsupportedParamsError
-    from .retry import CHAT_RETRIES, agent_policy
+    from .retry import CHAT_RETRIES, SDK_MAX_DELAY, agent_policy, delay
     learned = False
 
     def policy(context):
@@ -556,8 +560,22 @@ def _chat_retry(replies: _Replies):
             if named:
                 replies.refused.update(named)
                 return RetryDecision(retry=True, delay=0)
+        if getattr(context.error, "no_choices", False):
+            return RetryDecision(retry=True, delay=delay(
+                context.attempt - 1, None, SDK_MAX_DELAY))
         return agent_policy(context)
     return ModelRetrySettings(max_retries=CHAT_RETRIES, policy=policy)
+
+
+def _no_choices(model: str):
+    """A reply with no choices, raised as LiteLLM raises one whose choices
+    are missing and marked for _chat_retry: an empty answer never passes
+    as the model's."""
+    from litellm.exceptions import APIError
+    error = APIError(500, "the model returned a reply with no choices", "",
+                     model)
+    setattr(error, "no_choices", True)
+    return error
 
 
 def _keep_reply_fields(agent, messages) -> Optional[_Replies]:
@@ -594,15 +612,30 @@ def _keep_reply_fields(agent, messages) -> Optional[_Replies]:
         if replies.request != call_id:
             replies.missed = True
         if not isinstance(result, tuple):
-            if result.choices:
-                replies.record(result.choices[0].message.model_dump())
+            if not result.choices:
+                raise _no_choices(model.model)
+            replies.record(result.choices[0].message.model_dump())
             return result
         create = getattr(result[1], "chunk_creator", None)
         if create is not None:  # LiteLLM's CustomStreamWrapper
             setattr(result[1], "chunk_creator", _recording(create, replies))
+        replies.unanswered = create is not None
         return result
 
+    stream_response = model.stream_response
+
+    async def streaming(*args, **kwargs):
+        from contextlib import aclosing
+        # an async generator, typed AsyncIterator by openai-agents
+        async with aclosing(stream_response(*args, **kwargs)) as events:  # type: ignore[arg-type]
+            async for event in events:
+                # before the end, the SDK's retry may still send it again
+                if event.type == "response.completed" and replies.unanswered:
+                    raise _no_choices(model.model)
+                yield event
+
     model._fetch_response = fetching
+    model.stream_response = streaming
     agent.model_settings = dataclasses.replace(
         agent.model_settings, retry=_chat_retry(replies))
     return replies
