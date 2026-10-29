@@ -889,17 +889,22 @@ def test_reply_with_no_choices_goes_again(client, monkeypatch, stream, empty,
 
 
 @needs_agents
-def test_a_stream_of_plain_dict_chunks_is_an_answer(client, monkeypatch):
+@pytest.mark.parametrize("pieces, finish", [(["Hello", " there"], "stop"),
+                                            ([""], "")],
+                         ids=["answer", "empty"])
+def test_a_stream_of_plain_dict_chunks_is_an_answer(client, monkeypatch,
+                                                    pieces, finish):
     """Some LiteLLM parsers (Snowflake, Cohere) yield plain dict chunks,
-    which carry choices only once LiteLLM has built them."""
+    which carry no choices list: their answer, an empty one too (Cohere's,
+    with no finish LiteLLM reads), passes as the non-streamed reply does."""
     pytest.importorskip("litellm")
     requests = _mock_litellm(monkeypatch, [[
-        {"text": "Hello", "is_finished": False, "finish_reason": "",
-         "usage": None},
-        {"text": " there", "is_finished": True, "finish_reason": "stop",
-         "usage": None}]])
+        {"text": text, "is_finished": False, "finish_reason": "",
+         "usage": None} for text in pieces[:-1]] + [
+        {"text": pieces[-1], "is_finished": bool(finish),
+         "finish_reason": finish, "usage": None}]])
     out = client.chat("q", model="gpt-test", stream=True)
-    assert "".join(out) == "Hello there"
+    assert "".join(out) == "".join(pieces)
     assert len(requests) == 1
 
 

@@ -506,7 +506,7 @@ def _recording(create, replies: _Replies):
     replies.streams.append((chunks, raw))
 
     def creating(chunk):
-        choices = getattr(chunk, "choices", None) or ()
+        choices = getattr(chunk, "choices", None)
         delta = getattr(choices[0], "delta", None) if choices else None
         dump = getattr(delta, "model_dump", None)
         fields = delta if isinstance(delta, dict) else dump() if dump else {}
@@ -517,9 +517,11 @@ def _recording(create, replies: _Replies):
             if not parts or type(parts[0]) is type(value):
                 parts.append(value)
         processed = create(chunk=chunk)
-        # LiteLLM builds choices from dict chunks (Snowflake, Cohere), and
-        # holds a Gemini finish-only chunk's for its own closing chunk
-        if choices or getattr(processed, "choices", None):
+        # only a chunk with a choices list can come with none (Gemini with no
+        # candidates): LiteLLM's dict and str parsers (Snowflake, Cohere)
+        # carry none at all, and LiteLLM holds a Gemini finish-only chunk's
+        # choice for its own closing chunk
+        if choices is None or choices or getattr(processed, "choices", None):
             replies.unanswered = False
         if processed is not None:
             _drop_repeated_thinking(processed, thinking)
