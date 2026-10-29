@@ -1,4 +1,5 @@
 """Cloud mode of the PageIndex SDK, based on the 0.2.8 client."""
+import os
 import requests
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Union, Iterator
@@ -23,7 +24,14 @@ class CloudAPI:
 
     def __init__(self, client):
         self._client = client
-        self._http = cloud_session()
+        self._session, self._pid = cloud_session(), os.getpid()
+
+    @property
+    def _http(self):
+        # a forked process would read replies off the sockets its parent pooled
+        if self._pid != os.getpid():
+            self._session, self._pid = cloud_session(), os.getpid()
+        return self._session
 
     @property
     def BASE_URL(self) -> str:
