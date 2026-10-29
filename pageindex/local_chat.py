@@ -311,7 +311,7 @@ class _Replies:
         self.last: list = []
         self.request: Optional[str] = None  # the latest filled call id
         self.missed = False  # a request went out without the fill
-        self.unanswered = False  # the latest stream has carried no choice
+        self.unanswered: Optional[bool] = None  # the latest stream, so far
         self.sent: set = set()  # latest request's fields a 400 may refuse
         self.refused: set = set()  # fields a 400 refused in this call
 
@@ -516,13 +516,14 @@ def _recording(create, replies: _Replies):
             parts = raw.setdefault(key, [])
             if not parts or type(parts[0]) is type(value):
                 parts.append(value)
-        processed = create(chunk=chunk)
-        # only a chunk with a choices list can come with none (Gemini with no
-        # candidates): LiteLLM's dict and str parsers (Snowflake, Cohere)
-        # carry none at all, and LiteLLM holds a Gemini finish-only chunk's
-        # choice for its own closing chunk
-        if choices is None or choices or getattr(processed, "choices", None):
+        # a stream is empty when its chunks' choices lists all came empty;
+        # LiteLLM's dict and str chunks (Snowflake, Cohere, its [DONE]
+        # sentinel) tell neither way
+        if choices:
             replies.unanswered = False
+        elif isinstance(choices, list) and replies.unanswered is None:
+            replies.unanswered = True
+        processed = create(chunk=chunk)
         if processed is not None:
             _drop_repeated_thinking(processed, thinking)
             chunks.append(processed)
@@ -623,7 +624,7 @@ def _keep_reply_fields(agent, messages) -> Optional[_Replies]:
         create = getattr(result[1], "chunk_creator", None)
         if create is not None:  # LiteLLM's CustomStreamWrapper
             setattr(result[1], "chunk_creator", _recording(create, replies))
-        replies.unanswered = create is not None
+        replies.unanswered = None
         return result
 
     stream_response = model.stream_response

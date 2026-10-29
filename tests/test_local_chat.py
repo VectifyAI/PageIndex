@@ -870,7 +870,11 @@ def test_reply_with_no_choices_goes_again(client, monkeypatch, stream, empty,
     import litellm
     from litellm.types.utils import ModelResponseStream
     monkeypatch.setattr("pageindex.retry.delay", lambda *args: 0)
-    replies = [[ModelResponseStream(choices=[])] if stream
+    # streamed as LiteLLM streams OpenRouter: the chunk, then the dict it
+    # makes of the provider's [DONE]
+    done = {"text": "", "is_finished": True, "finish_reason": "stop",
+            "usage": None, "index": 0}
+    replies = [[ModelResponseStream(choices=[]), done] if stream
                else litellm.ModelResponse(choices=[])] * empty
     replies.append(_litellm_chunks({"content": "A"}, finish="stop") if stream
                    else _litellm_reply("A"))
