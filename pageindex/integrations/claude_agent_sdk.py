@@ -190,6 +190,10 @@ _ERROR_STATUS = {"authentication_failed": 401, "billing_error": 402,
 SUBSCRIPTION_ENV = {"ANTHROPIC_API_KEY": "", "ANTHROPIC_AUTH_TOKEN": "",
                     "ANTHROPIC_BASE_URL": ""}
 
+# the CLI's stream watchdogs: unset, the byte one follows the event one
+# (Claude Code 2.1.301)
+_IDLE_TIMEOUTS = {"CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS", "CLAUDE_STREAM_IDLE_TIMEOUT_MS"}
+
 
 def is_claude_code(model) -> bool:
     return isinstance(model, str) and model.startswith(CLAUDE_CODE_PREFIX)
@@ -245,7 +249,11 @@ def claude_code_options(model: str, reasoning_effort=None, **options):
              # the advisor consults a stronger model: extra quota
              "CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1",
              # inherited, it outranks the effort given (Claude Code 2.1.301)
-             **({"CLAUDE_CODE_EFFORT_LEVEL": ""} if reasoning_effort else {})},
+             **({"CLAUDE_CODE_EFFORT_LEVEL": ""} if reasoning_effort else {}),
+             # a stream with no bytes, pings included, is dead: re-sent after
+             # 30 s, not the CLI's 3 minutes, unless the caller set a timeout
+             **({} if _IDLE_TIMEOUTS & os.environ.keys()
+                else {"CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS": "30000"})},
         **options)
 
 
@@ -361,9 +369,6 @@ def _index_options(model, reasoning_effort):
         options.effort = "low"
     # inherited, it outranks the effort; "" reads as unset (Claude Code 2.1.301)
     options.env["CLAUDE_CODE_EFFORT_LEVEL"] = ""
-    # a stream with no bytes, pings included, is dead: re-sent after 30 s,
-    # not the CLI's 3 minutes
-    options.env["CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS"] = "30000"
     return options
 
 

@@ -907,6 +907,20 @@ def test_an_effort_given_to_chat_beats_the_callers_claude_code_one(
 
 
 @needs_claude
+@pytest.mark.parametrize("theirs", ["CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS",
+                                    "CLAUDE_STREAM_IDLE_TIMEOUT_MS"])
+def test_chat_re_sends_a_silent_stream_after_30_s_unless_the_caller_set_a_timeout(
+        monkeypatch, chat_client, theirs):
+    sessions = fake_cli(monkeypatch, result("A"))
+    chat_client.chat("Q")
+    monkeypatch.setenv(theirs, "600000")
+    chat_client.chat("Q")
+    ours, kept = (s.options.env for s in sessions)
+    assert ours["CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS"] == "30000"
+    assert "CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS" not in kept
+
+
+@needs_claude
 def test_chat_stream_weaves_the_run(monkeypatch, chat_client):
     sessions = fake_cli(
         monkeypatch,
