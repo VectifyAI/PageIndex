@@ -18,8 +18,17 @@ async def get_node_summary(node, summary_token_threshold=200, model=None):
 
 async def generate_summaries_for_structure_md(structure, summary_token_threshold, model=None):
     nodes = structure_to_list(structure)
-    tasks = [get_node_summary(node, summary_token_threshold=summary_token_threshold, model=model) for node in nodes]
-    summaries = await asyncio.gather(*tasks)
+    tasks = [asyncio.create_task(get_node_summary(
+        node, summary_token_threshold=summary_token_threshold, model=model))
+        for node in nodes]
+    try:
+        summaries = await asyncio.gather(*tasks)
+    except BaseException:
+        # A failed gather leaves siblings running on a persistent event loop.
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
     
     for node, summary in zip(nodes, summaries):
         if not node.get('nodes'):
