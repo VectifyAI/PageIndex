@@ -633,7 +633,7 @@ def test_flash_refuses_bad_arguments_before_a_workflow_starts(monkeypatch, sampl
     from pageindex.flash.api import page_index_flash
     seen = fake_workflow(monkeypatch)
     monkeypatch.setenv("PAGEINDEX_CLAUDE_CODE_WORKFLOW", "1")
-    with pytest.raises(ValueError, match="can't turn thinking off"):
+    with pytest.raises(ValueError, match="takes no summary_reasoning_effort='none'"):
         page_index_flash(sample_pdf, summary_model="claude-code/haiku",
                          summary_reasoning_effort="none")
     with pytest.raises(ValueError, match="summary_concurrency must be"):

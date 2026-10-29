@@ -3880,9 +3880,8 @@ def test_chat_none_turns_claude_thinking_off(monkeypatch):
 
 
 def test_claude_code_chat_refuses_none():
-    """Claude Code won't turn thinking off for the models it serves, so a
-    chosen "none" raises before the CLI starts."""
-    with pytest.raises(PageIndexAPIError, match="can't turn thinking off"):
+    """A chosen "none" raises before the CLI starts."""
+    with pytest.raises(PageIndexAPIError, match="takes no reasoning_effort='none'"):
         local_chat._claude_code_run(None, [{"role": "user", "content": "q"}],
                                     "claude-code/sonnet", reasoning_effort="none")
 

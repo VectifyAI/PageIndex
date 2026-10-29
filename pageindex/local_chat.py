@@ -2414,8 +2414,8 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
             f"{', '.join(given)} — drop them.")
     if reasoning_effort == "none":
         raise PageIndexAPIError(
-            f"{model_name} can't turn thinking off, so it can't honor "
-            "reasoning_effort='none'; pass 'low' or leave it unset.")
+            f"{model_name} takes no reasoning_effort='none'; pass 'low' "
+            "or leave it unset.")
     from contextlib import aclosing
     from .integrations.claude_agent_sdk import (
         claude_code_messages, claude_code_options, tool_server)

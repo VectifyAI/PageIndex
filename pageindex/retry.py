@@ -7,7 +7,7 @@ from urllib3.util.retry import Retry
 
 RETRY_STATUS = frozenset({408, 409, 429})
 
-# Retries after the first try, and the longest backoff wait in seconds; reassign to change.
+# Retries after the first try, and the longest backoff wait in seconds.
 INDEX_RETRIES, INDEX_MAX_DELAY = 9, 30
 SDK_RETRIES, SDK_MAX_DELAY = 2, 8
 CHAT_RETRIES = 3  # also spent on resending without a field a 400 refused

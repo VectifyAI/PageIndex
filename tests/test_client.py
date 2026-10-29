@@ -4136,7 +4136,7 @@ def test_flash_refuses_a_chosen_none_the_model_cannot_honor(tmp_path, monkeypatc
 
     for model in ("anthropic/claude-opus-5-5", "bedrock/global.anthropic.claude-fable-5-1",
                   "claude-code/sonnet"):
-        with pytest.raises(ValueError, match="can't turn thinking off"):
+        with pytest.raises(ValueError, match="can't turn thinking off|takes no"):
             flash_api.page_index_flash(str(pdf), summary_model=model,
                                        summary_reasoning_effort="none")
         assert not calls, model
