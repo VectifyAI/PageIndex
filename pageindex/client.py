@@ -1292,18 +1292,20 @@ class PageIndexClient:
             doc_id: Document ID or list of IDs to scope the conversation.
                 Keep it identical across a conversation's calls. Local
                 documents: also enforced at the tool layer, not just
-                prompted. Cloud documents: the managed chat scopes
-                server-side; own-model chat targets at the prompt level,
-                opening with the document's metadata as each call fetches
-                it. If that changes mid-conversation (status, metadata,
-                folder), Claude models that bind thinking to the
-                conversation reject the earlier thinking with a 400 on
-                accounts that enforce it: start a new conversation.
+                prompted. Cloud documents: prompted, not enforced, on the
+                managed chat too (its tools reach every document the
+                api_key can); own-model chat opens with the document's
+                metadata as each call fetches it. If that changes
+                mid-conversation (status, metadata, folder), Claude
+                models that bind thinking to the conversation reject the
+                earlier thinking with a 400 on accounts that enforce it:
+                start a new conversation.
             folder_id: Folder ID to steer discovery toward that folder's
-                documents. Cloud-only. The managed chat scopes it
-                server-side; own-model chat leads the conversation with
-                the folder's targeting text (``folder_context``), ahead
-                of the document block. ``"root"`` is the whole library.
+                documents. Cloud-only, and prompted like ``doc_id``: the
+                managed chat steers with its own prompt; own-model chat
+                leads the conversation with the folder's targeting text
+                (``folder_context``), ahead of the document block.
+                ``"root"`` is the whole library.
                 Keep it identical across a conversation's calls.
             stream: Answer lane: return a ``ChatStream`` — iterate it for
                 the answer as text chunks as they are produced
@@ -1714,16 +1716,17 @@ class PageIndexClient:
                 targeting block it adds is re-set each call and is part
                 of the cached prompt prefix. Local documents: also
                 enforced at the tool layer, not just prompted. Cloud
-                documents: the managed chat scopes server-side;
-                own-model chat targets at the prompt level. If the
+                documents: prompted, not enforced, on the managed chat
+                too (its tools reach every document the api_key can). If the
                 document's metadata changes mid-conversation (status,
                 metadata, folder), Claude models that bind thinking to the
                 conversation reject the earlier thinking with a 400 on
                 accounts that enforce it: start a new conversation.
             folder_id: Folder ID to steer discovery toward that folder's
-                documents (cloud-only): the managed chat scopes it
-                server-side; own-model chat leads the conversation with
-                the folder's targeting text, ahead of the document block.
+                documents (cloud-only, prompted like ``doc_id``): the
+                managed chat steers with its own prompt; own-model chat
+                leads the conversation with the folder's targeting text,
+                ahead of the document block.
                 ``"root"`` is the whole library.
             temperature: Sampling temperature, passed through to the model.
             stream_metadata: With stream=True, yield chunk dicts instead of
