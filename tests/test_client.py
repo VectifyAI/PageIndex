@@ -2793,6 +2793,130 @@ def test_concurrent_same_name_submits_store_unique_names(local_client,
     assert {r["name"] for r in results} == {"sample.pdf", "sample_1.pdf"}
 
 
+def test_docstore_lock_uses_windows_lock_and_allows_nesting(tmp_path,
+                                                            monkeypatch):
+    from pageindex.local_store import DocStore
+
+    lock_calls = []
+
+    def lock_file(fd, mode, size):
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 0
+        lock_calls.append((mode, size))
+
+    fake_msvcrt = types.SimpleNamespace(
+        LK_LOCK=1,
+        LK_UNLCK=2,
+        locking=lock_file,
+    )
+    monkeypatch.setitem(sys.modules, "fcntl", None)
+    monkeypatch.setitem(sys.modules, "msvcrt", fake_msvcrt)
+    first = DocStore(str(tmp_path / "store"))
+    second = DocStore(str(tmp_path / "store"))
+
+    with first.lock():
+        with second.lock():
+            pass
+
+    with pytest.raises(RuntimeError, match="sentinel"):
+        with first.lock():
+            with second.lock():
+                raise RuntimeError("sentinel")
+
+    with first.lock():
+        pass
+
+    assert lock_calls == [(fake_msvcrt.LK_LOCK, 1),
+                          (fake_msvcrt.LK_UNLCK, 1),
+                          (fake_msvcrt.LK_LOCK, 1),
+                          (fake_msvcrt.LK_UNLCK, 1),
+                          (fake_msvcrt.LK_LOCK, 1),
+                          (fake_msvcrt.LK_UNLCK, 1)]
+
+
+def test_docstore_lock_serializes_threads_across_instances(tmp_path,
+                                                           monkeypatch):
+    import threading
+    from pageindex.local_store import DocStore
+
+    fake_msvcrt = types.SimpleNamespace(
+        LK_LOCK=1,
+        LK_UNLCK=2,
+        locking=lambda fd, mode, size: None,
+    )
+    monkeypatch.setitem(sys.modules, "fcntl", None)
+    monkeypatch.setitem(sys.modules, "msvcrt", fake_msvcrt)
+    first = DocStore(str(tmp_path / "store"))
+    second = DocStore(str(tmp_path / "store"))
+    first_entered = threading.Event()
+    release_first = threading.Event()
+    second_entered = threading.Event()
+
+    def hold_first():
+        with first.lock():
+            first_entered.set()
+            release_first.wait(2)
+
+    def enter_second():
+        with second.lock():
+            second_entered.set()
+
+    first_thread = threading.Thread(target=hold_first)
+    second_thread = threading.Thread(target=enter_second)
+    first_thread.start()
+    assert first_entered.wait(2)
+    second_thread.start()
+    try:
+        assert not second_entered.wait(0.1)
+    finally:
+        release_first.set()
+        first_thread.join(2)
+        second_thread.join(2)
+
+    assert not first_thread.is_alive()
+    assert not second_thread.is_alive()
+    assert second_entered.is_set()
+
+
+def test_docstore_lock_serializes_processes_across_instances(tmp_path):
+    import threading
+    from pageindex.local_store import DocStore
+
+    child_code = (
+        "import sys\n"
+        "from pageindex.local_store import DocStore\n"
+        "with DocStore(sys.argv[1]).lock():\n"
+        "    print('LOCKED', flush=True)\n"
+        "    sys.stdin.readline()\n"
+    )
+    child = subprocess.Popen(
+        [sys.executable, "-c", child_code, str(tmp_path / "store")],
+        cwd=Path(__file__).parents[1],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert child.stdout.readline().strip() == "LOCKED"
+        entered = threading.Event()
+
+        def acquire_after_child():
+            with DocStore(str(tmp_path / "store")).lock():
+                entered.set()
+
+        thread = threading.Thread(target=acquire_after_child)
+        thread.start()
+        assert not entered.wait(0.1)
+        child.stdin.write("release\n")
+        child.stdin.flush()
+        assert entered.wait(2)
+        thread.join(2)
+        assert not thread.is_alive()
+    finally:
+        if child.stdin and not child.stdin.closed:
+            child.stdin.close()
+        child.wait(timeout=2)
+
+
 
 def test_format_tree_node_keeps_key_items():
     """key_items from the merge optimization survive the get_tree formatter."""
