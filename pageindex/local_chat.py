@@ -507,8 +507,6 @@ def _recording(create, replies: _Replies):
 
     def creating(chunk):
         choices = getattr(chunk, "choices", None) or ()
-        if choices:
-            replies.unanswered = False
         delta = getattr(choices[0], "delta", None) if choices else None
         dump = getattr(delta, "model_dump", None)
         fields = delta if isinstance(delta, dict) else dump() if dump else {}
@@ -519,6 +517,10 @@ def _recording(create, replies: _Replies):
             if not parts or type(parts[0]) is type(value):
                 parts.append(value)
         processed = create(chunk=chunk)
+        # LiteLLM builds choices from dict chunks (Snowflake, Cohere), and
+        # holds a Gemini finish-only chunk's for its own closing chunk
+        if choices or getattr(processed, "choices", None):
+            replies.unanswered = False
         if processed is not None:
             _drop_repeated_thinking(processed, thinking)
             chunks.append(processed)

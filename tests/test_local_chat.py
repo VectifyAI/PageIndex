@@ -888,6 +888,49 @@ def test_reply_with_no_choices_goes_again(client, monkeypatch, stream, empty,
     assert len(requests) == sent
 
 
+@needs_agents
+def test_a_stream_of_plain_dict_chunks_is_an_answer(client, monkeypatch):
+    """Some LiteLLM parsers (Snowflake, Cohere) yield plain dict chunks,
+    which carry choices only once LiteLLM has built them."""
+    pytest.importorskip("litellm")
+    requests = _mock_litellm(monkeypatch, [[
+        {"text": "Hello", "is_finished": False, "finish_reason": "",
+         "usage": None},
+        {"text": " there", "is_finished": True, "finish_reason": "stop",
+         "usage": None}]])
+    out = client.chat("q", model="gpt-test", stream=True)
+    assert "".join(out) == "Hello there"
+    assert len(requests) == 1
+
+
+@needs_agents
+def test_a_stream_of_a_finish_reason_alone_is_an_answer(client, monkeypatch):
+    """A Gemini candidate with a finish reason and no parts (thinking used
+    up max_tokens) streams one chunk whose choice LiteLLM's Gemini parser
+    holds for its own closing chunk: an answer cut short, not a reply with
+    no choices."""
+    pytest.importorskip("litellm")
+    from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
+    chunk = {"candidates": [{"finishReason": "MAX_TOKENS", "index": 0}],
+             "usageMetadata": {"promptTokenCount": 7, "totalTokenCount": 7}}
+    sent = []
+
+    async def fake_apost(self, url=None, *args, **kwargs):
+        sent.append(url)
+        return httpx.Response(
+            200, content=f"data: {json.dumps(chunk)}\r\n\r\n".encode(),
+            request=httpx.Request("POST", str(url)),
+            headers={"content-type": "text/event-stream"})
+
+    monkeypatch.setattr(AsyncHTTPHandler, "post", fake_apost)
+    # a dead local port, should LiteLLM ever send past the patch
+    backend = {"base_url": "http://127.0.0.1:9", "api_key": "test"}
+    with pytest.raises(PageIndexAPIError, match="stopped before finishing"):
+        "".join(client.chat("q", model="gemini/gemini-2.5-flash", stream=True,
+                            backend=backend))
+    assert len(sent) == 1 and sent[0].startswith("http://127.0.0.1:9/")
+
+
 def _refusal(field):
     from litellm.exceptions import BadRequestError
     return BadRequestError(message=f"property '{field}' is unsupported",
