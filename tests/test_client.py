@@ -3160,12 +3160,12 @@ def test_a_fork_waits_for_the_litellm_preload(monkeypatch, tmp_path):
     would wait forever on that import's lock, held by a thread it lacks: the
     fork waits for the import instead."""
     import time
+    import litellm  # noqa: F401  # waits out a real preload still importing it
     import pageindex.client as client_mod
     from conftest import exit_code_in_forked_child
     (tmp_path / "litellm.py").write_text("import time\ntime.sleep(0.5)\n")
     monkeypatch.syspath_prepend(str(tmp_path))
-    monkeypatch.setitem(sys.modules, "litellm", None)  # the real one comes back after
-    del sys.modules["litellm"]
+    monkeypatch.delitem(sys.modules, "litellm")  # the real one comes back after
     monkeypatch.setattr(client_mod, "_litellm_preload_started", False)
     client_mod._preload_litellm()
     deadline = time.monotonic() + 5
