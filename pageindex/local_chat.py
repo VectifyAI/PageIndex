@@ -2207,10 +2207,9 @@ def run_messages(client, messages, model: str, route: str,
     # Top-level cache_control: the server re-marks the newest block each
     # turn, so the loop re-reads the growing conversation from cache.
     # Counts toward the 4-breakpoint limit (live-verified 400 past it).
-    # Bedrock's InvokeModel rejects the field for the ARN-versioned models
-    # (Anthropic's legacy Bedrock page: Opus 4.6, Sonnet 4.6, Haiku 4.5 and
-    # earlier), so every Bedrock request, whatever the model, puts the
-    # breakpoint on each turn's tool results instead. The field can cover
+    # Bedrock's InvokeModel rejects the field for Sonnet 4.5 and Opus 4.5
+    # (live-verified), so every Bedrock request, whatever the model, puts
+    # the breakpoint on each turn's tool results instead. The field can cover
     # Bedrock once those models are gone.
     marks_fit = _cache_marks(system_blocks, prepared) < 4
     cached: dict[str, Any] = (

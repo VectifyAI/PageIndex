@@ -1979,8 +1979,8 @@ class PageIndexClient:
         from cache — skipped when your own blocks already use the three
         remaining breakpoints (the managed prompt holds the fourth). On
         ``bedrock/``, whose InvokeModel integration rejects the top-level
-        field for Opus 4.6 and earlier, an explicit breakpoint moves onto
-        each turn's tool results instead.
+        field for Sonnet 4.5 and Opus 4.5, an explicit breakpoint moves
+        onto each turn's tool results instead.
 
         Args:
             messages: Native Messages-format history (including prior
@@ -2367,8 +2367,8 @@ class PageIndexClient:
         and a top-level ``cache_control`` so each loop turn re-reads the
         growing prompt from cache (pop the key if you place your own
         breakpoints — the API allows four; a ``bedrock/`` model omits it,
-        as Bedrock's InvokeModel integration rejects it for Opus 4.6 and
-        earlier). Unlike the chat lane,
+        as Bedrock's InvokeModel integration rejects it for Sonnet 4.5 and
+        Opus 4.5). Unlike the chat lane,
         ``system`` here is the bare instructions string, without the chat
         header or its block-level breakpoint. To target a folder or
         documents, prepend ``folder_context(folder_id)`` /

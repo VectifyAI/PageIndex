@@ -5009,8 +5009,8 @@ def test_messages_top_level_cache_control(client, store_path, fake_anthropic):
 @pytest.mark.parametrize("stream", [False, True])
 def test_messages_bedrock_moves_an_explicit_breakpoint(client, store_path,
                                                        fake_anthropic, stream):
-    """Bedrock's InvokeModel integration rejects the top-level field (Opus
-    4.6 and earlier): each turn's newest tool result carries the one moving
+    """Bedrock's InvokeModel integration rejects the top-level field (Sonnet
+    4.5 and Opus 4.5): each turn's newest tool result carries the one moving
     breakpoint instead, and none leaks into the returned history."""
     seed_doc(store_path, "pi-a", "report.pdf")
     replies = [_anthropic_message([_anthropic_tool_use(tool_id)], "tool_use")
